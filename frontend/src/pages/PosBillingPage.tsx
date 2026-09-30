@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from "react";
+import { createPortal } from "react-dom";
 import {
   Barcode,
   Search,
@@ -43,6 +44,8 @@ export const PosBillingPage: React.FC = () => {
   // Search & Auto-complete
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<ProductItem[]>([]);
+  const [selectedSearchIndex, setSelectedSearchIndex] = useState(0);
+  const [dropdownPosition, setDropdownPosition] = useState<{ top: number; left: number; width: number } | null>(null);
   const [selectedProductForBatch, setSelectedProductForBatch] = useState<ProductItem | null>(null);
   const [productBatches, setProductBatches] = useState<ProductBatch[]>([]);
 
@@ -61,11 +64,23 @@ export const PosBillingPage: React.FC = () => {
   // References for focus control
   const searchInputRef = useRef<HTMLInputElement>(null);
   const tenderCashInputRef = useRef<HTMLInputElement>(null);
+  const dropdownRef = useRef<HTMLDivElement>(null);
 
   const refreshCartState = () => {
     setLines(posCartService.getLines());
     setTotals(posCartService.getTotals());
     setHeldBillsCount(billingTenderService.listHeldBills().length);
+  };
+
+  const updateDropdownPosition = () => {
+    if (searchInputRef.current) {
+      const rect = searchInputRef.current.getBoundingClientRect();
+      setDropdownPosition({
+        top: rect.bottom + 4,
+        left: rect.left,
+        width: rect.width,
+      });
+    }
   };
 
   // Focus search input on mount and handle global POS hotkeys
@@ -96,8 +111,12 @@ export const PosBillingPage: React.FC = () => {
           openTenderModal();
         }
       }
-      // Escape: Close open modals
+      // Escape: Close dropdown or open modals
       else if (e.key === "Escape") {
+        if (searchResults.length > 0) {
+          setSearchResults([]);
+          return;
+        }
         if (isTenderModalOpen) setIsTenderModalOpen(false);
         if (isRecallModalOpen) setIsRecallModalOpen(false);
         if (selectedProductForBatch) setSelectedProductForBatch(null);
@@ -106,7 +125,7 @@ export const PosBillingPage: React.FC = () => {
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isTenderModalOpen, isRecallModalOpen, selectedProductForBatch]);
+  }, [isTenderModalOpen, isRecallModalOpen, selectedProductForBatch, searchResults.length]);
 
   // Search products when query changes
   useEffect(() => {
@@ -119,10 +138,52 @@ export const PosBillingPage: React.FC = () => {
     const timer = setTimeout(async () => {
       const results = await productsStore.searchProducts(query);
       setSearchResults(results);
+      setSelectedSearchIndex(0);
+      updateDropdownPosition();
     }, 150);
 
     return () => clearTimeout(timer);
   }, [searchQuery]);
+
+  // Keep dropdown positioned properly during window resize/scroll and handle outside click
+  useEffect(() => {
+    const handleScrollOrResize = () => {
+      if (searchResults.length > 0) {
+        updateDropdownPosition();
+      }
+    };
+
+    window.addEventListener("resize", handleScrollOrResize);
+    window.addEventListener("scroll", handleScrollOrResize, true);
+
+    const handleClickOutside = (e: MouseEvent) => {
+      const target = e.target as Node;
+      if (
+        searchInputRef.current &&
+        !searchInputRef.current.contains(target) &&
+        dropdownRef.current &&
+        !dropdownRef.current.contains(target)
+      ) {
+        setSearchResults([]);
+      }
+    };
+
+    document.addEventListener("mousedown", handleClickOutside);
+
+    return () => {
+      window.removeEventListener("resize", handleScrollOrResize);
+      window.removeEventListener("scroll", handleScrollOrResize, true);
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, [searchResults.length]);
+
+  // Auto-scroll selected search result item into view
+  useEffect(() => {
+    if (searchResults.length > 0 && dropdownRef.current) {
+      const activeEl = dropdownRef.current.children[selectedSearchIndex] as HTMLElement | undefined;
+      activeEl?.scrollIntoView({ block: "nearest" });
+    }
+  }, [selectedSearchIndex, searchResults]);
 
   const showNotification = (message: string, type: "success" | "error" = "success") => {
     setNotification({ message, type });
@@ -130,6 +191,30 @@ export const PosBillingPage: React.FC = () => {
   };
 
   const handleBarcodeOrEnter = async (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      if (searchResults.length > 0) {
+        setSelectedSearchIndex((prev) => (prev < searchResults.length - 1 ? prev + 1 : prev));
+      }
+      return;
+    }
+
+    if (e.key === "ArrowUp") {
+      e.preventDefault();
+      if (searchResults.length > 0) {
+        setSelectedSearchIndex((prev) => (prev > 0 ? prev - 1 : 0));
+      }
+      return;
+    }
+
+    if (e.key === "Escape") {
+      if (searchResults.length > 0) {
+        e.preventDefault();
+        setSearchResults([]);
+        return;
+      }
+    }
+
     if (e.key === "Enter") {
       e.preventDefault();
       const code = searchQuery.trim();
@@ -144,9 +229,10 @@ export const PosBillingPage: React.FC = () => {
         return;
       }
 
-      // 2. Otherwise pick first matching search result if available
+      // 2. Otherwise pick selected or first matching search result if available
       if (searchResults.length > 0) {
-        await selectProductAndAddToCart(searchResults[0]);
+        const itemToSelect = searchResults[selectedSearchIndex] || searchResults[0];
+        await selectProductAndAddToCart(itemToSelect);
         setSearchQuery("");
         setSearchResults([]);
       }
@@ -407,6 +493,17 @@ export const PosBillingPage: React.FC = () => {
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               onKeyDown={handleBarcodeOrEnter}
+              onFocus={() => {
+                if (searchQuery.trim().length > 0 && searchResults.length === 0) {
+                  productsStore.searchProducts(searchQuery.trim()).then((res) => {
+                    setSearchResults(res);
+                    setSelectedSearchIndex(0);
+                    updateDropdownPosition();
+                  });
+                } else if (searchResults.length > 0) {
+                  updateDropdownPosition();
+                }
+              }}
               placeholder="Scan barcode or type medicine / product name (Press Enter)... [F1]"
               className="w-full rounded-md border border-slate-300 bg-white pl-10 pr-24 py-2 text-xs font-medium text-slate-800 placeholder-slate-400 focus:border-blue-600 focus:outline-none focus:ring-1 focus:ring-blue-600 shadow-sm"
             />
@@ -416,28 +513,67 @@ export const PosBillingPage: React.FC = () => {
             </div>
           </div>
 
-          {/* Search Dropdown Results */}
-          {searchResults.length > 0 && (
-            <div className="absolute left-3 right-3 top-14 z-30 max-h-60 overflow-y-auto rounded-md border border-slate-200 bg-white shadow-xl">
-              {searchResults.map((prod) => (
-                <div
-                  key={prod.id}
-                  onClick={() => selectProductAndAddToCart(prod)}
-                  className="flex cursor-pointer items-center justify-between border-b border-slate-100 px-4 py-2 hover:bg-blue-50 text-xs transition-colors"
-                >
-                  <div>
-                    <p className="font-semibold text-slate-800">{prod.name}</p>
-                    <p className="text-[11px] text-slate-400">
-                      Barcode: {prod.barcode} | HSN: {prod.hsn_sac_code || "N/A"} | GST: {prod.gst_percent}%
-                    </p>
+          {/* Search Dropdown Results rendered in React Portal to escape overflow & stacking contexts */}
+          {searchResults.length > 0 && dropdownPosition && createPortal(
+            <div
+              ref={dropdownRef}
+              style={{
+                position: "fixed",
+                top: `${dropdownPosition.top}px`,
+                left: `${dropdownPosition.left}px`,
+                width: `${dropdownPosition.width}px`,
+                zIndex: 9999,
+              }}
+              className="max-h-72 overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-2xl divide-y divide-slate-100"
+            >
+              {searchResults.map((prod, index) => {
+                const isSelected = index === selectedSearchIndex;
+                return (
+                  <div
+                    key={prod.id}
+                    onMouseEnter={() => setSelectedSearchIndex(index)}
+                    onClick={() => {
+                      selectProductAndAddToCart(prod);
+                      setSearchQuery("");
+                      setSearchResults([]);
+                    }}
+                    className={`flex cursor-pointer items-center justify-between px-4 py-2.5 text-xs transition-colors ${
+                      isSelected
+                        ? "bg-blue-50/90 text-blue-900 border-l-4 border-l-blue-600 pl-3"
+                        : "hover:bg-slate-50 text-slate-800"
+                    }`}
+                  >
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <p className={`font-semibold ${isSelected ? "text-blue-950 font-bold" : "text-slate-800"}`}>
+                          {prod.name}
+                        </p>
+                        {prod.generic_name && (
+                          <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-500 font-normal">
+                            {prod.generic_name}
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-[11px] text-slate-500 mt-0.5">
+                        Barcode: <span className="font-mono text-slate-600">{prod.barcode}</span>{" "}
+                        {prod.hsn_sac_code ? `| HSN: ${prod.hsn_sac_code}` : ""} | GST: {prod.gst_percent}%
+                      </p>
+                    </div>
+                    <div className="text-right shrink-0 ml-4">
+                      <p className="font-bold text-slate-900 text-sm">₹ {(prod.sel_rate || prod.mrp).toFixed(2)}</p>
+                      <p
+                        className={`text-[10px] font-medium ${
+                          (prod.current_stock || 0) > 0 ? "text-emerald-600" : "text-rose-500"
+                        }`}
+                      >
+                        Stock: {prod.current_stock || 0}
+                      </p>
+                    </div>
                   </div>
-                  <div className="text-right">
-                    <p className="font-bold text-slate-800">₹ {prod.sel_rate || prod.mrp}</p>
-                    <p className="text-[10px] text-emerald-600 font-medium">Stock: {prod.current_stock || 0}</p>
-                  </div>
-                </div>
-              ))}
-            </div>
+                );
+              })}
+            </div>,
+            document.body
           )}
         </div>
 
