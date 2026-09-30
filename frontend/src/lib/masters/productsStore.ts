@@ -14,6 +14,23 @@ export interface ProductBatch {
   shelf_location?: string;
 }
 
+/** Check if batch expiry date is in the past relative to reference date */
+export const isBatchExpired = (expiryDate: string, referenceDate: Date = new Date()): boolean => {
+  if (!expiryDate) return false;
+  const todayStr = referenceDate.toISOString().slice(0, 10);
+  if (expiryDate.length === 7) {
+    return expiryDate < todayStr.slice(0, 7);
+  }
+  return expiryDate < todayStr;
+};
+
+/** A batch can only be selected in billing if it has positive stock and is not expired */
+export const isBatchSelectable = (batch: ProductBatch, referenceDate: Date = new Date()): boolean => {
+  const isOutOfStock = (batch.stock_qty || 0) <= 0;
+  const isExpired = isBatchExpired(batch.expiry_date, referenceDate);
+  return !isOutOfStock && !isExpired;
+};
+
 export interface ProductItem {
   id: string;
   name: string;

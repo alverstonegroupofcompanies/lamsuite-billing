@@ -21,7 +21,13 @@ import {
   Sliders,
 } from "lucide-react";
 import { posCartService, type PosCartLine } from "../lib/billing/posCartService";
-import { productsStore, type ProductItem, type ProductBatch } from "../lib/masters/productsStore";
+import {
+  productsStore,
+  isBatchExpired,
+  isBatchSelectable,
+  type ProductItem,
+  type ProductBatch,
+} from "../lib/masters/productsStore";
 import { billingTenderService, type PaymentTenderLine } from "../lib/billing/billingTenderService";
 import {
   printingEngine,
@@ -48,6 +54,7 @@ export const PosBillingPage: React.FC = () => {
   const [dropdownPosition, setDropdownPosition] = useState<{ top: number; left: number; width: number } | null>(null);
   const [selectedProductForBatch, setSelectedProductForBatch] = useState<ProductItem | null>(null);
   const [productBatches, setProductBatches] = useState<ProductBatch[]>([]);
+  const [selectedBatchIndex, setSelectedBatchIndex] = useState(0);
 
   // Modals & Popups
   const [isTenderModalOpen, setIsTenderModalOpen] = useState(false);
@@ -65,11 +72,20 @@ export const PosBillingPage: React.FC = () => {
   const searchInputRef = useRef<HTMLInputElement>(null);
   const tenderCashInputRef = useRef<HTMLInputElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const batchListRef = useRef<HTMLDivElement>(null);
 
   const refreshCartState = () => {
     setLines(posCartService.getLines());
     setTotals(posCartService.getTotals());
     setHeldBillsCount(billingTenderService.listHeldBills().length);
+  };
+
+  const closeBatchModal = () => {
+    setSelectedProductForBatch(null);
+    setSelectedBatchIndex(0);
+    setTimeout(() => {
+      searchInputRef.current?.focus();
+    }, 50);
   };
 
   const updateDropdownPosition = () => {
@@ -89,6 +105,15 @@ export const PosBillingPage: React.FC = () => {
     refreshCartState();
 
     const handleKeyDown = (e: KeyboardEvent) => {
+      // If batch modal is open, let batch modal listeners handle navigation
+      if (selectedProductForBatch) {
+        if (e.key === "Escape" || e.key === "F1") {
+          e.preventDefault();
+          closeBatchModal();
+        }
+        return;
+      }
+
       // F1: Focus Search/Barcode
       if (e.key === "F1") {
         e.preventDefault();
@@ -119,13 +144,68 @@ export const PosBillingPage: React.FC = () => {
         }
         if (isTenderModalOpen) setIsTenderModalOpen(false);
         if (isRecallModalOpen) setIsRecallModalOpen(false);
-        if (selectedProductForBatch) setSelectedProductForBatch(null);
       }
     };
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [isTenderModalOpen, isRecallModalOpen, selectedProductForBatch, searchResults.length]);
+
+  // When batch modal opens: focus inside the modal and highlight earliest expiry (row 0)
+  useEffect(() => {
+    if (selectedProductForBatch) {
+      setSelectedBatchIndex(0);
+      const timer = setTimeout(() => {
+        batchListRef.current?.focus();
+      }, 50);
+      return () => clearTimeout(timer);
+    }
+  }, [selectedProductForBatch]);
+
+  // Keep highlighted batch row scrolled into view within the modal list
+  useEffect(() => {
+    if (selectedProductForBatch && batchListRef.current) {
+      const activeEl = batchListRef.current.children[selectedBatchIndex] as HTMLElement | undefined;
+      activeEl?.scrollIntoView({ block: "nearest" });
+    }
+  }, [selectedBatchIndex, selectedProductForBatch]);
+
+  // Batch modal keyboard navigation: Up/Down arrow wrap around, Enter selects, Esc closes
+  useEffect(() => {
+    if (!selectedProductForBatch) return;
+
+    const handleBatchKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        e.stopPropagation();
+        if (productBatches.length > 0) {
+          setSelectedBatchIndex((prev) => (prev + 1) % productBatches.length);
+        }
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        e.stopPropagation();
+        if (productBatches.length > 0) {
+          setSelectedBatchIndex((prev) => (prev - 1 + productBatches.length) % productBatches.length);
+        }
+      } else if (e.key === "Enter") {
+        e.preventDefault();
+        e.stopPropagation();
+        const highlightedBatch = productBatches[selectedBatchIndex];
+        if (highlightedBatch) {
+          addBatchToCart(highlightedBatch);
+        }
+      } else if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        closeBatchModal();
+      }
+    };
+
+    window.addEventListener("keydown", handleBatchKeyDown, true);
+    return () => {
+      window.removeEventListener("keydown", handleBatchKeyDown, true);
+    };
+  }, [selectedProductForBatch, productBatches, selectedBatchIndex]);
 
   // Search products when query changes
   useEffect(() => {
@@ -240,35 +320,52 @@ export const PosBillingPage: React.FC = () => {
   };
 
   const selectProductAndAddToCart = async (product: ProductItem) => {
-    const batches = await productsStore.getBatchesForProduct(product.id, true);
+    // Retrieve all batches in FEFO order (including out-of-stock batches to display in modal)
+    const batches = await productsStore.getBatchesForProduct(product.id, false);
 
     if (batches.length === 0) {
       showNotification(`No stock batches available for ${product.name}`, "error");
       return;
     }
 
-    if (batches.length === 1) {
-      // Single batch: auto-add with FEFO
+    const selectableBatches = batches.filter((b) => isBatchSelectable(b));
+
+    if (batches.length === 1 && selectableBatches.length === 1) {
+      // Single selectable batch: auto-add with FEFO
       posCartService.addProductToCart(product, batches[0], 1, 0);
       refreshCartState();
       setSearchQuery("");
       setSearchResults([]);
       searchInputRef.current?.focus();
     } else {
-      // Multiple batches: display batch picker modal
+      // Multiple batches or non-selectable batch: display batch picker modal
       setSelectedProductForBatch(product);
       setProductBatches(batches);
+      setSelectedBatchIndex(0);
     }
   };
 
   const addBatchToCart = (batch: ProductBatch) => {
     if (!selectedProductForBatch) return;
+    if (!isBatchSelectable(batch)) {
+      const isOutOfStock = (batch.stock_qty || 0) <= 0;
+      showNotification(
+        isOutOfStock
+          ? `Batch ${batch.batch_no} is out of stock`
+          : `Batch ${batch.batch_no} is expired (${batch.expiry_date}) and cannot be billed`,
+        "error"
+      );
+      return;
+    }
     posCartService.addProductToCart(selectedProductForBatch, batch, 1, 0);
     refreshCartState();
     setSelectedProductForBatch(null);
+    setSelectedBatchIndex(0);
     setSearchQuery("");
     setSearchResults([]);
-    searchInputRef.current?.focus();
+    setTimeout(() => {
+      searchInputRef.current?.focus();
+    }, 50);
   };
 
   const updateQuantity = (lineId: string, delta: number) => {
@@ -698,37 +795,158 @@ export const PosBillingPage: React.FC = () => {
         </div>
       </div>
 
-      {/* Batch Selection Modal (when multiple batches exist) */}
+      {/* Batch Selection Modal (FEFO Order with keyboard navigation & ARIA listbox) */}
       {selectedProductForBatch && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-xs p-4">
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="batch-modal-title"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-xs p-4"
+        >
           <div className="w-full max-w-lg rounded-lg bg-white shadow-2xl overflow-hidden border border-slate-200">
             <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3 bg-slate-50">
-              <h3 className="text-xs font-bold text-slate-800">
-                Select Batch (FEFO Order): {selectedProductForBatch.name}
-              </h3>
-              <button onClick={() => setSelectedProductForBatch(null)} className="text-slate-400 hover:text-slate-600">
+              <div>
+                <h3 id="batch-modal-title" className="text-xs font-bold text-slate-800">
+                  Select Batch (FEFO Order): {selectedProductForBatch.name}
+                </h3>
+                <p className="text-[11px] text-slate-500 mt-0.5">
+                  Use ↑/↓ arrows to navigate, Enter to select, Esc to cancel
+                </p>
+              </div>
+              <button
+                onClick={closeBatchModal}
+                className="text-slate-400 hover:text-slate-600 rounded p-1 transition-colors"
+                aria-label="Close batch selection"
+              >
                 <X className="h-4 w-4" />
               </button>
             </div>
-            <div className="max-h-64 overflow-y-auto divide-y divide-slate-100">
-              {productBatches.map((b) => (
-                <div
-                  key={b.id}
-                  onClick={() => addBatchToCart(b)}
-                  className="flex cursor-pointer items-center justify-between px-4 py-2.5 hover:bg-blue-50 text-xs transition-colors"
+
+            <div
+              ref={batchListRef}
+              role="listbox"
+              id="batch-listbox"
+              tabIndex={0}
+              aria-label="Select Batch (FEFO Order)"
+              aria-activedescendant={
+                productBatches.length > 0 ? `batch-option-${selectedBatchIndex}` : undefined
+              }
+              className="max-h-64 overflow-y-auto divide-y divide-slate-100 outline-none focus:ring-1 focus:ring-blue-500/20"
+            >
+              {productBatches.map((b, idx) => {
+                const isSelected = idx === selectedBatchIndex;
+                const selectable = isBatchSelectable(b);
+                const isExpired = isBatchExpired(b.expiry_date);
+                const isOutOfStock = (b.stock_qty || 0) <= 0;
+
+                return (
+                  <div
+                    key={b.id}
+                    id={`batch-option-${idx}`}
+                    role="option"
+                    aria-selected={isSelected}
+                    aria-disabled={!selectable}
+                    onMouseEnter={() => setSelectedBatchIndex(idx)}
+                    onClick={() => {
+                      if (selectable) {
+                        addBatchToCart(b);
+                      } else {
+                        showNotification(
+                          isOutOfStock ? "This batch is out of stock" : "This batch has expired and cannot be billed",
+                          "error"
+                        );
+                      }
+                    }}
+                    className={`flex items-center justify-between px-4 py-2.5 text-xs transition-colors ${
+                      !selectable
+                        ? isSelected
+                          ? "bg-slate-100/90 text-slate-500 border-l-4 border-l-slate-400 pl-3 cursor-not-allowed"
+                          : "bg-slate-50/50 text-slate-400 cursor-not-allowed opacity-60"
+                        : isSelected
+                        ? "bg-blue-50/90 text-blue-950 border-l-4 border-l-blue-600 pl-3 ring-1 ring-blue-500/20 font-medium cursor-pointer"
+                        : "hover:bg-slate-50 text-slate-800 cursor-pointer"
+                    }`}
+                  >
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono font-bold text-slate-800">{b.batch_no}</span>
+                        {idx === 0 && selectable && (
+                          <span className="rounded bg-blue-100 px-1.5 py-0.2 text-[10px] font-semibold text-blue-800">
+                            FEFO Recommendation
+                          </span>
+                        )}
+                        {isExpired && (
+                          <span className="rounded bg-rose-100 px-1.5 py-0.2 text-[10px] font-bold text-rose-700">
+                            Expired
+                          </span>
+                        )}
+                        {isOutOfStock && !isExpired && (
+                          <span className="rounded bg-slate-200 px-1.5 py-0.2 text-[10px] font-semibold text-slate-600">
+                            Out of Stock
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-3 text-[11px] mt-0.5">
+                        <span className={isExpired ? "text-rose-600 font-semibold" : "text-slate-500"}>
+                          Exp: {b.expiry_date}
+                        </span>
+                        {b.rack_location && (
+                          <span className="text-slate-400">Rack: {b.rack_location}</span>
+                        )}
+                        {b.shelf_location && (
+                          <span className="text-slate-400">Shelf: {b.shelf_location}</span>
+                        )}
+                      </div>
+                    </div>
+                    <div className="text-right shrink-0 ml-4">
+                      <p className="font-bold text-slate-900">
+                        ₹ {(b.selling_rate || b.mrp || selectedProductForBatch.sel_rate).toFixed(2)}
+                      </p>
+                      <span
+                        className={`inline-block mt-0.5 rounded px-2 py-0.5 text-[10px] font-semibold ${
+                          selectable
+                            ? "bg-emerald-50 text-emerald-700"
+                            : isExpired
+                            ? "bg-rose-50 text-rose-600"
+                            : "bg-slate-100 text-slate-500"
+                        }`}
+                      >
+                        {b.stock_qty} in stock
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="border-t border-slate-200 px-4 py-2.5 bg-slate-50 flex items-center justify-between text-[11px] text-slate-500">
+              <span>
+                Navigate with <kbd className="font-mono bg-white px-1 py-0.5 rounded border border-slate-300 text-slate-700">↑</kbd> <kbd className="font-mono bg-white px-1 py-0.5 rounded border border-slate-300 text-slate-700">↓</kbd>
+              </span>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={closeBatchModal}
+                  className="rounded px-2.5 py-1 text-slate-600 hover:bg-slate-200 text-xs"
                 >
-                  <div>
-                    <span className="font-mono font-bold text-slate-800">{b.batch_no}</span>
-                    <span className="ml-2 text-[11px] text-slate-500">Exp: {b.expiry_date}</span>
-                  </div>
-                  <div className="text-right">
-                    <span className="font-bold text-slate-800">₹ {b.selling_rate || b.mrp || selectedProductForBatch.sel_rate}</span>
-                    <span className="ml-3 rounded bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">
-                      {b.stock_qty} in stock
-                    </span>
-                  </div>
-                </div>
-              ))}
+                  Cancel (Esc)
+                </button>
+                <button
+                  type="button"
+                  disabled={
+                    productBatches.length === 0 || !isBatchSelectable(productBatches[selectedBatchIndex])
+                  }
+                  onClick={() => {
+                    const b = productBatches[selectedBatchIndex];
+                    if (b && isBatchSelectable(b)) {
+                      addBatchToCart(b);
+                    }
+                  }}
+                  className="rounded bg-blue-600 px-3 py-1 font-semibold text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-xs transition-colors shadow-xs"
+                >
+                  Select Batch (Enter)
+                </button>
+              </div>
             </div>
           </div>
         </div>

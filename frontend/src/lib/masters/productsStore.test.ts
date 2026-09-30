@@ -1,5 +1,11 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { productsStore, type ProductItem, type ProductBatch } from "./productsStore";
+import {
+  productsStore,
+  isBatchExpired,
+  isBatchSelectable,
+  type ProductItem,
+  type ProductBatch,
+} from "./productsStore";
 import { getMockDatabase, sqliteStorage } from "../db/sqliteStorage";
 
 describe("ProductsStore & FEFO Batch Engine (MST-001, POS-001, POS-002)", () => {
@@ -99,5 +105,43 @@ describe("ProductsStore & FEFO Batch Engine (MST-001, POS-001, POS-002)", () => 
     // Search by HSN
     const byHsn = await productsStore.searchProducts("30041010");
     expect(byHsn.length).toBe(1);
+  });
+
+  it("accurately detects expired and selectable batches", () => {
+    const refDate = new Date("2026-09-30T12:00:00Z");
+
+    // Past expiry
+    expect(isBatchExpired("2026-08-31", refDate)).toBe(true);
+    expect(isBatchExpired("2026-08", refDate)).toBe(true);
+
+    // Current month / future
+    expect(isBatchExpired("2026-09-30", refDate)).toBe(false);
+    expect(isBatchExpired("2026-10", refDate)).toBe(false);
+    expect(isBatchExpired("2027-12-31", refDate)).toBe(false);
+
+    // Selectability: requires both positive stock and non-expired
+    const validBatch: ProductBatch = {
+      id: "b1",
+      product_id: "p1",
+      batch_no: "B1",
+      expiry_date: "2027-01-01",
+      stock_qty: 15,
+    };
+    expect(isBatchSelectable(validBatch, refDate)).toBe(true);
+
+    const outOfStockBatch: ProductBatch = {
+      ...validBatch,
+      id: "b2",
+      stock_qty: 0,
+    };
+    expect(isBatchSelectable(outOfStockBatch, refDate)).toBe(false);
+
+    const expiredBatch: ProductBatch = {
+      ...validBatch,
+      id: "b3",
+      expiry_date: "2025-12-31",
+      stock_qty: 25,
+    };
+    expect(isBatchSelectable(expiredBatch, refDate)).toBe(false);
   });
 });
