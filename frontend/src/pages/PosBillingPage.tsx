@@ -67,6 +67,8 @@ export const PosBillingPage: React.FC = () => {
   const [receivedCash, setReceivedCash] = useState<number>(0);
   const [printFormat, setPrintFormat] = useState<"thermal" | "a4" | "pdf">("thermal");
   const [posColumns, setPosColumns] = useState<ColumnSetting[]>([]);
+  const [isFinalizing, setIsFinalizing] = useState(false);
+  const isFinalizingRef = useRef(false);
 
   // References for focus control
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -114,6 +116,24 @@ export const PosBillingPage: React.FC = () => {
         return;
       }
 
+      // If tender modal is open, handle tender modal hotkeys (F12, Enter, Escape)
+      if (isTenderModalOpen) {
+        if (e.key === "Escape") {
+          e.preventDefault();
+          if (!isFinalizingRef.current) {
+            setIsTenderModalOpen(false);
+            searchInputRef.current?.focus();
+          }
+          return;
+        }
+        if (e.key === "F12" || e.key === "Enter") {
+          e.preventDefault();
+          handleFinalizeAndPrint();
+          return;
+        }
+        return;
+      }
+
       // F1: Focus Search/Barcode
       if (e.key === "F1") {
         e.preventDefault();
@@ -132,9 +152,7 @@ export const PosBillingPage: React.FC = () => {
       // F12: Open Checkout / Tender
       else if (e.key === "F12") {
         e.preventDefault();
-        if (posCartService.getLines().length > 0) {
-          openTenderModal();
-        }
+        openTenderModal();
       }
       // Escape: Close dropdown or open modals
       else if (e.key === "Escape") {
@@ -142,14 +160,13 @@ export const PosBillingPage: React.FC = () => {
           setSearchResults([]);
           return;
         }
-        if (isTenderModalOpen) setIsTenderModalOpen(false);
         if (isRecallModalOpen) setIsRecallModalOpen(false);
       }
     };
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isTenderModalOpen, isRecallModalOpen, selectedProductForBatch, searchResults.length]);
+  }, [isTenderModalOpen, isRecallModalOpen, selectedProductForBatch, searchResults.length, lines.length]);
 
   // When batch modal opens: focus inside the modal and highlight earliest expiry (row 0)
   useEffect(() => {
@@ -421,6 +438,13 @@ export const PosBillingPage: React.FC = () => {
   };
 
   const openTenderModal = () => {
+    // Validate empty cart before opening modal
+    const currentLines = posCartService.getLines().length > 0 ? posCartService.getLines() : lines;
+    if (currentLines.length === 0) {
+      showNotification("Cannot open checkout: Cart is empty. Please add products first.", "error");
+      return;
+    }
+
     const t = posCartService.getTotals();
     setTenders([{ mode: "Cash", amount: t.grand_total }]);
     setReceivedCash(t.grand_total);
@@ -436,30 +460,35 @@ export const PosBillingPage: React.FC = () => {
     return 0;
   }, [tenders, receivedCash]);
 
-  const preparePrintData = (): InvoicePrintData => ({
-    invoice_number: invoiceNumber,
-    invoice_date: new Date().toISOString().slice(0, 10),
-    store_name: "LamStone Pharmacy & Retail",
-    store_phone: "9876543210",
-    customer_name: customerName,
-    customer_phone: customerPhone,
-    lines: lines.map((l) => ({
-      description: l.product.name,
-      batch_no: l.selectedBatch.batch_no,
-      expiry_date: l.selectedBatch.expiry_date,
-      qty: l.qty,
-      loose_qty: l.loose_qty,
-      rate: l.unit_price,
-      ptr: l.product.ptr,
-      pts: l.product.pts,
-      gst_percent: l.product.gst_percent,
-      amount: l.calculated.total_amount,
-    })),
-    subtotal: totals.taxable_subtotal,
-    tax_total: totals.total_tax,
-    round_off: totals.round_off,
-    grand_total: totals.grand_total,
-  });
+  const preparePrintData = (linesSource?: PosCartLine[], totalsSource?: InvoiceTotals): InvoicePrintData => {
+    const activeLines = linesSource || (posCartService.getLines().length > 0 ? posCartService.getLines() : lines);
+    const activeTotals = totalsSource || (posCartService.getLines().length > 0 ? posCartService.getTotals() : totals);
+
+    return {
+      invoice_number: invoiceNumber,
+      invoice_date: new Date().toISOString().slice(0, 10),
+      store_name: "LamStone Pharmacy & Retail",
+      store_phone: "9876543210",
+      customer_name: customerName,
+      customer_phone: customerPhone,
+      lines: activeLines.map((l) => ({
+        description: l.product.name,
+        batch_no: l.selectedBatch.batch_no,
+        expiry_date: l.selectedBatch.expiry_date,
+        qty: l.qty,
+        loose_qty: l.loose_qty,
+        rate: l.unit_price,
+        ptr: l.product.ptr,
+        pts: l.product.pts,
+        gst_percent: l.product.gst_percent,
+        amount: l.calculated.total_amount,
+      })),
+      subtotal: activeTotals.taxable_subtotal,
+      tax_total: activeTotals.total_tax,
+      round_off: activeTotals.round_off,
+      grand_total: activeTotals.grand_total,
+    };
+  };
 
   const handleShareWhatsApp = () => {
     if (!customerPhone.trim()) {
@@ -480,13 +509,36 @@ export const PosBillingPage: React.FC = () => {
   };
 
   const handleFinalizeAndPrint = async () => {
+    // 1. Idempotency guard: ignore repeat triggers while a save is in progress
+    if (isFinalizingRef.current) {
+      return;
+    }
+    isFinalizingRef.current = true;
+    setIsFinalizing(true);
+
     try {
+      // 2. Snapshot cart state at start of finalize
+      const cartSnapshot = posCartService.getLines().length > 0 ? posCartService.getLines() : lines;
+      const totalsSnapshot = posCartService.getLines().length > 0 ? posCartService.getTotals() : totals;
+
+      if (cartSnapshot.length === 0) {
+        showNotification("Cannot finalize: Cart is empty", "error");
+        return;
+      }
+
+      // 3. Prepare snapshot of print data BEFORE saving or clearing
+      const printData = preparePrintData(cartSnapshot, totalsSnapshot);
       const primaryPaymentMode = tenders[0]?.mode || "Cash";
-      const res = await posCartService.finalizeInvoice(invoiceNumber, primaryPaymentMode);
+
+      // 4. Save invoice without auto-clearing the cart yet
+      const res = await posCartService.finalizeInvoice(invoiceNumber, primaryPaymentMode, {
+        autoClear: false,
+        linesSnapshot: cartSnapshot,
+        totalsSnapshot,
+      });
 
       if (res.success) {
-        const printData = preparePrintData();
-
+        // 5. Execute print/export flow with snapshot
         if (printFormat === "thermal") {
           await printingEngine.printThermalReceipt(printData);
         } else if (printFormat === "a4") {
@@ -495,16 +547,23 @@ export const PosBillingPage: React.FC = () => {
           await printingEngine.exportToPdf(printData);
         }
 
-        showNotification(`Invoice ${invoiceNumber} billed (${printFormat.toUpperCase()})!`);
+        // 6. Clear cart ONLY after BOTH save and print have succeeded
+        posCartService.clearCart();
+        refreshCartState();
         setIsTenderModalOpen(false);
+        showNotification(`Invoice ${invoiceNumber} billed (${printFormat.toUpperCase()})!`);
         setInvoiceNumber(`INV-${Date.now().toString().slice(-6)}`);
         setCustomerName("Walk-in Customer");
         setCustomerPhone("");
-        refreshCartState();
-        searchInputRef.current?.focus();
+        setTimeout(() => {
+          searchInputRef.current?.focus();
+        }, 50);
       }
     } catch (err) {
       showNotification(err instanceof Error ? err.message : "Error saving invoice", "error");
+    } finally {
+      isFinalizingRef.current = false;
+      setIsFinalizing(false);
     }
   };
 
@@ -979,8 +1038,10 @@ export const PosBillingPage: React.FC = () => {
                   {(["Cash", "UPI", "Card", "Credit"] as const).map((mode) => (
                     <button
                       key={mode}
+                      type="button"
+                      disabled={isFinalizing}
                       onClick={() => setTenders([{ mode, amount: totals.grand_total }])}
-                      className={`rounded-lg py-2 text-xs font-semibold border transition-all ${
+                      className={`rounded-lg py-2 text-xs font-semibold border transition-all disabled:opacity-50 disabled:cursor-not-allowed ${
                         tenders[0]?.mode === mode
                           ? "border-blue-600 bg-blue-600 text-white shadow-sm"
                           : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
@@ -1000,9 +1061,16 @@ export const PosBillingPage: React.FC = () => {
                     <input
                       ref={tenderCashInputRef}
                       type="number"
+                      disabled={isFinalizing}
                       value={receivedCash}
                       onChange={(e) => setReceivedCash(parseFloat(e.target.value) || 0)}
-                      className="w-full rounded border border-slate-300 bg-white px-3 py-1.5 text-sm font-bold text-slate-800 focus:border-blue-600 focus:outline-none"
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          handleFinalizeAndPrint();
+                        }
+                      }}
+                      className="w-full rounded border border-slate-300 bg-white px-3 py-1.5 text-sm font-bold text-slate-800 focus:border-blue-600 focus:outline-none disabled:bg-slate-100 disabled:cursor-not-allowed"
                     />
                   </div>
                   <div className="flex justify-between items-center text-xs">
@@ -1018,8 +1086,9 @@ export const PosBillingPage: React.FC = () => {
                 <div className="grid grid-cols-3 gap-2">
                   <button
                     type="button"
+                    disabled={isFinalizing}
                     onClick={() => setPrintFormat("thermal")}
-                    className={`flex items-center justify-center gap-1.5 rounded-lg py-1.5 text-xs font-medium border ${
+                    className={`flex items-center justify-center gap-1.5 rounded-lg py-1.5 text-xs font-medium border disabled:opacity-50 disabled:cursor-not-allowed ${
                       printFormat === "thermal"
                         ? "border-blue-600 bg-blue-50 text-blue-700 font-bold"
                         : "border-slate-200 text-slate-600 hover:bg-slate-50"
@@ -1030,8 +1099,9 @@ export const PosBillingPage: React.FC = () => {
                   </button>
                   <button
                     type="button"
+                    disabled={isFinalizing}
                     onClick={() => setPrintFormat("a4")}
-                    className={`flex items-center justify-center gap-1.5 rounded-lg py-1.5 text-xs font-medium border ${
+                    className={`flex items-center justify-center gap-1.5 rounded-lg py-1.5 text-xs font-medium border disabled:opacity-50 disabled:cursor-not-allowed ${
                       printFormat === "a4"
                         ? "border-blue-600 bg-blue-50 text-blue-700 font-bold"
                         : "border-slate-200 text-slate-600 hover:bg-slate-50"
@@ -1042,8 +1112,9 @@ export const PosBillingPage: React.FC = () => {
                   </button>
                   <button
                     type="button"
+                    disabled={isFinalizing}
                     onClick={() => setPrintFormat("pdf")}
-                    className={`flex items-center justify-center gap-1.5 rounded-lg py-1.5 text-xs font-medium border ${
+                    className={`flex items-center justify-center gap-1.5 rounded-lg py-1.5 text-xs font-medium border disabled:opacity-50 disabled:cursor-not-allowed ${
                       printFormat === "pdf"
                         ? "border-blue-600 bg-blue-50 text-blue-700 font-bold"
                         : "border-slate-200 text-slate-600 hover:bg-slate-50"
@@ -1059,16 +1130,18 @@ export const PosBillingPage: React.FC = () => {
               <div className="flex items-center gap-2 pt-1">
                 <button
                   type="button"
+                  disabled={isFinalizing}
                   onClick={handleShareWhatsApp}
-                  className="flex-1 flex items-center justify-center gap-1.5 rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-800 hover:bg-emerald-100 transition-colors"
+                  className="flex-1 flex items-center justify-center gap-1.5 rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-800 hover:bg-emerald-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <MessageCircle className="h-3.5 w-3.5 text-emerald-600" />
                   <span>WhatsApp Bill</span>
                 </button>
                 <button
                   type="button"
+                  disabled={isFinalizing}
                   onClick={handleShareEmail}
-                  className="flex-1 flex items-center justify-center gap-1.5 rounded-lg border border-slate-300 bg-slate-50 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100 transition-colors"
+                  className="flex-1 flex items-center justify-center gap-1.5 rounded-lg border border-slate-300 bg-slate-50 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <Mail className="h-3.5 w-3.5 text-slate-500" />
                   <span>Email Invoice</span>
@@ -1078,17 +1151,21 @@ export const PosBillingPage: React.FC = () => {
 
             <div className="border-t border-slate-200 bg-slate-50 px-5 py-3.5 flex justify-end gap-2">
               <button
+                type="button"
+                disabled={isFinalizing}
                 onClick={() => setIsTenderModalOpen(false)}
-                className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-100"
+                className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 Cancel (Esc)
               </button>
               <button
+                type="button"
+                disabled={isFinalizing}
                 onClick={handleFinalizeAndPrint}
-                className="flex items-center gap-2 rounded-lg bg-emerald-600 px-5 py-2 text-xs font-bold text-white shadow-md hover:bg-emerald-700"
+                className="flex items-center gap-2 rounded-lg bg-emerald-600 px-5 py-2 text-xs font-bold text-white shadow-md hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
               >
                 <Printer className="h-4 w-4" />
-                <span>Save & Print ({printFormat.toUpperCase()})</span>
+                <span>{isFinalizing ? "Saving & Printing..." : `Save & Print (${printFormat.toUpperCase()})`}</span>
               </button>
             </div>
           </div>

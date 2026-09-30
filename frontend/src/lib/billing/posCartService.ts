@@ -201,12 +201,24 @@ export class PosCartService {
     return calculateInvoiceTotals(billingLines, this.billDiscount, this.companyTaxMode, this.isInterState, true);
   }
 
-  async finalizeInvoice(invoiceNumber: string, paymentMode = "Cash"): Promise<{ success: boolean; invoiceId: string }> {
-    if (this.lines.length === 0) {
+  async finalizeInvoice(
+    invoiceNumber: string,
+    paymentMode = "Cash",
+    options?: {
+      autoClear?: boolean;
+      linesSnapshot?: PosCartLine[];
+      totalsSnapshot?: InvoiceTotals;
+    }
+  ): Promise<{ success: boolean; invoiceId: string }> {
+    const linesToFinalize = options?.linesSnapshot && options.linesSnapshot.length > 0
+      ? options.linesSnapshot
+      : this.lines;
+
+    if (linesToFinalize.length === 0) {
       throw new Error("Cannot finalize empty cart");
     }
 
-    const totals = this.getTotals();
+    const totals = options?.totalsSnapshot || this.getTotals();
     const invoiceId = `inv_${Date.now()}_${Math.random().toString(16).slice(2, 6)}`;
     const externalId = `ext_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`;
     const now = Date.now();
@@ -241,7 +253,7 @@ export class PosCartService {
     await sqliteStorage.insertRecord("invoices", invoiceId, invoiceRow);
 
     // 2. Commit Invoice Line Items & Stock Transactions
-    for (const line of this.lines) {
+    for (const line of linesToFinalize) {
       const lineItemId = `inv_item_${Date.now()}_${Math.random().toString(16).slice(2, 6)}`;
       await sqliteStorage.insertRecord("invoice_items", lineItemId, {
         id: lineItemId,
@@ -283,8 +295,10 @@ export class PosCartService {
     // 3. Enqueue for background sync
     await syncQueueService.enqueue("invoice", invoiceId, "create", invoiceRow);
 
-    // 4. Reset Cart
-    this.clearCart();
+    // 4. Reset Cart only if autoClear is not explicitly disabled
+    if (options?.autoClear !== false) {
+      this.clearCart();
+    }
 
     return { success: true, invoiceId };
   }

@@ -104,4 +104,37 @@ describe("POS Cart Service & Checkout Pipeline (POS-001, POS-002, POS-007, STK-0
     // Verify cart was cleared
     expect(posCartService.getLines().length).toBe(0);
   });
+
+  it("supports snapshot finalization and delayed clearing for robust print workflows", async () => {
+    await posCartService.scanBarcodeAndAddToCart("8901111");
+    expect(posCartService.getLines().length).toBe(1);
+
+    // 1. Take snapshot of cart
+    const snapshot = [...posCartService.getLines()];
+    const totals = posCartService.getTotals();
+
+    // 2. Finalize with autoClear: false
+    const res = await posCartService.finalizeInvoice("INV-2026-SNAPSHOT", "UPI", {
+      autoClear: false,
+      linesSnapshot: snapshot,
+      totalsSnapshot: totals,
+    });
+
+    expect(res.success).toBe(true);
+
+    // Verify cart lines are preserved while print completes
+    expect(posCartService.getLines().length).toBe(1);
+
+    // Verify invoice saved correctly with UPI payment mode
+    const invoice = await sqliteStorage.findById("invoices", res.invoiceId);
+    expect(invoice?.payment_mode).toBe("UPI");
+    expect(invoice?.invoice_number).toBe("INV-2026-SNAPSHOT");
+
+    // 3. Clear cart after print completes
+    posCartService.clearCart();
+    expect(posCartService.getLines().length).toBe(0);
+
+    // 4. Truly empty cart throws error
+    await expect(posCartService.finalizeInvoice("INV-FAIL", "Cash")).rejects.toThrow("Cannot finalize empty cart");
+  });
 });
