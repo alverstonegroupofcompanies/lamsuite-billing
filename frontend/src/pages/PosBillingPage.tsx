@@ -13,11 +13,22 @@ import {
   AlertCircle,
   X,
   UserCheck,
+  MessageCircle,
+  Mail,
+  Download,
+  FileText,
+  Sliders,
 } from "lucide-react";
 import { posCartService, type PosCartLine } from "../lib/billing/posCartService";
 import { productsStore, type ProductItem, type ProductBatch } from "../lib/masters/productsStore";
 import { billingTenderService, type PaymentTenderLine } from "../lib/billing/billingTenderService";
-import { printingEngine } from "../lib/printing/printingEngine";
+import {
+  printingEngine,
+  generateWhatsAppShareUrl,
+  generateEmailShareUrl,
+  type InvoicePrintData,
+} from "../lib/printing/printingEngine";
+import { companySettingsService, type ColumnSetting } from "../lib/settings/companySettingsService";
 import type { InvoiceTotals } from "../lib/billing/billingCalculations";
 
 export const PosBillingPage: React.FC = () => {
@@ -44,6 +55,8 @@ export const PosBillingPage: React.FC = () => {
   // Tender form state
   const [tenders, setTenders] = useState<PaymentTenderLine[]>([{ mode: "Cash", amount: 0 }]);
   const [receivedCash, setReceivedCash] = useState<number>(0);
+  const [printFormat, setPrintFormat] = useState<"thermal" | "a4" | "pdf">("thermal");
+  const [posColumns, setPosColumns] = useState<ColumnSetting[]>([]);
 
   // References for focus control
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -240,35 +253,66 @@ export const PosBillingPage: React.FC = () => {
     return 0;
   }, [tenders, receivedCash]);
 
+  const preparePrintData = (): InvoicePrintData => ({
+    invoice_number: invoiceNumber,
+    invoice_date: new Date().toISOString().slice(0, 10),
+    store_name: "LamStone Pharmacy & Retail",
+    store_phone: "9876543210",
+    customer_name: customerName,
+    customer_phone: customerPhone,
+    lines: lines.map((l) => ({
+      description: l.product.name,
+      batch_no: l.selectedBatch.batch_no,
+      expiry_date: l.selectedBatch.expiry_date,
+      qty: l.qty,
+      loose_qty: l.loose_qty,
+      rate: l.unit_price,
+      ptr: l.product.ptr,
+      pts: l.product.pts,
+      gst_percent: l.product.gst_percent,
+      amount: l.calculated.total_amount,
+    })),
+    subtotal: totals.taxable_subtotal,
+    tax_total: totals.total_tax,
+    round_off: totals.round_off,
+    grand_total: totals.grand_total,
+  });
+
+  const handleShareWhatsApp = () => {
+    if (!customerPhone.trim()) {
+      showNotification("Please enter customer mobile number to share via WhatsApp", "error");
+      return;
+    }
+    const data = preparePrintData();
+    const url = generateWhatsAppShareUrl(customerPhone, data);
+    window.open(url, "_blank");
+    showNotification("WhatsApp invoice link opened!");
+  };
+
+  const handleShareEmail = () => {
+    const data = preparePrintData();
+    const url = generateEmailShareUrl("customer@example.com", data);
+    window.open(url, "_blank");
+    showNotification("Email invoice client opened!");
+  };
+
   const handleFinalizeAndPrint = async () => {
     try {
       const primaryPaymentMode = tenders[0]?.mode || "Cash";
       const res = await posCartService.finalizeInvoice(invoiceNumber, primaryPaymentMode);
 
       if (res.success) {
-        // Trigger silent thermal printing
-        await printingEngine.printThermalReceipt({
-          invoice_number: invoiceNumber,
-          invoice_date: new Date().toISOString().slice(0, 10),
-          store_name: "LamStone Pharmacy & Retail",
-          customer_name: customerName,
-          lines: lines.map((l) => ({
-            description: l.product.name,
-            batch_no: l.selectedBatch.batch_no,
-            expiry_date: l.selectedBatch.expiry_date,
-            qty: l.qty,
-            loose_qty: l.loose_qty,
-            rate: l.unit_price,
-            gst_percent: l.product.gst_percent,
-            amount: l.calculated.total_amount,
-          })),
-          subtotal: totals.taxable_subtotal,
-          tax_total: totals.total_tax,
-          round_off: totals.round_off,
-          grand_total: totals.grand_total,
-        });
+        const printData = preparePrintData();
 
-        showNotification(`Invoice ${invoiceNumber} billed and printed!`);
+        if (printFormat === "thermal") {
+          await printingEngine.printThermalReceipt(printData);
+        } else if (printFormat === "a4") {
+          await printingEngine.printA4TaxInvoice(printData);
+        } else if (printFormat === "pdf") {
+          await printingEngine.exportToPdf(printData);
+        }
+
+        showNotification(`Invoice ${invoiceNumber} billed (${printFormat.toUpperCase()})!`);
         setIsTenderModalOpen(false);
         setInvoiceNumber(`INV-${Date.now().toString().slice(-6)}`);
         setCustomerName("Walk-in Customer");
@@ -613,6 +657,69 @@ export const PosBillingPage: React.FC = () => {
                   </div>
                 </div>
               )}
+
+              {/* Print Output Format Selector */}
+              <div>
+                <label className="text-xs font-semibold text-slate-700 block mb-1.5">Print Output Format</label>
+                <div className="grid grid-cols-3 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setPrintFormat("thermal")}
+                    className={`flex items-center justify-center gap-1.5 rounded-lg py-1.5 text-xs font-medium border ${
+                      printFormat === "thermal"
+                        ? "border-blue-600 bg-blue-50 text-blue-700 font-bold"
+                        : "border-slate-200 text-slate-600 hover:bg-slate-50"
+                    }`}
+                  >
+                    <Printer className="h-3.5 w-3.5" />
+                    <span>Thermal 80mm</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPrintFormat("a4")}
+                    className={`flex items-center justify-center gap-1.5 rounded-lg py-1.5 text-xs font-medium border ${
+                      printFormat === "a4"
+                        ? "border-blue-600 bg-blue-50 text-blue-700 font-bold"
+                        : "border-slate-200 text-slate-600 hover:bg-slate-50"
+                    }`}
+                  >
+                    <FileText className="h-3.5 w-3.5" />
+                    <span>A4 Tax Invoice</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPrintFormat("pdf")}
+                    className={`flex items-center justify-center gap-1.5 rounded-lg py-1.5 text-xs font-medium border ${
+                      printFormat === "pdf"
+                        ? "border-blue-600 bg-blue-50 text-blue-700 font-bold"
+                        : "border-slate-200 text-slate-600 hover:bg-slate-50"
+                    }`}
+                  >
+                    <Download className="h-3.5 w-3.5" />
+                    <span>Save PDF</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Electronic Dispatch Actions */}
+              <div className="flex items-center gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={handleShareWhatsApp}
+                  className="flex-1 flex items-center justify-center gap-1.5 rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-800 hover:bg-emerald-100 transition-colors"
+                >
+                  <MessageCircle className="h-3.5 w-3.5 text-emerald-600" />
+                  <span>WhatsApp Bill</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleShareEmail}
+                  className="flex-1 flex items-center justify-center gap-1.5 rounded-lg border border-slate-300 bg-slate-50 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100 transition-colors"
+                >
+                  <Mail className="h-3.5 w-3.5 text-slate-500" />
+                  <span>Email Invoice</span>
+                </button>
+              </div>
             </div>
 
             <div className="border-t border-slate-200 bg-slate-50 px-5 py-3.5 flex justify-end gap-2">
@@ -627,7 +734,7 @@ export const PosBillingPage: React.FC = () => {
                 className="flex items-center gap-2 rounded-lg bg-emerald-600 px-5 py-2 text-xs font-bold text-white shadow-md hover:bg-emerald-700"
               >
                 <Printer className="h-4 w-4" />
-                <span>Save & Print Invoice</span>
+                <span>Save & Print ({printFormat.toUpperCase()})</span>
               </button>
             </div>
           </div>

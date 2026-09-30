@@ -51,6 +51,12 @@ export class MockSqliteDatabase {
     return t.delete(id);
   }
 
+  clearTable(table: string): void {
+    if (this.tables.has(table)) {
+      this.tables.get(table)!.clear();
+    }
+  }
+
   count(table: string): number {
     return this.ensureTable(table).size;
   }

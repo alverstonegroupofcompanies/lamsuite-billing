@@ -2,6 +2,8 @@ import { describe, it, expect } from "vitest";
 import {
   generateDynamicSlipHeightMm,
   generateUpiPaymentString,
+  generateWhatsAppShareUrl,
+  generateEmailShareUrl,
   printingEngine,
   type InvoicePrintData,
 } from "./printingEngine";
@@ -29,7 +31,33 @@ describe("Printing Engine & Document Layouts (PRN-001, PRN-002, PRN-005)", () =>
     });
   });
 
-  describe("Native Print Dispatch", () => {
+  describe("WhatsApp & Email Share Link Generators", () => {
+    const sampleData: InvoicePrintData = {
+      invoice_number: "INV-2026-001",
+      invoice_date: "2026-09-30",
+      store_name: "Apex Pharmacy",
+      lines: [{ description: "Paracetamol", qty: 1, rate: 30, gst_percent: 12, amount: 30 }],
+      subtotal: 30,
+      tax_total: 3.6,
+      round_off: 0.4,
+      grand_total: 34,
+    };
+
+    it("generates WhatsApp dispatch link with international dialing code and encoded bill details", () => {
+      const waUrl = generateWhatsAppShareUrl("9876543210", sampleData);
+      expect(waUrl).toContain("https://wa.me/919876543210");
+      expect(waUrl).toContain("INV-2026-001");
+      expect(waUrl).toContain("34.00");
+    });
+
+    it("generates email mailto link with encoded subject and summary body", () => {
+      const emailUrl = generateEmailShareUrl("customer@example.com", sampleData);
+      expect(emailUrl).toContain("mailto:customer%40example.com");
+      expect(emailUrl).toContain("INV-2026-001");
+    });
+  });
+
+  describe("Native Print Dispatch & Templates", () => {
     it("invokes native thermal print via desktop IPC bridge", async () => {
       resetMockHandlers();
       registerMockHandler("print:thermal", async (args) => {
@@ -50,6 +78,17 @@ describe("Printing Engine & Document Layouts (PRN-001, PRN-002, PRN-005)", () =>
       const res = await printingEngine.printThermalReceipt(sampleData, "EPSON TM-T82");
       expect(res.success).toBe(true);
       expect(res.job_id).toBe("spool_job_881");
+    });
+
+    it("maintains default named print templates and printer profiles", () => {
+      const templates = printingEngine.getTemplates();
+      expect(templates.length).toBeGreaterThanOrEqual(3);
+      expect(templates.map((t) => t.id)).toContain("thermal_standard");
+      expect(templates.map((t) => t.id)).toContain("a4_tax_invoice");
+
+      const profiles = printingEngine.getPrinterProfiles();
+      expect(profiles.length).toBeGreaterThanOrEqual(2);
+      expect(profiles.find((p) => p.isDefault)?.silentPrint).toBe(true);
     });
   });
 });

@@ -224,6 +224,19 @@ export class SqliteStorageService {
     return await bridge.invoke<T[]>("db:findAll", { table });
   }
 
+  async executeSql(sql: string): Promise<void> {
+    const bridge = getIpcBridge();
+    const match = sql.match(/DELETE\s+FROM\s+([a-zA-Z0-9_]+)/i);
+    if (match) {
+      const table = match[1];
+      if (bridge.runtime === "mock") {
+        getMockDatabase().clearTable(table);
+        return;
+      }
+    }
+    await bridge.invoke("db:execute", { sql });
+  }
+
   isInitialized(): boolean {
     return this.initialized;
   }
