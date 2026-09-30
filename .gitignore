@@ -1,0 +1,8 @@
+node_modules/
+dist/
+.DS_Store
+*.log
+.system_generated/
+frontend/node_modules/
+frontend/dist/
+backend/vendor/
