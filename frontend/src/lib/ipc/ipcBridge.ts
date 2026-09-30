@@ -45,7 +45,27 @@ class DesktopIpcBridge implements IpcBridge {
 
     if (runtime === "tauri") {
       const tauri = g.__TAURI__ as { invoke: <R>(cmd: string, a?: unknown) => Promise<R> };
-      return await tauri.invoke<T>(command, args);
+      
+      // Transform command names like "db:insert" -> "db_insert", "db:findAll" -> "db_find_all"
+      const snakeCmd = command
+        .replace(/:/g, "_")
+        .replace(/([A-Z])/g, "_$1")
+        .toLowerCase();
+
+      try {
+        return await tauri.invoke<T>(snakeCmd, args);
+      } catch (tauriError) {
+        try {
+          return await tauri.invoke<T>(command, args);
+        } catch {
+          // If Rust command is not implemented or during dev fallback, check mockHandlers
+          const handler = mockHandlers.get(command);
+          if (handler) {
+            return (await handler(args)) as T;
+          }
+          throw tauriError;
+        }
+      }
     }
 
     if (runtime === "electron") {

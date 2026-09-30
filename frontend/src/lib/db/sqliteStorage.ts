@@ -163,37 +163,45 @@ export class SqliteStorageService {
   }
 
   private registerMockIpcHandlers() {
-    const bridge = getIpcBridge();
-    if (bridge.runtime === "mock") {
-      const db = getMockDatabase();
+    const db = getMockDatabase();
 
-      registerMockHandler("db:migrate", async () => {
-        const latestVersion = MIGRATIONS[MIGRATIONS.length - 1].version;
-        db.setSchemaVersion(latestVersion);
-        return { success: true, version: latestVersion };
-      });
+    registerMockHandler("db:migrate", async () => {
+      const latestVersion = MIGRATIONS[MIGRATIONS.length - 1].version;
+      db.setSchemaVersion(latestVersion);
+      return { success: true, version: latestVersion };
+    });
 
-      registerMockHandler("db:version", async () => {
-        return { version: db.getSchemaVersion() };
-      });
+    registerMockHandler("db:version", async () => {
+      return { version: db.getSchemaVersion() };
+    });
 
-      registerMockHandler("db:insert", async (args) => {
-        const { table, id, record } = (args as { table: string; id: string; record: Record<string, unknown> }) || {};
-        if (!table || !id || !record) throw new Error("Missing table, id or record");
-        db.insert(table, id, record);
-        return { success: true };
-      });
+    registerMockHandler("db:insert", async (args) => {
+      const { table, id, record } = (args as { table: string; id: string; record: Record<string, unknown> }) || {};
+      if (!table || !id || !record) throw new Error("Missing table, id or record");
+      db.insert(table, id, record);
+      return { success: true };
+    });
 
-      registerMockHandler("db:findById", async (args) => {
-        const { table, id } = (args as { table: string; id: string }) || {};
-        return db.findById(table, id);
-      });
+    registerMockHandler("db:findById", async (args) => {
+      const { table, id } = (args as { table: string; id: string }) || {};
+      return db.findById(table, id);
+    });
 
-      registerMockHandler("db:findAll", async (args) => {
-        const { table } = (args as { table: string }) || {};
-        return db.findAll(table);
-      });
-    }
+    registerMockHandler("db:findAll", async (args) => {
+      const { table } = (args as { table: string }) || {};
+      return db.findAll(table);
+    });
+
+    registerMockHandler("db:execute", async (args) => {
+      const { sql } = (args as { sql?: string }) || {};
+      if (sql) {
+        const match = sql.match(/DELETE\s+FROM\s+([a-zA-Z0-9_]+)/i);
+        if (match) {
+          db.clearTable(match[1]);
+        }
+      }
+      return { success: true };
+    });
   }
 
   async initDatabase(): Promise<number> {
