@@ -5,22 +5,15 @@ description = "LamSuite Billing Desktop"
 authors = ["Muhammad Anshad <muhammad.anshad@teronext.com>"]
 edition = "2021"
 
-[lib]
-name = "lamsuite_billing_lib"
-crate-type = ["staticlib", "cdylib", "rlib"]
-
 [build-dependencies]
 tauri-build = { version = "1", features = [] }
 
 [dependencies]
 tauri = { version = "1", features = [
-  "shell-all",
-  "dialog-open",
-  "dialog-save",
-  "window-create",
-  "window-close",
-  "window-data-url",
+  "shell-open",
+  "dialog-all",
   "http-all",
+  "window-all",
   "devtools"
 ] }
 serde = { version = "1", features = ["derive"] }
@@ -32,6 +25,7 @@ parking_lot = "0.12"
 local-ip-address = "0.6"
 
 [features]
+default = ["custom-protocol"]
 custom-protocol = ["tauri/custom-protocol"]
 
 [profile.release]
