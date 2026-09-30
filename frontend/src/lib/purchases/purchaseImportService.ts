@@ -4,16 +4,19 @@ export interface ColumnMappingSuggestion {
 }
 
 export interface ExtractedOcrInvoice {
+  supplier_name?: string;
   supplier_gstin?: string;
   invoice_number?: string;
   invoice_date?: string;
   lines: Array<{
-    description: string;
+    product_name: string;
+    description?: string;
     hsn?: string;
-    batch?: string;
-    expiry?: string;
+    batch_no?: string;
+    expiry_date?: string;
     qty: number;
-    rate: number;
+    free_qty?: number;
+    purchase_rate: number;
     gst_percent?: number;
   }>;
 }
@@ -52,9 +55,38 @@ export class PurchaseImportService {
     });
   }
 
+  parseDelimitedTable(rawText: string, delimiter?: string): {
+    headers: string[];
+    records: Record<string, string>[];
+  } {
+    const rawLines = rawText.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+    if (rawLines.length === 0) return { headers: [], records: [] };
+
+    // Auto-detect delimiter if not specified
+    const sep = delimiter || (rawLines[0].includes("\t") ? "\t" : ",");
+    const headers = rawLines[0].split(sep).map((h) => h.trim().replace(/^["']|["']$/g, "").toLowerCase());
+
+    const records: Record<string, string>[] = [];
+    for (let i = 1; i < rawLines.length; i++) {
+      const cells = rawLines[i].split(sep).map((c) => c.trim().replace(/^["']|["']$/g, ""));
+      const record: Record<string, string> = {};
+      headers.forEach((h, idx) => {
+        record[h] = cells[idx] || "";
+      });
+      records.push(record);
+    }
+
+    return { headers, records };
+  }
+
   parseOcrText(ocrText: string): ExtractedOcrInvoice {
+    return this.extractInvoiceFromOcrText(ocrText);
+  }
+
+  extractInvoiceFromOcrText(ocrText: string): ExtractedOcrInvoice {
     const lines = ocrText.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
 
+    let supplierName: string | undefined;
     let supplierGstin: string | undefined;
     let invoiceNumber: string | undefined;
     let invoiceDate: string | undefined;
@@ -77,9 +109,14 @@ export class PurchaseImportService {
         const dateMatch = line.match(/\b(?:date)?\s*[:\-]?\s*(\d{2}[\/\-]\d{2}[\/\-]\d{4})\b/i);
         if (dateMatch) invoiceDate = dateMatch[1].trim();
       }
+
+      if (!supplierName && (line.toLowerCase().includes("ltd") || line.toLowerCase().includes("pharma") || line.toLowerCase().includes("distributor"))) {
+        supplierName = line;
+      }
     }
 
     return {
+      supplier_name: supplierName,
       supplier_gstin: supplierGstin,
       invoice_number: invoiceNumber,
       invoice_date: invoiceDate,

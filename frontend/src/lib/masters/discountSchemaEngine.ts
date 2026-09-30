@@ -13,6 +13,16 @@ export interface DiscountSchema {
   endDate?: string; // YYYY-MM-DD
 }
 
+export interface DiscountRule {
+  rule_id: string;
+  name: string;
+  rule_type: "percentage" | "buy_x_get_y" | "customer_type";
+  discount_percent: number;
+  min_quantity?: number;
+  free_quantity?: number;
+  is_active: boolean;
+}
+
 export interface CartLineItem {
   productId: string;
   categoryId?: string;
@@ -24,6 +34,30 @@ export interface CartLineItem {
 }
 
 export class DiscountSchemaEngine {
+  private activeRules: DiscountRule[] = [
+    {
+      rule_id: "rule_def_01",
+      name: "Default Wholesale 5%",
+      rule_type: "percentage",
+      discount_percent: 5,
+      min_quantity: 1,
+      is_active: true,
+    },
+  ];
+
+  registerRule(rule: DiscountRule): void {
+    const existingIdx = this.activeRules.findIndex((r) => r.rule_id === rule.rule_id);
+    if (existingIdx >= 0) {
+      this.activeRules[existingIdx] = rule;
+    } else {
+      this.activeRules.push(rule);
+    }
+  }
+
+  getAllRules(): DiscountRule[] {
+    return [...this.activeRules];
+  }
+
   evaluateLineDiscount(
     line: CartLineItem,
     schemas: DiscountSchema[],

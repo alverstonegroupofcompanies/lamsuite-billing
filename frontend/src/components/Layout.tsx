@@ -12,6 +12,7 @@ import {
   User,
   Clock,
 } from "lucide-react";
+import { companySettingsService } from "../lib/settings/companySettingsService";
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -57,14 +58,33 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
     };
   }, [navigate]);
 
-  const navItems = [
-    { name: "POS Billing", path: "/pos", key: "F1", icon: ShoppingCart },
-    { name: "Purchases", path: "/purchases", key: "F2", icon: Truck },
-    { name: "Stock Ledger", path: "/stock", key: "F3", icon: Package },
-    { name: "Reports & GST", path: "/reports", key: "F4", icon: FileBarChart },
-    { name: "Master Data", path: "/masters", key: "F5", icon: Database },
-    { name: "Settings", path: "/settings", key: "F10", icon: Settings },
+  const [enabledMenus, setEnabledMenus] = React.useState<string[]>([
+    "pos",
+    "purchases",
+    "stock",
+    "reports",
+    "masters",
+    "settings",
+  ]);
+
+  useEffect(() => {
+    companySettingsService.loadSettings().then((cfg) => {
+      if (cfg && cfg.enabled_menu_items) {
+        setEnabledMenus(cfg.enabled_menu_items);
+      }
+    });
+  }, [location.pathname]);
+
+  const allNavItems = [
+    { id: "pos", name: "POS Billing", path: "/pos", key: "F1", icon: ShoppingCart },
+    { id: "purchases", name: "Purchases", path: "/purchases", key: "F2", icon: Truck },
+    { id: "stock", name: "Stock Ledger", path: "/stock", key: "F3", icon: Package },
+    { id: "reports", name: "Reports & GST", path: "/reports", key: "F4", icon: FileBarChart },
+    { id: "masters", name: "Master Data", path: "/masters", key: "F5", icon: Database },
+    { id: "settings", name: "Settings", path: "/settings", key: "F10", icon: Settings },
   ];
+
+  const navItems = allNavItems.filter((item) => enabledMenus.includes(item.id));
 
   return (
     <div className="flex h-screen flex-col bg-slate-100 font-sans">
