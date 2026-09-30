@@ -5,4 +5,10 @@ dist/
 .system_generated/
 frontend/node_modules/
 frontend/dist/
+frontend/src-tauri/target/
 backend/vendor/
+backend/storage/*.key
+backend/database/*.sqlite
+backend/bootstrap/cache/*
+!backend/bootstrap/cache/.gitignore
+backend/.env
