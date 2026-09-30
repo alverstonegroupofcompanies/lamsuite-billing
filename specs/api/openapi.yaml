@@ -1,0 +1,405 @@
+openapi: 3.0.3
+info:
+  title: LamSuite Billing & Admin API
+  version: 2.0.0
+  description: Complete OpenAPI contract for LamSuite / Alverstone Billing, ensuring 100% parity between desktop client and central cloud backend.
+servers:
+  - url: https://admin.lamstonehealthcare.com/api
+    description: Production Cloud API
+  - url: http://localhost:8000/api
+    description: Local Dev Server
+
+paths:
+  /login:
+    post:
+      summary: Operator or admin sign-in
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string }
+                password: { type: string }
+                store_code: { type: string }
+      responses:
+        '200':
+          description: Authenticated successfully with Sanctum bearer token.
+
+  /store:
+    get:
+      summary: Get active store profile, drug licenses, and preferences
+      responses:
+        '200':
+          description: Store profile details
+
+  /devices/register:
+    post:
+      summary: Register desktop workstation with hardware fingerprint
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [store_id, device_name, device_uuid]
+              properties:
+                store_id: { type: integer }
+                device_name: { type: string }
+                device_uuid: { type: string }
+                os_info: { type: string }
+      responses:
+        '200':
+          description: Device paired and activated
+
+  /products:
+    get:
+      summary: List catalog items with filters
+      parameters:
+        - name: query
+          in: query
+          schema: { type: string }
+        - name: page
+          in: query
+          schema: { type: integer }
+      responses:
+        '200':
+          description: Paginated product list
+    post:
+      summary: Create new catalog item
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProductInput'
+      responses:
+        '201':
+          description: Product created
+
+  /products/{id}:
+    get:
+      summary: Get product details with batch inventory
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Product details with batches
+    put:
+      summary: Update catalog item
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProductInput'
+      responses:
+        '200':
+          description: Product updated
+    delete:
+      summary: Delete or archive product
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Product deleted
+
+  /products/{id}/batches:
+    post:
+      summary: Add new batch to product
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BatchInput'
+      responses:
+        '201':
+          description: Batch added
+
+  /invoices:
+    get:
+      summary: List invoices with filters
+      responses:
+        '200':
+          description: Invoices list
+    post:
+      summary: Create invoice (POS sale)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InvoiceInput'
+      responses:
+        '201':
+          description: Invoice created
+
+  /invoices/{id}:
+    get:
+      summary: Get invoice details
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Invoice document details
+    delete:
+      summary: Cancel or void invoice
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Invoice cancelled
+
+  /purchase-documents:
+    get:
+      summary: List purchase bills and returns
+      responses:
+        '200':
+          description: Purchase documents list
+    post:
+      summary: Record inward purchase bill
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PurchaseDocumentInput'
+      responses:
+        '201':
+          description: Purchase bill recorded
+
+  /customers:
+    get:
+      summary: List customers with ledger balances
+      responses:
+        '200':
+          description: Customer directory
+    post:
+      summary: Create new customer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CustomerInput'
+      responses:
+        '201':
+          description: Customer created
+
+  /suppliers:
+    get:
+      summary: List suppliers
+      responses:
+        '200':
+          description: Supplier directory
+    post:
+      summary: Create supplier
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SupplierInput'
+      responses:
+        '201':
+          description: Supplier created
+
+  /sync/pull:
+    get:
+      summary: Pull delta sync bundle since watermark
+      parameters:
+        - name: since
+          in: query
+          schema: { type: string }
+      responses:
+        '200':
+          description: Sync bundle with updated products, customers, invoices, and settings
+
+  /sync/invoices:
+    post:
+      summary: Idempotent push of offline invoices
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                invoices:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/InvoiceInput'
+      responses:
+        '200':
+          description: Invoices ingested and synced
+
+  /sync/stock-events:
+    post:
+      summary: Stream stock transactions to central ledger
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                events:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/StockEventInput'
+      responses:
+        '200':
+          description: Stock events processed
+
+  /reports/{reportKey}/run:
+    get:
+      summary: Execute server-side analytics report
+      parameters:
+        - name: reportKey
+          in: path
+          required: true
+          schema: { type: string }
+        - name: start_date
+          in: query
+          schema: { type: string }
+        - name: end_date
+          in: query
+          schema: { type: string }
+      responses:
+        '200':
+          description: Tabular report dataset
+
+components:
+  schemas:
+    ProductInput:
+      type: object
+      required: [name, barcode, mrp, sel_rate, gst_percent]
+      properties:
+        name: { type: string }
+        print_name: { type: string }
+        barcode: { type: string }
+        hsn_sac_code: { type: string }
+        category_id: { type: string }
+        brand_id: { type: string }
+        unit_id: { type: string }
+        mrp: { type: number }
+        sel_rate: { type: number }
+        ptr: { type: number }
+        pts: { type: number }
+        gst_percent: { type: number }
+        units_per_pack: { type: integer }
+        rack_location: { type: string }
+        shelf_location: { type: string }
+        generic_name: { type: string }
+        external_id: { type: string }
+
+    BatchInput:
+      type: object
+      required: [batch_no, expiry_date, stock_qty]
+      properties:
+        batch_no: { type: string }
+        mfg_date: { type: string }
+        expiry_date: { type: string }
+        stock_qty: { type: number }
+        mrp: { type: number }
+        purchase_rate: { type: number }
+        selling_rate: { type: number }
+
+    InvoiceInput:
+      type: object
+      required: [external_id, invoice_number, invoice_date, lines, grand_total]
+      properties:
+        external_id: { type: string }
+        invoice_number: { type: string }
+        invoice_date: { type: string }
+        customer_id: { type: string }
+        customer_name: { type: string }
+        customer_gstin: { type: string }
+        payment_mode: { type: string }
+        subtotal: { type: number }
+        discount_total: { type: number }
+        tax_total: { type: number }
+        round_off: { type: number }
+        grand_total: { type: number }
+        patient_name: { type: string }
+        doctor_name: { type: string }
+        doctor_reg_no: { type: string }
+        lines:
+          type: array
+          items:
+            type: object
+            required: [product_id, qty, unit_price, gst_percent, total_amount]
+            properties:
+              product_id: { type: string }
+              batch_no: { type: string }
+              expiry_date: { type: string }
+              qty: { type: number }
+              loose_qty: { type: number }
+              unit_price: { type: number }
+              discount_percent: { type: number }
+              gst_percent: { type: number }
+              total_amount: { type: number }
+
+    PurchaseDocumentInput:
+      type: object
+      required: [external_id, purchase_number, purchase_date, supplier_id, lines, grand_total]
+      properties:
+        external_id: { type: string }
+        purchase_number: { type: string }
+        purchase_date: { type: string }
+        supplier_id: { type: string }
+        grand_total: { type: number }
+
+    CustomerInput:
+      type: object
+      required: [name, phone]
+      properties:
+        name: { type: string }
+        phone: { type: string }
+        gstin: { type: string }
+        address: { type: string }
+
+    SupplierInput:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string }
+        gstin: { type: string }
+        phone: { type: string }
+        address: { type: string }
+
+    StockEventInput:
+      type: object
+      required: [external_id, product_id, event_type, qty_delta]
+      properties:
+        external_id: { type: string }
+        product_id: { type: string }
+        batch_id: { type: string }
+        event_type: { type: string }
+        qty_delta: { type: number }
+        unit_cost: { type: number }

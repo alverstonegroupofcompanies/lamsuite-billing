@@ -1,0 +1,42 @@
+[package]
+name = "lamsuite-billing"
+version = "2.0.0"
+description = "LamSuite Billing Desktop"
+authors = ["Muhammad Anshad <muhammad.anshad@teronext.com>"]
+edition = "2021"
+
+[lib]
+name = "lamsuite_billing_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "1", features = [] }
+
+[dependencies]
+tauri = { version = "1", features = [
+  "shell-all",
+  "dialog-open",
+  "dialog-save",
+  "window-create",
+  "window-close",
+  "window-data-url",
+  "http-all",
+  "devtools"
+] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+rusqlite = { version = "0.32", features = ["bundled"] }
+uuid = { version = "1", features = ["v4"] }
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+parking_lot = "0.12"
+local-ip-address = "0.6"
+
+[features]
+custom-protocol = ["tauri/custom-protocol"]
+
+[profile.release]
+panic = "abort"
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true
