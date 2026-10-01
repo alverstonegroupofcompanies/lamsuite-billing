@@ -382,5 +382,41 @@ describe("Printing Engine & Document Layouts (PRN-001, PRN-002, PRN-005)", () =>
       expect(html).toContain("tabular-nums");
       expect(html).not.toContain("font-family: monospace;");
     });
+
+    it("lays out footer as a non-overlapping grid without absolute positioning", () => {
+      const invoiceData: InvoicePrintData = {
+        invoice_number: "INV-GRID-TEST",
+        invoice_date: "2026-10-01",
+        store_name: "LamStone Pharmacy & Retail",
+        lines: [
+          { description: "Dolo 650", hsn_code: "300490", batch_no: "DL1", expiry_date: "2027-06", qty: 2, rate: 32, gst_percent: 12, amount: 64 },
+        ],
+        subtotal: 57.14,
+        tax_total: 6.86,
+        round_off: 0,
+        grand_total: 64,
+        jurisdiction_note: "Subject to local jurisdiction.",
+      };
+
+      const html = printingEngine.generateInvoiceHtml(invoiceData);
+      expect(html).toContain("footer-grid");
+      expect(html).toContain("grid-template-columns");
+      expect(html).toContain("qr-box");
+      expect(html).toContain("totals-card");
+      expect(html).toContain("terms-card");
+      expect(html).toContain("sign-card");
+      expect(html).toContain("Authorised Signatory / Pharmacist");
+      expect(html).toContain("For LamStone Pharmacy & Retail");
+      // Confirm no absolute positioning in footer styles
+      expect(html).not.toMatch(/footer[^{]*{[^}]*position:\s*absolute/i);
+
+      // Verify PDF generation succeeds and outputs valid vector PDF with embedded fonts
+      const pdfBytes = printingEngine.generateInvoicePdf(invoiceData);
+      expect(pdfBytes).toBeInstanceOf(Uint8Array);
+      expect(String.fromCharCode(...pdfBytes.subarray(0, 5))).toBe("%PDF-");
+      const pdfStr = Buffer.from(pdfBytes).toString("latin1");
+      expect(pdfStr).toContain("/ToUnicode");
+      expect(pdfStr.toLowerCase()).toContain("20b9");
+    });
   });
 });

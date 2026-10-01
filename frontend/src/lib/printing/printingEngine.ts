@@ -547,15 +547,25 @@ export class PrintingEngine {
     table.data-table th { background: #f1f5f9; color: #0f172a; font-weight: 700; padding: 6px; border-top: 1px solid #cbd5e1; border-bottom: 2px solid #94a3b8; }
     table.data-table tr:nth-child(even) { background: #f8fafc; }
 
-    .bottom-section { display: flex; justify-content: space-between; gap: 16px; margin-top: 12px; }
-    .left-pane { flex: 1; }
-    .totals-card { width: 300px; border: 1px solid #cbd5e1; border-radius: 6px; background: #f8fafc; padding: 10px 14px; font-variant-numeric: tabular-nums; }
+    .footer-container { margin-top: 12px; page-break-inside: avoid; }
+    .amount-words-bar { background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 4px; padding: 6px 10px; font-size: 10px; font-weight: 700; color: #1e293b; margin-bottom: 10px; }
+    
+    .footer-grid { display: grid; grid-template-columns: 1fr 310px; grid-template-rows: auto auto; gap: 10px 16px; align-items: stretch; }
+    .footer-cell { display: flex; flex-direction: column; }
+    
+    .qr-box { display: flex; align-items: center; gap: 12px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 8px 12px; height: 100%; box-sizing: border-box; }
+    .totals-card { border: 1px solid #cbd5e1; border-radius: 6px; background: #f8fafc; padding: 8px 14px; font-variant-numeric: tabular-nums; box-sizing: border-box; }
     .total-line { display: flex; justify-content: space-between; padding: 2.5px 0; font-size: 10.5px; color: #475569; }
     .grand-total-line { display: flex; justify-content: space-between; padding-top: 6px; margin-top: 6px; border-top: 2px solid #0f172a; font-size: 13px; font-weight: 800; color: #1d4ed8; }
     
-    .qr-box { display: flex; align-items: center; gap: 10px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 8px 10px; margin: 8px 0; width: fit-content; }
-    .terms-box { font-size: 9px; color: #64748b; line-height: 1.4; margin-top: 6px; }
-    .footer-sign { display: flex; justify-content: space-between; align-items: flex-end; margin-top: 20px; padding-top: 10px; border-top: 1px dashed #cbd5e1; font-size: 9.5px; }
+    .terms-card { border: 1px solid #e2e8f0; border-radius: 6px; background: #fff; padding: 8px 10px; font-size: 9px; color: #64748b; line-height: 1.45; height: 100%; display: flex; flex-direction: column; justify-content: space-between; box-sizing: border-box; }
+    .terms-title { font-weight: 700; text-transform: uppercase; color: #475569; margin-bottom: 2px; }
+    .terms-brand { margin-top: 6px; font-size: 8.5px; color: #94a3b8; border-top: 1px dashed #e2e8f0; padding-top: 4px; }
+    
+    .sign-card { border: 1px solid #cbd5e1; border-radius: 6px; background: #f8fafc; padding: 8px 14px; text-align: center; display: flex; flex-direction: column; justify-content: space-between; height: 100%; min-height: 70px; box-sizing: border-box; }
+    .sign-store { font-size: 10px; font-weight: 700; color: #1e293b; }
+    .sign-space { min-height: 24px; }
+    .sign-line { font-size: 9px; font-weight: 600; color: #475569; border-top: 1px solid #94a3b8; padding-top: 3px; }
   </style>
 </head>
 <body>
@@ -634,45 +644,57 @@ export class PrintingEngine {
     </table>
   </div>
 
-  <div class="bottom-section">
-    <div class="left-pane">
-      <div style="font-weight: 700; color: #1e293b; margin-bottom: 6px;">
-        <span style="color: #64748b; font-weight: 600;">Amount in Words:</span> ${amountWords}
-      </div>
+  <div class="footer-container">
+    <div class="amount-words-bar">
+      <span style="color: #64748b; font-weight: 600;">Amount in Words:</span> ${amountWords}
+    </div>
 
-      <div class="qr-box">
-        ${qrSvg}
-        <div style="font-size: 9.5px; color: #334155;">
-          <div style="font-weight: 800; color: #0f172a;">Scan & Pay via UPI</div>
-          <div>UPI ID: <strong>${upiVpa}</strong></div>
-          <div>Amount: <strong>₹ ${data.grand_total.toFixed(2)}</strong></div>
+    <div class="footer-grid">
+      <!-- Top-Left: UPI QR -->
+      <div class="footer-cell">
+        <div class="qr-box">
+          ${qrSvg}
+          <div style="font-size: 9.5px; color: #334155;">
+            <div style="font-weight: 800; color: #0f172a; margin-bottom: 2px;">Scan & Pay via UPI</div>
+            <div style="margin-bottom: 1px;">UPI ID: <strong>${upiVpa}</strong></div>
+            <div style="margin-bottom: 2px;">Amount: <strong>₹ ${data.grand_total.toFixed(2)}</strong></div>
+            <div style="font-size: 8.5px; color: #64748b;">Supports GPay, PhonePe, Paytm & UPI Apps</div>
+          </div>
         </div>
       </div>
 
-      <div class="terms-box">
-        <div style="font-weight: 700; text-transform: uppercase; color: #475569;">Terms & Conditions:</div>
-        <div>1. Goods once sold cannot be returned without original cash memo.</div>
-        <div>2. Refrigerated medicines are strictly non-returnable.</div>
-        <div>3. ${data.jurisdiction_note || "Subject to local jurisdiction."}</div>
+      <!-- Top-Right: Totals -->
+      <div class="footer-cell">
+        <div class="totals-card">
+          <div class="total-line"><span>Taxable Subtotal:</span><span style="font-weight: 600;">₹ ${data.subtotal.toFixed(2)}</span></div>
+          <div class="total-line"><span>Central GST (CGST):</span><span style="font-weight: 600;">₹ ${cgstTotal.toFixed(2)}</span></div>
+          <div class="total-line"><span>State GST (SGST):</span><span style="font-weight: 600;">₹ ${sgstTotal.toFixed(2)}</span></div>
+          <div class="total-line"><span>Total GST:</span><span style="font-weight: 600;">₹ ${data.tax_total.toFixed(2)}</span></div>
+          ${data.round_off ? `<div class="total-line"><span>Round Off:</span><span style="font-weight: 600;">${data.round_off > 0 ? "+" : ""}₹ ${data.round_off.toFixed(2)}</span></div>` : ""}
+          <div class="grand-total-line"><span>Grand Total:</span><span>₹ ${data.grand_total.toFixed(2)}</span></div>
+        </div>
       </div>
-    </div>
 
-    <div class="totals-card">
-      <div class="total-line"><span>Taxable Subtotal:</span><span style="font-weight: 600;">₹ ${data.subtotal.toFixed(2)}</span></div>
-      <div class="total-line"><span>Central GST (CGST):</span><span style="font-weight: 600;">₹ ${cgstTotal.toFixed(2)}</span></div>
-      <div class="total-line"><span>State GST (SGST):</span><span style="font-weight: 600;">₹ ${sgstTotal.toFixed(2)}</span></div>
-      <div class="total-line"><span>Total GST:</span><span style="font-weight: 600;">₹ ${data.tax_total.toFixed(2)}</span></div>
-      ${data.round_off ? `<div class="total-line"><span>Round Off:</span><span style="font-weight: 600;">${data.round_off > 0 ? "+" : ""}₹ ${data.round_off.toFixed(2)}</span></div>` : ""}
-      <div class="grand-total-line"><span>Grand Total:</span><span>₹ ${data.grand_total.toFixed(2)}</span></div>
-    </div>
-  </div>
+      <!-- Bottom-Left: Terms -->
+      <div class="footer-cell">
+        <div class="terms-card">
+          <div>
+            <div class="terms-title">Terms & Conditions:</div>
+            <div>1. Goods once sold will not be returned without original cash memo.</div>
+            <div>2. Refrigerated medicines are strictly non-returnable.</div>
+            <div>3. ${data.jurisdiction_note || "Subject to local jurisdiction."}</div>
+          </div>
+          <div class="terms-brand">${data.footer_note || "Computer Generated Tax Invoice • LamSuite POS"}</div>
+        </div>
+      </div>
 
-  <div class="footer-sign">
-    <div style="color: #64748b;">${data.footer_note || "Computer Generated Tax Invoice • LamSuite POS"}</div>
-    <div style="text-align: right; color: #334155;">
-      <div style="font-weight: 700;">For ${data.store_name}</div>
-      <div style="margin-top: 24px; font-weight: 600; border-top: 1px solid #94a3b8; display: inline-block; padding-top: 2px;">
-        Authorised Signatory / Pharmacist
+      <!-- Bottom-Right: Signature -->
+      <div class="footer-cell">
+        <div class="sign-card">
+          <div class="sign-store">For ${data.store_name}</div>
+          <div class="sign-space"></div>
+          <div class="sign-line">Authorised Signatory / Pharmacist</div>
+        </div>
       </div>
     </div>
   </div>
@@ -940,19 +962,68 @@ export class PrintingEngine {
     });
 
     let bottomY = (doc as any).lastAutoTable?.finalY ? (doc as any).lastAutoTable.finalY + 4 : 160;
-    if (bottomY + 40 > 280) {
+    if (bottomY + 68 > 280) {
       doc.addPage();
       bottomY = 15;
     }
 
-    // Totals Box (Right Side, width: 75mm, strictly inside margins)
-    const totalsBoxWidth = 75;
-    const totalsBoxX = marginX + contentWidth - totalsBoxWidth; // 123mm
-    const totalsBoxHeight = 32;
+    const colLeftX = marginX; // 12mm
+    const colRightWidth = 75; // 75mm (Totals & Signature width)
+    const gap = 5; // 5mm gap between columns
+    const colLeftWidth = contentWidth - colRightWidth - gap; // 186 - 75 - 5 = 106mm
+    const colRightX = colLeftX + colLeftWidth + gap; // 12 + 106 + 5 = 123mm
+
+    // Amount in Words Banner (Full width: 186mm)
+    const amountWords = data.amount_in_words || numberToWordsIndian(data.grand_total);
     doc.setFillColor(248, 250, 252);
-    doc.rect(totalsBoxX, bottomY, totalsBoxWidth, totalsBoxHeight, "F");
+    doc.rect(colLeftX, bottomY, contentWidth, 7, "F");
     doc.setDrawColor(203, 213, 225);
-    doc.rect(totalsBoxX, bottomY, totalsBoxWidth, totalsBoxHeight, "S");
+    doc.rect(colLeftX, bottomY, contentWidth, 7, "S");
+
+    doc.setFont("Roboto", "bold");
+    doc.setFontSize(7.5);
+    doc.setTextColor(30, 41, 59);
+    doc.text("Amount in Words: ", colLeftX + 3, bottomY + 4.8);
+    const wordsPrefixWidth = doc.getTextWidth("Amount in Words: ");
+    doc.setFont("Roboto", "normal");
+    doc.text(amountWords, colLeftX + 3 + wordsPrefixWidth, bottomY + 4.8, { maxWidth: contentWidth - wordsPrefixWidth - 6 });
+
+    // Grid Row 1 (Y: bottomY + 9mm, Height: 32mm)
+    const row1Y = bottomY + 9;
+    const row1Height = 32;
+
+    // Top-Left: UPI QR Box (X: colLeftX = 12mm, Width: colLeftWidth = 106mm)
+    doc.setFillColor(248, 250, 252);
+    doc.rect(colLeftX, row1Y, colLeftWidth, row1Height, "F");
+    doc.setDrawColor(226, 232, 240);
+    doc.rect(colLeftX, row1Y, colLeftWidth, row1Height, "S");
+
+    const upiVpa = data.upi_vpa || "pharmacy@upi";
+    const upiUri = generateUpiPaymentString(upiVpa, data.store_name, data.grand_total, data.invoice_number);
+    drawQrCodeJsPdf(doc, upiUri, colLeftX + 4, row1Y + 4, 24);
+
+    const qrTextX = colLeftX + 32;
+    doc.setFont("Roboto", "bold");
+    doc.setFontSize(8);
+    doc.setTextColor(15, 23, 42);
+    doc.text("Scan & Pay via UPI", qrTextX, row1Y + 9);
+
+    doc.setFont("Roboto", "normal");
+    doc.setFontSize(7);
+    doc.setTextColor(71, 85, 105);
+    doc.text(`UPI VPA: ${upiVpa}`, qrTextX, row1Y + 14.5);
+    doc.setFont("Roboto", "bold");
+    doc.text(`Total Amount: ₹ ${data.grand_total.toFixed(2)}`, qrTextX, row1Y + 19.5);
+    doc.setFont("Roboto", "normal");
+    doc.setFontSize(6.5);
+    doc.setTextColor(148, 163, 184);
+    doc.text("Scan with GPay, PhonePe, Paytm, or any UPI app", qrTextX, row1Y + 25);
+
+    // Top-Right: Totals Card (X: colRightX = 123mm, Width: colRightWidth = 75mm)
+    doc.setFillColor(248, 250, 252);
+    doc.rect(colRightX, row1Y, colRightWidth, row1Height, "F");
+    doc.setDrawColor(203, 213, 225);
+    doc.rect(colRightX, row1Y, colRightWidth, row1Height, "S");
 
     doc.setFontSize(7.5);
     doc.setFont("Roboto", "normal");
@@ -960,74 +1031,79 @@ export class PrintingEngine {
 
     const cgstTotal = data.cgst_total !== undefined ? data.cgst_total : round2(data.tax_total / 2);
     const sgstTotal = data.sgst_total !== undefined ? data.sgst_total : round2(data.tax_total / 2);
-    const rightValX = totalsBoxX + totalsBoxWidth - 4;
+    const rightValX = colRightX + colRightWidth - 4;
 
-    doc.text("Taxable Subtotal:", totalsBoxX + 3, bottomY + 5);
-    doc.text(`₹ ${data.subtotal.toFixed(2)}`, rightValX, bottomY + 5, { align: "right" });
+    doc.text("Taxable Subtotal:", colRightX + 3, row1Y + 5);
+    doc.text(`₹ ${data.subtotal.toFixed(2)}`, rightValX, row1Y + 5, { align: "right" });
 
-    doc.text("Central GST (CGST):", totalsBoxX + 3, bottomY + 9.5);
-    doc.text(`₹ ${cgstTotal.toFixed(2)}`, rightValX, bottomY + 9.5, { align: "right" });
+    doc.text("Central GST (CGST):", colRightX + 3, row1Y + 9.5);
+    doc.text(`₹ ${cgstTotal.toFixed(2)}`, rightValX, row1Y + 9.5, { align: "right" });
 
-    doc.text("State GST (SGST):", totalsBoxX + 3, bottomY + 14);
-    doc.text(`₹ ${sgstTotal.toFixed(2)}`, rightValX, bottomY + 14, { align: "right" });
+    doc.text("State GST (SGST):", colRightX + 3, row1Y + 14);
+    doc.text(`₹ ${sgstTotal.toFixed(2)}`, rightValX, row1Y + 14, { align: "right" });
 
-    doc.text("Total GST:", totalsBoxX + 3, bottomY + 18.5);
-    doc.text(`₹ ${data.tax_total.toFixed(2)}`, rightValX, bottomY + 18.5, { align: "right" });
+    doc.text("Total GST:", colRightX + 3, row1Y + 18.5);
+    doc.text(`₹ ${data.tax_total.toFixed(2)}`, rightValX, row1Y + 18.5, { align: "right" });
 
     if (data.round_off !== 0) {
       const roSign = data.round_off > 0 ? "+" : "";
-      doc.text("Round-Off:", totalsBoxX + 3, bottomY + 22.5);
-      doc.text(`${roSign}₹ ${data.round_off.toFixed(2)}`, rightValX, bottomY + 22.5, { align: "right" });
+      doc.text("Round-Off:", colRightX + 3, row1Y + 22.5);
+      doc.text(`${roSign}₹ ${data.round_off.toFixed(2)}`, rightValX, row1Y + 22.5, { align: "right" });
     }
 
     doc.setDrawColor(203, 213, 225);
-    doc.line(totalsBoxX + 2, bottomY + 23.5, totalsBoxX + totalsBoxWidth - 2, bottomY + 23.5);
+    doc.line(colRightX + 2, row1Y + 23.5, colRightX + colRightWidth - 2, row1Y + 23.5);
 
     doc.setFont("Roboto", "bold");
     doc.setFontSize(9);
     doc.setTextColor(29, 78, 216); // blue-700
-    doc.text("Grand Total:", totalsBoxX + 3, bottomY + 28);
-    doc.text(`₹ ${data.grand_total.toFixed(2)}`, rightValX, bottomY + 28, { align: "right" });
+    doc.text("Grand Total:", colRightX + 3, row1Y + 28);
+    doc.text(`₹ ${data.grand_total.toFixed(2)}`, rightValX, row1Y + 28, { align: "right" });
 
-    // Left Side at bottomY: Amount in Words, UPI QR Code, Terms & Signatory
-    const amountWords = data.amount_in_words || numberToWordsIndian(data.grand_total);
+    // Grid Row 2 (Y: row1Y + row1Height + 3mm, Height: 24mm)
+    const row2Y = row1Y + row1Height + 3;
+    const row2Height = 24;
+
+    // Bottom-Left: Terms & Conditions Box (X: colLeftX = 12mm, Width: colLeftWidth = 106mm)
+    doc.setFillColor(255, 255, 255);
+    doc.rect(colLeftX, row2Y, colLeftWidth, row2Height, "F");
+    doc.setDrawColor(226, 232, 240);
+    doc.rect(colLeftX, row2Y, colLeftWidth, row2Height, "S");
+
+    doc.setFont("Roboto", "bold");
+    doc.setFontSize(7);
+    doc.setTextColor(71, 85, 105);
+    doc.text("TERMS & CONDITIONS:", colLeftX + 3, row2Y + 4.5);
+
+    doc.setFont("Roboto", "normal");
+    doc.setFontSize(6.5);
+    doc.setTextColor(100, 116, 139);
+    doc.text("1. Goods once sold will not be returned without original cash memo.", colLeftX + 3, row2Y + 8.5, { maxWidth: colLeftWidth - 6 });
+    doc.text("2. Refrigerated medicines are strictly non-returnable.", colLeftX + 3, row2Y + 12.5, { maxWidth: colLeftWidth - 6 });
+    doc.text(`3. ${data.jurisdiction_note || "Subject to local jurisdiction."}`, colLeftX + 3, row2Y + 16.5, { maxWidth: colLeftWidth - 6 });
+
+    doc.setFontSize(6);
+    doc.setTextColor(148, 163, 184);
+    doc.text(data.footer_note || "Computer Generated Tax Invoice • LamSuite POS", colLeftX + 3, row2Y + 21);
+
+    // Bottom-Right: Authorised Signatory Box (X: colRightX = 123mm, Width: colRightWidth = 75mm)
+    doc.setFillColor(248, 250, 252);
+    doc.rect(colRightX, row2Y, colRightWidth, row2Height, "F");
+    doc.setDrawColor(203, 213, 225);
+    doc.rect(colRightX, row2Y, colRightWidth, row2Height, "S");
+
     doc.setFont("Roboto", "bold");
     doc.setFontSize(7.5);
     doc.setTextColor(30, 41, 59);
-    doc.text(`Amount in Words: ${amountWords}`, marginX, bottomY + 4, { maxWidth: contentWidth - totalsBoxWidth - 6 });
+    doc.text(`For ${data.store_name}`, colRightX + colRightWidth / 2, row2Y + 5, { align: "center", maxWidth: colRightWidth - 4 });
 
-    // UPI QR Code
-    const upiVpa = data.upi_vpa || "pharmacy@upi";
-    const upiUri = generateUpiPaymentString(upiVpa, data.store_name, data.grand_total, data.invoice_number);
-    drawQrCodeJsPdf(doc, upiUri, marginX, bottomY + 8, 18);
+    doc.setDrawColor(148, 163, 184);
+    doc.line(colRightX + 8, row2Y + 17, colRightX + colRightWidth - 8, row2Y + 17);
 
-    doc.setFont("Roboto", "bold");
-    doc.setFontSize(7.5);
-    doc.setTextColor(15, 23, 42);
-    doc.text("Scan & Pay via UPI", marginX + 21, bottomY + 12);
     doc.setFont("Roboto", "normal");
-    doc.setFontSize(7);
+    doc.setFontSize(6.5);
     doc.setTextColor(71, 85, 105);
-    doc.text(`UPI VPA: ${upiVpa}`, marginX + 21, bottomY + 16.5);
-    doc.text(`Total: ₹ ${data.grand_total.toFixed(2)}`, marginX + 21, bottomY + 20.5);
-
-    // Terms & Conditions
-    const termsY = bottomY + 29;
-    doc.setFont("Roboto", "normal");
-    doc.setFontSize(6.5);
-    doc.setTextColor(100, 116, 139);
-    doc.text("1. Goods once sold will not be returned without original cash memo.", marginX, termsY);
-    doc.text(`2. Refrigerated medicines are strictly non-returnable. • ${data.jurisdiction_note || "Subject to local jurisdiction."}`, marginX, termsY + 3.5);
-
-    // Signature
-    doc.setFont("Roboto", "bold");
-    doc.setFontSize(7.5);
-    doc.setTextColor(51, 65, 85);
-    doc.text(`For ${data.store_name}`, marginX + 60, termsY);
-    doc.setFont("Roboto", "normal");
-    doc.setFontSize(6.5);
-    doc.setTextColor(100, 116, 139);
-    doc.text("Authorised Signatory / Pharmacist", marginX + 60, termsY + 4);
+    doc.text("Authorised Signatory / Pharmacist", colRightX + colRightWidth / 2, row2Y + 21, { align: "center" });
 
     // Page Numbering & Bottom Brand Mark on all pages
     const totalPages = doc.getNumberOfPages();
