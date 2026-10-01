@@ -44,6 +44,7 @@ import { printingEngine } from "../lib/printing/printingEngine";
 import { sqliteStorage } from "../lib/db/sqliteStorage";
 import { productsStore } from "../lib/masters/productsStore";
 import { partiesStore } from "../lib/masters/partiesStore";
+import { seed50Products } from "../lib/masters/seedProductsData";
 
 export const SettingsPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState<
@@ -173,153 +174,8 @@ export const SettingsPage: React.FC = () => {
   // Seed sample mock data
   const handleSeedDemoData = async () => {
     try {
-      const demoProducts = [
-        {
-          id: "demo_prod_01",
-          name: "Dolo 650 Tablet (Paracetamol)",
-          barcode: "8901234001010",
-          hsn_sac_code: "30049099",
-          mrp: 34.0,
-          sel_rate: 32.0,
-          ptr: 24.5,
-          pts: 22.0,
-          gst_percent: 12,
-          units_per_pack: 15,
-          generic_name: "Paracetamol 650mg",
-          rack_location: "R1",
-          shelf_location: "S3",
-          reorder_level: 50,
-          current_stock: 150,
-          is_active: true,
-        },
-        {
-          id: "demo_prod_02",
-          name: "Augmentin 625 Duo Tablet",
-          barcode: "8901234002020",
-          hsn_sac_code: "30041000",
-          mrp: 205.0,
-          sel_rate: 195.0,
-          ptr: 150.0,
-          pts: 135.0,
-          gst_percent: 12,
-          units_per_pack: 10,
-          generic_name: "Amoxicillin + Clavulanic Acid",
-          rack_location: "R2",
-          shelf_location: "S1",
-          reorder_level: 30,
-          current_stock: 80,
-          is_active: true,
-        },
-        {
-          id: "demo_prod_03",
-          name: "Pan 40 Tablet",
-          barcode: "8901234003030",
-          hsn_sac_code: "30049099",
-          mrp: 155.0,
-          sel_rate: 145.0,
-          ptr: 110.0,
-          pts: 98.0,
-          gst_percent: 12,
-          units_per_pack: 15,
-          generic_name: "Pantoprazole 40mg",
-          rack_location: "R1",
-          shelf_location: "S2",
-          reorder_level: 40,
-          current_stock: 120,
-          is_active: true,
-        },
-        {
-          id: "demo_prod_04",
-          name: "Azithral 500mg Tablet",
-          barcode: "8901234004040",
-          hsn_sac_code: "30042000",
-          mrp: 120.0,
-          sel_rate: 115.0,
-          ptr: 85.0,
-          pts: 75.0,
-          gst_percent: 12,
-          units_per_pack: 5,
-          generic_name: "Azithromycin 500mg",
-          rack_location: "R3",
-          shelf_location: "S1",
-          reorder_level: 25,
-          current_stock: 60,
-          is_active: true,
-        },
-      ];
-
-      for (const prod of demoProducts) {
-        await productsStore.upsertProduct(prod);
-      }
-
-      const demoBatches = [
-        {
-          id: "demo_batch_01",
-          product_id: "demo_prod_01",
-          batch_no: "DL2601",
-          expiry_date: "2027-10",
-          stock_qty: 150,
-          mrp: 34.0,
-          purchase_rate: 22.0,
-          selling_rate: 32.0,
-        },
-        {
-          id: "demo_batch_02",
-          product_id: "demo_prod_02",
-          batch_no: "AUG889",
-          expiry_date: "2027-08",
-          stock_qty: 80,
-          mrp: 205.0,
-          purchase_rate: 140.0,
-          selling_rate: 195.0,
-        },
-        {
-          id: "demo_batch_03",
-          product_id: "demo_prod_03",
-          batch_no: "PAN551",
-          expiry_date: "2028-02",
-          stock_qty: 120,
-          mrp: 155.0,
-          purchase_rate: 100.0,
-          selling_rate: 145.0,
-        },
-        {
-          id: "demo_batch_04",
-          product_id: "demo_prod_04",
-          batch_no: "AZI332",
-          expiry_date: "2026-12",
-          stock_qty: 60,
-          mrp: 120.0,
-          purchase_rate: 80.0,
-          selling_rate: 115.0,
-        },
-      ];
-
-      for (const batch of demoBatches) {
-        await productsStore.upsertBatch(batch);
-      }
-
-      await partiesStore.upsertCustomer({
-        id: "demo_cust_01",
-        name: "Rahul Kumar",
-        phone: "9876543210",
-        address: "Palakkad Town",
-        outstanding_balance: 0,
-        credit_limit: 5000,
-        is_active: true,
-      });
-
-      await partiesStore.upsertSupplier({
-        id: "demo_supp_01",
-        name: "Apollo Pharma Distributors Pvt Ltd",
-        phone: "9847012345",
-        gstin: "32AAACA1234B1Z2",
-        address: "Cochin Hub",
-        credit_period_days: 30,
-        is_active: true,
-      });
-
-      showNotification("Demo medicines, FEFO batches, and parties seeded successfully!");
+      const res = await seed50Products();
+      showNotification(`Successfully seeded ${res.productsCount} test products and ${res.batchesCount} FEFO batches!`);
     } catch (err) {
       console.error("Error seeding demo data:", err);
       showNotification(`Failed seeding demo data: ${err instanceof Error ? err.message : String(err)}`, "error");
@@ -1414,16 +1270,16 @@ export const SettingsPage: React.FC = () => {
                 </div>
 
                 <div className="rounded-lg border border-slate-200 p-4 space-y-3">
-                  <div className="text-xs font-bold text-slate-800">Generate Demo Master Data</div>
+                  <div className="text-xs font-bold text-slate-800">Generate 50 Test Products</div>
                   <p className="text-[11px] text-slate-500">
-                    Loads sample medicines (Dolo 650, Paracetamol), FEFO batches, and wholesale price tiers.
+                    Loads 50 realistic pharmacy medicines (antibiotics, pain relief, antacids, cardiac, diabetic, vitamins, topicals), FEFO batches, and parties.
                   </p>
                   <button
                     onClick={handleSeedDemoData}
                     className="flex items-center gap-1.5 rounded bg-emerald-600 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-700"
                   >
                     <Play className="h-3.5 w-3.5" />
-                    <span>Seed Demo Products</span>
+                    <span>Seed 50 Test Products</span>
                   </button>
                 </div>
               </div>
