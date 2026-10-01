@@ -690,29 +690,61 @@ export class PrintingEngine {
               title: "Save Invoice as PDF",
             });
           }
-
-          // If user cancelled the Finder / File Explorer dialog, stop immediately with cancelled: true
-          if (!chosenPath) {
-            return { success: false, cancelled: true };
-          }
-
-          // Remember the chosen folder for next time
-          const lastSlash = Math.max(chosenPath.lastIndexOf("/"), chosenPath.lastIndexOf("\\"));
-          if (lastSlash > 0) {
-            const chosenDir = chosenPath.substring(0, lastSlash);
-            try {
-              localStorage.setItem(LAST_FOLDER_KEY, chosenDir);
-            } catch {}
-          }
-        } catch (dialogErr) {
-          console.warn("Tauri dialog save prompt fallback:", dialogErr);
+        } catch (dialogErr: any) {
+          console.error("Tauri dialog save error:", dialogErr);
+          return { success: false, error: `Could not open file save dialog: ${dialogErr?.message || dialogErr}` };
         }
 
-        const res = await invokeCommand<{ success: boolean; file_path?: string }>("print:export_pdf", {
-          data,
-          target_path: chosenPath || undefined,
+        // If user cancelled the Finder / File Explorer dialog, stop immediately with cancelled: true
+        if (!chosenPath) {
+          return { success: false, cancelled: true };
+        }
+
+        // Ensure file path ends with .pdf extension
+        if (!chosenPath.toLowerCase().endsWith(".pdf")) {
+          chosenPath = `${chosenPath}.pdf`;
+        }
+
+        // Remember the chosen folder for next time
+        const lastSlash = Math.max(chosenPath.lastIndexOf("/"), chosenPath.lastIndexOf("\\"));
+        if (lastSlash > 0) {
+          const chosenDir = chosenPath.substring(0, lastSlash);
+          try {
+            localStorage.setItem(LAST_FOLDER_KEY, chosenDir);
+          } catch {}
+        }
+
+        // Convert pdfBytes to base64 string for redundant serialization support
+        let pdfBase64 = "";
+        try {
+          let binary = "";
+          const len = pdfBytes.byteLength;
+          for (let i = 0; i < len; i++) {
+            binary += String.fromCharCode(pdfBytes[i]);
+          }
+          pdfBase64 = btoa(binary);
+        } catch (e) {
+          console.warn("Base64 conversion failed:", e);
+        }
+
+        // Provide both camelCase and snake_case keys (top-level and embedded in data)
+        const payload = {
+          data: {
+            ...data,
+            targetPath: chosenPath,
+            target_path: chosenPath,
+            pdfBase64,
+            pdf_base64: pdfBase64,
+          },
+          targetPath: chosenPath,
+          target_path: chosenPath,
+          pdfBytes: Array.from(pdfBytes),
           pdf_bytes: Array.from(pdfBytes),
-        });
+          pdfBase64,
+          pdf_base64: pdfBase64,
+        };
+
+        const res = await invokeCommand<{ success: boolean; file_path?: string }>("print:export_pdf", payload);
 
         if (res && res.success) {
           return { success: true, file_path: res.file_path };
@@ -771,13 +803,36 @@ export class PrintingEngine {
 
     // 3. Desktop / Mock runtime fallback (e.g. testing)
     try {
-      const res = await invokeCommand<{ success: boolean; file_path?: string }>("print:export_pdf", {
-        data,
-        target_path: `/exports/${defaultFileName}`,
+      let pdfBase64 = "";
+      try {
+        let binary = "";
+        const len = pdfBytes.byteLength;
+        for (let i = 0; i < len; i++) {
+          binary += String.fromCharCode(pdfBytes[i]);
+        }
+        pdfBase64 = btoa(binary);
+      } catch {}
+
+      const fallbackPath = `/exports/${defaultFileName}`;
+      const payload = {
+        data: {
+          ...data,
+          targetPath: fallbackPath,
+          target_path: fallbackPath,
+          pdfBase64,
+          pdf_base64: pdfBase64,
+        },
+        targetPath: fallbackPath,
+        target_path: fallbackPath,
+        pdfBytes: Array.from(pdfBytes),
         pdf_bytes: Array.from(pdfBytes),
-      });
+        pdfBase64,
+        pdf_base64: pdfBase64,
+      };
+
+      const res = await invokeCommand<{ success: boolean; file_path?: string }>("print:export_pdf", payload);
       if (res && res.success) {
-        return { success: true, file_path: res.file_path || `/exports/${defaultFileName}` };
+        return { success: true, file_path: res.file_path || fallbackPath };
       }
       return { success: false, error: "Failed to write PDF file" };
     } catch (err: any) {

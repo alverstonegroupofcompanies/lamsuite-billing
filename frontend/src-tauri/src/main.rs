@@ -193,12 +193,20 @@ fn print_export_pdf(
     target_path: Option<String>,
     pdf_bytes: Option<Vec<u8>>,
     pdf_base64: Option<String>,
-    html_content: Option<String>,
+    _html_content: Option<String>,
 ) -> Result<Value, String> {
     let invoice_no = data["invoice_number"].as_str().unwrap_or("INV-001");
     let clean_invoice_no = invoice_no.replace('/', "_").replace('\\', "_");
 
-    let final_path = if let Some(ref p) = target_path {
+    // 1. Resolve Target Path:
+    // Check direct parameter `target_path` (mapped from JS `targetPath`),
+    // or fallback to nested `targetPath` / `target_path` in `data`
+    let resolved_target_path = target_path
+        .or_else(|| data.get("targetPath").and_then(|v| v.as_str()).map(|s| s.to_string()))
+        .or_else(|| data.get("target_path").and_then(|v| v.as_str()).map(|s| s.to_string()))
+        .filter(|s| !s.trim().is_empty());
+
+    let mut final_path = if let Some(p) = resolved_target_path {
         PathBuf::from(p)
     } else {
         let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
@@ -212,32 +220,61 @@ fn print_export_pdf(
         exports_dir.join(format!("Invoice_{}.pdf", clean_invoice_no))
     };
 
-    if let Some(parent) = final_path.parent() {
-        fs::create_dir_all(parent).map_err(|e| format!("Cannot create folder '{}': {}", parent.display(), e))?;
+    // If target path points to an existing directory, place the file inside it
+    if final_path.is_dir() {
+        final_path = final_path.join(format!("Invoice_{}.pdf", clean_invoice_no));
     }
 
-    let bytes_to_write: Vec<u8> = if let Some(b) = pdf_bytes {
-        b
-    } else if let Some(ref b64) = pdf_base64 {
-        // Simple base64 decoding if provided
-        match base64_decode(b64) {
-            Ok(decoded) => decoded,
-            Err(_) => b64.as_bytes().to_vec(),
+    // Ensure .pdf file extension
+    let has_pdf_ext = final_path
+        .extension()
+        .map(|ext| ext.to_string_lossy().to_lowercase() == "pdf")
+        .unwrap_or(false);
+    if !has_pdf_ext {
+        final_path.set_extension("pdf");
+    }
+
+    // Ensure parent directory exists
+    if let Some(parent) = final_path.parent() {
+        if !parent.as_os_str().is_empty() {
+            fs::create_dir_all(parent).map_err(|e| format!("Cannot create folder '{}': {}", parent.display(), e))?;
         }
-    } else if let Some(ref html) = html_content {
-        html.as_bytes().to_vec()
+    }
+
+    // 2. Resolve Binary PDF Content:
+    // Check direct parameter `pdf_bytes` (from JS `pdfBytes`),
+    // or direct `pdf_base64` (from JS `pdfBase64`),
+    // or payload embedded inside `data` (camelCase or snake_case)
+    let resolved_bytes: Option<Vec<u8>> = if let Some(b) = pdf_bytes {
+        if !b.is_empty() { Some(b) } else { None }
+    } else if let Some(ref b64) = pdf_base64 {
+        base64_decode(b64).ok().filter(|b| !b.is_empty())
+    } else if let Some(b64) = data.get("pdfBase64").or_else(|| data.get("pdf_base64")).and_then(|v| v.as_str()) {
+        base64_decode(b64).ok().filter(|b| !b.is_empty())
+    } else if let Some(arr) = data.get("pdfBytes").or_else(|| data.get("pdf_bytes")).and_then(|v| v.as_array()) {
+        let b: Vec<u8> = arr.iter().filter_map(|x| x.as_u64().map(|n| n as u8)).collect();
+        if !b.is_empty() { Some(b) } else { None }
     } else {
-        format!(
-            "<!DOCTYPE html><html><body><h1>Invoice #{}</h1><p>Date: {}</p><p>Customer: {}</p><p>Total: Rs. {}</p></body></html>",
-            invoice_no,
-            data["invoice_date"].as_str().unwrap_or(""),
-            data["customer_name"].as_str().unwrap_or("Walk-in"),
-            data["grand_total"]
-        ).into_bytes()
+        None
     };
 
-    fs::write(&final_path, &bytes_to_write)
-        .map_err(|e| format!("Failed to write invoice to '{}': {}", final_path.display(), e))?;
+    let bytes = match resolved_bytes {
+        Some(b) => b,
+        None => {
+            return Err("Failed to export PDF: No binary PDF content received from generator. Refusing to write invalid file.".into());
+        }
+    };
+
+    // Strictly validate standard PDF magic header bytes: %PDF-
+    if bytes.len() < 5 || &bytes[0..5] != b"%PDF-" {
+        return Err(format!(
+            "Invalid PDF format: file header does not begin with standard '%PDF-' magic bytes. Refusing to write corrupt or non-PDF file."
+        ));
+    }
+
+    // Write confirmed binary PDF to target path
+    fs::write(&final_path, &bytes)
+        .map_err(|e| format!("Failed to write PDF to '{}': {}", final_path.display(), e))?;
 
     if !final_path.exists() {
         return Err(format!("File verification failed: '{}' does not exist after writing", final_path.display()));
@@ -258,19 +295,32 @@ fn print_export_pdf(
 }
 
 fn base64_decode(input: &str) -> Result<Vec<u8>, ()> {
-    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let clean = if let Some(pos) = input.find(',') {
+        &input[pos + 1..]
+    } else {
+        input
+    };
+
     let mut out = Vec::new();
     let mut buf: u32 = 0;
     let mut bits: u32 = 0;
 
-    for &byte in input.as_bytes() {
-        if byte == b'=' {
+    for &b in clean.as_bytes() {
+        if b.is_ascii_whitespace() {
+            continue;
+        }
+        if b == b'=' {
             break;
         }
-        let val = match TABLE.iter().position(|&c| c == byte) {
-            Some(idx) => idx as u32,
-            None => continue,
-        };
+        let val = match b {
+            b'A'..=b'Z' => b - b'A',
+            b'a'..=b'z' => b - b'a' + 26,
+            b'0'..=b'9' => b - b'0' + 52,
+            b'+' => 62,
+            b'/' => 63,
+            _ => continue,
+        } as u32;
+
         buf = (buf << 6) | val;
         bits += 6;
         if bits >= 8 {

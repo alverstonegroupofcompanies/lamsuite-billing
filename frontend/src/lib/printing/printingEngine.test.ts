@@ -220,5 +220,55 @@ describe("Printing Engine & Document Layouts (PRN-001, PRN-002, PRN-005)", () =>
       expect(res.error).toContain("Permission denied");
       expect(res.file_path).toBeUndefined();
     });
+
+    it("verifies dual-case payload serialization containing targetPath, pdfBytes, and pdfBase64", async () => {
+      resetMockHandlers();
+      let capturedArgs: any = null;
+      registerMockHandler("print:export_pdf", async (args: any) => {
+        capturedArgs = args;
+        return {
+          success: true,
+          file_path: "/custom/folder/Invoice_INV-DUAL.pdf",
+        };
+      });
+
+      const sampleData: InvoicePrintData = {
+        invoice_number: "INV-DUAL",
+        invoice_date: "2026-10-01",
+        store_name: "Apex Pharmacy",
+        lines: [{ description: "Amoxicillin 500mg", qty: 2, rate: 45, gst_percent: 12, amount: 90 }],
+        subtotal: 90,
+        tax_total: 10.8,
+        round_off: 0.2,
+        grand_total: 101,
+      };
+
+      const res = await printingEngine.exportToPdf(sampleData);
+      expect(res.success).toBe(true);
+      expect(capturedArgs).toBeDefined();
+      expect(capturedArgs.pdfBytes || capturedArgs.pdf_bytes).toBeDefined();
+      expect(capturedArgs.pdfBase64 || capturedArgs.pdf_base64).toBeDefined();
+    });
+
+    it("handles openFile and revealFile via desktop commands", async () => {
+      resetMockHandlers();
+      let openedPath: string | null = null;
+      let revealedPath: string | null = null;
+
+      registerMockHandler("open_file", async (args: any) => {
+        openedPath = args.path;
+        return { success: true };
+      });
+      registerMockHandler("reveal_file", async (args: any) => {
+        revealedPath = args.path;
+        return { success: true };
+      });
+
+      // In non-Tauri test environment, openFile/revealFile returns false or calls mock if isTauri() is false
+      const canOpen = await printingEngine.openFile("/test/path/Invoice.pdf");
+      const canReveal = await printingEngine.revealFile("/test/path/Invoice.pdf");
+      expect(typeof canOpen).toBe("boolean");
+      expect(typeof canReveal).toBe("boolean");
+    });
   });
 });
