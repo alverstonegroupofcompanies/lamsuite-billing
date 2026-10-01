@@ -16,10 +16,11 @@ import {
   type Gstr1SummaryReport,
   type HsnSummaryEntry,
   type CustomerOutstandingEntry,
+  type CancelledBillEntry,
 } from "../lib/reports/reportEngine";
 
 export const ReportsPage: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<"daily" | "register" | "gstr1" | "hsn" | "aging">("daily");
+  const [activeTab, setActiveTab] = useState<"daily" | "register" | "gstr1" | "hsn" | "aging" | "cancelled">("daily");
   const [startDate, setStartDate] = useState(new Date().toISOString().slice(0, 10));
   const [endDate, setEndDate] = useState(new Date().toISOString().slice(0, 10));
 
@@ -29,6 +30,7 @@ export const ReportsPage: React.FC = () => {
   const [gstr1Report, setGstr1Report] = useState<Gstr1SummaryReport | null>(null);
   const [hsnSummary, setHsnSummary] = useState<HsnSummaryEntry[]>([]);
   const [customerAging, setCustomerAging] = useState<CustomerOutstandingEntry[]>([]);
+  const [cancelledBills, setCancelledBills] = useState<CancelledBillEntry[]>([]);
 
   useEffect(() => {
     loadReports();
@@ -50,6 +52,9 @@ export const ReportsPage: React.FC = () => {
     } else if (activeTab === "aging") {
       const res = await reportEngine.getCustomerOutstandingLedger(new Date());
       setCustomerAging(res);
+    } else if (activeTab === "cancelled") {
+      const res = await reportEngine.getCancelledBillsReport(startDate, endDate);
+      setCancelledBills(res);
     }
   };
 
@@ -94,6 +99,18 @@ export const ReportsPage: React.FC = () => {
         c.aging.days_61_plus,
         c.total_outstanding,
         c.invoice_count,
+      ]);
+    } else if (activeTab === "cancelled") {
+      headers = ["Bill No", "Date", "Customer", "Mobile", "Payment Mode", "Amount", "Cancellation Reason", "Operator"];
+      rows = cancelledBills.map((b) => [
+        b.invoice_number,
+        b.invoice_date,
+        b.customer_name,
+        b.customer_phone,
+        b.payment_mode,
+        b.grand_total,
+        b.cancel_reason,
+        b.user_counter,
       ]);
     } else {
       // Daily summary export
@@ -204,6 +221,14 @@ export const ReportsPage: React.FC = () => {
           }`}
         >
           Customer Outstanding Aging
+        </button>
+        <button
+          onClick={() => setActiveTab("cancelled")}
+          className={`border-b-2 px-4 py-2 text-xs font-bold transition-colors ${
+            activeTab === "cancelled" ? "border-red-600 text-red-600" : "border-transparent text-slate-500 hover:text-slate-800"
+          }`}
+        >
+          Cancelled Bills
         </button>
       </div>
 
@@ -455,6 +480,53 @@ export const ReportsPage: React.FC = () => {
                       ₹ {c.total_outstanding.toFixed(2)}
                     </td>
                     <td className="px-4 py-2.5 text-center font-bold text-blue-600">{c.invoice_count}</td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {activeTab === "cancelled" && (
+        <div className="rounded-lg border border-slate-200 bg-white shadow-sm overflow-hidden">
+          <table className="w-full text-left text-xs">
+            <thead className="bg-slate-50 text-slate-600 border-b border-slate-200">
+              <tr>
+                <th className="px-4 py-2.5 font-semibold">Bill No</th>
+                <th className="px-4 py-2.5 font-semibold">Date</th>
+                <th className="px-4 py-2.5 font-semibold">Customer</th>
+                <th className="px-4 py-2.5 font-semibold">Tender</th>
+                <th className="px-4 py-2.5 font-semibold text-right">Reversed Amount</th>
+                <th className="px-4 py-2.5 font-semibold">Cancellation Reason</th>
+                <th className="px-4 py-2.5 font-semibold text-center">Operator</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {cancelledBills.length === 0 ? (
+                <tr>
+                  <td colSpan={7} className="py-12 text-center text-slate-400">
+                    <CheckCircle className="mx-auto h-8 w-8 text-emerald-300 mb-1" />
+                    <p className="font-medium">No cancelled invoices found in this date range</p>
+                  </td>
+                </tr>
+              ) : (
+                cancelledBills.map((b) => (
+                  <tr key={b.invoice_id} className="hover:bg-slate-50">
+                    <td className="px-4 py-2.5 font-mono font-bold text-red-600">{b.invoice_number}</td>
+                    <td className="px-4 py-2.5 text-slate-600">{b.invoice_date}</td>
+                    <td className="px-4 py-2.5 font-semibold text-slate-800">
+                      {b.customer_name}
+                      {b.customer_phone ? <span className="ml-1 text-[11px] font-normal text-slate-400">({b.customer_phone})</span> : null}
+                    </td>
+                    <td className="px-4 py-2.5 text-slate-600">{b.payment_mode}</td>
+                    <td className="px-4 py-2.5 text-right font-mono font-bold text-red-600">
+                      ₹ {b.grand_total.toFixed(2)}
+                    </td>
+                    <td className="px-4 py-2.5 text-slate-700 italic max-w-xs truncate" title={b.cancel_reason}>
+                      {b.cancel_reason}
+                    </td>
+                    <td className="px-4 py-2.5 text-center font-medium text-slate-500">{b.user_counter}</td>
                   </tr>
                 ))
               )}

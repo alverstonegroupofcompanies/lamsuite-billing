@@ -74,6 +74,15 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose 
       action: () => { navigate("/pos"); onClose(); },
     },
     {
+      id: "nav_bills",
+      category: "Billing & POS",
+      title: "Find & Manage Past Bills",
+      subtitle: "Search, reprint, edit, or cancel customer invoices",
+      shortcut: "F6",
+      icon: FileText,
+      action: () => { navigate("/bills"); onClose(); },
+    },
+    {
       id: "nav_purchases",
       category: "Navigation",
       title: "Inward Purchase Register",

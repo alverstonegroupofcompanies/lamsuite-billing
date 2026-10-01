@@ -192,6 +192,12 @@ export class SqliteStorageService {
       return db.findAll(table);
     });
 
+    registerMockHandler("db:delete", async (args) => {
+      const { table, id } = (args as { table: string; id: string }) || {};
+      if (!table || !id) throw new Error("Missing table or id");
+      return { success: db.delete(table, id) };
+    });
+
     registerMockHandler("db:execute", async (args) => {
       const { sql } = (args as { sql?: string }) || {};
       if (sql) {
@@ -232,6 +238,12 @@ export class SqliteStorageService {
     return await bridge.invoke<T[]>("db:findAll", { table });
   }
 
+  async deleteRecord(table: string, id: string): Promise<boolean> {
+    const bridge = getIpcBridge();
+    const res = await bridge.invoke<{ success: boolean }>("db:delete", { table, id });
+    return Boolean(res?.success);
+  }
+
   async executeSql(sql: string): Promise<void> {
     const bridge = getIpcBridge();
     const match = sql.match(/DELETE\s+FROM\s+([a-zA-Z0-9_]+)/i);
@@ -243,6 +255,10 @@ export class SqliteStorageService {
       }
     }
     await bridge.invoke("db:execute", { sql });
+  }
+
+  async clearTable(table: string): Promise<void> {
+    await this.executeSql(`DELETE FROM ${table}`);
   }
 
   isInitialized(): boolean {

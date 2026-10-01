@@ -16,6 +16,7 @@ import {
   Minimize,
   Sliders,
   Layers,
+  FileText,
 } from "lucide-react";
 import { companySettingsService } from "../lib/settings/companySettingsService";
 import { CommandPalette } from "./CommandPalette";
@@ -33,6 +34,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [enabledMenus, setEnabledMenus] = useState<string[]>([
     "pos",
+    "bills",
     "purchases",
     "stock",
     "reports",
@@ -48,7 +50,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
     window.addEventListener("online", handleOnline);
     window.addEventListener("offline", handleOffline);
 
-    // Global keyboard navigation shortcuts (F1-F5, F10, F11, Ctrl+K / Cmd+K)
+    // Global keyboard navigation shortcuts (F1-F6, F10, F11, Ctrl+K / Cmd+K)
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
@@ -68,6 +70,9 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
       } else if (e.key === "F5") {
         e.preventDefault();
         navigate("/masters");
+      } else if (e.key === "F6") {
+        e.preventDefault();
+        navigate("/bills");
       } else if (e.key === "F10") {
         e.preventDefault();
         navigate("/settings");
@@ -104,6 +109,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
 
   const allNavItems = [
     { id: "pos", name: "POS Billing", path: "/pos", key: "F1", icon: ShoppingCart, group: "Sales & Billing" },
+    { id: "bills", name: "Bills", path: "/bills", key: "F6", icon: FileText, group: "Sales & Billing" },
     { id: "purchases", name: "Purchases", path: "/purchases", key: "F2", icon: Truck, group: "Purchase" },
     { id: "stock", name: "Stock Ledger", path: "/stock", key: "F3", icon: Package, group: "Inventory" },
     { id: "reports", name: "Reports & GST", path: "/reports", key: "F4", icon: FileBarChart, group: "Reports" },

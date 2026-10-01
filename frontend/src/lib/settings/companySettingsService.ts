@@ -214,7 +214,7 @@ export const DEFAULT_SETTINGS: CompanySettings = {
   },
 
   invoice_columns: [...DEFAULT_COLUMNS],
-  enabled_menu_items: ["pos", "purchases", "stock", "reports", "masters", "settings"],
+  enabled_menu_items: ["pos", "bills", "purchases", "stock", "reports", "masters", "settings"],
 };
 
 export class CompanySettingsService {

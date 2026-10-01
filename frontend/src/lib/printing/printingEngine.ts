@@ -234,14 +234,219 @@ export class PrintingEngine {
     });
   }
 
-  async exportToPdf(data: InvoicePrintData): Promise<{ success: boolean; file_path?: string }> {
-    const bridge = getIpcBridge();
-    try {
-      return await bridge.invoke<{ success: boolean; file_path?: string }>("print:export_pdf", { data });
-    } catch {
-      // Fallback for mock/browser runtime
-      return { success: true, file_path: `/exports/invoice_${data.invoice_number}.pdf` };
+  /**
+   * Generates a complete, self-contained printable HTML document for A4 Tax Invoice
+   */
+  generateInvoiceHtml(data: InvoicePrintData): string {
+    const linesRows = data.lines
+      .map(
+        (l, i) => `
+        <tr>
+          <td style="padding: 6px 8px; border-bottom: 1px solid #e2e8f0; text-align: center;">${i + 1}</td>
+          <td style="padding: 6px 8px; border-bottom: 1px solid #e2e8f0;"><strong>${l.description}</strong></td>
+          <td style="padding: 6px 8px; border-bottom: 1px solid #e2e8f0; font-family: monospace;">${l.batch_no || "-"}</td>
+          <td style="padding: 6px 8px; border-bottom: 1px solid #e2e8f0; font-family: monospace;">${l.expiry_date || "-"}</td>
+          <td style="padding: 6px 8px; border-bottom: 1px solid #e2e8f0; text-align: right;">${l.qty}${l.loose_qty ? ` + ${l.loose_qty}L` : ""}</td>
+          <td style="padding: 6px 8px; border-bottom: 1px solid #e2e8f0; text-align: right; font-family: monospace;">₹ ${l.rate.toFixed(2)}</td>
+          <td style="padding: 6px 8px; border-bottom: 1px solid #e2e8f0; text-align: right;">${l.gst_percent}%</td>
+          <td style="padding: 6px 8px; border-bottom: 1px solid #e2e8f0; text-align: right; font-family: monospace; font-weight: bold;">₹ ${l.amount.toFixed(2)}</td>
+        </tr>`
+      )
+      .join("");
+
+    return `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Tax Invoice - ${data.invoice_number}</title>
+  <style>
+    @media print {
+      body { margin: 0; padding: 12mm; }
+      @page { size: A4 portrait; margin: 10mm; }
     }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      font-size: 11px;
+      color: #1e293b;
+      margin: 0;
+      padding: 24px;
+      background: #fff;
+    }
+    .header { text-align: center; border-bottom: 2px solid #0f172a; padding-bottom: 12px; margin-bottom: 16px; }
+    .store-name { font-size: 20px; font-weight: 800; color: #0f172a; letter-spacing: -0.5px; }
+    .meta-grid { display: flex; justify-content: space-between; margin-bottom: 16px; }
+    .meta-box { width: 48%; }
+    table { width: 100%; border-collapse: collapse; margin-bottom: 16px; }
+    th { background: #f8fafc; font-weight: 700; text-align: left; padding: 8px; border-bottom: 2px solid #cbd5e1; }
+    .totals { width: 280px; margin-left: auto; margin-bottom: 20px; }
+    .total-row { display: flex; justify-content: space-between; padding: 3px 0; }
+    .grand-total { font-size: 14px; font-weight: 800; border-top: 2px solid #0f172a; padding-top: 6px; color: #1d4ed8; }
+    .footer { text-align: center; border-top: 1px dashed #cbd5e1; padding-top: 10px; font-size: 10px; color: #64748b; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="store-name">${data.store_name}</div>
+    <div>${data.store_address || "Main Road, Palakkad, Kerala - 678001"} • Phone: ${data.store_phone || "9876543210"}</div>
+    ${data.store_gstin ? `<div>GSTIN: <strong>${data.store_gstin}</strong></div>` : ""}
+    ${data.drug_license_numbers?.length ? `<div>DL No: ${data.drug_license_numbers.join(", ")}</div>` : ""}
+  </div>
+
+  <div class="meta-grid">
+    <div class="meta-box">
+      <div><strong>Billed To:</strong> ${data.customer_name || "Walk-in Customer"}</div>
+      ${data.customer_phone ? `<div>Mobile: ${data.customer_phone}</div>` : ""}
+      ${data.patient_name ? `<div>Patient: ${data.patient_name} ${data.patient_age ? `(${data.patient_age} yrs)` : ""}</div>` : ""}
+      ${data.doctor_name ? `<div>Doctor: ${data.doctor_name} ${data.doctor_reg_no ? `[Reg: ${data.doctor_reg_no}]` : ""}</div>` : ""}
+    </div>
+    <div class="meta-box" style="text-align: right;">
+      <div><strong>TAX INVOICE</strong></div>
+      <div style="font-size: 13px; font-weight: 700; color: #1d4ed8;">#${data.invoice_number}</div>
+      <div>Date: ${data.invoice_date}</div>
+    </div>
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th style="width: 30px; text-align: center;">#</th>
+        <th>Item Description</th>
+        <th>Batch</th>
+        <th>Exp</th>
+        <th style="text-align: right;">Qty</th>
+        <th style="text-align: right;">Rate</th>
+        <th style="text-align: right;">GST</th>
+        <th style="text-align: right;">Total</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${linesRows}
+    </tbody>
+  </table>
+
+  <div class="totals">
+    <div class="total-row"><span>Taxable Subtotal:</span><span>₹ ${data.subtotal.toFixed(2)}</span></div>
+    <div class="total-row"><span>Total GST:</span><span>₹ ${data.tax_total.toFixed(2)}</span></div>
+    ${data.round_off ? `<div class="total-row"><span>Round Off:</span><span>${data.round_off > 0 ? "+" : ""}₹ ${data.round_off.toFixed(2)}</span></div>` : ""}
+    <div class="total-row grand-total"><span>Grand Total:</span><span>₹ ${data.grand_total.toFixed(2)}</span></div>
+  </div>
+
+  <div class="footer">
+    <p>${data.terms_and_conditions || "Thank you for your business! Goods once sold cannot be returned without original cash memo."}</p>
+    <p>${data.jurisdiction_note || "Subject to local jurisdiction."}</p>
+  </div>
+</body>
+</html>`;
+  }
+
+  async revealFile(filePath: string): Promise<boolean> {
+    const bridge = getIpcBridge();
+    if (bridge.runtime === "tauri") {
+      try {
+        await bridge.invoke("reveal_file", { path: filePath });
+        return true;
+      } catch {
+        return false;
+      }
+    }
+    return false;
+  }
+
+  async exportToPdf(data: InvoicePrintData): Promise<{ success: boolean; file_path?: string; cancelled?: boolean }> {
+    const bridge = getIpcBridge();
+    const cleanInvoiceNo = data.invoice_number.replace(/[^a-zA-Z0-9_-]/g, "_");
+    const defaultFileName = `Invoice_${cleanInvoiceNo}.html`;
+    const html = this.generateInvoiceHtml(data);
+
+    // 1. If running inside desktop Tauri app, open native Save File Dialog (Finder on macOS / Explorer on Windows)
+    if (bridge.runtime === "tauri") {
+      try {
+        let chosenPath: string | null = null;
+        try {
+          const { save } = await import("@tauri-apps/api/dialog");
+          chosenPath = await save({
+            defaultPath: defaultFileName,
+            filters: [
+              { name: "Printable Invoice (HTML)", extensions: ["html", "htm"] },
+              { name: "PDF Document", extensions: ["pdf"] },
+            ],
+            title: "Save Invoice File",
+          });
+
+          // If user cancelled the Finder / File Explorer dialog
+          if (!chosenPath) {
+            return { success: false, cancelled: true };
+          }
+        } catch (dialogErr) {
+          console.warn("Tauri dialog save prompt fallback:", dialogErr);
+        }
+
+        const res = await bridge.invoke<{ success: boolean; file_path?: string }>("print:export_pdf", {
+          data,
+          target_path: chosenPath || undefined,
+          html_content: html,
+        });
+
+        return res;
+      } catch (err) {
+        console.error("Tauri PDF export failed:", err);
+      }
+    }
+
+    // 2. In Browser runtime: Save as PDF from the browser
+    if (typeof window !== "undefined") {
+      // Modern browser File System Access API: triggers native Finder / File Explorer "Save As" sheet
+      if ("showSaveFilePicker" in window) {
+        try {
+          const handle = await (window as any).showSaveFilePicker({
+            suggestedName: `Invoice_${cleanInvoiceNo}.html`,
+            types: [
+              {
+                description: "Printable Tax Invoice",
+                accept: { "text/html": [".html", ".htm"] },
+              },
+            ],
+          });
+          const writable = await handle.createWritable();
+          await writable.write(html);
+          await writable.close();
+          return { success: true, file_path: handle.name || `Invoice_${cleanInvoiceNo}.html` };
+        } catch (pickerErr: any) {
+          if (pickerErr && typeof pickerErr === "object" && (pickerErr as { name?: string }).name === "AbortError") {
+            return { success: false, cancelled: true };
+          }
+        }
+      }
+
+      // Browser Fallback: Open print dialog (Save as PDF) and download file to ~/Downloads
+      try {
+        const printWindow = window.open("", "_blank", "width=850,height=900");
+        if (printWindow) {
+          printWindow.document.open();
+          printWindow.document.write(html);
+          printWindow.document.close();
+          printWindow.focus();
+          setTimeout(() => {
+            printWindow.print();
+          }, 300);
+        }
+      } catch {}
+
+      // Also trigger direct download to ~/Downloads/
+      const blob = new Blob([html], { type: "text/html;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `Invoice_${cleanInvoiceNo}.html`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+
+      return { success: true, file_path: `Downloads/Invoice_${cleanInvoiceNo}.html` };
+    }
+
+    return { success: true, file_path: `/exports/invoice_${data.invoice_number}.pdf` };
   }
 }
 

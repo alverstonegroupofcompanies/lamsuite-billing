@@ -177,6 +177,19 @@ export interface CustomerOutstandingEntry {
   last_invoice_date: string;
 }
 
+export interface CancelledBillEntry {
+  invoice_id: string;
+  invoice_number: string;
+  invoice_date: string;
+  customer_name: string;
+  customer_phone?: string;
+  grand_total: number;
+  payment_mode: string;
+  cancel_reason: string;
+  cancelled_at: number;
+  user_counter?: string;
+}
+
 export class ReportEngine {
   private defaultStoreStateCode = "32"; // Default Kerala state code
 
@@ -603,6 +616,34 @@ export class ReportEngine {
 
     return [headerLine, ...bodyLines].join("\r\n");
   }
+
+  /**
+   * Cancelled Bills Report: returns invoices that were marked as cancelled
+   */
+  async getCancelledBillsReport(startDate?: string, endDate?: string): Promise<CancelledBillEntry[]> {
+    const allInvoices = await sqliteStorage.findAll<any>("invoices");
+    const cancelled = allInvoices.filter((inv) => inv.status === "cancelled");
+
+    const filtered = cancelled.filter((inv) => {
+      if (startDate && inv.invoice_date < startDate) return false;
+      if (endDate && inv.invoice_date > endDate) return false;
+      return true;
+    });
+
+    return filtered.map((inv) => ({
+      invoice_id: inv.id,
+      invoice_number: inv.invoice_number,
+      invoice_date: inv.invoice_date,
+      customer_name: inv.customer_name || "Walk-in Customer",
+      customer_phone: inv.customer_phone || "",
+      grand_total: inv.grand_total || 0,
+      payment_mode: inv.payment_mode || "Cash",
+      cancel_reason: inv.cancel_reason || "No reason specified",
+      cancelled_at: inv.updated_at || inv.created_at || Date.now(),
+      user_counter: inv.user_counter || "Counter 01",
+    }));
+  }
 }
 
 export const reportEngine = new ReportEngine();
+

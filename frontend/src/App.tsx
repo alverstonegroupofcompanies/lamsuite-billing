@@ -8,6 +8,7 @@ import { StockLedgerPage } from "./pages/StockLedgerPage";
 import { ReportsPage } from "./pages/ReportsPage";
 import { MastersPage } from "./pages/MastersPage";
 import { SettingsPage } from "./pages/SettingsPage";
+import { BillsPage } from "./pages/BillsPage";
 
 export const App: React.FC = () => {
   return (
@@ -17,6 +18,7 @@ export const App: React.FC = () => {
           <Route path="/" element={<Navigate to="/dashboard" replace />} />
           <Route path="/dashboard" element={<DashboardPage />} />
           <Route path="/pos" element={<PosBillingPage />} />
+          <Route path="/bills" element={<BillsPage />} />
           <Route path="/purchases" element={<PurchasesPage />} />
           <Route path="/stock" element={<StockLedgerPage />} />
           <Route path="/reports" element={<ReportsPage />} />

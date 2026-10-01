@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo } from "react";
 import { createPortal } from "react-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   Barcode,
   Search,
@@ -19,6 +20,8 @@ import {
   Download,
   FileText,
   Sliders,
+  History,
+  Check,
 } from "lucide-react";
 import { posCartService, type PosCartLine } from "../lib/billing/posCartService";
 import {
@@ -37,8 +40,18 @@ import {
 } from "../lib/printing/printingEngine";
 import { companySettingsService, type ColumnSetting } from "../lib/settings/companySettingsService";
 import type { InvoiceTotals } from "../lib/billing/billingCalculations";
+import {
+  invoiceManagementService,
+  type InvoiceRecord,
+  type InvoiceItemRecord,
+  type InvoiceDiffResult,
+} from "../lib/billing/invoiceManagementService";
 
 export const PosBillingPage: React.FC = () => {
+  const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const editInvoiceParam = searchParams.get("edit");
+
   // Cart & Invoice State
   const [lines, setLines] = useState<PosCartLine[]>([]);
   const [totals, setTotals] = useState<InvoiceTotals>(posCartService.getTotals());
@@ -46,6 +59,13 @@ export const PosBillingPage: React.FC = () => {
   const [customerPhone, setCustomerPhone] = useState("");
   const [customerGstin, setCustomerGstin] = useState("");
   const [invoiceNumber, setInvoiceNumber] = useState(`INV-${Date.now().toString().slice(-6)}`);
+
+  // Editing Past Invoice State
+  const [editingInvoice, setEditingInvoice] = useState<InvoiceRecord | null>(null);
+  const [originalInvoiceItems, setOriginalInvoiceItems] = useState<InvoiceItemRecord[]>([]);
+  const [isDiffModalOpen, setIsDiffModalOpen] = useState(false);
+  const [editDiff, setEditDiff] = useState<InvoiceDiffResult | null>(null);
+  const [editReason, setEditReason] = useState("");
 
   // Search & Auto-complete
   const [searchQuery, setSearchQuery] = useState("");
@@ -75,6 +95,83 @@ export const PosBillingPage: React.FC = () => {
   const tenderCashInputRef = useRef<HTMLInputElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const batchListRef = useRef<HTMLDivElement>(null);
+
+  // Load invoice if 'edit' query param is provided
+  useEffect(() => {
+    if (!editInvoiceParam) {
+      return;
+    }
+
+    const loadForEdit = async () => {
+      const details = await invoiceManagementService.getInvoiceWithDetails(editInvoiceParam);
+      if (!details) {
+        showNotification(`Invoice ${editInvoiceParam} not found`, "error");
+        setSearchParams({});
+        return;
+      }
+
+      const lock = invoiceManagementService.checkInvoiceLockStatus(details.invoice);
+      if (lock.isLocked) {
+        showNotification(lock.lockReason || "Invoice is locked from editing", "error");
+        setSearchParams({});
+        return;
+      }
+
+      setEditingInvoice(details.invoice);
+      setOriginalInvoiceItems(details.items);
+      setInvoiceNumber(details.invoice.invoice_number);
+      setCustomerName(details.invoice.customer_name || "Walk-in Customer");
+      setCustomerPhone(details.invoice.customer_phone || "");
+      setCustomerGstin(details.invoice.customer_gstin || "");
+
+      // Populate cart lines with previous invoice items
+      posCartService.clearCart();
+      for (const it of details.items) {
+        const batches: ProductBatch[] = await productsStore.getBatchesForProduct(it.product_id, false);
+        const batch: ProductBatch = batches.find((b: ProductBatch) => b.batch_no === it.batch_no) || {
+          id: `batch_${it.product_id}_${it.batch_no}`,
+          product_id: it.product_id,
+          batch_no: it.batch_no,
+          expiry_date: it.expiry_date,
+          stock_qty: 100,
+          mrp: it.mrp || it.unit_price,
+          selling_rate: it.unit_price,
+        };
+
+        const prodItem: ProductItem = {
+          id: it.product_id,
+          name: it.product_name,
+          barcode: "",
+          mrp: it.mrp || it.unit_price,
+          sel_rate: it.unit_price,
+          gst_percent: it.gst_percent,
+          hsn_sac_code: it.hsn_code,
+          units_per_pack: it.units_per_pack || 1,
+          is_active: true,
+        };
+
+        posCartService.addProductToCart(prodItem, batch, it.qty, it.loose_qty);
+      }
+      refreshCartState();
+      showNotification(`Editing ${details.invoice.invoice_number}`);
+    };
+
+    loadForEdit();
+  }, [editInvoiceParam]);
+
+  const cancelEditingMode = () => {
+    setEditingInvoice(null);
+    setOriginalInvoiceItems([]);
+    setSearchParams({});
+    posCartService.clearCart();
+    refreshCartState();
+    setInvoiceNumber(`INV-${Date.now().toString().slice(-6)}`);
+    setCustomerName("Walk-in Customer");
+    setCustomerPhone("");
+    setCustomerGstin("");
+    setEditReason("");
+    showNotification("Edit cancelled. Started new bill.");
+  };
 
   const refreshCartState = () => {
     setLines(posCartService.getLines());
@@ -116,6 +213,24 @@ export const PosBillingPage: React.FC = () => {
         return;
       }
 
+      // If diff modal is open, handle diff modal hotkeys (F12, Enter, Escape)
+      if (isDiffModalOpen) {
+        if (e.key === "Escape") {
+          e.preventDefault();
+          if (!isFinalizingRef.current) {
+            setIsDiffModalOpen(false);
+            searchInputRef.current?.focus();
+          }
+          return;
+        }
+        if (e.key === "F12" || e.key === "Enter") {
+          e.preventDefault();
+          handleSaveEditedInvoice();
+          return;
+        }
+        return;
+      }
+
       // If tender modal is open, handle tender modal hotkeys (F12, Enter, Escape)
       if (isTenderModalOpen) {
         if (e.key === "Escape") {
@@ -138,6 +253,11 @@ export const PosBillingPage: React.FC = () => {
       if (e.key === "F1") {
         e.preventDefault();
         searchInputRef.current?.focus();
+      }
+      // F6: Recall / Find Past Bill
+      else if (e.key === "F6") {
+        e.preventDefault();
+        navigate("/bills");
       }
       // F8: Hold Current Bill
       else if (e.key === "F8") {
@@ -166,7 +286,7 @@ export const PosBillingPage: React.FC = () => {
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isTenderModalOpen, isRecallModalOpen, selectedProductForBatch, searchResults.length, lines.length]);
+  }, [isTenderModalOpen, isRecallModalOpen, isDiffModalOpen, selectedProductForBatch, searchResults.length, lines.length, editingInvoice, originalInvoiceItems]);
 
   // When batch modal opens: focus inside the modal and highlight earliest expiry (row 0)
   useEffect(() => {
@@ -445,11 +565,83 @@ export const PosBillingPage: React.FC = () => {
       return;
     }
 
+    // If editing past invoice, compute diff and open diff confirmation modal
+    if (editingInvoice) {
+      const diff = invoiceManagementService.computeDiff(originalInvoiceItems, currentLines);
+      setEditDiff(diff);
+      setIsDiffModalOpen(true);
+      return;
+    }
+
     const t = posCartService.getTotals();
     setTenders([{ mode: "Cash", amount: t.grand_total }]);
     setReceivedCash(t.grand_total);
     setIsTenderModalOpen(true);
     setTimeout(() => tenderCashInputRef.current?.focus(), 100);
+  };
+
+  const handleSaveEditedInvoice = async () => {
+    if (!editingInvoice) return;
+    if (isFinalizingRef.current) return;
+    isFinalizingRef.current = true;
+    setIsFinalizing(true);
+
+    try {
+      const cartSnapshot = posCartService.getLines().length > 0 ? posCartService.getLines() : lines;
+      if (cartSnapshot.length === 0) {
+        showNotification("Cannot save invoice with 0 items. Please cancel the bill instead.", "error");
+        return;
+      }
+
+      const primaryPaymentMode = tenders[0]?.mode || editingInvoice.payment_mode || "Cash";
+      const res = await invoiceManagementService.saveInvoiceEdit(editingInvoice.id, {
+        lines: cartSnapshot,
+        customerName,
+        customerPhone,
+        customerGstin,
+        paymentMode: primaryPaymentMode,
+        reason: editReason || "Invoice revised from POS screen",
+        operatorUser: "Counter 01",
+      });
+
+      if (res.success) {
+        // Trigger revised print
+        const printData = preparePrintData(cartSnapshot);
+        printData.invoice_number = `${editingInvoice.invoice_number} (Revised)`;
+
+        if (printFormat === "thermal") {
+          await printingEngine.printThermalReceipt(printData);
+        } else if (printFormat === "a4") {
+          await printingEngine.printA4TaxInvoice(printData);
+        } else if (printFormat === "pdf") {
+          const exportRes = await printingEngine.exportToPdf(printData);
+          if (exportRes.file_path) {
+            showNotification(`Invoice saved: ${exportRes.file_path}`);
+          }
+        }
+
+        posCartService.clearCart();
+        refreshCartState();
+        setIsDiffModalOpen(false);
+        setEditingInvoice(null);
+        setOriginalInvoiceItems([]);
+        setSearchParams({});
+        setInvoiceNumber(`INV-${Date.now().toString().slice(-6)}`);
+        setCustomerName("Walk-in Customer");
+        setCustomerPhone("");
+        setCustomerGstin("");
+        setEditReason("");
+        showNotification(`Invoice ${editingInvoice.invoice_number} revised successfully!`);
+        setTimeout(() => {
+          searchInputRef.current?.focus();
+        }, 50);
+      }
+    } catch (err) {
+      showNotification(err instanceof Error ? err.message : "Error saving revision", "error");
+    } finally {
+      isFinalizingRef.current = false;
+      setIsFinalizing(false);
+    }
   };
 
   const calculatedBalanceChange = useMemo(() => {
@@ -544,14 +736,18 @@ export const PosBillingPage: React.FC = () => {
         } else if (printFormat === "a4") {
           await printingEngine.printA4TaxInvoice(printData);
         } else if (printFormat === "pdf") {
-          await printingEngine.exportToPdf(printData);
+          const exportRes = await printingEngine.exportToPdf(printData);
+          if (exportRes.cancelled) {
+            // User cancelled the file save picker
+            return;
+          }
         }
 
         // 6. Clear cart ONLY after BOTH save and print have succeeded
         posCartService.clearCart();
         refreshCartState();
         setIsTenderModalOpen(false);
-        showNotification(`Invoice ${invoiceNumber} billed (${printFormat.toUpperCase()})!`);
+        showNotification(`Invoice ${invoiceNumber} billed & saved as PDF!`);
         setInvoiceNumber(`INV-${Date.now().toString().slice(-6)}`);
         setCustomerName("Walk-in Customer");
         setCustomerPhone("");
@@ -612,8 +808,17 @@ export const PosBillingPage: React.FC = () => {
           </div>
         </div>
 
-        {/* Action Shortcuts: Hold, Recall, Clear */}
+        {/* Action Shortcuts: Hold, Recall, Find Bill */}
         <div className="flex items-center gap-2">
+          <button
+            onClick={() => navigate("/bills")}
+            className="flex items-center gap-1.5 rounded bg-blue-50 px-3 py-1.5 text-xs font-semibold text-blue-700 hover:bg-blue-100"
+            title="Recall / Find Past Bills (F6)"
+          >
+            <FileText className="h-3.5 w-3.5" />
+            <span>Recall / Find Bill (F6)</span>
+          </button>
+
           <button
             onClick={handleHoldBill}
             className="flex items-center gap-1.5 rounded bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-700 hover:bg-amber-100"
@@ -636,6 +841,33 @@ export const PosBillingPage: React.FC = () => {
           </button>
         </div>
       </div>
+
+      {/* Editing Mode Banner */}
+      {editingInvoice && (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-300 bg-amber-50 px-4 py-2.5 shadow-sm text-xs text-amber-900">
+          <div className="flex items-center gap-2">
+            <span className="flex h-2.5 w-2.5 rounded-full bg-amber-500 animate-pulse" />
+            <span className="font-bold text-amber-950">
+              Editing Invoice: {editingInvoice.invoice_number}
+            </span>
+            <span className="text-amber-800">
+              (Original Total: ₹{editingInvoice.grand_total.toFixed(2)} • Billed on {editingInvoice.invoice_date})
+            </span>
+          </div>
+
+          <div className="flex items-center gap-3">
+            <span className="text-[11px] text-amber-700 font-medium hidden sm:inline">
+              Changes will reverse original stock and update ledger atomically on Save (F12)
+            </span>
+            <button
+              onClick={cancelEditingMode}
+              className="rounded bg-amber-200 px-3 py-1 text-xs font-bold text-amber-950 hover:bg-amber-300 transition-colors shadow-xs"
+            >
+              Cancel Editing
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Main Billing Workspace: Search & High-Speed Items Grid */}
       <div className="flex flex-1 flex-col rounded-lg border border-slate-200 bg-white shadow-sm overflow-hidden">
@@ -1204,6 +1436,173 @@ export const PosBillingPage: React.FC = () => {
                   </div>
                 ))
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Invoice Revision Diff Confirmation Modal */}
+      {isDiffModalOpen && editingInvoice && editDiff && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-xs p-4">
+          <div className="flex max-h-[90vh] w-full max-w-2xl flex-col rounded-xl border border-slate-200 bg-white shadow-2xl overflow-hidden">
+            {/* Header */}
+            <div className="flex items-center justify-between border-b border-slate-200 bg-amber-50/70 px-5 py-3.5">
+              <div className="flex items-center gap-2.5">
+                <History className="h-5 w-5 text-amber-600" />
+                <div>
+                  <h3 className="text-sm font-bold text-slate-800">
+                    Confirm Revision: {editingInvoice.invoice_number}
+                  </h3>
+                  <p className="text-[11px] text-slate-500">
+                    Review item differences before reversing stock and saving changes.
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setIsDiffModalOpen(false)}
+                className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-200 hover:text-slate-700"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            {/* Body */}
+            <div className="flex-1 overflow-y-auto p-5 space-y-4 text-xs">
+              {/* Diff Summary Cards */}
+              <div className="grid grid-cols-3 gap-3">
+                <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                  <span className="text-[10px] font-semibold text-slate-400 uppercase">Original Total</span>
+                  <p className="font-mono text-sm font-bold text-slate-700">₹ {editDiff.oldTotal.toFixed(2)}</p>
+                </div>
+                <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                  <span className="text-[10px] font-semibold text-slate-400 uppercase">Revised Total</span>
+                  <p className="font-mono text-sm font-bold text-blue-700">₹ {editDiff.newTotal.toFixed(2)}</p>
+                </div>
+                <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                  <span className="text-[10px] font-semibold text-slate-400 uppercase">Net Difference</span>
+                  <p
+                    className={`font-mono text-sm font-bold ${
+                      editDiff.totalDiff > 0
+                        ? "text-emerald-600"
+                        : editDiff.totalDiff < 0
+                        ? "text-red-600"
+                        : "text-slate-600"
+                    }`}
+                  >
+                    {editDiff.totalDiff >= 0 ? "+" : ""}₹ {editDiff.totalDiff.toFixed(2)}
+                  </p>
+                </div>
+              </div>
+
+              {/* Items Changed Table */}
+              <div className="rounded-lg border border-slate-200 overflow-hidden">
+                <div className="bg-slate-100 px-3 py-2 text-xs font-bold text-slate-700 border-b border-slate-200">
+                  Item Modifications ({editDiff.changes.length})
+                </div>
+                <div className="max-h-56 overflow-y-auto divide-y divide-slate-100">
+                  {editDiff.changes.length === 0 ? (
+                    <div className="p-4 text-center text-slate-400">No line item modifications detected.</div>
+                  ) : (
+                    editDiff.changes.map((chg, idx) => (
+                      <div key={idx} className="flex items-center justify-between p-3 text-xs">
+                        <div className="flex items-center gap-2">
+                          {chg.type === "ADDED" && (
+                            <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-bold text-emerald-700">
+                              + Added
+                            </span>
+                          )}
+                          {chg.type === "REMOVED" && (
+                            <span className="rounded bg-red-100 px-1.5 py-0.5 text-[10px] font-bold text-red-700">
+                              - Removed
+                            </span>
+                          )}
+                          {chg.type === "MODIFIED" && (
+                            <span className="rounded bg-blue-100 px-1.5 py-0.5 text-[10px] font-bold text-blue-700">
+                              • Changed
+                            </span>
+                          )}
+                          <div>
+                            <p className="font-bold text-slate-800">{chg.productName}</p>
+                            <p className="font-mono text-[10px] text-slate-400">Batch: {chg.batchNo}</p>
+                          </div>
+                        </div>
+
+                        <div className="text-right font-mono">
+                          {chg.type === "MODIFIED" && (
+                            <p className="text-slate-600">
+                              Qty: {chg.oldQty} → <strong>{chg.newQty}</strong> (₹{chg.oldAmount?.toFixed(2)} → ₹{chg.newAmount?.toFixed(2)})
+                            </p>
+                          )}
+                          {chg.type === "ADDED" && (
+                            <p className="text-emerald-700 font-bold">
+                              Qty: {chg.newQty} (₹{chg.newAmount?.toFixed(2)})
+                            </p>
+                          )}
+                          {chg.type === "REMOVED" && (
+                            <p className="text-red-700 line-through">
+                              Qty: {chg.oldQty} (₹{chg.oldAmount?.toFixed(2)})
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+
+              {/* Revision Reason */}
+              <div>
+                <label className="text-xs font-bold text-slate-700">Reason for Revision (Audit Trail):</label>
+                <input
+                  type="text"
+                  value={editReason}
+                  onChange={(e) => setEditReason(e.target.value)}
+                  placeholder="e.g., Customer altered quantity, corrected item..."
+                  className="w-full rounded border border-slate-300 p-2 text-xs focus:border-blue-500 focus:outline-none mt-1"
+                  autoFocus
+                />
+              </div>
+
+              {/* Format selection */}
+              <div className="flex items-center justify-between border-t border-slate-200 pt-3">
+                <span className="text-xs font-semibold text-slate-600">Reprint Format:</span>
+                <div className="flex gap-2">
+                  {(["thermal", "a4", "pdf"] as const).map((fmt) => (
+                    <button
+                      key={fmt}
+                      type="button"
+                      onClick={() => setPrintFormat(fmt)}
+                      className={`rounded px-3 py-1 text-xs font-bold uppercase transition-all ${
+                        printFormat === fmt
+                          ? "bg-blue-600 text-white shadow-xs"
+                          : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                      }`}
+                    >
+                      {fmt}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="border-t border-slate-200 bg-slate-50 px-5 py-3 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setIsDiffModalOpen(false)}
+                className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-100"
+              >
+                Back to Editing (Esc)
+              </button>
+              <button
+                type="button"
+                disabled={isFinalizing}
+                onClick={handleSaveEditedInvoice}
+                className="flex items-center gap-2 rounded-lg bg-blue-600 px-5 py-2 text-xs font-bold text-white shadow-md hover:bg-blue-700 disabled:opacity-50 transition-all"
+              >
+                <Check className="h-4 w-4" />
+                <span>{isFinalizing ? "Saving & Printing..." : "Confirm & Save Revision (Enter)"}</span>
+              </button>
             </div>
           </div>
         </div>

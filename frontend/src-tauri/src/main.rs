@@ -110,6 +110,22 @@ fn db_find_all(table: String, state: State<DbState>) -> Result<Vec<Value>, Strin
 }
 
 #[tauri::command]
+fn db_delete(
+    table: String,
+    id: String,
+    state: State<DbState>,
+) -> Result<Value, String> {
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    conn.execute(
+        "DELETE FROM kv_store WHERE table_name = ?1 AND id = ?2;",
+        params![table, id],
+    )
+    .map_err(|e| e.to_string())?;
+
+    Ok(json!({ "success": true }))
+}
+
+#[tauri::command]
 fn db_execute(sql: String, state: State<DbState>) -> Result<Value, String> {
     let conn = state.conn.lock().map_err(|e| e.to_string())?;
 
@@ -172,14 +188,90 @@ fn print_a4(data: Value, printer_name: Option<String>) -> Result<Value, String> 
 }
 
 #[tauri::command]
-fn print_export_pdf(data: Value) -> Result<Value, String> {
+fn print_export_pdf(
+    data: Value,
+    target_path: Option<String>,
+    html_content: Option<String>,
+) -> Result<Value, String> {
     let invoice_no = data["invoice_number"].as_str().unwrap_or("INV-001");
-    let file_name = format!("Invoice_{}.pdf", invoice_no);
+    let clean_invoice_no = invoice_no.replace('/', "_");
+
+    let final_path = if let Some(ref p) = target_path {
+        PathBuf::from(p)
+    } else {
+        let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
+        let exports_dir = PathBuf::from(home)
+            .join(".gemini")
+            .join("antigravity")
+            .join("scratch")
+            .join("lamsuite-billing")
+            .join("exports");
+        let _ = fs::create_dir_all(&exports_dir);
+        exports_dir.join(format!("Invoice_{}.html", clean_invoice_no))
+    };
+
+    if let Some(parent) = final_path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+
+    let content_to_write = if let Some(ref html) = html_content {
+        html.clone()
+    } else {
+        format!(
+            "<!DOCTYPE html><html><body><h1>Invoice #{}</h1><p>Date: {}</p><p>Customer: {}</p><p>Total: Rs. {}</p></body></html>",
+            invoice_no,
+            data["invoice_date"].as_str().unwrap_or(""),
+            data["customer_name"].as_str().unwrap_or("Walk-in"),
+            data["grand_total"]
+        )
+    };
+
+    let _ = fs::write(&final_path, content_to_write);
+
+    // Auto-reveal in Finder on macOS / Explorer on Windows
+    let path_str = final_path.to_string_lossy().to_string();
+    #[cfg(target_os = "macos")]
+    {
+        let _ = std::process::Command::new("open")
+            .arg("-R")
+            .arg(&path_str)
+            .spawn();
+    }
+    #[cfg(target_os = "windows")]
+    {
+        let _ = std::process::Command::new("explorer")
+            .arg(format!("/select,{}", path_str))
+            .spawn();
+    }
 
     Ok(json!({
         "success": true,
-        "file_path": format!("./exports/{}", file_name)
+        "file_path": path_str
     }))
+}
+
+#[tauri::command]
+fn reveal_file(path: String) -> Result<Value, String> {
+    #[cfg(target_os = "macos")]
+    {
+        let _ = std::process::Command::new("open")
+            .arg("-R")
+            .arg(&path)
+            .spawn();
+    }
+    #[cfg(target_os = "windows")]
+    {
+        let _ = std::process::Command::new("explorer")
+            .arg(format!("/select,{}", path))
+            .spawn();
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let _ = std::process::Command::new("xdg-open")
+            .arg(&path)
+            .spawn();
+    }
+    Ok(json!({ "success": true }))
 }
 
 #[tauri::command]
@@ -232,10 +324,12 @@ fn main() {
             db_insert,
             db_find_by_id,
             db_find_all,
+            db_delete,
             db_execute,
             print_thermal,
             print_a4,
             print_export_pdf,
+            reveal_file,
             lan_discover_main
         ])
         .run(tauri::generate_context!())
