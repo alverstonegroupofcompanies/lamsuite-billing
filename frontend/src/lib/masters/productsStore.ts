@@ -66,6 +66,10 @@ export class ProductsStore {
     return await sqliteStorage.findById<ProductItem>("products", id);
   }
 
+  async getAllProducts(): Promise<ProductItem[]> {
+    return await sqliteStorage.findAll<ProductItem>("products");
+  }
+
   async findProductByBarcode(barcode: string): Promise<ProductItem | null> {
     const cleanBarcode = barcode.trim();
     if (!cleanBarcode) return null;

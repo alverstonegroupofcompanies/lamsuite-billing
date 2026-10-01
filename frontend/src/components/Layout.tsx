@@ -20,6 +20,7 @@ import {
   Undo2,
   ArrowUpFromLine,
   AlertTriangle,
+  Building2,
 } from "lucide-react";
 import { companySettingsService } from "../lib/settings/companySettingsService";
 import { CommandPalette } from "./CommandPalette";
@@ -40,6 +41,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
     "pos",
     "bills",
     "sales_returns",
+    "customer_debit_notes",
     "purchases",
     "purchase_returns",
     "stock",
@@ -127,6 +129,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
     { id: "pos", name: "POS Billing", path: "/pos", key: "F1", icon: ShoppingCart, group: "Sales & Billing" },
     { id: "bills", name: "Bills", path: "/bills", key: "F6", icon: FileText, group: "Sales & Billing" },
     { id: "sales_returns", name: "Sales Returns", path: "/returns/sales", key: "F7", icon: Undo2, group: "Sales & Billing" },
+    { id: "customer_debit_notes", name: "Debit Notes (B2B)", path: "/returns/debit-notes", key: "", icon: Building2, group: "Sales & Billing" },
     { id: "purchases", name: "Purchases", path: "/purchases", key: "F2", icon: Truck, group: "Purchase" },
     { id: "purchase_returns", name: "Purchase Returns", path: "/returns/purchases", key: "", icon: ArrowUpFromLine, group: "Purchase" },
     { id: "stock", name: "Stock Ledger", path: "/stock", key: "F3", icon: Package, group: "Inventory" },

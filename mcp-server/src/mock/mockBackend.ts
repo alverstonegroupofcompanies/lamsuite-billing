@@ -239,6 +239,14 @@ export class MockLamSuiteBackend {
     this.app = express();
     this.app.use(cors());
     this.app.use(express.json());
+    this.app.use((req, _res, next) => {
+      if (req.url.startsWith("/api/")) {
+        req.url = req.url.slice(4);
+      } else if (req.url === "/api") {
+        req.url = "/";
+      }
+      next();
+    });
     this.seedInitialInvoices();
     this.setupRoutes();
   }

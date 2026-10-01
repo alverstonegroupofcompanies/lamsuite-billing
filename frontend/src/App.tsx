@@ -11,6 +11,7 @@ import { SettingsPage } from "./pages/SettingsPage";
 import { BillsPage } from "./pages/BillsPage";
 import { SalesReturnPage } from "./pages/SalesReturnPage";
 import { PurchaseReturnPage } from "./pages/PurchaseReturnPage";
+import { CustomerDebitNotePage } from "./pages/CustomerDebitNotePage";
 
 export const App: React.FC = () => {
   return (
@@ -28,6 +29,7 @@ export const App: React.FC = () => {
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="/returns/sales" element={<SalesReturnPage />} />
           <Route path="/returns/purchases" element={<PurchaseReturnPage />} />
+          <Route path="/returns/debit-notes" element={<CustomerDebitNotePage />} />
         </Routes>
       </Layout>
     </BrowserRouter>

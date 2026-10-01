@@ -243,6 +243,10 @@ export class CompanySettingsService {
     return { ...this.currentSettings };
   }
 
+  getSettings(): CompanySettings {
+    return { ...this.currentSettings };
+  }
+
   async updateSettings(updates: Partial<CompanySettings>): Promise<CompanySettings> {
     // Keep legacy top-level shortcuts in sync with sequences
     if (updates.invoice_prefix) {

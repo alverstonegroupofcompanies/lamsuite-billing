@@ -93,6 +93,10 @@ export class PartiesStore {
     return await sqliteStorage.findById<Customer>("customers", id);
   }
 
+  async getAllCustomers(): Promise<Customer[]> {
+    return await sqliteStorage.findAll<Customer>("customers");
+  }
+
   async findCustomerByPhone(phone: string): Promise<Customer | null> {
     const target = normalizeIndianPhone(phone);
     if (!target) return null;

@@ -12,6 +12,7 @@ import {
   ChevronDown,
   Printer,
   Clock,
+  Building2,
 } from "lucide-react";
 import {
   salesReturnService,
@@ -66,6 +67,7 @@ export const SalesReturnPage: React.FC = () => {
 
   // --- Form modal state ---
   const [isFormOpen, setIsFormOpen] = useState(false);
+  const [returnSource, setReturnSource] = useState<"counter" | "customer_debit_note">("counter");
   const [formStep, setFormStep] = useState<"invoice_search" | "line_selection" | "payment">("invoice_search");
 
   // Step 1: Invoice search
@@ -380,12 +382,38 @@ export const SalesReturnPage: React.FC = () => {
           </h2>
           <p className="text-xs text-slate-500">Process customer returns, issue credit notes, manage stock restocking.</p>
         </div>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => navigate("/returns/debit-notes")}
+            className="flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50 shadow-xs"
+          >
+            <Building2 className="h-4 w-4 text-indigo-600" />
+            B2B Debit Notes
+          </button>
+          <button
+            onClick={openForm}
+            className="flex items-center gap-2 rounded-lg bg-rose-600 px-4 py-2 text-xs font-bold text-white shadow-sm hover:bg-rose-700"
+          >
+            <Plus className="h-4 w-4" />
+            New Return (F7)
+          </button>
+        </div>
+      </div>
+
+      {/* Module Switcher Tabs */}
+      <div className="flex items-center gap-2 border-b border-slate-200">
         <button
-          onClick={openForm}
-          className="flex items-center gap-2 rounded-lg bg-rose-600 px-4 py-2 text-xs font-bold text-white shadow-sm hover:bg-rose-700"
+          className="flex items-center gap-2 border-b-2 border-rose-600 pb-2 px-3 text-xs font-bold text-rose-700"
         >
-          <Plus className="h-4 w-4" />
-          New Return (F7)
+          <Undo2 className="h-4 w-4" />
+          Counter Returns (Walk-in)
+        </button>
+        <button
+          onClick={() => navigate("/returns/debit-notes")}
+          className="flex items-center gap-2 border-b-2 border-transparent pb-2 px-3 text-xs font-bold text-slate-500 hover:text-slate-800"
+        >
+          <Building2 className="h-4 w-4 text-indigo-600" />
+          Customer Debit Notes (B2B Multi-Invoice)
         </button>
       </div>
 
@@ -524,12 +552,58 @@ export const SalesReturnPage: React.FC = () => {
 
             {/* Body */}
             <div className="flex-1 overflow-y-auto p-5 space-y-4">
-              {/* ── Step 1: Invoice Search ────────────────────────────────────── */}
+              {/* ── Step 1: Invoice Search & Return Source ───────────────────── */}
               {formStep === "invoice_search" && (
                 <div className="space-y-4">
+                  {/* Return Source Selection (Requirement #1) */}
+                  <div>
+                    <label className="mb-1.5 block text-xs font-bold text-slate-700">
+                      Return Source *
+                    </label>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div
+                        onClick={() => setReturnSource("counter")}
+                        className={`cursor-pointer rounded-xl border p-3 transition-all ${
+                          returnSource === "counter"
+                            ? "border-rose-500 bg-rose-50/70 shadow-xs"
+                            : "border-slate-200 bg-white hover:bg-slate-50"
+                        }`}
+                      >
+                        <div className="flex items-center gap-2">
+                          <Undo2 className="h-4 w-4 text-rose-600" />
+                          <span className="text-xs font-bold text-slate-800">Counter Return</span>
+                        </div>
+                        <p className="mt-1 text-[11px] text-slate-500">
+                          Walk-in customer returns goods against a specific sales bill.
+                        </p>
+                      </div>
+
+                      <div
+                        onClick={() => {
+                          setReturnSource("customer_debit_note");
+                          setIsFormOpen(false);
+                          navigate("/returns/debit-notes");
+                        }}
+                        className={`cursor-pointer rounded-xl border p-3 transition-all ${
+                          returnSource === "customer_debit_note"
+                            ? "border-indigo-500 bg-indigo-50/70 shadow-xs"
+                            : "border-slate-200 bg-white hover:bg-slate-50"
+                        }`}
+                      >
+                        <div className="flex items-center gap-2">
+                          <Building2 className="h-4 w-4 text-indigo-600" />
+                          <span className="text-xs font-bold text-slate-800">Customer Debit Note (B2B)</span>
+                        </div>
+                        <p className="mt-1 text-[11px] text-slate-500">
+                          Customer sent a debit note covering products across 1 or more invoices.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
                   <div className="relative">
                     <label className="mb-1 block text-xs font-semibold text-slate-700">
-                      Search Invoice by Number, Customer Name, or Mobile
+                      Search Original Invoice by Number, Customer Name, or Mobile
                     </label>
                     <div className="relative">
                       <Search className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />

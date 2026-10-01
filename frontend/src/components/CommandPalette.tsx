@@ -18,6 +18,7 @@ import {
   FileText,
   Undo2,
   ArrowUpFromLine,
+  Building2,
 } from "lucide-react";
 
 interface CommandPaletteProps {
@@ -92,6 +93,15 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose 
       shortcut: "F7",
       icon: Undo2,
       action: () => { navigate("/returns/sales"); onClose(); },
+    },
+    {
+      id: "nav_customer_debit_notes",
+      category: "Billing & POS",
+      title: "Customer Debit Notes (B2B Multi-Invoice)",
+      subtitle: "Reconcile received customer debit notes, auto-match invoices, and issue GST Credit Notes",
+      shortcut: "",
+      icon: Building2,
+      action: () => { navigate("/returns/debit-notes"); onClose(); },
     },
     {
       id: "nav_purchase_returns",

@@ -70,7 +70,7 @@ describe("MCP Inspector & Official Protocol Handshake", () => {
     const content = callResult.content as Array<{ type: string; text: string }>;
     expect(content[0].type).toBe("text");
     expect(content[0].text).toContain("Dolo 650 Tablet");
-    expect(content[0].text).toContain("DL101");
+    expect(content[0].text).toContain("8901234567890");
   });
 
   it("lists and reads MCP resources", async () => {

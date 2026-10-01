@@ -205,9 +205,13 @@ export function calculateInvoiceTotals(
   }
 
   const totalTax = round2(cgstTotal + sgstTotal + igstTotal + cessTotal);
+  let linesTotal = 0;
+  for (const line of calculatedLines) {
+    linesTotal = round2(linesTotal + line.total_amount);
+  }
   const netBeforeRound = Math.max(
     0,
-    round2(subtotal - lineDiscountTotal - computedBillDiscount + totalTax)
+    round2(linesTotal - computedBillDiscount)
   );
 
   const roundedGrandTotal = Math.round(netBeforeRound);

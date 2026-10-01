@@ -14,9 +14,11 @@ async function main() {
     process.env.LAMSUITE_USE_MOCK === "true";
 
   if (useMock) {
-    const mockBackend = new MockLamSuiteBackend({ port: 8000 });
-    await mockBackend.start();
-    console.error("[LamSuite MCP] Started in-process mock LamSuite backend on port 8000.");
+    const mockPort = Number(process.env.LAMSUITE_MOCK_PORT) || 8088;
+    const mockBackend = new MockLamSuiteBackend({ port: mockPort });
+    const url = await mockBackend.start();
+    config.apiUrl = `${url}/api`;
+    console.error(`[LamSuite MCP] Started in-process mock LamSuite backend at ${config.apiUrl}`);
   }
 
   console.error(

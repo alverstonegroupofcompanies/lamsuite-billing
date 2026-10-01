@@ -1412,11 +1412,12 @@ export class PrintingEngine {
       <div>Mobile: ${data.customer_phone || "Not specified"}</div>
       ${data.customer_gstin ? `<div>GSTIN: ${data.customer_gstin}</div>` : ""}
       <div>Refund Mode: <strong>${data.refund_mode}</strong></div>
+      ${data.customer_debit_note_number ? `<div style="margin-top: 3px; color: #991b1b; font-weight: 700;">Customer DN Ref: #${data.customer_debit_note_number} ${data.customer_debit_note_date ? `(${data.customer_debit_note_date})` : ""}</div>` : ""}
     </div>
     <div class="meta-col" style="text-align: right;">
       <div style="font-size: 12px; font-weight: 800; color: #b91c1c;">#${data.return_number}</div>
-      <div>Return Date: ${data.return_date}</div>
-      ${data.original_invoice_number ? `<div>Original Invoice: <strong>#${data.original_invoice_number}</strong> (${data.original_invoice_date || "-"})</div>` : "<div>Standalone Sales Return</div>"}
+      <div>Credit Note Date: ${data.return_date}</div>
+      ${data.original_invoice_number ? `<div>Original Invoice: <strong>#${data.original_invoice_number}</strong> ${data.original_invoice_date ? `(${data.original_invoice_date})` : ""}</div>` : data.invoice_references && data.invoice_references.length > 0 ? `<div>Invoices: <strong>${data.invoice_references.map((r) => `#${r.invoice_number}`).join(", ")}</strong></div>` : "<div>Standalone Sales Return</div>"}
     </div>
   </div>
 
@@ -1992,6 +1993,9 @@ export interface CreditNotePrintData {
   return_date: string;
   original_invoice_number?: string;
   original_invoice_date?: string;
+  customer_debit_note_number?: string;
+  customer_debit_note_date?: string;
+  invoice_references?: Array<{ invoice_number: string; invoice_date?: string }>;
   store_name: string;
   store_address?: string;
   store_phone?: string;
