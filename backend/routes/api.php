@@ -2,6 +2,20 @@
 
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Api\AuthController;
+use App\Http\Controllers\Api\AdminAuthController;
+use App\Http\Controllers\Api\AdminDashboardController;
+use App\Http\Controllers\Api\AdminStoreController;
+use App\Http\Controllers\Api\AdminDeviceController;
+use App\Http\Controllers\Api\AdminFeatureController;
+use App\Http\Controllers\Api\AdminUserController;
+use App\Http\Controllers\Api\AdminMasterController;
+use App\Http\Controllers\Api\AdminTransactionController;
+use App\Http\Controllers\Api\AdminInventoryController;
+use App\Http\Controllers\Api\AdminReportController;
+use App\Http\Controllers\Api\AdminSyncController;
+use App\Http\Controllers\Api\AdminSettingController;
+use App\Http\Controllers\Api\AdminAuditController;
+use App\Http\Controllers\Api\AdminNotificationController;
 use App\Http\Controllers\Api\StoreController;
 use App\Http\Controllers\Api\ProductController;
 use App\Http\Controllers\Api\InvoiceController;
@@ -12,21 +26,22 @@ use App\Http\Controllers\Api\ReportController;
 
 /*
 |--------------------------------------------------------------------------
-| LamSuite / Alverstone Billing API Routes (OpenAPI 3.0.3 Contract)
+| Public Authentication & Device Onboarding
 |--------------------------------------------------------------------------
 */
-
-// Public Authentication & Device Onboarding
-Route::post('/login', [AuthController::class, 'login']);
+Route::post('/login', [AdminAuthController::class, 'login']);
+Route::post('/auth/login', [AdminAuthController::class, 'login']);
 Route::post('/devices/register', [AuthController::class, 'registerDevice']);
 
-// Protected Store Operations (Sanctum Authenticated)
+/*
+|--------------------------------------------------------------------------
+| Desktop Client Protected Store Operations (Sanctum Authenticated)
+|--------------------------------------------------------------------------
+*/
 Route::middleware('auth:sanctum')->group(function () {
-    // Store Profile & Hardware
     Route::get('/store', [StoreController::class, 'show']);
     Route::put('/store', [StoreController::class, 'update']);
 
-    // Catalog & Batches
     Route::get('/products', [ProductController::class, 'index']);
     Route::post('/products', [ProductController::class, 'store']);
     Route::get('/products/{id}', [ProductController::class, 'show']);
@@ -34,31 +49,144 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::delete('/products/{id}', [ProductController::class, 'destroy']);
     Route::post('/products/{id}/batches', [ProductController::class, 'addBatch']);
 
-    // POS Invoices & Sales Documents
     Route::get('/invoices', [InvoiceController::class, 'index']);
     Route::post('/invoices', [InvoiceController::class, 'store']);
     Route::get('/invoices/{id}', [InvoiceController::class, 'show']);
     Route::post('/invoices/{id}/cancel', [InvoiceController::class, 'cancel']);
 
-    // Purchases & Inward Stock
     Route::get('/purchases', [PurchaseController::class, 'index']);
     Route::post('/purchases', [PurchaseController::class, 'store']);
     Route::get('/purchases/{id}', [PurchaseController::class, 'show']);
 
-    // Stock & Inventory Control
     Route::post('/stock/adjustments', [StockController::class, 'recordAdjustment']);
     Route::post('/stock/transfers', [StockController::class, 'dispatchTransfer']);
     Route::get('/stock/batches/near-expiry', [StockController::class, 'nearExpiry']);
     Route::get('/stock/products/low-stock', [StockController::class, 'lowStock']);
 
-    // Offline Sync Engine (Idempotent Batch Push / Pull)
     Route::post('/sync/push/invoices', [SyncController::class, 'pushInvoices']);
     Route::post('/sync/push/stock-events', [SyncController::class, 'pushStockEvents']);
     Route::get('/sync/pull/deltas', [SyncController::class, 'pullDeltas']);
 
-    // Indian Statutory GST & Financial Reports
     Route::get('/reports/daily-collection', [ReportController::class, 'dailyCollection']);
     Route::get('/reports/gstr-1', [ReportController::class, 'gstr1']);
     Route::get('/reports/hsn-summary', [ReportController::class, 'hsnSummary']);
     Route::get('/reports/customer-aging', [ReportController::class, 'customerAging']);
+});
+
+/*
+|--------------------------------------------------------------------------
+| Web Admin Panel API (Sanctum + Tenant Scoping + RBAC + IP Allowlist)
+|--------------------------------------------------------------------------
+*/
+Route::middleware(['auth:sanctum', 'session.timeout', 'ip.allowlist', 'scope.store'])->prefix('admin')->group(function () {
+    // Auth, 2FA, Sessions & Impersonation
+    Route::get('/me', [AdminAuthController::class, 'me']);
+    Route::post('/logout', [AdminAuthController::class, 'logout']);
+    Route::post('/2fa/setup', [AdminAuthController::class, 'setup2fa']);
+    Route::post('/2fa/enable', [AdminAuthController::class, 'enable2fa']);
+    Route::post('/2fa/disable', [AdminAuthController::class, 'disable2fa']);
+    Route::post('/impersonate', [AdminAuthController::class, 'impersonate']);
+    Route::post('/stop-impersonate', [AdminAuthController::class, 'stopImpersonate']);
+    Route::post('/password-reset', [AdminAuthController::class, 'resetPassword']);
+    Route::get('/sessions', [AdminAuthController::class, 'activeSessions']);
+    Route::post('/sessions/{id}/logout', [AdminAuthController::class, 'forceLogoutSession']);
+
+    // Module 1: Dashboard
+    Route::get('/dashboard', [AdminDashboardController::class, 'index'])->middleware('rbac:dashboard,view');
+
+    // Module 2: Stores
+    Route::get('/stores', [AdminStoreController::class, 'index'])->middleware('rbac:stores,view');
+    Route::post('/stores', [AdminStoreController::class, 'store'])->middleware('rbac:stores,create');
+    Route::get('/stores/{id}', [AdminStoreController::class, 'show'])->middleware('rbac:stores,view');
+    Route::put('/stores/{id}', [AdminStoreController::class, 'update'])->middleware('rbac:stores,edit');
+    Route::post('/stores/{id}/toggle-status', [AdminStoreController::class, 'toggleStatus'])->middleware('rbac:stores,edit');
+    Route::post('/stores/{id}/reset', [AdminStoreController::class, 'resetStore'])->middleware('rbac:stores,delete');
+
+    // Module 3: Devices / Counters
+    Route::get('/devices', [AdminDeviceController::class, 'index'])->middleware('rbac:devices,view');
+    Route::post('/devices/{id}/status', [AdminDeviceController::class, 'updateStatus'])->middleware('rbac:devices,edit');
+    Route::post('/devices/{id}/force-resync', [AdminDeviceController::class, 'forceResync'])->middleware('rbac:devices,edit');
+
+    // Module 4: Menu & Feature Control
+    Route::get('/stores/{id}/features', [AdminFeatureController::class, 'show'])->middleware('rbac:features,view');
+    Route::put('/stores/{id}/features', [AdminFeatureController::class, 'update'])->middleware('rbac:features,edit');
+
+    // Module 5: Users & Roles
+    Route::get('/users', [AdminUserController::class, 'index'])->middleware('rbac:users,view');
+    Route::post('/users', [AdminUserController::class, 'store'])->middleware('rbac:users,create');
+    Route::get('/users/{id}', [AdminUserController::class, 'show'])->middleware('rbac:users,view');
+    Route::put('/users/{id}', [AdminUserController::class, 'update'])->middleware('rbac:users,edit');
+    Route::post('/users/{id}/toggle-biometric', [AdminUserController::class, 'toggleBiometric'])->middleware('rbac:users,edit');
+    Route::post('/users/{id}/force-logout', [AdminUserController::class, 'forceLogout'])->middleware('rbac:users,edit');
+
+    // Module 6: Master Data
+    Route::get('/products', [AdminMasterController::class, 'products'])->middleware('rbac:masters,view');
+    Route::post('/products', [AdminMasterController::class, 'storeProduct'])->middleware('rbac:masters,create');
+    Route::put('/products/{id}', [AdminMasterController::class, 'updateProduct'])->middleware('rbac:masters,edit');
+    Route::post('/products/{id}/batches', [AdminMasterController::class, 'addBatch'])->middleware('rbac:masters,create');
+    Route::post('/products/bulk-edit', [AdminMasterController::class, 'bulkEditProducts'])->middleware('rbac:masters,edit');
+
+    Route::get('/lookups', [AdminMasterController::class, 'lookups'])->middleware('rbac:masters,view');
+    Route::post('/lookups', [AdminMasterController::class, 'storeLookup'])->middleware('rbac:masters,create');
+
+    Route::get('/parties', [AdminMasterController::class, 'parties'])->middleware('rbac:masters,view');
+    Route::post('/parties', [AdminMasterController::class, 'storeParty'])->middleware('rbac:masters,create');
+    Route::put('/parties/{id}', [AdminMasterController::class, 'updateParty'])->middleware('rbac:masters,edit');
+
+    Route::post('/masters/merge', [AdminMasterController::class, 'mergeDuplicates'])->middleware('rbac:masters,edit');
+    Route::post('/masters/import', [AdminMasterController::class, 'import'])->middleware('rbac:masters,create');
+
+    // Module 7: Transactions
+    Route::get('/invoices', [AdminTransactionController::class, 'invoices'])->middleware('rbac:transactions,view');
+    Route::get('/invoices/{id}', [AdminTransactionController::class, 'showInvoice'])->middleware('rbac:transactions,view');
+    Route::post('/invoices/{id}/cancel', [AdminTransactionController::class, 'cancelInvoice'])->middleware('rbac:transactions,edit');
+    Route::put('/invoices/{id}', [AdminTransactionController::class, 'updateInvoice'])->middleware('rbac:transactions,edit');
+
+    Route::get('/purchases', [AdminTransactionController::class, 'purchases'])->middleware('rbac:transactions,view');
+    Route::get('/purchases/{id}', [AdminTransactionController::class, 'showPurchase'])->middleware('rbac:transactions,view');
+
+    Route::get('/stock/adjustments', [AdminTransactionController::class, 'stockAdjustments'])->middleware('rbac:transactions,view');
+    Route::get('/stock/transfers', [AdminTransactionController::class, 'stockTransfers'])->middleware('rbac:transactions,view');
+    Route::get('/expenses', [AdminTransactionController::class, 'expenses'])->middleware('rbac:transactions,view');
+    Route::get('/customer-payments', [AdminTransactionController::class, 'customerPayments'])->middleware('rbac:transactions,view');
+
+    // Module 8: Inventory
+    Route::get('/inventory/batches', [AdminInventoryController::class, 'batchInventory'])->middleware('rbac:inventory,view');
+    Route::get('/inventory/ledger', [AdminInventoryController::class, 'stockLedger'])->middleware('rbac:inventory,view');
+    Route::get('/inventory/near-expiry', [AdminInventoryController::class, 'nearExpiry'])->middleware('rbac:inventory,view');
+    Route::post('/inventory/transfers/dispatch', [AdminInventoryController::class, 'dispatchTransfer'])->middleware('rbac:inventory,create');
+    Route::post('/inventory/transfers/{id}/receive', [AdminInventoryController::class, 'receiveTransfer'])->middleware('rbac:inventory,edit');
+    Route::post('/inventory/reconcile', [AdminInventoryController::class, 'reconcileStock'])->middleware('rbac:inventory,edit');
+
+    // Module 9: Reports (Accessible to Accountant & Managers)
+    Route::get('/reports/sales', [AdminReportController::class, 'salesSummary'])->middleware('rbac:reports,view');
+    Route::get('/reports/gstr1', [AdminReportController::class, 'gstr1'])->middleware('rbac:reports,view');
+    Route::get('/reports/customer-aging', [AdminReportController::class, 'customerAging'])->middleware('rbac:reports,view');
+    Route::get('/reports/pharmacy', [AdminReportController::class, 'pharmacyReport'])->middleware('rbac:reports,view');
+    Route::get('/reports/scheduled', [AdminReportController::class, 'scheduledReports'])->middleware('rbac:reports,view');
+
+    // Module 10: Sync Center
+    Route::get('/sync/events', [AdminSyncController::class, 'index'])->middleware('rbac:sync,view');
+    Route::post('/sync/events/{id}/resolve', [AdminSyncController::class, 'resolveConflict'])->middleware('rbac:sync,edit');
+    Route::post('/sync/events/{id}/retry', [AdminSyncController::class, 'retry'])->middleware('rbac:sync,edit');
+    Route::get('/sync/diagnostics', [AdminSyncController::class, 'diagnostics'])->middleware('rbac:sync,view');
+
+    // Module 11: Settings
+    Route::get('/settings', [AdminSettingController::class, 'index'])->middleware('rbac:settings,view');
+    Route::post('/settings', [AdminSettingController::class, 'update'])->middleware('rbac:settings,edit');
+    Route::post('/settings/rotate-secret', [AdminSettingController::class, 'rotateSecret'])->middleware('rbac:settings,edit');
+    Route::get('/settings/financial-years', [AdminSettingController::class, 'financialYears'])->middleware('rbac:settings,view');
+    Route::post('/settings/financial-years/{id}/toggle-lock', [AdminSettingController::class, 'toggleFinancialYearLock'])->middleware('rbac:settings,edit');
+    Route::get('/settings/gst-periods', [AdminSettingController::class, 'gstPeriods'])->middleware('rbac:settings,view');
+    Route::post('/settings/gst-periods/toggle-lock', [AdminSettingController::class, 'toggleGstPeriodLock'])->middleware('rbac:settings,edit');
+    Route::get('/settings/backup-restore', [AdminSettingController::class, 'backupRestorePoints'])->middleware('rbac:settings,view');
+
+    // Module 12: Audit Log (Read-only)
+    Route::get('/audit-logs', [AdminAuditController::class, 'index'])->middleware('rbac:audit,view');
+
+    // Module 13: Notifications
+    Route::get('/notifications', [AdminNotificationController::class, 'index'])->middleware('rbac:notifications,view');
+    Route::post('/notifications/{id}/read', [AdminNotificationController::class, 'markAsRead'])->middleware('rbac:notifications,view');
+    Route::post('/notifications/mark-all-read', [AdminNotificationController::class, 'markAllAsRead'])->middleware('rbac:notifications,view');
+    Route::post('/notifications/check-alerts', [AdminNotificationController::class, 'checkAlerts'])->middleware('rbac:notifications,view');
 });

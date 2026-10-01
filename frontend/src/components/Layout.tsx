@@ -17,6 +17,9 @@ import {
   Sliders,
   Layers,
   FileText,
+  Undo2,
+  ArrowUpFromLine,
+  AlertTriangle,
 } from "lucide-react";
 import { companySettingsService } from "../lib/settings/companySettingsService";
 import { CommandPalette } from "./CommandPalette";
@@ -32,10 +35,13 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
   const [isOnline, setIsOnline] = useState<boolean>(navigator.onLine);
   const [isCmdPaletteOpen, setIsCmdPaletteOpen] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [isStoreDisabled, setIsStoreDisabled] = useState(false);
   const [enabledMenus, setEnabledMenus] = useState<string[]>([
     "pos",
     "bills",
+    "sales_returns",
     "purchases",
+    "purchase_returns",
     "stock",
     "reports",
     "masters",
@@ -73,6 +79,9 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
       } else if (e.key === "F6") {
         e.preventDefault();
         navigate("/bills");
+      } else if (e.key === "F7") {
+        e.preventDefault();
+        navigate("/returns/sales");
       } else if (e.key === "F10") {
         e.preventDefault();
         navigate("/settings");
@@ -93,8 +102,15 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
 
   useEffect(() => {
     companySettingsService.loadSettings().then((cfg) => {
-      if (cfg && cfg.enabled_menu_items) {
-        setEnabledMenus(cfg.enabled_menu_items);
+      if (cfg) {
+        if (cfg.enabled_menu_items) {
+          setEnabledMenus(cfg.enabled_menu_items);
+        }
+        if (cfg.is_active === false) {
+          setIsStoreDisabled(true);
+        } else {
+          setIsStoreDisabled(false);
+        }
       }
     });
   }, [location.pathname]);
@@ -110,7 +126,9 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
   const allNavItems = [
     { id: "pos", name: "POS Billing", path: "/pos", key: "F1", icon: ShoppingCart, group: "Sales & Billing" },
     { id: "bills", name: "Bills", path: "/bills", key: "F6", icon: FileText, group: "Sales & Billing" },
+    { id: "sales_returns", name: "Sales Returns", path: "/returns/sales", key: "F7", icon: Undo2, group: "Sales & Billing" },
     { id: "purchases", name: "Purchases", path: "/purchases", key: "F2", icon: Truck, group: "Purchase" },
+    { id: "purchase_returns", name: "Purchase Returns", path: "/returns/purchases", key: "", icon: ArrowUpFromLine, group: "Purchase" },
     { id: "stock", name: "Stock Ledger", path: "/stock", key: "F3", icon: Package, group: "Inventory" },
     { id: "reports", name: "Reports & GST", path: "/reports", key: "F4", icon: FileBarChart, group: "Reports" },
     { id: "masters", name: "Master Data", path: "/masters", key: "F5", icon: Database, group: "Master" },
@@ -118,6 +136,25 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
   ];
 
   const navItems = allNavItems.filter((item) => enabledMenus.includes(item.id));
+
+  if (isStoreDisabled) {
+    return (
+      <div className="flex h-screen flex-col items-center justify-center bg-slate-900 text-white p-6 font-sans">
+        <div className="max-w-md w-full text-center space-y-4 bg-slate-800 p-8 rounded-2xl border border-red-500/30 shadow-2xl">
+          <div className="w-16 h-16 rounded-full bg-red-500/20 text-red-400 mx-auto flex items-center justify-center">
+            <AlertTriangle className="w-8 h-8" />
+          </div>
+          <h2 className="text-2xl font-bold tracking-tight text-red-400">Store disabled</h2>
+          <p className="text-sm text-slate-300">
+            This store has been disabled in the central Admin Panel. Connected workstations and billing terminals cannot process transactions while the store is disabled.
+          </p>
+          <div className="rounded-lg bg-slate-950/60 p-3 text-xs text-slate-400 font-mono">
+            Status: Store disabled | Contact your system administrator.
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex h-screen flex-col bg-slate-100 font-sans select-none">

@@ -10,6 +10,7 @@ class ProductBatch extends Model
     protected $table = 'product_batches';
 
     protected $fillable = [
+        'store_id',
         'product_id',
         'batch_no',
         'mfg_date',
@@ -21,18 +22,26 @@ class ProductBatch extends Model
         'rack_location',
         'shelf_location',
         'external_id',
+        'version',
     ];
 
     protected $casts = [
         'expiry_date' => 'date',
+        'mfg_date' => 'date',
         'stock_qty' => 'decimal:2',
         'mrp' => 'decimal:2',
         'purchase_rate' => 'decimal:2',
         'selling_rate' => 'decimal:2',
+        'version' => 'integer',
     ];
 
     public function product(): BelongsTo
     {
         return $this->belongsTo(Product::class);
+    }
+
+    public function store(): BelongsTo
+    {
+        return $this->belongsTo(Store::class);
     }
 }

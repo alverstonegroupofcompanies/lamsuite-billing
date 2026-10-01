@@ -16,6 +16,8 @@ import {
   ArrowRight,
   Shield,
   FileText,
+  Undo2,
+  ArrowUpFromLine,
 } from "lucide-react";
 
 interface CommandPaletteProps {
@@ -81,6 +83,24 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose 
       shortcut: "F6",
       icon: FileText,
       action: () => { navigate("/bills"); onClose(); },
+    },
+    {
+      id: "nav_sales_returns",
+      category: "Billing & POS",
+      title: "Sales Returns / Credit Notes",
+      subtitle: "Process customer returns, issue credit notes, restore batch stock",
+      shortcut: "F7",
+      icon: Undo2,
+      action: () => { navigate("/returns/sales"); onClose(); },
+    },
+    {
+      id: "nav_purchase_returns",
+      category: "Navigation",
+      title: "Purchase Returns / Debit Notes",
+      subtitle: "Return stock to supplier, issue debit notes, reverse input GST",
+      shortcut: "",
+      icon: ArrowUpFromLine,
+      action: () => { navigate("/returns/purchases"); onClose(); },
     },
     {
       id: "nav_purchases",

@@ -13,6 +13,8 @@ export interface DocumentSequenceConfig {
   nextInvoiceNumber: number;
   returnPrefix: string;
   nextReturnNumber: number;
+  purchaseReturnPrefix?: string;
+  nextPurchaseReturnNumber?: number;
   purchasePrefix: string;
   nextPurchaseNumber: number;
   quotationPrefix: string;
@@ -110,6 +112,7 @@ export interface CompanySettings {
   invoice_columns: ColumnSetting[];
 
   enabled_menu_items: string[];
+  is_active?: boolean;
 }
 
 export const DEFAULT_COLUMNS: ColumnSetting[] = [
@@ -153,8 +156,10 @@ export const DEFAULT_SETTINGS: CompanySettings = {
   sequences: {
     invoicePrefix: "INV",
     nextInvoiceNumber: 1001,
-    returnPrefix: "RET",
-    nextReturnNumber: 101,
+    returnPrefix: "SR",
+    nextReturnNumber: 1,
+    purchaseReturnPrefix: "PR",
+    nextPurchaseReturnNumber: 1,
     purchasePrefix: "PUR",
     nextPurchaseNumber: 201,
     quotationPrefix: "QUO",

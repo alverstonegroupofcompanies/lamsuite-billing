@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   Truck,
   Plus,
@@ -10,6 +11,7 @@ import {
   X,
   FileText,
   RotateCcw,
+  ArrowUpFromLine,
 } from "lucide-react";
 import {
   purchaseService,
@@ -21,6 +23,7 @@ import { productsStore, type ProductItem } from "../lib/masters/productsStore";
 import { sqliteStorage } from "../lib/db/sqliteStorage";
 
 export const PurchasesPage: React.FC = () => {
+  const navigate = useNavigate();
   const [purchasesList, setPurchasesList] = useState<any[]>([]);
   const [isNewBillOpen, setIsNewBillOpen] = useState(false);
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
@@ -248,12 +251,13 @@ export const PurchasesPage: React.FC = () => {
                 <th className="px-4 py-2.5 font-semibold text-right">GST</th>
                 <th className="px-4 py-2.5 font-semibold text-right font-bold">Total Amount</th>
                 <th className="px-4 py-2.5 font-semibold text-center">Status</th>
+                <th className="px-4 py-2.5 font-semibold text-center">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {purchasesList.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="py-12 text-center text-slate-400">
+                  <td colSpan={9} className="py-12 text-center text-slate-400">
                     <Truck className="mx-auto h-8 w-8 text-slate-300 mb-1" />
                     <p className="font-medium">No inward purchase bills recorded yet</p>
                     <p className="text-[11px] text-slate-400">Click "New Inward Bill" to record stock receipts</p>
@@ -275,6 +279,16 @@ export const PurchasesPage: React.FC = () => {
                       <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">
                         RECEIVED
                       </span>
+                    </td>
+                    <td className="px-4 py-3 text-center">
+                      <button
+                        onClick={() => navigate(`/returns/purchases?purchaseId=${p.id}`)}
+                        className="flex items-center gap-1 rounded bg-orange-50 px-2.5 py-1 text-[11px] font-semibold text-orange-700 hover:bg-orange-100"
+                        title="Issue debit note / return to supplier"
+                      >
+                        <ArrowUpFromLine className="h-3 w-3" />
+                        Return
+                      </button>
                     </td>
                   </tr>
                 ))

@@ -905,6 +905,17 @@ export const BillsPage: React.FC = () => {
                 {selectedInvoice.status !== "cancelled" && (
                   <>
                     <button
+                      onClick={() => {
+                        setIsDetailModalOpen(false);
+                        navigate(`/returns/sales?invoiceId=${selectedInvoice.id}`);
+                      }}
+                      className="flex items-center gap-1 rounded bg-rose-50 px-3 py-1.5 text-xs font-semibold text-rose-700 hover:bg-rose-100"
+                      title="Issue credit note / process customer return"
+                    >
+                      <RefreshCw className="h-3.5 w-3.5" />
+                      <span>Return / Credit Note</span>
+                    </button>
+                    <button
                       onClick={handlePromptEdit}
                       className="flex items-center gap-1 rounded bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-700 hover:bg-amber-100"
                     >

@@ -1342,6 +1342,698 @@ export class PrintingEngine {
       return { success: false, error: err instanceof Error ? err.message : String(err) };
     }
   }
+
+  /**
+   * Generates Statutory A4 Credit Note HTML for Sales Returns
+   */
+  generateCreditNoteA4Html(data: CreditNotePrintData): string {
+    const cgstTotal = data.cgst_total !== undefined ? data.cgst_total : round2(data.tax_total / 2);
+    const sgstTotal = data.sgst_total !== undefined ? data.sgst_total : round2(data.tax_total / 2);
+    const amountWords = data.amount_in_words || numberToWordsIndian(data.grand_total);
+
+    const itemsRows = data.lines
+      .map(
+        (it, idx) => `
+      <tr>
+        <td style="padding: 5px 6px; text-align: center; border-bottom: 1px solid #e2e8f0;">${idx + 1}</td>
+        <td style="padding: 5px 6px; border-bottom: 1px solid #e2e8f0;">
+          <div style="font-weight: 700; color: #0f172a;">${it.description}</div>
+          ${it.reason ? `<div style="font-size: 8.5px; color: #dc2626;">Reason: ${it.reason}</div>` : ""}
+        </td>
+        <td style="padding: 5px 6px; text-align: center; border-bottom: 1px solid #e2e8f0;">${it.hsn_code || "300490"}</td>
+        <td style="padding: 5px 6px; text-align: center; border-bottom: 1px solid #e2e8f0; font-family: monospace;">${it.batch_no || "-"}</td>
+        <td style="padding: 5px 6px; text-align: center; border-bottom: 1px solid #e2e8f0;">${it.expiry_date || "-"}</td>
+        <td style="padding: 5px 6px; text-align: right; border-bottom: 1px solid #e2e8f0; font-weight: 700;">${it.qty}</td>
+        <td style="padding: 5px 6px; text-align: right; border-bottom: 1px solid #e2e8f0; font-variant-numeric: tabular-nums;">₹ ${it.rate.toFixed(2)}</td>
+        <td style="padding: 5px 6px; text-align: right; border-bottom: 1px solid #e2e8f0;">${it.gst_percent}%</td>
+        <td style="padding: 5px 6px; text-align: right; border-bottom: 1px solid #e2e8f0; font-weight: 700; font-variant-numeric: tabular-nums;">₹ ${it.amount.toFixed(2)}</td>
+      </tr>`
+      )
+      .join("");
+
+    return `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Credit Note - ${data.return_number}</title>
+  <style>
+    @media print { body { margin: 0; padding: 8mm; } @page { size: A4 portrait; margin: 8mm; } }
+    * { box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 10.5px; line-height: 1.35; color: #1e293b; margin: 0; padding: 20px; background: #fff; font-variant-numeric: tabular-nums; }
+    .header { text-align: center; border-bottom: 2px solid #b91c1c; padding-bottom: 8px; margin-bottom: 12px; }
+    .store-name { font-size: 19px; font-weight: 800; color: #0f172a; }
+    .tax-badge { font-size: 13px; font-weight: 800; letter-spacing: 0.5px; color: #b91c1c; margin-top: 6px; }
+    .meta-grid { display: flex; justify-content: space-between; border: 1px solid #fca5a5; border-radius: 6px; background: #fff1f2; padding: 8px 12px; margin-bottom: 12px; }
+    .meta-col { width: 48%; }
+    table.data-table { width: 100%; border-collapse: collapse; font-size: 10px; margin-bottom: 12px; }
+    table.data-table th { background: #fef2f2; color: #991b1b; font-weight: 700; padding: 6px; border-top: 1px solid #fecaca; border-bottom: 2px solid #f87171; }
+    .footer-container { margin-top: 12px; page-break-inside: avoid; }
+    .amount-words-bar { background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 4px; padding: 6px 10px; font-size: 10px; font-weight: 700; color: #1e293b; margin-bottom: 10px; }
+    .footer-grid { display: grid; grid-template-columns: 1fr 310px; gap: 10px 16px; align-items: stretch; }
+    .totals-card { border: 1px solid #cbd5e1; border-radius: 6px; background: #f8fafc; padding: 8px 14px; font-variant-numeric: tabular-nums; }
+    .total-line { display: flex; justify-content: space-between; padding: 2.5px 0; font-size: 10.5px; color: #475569; }
+    .grand-total-line { display: flex; justify-content: space-between; padding-top: 6px; margin-top: 6px; border-top: 2px solid #b91c1c; font-size: 13px; font-weight: 800; color: #b91c1c; }
+    .sign-card { border: 1px solid #cbd5e1; border-radius: 6px; background: #f8fafc; padding: 8px 14px; text-align: center; display: flex; flex-direction: column; justify-content: space-between; min-height: 70px; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="store-name">${data.store_name}</div>
+    <div style="font-size: 10px; color: #475569;">${data.store_address || ""} • Phone: ${data.store_phone || ""}</div>
+    <div style="font-size: 9.5px; font-weight: 700; color: #334155; margin-top: 2px;">
+      ${data.store_gstin ? `GSTIN: ${data.store_gstin}` : ""}
+    </div>
+    <div class="tax-badge">CREDIT NOTE / SALES RETURN</div>
+  </div>
+
+  <div class="meta-grid">
+    <div class="meta-col">
+      <div><strong>Customer:</strong> ${data.customer_name}</div>
+      <div>Mobile: ${data.customer_phone || "Not specified"}</div>
+      ${data.customer_gstin ? `<div>GSTIN: ${data.customer_gstin}</div>` : ""}
+      <div>Refund Mode: <strong>${data.refund_mode}</strong></div>
+    </div>
+    <div class="meta-col" style="text-align: right;">
+      <div style="font-size: 12px; font-weight: 800; color: #b91c1c;">#${data.return_number}</div>
+      <div>Return Date: ${data.return_date}</div>
+      ${data.original_invoice_number ? `<div>Original Invoice: <strong>#${data.original_invoice_number}</strong> (${data.original_invoice_date || "-"})</div>` : "<div>Standalone Sales Return</div>"}
+    </div>
+  </div>
+
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th style="width: 28px; text-align: center;">#</th>
+        <th style="text-align: left;">Returned Item Description</th>
+        <th style="width: 60px; text-align: center;">HSN</th>
+        <th style="width: 65px; text-align: center;">Batch</th>
+        <th style="width: 55px; text-align: center;">Exp</th>
+        <th style="width: 45px; text-align: right;">Qty</th>
+        <th style="width: 75px; text-align: right;">Rate (₹)</th>
+        <th style="width: 55px; text-align: right;">GST %</th>
+        <th style="width: 85px; text-align: right;">Reversal (₹)</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${itemsRows}
+    </tbody>
+  </table>
+
+  <div class="footer-container">
+    <div class="amount-words-bar">
+      <span style="color: #64748b; font-weight: 600;">Refund Amount in Words:</span> ${amountWords}
+    </div>
+
+    <div class="footer-grid">
+      <div style="border: 1px solid #e2e8f0; border-radius: 6px; padding: 10px; font-size: 9px; color: #64748b;">
+        <div style="font-weight: 700; color: #475569; text-transform: uppercase; margin-bottom: 4px;">Notes & Settlement Terms:</div>
+        <div>1. Credit Note issued against returned goods as per Statutory GST Rule 53.</div>
+        <div>2. Adjusted in customer ledger or refunded via ${data.refund_mode}.</div>
+        ${data.notes ? `<div style="margin-top: 6px; color: #0f172a; font-weight: 600;">Remarks: ${data.notes}</div>` : ""}
+        <div style="margin-top: 12px; font-size: 8.5px; color: #94a3b8;">Computer Generated Credit Note • LamSuite POS</div>
+      </div>
+
+      <div class="totals-card">
+        <div class="total-line"><span>Taxable Reversal:</span><span style="font-weight: 600;">₹ ${data.subtotal.toFixed(2)}</span></div>
+        <div class="total-line"><span>Central GST (CGST):</span><span style="font-weight: 600;">₹ ${cgstTotal.toFixed(2)}</span></div>
+        <div class="total-line"><span>State GST (SGST):</span><span style="font-weight: 600;">₹ ${sgstTotal.toFixed(2)}</span></div>
+        <div class="total-line"><span>Total GST Reversal:</span><span style="font-weight: 600;">₹ ${data.tax_total.toFixed(2)}</span></div>
+        ${data.round_off ? `<div class="total-line"><span>Round Off:</span><span style="font-weight: 600;">${data.round_off > 0 ? "+" : ""}₹ ${data.round_off.toFixed(2)}</span></div>` : ""}
+        <div class="grand-total-line"><span>Total Refund:</span><span>₹ ${data.grand_total.toFixed(2)}</span></div>
+      </div>
+    </div>
+
+    <div style="display: flex; justify-content: flex-end; margin-top: 16px;">
+      <div class="sign-card" style="width: 250px;">
+        <div style="font-size: 10px; font-weight: 700; color: #1e293b;">For ${data.store_name}</div>
+        <div style="min-height: 24px;"></div>
+        <div style="font-size: 9px; font-weight: 600; color: #475569; border-top: 1px solid #94a3b8; padding-top: 3px;">
+          Authorised Signatory / Pharmacist
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>`;
+  }
+
+  /**
+   * Generates compact 80mm thermal receipt slip for Credit Notes
+   */
+  generateCreditNoteThermalSlip(data: CreditNotePrintData): string {
+    const linesStr = data.lines
+      .map(
+        (l) => `
+    <div style="display:flex; justify-content:space-between; margin-bottom: 2px;">
+      <span style="font-weight:bold;">${l.description}</span>
+      <span>₹ ${l.amount.toFixed(2)}</span>
+    </div>
+    <div style="display:flex; justify-content:space-between; font-size: 10px; color:#555;">
+      <span>Batch: ${l.batch_no || "-"} | Exp: ${l.expiry_date || "-"}</span>
+      <span>${l.qty} x ₹ ${l.rate.toFixed(2)}</span>
+    </div>`
+      )
+      .join("");
+
+    return `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <style>
+    body { font-family: monospace; font-size: 11px; margin: 0; padding: 10px; width: 72mm; color: #000; }
+    .center { text-align: center; }
+    .bold { font-weight: bold; }
+    .divider { border-top: 1px dashed #000; margin: 6px 0; }
+  </style>
+</head>
+<body>
+  <div class="center bold" style="font-size: 14px;">${data.store_name}</div>
+  <div class="center" style="font-size: 10px;">${data.store_phone || ""}</div>
+  <div class="center bold" style="margin: 4px 0; font-size: 12px;">*** CREDIT NOTE ***</div>
+  <div class="divider"></div>
+  <div>Note #: <strong>${data.return_number}</strong></div>
+  <div>Date: ${data.return_date}</div>
+  ${data.original_invoice_number ? `<div>Original Inv: #${data.original_invoice_number}</div>` : ""}
+  <div>Customer: ${data.customer_name}</div>
+  <div class="divider"></div>
+  ${linesStr}
+  <div class="divider"></div>
+  <div style="display:flex; justify-content:space-between;">
+    <span>Taxable Reversal:</span>
+    <span>₹ ${data.subtotal.toFixed(2)}</span>
+  </div>
+  <div style="display:flex; justify-content:space-between;">
+    <span>GST Reversal:</span>
+    <span>₹ ${data.tax_total.toFixed(2)}</span>
+  </div>
+  <div style="display:flex; justify-content:space-between; font-size: 13px; font-weight: bold; margin-top: 4px;">
+    <span>TOTAL REFUND:</span>
+    <span>₹ ${data.grand_total.toFixed(2)}</span>
+  </div>
+  <div style="margin-top: 4px; font-size: 10px;">Refund Mode: <strong>${data.refund_mode}</strong></div>
+  <div class="divider"></div>
+  <div class="center" style="font-size: 9px; margin-top: 8px;">
+    Goods returned and verified by Pharmacist<br/>
+    Powered by LamSuite Retail
+  </div>
+</body>
+</html>`;
+  }
+
+  /**
+   * Generates vector PDF for Credit Notes using embedded Roboto font
+   */
+  generateCreditNotePdf(data: CreditNotePrintData): Uint8Array {
+    const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+    doc.addFileToVFS("Roboto-Regular.ttf", ROBOTO_REGULAR_BASE64);
+    doc.addFont("Roboto-Regular.ttf", "Roboto", "normal");
+    doc.addFileToVFS("Roboto-Bold.ttf", ROBOTO_BOLD_BASE64);
+    doc.addFont("Roboto-Bold.ttf", "Roboto", "bold");
+    doc.setFont("Roboto", "normal");
+
+    const marginX = 12;
+    const contentWidth = 186;
+    const centerX = 105;
+
+    // Header
+    doc.setFont("Roboto", "bold");
+    doc.setFontSize(15);
+    doc.setTextColor(15, 23, 42);
+    doc.text(data.store_name, centerX, 14, { align: "center" });
+
+    doc.setFont("Roboto", "normal");
+    doc.setFontSize(8);
+    doc.setTextColor(71, 85, 105);
+    doc.text(`${data.store_address || ""} • Phone: ${data.store_phone || ""}`, centerX, 18.5, { align: "center" });
+
+    doc.setFont("Roboto", "bold");
+    doc.setFontSize(11);
+    doc.setTextColor(185, 28, 28); // red-700
+    doc.text("CREDIT NOTE / SALES RETURN", centerX, 24, { align: "center" });
+
+    // Meta box
+    doc.setFillColor(255, 241, 242);
+    doc.rect(marginX, 27, contentWidth, 18, "F");
+    doc.setDrawColor(252, 165, 165);
+    doc.rect(marginX, 27, contentWidth, 18, "S");
+
+    doc.setFont("Roboto", "normal");
+    doc.setFontSize(8);
+    doc.setTextColor(15, 23, 42);
+    doc.text(`Customer: ${data.customer_name}`, marginX + 3, 32);
+    doc.text(`Mobile: ${data.customer_phone || "-"}`, marginX + 3, 37);
+    doc.text(`Refund Mode: ${data.refund_mode}`, marginX + 3, 42);
+
+    doc.setFont("Roboto", "bold");
+    doc.setTextColor(185, 28, 28);
+    doc.text(`Credit Note: #${data.return_number}`, marginX + contentWidth - 3, 32, { align: "right" });
+    doc.setFont("Roboto", "normal");
+    doc.setTextColor(15, 23, 42);
+    doc.text(`Date: ${data.return_date}`, marginX + contentWidth - 3, 37, { align: "right" });
+    doc.text(
+      data.original_invoice_number ? `Original Inv: #${data.original_invoice_number}` : "Standalone Return",
+      marginX + contentWidth - 3,
+      42,
+      { align: "right" }
+    );
+
+    // Items table
+    const tableBody = data.lines.map((l, idx) => [
+      String(idx + 1),
+      l.description,
+      l.hsn_code || "300490",
+      l.batch_no || "-",
+      l.expiry_date || "-",
+      String(l.qty),
+      `₹ ${l.rate.toFixed(2)}`,
+      `${l.gst_percent}%`,
+      `₹ ${l.amount.toFixed(2)}`,
+    ]);
+
+    autoTable(doc, {
+      startY: 48,
+      margin: { left: marginX, right: marginX },
+      head: [["#", "Item Description", "HSN", "Batch", "Exp", "Qty", "Rate", "GST %", "Total (₹)"]],
+      body: tableBody,
+      theme: "plain",
+      styles: { font: "Roboto", fontSize: 7.5, cellPadding: 2, textColor: [30, 41, 59] },
+      headStyles: { font: "Roboto", fontStyle: "bold", fillColor: [254, 242, 242], textColor: [153, 27, 27] },
+      columnStyles: {
+        0: { halign: "center", cellWidth: 10 },
+        1: { halign: "left" },
+        2: { halign: "center", cellWidth: 20 },
+        3: { halign: "center", cellWidth: 22 },
+        4: { halign: "center", cellWidth: 18 },
+        5: { halign: "right", cellWidth: 14, fontStyle: "bold" },
+        6: { halign: "right", cellWidth: 20 },
+        7: { halign: "right", cellWidth: 16 },
+        8: { halign: "right", cellWidth: 24, fontStyle: "bold" },
+      },
+    });
+
+    let bottomY = (doc as any).lastAutoTable?.finalY ? (doc as any).lastAutoTable.finalY + 6 : 140;
+    if (bottomY + 50 > 280) {
+      doc.addPage();
+      bottomY = 15;
+    }
+
+    // Amount in words
+    const amountWords = data.amount_in_words || numberToWordsIndian(data.grand_total);
+    doc.setFillColor(248, 250, 252);
+    doc.rect(marginX, bottomY, contentWidth, 7, "F");
+    doc.setDrawColor(203, 213, 225);
+    doc.rect(marginX, bottomY, contentWidth, 7, "S");
+    doc.setFont("Roboto", "bold");
+    doc.setFontSize(7.5);
+    doc.setTextColor(30, 41, 59);
+    doc.text(`Refund Amount in Words: ${amountWords}`, marginX + 3, bottomY + 4.8);
+
+    // Totals card on right
+    const rowY = bottomY + 10;
+    const totalsW = 75;
+    const totalsX = marginX + contentWidth - totalsW;
+    doc.setFillColor(248, 250, 252);
+    doc.rect(totalsX, rowY, totalsW, 30, "F");
+    doc.setDrawColor(203, 213, 225);
+    doc.rect(totalsX, rowY, totalsW, 30, "S");
+
+    doc.setFont("Roboto", "normal");
+    doc.setFontSize(7.5);
+    doc.setTextColor(71, 85, 105);
+    doc.text("Taxable Reversal:", totalsX + 3, rowY + 6);
+    doc.text(`₹ ${data.subtotal.toFixed(2)}`, totalsX + totalsW - 3, rowY + 6, { align: "right" });
+
+    doc.text("GST Reversal:", totalsX + 3, rowY + 12);
+    doc.text(`₹ ${data.tax_total.toFixed(2)}`, totalsX + totalsW - 3, rowY + 12, { align: "right" });
+
+    doc.setFont("Roboto", "bold");
+    doc.setFontSize(8.5);
+    doc.setTextColor(185, 28, 28);
+    doc.text("Total Refund:", totalsX + 3, rowY + 24);
+    doc.text(`₹ ${data.grand_total.toFixed(2)}`, totalsX + totalsW - 3, rowY + 24, { align: "right" });
+
+    // Signatory on left
+    const signW = 105;
+    doc.setFillColor(255, 255, 255);
+    doc.rect(marginX, rowY, signW, 30, "F");
+    doc.setDrawColor(226, 232, 240);
+    doc.rect(marginX, rowY, signW, 30, "S");
+
+    doc.setFont("Roboto", "normal");
+    doc.setFontSize(7);
+    doc.setTextColor(100, 116, 139);
+    doc.text("Credit Note issued against returned goods as per GST rules.", marginX + 3, rowY + 6);
+    doc.text(`Refund Mode: ${data.refund_mode}`, marginX + 3, rowY + 11);
+    doc.text(`For ${data.store_name}`, marginX + signW - 3, rowY + 18, { align: "right" });
+    doc.text("Authorised Signatory / Pharmacist", marginX + signW - 3, rowY + 26, { align: "right" });
+
+    return new Uint8Array(doc.output("arraybuffer"));
+  }
+
+  /**
+   * Generates Statutory A4 Debit Note HTML for Purchase Returns
+   */
+  generateDebitNoteA4Html(data: DebitNotePrintData): string {
+    const cgstTotal = data.cgst_total !== undefined ? data.cgst_total : round2(data.tax_total / 2);
+    const sgstTotal = data.sgst_total !== undefined ? data.sgst_total : round2(data.tax_total / 2);
+    const amountWords = data.amount_in_words || numberToWordsIndian(data.grand_total);
+
+    const itemsRows = data.lines
+      .map(
+        (it, idx) => `
+      <tr>
+        <td style="padding: 5px 6px; text-align: center; border-bottom: 1px solid #e2e8f0;">${idx + 1}</td>
+        <td style="padding: 5px 6px; border-bottom: 1px solid #e2e8f0;">
+          <div style="font-weight: 700; color: #0f172a;">${it.description}</div>
+          ${it.reason ? `<div style="font-size: 8.5px; color: #2563eb;">Reason: ${it.reason}</div>` : ""}
+        </td>
+        <td style="padding: 5px 6px; text-align: center; border-bottom: 1px solid #e2e8f0;">${it.hsn_code || "300490"}</td>
+        <td style="padding: 5px 6px; text-align: center; border-bottom: 1px solid #e2e8f0; font-family: monospace;">${it.batch_no || "-"}</td>
+        <td style="padding: 5px 6px; text-align: center; border-bottom: 1px solid #e2e8f0;">${it.expiry_date || "-"}</td>
+        <td style="padding: 5px 6px; text-align: right; border-bottom: 1px solid #e2e8f0; font-weight: 700;">${it.qty}</td>
+        <td style="padding: 5px 6px; text-align: right; border-bottom: 1px solid #e2e8f0; font-variant-numeric: tabular-nums;">₹ ${it.rate.toFixed(2)}</td>
+        <td style="padding: 5px 6px; text-align: right; border-bottom: 1px solid #e2e8f0;">${it.gst_percent}%</td>
+        <td style="padding: 5px 6px; text-align: right; border-bottom: 1px solid #e2e8f0; font-weight: 700; font-variant-numeric: tabular-nums;">₹ ${it.amount.toFixed(2)}</td>
+      </tr>`
+      )
+      .join("");
+
+    return `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Debit Note - ${data.return_number}</title>
+  <style>
+    @media print { body { margin: 0; padding: 8mm; } @page { size: A4 portrait; margin: 8mm; } }
+    * { box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 10.5px; line-height: 1.35; color: #1e293b; margin: 0; padding: 20px; background: #fff; font-variant-numeric: tabular-nums; }
+    .header { text-align: center; border-bottom: 2px solid #1e3a8a; padding-bottom: 8px; margin-bottom: 12px; }
+    .store-name { font-size: 19px; font-weight: 800; color: #0f172a; }
+    .tax-badge { font-size: 13px; font-weight: 800; letter-spacing: 0.5px; color: #1e3a8a; margin-top: 6px; }
+    .meta-grid { display: flex; justify-content: space-between; border: 1px solid #93c5fd; border-radius: 6px; background: #eff6ff; padding: 8px 12px; margin-bottom: 12px; }
+    .meta-col { width: 48%; }
+    table.data-table { width: 100%; border-collapse: collapse; font-size: 10px; margin-bottom: 12px; }
+    table.data-table th { background: #f0fdf4; color: #166534; font-weight: 700; padding: 6px; border-top: 1px solid #bbf7d0; border-bottom: 2px solid #86efac; }
+    .footer-container { margin-top: 12px; page-break-inside: avoid; }
+    .amount-words-bar { background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 4px; padding: 6px 10px; font-size: 10px; font-weight: 700; color: #1e293b; margin-bottom: 10px; }
+    .footer-grid { display: grid; grid-template-columns: 1fr 310px; gap: 10px 16px; align-items: stretch; }
+    .totals-card { border: 1px solid #cbd5e1; border-radius: 6px; background: #f8fafc; padding: 8px 14px; font-variant-numeric: tabular-nums; }
+    .total-line { display: flex; justify-content: space-between; padding: 2.5px 0; font-size: 10.5px; color: #475569; }
+    .grand-total-line { display: flex; justify-content: space-between; padding-top: 6px; margin-top: 6px; border-top: 2px solid #1e3a8a; font-size: 13px; font-weight: 800; color: #1e3a8a; }
+    .sign-card { border: 1px solid #cbd5e1; border-radius: 6px; background: #f8fafc; padding: 8px 14px; text-align: center; display: flex; flex-direction: column; justify-content: space-between; min-height: 70px; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="store-name">${data.store_name}</div>
+    <div style="font-size: 10px; color: #475569;">${data.store_address || ""} • Phone: ${data.store_phone || ""}</div>
+    <div style="font-size: 9.5px; font-weight: 700; color: #334155; margin-top: 2px;">
+      ${data.store_gstin ? `GSTIN: ${data.store_gstin}` : ""}
+    </div>
+    <div class="tax-badge">DEBIT NOTE / PURCHASE RETURN</div>
+  </div>
+
+  <div class="meta-grid">
+    <div class="meta-col">
+      <div><strong>To Supplier:</strong> ${data.supplier_name}</div>
+      ${data.supplier_gstin ? `<div>GSTIN: ${data.supplier_gstin}</div>` : ""}
+      <div>Settlement: <strong>${data.settlement_type === "credit_adjust" ? "Adjust against Payable" : "Refund Received"}</strong></div>
+    </div>
+    <div class="meta-col" style="text-align: right;">
+      <div style="font-size: 12px; font-weight: 800; color: #1e3a8a;">#${data.return_number}</div>
+      <div>Return Date: ${data.return_date}</div>
+      ${data.original_purchase_number ? `<div>Purchase Ref: <strong>#${data.original_purchase_number}</strong></div>` : ""}
+      ${data.supplier_invoice_no ? `<div>Supplier Bill #: ${data.supplier_invoice_no}</div>` : ""}
+    </div>
+  </div>
+
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th style="width: 28px; text-align: center;">#</th>
+        <th style="text-align: left;">Returned Item Description</th>
+        <th style="width: 60px; text-align: center;">HSN</th>
+        <th style="width: 65px; text-align: center;">Batch</th>
+        <th style="width: 55px; text-align: center;">Exp</th>
+        <th style="width: 45px; text-align: right;">Qty</th>
+        <th style="width: 75px; text-align: right;">Purchase Rate (₹)</th>
+        <th style="width: 55px; text-align: right;">GST %</th>
+        <th style="width: 85px; text-align: right;">Reversal (₹)</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${itemsRows}
+    </tbody>
+  </table>
+
+  <div class="footer-container">
+    <div class="amount-words-bar">
+      <span style="color: #64748b; font-weight: 600;">Reversal Amount in Words:</span> ${amountWords}
+    </div>
+
+    <div class="footer-grid">
+      <div style="border: 1px solid #e2e8f0; border-radius: 6px; padding: 10px; font-size: 9px; color: #64748b;">
+        <div style="font-weight: 700; color: #475569; text-transform: uppercase; margin-bottom: 4px;">Input GST Reversal & Settlement:</div>
+        <div>1. Debit Note issued to supplier for return of goods as per GST statutory provisions.</div>
+        <div>2. Input Tax Credit (ITC) reversed accordingly.</div>
+        ${data.notes ? `<div style="margin-top: 6px; color: #0f172a; font-weight: 600;">Remarks: ${data.notes}</div>` : ""}
+        <div style="margin-top: 12px; font-size: 8.5px; color: #94a3b8;">Computer Generated Debit Note • LamSuite POS</div>
+      </div>
+
+      <div class="totals-card">
+        <div class="total-line"><span>Taxable Purchase Value:</span><span style="font-weight: 600;">₹ ${data.subtotal.toFixed(2)}</span></div>
+        <div class="total-line"><span>CGST Reversal:</span><span style="font-weight: 600;">₹ ${cgstTotal.toFixed(2)}</span></div>
+        <div class="total-line"><span>SGST Reversal:</span><span style="font-weight: 600;">₹ ${sgstTotal.toFixed(2)}</span></div>
+        <div class="total-line"><span>Total Input GST Reversed:</span><span style="font-weight: 600;">₹ ${data.tax_total.toFixed(2)}</span></div>
+        ${data.round_off ? `<div class="total-line"><span>Round Off:</span><span style="font-weight: 600;">${data.round_off > 0 ? "+" : ""}₹ ${data.round_off.toFixed(2)}</span></div>` : ""}
+        <div class="grand-total-line"><span>Total Debit Amount:</span><span>₹ ${data.grand_total.toFixed(2)}</span></div>
+      </div>
+    </div>
+
+    <div style="display: flex; justify-content: flex-end; margin-top: 16px;">
+      <div class="sign-card" style="width: 250px;">
+        <div style="font-size: 10px; font-weight: 700; color: #1e293b;">For ${data.store_name}</div>
+        <div style="min-height: 24px;"></div>
+        <div style="font-size: 9px; font-weight: 600; color: #475569; border-top: 1px solid #94a3b8; padding-top: 3px;">
+          Authorised Signatory
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>`;
+  }
+
+  /**
+   * Generates vector PDF for Debit Notes using embedded Roboto font
+   */
+  generateDebitNotePdf(data: DebitNotePrintData): Uint8Array {
+    const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+    doc.addFileToVFS("Roboto-Regular.ttf", ROBOTO_REGULAR_BASE64);
+    doc.addFont("Roboto-Regular.ttf", "Roboto", "normal");
+    doc.addFileToVFS("Roboto-Bold.ttf", ROBOTO_BOLD_BASE64);
+    doc.addFont("Roboto-Bold.ttf", "Roboto", "bold");
+    doc.setFont("Roboto", "normal");
+
+    const marginX = 12;
+    const contentWidth = 186;
+    const centerX = 105;
+
+    // Header
+    doc.setFont("Roboto", "bold");
+    doc.setFontSize(15);
+    doc.setTextColor(15, 23, 42);
+    doc.text(data.store_name, centerX, 14, { align: "center" });
+
+    doc.setFont("Roboto", "normal");
+    doc.setFontSize(8);
+    doc.setTextColor(71, 85, 105);
+    doc.text(`${data.store_address || ""} • Phone: ${data.store_phone || ""}`, centerX, 18.5, { align: "center" });
+
+    doc.setFont("Roboto", "bold");
+    doc.setFontSize(11);
+    doc.setTextColor(30, 58, 138); // blue-900
+    doc.text("DEBIT NOTE / PURCHASE RETURN", centerX, 24, { align: "center" });
+
+    // Meta box
+    doc.setFillColor(239, 246, 255);
+    doc.rect(marginX, 27, contentWidth, 18, "F");
+    doc.setDrawColor(147, 197, 253);
+    doc.rect(marginX, 27, contentWidth, 18, "S");
+
+    doc.setFont("Roboto", "normal");
+    doc.setFontSize(8);
+    doc.setTextColor(15, 23, 42);
+    doc.text(`Supplier: ${data.supplier_name}`, marginX + 3, 32);
+    doc.text(`GSTIN: ${data.supplier_gstin || "-"}`, marginX + 3, 37);
+    doc.text(`Settlement: ${data.settlement_type === "credit_adjust" ? "Adjust against Payable" : "Refund Received"}`, marginX + 3, 42);
+
+    doc.setFont("Roboto", "bold");
+    doc.setTextColor(30, 58, 138);
+    doc.text(`Debit Note: #${data.return_number}`, marginX + contentWidth - 3, 32, { align: "right" });
+    doc.setFont("Roboto", "normal");
+    doc.setTextColor(15, 23, 42);
+    doc.text(`Date: ${data.return_date}`, marginX + contentWidth - 3, 37, { align: "right" });
+    doc.text(
+      data.original_purchase_number ? `Purchase Bill: #${data.original_purchase_number}` : "Standalone Return",
+      marginX + contentWidth - 3,
+      42,
+      { align: "right" }
+    );
+
+    // Items table
+    const tableBody = data.lines.map((l, idx) => [
+      String(idx + 1),
+      l.description,
+      l.hsn_code || "300490",
+      l.batch_no || "-",
+      l.expiry_date || "-",
+      String(l.qty),
+      `₹ ${l.rate.toFixed(2)}`,
+      `${l.gst_percent}%`,
+      `₹ ${l.amount.toFixed(2)}`,
+    ]);
+
+    autoTable(doc, {
+      startY: 48,
+      margin: { left: marginX, right: marginX },
+      head: [["#", "Item Description", "HSN", "Batch", "Exp", "Qty", "Purchase Rate", "GST %", "Total (₹)"]],
+      body: tableBody,
+      theme: "plain",
+      styles: { font: "Roboto", fontSize: 7.5, cellPadding: 2, textColor: [30, 41, 59] },
+      headStyles: { font: "Roboto", fontStyle: "bold", fillColor: [239, 246, 255], textColor: [30, 58, 138] },
+      columnStyles: {
+        0: { halign: "center", cellWidth: 10 },
+        1: { halign: "left" },
+        2: { halign: "center", cellWidth: 20 },
+        3: { halign: "center", cellWidth: 22 },
+        4: { halign: "center", cellWidth: 18 },
+        5: { halign: "right", cellWidth: 14, fontStyle: "bold" },
+        6: { halign: "right", cellWidth: 22 },
+        7: { halign: "right", cellWidth: 16 },
+        8: { halign: "right", cellWidth: 24, fontStyle: "bold" },
+      },
+    });
+
+    let bottomY = (doc as any).lastAutoTable?.finalY ? (doc as any).lastAutoTable.finalY + 6 : 140;
+    if (bottomY + 50 > 280) {
+      doc.addPage();
+      bottomY = 15;
+    }
+
+    // Amount in words
+    const amountWords = data.amount_in_words || numberToWordsIndian(data.grand_total);
+    doc.setFillColor(248, 250, 252);
+    doc.rect(marginX, bottomY, contentWidth, 7, "F");
+    doc.setDrawColor(203, 213, 225);
+    doc.rect(marginX, bottomY, contentWidth, 7, "S");
+    doc.setFont("Roboto", "bold");
+    doc.setFontSize(7.5);
+    doc.setTextColor(30, 41, 59);
+    doc.text(`Debit Amount in Words: ${amountWords}`, marginX + 3, bottomY + 4.8);
+
+    // Totals card on right
+    const rowY = bottomY + 10;
+    const totalsW = 75;
+    const totalsX = marginX + contentWidth - totalsW;
+    doc.setFillColor(248, 250, 252);
+    doc.rect(totalsX, rowY, totalsW, 30, "F");
+    doc.setDrawColor(203, 213, 225);
+    doc.rect(totalsX, rowY, totalsW, 30, "S");
+
+    doc.setFont("Roboto", "normal");
+    doc.setFontSize(7.5);
+    doc.setTextColor(71, 85, 105);
+    doc.text("Taxable Value:", totalsX + 3, rowY + 6);
+    doc.text(`₹ ${data.subtotal.toFixed(2)}`, totalsX + totalsW - 3, rowY + 6, { align: "right" });
+
+    doc.text("Input GST Reversal:", totalsX + 3, rowY + 12);
+    doc.text(`₹ ${data.tax_total.toFixed(2)}`, totalsX + totalsW - 3, rowY + 12, { align: "right" });
+
+    doc.setFont("Roboto", "bold");
+    doc.setFontSize(8.5);
+    doc.setTextColor(30, 58, 138);
+    doc.text("Total Debit:", totalsX + 3, rowY + 24);
+    doc.text(`₹ ${data.grand_total.toFixed(2)}`, totalsX + totalsW - 3, rowY + 24, { align: "right" });
+
+    // Signatory on left
+    const signW = 105;
+    doc.setFillColor(255, 255, 255);
+    doc.rect(marginX, rowY, signW, 30, "F");
+    doc.setDrawColor(226, 232, 240);
+    doc.rect(marginX, rowY, signW, 30, "S");
+
+    doc.setFont("Roboto", "normal");
+    doc.setFontSize(7);
+    doc.setTextColor(100, 116, 139);
+    doc.text("Debit Note issued to supplier for return of goods under GST rules.", marginX + 3, rowY + 6);
+    doc.text(`Settlement: ${data.settlement_type === "credit_adjust" ? "Adjust against Payable" : "Refund Received"}`, marginX + 3, rowY + 11);
+    doc.text(`For ${data.store_name}`, marginX + signW - 3, rowY + 18, { align: "right" });
+    doc.text("Authorised Signatory", marginX + signW - 3, rowY + 26, { align: "right" });
+
+    return new Uint8Array(doc.output("arraybuffer"));
+  }
+}
+
+export interface ReturnLinePrintItem {
+  description: string;
+  hsn_code?: string;
+  batch_no?: string;
+  expiry_date?: string;
+  qty: number;
+  rate: number;
+  gst_percent: number;
+  amount: number;
+  reason?: string;
+}
+
+export interface CreditNotePrintData {
+  return_number: string;
+  return_date: string;
+  original_invoice_number?: string;
+  original_invoice_date?: string;
+  store_name: string;
+  store_address?: string;
+  store_phone?: string;
+  store_gstin?: string;
+  drug_license_numbers?: string[];
+  customer_name: string;
+  customer_phone?: string;
+  customer_gstin?: string;
+  lines: ReturnLinePrintItem[];
+  subtotal: number;
+  tax_total: number;
+  cgst_total?: number;
+  sgst_total?: number;
+  round_off: number;
+  grand_total: number;
+  refund_mode: string;
+  amount_in_words?: string;
+  notes?: string;
+}
+
+export interface DebitNotePrintData {
+  return_number: string;
+  return_date: string;
+  original_purchase_number?: string;
+  supplier_invoice_no?: string;
+  store_name: string;
+  store_address?: string;
+  store_phone?: string;
+  store_gstin?: string;
+  supplier_name: string;
+  supplier_phone?: string;
+  supplier_gstin?: string;
+  lines: ReturnLinePrintItem[];
+  subtotal: number;
+  tax_total: number;
+  cgst_total?: number;
+  sgst_total?: number;
+  round_off: number;
+  grand_total: number;
+  settlement_type: string;
+  amount_in_words?: string;
+  notes?: string;
 }
 
 export const printingEngine = new PrintingEngine();
