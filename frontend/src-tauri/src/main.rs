@@ -191,10 +191,12 @@ fn print_a4(data: Value, printer_name: Option<String>) -> Result<Value, String> 
 fn print_export_pdf(
     data: Value,
     target_path: Option<String>,
+    pdf_bytes: Option<Vec<u8>>,
+    pdf_base64: Option<String>,
     html_content: Option<String>,
 ) -> Result<Value, String> {
     let invoice_no = data["invoice_number"].as_str().unwrap_or("INV-001");
-    let clean_invoice_no = invoice_no.replace('/', "_");
+    let clean_invoice_no = invoice_no.replace('/', "_").replace('\\', "_");
 
     let final_path = if let Some(ref p) = target_path {
         PathBuf::from(p)
@@ -206,16 +208,24 @@ fn print_export_pdf(
             .join("scratch")
             .join("lamsuite-billing")
             .join("exports");
-        let _ = fs::create_dir_all(&exports_dir);
-        exports_dir.join(format!("Invoice_{}.html", clean_invoice_no))
+        fs::create_dir_all(&exports_dir).map_err(|e| format!("Cannot create exports directory '{}': {}", exports_dir.display(), e))?;
+        exports_dir.join(format!("Invoice_{}.pdf", clean_invoice_no))
     };
 
     if let Some(parent) = final_path.parent() {
-        let _ = fs::create_dir_all(parent);
+        fs::create_dir_all(parent).map_err(|e| format!("Cannot create folder '{}': {}", parent.display(), e))?;
     }
 
-    let content_to_write = if let Some(ref html) = html_content {
-        html.clone()
+    let bytes_to_write: Vec<u8> = if let Some(b) = pdf_bytes {
+        b
+    } else if let Some(ref b64) = pdf_base64 {
+        // Simple base64 decoding if provided
+        match base64_decode(b64) {
+            Ok(decoded) => decoded,
+            Err(_) => b64.as_bytes().to_vec(),
+        }
+    } else if let Some(ref html) = html_content {
+        html.as_bytes().to_vec()
     } else {
         format!(
             "<!DOCTYPE html><html><body><h1>Invoice #{}</h1><p>Date: {}</p><p>Customer: {}</p><p>Total: Rs. {}</p></body></html>",
@@ -223,26 +233,23 @@ fn print_export_pdf(
             data["invoice_date"].as_str().unwrap_or(""),
             data["customer_name"].as_str().unwrap_or("Walk-in"),
             data["grand_total"]
-        )
+        ).into_bytes()
     };
 
-    let _ = fs::write(&final_path, content_to_write);
+    fs::write(&final_path, &bytes_to_write)
+        .map_err(|e| format!("Failed to write invoice to '{}': {}", final_path.display(), e))?;
 
-    // Auto-reveal in Finder on macOS / Explorer on Windows
+    if !final_path.exists() {
+        return Err(format!("File verification failed: '{}' does not exist after writing", final_path.display()));
+    }
+
+    let meta = fs::metadata(&final_path)
+        .map_err(|e| format!("Cannot inspect written file '{}': {}", final_path.display(), e))?;
+    if meta.len() == 0 {
+        return Err(format!("File '{}' was written but has size 0 bytes", final_path.display()));
+    }
+
     let path_str = final_path.to_string_lossy().to_string();
-    #[cfg(target_os = "macos")]
-    {
-        let _ = std::process::Command::new("open")
-            .arg("-R")
-            .arg(&path_str)
-            .spawn();
-    }
-    #[cfg(target_os = "windows")]
-    {
-        let _ = std::process::Command::new("explorer")
-            .arg(format!("/select,{}", path_str))
-            .spawn();
-    }
 
     Ok(json!({
         "success": true,
@@ -250,26 +257,91 @@ fn print_export_pdf(
     }))
 }
 
+fn base64_decode(input: &str) -> Result<Vec<u8>, ()> {
+    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = Vec::new();
+    let mut buf: u32 = 0;
+    let mut bits: u32 = 0;
+
+    for &byte in input.as_bytes() {
+        if byte == b'=' {
+            break;
+        }
+        let val = match TABLE.iter().position(|&c| c == byte) {
+            Some(idx) => idx as u32,
+            None => continue,
+        };
+        buf = (buf << 6) | val;
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            out.push((buf >> bits) as u8);
+        }
+    }
+    Ok(out)
+}
+
 #[tauri::command]
-fn reveal_file(path: String) -> Result<Value, String> {
+fn open_file(path: String) -> Result<Value, String> {
+    let p = PathBuf::from(&path);
+    if !p.exists() {
+        return Err(format!("File does not exist: {}", path));
+    }
+
     #[cfg(target_os = "macos")]
     {
         let _ = std::process::Command::new("open")
-            .arg("-R")
             .arg(&path)
-            .spawn();
+            .spawn()
+            .map_err(|e| format!("Failed to open file: {}", e))?;
     }
     #[cfg(target_os = "windows")]
     {
-        let _ = std::process::Command::new("explorer")
-            .arg(format!("/select,{}", path))
-            .spawn();
+        let _ = std::process::Command::new("cmd")
+            .args(["/C", "start", "", &path])
+            .spawn()
+            .map_err(|e| format!("Failed to open file: {}", e))?;
     }
     #[cfg(target_os = "linux")]
     {
         let _ = std::process::Command::new("xdg-open")
             .arg(&path)
-            .spawn();
+            .spawn()
+            .map_err(|e| format!("Failed to open file: {}", e))?;
+    }
+
+    Ok(json!({ "success": true }))
+}
+
+#[tauri::command]
+fn reveal_file(path: String) -> Result<Value, String> {
+    let p = PathBuf::from(&path);
+    if !p.exists() {
+        return Err(format!("File does not exist: {}", path));
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        let _ = std::process::Command::new("open")
+            .arg("-R")
+            .arg(&path)
+            .spawn()
+            .map_err(|e| format!("Failed to reveal file: {}", e))?;
+    }
+    #[cfg(target_os = "windows")]
+    {
+        let _ = std::process::Command::new("explorer")
+            .arg(format!("/select,{}", path))
+            .spawn()
+            .map_err(|e| format!("Failed to reveal file: {}", e))?;
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let dir = p.parent().unwrap_or(&p);
+        let _ = std::process::Command::new("xdg-open")
+            .arg(dir)
+            .spawn()
+            .map_err(|e| format!("Failed to reveal file: {}", e))?;
     }
     Ok(json!({ "success": true }))
 }
@@ -329,6 +401,7 @@ fn main() {
             print_thermal,
             print_a4,
             print_export_pdf,
+            open_file,
             reveal_file,
             lan_discover_main
         ])

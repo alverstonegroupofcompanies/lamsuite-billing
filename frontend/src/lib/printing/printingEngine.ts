@@ -1,4 +1,6 @@
 import { getIpcBridge } from "../ipc/ipcBridge";
+import { jsPDF } from "jspdf";
+import autoTable from "jspdf-autotable";
 
 export interface InvoicePrintData {
   invoice_number: string;
@@ -339,43 +341,299 @@ export class PrintingEngine {
 </html>`;
   }
 
-  async revealFile(filePath: string): Promise<boolean> {
+  /**
+   * Generates a high-fidelity vector PDF matching the A4 Tax Invoice layout,
+   * with automatic multi-page splitting, repeating headers, and totals summary.
+   */
+  generateInvoicePdf(data: InvoicePrintData): Uint8Array {
+    const doc = new jsPDF({
+      orientation: "portrait",
+      unit: "mm",
+      format: "a4",
+    });
+
+    const pageWidth = 210;
+    const marginX = 12;
+    const contentWidth = pageWidth - marginX * 2; // 186mm
+    const centerX = pageWidth / 2;
+
+    // Header: Pharmacy Name & Contact
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(16);
+    doc.setTextColor(15, 23, 42); // slate-900
+    doc.text(data.store_name || "Pharmacy Store", centerX, 15, { align: "center" });
+
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8.5);
+    doc.setTextColor(71, 85, 105); // slate-600
+    const addressLine = `${data.store_address || "Main Road, Palakkad, Kerala - 678001"} • Phone: ${data.store_phone || "9876543210"}`;
+    doc.text(addressLine, centerX, 20.5, { align: "center" });
+
+    // Licenses (GSTIN, DL, FSSAI)
+    const licenseItems: string[] = [];
+    if (data.store_gstin) licenseItems.push(`GSTIN: ${data.store_gstin}`);
+    if (data.drug_license_numbers && data.drug_license_numbers.length > 0) {
+      licenseItems.push(`DL: ${data.drug_license_numbers.join(", ")}`);
+    }
+    if (data.fssai_no) licenseItems.push(`FSSAI: ${data.fssai_no}`);
+
+    if (licenseItems.length > 0) {
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(8);
+      doc.setTextColor(51, 65, 85);
+      doc.text(licenseItems.join("  |  "), centerX, 25, { align: "center" });
+    }
+
+    // Divider Line
+    doc.setDrawColor(203, 213, 225); // slate-300
+    doc.setLineWidth(0.4);
+    doc.line(marginX, 27.5, marginX + contentWidth, 27.5);
+
+    // Title Badge
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(10.5);
+    doc.setTextColor(30, 41, 59);
+    doc.text("TAX INVOICE", centerX, 32.5, { align: "center" });
+
+    // Metadata Grid (Customer / Patient / Doctor / Invoice Info)
+    const metaBoxY = 35;
+    const metaBoxHeight = 22;
+    doc.setFillColor(248, 250, 252); // slate-50
+    doc.rect(marginX, metaBoxY, contentWidth, metaBoxHeight, "F");
+    doc.setDrawColor(226, 232, 240); // slate-200
+    doc.rect(marginX, metaBoxY, contentWidth, metaBoxHeight, "S");
+
+    doc.setFontSize(8);
+    const leftX = marginX + 3;
+    const rightColX = marginX + contentWidth / 2 + 10;
+
+    // Left Column
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(30, 41, 59);
+    doc.text(`Billed To: ${data.customer_name || "Walk-in Customer"}`, leftX, metaBoxY + 5);
+
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(71, 85, 105);
+    doc.text(`Mobile: ${data.customer_phone || "Not specified"}`, leftX, metaBoxY + 9.5);
+
+    if (data.patient_name) {
+      const patientInfo = `Patient: ${data.patient_name}${data.patient_age ? ` (${data.patient_age} yrs)` : ""}${data.patient_gender ? ` / ${data.patient_gender}` : ""}`;
+      doc.text(patientInfo, leftX, metaBoxY + 14);
+    } else {
+      doc.text("Category: Retail Sale", leftX, metaBoxY + 14);
+    }
+
+    if (data.doctor_name) {
+      const doctorInfo = `Doctor: ${data.doctor_name}${data.doctor_reg_no ? ` [Reg: ${data.doctor_reg_no}]` : ""}`;
+      doc.text(doctorInfo, leftX, metaBoxY + 18.5);
+    }
+
+    // Right Column
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(30, 41, 59);
+    doc.text(`Invoice No: ${data.invoice_number}`, rightColX, metaBoxY + 5);
+
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(71, 85, 105);
+    doc.text(`Date: ${data.invoice_date}`, rightColX, metaBoxY + 9.5);
+    doc.text("Place of Supply: 32-Kerala", rightColX, metaBoxY + 14);
+
+    // Items Table using jspdf-autotable
+    const tableRows = data.lines.map((l, i) => [
+      String(i + 1),
+      l.description,
+      l.batch_no || "-",
+      l.expiry_date || "-",
+      `${l.qty}${l.loose_qty ? ` + ${l.loose_qty}L` : ""}`,
+      l.rate.toFixed(2),
+      `${l.gst_percent}%`,
+      l.amount.toFixed(2),
+    ]);
+
+    autoTable(doc, {
+      startY: 60,
+      margin: { left: marginX, right: marginX },
+      head: [["#", "Item / Description", "Batch", "Expiry", "Qty", "Rate (₹)", "GST %", "Total (₹)"]],
+      body: tableRows,
+      theme: "grid",
+      headStyles: {
+        fillColor: [241, 245, 249],
+        textColor: [15, 23, 42],
+        fontStyle: "bold",
+        fontSize: 8,
+        halign: "left",
+      },
+      bodyStyles: {
+        fontSize: 7.5,
+        textColor: [30, 41, 59],
+        cellPadding: 2,
+      },
+      alternateRowStyles: {
+        fillColor: [255, 255, 255],
+      },
+      columnStyles: {
+        0: { halign: "center", cellWidth: 8 },
+        1: { halign: "left", cellWidth: 54, fontStyle: "bold" },
+        2: { halign: "center", cellWidth: 22 },
+        3: { halign: "center", cellWidth: 18 },
+        4: { halign: "right", cellWidth: 16 },
+        5: { halign: "right", cellWidth: 20 },
+        6: { halign: "right", cellWidth: 16 },
+        7: { halign: "right", cellWidth: 32, fontStyle: "bold" },
+      },
+    });
+
+    // Check final position for Totals & Footer
+    let finalY = (doc as any).lastAutoTable?.finalY ? (doc as any).lastAutoTable.finalY + 5 : 120;
+    if (finalY + 45 > 280) {
+      doc.addPage();
+      finalY = 15;
+    }
+
+    // Totals Box (Right Side)
+    const totalsBoxWidth = 72;
+    const totalsBoxX = marginX + contentWidth - totalsBoxWidth;
+    doc.setFillColor(248, 250, 252);
+    doc.rect(totalsBoxX, finalY, totalsBoxWidth, 28, "F");
+    doc.setDrawColor(226, 232, 240);
+    doc.rect(totalsBoxX, finalY, totalsBoxWidth, 28, "S");
+
+    doc.setFontSize(8);
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(71, 85, 105);
+    doc.text("Taxable Subtotal:", totalsBoxX + 3, finalY + 5.5);
+    doc.text(`₹ ${data.subtotal.toFixed(2)}`, totalsBoxX + totalsBoxWidth - 3, finalY + 5.5, { align: "right" });
+
+    doc.text("GST Tax Total:", totalsBoxX + 3, finalY + 10.5);
+    doc.text(`₹ ${data.tax_total.toFixed(2)}`, totalsBoxX + totalsBoxWidth - 3, finalY + 10.5, { align: "right" });
+
+    if (data.round_off !== 0) {
+      doc.text("Round-Off:", totalsBoxX + 3, finalY + 15.5);
+      const roSign = data.round_off > 0 ? "+" : "";
+      doc.text(`${roSign}₹ ${data.round_off.toFixed(2)}`, totalsBoxX + totalsBoxWidth - 3, finalY + 15.5, { align: "right" });
+    }
+
+    doc.setDrawColor(203, 213, 225);
+    doc.line(totalsBoxX + 2, finalY + 18.5, totalsBoxX + totalsBoxWidth - 2, finalY + 18.5);
+
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(9.5);
+    doc.setTextColor(29, 78, 216); // blue-700
+    doc.text("Grand Total:", totalsBoxX + 3, finalY + 24);
+    doc.text(`₹ ${data.grand_total.toFixed(2)}`, totalsBoxX + totalsBoxWidth - 3, finalY + 24, { align: "right" });
+
+    // Terms & Signatory (Left Side)
+    const termsX = marginX;
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(7.5);
+    doc.setTextColor(100, 116, 139);
+    doc.text(
+      data.terms_and_conditions || "Thank you for your business! Goods once sold cannot be returned without original cash memo.",
+      termsX,
+      finalY + 8,
+      { maxWidth: 105 }
+    );
+    doc.text(data.jurisdiction_note || "Subject to local jurisdiction.", termsX, finalY + 15, { maxWidth: 105 });
+
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(51, 65, 85);
+    doc.text("Authorised Signatory / Pharmacist", termsX, finalY + 25);
+
+    // Page Numbering & Bottom Brand Mark on all pages
+    const totalPages = doc.getNumberOfPages();
+    for (let p = 1; p <= totalPages; p++) {
+      doc.setPage(p);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(7.5);
+      doc.setTextColor(148, 163, 184);
+      doc.text(
+        `Page ${p} of ${totalPages}  •  Computer Generated Tax Invoice  •  LamSuite POS`,
+        centerX,
+        292,
+        { align: "center" }
+      );
+    }
+
+    return new Uint8Array(doc.output("arraybuffer"));
+  }
+
+  async openFile(filePath: string): Promise<boolean> {
     const bridge = getIpcBridge();
     if (bridge.runtime === "tauri") {
       try {
-        await bridge.invoke("reveal_file", { path: filePath });
+        await bridge.invoke("open_file", { path: filePath });
         return true;
-      } catch {
+      } catch (e) {
+        console.error("Failed to open file via Tauri:", e);
         return false;
       }
     }
     return false;
   }
 
-  async exportToPdf(data: InvoicePrintData): Promise<{ success: boolean; file_path?: string; cancelled?: boolean }> {
+  async revealFile(filePath: string): Promise<boolean> {
     const bridge = getIpcBridge();
-    const cleanInvoiceNo = data.invoice_number.replace(/[^a-zA-Z0-9_-]/g, "_");
-    const defaultFileName = `Invoice_${cleanInvoiceNo}.html`;
-    const html = this.generateInvoiceHtml(data);
-
-    // 1. If running inside desktop Tauri app, open native Save File Dialog (Finder on macOS / Explorer on Windows)
     if (bridge.runtime === "tauri") {
       try {
+        await bridge.invoke("reveal_file", { path: filePath });
+        return true;
+      } catch (e) {
+        console.error("Failed to reveal file via Tauri:", e);
+        return false;
+      }
+    }
+    return false;
+  }
+
+  async exportToPdf(data: InvoicePrintData): Promise<{ success: boolean; file_path?: string; cancelled?: boolean; error?: string }> {
+    const bridge = getIpcBridge();
+    const cleanInvoiceNo = data.invoice_number.replace(/[^a-zA-Z0-9_-]/g, "_");
+    const defaultFileName = `Invoice_${cleanInvoiceNo}.pdf`;
+
+    let pdfBytes: Uint8Array;
+    try {
+      pdfBytes = this.generateInvoicePdf(data);
+    } catch (err: any) {
+      console.error("PDF generation failed:", err);
+      return { success: false, error: `PDF generation error: ${err?.message || err}` };
+    }
+
+    // 1. Desktop Tauri App: Native Save As Dialog (Finder on macOS / Explorer on Windows)
+    if (bridge.runtime === "tauri") {
+      try {
+        const LAST_FOLDER_KEY = "lamsuite_last_save_pdf_folder";
+        let defaultPath = defaultFileName;
+        try {
+          const lastFolder = typeof window !== "undefined" ? localStorage.getItem(LAST_FOLDER_KEY) : null;
+          if (lastFolder) {
+            const cleanFolder = lastFolder.replace(/[/\\]+$/, "");
+            defaultPath = `${cleanFolder}/${defaultFileName}`;
+          }
+        } catch {}
+
         let chosenPath: string | null = null;
         try {
           const { save } = await import("@tauri-apps/api/dialog");
           chosenPath = await save({
-            defaultPath: defaultFileName,
+            defaultPath,
             filters: [
-              { name: "Printable Invoice (HTML)", extensions: ["html", "htm"] },
-              { name: "PDF Document", extensions: ["pdf"] },
+              { name: "PDF Document (*.pdf)", extensions: ["pdf"] },
             ],
-            title: "Save Invoice File",
+            title: "Save Invoice as PDF",
           });
 
-          // If user cancelled the Finder / File Explorer dialog
+          // If user cancelled the Finder / File Explorer dialog, stop immediately with cancelled: true
           if (!chosenPath) {
             return { success: false, cancelled: true };
+          }
+
+          // Remember the chosen folder for next time
+          const lastSlash = Math.max(chosenPath.lastIndexOf("/"), chosenPath.lastIndexOf("\\"));
+          if (lastSlash > 0) {
+            const chosenDir = chosenPath.substring(0, lastSlash);
+            try {
+              localStorage.setItem(LAST_FOLDER_KEY, chosenDir);
+            } catch {}
           }
         } catch (dialogErr) {
           console.warn("Tauri dialog save prompt fallback:", dialogErr);
@@ -384,69 +642,78 @@ export class PrintingEngine {
         const res = await bridge.invoke<{ success: boolean; file_path?: string }>("print:export_pdf", {
           data,
           target_path: chosenPath || undefined,
-          html_content: html,
+          pdf_bytes: Array.from(pdfBytes),
         });
 
-        return res;
-      } catch (err) {
+        if (res && res.success) {
+          return { success: true, file_path: res.file_path };
+        } else {
+          return { success: false, error: "Failed to write PDF file to disk" };
+        }
+      } catch (err: any) {
         console.error("Tauri PDF export failed:", err);
+        return { success: false, error: err instanceof Error ? err.message : String(err) };
       }
     }
 
-    // 2. In Browser runtime: Save as PDF from the browser
+    // 2. In Browser runtime: Save as PDF
     if (typeof window !== "undefined") {
       // Modern browser File System Access API: triggers native Finder / File Explorer "Save As" sheet
       if ("showSaveFilePicker" in window) {
         try {
           const handle = await (window as any).showSaveFilePicker({
-            suggestedName: `Invoice_${cleanInvoiceNo}.html`,
+            suggestedName: defaultFileName,
             types: [
               {
-                description: "Printable Tax Invoice",
-                accept: { "text/html": [".html", ".htm"] },
+                description: "PDF Document (*.pdf)",
+                accept: { "application/pdf": [".pdf"] },
               },
             ],
           });
           const writable = await handle.createWritable();
-          await writable.write(html);
+          await writable.write(pdfBytes);
           await writable.close();
-          return { success: true, file_path: handle.name || `Invoice_${cleanInvoiceNo}.html` };
+          return { success: true, file_path: handle.name || defaultFileName };
         } catch (pickerErr: any) {
           if (pickerErr && typeof pickerErr === "object" && (pickerErr as { name?: string }).name === "AbortError") {
             return { success: false, cancelled: true };
           }
+          return { success: false, error: pickerErr?.message || "Failed to save PDF to selected location" };
         }
       }
 
-      // Browser Fallback: Open print dialog (Save as PDF) and download file to ~/Downloads
+      // Browser Fallback: Direct download blob with correct application/pdf MIME type
       try {
-        const printWindow = window.open("", "_blank", "width=850,height=900");
-        if (printWindow) {
-          printWindow.document.open();
-          printWindow.document.write(html);
-          printWindow.document.close();
-          printWindow.focus();
-          setTimeout(() => {
-            printWindow.print();
-          }, 300);
-        }
-      } catch {}
+        const blob = new Blob([pdfBytes.buffer as ArrayBuffer], { type: "application/pdf" });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = defaultFileName;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        setTimeout(() => URL.revokeObjectURL(url), 10000);
 
-      // Also trigger direct download to ~/Downloads/
-      const blob = new Blob([html], { type: "text/html;charset=utf-8;" });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = `Invoice_${cleanInvoiceNo}.html`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(url);
-
-      return { success: true, file_path: `Downloads/Invoice_${cleanInvoiceNo}.html` };
+        return { success: true, file_path: `Downloads/${defaultFileName}` };
+      } catch (blobErr: any) {
+        return { success: false, error: blobErr?.message || "Browser download failed" };
+      }
     }
 
-    return { success: true, file_path: `/exports/invoice_${data.invoice_number}.pdf` };
+    // 3. Desktop / Mock runtime fallback (e.g. testing)
+    try {
+      const res = await bridge.invoke<{ success: boolean; file_path?: string }>("print:export_pdf", {
+        data,
+        target_path: `/exports/${defaultFileName}`,
+        pdf_bytes: Array.from(pdfBytes),
+      });
+      if (res && res.success) {
+        return { success: true, file_path: res.file_path || `/exports/${defaultFileName}` };
+      }
+      return { success: false, error: "Failed to write PDF file" };
+    } catch (err: any) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) };
+    }
   }
 }
 

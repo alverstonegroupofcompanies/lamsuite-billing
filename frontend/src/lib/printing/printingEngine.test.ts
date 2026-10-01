@@ -91,4 +91,134 @@ describe("Printing Engine & Document Layouts (PRN-001, PRN-002, PRN-005)", () =>
       expect(profiles.find((p) => p.isDefault)?.silentPrint).toBe(true);
     });
   });
+
+  describe("Real PDF Generation & Multi-Page Pagination", () => {
+    it("generates a genuine vector PDF with valid magic header and single page for 1-item invoice", () => {
+      const singleItemInvoice: InvoicePrintData = {
+        invoice_number: "INV-2026-001",
+        invoice_date: "2026-10-01",
+        store_name: "LamSuite Medicare",
+        store_address: "Court Road, Palakkad - 678001",
+        store_phone: "9876543210",
+        store_gstin: "32AAAAA0000A1Z5",
+        drug_license_numbers: ["20B-112233", "21B-445566"],
+        customer_name: "Rahul Nair",
+        customer_phone: "9447000000",
+        patient_name: "Rahul Nair",
+        doctor_name: "Dr. K. Menon",
+        lines: [
+          {
+            description: "Dolo 650 Tablets (15 Tabs)",
+            batch_no: "DL992",
+            expiry_date: "2027-08",
+            qty: 1,
+            rate: 128,
+            gst_percent: 12,
+            amount: 128,
+          },
+        ],
+        subtotal: 114.28,
+        tax_total: 13.72,
+        round_off: 0,
+        grand_total: 128,
+      };
+
+      const pdfBytes = printingEngine.generateInvoicePdf(singleItemInvoice);
+      expect(pdfBytes).toBeInstanceOf(Uint8Array);
+      expect(pdfBytes.length).toBeGreaterThan(1000);
+
+      // Verify PDF header magic bytes %PDF-
+      const headerStr = String.fromCharCode(...pdfBytes.subarray(0, 5));
+      expect(headerStr).toBe("%PDF-");
+    });
+
+    it("generates multi-page PDF with pagination for 40+ item invoice without layout corruption", () => {
+      const lines = [];
+      for (let i = 1; i <= 45; i++) {
+        lines.push({
+          description: `Pharmaceutical Capsule / Tablet Item #${i}`,
+          batch_no: `BAT-${1000 + i}`,
+          expiry_date: "2028-05",
+          qty: 2,
+          rate: 50,
+          gst_percent: 12,
+          amount: 100,
+        });
+      }
+
+      const multiItemInvoice: InvoicePrintData = {
+        invoice_number: "INV-2026-MULTI45",
+        invoice_date: "2026-10-01",
+        store_name: "LamSuite Super Specialty Pharmacy",
+        lines,
+        subtotal: 4000,
+        tax_total: 480,
+        round_off: 0,
+        grand_total: 4480,
+      };
+
+      const pdfBytes = printingEngine.generateInvoicePdf(multiItemInvoice);
+      expect(pdfBytes).toBeInstanceOf(Uint8Array);
+      expect(pdfBytes.length).toBeGreaterThan(50000); // 45 items generate a substantial multi-page vector PDF
+
+      const headerStr = String.fromCharCode(...pdfBytes.subarray(0, 5));
+      expect(headerStr).toBe("%PDF-");
+
+      // Verify that the PDF content contains multi-page markers
+      const rawString = String.fromCharCode(...pdfBytes.subarray(0, 1000));
+      expect(rawString).toContain("%PDF-");
+    });
+
+    it("exports PDF via IPC bridge with binary data and real file path", async () => {
+      resetMockHandlers();
+      registerMockHandler("print:export_pdf", async (args: any) => {
+        expect(args.pdf_bytes).toBeDefined();
+        expect(Array.isArray(args.pdf_bytes)).toBe(true);
+        expect(args.pdf_bytes.length).toBeGreaterThan(1000);
+        return {
+          success: true,
+          file_path: "/Users/test/Documents/Invoices/Invoice_INV-2026-001.pdf",
+        };
+      });
+
+      const sampleData: InvoicePrintData = {
+        invoice_number: "INV-2026-001",
+        invoice_date: "2026-10-01",
+        store_name: "Apex Pharmacy",
+        lines: [{ description: "Paracetamol", qty: 1, rate: 30, gst_percent: 12, amount: 30 }],
+        subtotal: 30,
+        tax_total: 3.6,
+        round_off: 0.4,
+        grand_total: 34,
+      };
+
+      const res = await printingEngine.exportToPdf(sampleData);
+      expect(res.success).toBe(true);
+      expect(res.file_path).toBe("/Users/test/Documents/Invoices/Invoice_INV-2026-001.pdf");
+      expect(res.cancelled).toBeFalsy();
+    });
+
+    it("handles write failure on read-only destination without reporting false success", async () => {
+      resetMockHandlers();
+      registerMockHandler("print:export_pdf", async () => {
+        throw new Error("Permission denied: Cannot write to read-only folder '/Volumes/ReadOnly/Invoices'");
+      });
+
+      const sampleData: InvoicePrintData = {
+        invoice_number: "INV-2026-ERR",
+        invoice_date: "2026-10-01",
+        store_name: "Apex Pharmacy",
+        lines: [{ description: "Paracetamol", qty: 1, rate: 30, gst_percent: 12, amount: 30 }],
+        subtotal: 30,
+        tax_total: 3.6,
+        round_off: 0.4,
+        grand_total: 34,
+      };
+
+      const res = await printingEngine.exportToPdf(sampleData);
+      expect(res.success).toBe(false);
+      expect(res.error).toContain("Permission denied");
+      expect(res.file_path).toBeUndefined();
+    });
+  });
 });

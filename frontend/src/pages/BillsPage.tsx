@@ -20,6 +20,8 @@ import {
   Lock,
   UserCheck,
   RefreshCw,
+  FolderOpen,
+  ExternalLink,
 } from "lucide-react";
 import {
   invoiceManagementService,
@@ -69,14 +71,27 @@ export const BillsPage: React.FC = () => {
   const [editPinError, setEditPinError] = useState("");
 
   // Notification Toast
-  const [notification, setNotification] = useState<{ message: string; type: "success" | "error" } | null>(null);
+  interface NotificationAction {
+    label: string;
+    icon?: "open" | "folder";
+    onClick: () => void;
+  }
+  const [notification, setNotification] = useState<{
+    message: string;
+    type: "success" | "error";
+    actions?: NotificationAction[];
+  } | null>(null);
 
   const searchInputRef = useRef<HTMLInputElement>(null);
   const tableRef = useRef<HTMLTableSectionElement>(null);
 
-  const showNotification = (message: string, type: "success" | "error" = "success") => {
-    setNotification({ message, type });
-    setTimeout(() => setNotification(null), 3500);
+  const showNotification = (
+    message: string,
+    type: "success" | "error" = "success",
+    actions?: NotificationAction[]
+  ) => {
+    setNotification({ message, type, actions });
+    setTimeout(() => setNotification(null), actions && actions.length > 0 ? 8000 : 3500);
   };
 
   const loadInvoices = async () => {
@@ -224,10 +239,31 @@ export const BillsPage: React.FC = () => {
       } else if (format === "pdf") {
         const res = await printingEngine.exportToPdf(printData);
         if (res.cancelled) {
-          showNotification("Save cancelled", "error");
+          // User intentionally cancelled the file dialog - show nothing
           return;
         }
-        showNotification(res.file_path ? `Saved to: ${res.file_path}` : "PDF invoice saved!");
+        if (!res.success) {
+          showNotification(res.error || "Failed to save PDF invoice", "error");
+          return;
+        }
+        showNotification(
+          res.file_path ? `Saved to: ${res.file_path}` : "PDF invoice saved successfully!",
+          "success",
+          res.file_path
+            ? [
+                {
+                  label: "Open file",
+                  icon: "open",
+                  onClick: () => printingEngine.openFile(res.file_path!),
+                },
+                {
+                  label: "Show in folder",
+                  icon: "folder",
+                  onClick: () => printingEngine.revealFile(res.file_path!),
+                },
+              ]
+            : undefined
+        );
       }
     } catch (err) {
       showNotification("Error printing invoice", "error");
@@ -356,16 +392,47 @@ export const BillsPage: React.FC = () => {
       {/* Toast Notification */}
       {notification && (
         <div
-          className={`fixed top-4 right-4 z-50 flex items-center gap-2 rounded-lg px-4 py-3 text-xs font-semibold text-white shadow-lg transition-all ${
-            notification.type === "success" ? "bg-emerald-600" : "bg-red-600"
+          className={`fixed top-4 right-4 z-50 flex flex-col gap-2 rounded-xl p-3.5 text-xs font-semibold shadow-2xl transition-all max-w-lg border ${
+            notification.type === "success"
+              ? "bg-slate-900 text-slate-100 border-emerald-500/50"
+              : "bg-red-800 text-white border-red-600"
           }`}
         >
-          {notification.type === "success" ? (
-            <CheckCircle className="h-4 w-4" />
-          ) : (
-            <AlertCircle className="h-4 w-4" />
+          <div className="flex items-start gap-2.5">
+            {notification.type === "success" ? (
+              <CheckCircle className="h-4 w-4 text-emerald-400 shrink-0 mt-0.5" />
+            ) : (
+              <AlertCircle className="h-4 w-4 text-red-200 shrink-0 mt-0.5" />
+            )}
+            <div className="flex-1 overflow-hidden">
+              <p className="font-medium break-all leading-relaxed">{notification.message}</p>
+            </div>
+            <button
+              onClick={() => setNotification(null)}
+              className="text-slate-400 hover:text-white p-0.5 cursor-pointer ml-1"
+            >
+              <XCircle className="h-3.5 w-3.5" />
+            </button>
+          </div>
+
+          {notification.actions && notification.actions.length > 0 && (
+            <div className="flex items-center gap-2 pt-2 border-t border-slate-700/60 mt-0.5">
+              {notification.actions.map((act, i) => (
+                <button
+                  key={i}
+                  onClick={act.onClick}
+                  className="flex items-center gap-1.5 rounded-md bg-slate-800 hover:bg-slate-700 px-2.5 py-1 text-[11px] font-bold text-emerald-400 border border-slate-700 shadow-xs cursor-pointer transition-colors"
+                >
+                  {act.icon === "folder" ? (
+                    <FolderOpen className="h-3 w-3" />
+                  ) : (
+                    <ExternalLink className="h-3 w-3" />
+                  )}
+                  <span>{act.label}</span>
+                </button>
+              ))}
+            </div>
           )}
-          <span>{notification.message}</span>
         </div>
       )}
 

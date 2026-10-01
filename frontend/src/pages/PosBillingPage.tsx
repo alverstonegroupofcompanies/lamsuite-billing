@@ -22,6 +22,8 @@ import {
   Sliders,
   History,
   Check,
+  FolderOpen,
+  ExternalLink,
 } from "lucide-react";
 import { posCartService, type PosCartLine } from "../lib/billing/posCartService";
 import {
@@ -80,7 +82,16 @@ export const PosBillingPage: React.FC = () => {
   const [isTenderModalOpen, setIsTenderModalOpen] = useState(false);
   const [isRecallModalOpen, setIsRecallModalOpen] = useState(false);
   const [heldBillsCount, setHeldBillsCount] = useState(billingTenderService.listHeldBills().length);
-  const [notification, setNotification] = useState<{ message: string; type: "success" | "error" } | null>(null);
+  interface NotificationAction {
+    label: string;
+    icon?: "open" | "folder";
+    onClick: () => void;
+  }
+  const [notification, setNotification] = useState<{
+    message: string;
+    type: "success" | "error";
+    actions?: NotificationAction[];
+  } | null>(null);
 
   // Tender form state
   const [tenders, setTenders] = useState<PaymentTenderLine[]>([{ mode: "Cash", amount: 0 }]);
@@ -402,9 +413,13 @@ export const PosBillingPage: React.FC = () => {
     }
   }, [selectedSearchIndex, searchResults]);
 
-  const showNotification = (message: string, type: "success" | "error" = "success") => {
-    setNotification({ message, type });
-    setTimeout(() => setNotification(null), 3000);
+  const showNotification = (
+    message: string,
+    type: "success" | "error" = "success",
+    actions?: NotificationAction[]
+  ) => {
+    setNotification({ message, type, actions });
+    setTimeout(() => setNotification(null), actions && actions.length > 0 ? 8000 : 3000);
   };
 
   const handleBarcodeOrEnter = async (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -609,15 +624,21 @@ export const PosBillingPage: React.FC = () => {
         const printData = preparePrintData(cartSnapshot);
         printData.invoice_number = `${editingInvoice.invoice_number} (Revised)`;
 
+        let savedPdfPath: string | undefined;
         if (printFormat === "thermal") {
           await printingEngine.printThermalReceipt(printData);
         } else if (printFormat === "a4") {
           await printingEngine.printA4TaxInvoice(printData);
         } else if (printFormat === "pdf") {
           const exportRes = await printingEngine.exportToPdf(printData);
-          if (exportRes.file_path) {
-            showNotification(`Invoice saved: ${exportRes.file_path}`);
+          if (exportRes.cancelled) {
+            return;
           }
+          if (!exportRes.success) {
+            showNotification(exportRes.error || "Failed to save revised PDF bill", "error");
+            return;
+          }
+          savedPdfPath = exportRes.file_path;
         }
 
         posCartService.clearCart();
@@ -631,7 +652,26 @@ export const PosBillingPage: React.FC = () => {
         setCustomerPhone("");
         setCustomerGstin("");
         setEditReason("");
-        showNotification(`Invoice ${editingInvoice.invoice_number} revised successfully!`);
+        showNotification(
+          savedPdfPath
+            ? `Saved to: ${savedPdfPath}`
+            : `Invoice ${editingInvoice.invoice_number} revised successfully!`,
+          "success",
+          savedPdfPath
+            ? [
+                {
+                  label: "Open file",
+                  icon: "open",
+                  onClick: () => printingEngine.openFile(savedPdfPath!),
+                },
+                {
+                  label: "Show in folder",
+                  icon: "folder",
+                  onClick: () => printingEngine.revealFile(savedPdfPath!),
+                },
+              ]
+            : undefined
+        );
         setTimeout(() => {
           searchInputRef.current?.focus();
         }, 50);
@@ -731,6 +771,7 @@ export const PosBillingPage: React.FC = () => {
 
       if (res.success) {
         // 5. Execute print/export flow with snapshot
+        let savedPdfPath: string | undefined;
         if (printFormat === "thermal") {
           await printingEngine.printThermalReceipt(printData);
         } else if (printFormat === "a4") {
@@ -738,16 +779,40 @@ export const PosBillingPage: React.FC = () => {
         } else if (printFormat === "pdf") {
           const exportRes = await printingEngine.exportToPdf(printData);
           if (exportRes.cancelled) {
-            // User cancelled the file save picker
+            // User cancelled the file save picker - do not complete settlement
             return;
           }
+          if (!exportRes.success) {
+            showNotification(exportRes.error || "Failed to save PDF file", "error");
+            return;
+          }
+          savedPdfPath = exportRes.file_path;
         }
 
         // 6. Clear cart ONLY after BOTH save and print have succeeded
         posCartService.clearCart();
         refreshCartState();
         setIsTenderModalOpen(false);
-        showNotification(`Invoice ${invoiceNumber} billed & saved as PDF!`);
+        showNotification(
+          savedPdfPath
+            ? `Saved to: ${savedPdfPath}`
+            : `Invoice ${invoiceNumber} billed successfully!`,
+          "success",
+          savedPdfPath
+            ? [
+                {
+                  label: "Open file",
+                  icon: "open",
+                  onClick: () => printingEngine.openFile(savedPdfPath!),
+                },
+                {
+                  label: "Show in folder",
+                  icon: "folder",
+                  onClick: () => printingEngine.revealFile(savedPdfPath!),
+                },
+              ]
+            : undefined
+        );
         setInvoiceNumber(`INV-${Date.now().toString().slice(-6)}`);
         setCustomerName("Walk-in Customer");
         setCustomerPhone("");
@@ -768,16 +833,47 @@ export const PosBillingPage: React.FC = () => {
       {/* Toast Notification */}
       {notification && (
         <div
-          className={`fixed top-4 right-4 z-50 flex items-center gap-2 rounded-lg px-4 py-3 text-xs font-semibold text-white shadow-lg transition-all ${
-            notification.type === "success" ? "bg-emerald-600" : "bg-red-600"
+          className={`fixed top-4 right-4 z-50 flex flex-col gap-2 rounded-xl p-3.5 text-xs font-semibold shadow-2xl transition-all max-w-lg border ${
+            notification.type === "success"
+              ? "bg-slate-900 text-slate-100 border-emerald-500/50"
+              : "bg-red-800 text-white border-red-600"
           }`}
         >
-          {notification.type === "success" ? (
-            <CheckCircle className="h-4 w-4" />
-          ) : (
-            <AlertCircle className="h-4 w-4" />
+          <div className="flex items-start gap-2.5">
+            {notification.type === "success" ? (
+              <CheckCircle className="h-4 w-4 text-emerald-400 shrink-0 mt-0.5" />
+            ) : (
+              <AlertCircle className="h-4 w-4 text-red-200 shrink-0 mt-0.5" />
+            )}
+            <div className="flex-1 overflow-hidden">
+              <p className="font-medium break-all leading-relaxed">{notification.message}</p>
+            </div>
+            <button
+              onClick={() => setNotification(null)}
+              className="text-slate-400 hover:text-white p-0.5 cursor-pointer ml-1"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </div>
+
+          {notification.actions && notification.actions.length > 0 && (
+            <div className="flex items-center gap-2 pt-2 border-t border-slate-700/60 mt-0.5">
+              {notification.actions.map((act, i) => (
+                <button
+                  key={i}
+                  onClick={act.onClick}
+                  className="flex items-center gap-1.5 rounded-md bg-slate-800 hover:bg-slate-700 px-2.5 py-1 text-[11px] font-bold text-emerald-400 border border-slate-700 shadow-xs cursor-pointer transition-colors"
+                >
+                  {act.icon === "folder" ? (
+                    <FolderOpen className="h-3 w-3" />
+                  ) : (
+                    <ExternalLink className="h-3 w-3" />
+                  )}
+                  <span>{act.label}</span>
+                </button>
+              ))}
+            </div>
           )}
-          <span>{notification.message}</span>
         </div>
       )}
 
