@@ -701,11 +701,20 @@ export const PosBillingPage: React.FC = () => {
       invoice_number: invoiceNumber,
       invoice_date: new Date().toISOString().slice(0, 10),
       store_name: "LamStone Pharmacy & Retail",
+      store_address: "Main Road, Palakkad, Kerala - 678001",
       store_phone: "9876543210",
-      customer_name: customerName,
-      customer_phone: customerPhone,
+      store_gstin: "32ABCDE1234F1Z5",
+      drug_license_numbers: ["20B/KL-PKD-1029", "21B/KL-PKD-1030"],
+      fssai_no: "10020042001234",
+      place_of_supply: "32-Kerala",
+      customer_name: customerName || "Walk-in Customer",
+      customer_phone: customerPhone || "",
+      customer_gstin: customerGstin || undefined,
+      payment_mode: tenders[0]?.mode || "Cash",
+      payment_status: "Paid",
       lines: activeLines.map((l) => ({
         description: l.product.name,
+        hsn_code: (l.product as any).hsn_code || "300490",
         batch_no: l.selectedBatch.batch_no,
         expiry_date: l.selectedBatch.expiry_date,
         qty: l.qty,
@@ -720,6 +729,7 @@ export const PosBillingPage: React.FC = () => {
       tax_total: activeTotals.total_tax,
       round_off: activeTotals.round_off,
       grand_total: activeTotals.grand_total,
+      upi_vpa: "pharmacy@upi",
     };
   };
 

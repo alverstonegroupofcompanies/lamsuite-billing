@@ -1,23 +1,34 @@
 import { getIpcBridge, isTauri, invokeCommand } from "../ipc/ipcBridge";
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
+import * as QRCodeModule from "qrcode";
+import { ROBOTO_REGULAR_BASE64, ROBOTO_BOLD_BASE64 } from "./embeddedFonts";
+
+const QRCode = (QRCodeModule as any).default || QRCodeModule;
 
 export interface InvoicePrintData {
   invoice_number: string;
   invoice_date: string;
+  invoice_time?: string;
   store_name: string;
   store_address?: string;
   store_phone?: string;
+  store_email?: string;
   store_gstin?: string;
   drug_license_numbers?: string[]; // e.g. ["20B-12345", "21B-67890"]
   fssai_no?: string;
+  place_of_supply?: string;
   customer_name?: string;
   customer_phone?: string;
+  customer_gstin?: string;
+  customer_address?: string;
   patient_name?: string;
   patient_age?: string | number;
   patient_gender?: string;
   doctor_name?: string;
   doctor_reg_no?: string;
+  payment_mode?: string;
+  payment_status?: string;
   lines: Array<{
     description: string;
     hsn_code?: string;
@@ -29,17 +40,164 @@ export interface InvoicePrintData {
     ptr?: number;
     pts?: number;
     discount_amount?: number;
+    taxable_amount?: number;
     gst_percent: number;
     amount: number;
   }>;
   subtotal: number;
   tax_total: number;
+  cgst_total?: number;
+  sgst_total?: number;
+  igst_total?: number;
   round_off: number;
   grand_total: number;
+  amount_in_words?: string;
   upi_vpa?: string;
   terms_and_conditions?: string;
   jurisdiction_note?: string;
   footer_note?: string;
+}
+
+export interface HsnSummaryRow {
+  hsnCode: string;
+  taxableValue: number;
+  cgstRate: number;
+  cgstAmount: number;
+  sgstRate: number;
+  sgstAmount: number;
+  totalTax: number;
+}
+
+export function round2(n: number): number {
+  return Math.round((Number(n) + Number.EPSILON) * 100) / 100;
+}
+
+export function numberToWordsIndian(amount: number): string {
+  const num = Math.round(Math.abs(amount) * 100) / 100;
+  const whole = Math.floor(num);
+  const paise = Math.round((num - whole) * 100);
+  if (whole === 0 && paise === 0) return "Indian Zero Rupees Only";
+
+  const units = [
+    "", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine",
+    "Ten", "Eleven", "Twelve", "Thirteen", "Fourteen", "Fifteen", "Sixteen", "Seventeen", "Eighteen", "Nineteen",
+  ];
+  const tens = ["", "", "Twenty", "Thirty", "Forty", "Fifty", "Sixty", "Seventy", "Eighty", "Ninety"];
+
+  function convertTwoDigits(n: number): string {
+    if (n < 20) return units[n];
+    const t = Math.floor(n / 10);
+    const r = n % 10;
+    return tens[t] + (r > 0 ? " " + units[r] : "");
+  }
+
+  function convertThreeDigits(n: number): string {
+    const h = Math.floor(n / 100);
+    const rest = n % 100;
+    let res = "";
+    if (h > 0) res += units[h] + " Hundred";
+    if (rest > 0) {
+      if (res.length > 0) res += " ";
+      res += convertTwoDigits(rest);
+    }
+    return res;
+  }
+
+  let words = "";
+  const crore = Math.floor(whole / 10000000);
+  let rem = whole % 10000000;
+  const lakh = Math.floor(rem / 100000);
+  rem = rem % 100000;
+  const thousand = Math.floor(rem / 1000);
+  rem = rem % 1000;
+  const hundredPart = rem;
+
+  if (crore > 0) words += convertTwoDigits(crore) + " Crore ";
+  if (lakh > 0) words += convertTwoDigits(lakh) + " Lakh ";
+  if (thousand > 0) words += convertTwoDigits(thousand) + " Thousand ";
+  if (hundredPart > 0) words += convertThreeDigits(hundredPart) + " ";
+
+  words = words.trim();
+  let result = words ? `${words} Rupees` : "";
+  if (paise > 0) {
+    const paiseWords = convertTwoDigits(paise);
+    result = result ? `${result} and ${paiseWords} Paise` : `${paiseWords} Paise`;
+  }
+  return `Indian ${result} Only`;
+}
+
+export function calculateHsnSummary(lines: InvoicePrintData["lines"]): HsnSummaryRow[] {
+  const map = new Map<string, { hsnCode: string; rate: number; taxable: number; total: number }>();
+  for (const l of lines) {
+    const hsn = l.hsn_code || "300490";
+    const gstRate = l.gst_percent || 0;
+    const key = `${hsn}_${gstRate}`;
+    const lineTotal = l.amount || 0;
+    const lineTaxable = l.taxable_amount !== undefined
+      ? l.taxable_amount
+      : (gstRate > 0 ? lineTotal / (1 + gstRate / 100) : lineTotal);
+
+    const existing = map.get(key) || { hsnCode: hsn, rate: gstRate, taxable: 0, total: 0 };
+    existing.taxable += lineTaxable;
+    existing.total += lineTotal;
+    map.set(key, existing);
+  }
+
+  const rows: HsnSummaryRow[] = [];
+  map.forEach((item) => {
+    const taxableValue = round2(item.taxable);
+    const halfRate = item.rate / 2;
+    const cgstAmount = round2(taxableValue * (halfRate / 100));
+    const sgstAmount = round2(taxableValue * (halfRate / 100));
+    const totalTax = round2(cgstAmount + sgstAmount);
+    rows.push({
+      hsnCode: item.hsnCode,
+      taxableValue,
+      cgstRate: halfRate,
+      cgstAmount,
+      sgstRate: halfRate,
+      sgstAmount,
+      totalTax,
+    });
+  });
+
+  return rows;
+}
+
+export function generateQrCodeSvg(text: string, size = 80): string {
+  try {
+    const qr = (QRCode as any).create(text, { errorCorrectionLevel: "M" });
+    const count = qr.modules.size;
+    let paths = "";
+    for (let r = 0; r < count; r++) {
+      for (let c = 0; c < count; c++) {
+        if (qr.modules.get(r, c)) {
+          paths += `M${c},${r}h1v1h-1z `;
+        }
+      }
+    }
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${count} ${count}" width="${size}" height="${size}"><path fill="#0f172a" d="${paths}" /></svg>`;
+  } catch (e) {
+    return "";
+  }
+}
+
+export function drawQrCodeJsPdf(doc: jsPDF, text: string, x: number, y: number, size: number): void {
+  try {
+    const qr = (QRCode as any).create(text, { errorCorrectionLevel: "M" });
+    const count = qr.modules.size;
+    const cellSize = size / count;
+    doc.setFillColor(15, 23, 42);
+    for (let r = 0; r < count; r++) {
+      for (let c = 0; c < count; c++) {
+        if (qr.modules.get(r, c)) {
+          doc.rect(x + c * cellSize, y + r * cellSize, cellSize, cellSize, "F");
+        }
+      }
+    }
+  } catch (e) {
+    console.warn("Could not draw QR code in PDF:", e);
+  }
 }
 
 export interface PrintColumnConfig {
@@ -300,23 +458,59 @@ export class PrintingEngine {
   }
 
   /**
-   * Generates a complete, self-contained printable HTML document for A4 Tax Invoice
+   * Generates a complete, self-contained printable HTML document for Statutory A4 Tax Invoice
    */
   generateInvoiceHtml(data: InvoicePrintData): string {
-    const linesRows = data.lines
+    const amountWords = data.amount_in_words || numberToWordsIndian(data.grand_total);
+    const hsnRows = calculateHsnSummary(data.lines);
+    const upiVpa = data.upi_vpa || "pharmacy@upi";
+    const upiUri = generateUpiPaymentString(upiVpa, data.store_name, data.grand_total, data.invoice_number);
+    const qrSvg = generateQrCodeSvg(upiUri, 76);
+
+    const cgstTotal = data.cgst_total !== undefined ? data.cgst_total : round2(data.tax_total / 2);
+    const sgstTotal = data.sgst_total !== undefined ? data.sgst_total : round2(data.tax_total / 2);
+
+    const itemsRows = data.lines
       .map(
         (l, i) => `
         <tr>
-          <td style="padding: 6px 8px; border-bottom: 1px solid #e2e8f0; text-align: center;">${i + 1}</td>
-          <td style="padding: 6px 8px; border-bottom: 1px solid #e2e8f0;"><strong>${l.description}</strong></td>
-          <td style="padding: 6px 8px; border-bottom: 1px solid #e2e8f0; font-family: monospace;">${l.batch_no || "-"}</td>
-          <td style="padding: 6px 8px; border-bottom: 1px solid #e2e8f0; font-family: monospace;">${l.expiry_date || "-"}</td>
-          <td style="padding: 6px 8px; border-bottom: 1px solid #e2e8f0; text-align: right;">${l.qty}${l.loose_qty ? ` + ${l.loose_qty}L` : ""}</td>
-          <td style="padding: 6px 8px; border-bottom: 1px solid #e2e8f0; text-align: right; font-family: monospace;">₹ ${l.rate.toFixed(2)}</td>
-          <td style="padding: 6px 8px; border-bottom: 1px solid #e2e8f0; text-align: right;">${l.gst_percent}%</td>
-          <td style="padding: 6px 8px; border-bottom: 1px solid #e2e8f0; text-align: right; font-family: monospace; font-weight: bold;">₹ ${l.amount.toFixed(2)}</td>
+          <td style="padding: 5px 6px; text-align: center; border-bottom: 1px solid #e2e8f0;">${i + 1}</td>
+          <td style="padding: 5px 6px; border-bottom: 1px solid #e2e8f0;">
+            <div style="font-weight: 700; color: #0f172a;">${l.description}</div>
+          </td>
+          <td style="padding: 5px 6px; text-align: center; border-bottom: 1px solid #e2e8f0;">${l.hsn_code || "300490"}</td>
+          <td style="padding: 5px 6px; text-align: center; border-bottom: 1px solid #e2e8f0;">${l.batch_no || "-"}</td>
+          <td style="padding: 5px 6px; text-align: center; border-bottom: 1px solid #e2e8f0;">${l.expiry_date || "-"}</td>
+          <td style="padding: 5px 6px; text-align: right; border-bottom: 1px solid #e2e8f0; font-variant-numeric: tabular-nums;">${l.qty}${l.loose_qty ? ` + ${l.loose_qty}L` : ""}</td>
+          <td style="padding: 5px 6px; text-align: right; border-bottom: 1px solid #e2e8f0; font-variant-numeric: tabular-nums;">₹ ${l.rate.toFixed(2)}</td>
+          <td style="padding: 5px 6px; text-align: right; border-bottom: 1px solid #e2e8f0; font-variant-numeric: tabular-nums;">${l.gst_percent}%</td>
+          <td style="padding: 5px 6px; text-align: right; border-bottom: 1px solid #e2e8f0; font-weight: 700; color: #0f172a; font-variant-numeric: tabular-nums;">₹ ${l.amount.toFixed(2)}</td>
         </tr>`
       )
+      .join("");
+
+    let totalHsnTaxable = 0;
+    let totalHsnCgst = 0;
+    let totalHsnSgst = 0;
+    let totalHsnTax = 0;
+
+    const hsnRowsHtml = hsnRows
+      .map((r) => {
+        totalHsnTaxable += r.taxableValue;
+        totalHsnCgst += r.cgstAmount;
+        totalHsnSgst += r.sgstAmount;
+        totalHsnTax += r.totalTax;
+        return `
+        <tr>
+          <td style="padding: 4px 6px; text-align: center; border-bottom: 1px solid #e2e8f0;">${r.hsnCode}</td>
+          <td style="padding: 4px 6px; text-align: right; border-bottom: 1px solid #e2e8f0; font-variant-numeric: tabular-nums;">₹ ${r.taxableValue.toFixed(2)}</td>
+          <td style="padding: 4px 6px; text-align: right; border-bottom: 1px solid #e2e8f0; font-variant-numeric: tabular-nums;">${r.cgstRate}%</td>
+          <td style="padding: 4px 6px; text-align: right; border-bottom: 1px solid #e2e8f0; font-variant-numeric: tabular-nums;">₹ ${r.cgstAmount.toFixed(2)}</td>
+          <td style="padding: 4px 6px; text-align: right; border-bottom: 1px solid #e2e8f0; font-variant-numeric: tabular-nums;">${r.sgstRate}%</td>
+          <td style="padding: 4px 6px; text-align: right; border-bottom: 1px solid #e2e8f0; font-variant-numeric: tabular-nums;">₹ ${r.sgstAmount.toFixed(2)}</td>
+          <td style="padding: 4px 6px; text-align: right; border-bottom: 1px solid #e2e8f0; font-weight: 700; font-variant-numeric: tabular-nums;">₹ ${r.totalTax.toFixed(2)}</td>
+        </tr>`;
+      })
       .join("");
 
     return `<!DOCTYPE html>
@@ -326,87 +520,169 @@ export class PrintingEngine {
   <title>Tax Invoice - ${data.invoice_number}</title>
   <style>
     @media print {
-      body { margin: 0; padding: 12mm; }
-      @page { size: A4 portrait; margin: 10mm; }
+      body { margin: 0; padding: 8mm; }
+      @page { size: A4 portrait; margin: 8mm; }
     }
+    * { box-sizing: border-box; }
     body {
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-      font-size: 11px;
+      font-size: 10.5px;
+      line-height: 1.35;
       color: #1e293b;
       margin: 0;
-      padding: 24px;
+      padding: 20px;
       background: #fff;
+      font-variant-numeric: tabular-nums;
     }
-    .header { text-align: center; border-bottom: 2px solid #0f172a; padding-bottom: 12px; margin-bottom: 16px; }
-    .store-name { font-size: 20px; font-weight: 800; color: #0f172a; letter-spacing: -0.5px; }
-    .meta-grid { display: flex; justify-content: space-between; margin-bottom: 16px; }
-    .meta-box { width: 48%; }
-    table { width: 100%; border-collapse: collapse; margin-bottom: 16px; }
-    th { background: #f8fafc; font-weight: 700; text-align: left; padding: 8px; border-bottom: 2px solid #cbd5e1; }
-    .totals { width: 280px; margin-left: auto; margin-bottom: 20px; }
-    .total-row { display: flex; justify-content: space-between; padding: 3px 0; }
-    .grand-total { font-size: 14px; font-weight: 800; border-top: 2px solid #0f172a; padding-top: 6px; color: #1d4ed8; }
-    .footer { text-align: center; border-top: 1px dashed #cbd5e1; padding-top: 10px; font-size: 10px; color: #64748b; }
+    .header { text-align: center; border-bottom: 2px solid #0f172a; padding-bottom: 8px; margin-bottom: 12px; }
+    .store-name { font-size: 19px; font-weight: 800; color: #0f172a; }
+    .store-sub { font-size: 10px; color: #475569; margin-top: 2px; }
+    .store-licenses { font-size: 9.5px; font-weight: 700; color: #334155; margin-top: 3px; }
+    .tax-badge { font-size: 13px; font-weight: 800; letter-spacing: 0.5px; color: #0f172a; margin-top: 6px; }
+    
+    .meta-grid { display: flex; justify-content: space-between; border: 1px solid #cbd5e1; border-radius: 6px; background: #f8fafc; padding: 8px 12px; margin-bottom: 12px; }
+    .meta-col { width: 48%; }
+    
+    table.data-table { width: 100%; border-collapse: collapse; font-size: 10px; margin-bottom: 12px; }
+    table.data-table th { background: #f1f5f9; color: #0f172a; font-weight: 700; padding: 6px; border-top: 1px solid #cbd5e1; border-bottom: 2px solid #94a3b8; }
+    table.data-table tr:nth-child(even) { background: #f8fafc; }
+
+    .bottom-section { display: flex; justify-content: space-between; gap: 16px; margin-top: 12px; }
+    .left-pane { flex: 1; }
+    .totals-card { width: 300px; border: 1px solid #cbd5e1; border-radius: 6px; background: #f8fafc; padding: 10px 14px; font-variant-numeric: tabular-nums; }
+    .total-line { display: flex; justify-content: space-between; padding: 2.5px 0; font-size: 10.5px; color: #475569; }
+    .grand-total-line { display: flex; justify-content: space-between; padding-top: 6px; margin-top: 6px; border-top: 2px solid #0f172a; font-size: 13px; font-weight: 800; color: #1d4ed8; }
+    
+    .qr-box { display: flex; align-items: center; gap: 10px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 8px 10px; margin: 8px 0; width: fit-content; }
+    .terms-box { font-size: 9px; color: #64748b; line-height: 1.4; margin-top: 6px; }
+    .footer-sign { display: flex; justify-content: space-between; align-items: flex-end; margin-top: 20px; padding-top: 10px; border-top: 1px dashed #cbd5e1; font-size: 9.5px; }
   </style>
 </head>
 <body>
   <div class="header">
     <div class="store-name">${data.store_name}</div>
-    <div>${data.store_address || "Main Road, Palakkad, Kerala - 678001"} • Phone: ${data.store_phone || "9876543210"}</div>
-    ${data.store_gstin ? `<div>GSTIN: <strong>${data.store_gstin}</strong></div>` : ""}
-    ${data.drug_license_numbers?.length ? `<div>DL No: ${data.drug_license_numbers.join(", ")}</div>` : ""}
+    <div class="store-sub">${data.store_address || "Main Road, Palakkad, Kerala - 678001"} • Phone: ${data.store_phone || "9876543210"}</div>
+    <div class="store-licenses">
+      ${data.store_gstin ? `GSTIN: ${data.store_gstin}` : ""}
+      ${data.drug_license_numbers?.length ? `  |  DL: ${data.drug_license_numbers.join(", ")}` : ""}
+      ${data.fssai_no ? `  |  FSSAI: ${data.fssai_no}` : ""}
+    </div>
+    <div class="tax-badge">TAX INVOICE</div>
   </div>
 
   <div class="meta-grid">
-    <div class="meta-box">
+    <div class="meta-col">
       <div><strong>Billed To:</strong> ${data.customer_name || "Walk-in Customer"}</div>
-      ${data.customer_phone ? `<div>Mobile: ${data.customer_phone}</div>` : ""}
-      ${data.patient_name ? `<div>Patient: ${data.patient_name} ${data.patient_age ? `(${data.patient_age} yrs)` : ""}</div>` : ""}
+      <div>Mobile: ${data.customer_phone || "Not specified"}</div>
+      ${data.patient_name ? `<div>Patient: ${data.patient_name} ${data.patient_age ? `(${data.patient_age} yrs)` : ""}${data.patient_gender ? ` / ${data.patient_gender}` : ""}</div>` : ""}
       ${data.doctor_name ? `<div>Doctor: ${data.doctor_name} ${data.doctor_reg_no ? `[Reg: ${data.doctor_reg_no}]` : ""}</div>` : ""}
     </div>
-    <div class="meta-box" style="text-align: right;">
-      <div><strong>TAX INVOICE</strong></div>
-      <div style="font-size: 13px; font-weight: 700; color: #1d4ed8;">#${data.invoice_number}</div>
-      <div>Date: ${data.invoice_date}</div>
+    <div class="meta-col" style="text-align: right;">
+      <div style="font-size: 12px; font-weight: 800; color: #1d4ed8;">#${data.invoice_number}</div>
+      <div>Date: ${data.invoice_date}${data.invoice_time ? ` ${data.invoice_time}` : ""}</div>
+      <div>Payment Mode: <strong>${data.payment_mode || "Cash"}</strong> (${data.payment_status || "Paid"})</div>
+      <div>Place of Supply: ${data.place_of_supply || "32-Kerala"}</div>
     </div>
   </div>
 
-  <table>
+  <table class="data-table">
     <thead>
       <tr>
-        <th style="width: 30px; text-align: center;">#</th>
-        <th>Item Description</th>
-        <th>Batch</th>
-        <th>Exp</th>
-        <th style="text-align: right;">Qty</th>
-        <th style="text-align: right;">Rate</th>
-        <th style="text-align: right;">GST</th>
-        <th style="text-align: right;">Total</th>
+        <th style="width: 28px; text-align: center;">#</th>
+        <th style="text-align: left;">Item Description</th>
+        <th style="width: 60px; text-align: center;">HSN</th>
+        <th style="width: 65px; text-align: center;">Batch</th>
+        <th style="width: 55px; text-align: center;">Exp</th>
+        <th style="width: 45px; text-align: right;">Qty</th>
+        <th style="width: 75px; text-align: right;">Rate (₹)</th>
+        <th style="width: 55px; text-align: right;">GST %</th>
+        <th style="width: 85px; text-align: right;">Total (₹)</th>
       </tr>
     </thead>
     <tbody>
-      ${linesRows}
+      ${itemsRows}
     </tbody>
   </table>
 
-  <div class="totals">
-    <div class="total-row"><span>Taxable Subtotal:</span><span>₹ ${data.subtotal.toFixed(2)}</span></div>
-    <div class="total-row"><span>Total GST:</span><span>₹ ${data.tax_total.toFixed(2)}</span></div>
-    ${data.round_off ? `<div class="total-row"><span>Round Off:</span><span>${data.round_off > 0 ? "+" : ""}₹ ${data.round_off.toFixed(2)}</span></div>` : ""}
-    <div class="total-row grand-total"><span>Grand Total:</span><span>₹ ${data.grand_total.toFixed(2)}</span></div>
+  <!-- HSN Tax Summary -->
+  <div style="margin-top: 10px; margin-bottom: 12px;">
+    <div style="font-weight: 700; font-size: 9.5px; color: #475569; text-transform: uppercase; margin-bottom: 4px;">HSN / GST Tax Summary</div>
+    <table class="data-table" style="margin-bottom: 0;">
+      <thead>
+        <tr>
+          <th style="text-align: center;">HSN/SAC</th>
+          <th style="text-align: right;">Taxable Value (₹)</th>
+          <th style="text-align: right;">CGST %</th>
+          <th style="text-align: right;">CGST (₹)</th>
+          <th style="text-align: right;">SGST %</th>
+          <th style="text-align: right;">SGST (₹)</th>
+          <th style="text-align: right;">Total Tax (₹)</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${hsnRowsHtml}
+        <tr style="background: #f1f5f9; font-weight: 700;">
+          <td style="padding: 4px 6px; text-align: center; border-top: 1px solid #94a3b8;">Total</td>
+          <td style="padding: 4px 6px; text-align: right; border-top: 1px solid #94a3b8; font-variant-numeric: tabular-nums;">₹ ${totalHsnTaxable.toFixed(2)}</td>
+          <td style="padding: 4px 6px; border-top: 1px solid #94a3b8;"></td>
+          <td style="padding: 4px 6px; text-align: right; border-top: 1px solid #94a3b8; font-variant-numeric: tabular-nums;">₹ ${totalHsnCgst.toFixed(2)}</td>
+          <td style="padding: 4px 6px; border-top: 1px solid #94a3b8;"></td>
+          <td style="padding: 4px 6px; text-align: right; border-top: 1px solid #94a3b8; font-variant-numeric: tabular-nums;">₹ ${totalHsnSgst.toFixed(2)}</td>
+          <td style="padding: 4px 6px; text-align: right; border-top: 1px solid #94a3b8; font-variant-numeric: tabular-nums;">₹ ${totalHsnTax.toFixed(2)}</td>
+        </tr>
+      </tbody>
+    </table>
   </div>
 
-  <div class="footer">
-    <p>${data.terms_and_conditions || "Thank you for your business! Goods once sold cannot be returned without original cash memo."}</p>
-    <p>${data.jurisdiction_note || "Subject to local jurisdiction."}</p>
+  <div class="bottom-section">
+    <div class="left-pane">
+      <div style="font-weight: 700; color: #1e293b; margin-bottom: 6px;">
+        <span style="color: #64748b; font-weight: 600;">Amount in Words:</span> ${amountWords}
+      </div>
+
+      <div class="qr-box">
+        ${qrSvg}
+        <div style="font-size: 9.5px; color: #334155;">
+          <div style="font-weight: 800; color: #0f172a;">Scan & Pay via UPI</div>
+          <div>UPI ID: <strong>${upiVpa}</strong></div>
+          <div>Amount: <strong>₹ ${data.grand_total.toFixed(2)}</strong></div>
+        </div>
+      </div>
+
+      <div class="terms-box">
+        <div style="font-weight: 700; text-transform: uppercase; color: #475569;">Terms & Conditions:</div>
+        <div>1. Goods once sold cannot be returned without original cash memo.</div>
+        <div>2. Refrigerated medicines are strictly non-returnable.</div>
+        <div>3. ${data.jurisdiction_note || "Subject to local jurisdiction."}</div>
+      </div>
+    </div>
+
+    <div class="totals-card">
+      <div class="total-line"><span>Taxable Subtotal:</span><span style="font-weight: 600;">₹ ${data.subtotal.toFixed(2)}</span></div>
+      <div class="total-line"><span>Central GST (CGST):</span><span style="font-weight: 600;">₹ ${cgstTotal.toFixed(2)}</span></div>
+      <div class="total-line"><span>State GST (SGST):</span><span style="font-weight: 600;">₹ ${sgstTotal.toFixed(2)}</span></div>
+      <div class="total-line"><span>Total GST:</span><span style="font-weight: 600;">₹ ${data.tax_total.toFixed(2)}</span></div>
+      ${data.round_off ? `<div class="total-line"><span>Round Off:</span><span style="font-weight: 600;">${data.round_off > 0 ? "+" : ""}₹ ${data.round_off.toFixed(2)}</span></div>` : ""}
+      <div class="grand-total-line"><span>Grand Total:</span><span>₹ ${data.grand_total.toFixed(2)}</span></div>
+    </div>
+  </div>
+
+  <div class="footer-sign">
+    <div style="color: #64748b;">${data.footer_note || "Computer Generated Tax Invoice • LamSuite POS"}</div>
+    <div style="text-align: right; color: #334155;">
+      <div style="font-weight: 700;">For ${data.store_name}</div>
+      <div style="margin-top: 24px; font-weight: 600; border-top: 1px solid #94a3b8; display: inline-block; padding-top: 2px;">
+        Authorised Signatory / Pharmacist
+      </div>
+    </div>
   </div>
 </body>
 </html>`;
   }
 
   /**
-   * Generates a high-fidelity vector PDF matching the A4 Tax Invoice layout,
-   * with automatic multi-page splitting, repeating headers, and totals summary.
+   * Generates a high-fidelity vector PDF matching the Statutory A4 Tax Invoice layout,
+   * using embedded Roboto font with full Unicode ₹ support, repeating headers, and totals summary.
    */
   generateInvoicePdf(data: InvoicePrintData): Uint8Array {
     const doc = new jsPDF({
@@ -415,22 +691,29 @@ export class PrintingEngine {
       format: "a4",
     });
 
+    // Embed local TrueType font with full Indian Rupee (₹, U+20B9) Unicode support
+    doc.addFileToVFS("Roboto-Regular.ttf", ROBOTO_REGULAR_BASE64);
+    doc.addFont("Roboto-Regular.ttf", "Roboto", "normal");
+    doc.addFileToVFS("Roboto-Bold.ttf", ROBOTO_BOLD_BASE64);
+    doc.addFont("Roboto-Bold.ttf", "Roboto", "bold");
+    doc.setFont("Roboto", "normal");
+
     const pageWidth = 210;
     const marginX = 12;
     const contentWidth = pageWidth - marginX * 2; // 186mm
     const centerX = pageWidth / 2;
 
     // Header: Pharmacy Name & Contact
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(16);
+    doc.setFont("Roboto", "bold");
+    doc.setFontSize(15);
     doc.setTextColor(15, 23, 42); // slate-900
-    doc.text(data.store_name || "Pharmacy Store", centerX, 15, { align: "center" });
+    doc.text(data.store_name || "Pharmacy Store", centerX, 14, { align: "center" });
 
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(8.5);
+    doc.setFont("Roboto", "normal");
+    doc.setFontSize(8);
     doc.setTextColor(71, 85, 105); // slate-600
     const addressLine = `${data.store_address || "Main Road, Palakkad, Kerala - 678001"} • Phone: ${data.store_phone || "9876543210"}`;
-    doc.text(addressLine, centerX, 20.5, { align: "center" });
+    doc.text(addressLine, centerX, 18.5, { align: "center" });
 
     // Licenses (GSTIN, DL, FSSAI)
     const licenseItems: string[] = [];
@@ -441,176 +724,320 @@ export class PrintingEngine {
     if (data.fssai_no) licenseItems.push(`FSSAI: ${data.fssai_no}`);
 
     if (licenseItems.length > 0) {
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(8);
+      doc.setFont("Roboto", "bold");
+      doc.setFontSize(7.5);
       doc.setTextColor(51, 65, 85);
-      doc.text(licenseItems.join("  |  "), centerX, 25, { align: "center" });
+      doc.text(licenseItems.join("  |  "), centerX, 22.5, { align: "center" });
     }
 
     // Divider Line
-    doc.setDrawColor(203, 213, 225); // slate-300
-    doc.setLineWidth(0.4);
-    doc.line(marginX, 27.5, marginX + contentWidth, 27.5);
+    doc.setDrawColor(203, 213, 225);
+    doc.setLineWidth(0.3);
+    doc.line(marginX, 24.5, marginX + contentWidth, 24.5);
 
     // Title Badge
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(10.5);
+    doc.setFont("Roboto", "bold");
+    doc.setFontSize(10);
     doc.setTextColor(30, 41, 59);
-    doc.text("TAX INVOICE", centerX, 32.5, { align: "center" });
+    doc.text("TAX INVOICE", centerX, 29, { align: "center" });
 
     // Metadata Grid (Customer / Patient / Doctor / Invoice Info)
-    const metaBoxY = 35;
-    const metaBoxHeight = 22;
-    doc.setFillColor(248, 250, 252); // slate-50
+    const metaBoxY = 31.5;
+    const metaBoxHeight = 19;
+    doc.setFillColor(248, 250, 252);
     doc.rect(marginX, metaBoxY, contentWidth, metaBoxHeight, "F");
-    doc.setDrawColor(226, 232, 240); // slate-200
+    doc.setDrawColor(226, 232, 240);
     doc.rect(marginX, metaBoxY, contentWidth, metaBoxHeight, "S");
 
-    doc.setFontSize(8);
+    doc.setFontSize(7.5);
     const leftX = marginX + 3;
     const rightColX = marginX + contentWidth / 2 + 10;
 
     // Left Column
-    doc.setFont("helvetica", "bold");
+    doc.setFont("Roboto", "bold");
     doc.setTextColor(30, 41, 59);
-    doc.text(`Billed To: ${data.customer_name || "Walk-in Customer"}`, leftX, metaBoxY + 5);
+    doc.text(`Billed To: ${data.customer_name || "Walk-in Customer"}`, leftX, metaBoxY + 4.5);
 
-    doc.setFont("helvetica", "normal");
+    doc.setFont("Roboto", "normal");
     doc.setTextColor(71, 85, 105);
-    doc.text(`Mobile: ${data.customer_phone || "Not specified"}`, leftX, metaBoxY + 9.5);
+    doc.text(`Mobile: ${data.customer_phone || "Not specified"}`, leftX, metaBoxY + 8.5);
 
     if (data.patient_name) {
       const patientInfo = `Patient: ${data.patient_name}${data.patient_age ? ` (${data.patient_age} yrs)` : ""}${data.patient_gender ? ` / ${data.patient_gender}` : ""}`;
-      doc.text(patientInfo, leftX, metaBoxY + 14);
+      doc.text(patientInfo, leftX, metaBoxY + 12.5);
     } else {
-      doc.text("Category: Retail Sale", leftX, metaBoxY + 14);
+      doc.text("Category: Retail Sale", leftX, metaBoxY + 12.5);
     }
 
     if (data.doctor_name) {
       const doctorInfo = `Doctor: ${data.doctor_name}${data.doctor_reg_no ? ` [Reg: ${data.doctor_reg_no}]` : ""}`;
-      doc.text(doctorInfo, leftX, metaBoxY + 18.5);
+      doc.text(doctorInfo, leftX, metaBoxY + 16.5);
     }
 
     // Right Column
-    doc.setFont("helvetica", "bold");
+    doc.setFont("Roboto", "bold");
     doc.setTextColor(30, 41, 59);
-    doc.text(`Invoice No: ${data.invoice_number}`, rightColX, metaBoxY + 5);
+    doc.text(`Invoice No: ${data.invoice_number}`, rightColX, metaBoxY + 4.5);
 
-    doc.setFont("helvetica", "normal");
+    doc.setFont("Roboto", "normal");
     doc.setTextColor(71, 85, 105);
-    doc.text(`Date: ${data.invoice_date}`, rightColX, metaBoxY + 9.5);
-    doc.text("Place of Supply: 32-Kerala", rightColX, metaBoxY + 14);
+    doc.text(`Date: ${data.invoice_date}${data.invoice_time ? ` ${data.invoice_time}` : ""}`, rightColX, metaBoxY + 8.5);
+    doc.text(`Payment: ${data.payment_mode || "Cash"} (${data.payment_status || "Paid"})`, rightColX, metaBoxY + 12.5);
+    doc.text(`Place of Supply: ${data.place_of_supply || "32-Kerala"}`, rightColX, metaBoxY + 16.5);
 
     // Items Table using jspdf-autotable
     const tableRows = data.lines.map((l, i) => [
       String(i + 1),
       l.description,
+      l.hsn_code || "300490",
       l.batch_no || "-",
       l.expiry_date || "-",
       `${l.qty}${l.loose_qty ? ` + ${l.loose_qty}L` : ""}`,
-      l.rate.toFixed(2),
+      `₹ ${l.rate.toFixed(2)}`,
       `${l.gst_percent}%`,
-      l.amount.toFixed(2),
+      `₹ ${l.amount.toFixed(2)}`,
     ]);
 
+    const colAlignments: Record<number, "left" | "center" | "right"> = {
+      0: "center",
+      1: "left",
+      2: "center",
+      3: "center",
+      4: "center",
+      5: "right",
+      6: "right",
+      7: "right",
+      8: "right",
+    };
+
     autoTable(doc, {
-      startY: 60,
+      startY: 53.5,
       margin: { left: marginX, right: marginX },
-      head: [["#", "Item / Description", "Batch", "Expiry", "Qty", "Rate (₹)", "GST %", "Total (₹)"]],
+      head: [["#", "Item Description", "HSN", "Batch", "Exp", "Qty", "Rate (₹)", "GST %", "Total (₹)"]],
       body: tableRows,
       theme: "grid",
-      headStyles: {
-        fillColor: [241, 245, 249],
-        textColor: [15, 23, 42],
-        fontStyle: "bold",
-        fontSize: 8,
-        halign: "left",
-      },
-      bodyStyles: {
+      showHead: "everyPage",
+      styles: {
+        font: "Roboto",
         fontSize: 7.5,
         textColor: [30, 41, 59],
-        cellPadding: 2,
+        cellPadding: 1.8,
+      },
+      headStyles: {
+        font: "Roboto",
+        fontStyle: "bold",
+        fillColor: [241, 245, 249],
+        textColor: [15, 23, 42],
+        fontSize: 7.5,
       },
       alternateRowStyles: {
         fillColor: [255, 255, 255],
       },
       columnStyles: {
-        0: { halign: "center", cellWidth: 8 },
-        1: { halign: "left", cellWidth: 54, fontStyle: "bold" },
-        2: { halign: "center", cellWidth: 22 },
-        3: { halign: "center", cellWidth: 18 },
-        4: { halign: "right", cellWidth: 16 },
-        5: { halign: "right", cellWidth: 20 },
-        6: { halign: "right", cellWidth: 16 },
-        7: { halign: "right", cellWidth: 32, fontStyle: "bold" },
+        0: { cellWidth: 8 },
+        1: { cellWidth: 54, fontStyle: "bold" },
+        2: { cellWidth: 18 },
+        3: { cellWidth: 20 },
+        4: { cellWidth: 16 },
+        5: { cellWidth: 14 },
+        6: { cellWidth: 18 },
+        7: { cellWidth: 14 },
+        8: { cellWidth: 24, fontStyle: "bold" },
+      },
+      didParseCell: (hookData) => {
+        hookData.cell.styles.halign = colAlignments[hookData.column.index] || "left";
       },
     });
 
-    // Check final position for Totals & Footer
-    let finalY = (doc as any).lastAutoTable?.finalY ? (doc as any).lastAutoTable.finalY + 5 : 120;
-    if (finalY + 45 > 280) {
+    // Check final position for HSN Summary & Totals
+    let currY = (doc as any).lastAutoTable?.finalY ? (doc as any).lastAutoTable.finalY + 4 : 120;
+    if (currY + 65 > 280) {
       doc.addPage();
-      finalY = 15;
+      currY = 15;
     }
 
-    // Totals Box (Right Side)
-    const totalsBoxWidth = 72;
-    const totalsBoxX = marginX + contentWidth - totalsBoxWidth;
-    doc.setFillColor(248, 250, 252);
-    doc.rect(totalsBoxX, finalY, totalsBoxWidth, 28, "F");
-    doc.setDrawColor(226, 232, 240);
-    doc.rect(totalsBoxX, finalY, totalsBoxWidth, 28, "S");
+    // HSN Tax Summary Table
+    const hsnRows = calculateHsnSummary(data.lines);
+    let totalHsnTaxable = 0;
+    let totalHsnCgst = 0;
+    let totalHsnSgst = 0;
+    let totalHsnTax = 0;
+    const hsnTableBody = hsnRows.map((r) => {
+      totalHsnTaxable += r.taxableValue;
+      totalHsnCgst += r.cgstAmount;
+      totalHsnSgst += r.sgstAmount;
+      totalHsnTax += r.totalTax;
+      return [
+        r.hsnCode,
+        `₹ ${r.taxableValue.toFixed(2)}`,
+        `${r.cgstRate}%`,
+        `₹ ${r.cgstAmount.toFixed(2)}`,
+        `${r.sgstRate}%`,
+        `₹ ${r.sgstAmount.toFixed(2)}`,
+        `₹ ${r.totalTax.toFixed(2)}`,
+      ];
+    });
+    hsnTableBody.push([
+      "Total",
+      `₹ ${totalHsnTaxable.toFixed(2)}`,
+      "",
+      `₹ ${totalHsnCgst.toFixed(2)}`,
+      "",
+      `₹ ${totalHsnSgst.toFixed(2)}`,
+      `₹ ${totalHsnTax.toFixed(2)}`,
+    ]);
 
+    const hsnAlignments: Record<number, "left" | "center" | "right"> = {
+      0: "center",
+      1: "right",
+      2: "right",
+      3: "right",
+      4: "right",
+      5: "right",
+      6: "right",
+    };
+
+    doc.setFont("Roboto", "bold");
     doc.setFontSize(8);
-    doc.setFont("helvetica", "normal");
     doc.setTextColor(71, 85, 105);
-    doc.text("Taxable Subtotal:", totalsBoxX + 3, finalY + 5.5);
-    doc.text(`₹ ${data.subtotal.toFixed(2)}`, totalsBoxX + totalsBoxWidth - 3, finalY + 5.5, { align: "right" });
+    doc.text("HSN / GST TAX SUMMARY", marginX, currY);
 
-    doc.text("GST Tax Total:", totalsBoxX + 3, finalY + 10.5);
-    doc.text(`₹ ${data.tax_total.toFixed(2)}`, totalsBoxX + totalsBoxWidth - 3, finalY + 10.5, { align: "right" });
+    autoTable(doc, {
+      startY: currY + 1.5,
+      margin: { left: marginX, right: marginX },
+      head: [["HSN/SAC", "Taxable Value (₹)", "CGST %", "CGST (₹)", "SGST %", "SGST (₹)", "Total Tax (₹)"]],
+      body: hsnTableBody,
+      theme: "grid",
+      styles: {
+        font: "Roboto",
+        fontSize: 7,
+        textColor: [30, 41, 59],
+        cellPadding: 1.5,
+      },
+      headStyles: {
+        font: "Roboto",
+        fontStyle: "bold",
+        fillColor: [241, 245, 249],
+        textColor: [15, 23, 42],
+        fontSize: 7,
+      },
+      columnStyles: {
+        0: { cellWidth: 26 },
+        1: { cellWidth: 32 },
+        2: { cellWidth: 20 },
+        3: { cellWidth: 26 },
+        4: { cellWidth: 20 },
+        5: { cellWidth: 26 },
+        6: { cellWidth: 36, fontStyle: "bold" },
+      },
+      didParseCell: (hookData) => {
+        hookData.cell.styles.halign = hsnAlignments[hookData.column.index] || "left";
+        if (hookData.row.index === hsnTableBody.length - 1) {
+          hookData.cell.styles.fontStyle = "bold";
+          hookData.cell.styles.fillColor = [248, 250, 252];
+        }
+      },
+    });
+
+    let bottomY = (doc as any).lastAutoTable?.finalY ? (doc as any).lastAutoTable.finalY + 4 : 160;
+    if (bottomY + 40 > 280) {
+      doc.addPage();
+      bottomY = 15;
+    }
+
+    // Totals Box (Right Side, width: 75mm, strictly inside margins)
+    const totalsBoxWidth = 75;
+    const totalsBoxX = marginX + contentWidth - totalsBoxWidth; // 123mm
+    const totalsBoxHeight = 32;
+    doc.setFillColor(248, 250, 252);
+    doc.rect(totalsBoxX, bottomY, totalsBoxWidth, totalsBoxHeight, "F");
+    doc.setDrawColor(203, 213, 225);
+    doc.rect(totalsBoxX, bottomY, totalsBoxWidth, totalsBoxHeight, "S");
+
+    doc.setFontSize(7.5);
+    doc.setFont("Roboto", "normal");
+    doc.setTextColor(71, 85, 105);
+
+    const cgstTotal = data.cgst_total !== undefined ? data.cgst_total : round2(data.tax_total / 2);
+    const sgstTotal = data.sgst_total !== undefined ? data.sgst_total : round2(data.tax_total / 2);
+    const rightValX = totalsBoxX + totalsBoxWidth - 4;
+
+    doc.text("Taxable Subtotal:", totalsBoxX + 3, bottomY + 5);
+    doc.text(`₹ ${data.subtotal.toFixed(2)}`, rightValX, bottomY + 5, { align: "right" });
+
+    doc.text("Central GST (CGST):", totalsBoxX + 3, bottomY + 9.5);
+    doc.text(`₹ ${cgstTotal.toFixed(2)}`, rightValX, bottomY + 9.5, { align: "right" });
+
+    doc.text("State GST (SGST):", totalsBoxX + 3, bottomY + 14);
+    doc.text(`₹ ${sgstTotal.toFixed(2)}`, rightValX, bottomY + 14, { align: "right" });
+
+    doc.text("Total GST:", totalsBoxX + 3, bottomY + 18.5);
+    doc.text(`₹ ${data.tax_total.toFixed(2)}`, rightValX, bottomY + 18.5, { align: "right" });
 
     if (data.round_off !== 0) {
-      doc.text("Round-Off:", totalsBoxX + 3, finalY + 15.5);
       const roSign = data.round_off > 0 ? "+" : "";
-      doc.text(`${roSign}₹ ${data.round_off.toFixed(2)}`, totalsBoxX + totalsBoxWidth - 3, finalY + 15.5, { align: "right" });
+      doc.text("Round-Off:", totalsBoxX + 3, bottomY + 22.5);
+      doc.text(`${roSign}₹ ${data.round_off.toFixed(2)}`, rightValX, bottomY + 22.5, { align: "right" });
     }
 
     doc.setDrawColor(203, 213, 225);
-    doc.line(totalsBoxX + 2, finalY + 18.5, totalsBoxX + totalsBoxWidth - 2, finalY + 18.5);
+    doc.line(totalsBoxX + 2, bottomY + 23.5, totalsBoxX + totalsBoxWidth - 2, bottomY + 23.5);
 
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(9.5);
+    doc.setFont("Roboto", "bold");
+    doc.setFontSize(9);
     doc.setTextColor(29, 78, 216); // blue-700
-    doc.text("Grand Total:", totalsBoxX + 3, finalY + 24);
-    doc.text(`₹ ${data.grand_total.toFixed(2)}`, totalsBoxX + totalsBoxWidth - 3, finalY + 24, { align: "right" });
+    doc.text("Grand Total:", totalsBoxX + 3, bottomY + 28);
+    doc.text(`₹ ${data.grand_total.toFixed(2)}`, rightValX, bottomY + 28, { align: "right" });
 
-    // Terms & Signatory (Left Side)
-    const termsX = marginX;
-    doc.setFont("helvetica", "normal");
+    // Left Side at bottomY: Amount in Words, UPI QR Code, Terms & Signatory
+    const amountWords = data.amount_in_words || numberToWordsIndian(data.grand_total);
+    doc.setFont("Roboto", "bold");
     doc.setFontSize(7.5);
-    doc.setTextColor(100, 116, 139);
-    doc.text(
-      data.terms_and_conditions || "Thank you for your business! Goods once sold cannot be returned without original cash memo.",
-      termsX,
-      finalY + 8,
-      { maxWidth: 105 }
-    );
-    doc.text(data.jurisdiction_note || "Subject to local jurisdiction.", termsX, finalY + 15, { maxWidth: 105 });
+    doc.setTextColor(30, 41, 59);
+    doc.text(`Amount in Words: ${amountWords}`, marginX, bottomY + 4, { maxWidth: contentWidth - totalsBoxWidth - 6 });
 
-    doc.setFont("helvetica", "bold");
+    // UPI QR Code
+    const upiVpa = data.upi_vpa || "pharmacy@upi";
+    const upiUri = generateUpiPaymentString(upiVpa, data.store_name, data.grand_total, data.invoice_number);
+    drawQrCodeJsPdf(doc, upiUri, marginX, bottomY + 8, 18);
+
+    doc.setFont("Roboto", "bold");
+    doc.setFontSize(7.5);
+    doc.setTextColor(15, 23, 42);
+    doc.text("Scan & Pay via UPI", marginX + 21, bottomY + 12);
+    doc.setFont("Roboto", "normal");
+    doc.setFontSize(7);
+    doc.setTextColor(71, 85, 105);
+    doc.text(`UPI VPA: ${upiVpa}`, marginX + 21, bottomY + 16.5);
+    doc.text(`Total: ₹ ${data.grand_total.toFixed(2)}`, marginX + 21, bottomY + 20.5);
+
+    // Terms & Conditions
+    const termsY = bottomY + 29;
+    doc.setFont("Roboto", "normal");
+    doc.setFontSize(6.5);
+    doc.setTextColor(100, 116, 139);
+    doc.text("1. Goods once sold will not be returned without original cash memo.", marginX, termsY);
+    doc.text(`2. Refrigerated medicines are strictly non-returnable. • ${data.jurisdiction_note || "Subject to local jurisdiction."}`, marginX, termsY + 3.5);
+
+    // Signature
+    doc.setFont("Roboto", "bold");
+    doc.setFontSize(7.5);
     doc.setTextColor(51, 65, 85);
-    doc.text("Authorised Signatory / Pharmacist", termsX, finalY + 25);
+    doc.text(`For ${data.store_name}`, marginX + 60, termsY);
+    doc.setFont("Roboto", "normal");
+    doc.setFontSize(6.5);
+    doc.setTextColor(100, 116, 139);
+    doc.text("Authorised Signatory / Pharmacist", marginX + 60, termsY + 4);
 
     // Page Numbering & Bottom Brand Mark on all pages
     const totalPages = doc.getNumberOfPages();
     for (let p = 1; p <= totalPages; p++) {
       doc.setPage(p);
-      doc.setFont("helvetica", "normal");
-      doc.setFontSize(7.5);
+      doc.setFont("Roboto", "normal");
+      doc.setFontSize(7);
       doc.setTextColor(148, 163, 184);
       doc.text(
-        `Page ${p} of ${totalPages}  •  Computer Generated Tax Invoice  •  LamSuite POS`,
+        `Page ${p} of ${totalPages}  •  Computer Generated Statutory Tax Invoice  •  LamSuite POS`,
         centerX,
         292,
         { align: "center" }

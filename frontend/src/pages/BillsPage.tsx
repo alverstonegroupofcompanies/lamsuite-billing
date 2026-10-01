@@ -206,11 +206,20 @@ export const BillsPage: React.FC = () => {
       invoice_number: invoice.invoice_number + (invoice.is_revised ? " (Revised)" : ""),
       invoice_date: invoice.invoice_date,
       store_name: "LamStone Pharmacy & Retail",
+      store_address: "Main Road, Palakkad, Kerala - 678001",
       store_phone: "9876543210",
+      store_gstin: "32ABCDE1234F1Z5",
+      drug_license_numbers: ["20B/KL-PKD-1029", "21B/KL-PKD-1030"],
+      fssai_no: "10020042001234",
+      place_of_supply: invoice.place_of_supply || "32-Kerala",
       customer_name: invoice.customer_name || "Walk-in Customer",
       customer_phone: invoice.customer_phone || "",
+      customer_gstin: invoice.customer_gstin || undefined,
+      payment_mode: invoice.payment_mode || "Cash",
+      payment_status: (invoice as any).payment_status || "Paid",
       lines: items.map((it) => ({
         description: it.product_name,
+        hsn_code: (it as any).hsn_code || "300490",
         batch_no: it.batch_no,
         expiry_date: it.expiry_date,
         qty: it.qty,
@@ -223,6 +232,7 @@ export const BillsPage: React.FC = () => {
       tax_total: invoice.tax_total,
       round_off: invoice.round_off,
       grand_total: invoice.grand_total,
+      upi_vpa: "pharmacy@upi",
     };
   };
 

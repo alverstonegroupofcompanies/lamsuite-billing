@@ -4,6 +4,8 @@ import {
   generateUpiPaymentString,
   generateWhatsAppShareUrl,
   generateEmailShareUrl,
+  numberToWordsIndian,
+  calculateHsnSummary,
   printingEngine,
   type InvoicePrintData,
 } from "./printingEngine";
@@ -269,6 +271,116 @@ describe("Printing Engine & Document Layouts (PRN-001, PRN-002, PRN-005)", () =>
       const canReveal = await printingEngine.revealFile("/test/path/Invoice.pdf");
       expect(typeof canOpen).toBe("boolean");
       expect(typeof canReveal).toBe("boolean");
+    });
+
+    it("converts amounts to Indian numbering words correctly", () => {
+      expect(numberToWordsIndian(291)).toBe("Indian Two Hundred Ninety One Rupees Only");
+      expect(numberToWordsIndian(128.50)).toBe("Indian One Hundred Twenty Eight Rupees and Fifty Paise Only");
+      expect(numberToWordsIndian(100500)).toBe("Indian One Lakh Five Hundred Rupees Only");
+    });
+
+    it("calculates HSN Tax Summary grouping by HSN code and GST rate", () => {
+      const testLines = [
+        { description: "Item 1", hsn_code: "300490", qty: 2, rate: 50, gst_percent: 12, amount: 100, taxable_amount: 89.29 },
+        { description: "Item 2", hsn_code: "300490", qty: 1, rate: 100, gst_percent: 12, amount: 100, taxable_amount: 89.29 },
+        { description: "Item 3", hsn_code: "210690", qty: 1, rate: 200, gst_percent: 18, amount: 200, taxable_amount: 169.49 },
+      ];
+      const summary = calculateHsnSummary(testLines);
+      expect(summary).toHaveLength(2);
+
+      const pharmaHsn = summary.find((s: any) => s.hsnCode === "300490");
+      expect(pharmaHsn).toBeDefined();
+      expect(pharmaHsn!.cgstRate).toBe(6);
+      expect(pharmaHsn!.sgstRate).toBe(6);
+      expect(pharmaHsn!.taxableValue).toBe(178.58);
+
+      const foodHsn = summary.find((s: any) => s.hsnCode === "210690");
+      expect(foodHsn).toBeDefined();
+      expect(foodHsn!.cgstRate).toBe(9);
+      expect(foodHsn!.sgstRate).toBe(9);
+    });
+
+    it("generates 1-item, 2-item, and 46-item statutory A4 PDFs with valid Unicode %PDF- header and ToUnicode CMap", () => {
+      const buildInvoice = (count: number): InvoicePrintData => {
+        const lines = [];
+        for (let i = 1; i <= count; i++) {
+          lines.push({
+            description: `Dolo 650 Tablets Batch #${i}`,
+            hsn_code: "300490",
+            batch_no: `BT-${1000 + i}`,
+            expiry_date: "12/28",
+            qty: 2,
+            rate: 32.5,
+            gst_percent: 12,
+            amount: 65,
+          });
+        }
+        return {
+          invoice_number: `INV-TEST-${count}`,
+          invoice_date: "2026-10-01",
+          store_name: "LamStone Specialty Pharmacy",
+          store_address: "Main Road, Palakkad - 678001",
+          store_phone: "9876543210",
+          store_gstin: "32ABCDE1234F1Z5",
+          customer_name: "Muhammad Anshad",
+          customer_phone: "9847012345",
+          lines,
+          subtotal: count * 58.04,
+          tax_total: count * 6.96,
+          round_off: 0,
+          grand_total: count * 65,
+        };
+      };
+
+      // 1-item invoice
+      const pdf1 = printingEngine.generateInvoicePdf(buildInvoice(1));
+      expect(pdf1).toBeInstanceOf(Uint8Array);
+      expect(String.fromCharCode(...pdf1.subarray(0, 5))).toBe("%PDF-");
+      const str1 = Buffer.from(pdf1).toString("latin1");
+      expect(str1).toContain("/ToUnicode");
+      expect(str1.toLowerCase()).toContain("20b9"); // Unicode U+20B9 (₹)
+
+      // 2-item invoice
+      const pdf2 = printingEngine.generateInvoicePdf(buildInvoice(2));
+      expect(pdf2).toBeInstanceOf(Uint8Array);
+      expect(String.fromCharCode(...pdf2.subarray(0, 5))).toBe("%PDF-");
+      const str2 = Buffer.from(pdf2).toString("latin1");
+      expect(str2).toContain("/ToUnicode");
+      expect(str2.toLowerCase()).toContain("20b9");
+
+      // 46-item invoice
+      const pdf46 = printingEngine.generateInvoicePdf(buildInvoice(46));
+      expect(pdf46).toBeInstanceOf(Uint8Array);
+      expect(String.fromCharCode(...pdf46.subarray(0, 5))).toBe("%PDF-");
+      const str46 = Buffer.from(pdf46).toString("latin1");
+      expect(str46).toContain("/ToUnicode");
+      expect(str46.toLowerCase()).toContain("20b9");
+      expect(pdf46.length).toBeGreaterThan(150000); // 46 items multi-page PDF
+    });
+
+    it("generates matching statutory A4 HTML template with HSN summary, QR code, and aligned columns", () => {
+      const invoiceData: InvoicePrintData = {
+        invoice_number: "INV-HTML-MATCH",
+        invoice_date: "2026-10-01",
+        store_name: "LamStone Specialty Pharmacy",
+        customer_name: "Anshad",
+        lines: [
+          { description: "Amoxicillin 500mg", hsn_code: "300490", batch_no: "AMX-1", expiry_date: "05/27", qty: 1, rate: 100, gst_percent: 12, amount: 100 },
+        ],
+        subtotal: 89.29,
+        tax_total: 10.71,
+        round_off: 0,
+        grand_total: 100,
+      };
+
+      const html = printingEngine.generateInvoiceHtml(invoiceData);
+      expect(html).toContain("TAX INVOICE");
+      expect(html).toContain("HSN / GST Tax Summary");
+      expect(html).toContain("Scan & Pay via UPI");
+      expect(html).toContain("Amount in Words:");
+      expect(html).toContain("Terms & Conditions:");
+      expect(html).toContain("tabular-nums");
+      expect(html).not.toContain("font-family: monospace;");
     });
   });
 });
