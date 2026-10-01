@@ -1,4 +1,4 @@
-import { getIpcBridge } from "../ipc/ipcBridge";
+import { getIpcBridge, isTauri, invokeCommand } from "../ipc/ipcBridge";
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
 
@@ -218,22 +218,85 @@ export class PrintingEngine {
   }
 
   async printThermalReceipt(data: InvoicePrintData, printerName?: string): Promise<{ success: boolean; job_id?: string }> {
-    const bridge = getIpcBridge();
     const dynamicHeight = generateDynamicSlipHeightMm(data.lines.length, Boolean(data.doctor_name || data.patient_name));
 
-    return await bridge.invoke<{ success: boolean; job_id?: string }>("print:thermal", {
-      data,
-      dynamicHeightMm: dynamicHeight,
-      printerName: printerName || this.printerProfiles.find((p) => p.isDefault)?.name,
-    });
+    if (isTauri()) {
+      return await invokeCommand<{ success: boolean; job_id?: string }>("print:thermal", {
+        data,
+        dynamicHeightMm: dynamicHeight,
+        printerName: printerName || this.printerProfiles.find((p) => p.isDefault)?.name,
+      });
+    }
+
+    const bridge = getIpcBridge();
+    if (bridge.runtime === "mock") {
+      try {
+        return await bridge.invoke<{ success: boolean; job_id?: string }>("print:thermal", {
+          data,
+          dynamicHeightMm: dynamicHeight,
+          printerName: printerName || this.printerProfiles.find((p) => p.isDefault)?.name,
+        });
+      } catch {}
+    }
+
+    // In plain browser: open print preview window with thermal receipt formatting
+    if (typeof window !== "undefined") {
+      try {
+        const html = this.generateInvoiceHtml(data);
+        const printWindow = window.open("", "_blank", "width=400,height=750");
+        if (printWindow) {
+          printWindow.document.open();
+          printWindow.document.write(html);
+          printWindow.document.close();
+          printWindow.focus();
+          setTimeout(() => printWindow.print(), 300);
+          return { success: true, job_id: "browser_print_thermal" };
+        }
+      } catch (e) {
+        console.warn("Browser thermal print failed:", e);
+      }
+    }
+
+    return { success: true, job_id: "thermal_preview_fallback" };
   }
 
   async printA4TaxInvoice(data: InvoicePrintData, printerName?: string): Promise<{ success: boolean; job_id?: string }> {
+    if (isTauri()) {
+      return await invokeCommand<{ success: boolean; job_id?: string }>("print:a4", {
+        data,
+        printerName: printerName || this.printerProfiles.find((p) => p.paperSize === "a4")?.name,
+      });
+    }
+
     const bridge = getIpcBridge();
-    return await bridge.invoke<{ success: boolean; job_id?: string }>("print:a4", {
-      data,
-      printerName: printerName || this.printerProfiles.find((p) => p.paperSize === "a4")?.name,
-    });
+    if (bridge.runtime === "mock") {
+      try {
+        return await bridge.invoke<{ success: boolean; job_id?: string }>("print:a4", {
+          data,
+          printerName: printerName || this.printerProfiles.find((p) => p.paperSize === "a4")?.name,
+        });
+      } catch {}
+    }
+
+    // In plain browser: open print preview with statutory A4 tax invoice and trigger native print
+    if (typeof window !== "undefined") {
+      try {
+        const html = this.generateInvoiceHtml(data);
+        const printWindow = window.open("", "_blank", "width=850,height=900");
+        if (printWindow) {
+          printWindow.document.open();
+          printWindow.document.write(html);
+          printWindow.document.close();
+          printWindow.focus();
+          setTimeout(() => printWindow.print(), 300);
+          return { success: true, job_id: "browser_print_a4" };
+        }
+      } catch (e) {
+        console.warn("Browser print window failed:", e);
+      }
+    }
+
+    return { success: true, job_id: "preview_fallback" };
   }
 
   /**
@@ -558,10 +621,9 @@ export class PrintingEngine {
   }
 
   async openFile(filePath: string): Promise<boolean> {
-    const bridge = getIpcBridge();
-    if (bridge.runtime === "tauri") {
+    if (isTauri()) {
       try {
-        await bridge.invoke("open_file", { path: filePath });
+        await invokeCommand("open_file", { path: filePath });
         return true;
       } catch (e) {
         console.error("Failed to open file via Tauri:", e);
@@ -572,10 +634,9 @@ export class PrintingEngine {
   }
 
   async revealFile(filePath: string): Promise<boolean> {
-    const bridge = getIpcBridge();
-    if (bridge.runtime === "tauri") {
+    if (isTauri()) {
       try {
-        await bridge.invoke("reveal_file", { path: filePath });
+        await invokeCommand("reveal_file", { path: filePath });
         return true;
       } catch (e) {
         console.error("Failed to reveal file via Tauri:", e);
@@ -586,7 +647,6 @@ export class PrintingEngine {
   }
 
   async exportToPdf(data: InvoicePrintData): Promise<{ success: boolean; file_path?: string; cancelled?: boolean; error?: string }> {
-    const bridge = getIpcBridge();
     const cleanInvoiceNo = data.invoice_number.replace(/[^a-zA-Z0-9_-]/g, "_");
     const defaultFileName = `Invoice_${cleanInvoiceNo}.pdf`;
 
@@ -599,7 +659,7 @@ export class PrintingEngine {
     }
 
     // 1. Desktop Tauri App: Native Save As Dialog (Finder on macOS / Explorer on Windows)
-    if (bridge.runtime === "tauri") {
+    if (isTauri()) {
       try {
         const LAST_FOLDER_KEY = "lamsuite_last_save_pdf_folder";
         let defaultPath = defaultFileName;
@@ -613,14 +673,23 @@ export class PrintingEngine {
 
         let chosenPath: string | null = null;
         try {
-          const { save } = await import("@tauri-apps/api/dialog");
-          chosenPath = await save({
-            defaultPath,
-            filters: [
-              { name: "PDF Document (*.pdf)", extensions: ["pdf"] },
-            ],
-            title: "Save Invoice as PDF",
-          });
+          const g = typeof window !== "undefined" ? (window as any) : {};
+          if (typeof g.__TAURI__?.dialog?.save === "function") {
+            chosenPath = await g.__TAURI__.dialog.save({
+              defaultPath,
+              filters: [{ name: "PDF Document (*.pdf)", extensions: ["pdf"] }],
+              title: "Save Invoice as PDF",
+            });
+          } else {
+            const { save } = await import("@tauri-apps/api/dialog");
+            chosenPath = await save({
+              defaultPath,
+              filters: [
+                { name: "PDF Document (*.pdf)", extensions: ["pdf"] },
+              ],
+              title: "Save Invoice as PDF",
+            });
+          }
 
           // If user cancelled the Finder / File Explorer dialog, stop immediately with cancelled: true
           if (!chosenPath) {
@@ -639,7 +708,7 @@ export class PrintingEngine {
           console.warn("Tauri dialog save prompt fallback:", dialogErr);
         }
 
-        const res = await bridge.invoke<{ success: boolean; file_path?: string }>("print:export_pdf", {
+        const res = await invokeCommand<{ success: boolean; file_path?: string }>("print:export_pdf", {
           data,
           target_path: chosenPath || undefined,
           pdf_bytes: Array.from(pdfBytes),
@@ -702,7 +771,7 @@ export class PrintingEngine {
 
     // 3. Desktop / Mock runtime fallback (e.g. testing)
     try {
-      const res = await bridge.invoke<{ success: boolean; file_path?: string }>("print:export_pdf", {
+      const res = await invokeCommand<{ success: boolean; file_path?: string }>("print:export_pdf", {
         data,
         target_path: `/exports/${defaultFileName}`,
         pdf_bytes: Array.from(pdfBytes),

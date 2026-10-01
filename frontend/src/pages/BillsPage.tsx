@@ -36,6 +36,7 @@ import {
   generateEmailShareUrl,
   type InvoicePrintData,
 } from "../lib/printing/printingEngine";
+import { isTauri } from "../lib/ipc/ipcBridge";
 import { posCartService } from "../lib/billing/posCartService";
 import { productsStore, type ProductBatch, type ProductItem } from "../lib/masters/productsStore";
 
@@ -278,7 +279,11 @@ export const BillsPage: React.FC = () => {
     }
     const printData = buildPrintData(selectedInvoice, selectedInvoiceItems);
     const url = generateWhatsAppShareUrl(selectedInvoice.customer_phone, printData);
-    window.open(url, "_blank");
+    if (isTauri()) {
+      import("@tauri-apps/api/shell").then(({ open }) => open(url)).catch(() => window.open(url, "_blank"));
+    } else {
+      window.open(url, "_blank");
+    }
     showNotification("WhatsApp share window opened");
   };
 
@@ -286,7 +291,11 @@ export const BillsPage: React.FC = () => {
     if (!selectedInvoice) return;
     const printData = buildPrintData(selectedInvoice, selectedInvoiceItems);
     const url = generateEmailShareUrl("customer@example.com", printData);
-    window.open(url, "_blank");
+    if (isTauri()) {
+      import("@tauri-apps/api/shell").then(({ open }) => open(url)).catch(() => window.open(url, "_blank"));
+    } else {
+      window.open(url, "_blank");
+    }
     showNotification("Email client opened");
   };
 

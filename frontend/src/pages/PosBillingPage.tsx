@@ -40,6 +40,7 @@ import {
   generateEmailShareUrl,
   type InvoicePrintData,
 } from "../lib/printing/printingEngine";
+import { isTauri } from "../lib/ipc/ipcBridge";
 import { companySettingsService, type ColumnSetting } from "../lib/settings/companySettingsService";
 import type { InvoiceTotals } from "../lib/billing/billingCalculations";
 import {
@@ -729,14 +730,22 @@ export const PosBillingPage: React.FC = () => {
     }
     const data = preparePrintData();
     const url = generateWhatsAppShareUrl(customerPhone, data);
-    window.open(url, "_blank");
+    if (isTauri()) {
+      import("@tauri-apps/api/shell").then(({ open }) => open(url)).catch(() => window.open(url, "_blank"));
+    } else {
+      window.open(url, "_blank");
+    }
     showNotification("WhatsApp invoice link opened!");
   };
 
   const handleShareEmail = () => {
     const data = preparePrintData();
     const url = generateEmailShareUrl("customer@example.com", data);
-    window.open(url, "_blank");
+    if (isTauri()) {
+      import("@tauri-apps/api/shell").then(({ open }) => open(url)).catch(() => window.open(url, "_blank"));
+    } else {
+      window.open(url, "_blank");
+    }
     showNotification("Email invoice client opened!");
   };
 
