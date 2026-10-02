@@ -39,6 +39,8 @@ import {
 import { isTauri } from "../lib/ipc/ipcBridge";
 import { posCartService } from "../lib/billing/posCartService";
 import { productsStore, type ProductBatch, type ProductItem } from "../lib/masters/productsStore";
+import { companySettingsService } from "../lib/settings/companySettingsService";
+import { PrintPreviewModal } from "../components/PrintPreviewModal";
 
 export const BillsPage: React.FC = () => {
   const navigate = useNavigate();
@@ -236,10 +238,35 @@ export const BillsPage: React.FC = () => {
     };
   };
 
+  // Print Preview Modal State
+  const [previewModalState, setPreviewModalState] = useState<{
+    isOpen: boolean;
+    data: InvoicePrintData | null;
+    initialFormat?: "a4" | "half_a4" | "thermal_80mm" | "thermal_58mm";
+    title?: string;
+  }>({
+    isOpen: false,
+    data: null,
+  });
+
   // Actions
-  const handleReprint = async (format: "a4" | "thermal" | "pdf") => {
+  const handleReprint = async (format: "a4" | "thermal" | "pdf", e?: React.MouseEvent) => {
     if (!selectedInvoice) return;
     const printData = buildPrintData(selectedInvoice, selectedInvoiceItems);
+    const settings = companySettingsService.getSettings();
+    const previewMode = settings.printing.previewMode || "always";
+    const bypassPreview = (e && e.shiftKey) || previewMode === "never" || (previewMode === "skip_thermal" && format === "thermal");
+
+    if (!bypassPreview) {
+      setPreviewModalState({
+        isOpen: true,
+        data: printData,
+        initialFormat: format === "a4" ? "a4" : "thermal_80mm",
+        title: `Reprint Preview - #${selectedInvoice.invoice_number}`,
+      });
+      return;
+    }
+
     try {
       if (format === "thermal") {
         await printingEngine.printThermalReceipt(printData);
@@ -1028,6 +1055,19 @@ export const BillsPage: React.FC = () => {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Print Preview Modal */}
+      {previewModalState.isOpen && previewModalState.data && (
+        <PrintPreviewModal
+          isOpen={previewModalState.isOpen}
+          onClose={() => setPreviewModalState({ isOpen: false, data: null })}
+          docType="tax_invoice"
+          title={previewModalState.title || "Print Preview - Tax Invoice"}
+          data={previewModalState.data}
+          initialFormat={previewModalState.initialFormat}
+          customerPhone={selectedInvoice?.customer_phone}
+        />
       )}
     </div>
   );

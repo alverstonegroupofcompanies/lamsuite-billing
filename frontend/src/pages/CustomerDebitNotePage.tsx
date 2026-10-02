@@ -16,7 +16,8 @@ import {
 } from "../lib/billing/customerDebitNoteService";
 import { partiesStore, type Customer } from "../lib/masters/partiesStore";
 import { productsStore, type ProductItem } from "../lib/masters/productsStore";
-import { printingEngine } from "../lib/printing/printingEngine";
+import { printingEngine, type CreditNotePrintData } from "../lib/printing/printingEngine";
+import { PrintPreviewModal } from "../components/PrintPreviewModal";
 import {
   Undo2,
   Search,
@@ -98,6 +99,16 @@ export const CustomerDebitNotePage: React.FC = () => {
   const [isIssueModalOpen, setIsIssueModalOpen] = useState(false);
   const [isReportModalOpen, setIsReportModalOpen] = useState(false);
   const [reportData, setReportData] = useState<any>(null);
+
+  // Print Preview Modal State
+  const [previewModalState, setPreviewModalState] = useState<{
+    isOpen: boolean;
+    data: CreditNotePrintData | null;
+    title?: string;
+  }>({
+    isOpen: false,
+    data: null,
+  });
 
   const showToast = (msg: string, type: "success" | "error" = "success") => {
     setToast({ msg, type });
@@ -316,50 +327,45 @@ export const CustomerDebitNotePage: React.FC = () => {
   };
 
   const handlePrintCreditNote = (cn: CreditNoteRecord) => {
-    try {
-      const html = printingEngine.generateCreditNoteA4Html({
-        return_number: cn.credit_note_number,
-        return_date: cn.credit_note_date,
-        original_invoice_number: cn.original_invoice_numbers.join(", "),
-        customer_debit_note_number: cn.source_debit_note_number,
-        invoice_references: cn.invoice_references,
-        store_name: "LamStone Pharmacy & Retail",
-        store_address: "Main Road, Palakkad, Kerala - 678001",
-        store_phone: "9876543210",
-        store_gstin: "32AAAAA0000A1Z5",
-        customer_name: cn.customer_name,
-        customer_phone: cn.customer_phone,
-        customer_gstin: cn.customer_gstin,
-        lines: cn.lines.map((l) => ({
-          description: l.product_name,
-          hsn_code: l.hsn_code,
-          batch_no: l.batch_no,
-          expiry_date: l.expiry_date,
-          qty: l.return_qty,
-          rate: l.unit_price,
-          gst_percent: l.gst_percent,
-          amount: l.total_amount,
-          reason: l.reason,
-        })),
-        subtotal: cn.subtotal,
-        tax_total: cn.tax_total,
-        cgst_total: cn.cgst_total,
-        sgst_total: cn.sgst_total,
-        round_off: cn.round_off,
-        grand_total: cn.grand_total,
-        refund_mode: cn.refund_mode,
-        notes: cn.notes,
-      });
+    const printData: CreditNotePrintData = {
+      return_number: cn.credit_note_number,
+      return_date: cn.credit_note_date,
+      original_invoice_number: cn.original_invoice_numbers.join(", "),
+      customer_debit_note_number: cn.source_debit_note_number,
+      invoice_references: cn.invoice_references,
+      store_name: "LamStone Pharmacy & Retail",
+      store_address: "Main Road, Palakkad, Kerala - 678001",
+      store_phone: "9876543210",
+      store_gstin: "32AAAAA0000A1Z5",
+      customer_name: cn.customer_name,
+      customer_phone: cn.customer_phone,
+      customer_gstin: cn.customer_gstin,
+      lines: cn.lines.map((l) => ({
+        description: l.product_name,
+        hsn_code: l.hsn_code,
+        batch_no: l.batch_no,
+        expiry_date: l.expiry_date,
+        qty: l.return_qty,
+        rate: l.unit_price,
+        gst_percent: l.gst_percent,
+        amount: l.total_amount,
+        reason: l.reason,
+      })),
+      subtotal: cn.subtotal,
+      tax_total: cn.tax_total,
+      cgst_total: cn.cgst_total,
+      sgst_total: cn.sgst_total,
+      round_off: cn.round_off,
+      grand_total: cn.grand_total,
+      refund_mode: cn.refund_mode,
+      notes: cn.notes,
+    };
 
-      const win = window.open("", "_blank", "width=900,height=650");
-      if (win) {
-        win.document.write(html);
-        win.document.close();
-        win.print();
-      }
-    } catch (err: any) {
-      showToast("Print error: " + err.message, "error");
-    }
+    setPreviewModalState({
+      isOpen: true,
+      data: printData,
+      title: `Credit Note Preview - #${cn.credit_note_number}`,
+    });
   };
 
   const statusBadge = (status: DebitNoteStatus) => {
@@ -1320,6 +1326,19 @@ export const CustomerDebitNotePage: React.FC = () => {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Print Preview Modal */}
+      {previewModalState.isOpen && previewModalState.data && (
+        <PrintPreviewModal
+          isOpen={previewModalState.isOpen}
+          onClose={() => setPreviewModalState({ isOpen: false, data: null })}
+          docType="credit_note"
+          title={previewModalState.title || "Credit Note Preview"}
+          data={previewModalState.data}
+          initialFormat="a4"
+          customerPhone={previewModalState.data.customer_phone}
+        />
       )}
     </div>
   );

@@ -21,7 +21,8 @@ import {
   type PurchaseReturnSettlement,
 } from "../lib/purchases/purchaseReturnService";
 import { sqliteStorage } from "../lib/db/sqliteStorage";
-import { printingEngine } from "../lib/printing/printingEngine";
+import { printingEngine, type DebitNotePrintData } from "../lib/printing/printingEngine";
+import { PrintPreviewModal } from "../components/PrintPreviewModal";
 
 const RETURN_REASONS: { value: PurchaseReturnReason; label: string }[] = [
   { value: "expired", label: "Expired" },
@@ -87,6 +88,16 @@ export const PurchaseReturnPage: React.FC = () => {
   const [refundMode, setRefundMode] = useState<"Cash" | "Bank Transfer" | "UPI">("Cash");
   const [notes, setNotes] = useState("");
   const [saving, setSaving] = useState(false);
+
+  // Print Preview Modal State
+  const [previewModalState, setPreviewModalState] = useState<{
+    isOpen: boolean;
+    data: DebitNotePrintData | null;
+    title?: string;
+  }>({
+    isOpen: false,
+    data: null,
+  });
 
   // Toast
   const [toast, setToast] = useState<{ msg: string; type: "success" | "error" } | null>(null);
@@ -238,6 +249,46 @@ export const PurchaseReturnPage: React.FC = () => {
 
   const totals = calcTotals();
 
+  const handlePrintDebitNote = (ret: any) => {
+    const printData: DebitNotePrintData = {
+      return_number: ret.return_number,
+      return_date: ret.return_date,
+      original_purchase_number: ret.original_purchase_number,
+      supplier_invoice_no: ret.supplier_invoice_no,
+      store_name: "LamStone Pharmacy & Retail",
+      store_address: "Main Road, Palakkad, Kerala - 678001",
+      store_phone: "9876543210",
+      store_gstin: "32AAAAA0000A1Z5",
+      supplier_name: ret.supplier_name,
+      supplier_gstin: ret.supplier_gstin,
+      lines: (ret.lines || []).map((l: any) => ({
+        description: l.product_name,
+        hsn_code: l.hsn_code,
+        batch_no: l.batch_no,
+        expiry_date: l.expiry_date,
+        qty: l.return_qty,
+        rate: l.purchase_rate,
+        gst_percent: l.gst_percent,
+        amount: l.total_amount,
+        reason: l.reason,
+      })),
+      subtotal: ret.subtotal,
+      cgst_total: ret.cgst_total,
+      sgst_total: ret.sgst_total,
+      tax_total: ret.tax_total,
+      round_off: ret.round_off,
+      grand_total: ret.grand_total,
+      settlement_type: ret.settlement_type,
+      notes: ret.notes,
+    };
+
+    setPreviewModalState({
+      isOpen: true,
+      data: printData,
+      title: `Debit Note Preview - #${ret.return_number}`,
+    });
+  };
+
   // ── Save ──────────────────────────────────────────────────────────────────────
   const handleSave = async () => {
     if (selectedLines.length === 0) {
@@ -280,43 +331,11 @@ export const PurchaseReturnPage: React.FC = () => {
       setIsFormOpen(false);
       loadList();
 
-      // Print debit note
+      // Open Print Preview Modal
       try {
         const ret = await purchaseReturnService.getPurchaseReturnById(result.returnId);
         if (ret) {
-          const html = printingEngine.generateDebitNoteA4Html({
-            return_number: ret.return_number,
-            return_date: ret.return_date,
-            original_purchase_number: ret.original_purchase_number,
-            store_name: "LamSuite Billing",
-            supplier_name: ret.supplier_name,
-            supplier_gstin: ret.supplier_gstin,
-            supplier_invoice_no: ret.supplier_invoice_no,
-            lines: ret.lines.map((l) => ({
-              description: l.product_name,
-              hsn_code: l.hsn_code,
-              batch_no: l.batch_no,
-              expiry_date: l.expiry_date,
-              qty: l.return_qty,
-              rate: l.purchase_rate,
-              gst_percent: l.gst_percent,
-              amount: l.total_amount,
-              reason: l.reason,
-            })),
-            subtotal: ret.subtotal,
-            cgst_total: ret.cgst_total,
-            sgst_total: ret.sgst_total,
-            tax_total: ret.tax_total,
-            round_off: ret.round_off,
-            grand_total: ret.grand_total,
-            settlement_type: ret.settlement_type,
-          });
-          const win = window.open("", "_blank", "width=900,height=650");
-          if (win) {
-            win.document.write(html);
-            win.document.close();
-            win.print();
-          }
+          handlePrintDebitNote(ret);
         }
       } catch (_) {
         // print is non-fatal
@@ -422,19 +441,20 @@ export const PurchaseReturnPage: React.FC = () => {
                 <th className="px-4 py-2.5 font-semibold text-right">Debit Amt</th>
                 <th className="px-4 py-2.5 font-semibold">Settlement</th>
                 <th className="px-4 py-2.5 font-semibold text-center">Status</th>
+                <th className="px-4 py-2.5 font-semibold text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {listLoading ? (
                 <tr>
-                  <td colSpan={7} className="py-10 text-center text-slate-400">
+                  <td colSpan={8} className="py-10 text-center text-slate-400">
                     <RefreshCw className="mx-auto h-6 w-6 animate-spin text-slate-300 mb-1" />
                     Loading...
                   </td>
                 </tr>
               ) : filteredReturns.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="py-12 text-center text-slate-400">
+                  <td colSpan={8} className="py-12 text-center text-slate-400">
                     <ArrowUpFromLine className="mx-auto h-8 w-8 text-slate-300 mb-1" />
                     <p className="font-medium">No purchase returns yet</p>
                     <p className="text-[11px]">Click "New Purchase Return" to return stock to supplier</p>
@@ -456,6 +476,16 @@ export const PurchaseReturnPage: React.FC = () => {
                       </span>
                     </td>
                     <td className="px-4 py-2.5 text-center">{statusBadge(r.status)}</td>
+                    <td className="px-4 py-2.5 text-right">
+                      <button
+                        onClick={() => handlePrintDebitNote(r)}
+                        className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold text-orange-700 hover:text-white bg-orange-50 hover:bg-orange-600 border border-orange-200 rounded-lg transition"
+                        title="Print Debit Note"
+                      >
+                        <Printer className="w-3.5 h-3.5" />
+                        <span>Print</span>
+                      </button>
+                    </td>
                   </tr>
                 ))
               )}
@@ -850,6 +880,18 @@ export const PurchaseReturnPage: React.FC = () => {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Print Preview Modal */}
+      {previewModalState.isOpen && previewModalState.data && (
+        <PrintPreviewModal
+          isOpen={previewModalState.isOpen}
+          onClose={() => setPreviewModalState({ isOpen: false, data: null })}
+          docType="debit_note"
+          title={previewModalState.title || "Debit Note Preview"}
+          data={previewModalState.data}
+          initialFormat="a4"
+        />
       )}
     </div>
   );

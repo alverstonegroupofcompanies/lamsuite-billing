@@ -859,20 +859,130 @@ export const SettingsPage: React.FC = () => {
                 />
               </div>
 
+              {/* Print Preview Mode Setting */}
+              <div className="rounded-lg border border-blue-200 bg-blue-50/50 p-3.5 dark:border-blue-900/50 dark:bg-blue-950/20">
+                <label className="block text-xs font-bold text-slate-800 dark:text-slate-200 mb-1">
+                  Print Preview Behavior
+                </label>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mb-2">
+                  Control whether the interactive Print Preview modal appears before sending jobs to the printer. Shift+Click bypasses preview anytime.
+                </p>
+                <div className="grid grid-cols-3 gap-2">
+                  <label className={`flex items-center gap-2 p-2 rounded-lg border text-xs cursor-pointer ${
+                    (settings.printing.previewMode || "always") === "always"
+                      ? "bg-white dark:bg-slate-800 border-blue-600 text-blue-700 dark:text-blue-400 font-semibold shadow-sm"
+                      : "border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300"
+                  }`}>
+                    <input
+                      type="radio"
+                      name="previewMode"
+                      value="always"
+                      checked={(settings.printing.previewMode || "always") === "always"}
+                      onChange={() =>
+                        setSettings({
+                          ...settings,
+                          printing: { ...settings.printing, previewMode: "always" },
+                        })
+                      }
+                      className="text-blue-600"
+                    />
+                    <span>Always Show Preview (Recommended)</span>
+                  </label>
+
+                  <label className={`flex items-center gap-2 p-2 rounded-lg border text-xs cursor-pointer ${
+                    settings.printing.previewMode === "skip_thermal"
+                      ? "bg-white dark:bg-slate-800 border-blue-600 text-blue-700 dark:text-blue-400 font-semibold shadow-sm"
+                      : "border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300"
+                  }`}>
+                    <input
+                      type="radio"
+                      name="previewMode"
+                      value="skip_thermal"
+                      checked={settings.printing.previewMode === "skip_thermal"}
+                      onChange={() =>
+                        setSettings({
+                          ...settings,
+                          printing: { ...settings.printing, previewMode: "skip_thermal" },
+                        })
+                      }
+                      className="text-blue-600"
+                    />
+                    <span>Skip for Thermal (Quick Counter)</span>
+                  </label>
+
+                  <label className={`flex items-center gap-2 p-2 rounded-lg border text-xs cursor-pointer ${
+                    settings.printing.previewMode === "never"
+                      ? "bg-white dark:bg-slate-800 border-blue-600 text-blue-700 dark:text-blue-400 font-semibold shadow-sm"
+                      : "border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300"
+                  }`}>
+                    <input
+                      type="radio"
+                      name="previewMode"
+                      value="never"
+                      checked={settings.printing.previewMode === "never"}
+                      onChange={() =>
+                        setSettings({
+                          ...settings,
+                          printing: { ...settings.printing, previewMode: "never" },
+                        })
+                      }
+                      className="text-blue-600"
+                    />
+                    <span>Never Show Preview (Direct Print)</span>
+                  </label>
+                </div>
+              </div>
+
               <div className="grid grid-cols-2 gap-4">
-                <label className="flex items-center gap-2 text-xs text-slate-700">
-                  <input
-                    type="checkbox"
-                    checked={settings.printing.silentPrinting}
+                <div>
+                  <label className="block text-[11px] font-semibold uppercase text-slate-600">Default Copy Marker</label>
+                  <select
+                    value={settings.printing.defaultCopyMarker || "Original for Recipient"}
                     onChange={(e) =>
                       setSettings({
                         ...settings,
-                        printing: { ...settings.printing, silentPrinting: e.target.checked },
+                        printing: { ...settings.printing, defaultCopyMarker: e.target.value },
+                      })
+                    }
+                    className="mt-1 w-full rounded border border-slate-300 p-2 text-xs focus:border-blue-500 focus:outline-none"
+                  >
+                    <option value="Original for Recipient">Original for Recipient</option>
+                    <option value="Duplicate for Transporter">Duplicate for Transporter</option>
+                    <option value="Triplicate for Supplier">Triplicate for Supplier</option>
+                    <option value="Customer Copy">Customer Copy</option>
+                    <option value="Office Copy">Office Copy</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-[11px] font-semibold uppercase text-slate-600">Jurisdiction Note</label>
+                  <input
+                    type="text"
+                    value={settings.printing.jurisdictionNote || "Subject to local jurisdiction."}
+                    onChange={(e) =>
+                      setSettings({
+                        ...settings,
+                        printing: { ...settings.printing, jurisdictionNote: e.target.value },
+                      })
+                    }
+                    className="mt-1 w-full rounded border border-slate-300 p-2 text-xs focus:border-blue-500 focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3 pt-2">
+                <label className="flex items-center gap-2 text-xs text-slate-700">
+                  <input
+                    type="checkbox"
+                    checked={settings.printing.printHsnSummary ?? true}
+                    onChange={(e) =>
+                      setSettings({
+                        ...settings,
+                        printing: { ...settings.printing, printHsnSummary: e.target.checked },
                       })
                     }
                     className="rounded border-slate-300 text-blue-600"
                   />
-                  <span>Silent Direct Print (bypass system print dialog)</span>
+                  <span>Print HSN / GST Tax Summary Table</span>
                 </label>
                 <label className="flex items-center gap-2 text-xs text-slate-700">
                   <input
@@ -886,7 +996,35 @@ export const SettingsPage: React.FC = () => {
                     }
                     className="rounded border-slate-300 text-blue-600"
                   />
-                  <span>Print Dynamic UPI QR Code on Slip</span>
+                  <span>Print Dynamic UPI QR Code on Slip & Invoice</span>
+                </label>
+                <label className="flex items-center gap-2 text-xs text-slate-700">
+                  <input
+                    type="checkbox"
+                    checked={settings.printing.printDoctorDetails ?? true}
+                    onChange={(e) =>
+                      setSettings({
+                        ...settings,
+                        printing: { ...settings.printing, printDoctorDetails: e.target.checked },
+                      })
+                    }
+                    className="rounded border-slate-300 text-blue-600"
+                  />
+                  <span>Print Patient & Doctor Details</span>
+                </label>
+                <label className="flex items-center gap-2 text-xs text-slate-700">
+                  <input
+                    type="checkbox"
+                    checked={settings.printing.printDrugLicenses ?? true}
+                    onChange={(e) =>
+                      setSettings({
+                        ...settings,
+                        printing: { ...settings.printing, printDrugLicenses: e.target.checked },
+                      })
+                    }
+                    className="rounded border-slate-300 text-blue-600"
+                  />
+                  <span>Print Store Drug Licenses (20B, 21B) & GSTIN</span>
                 </label>
               </div>
             </div>

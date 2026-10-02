@@ -49,6 +49,7 @@ import {
   type InvoiceItemRecord,
   type InvoiceDiffResult,
 } from "../lib/billing/invoiceManagementService";
+import { PrintPreviewModal } from "../components/PrintPreviewModal";
 
 export const PosBillingPage: React.FC = () => {
   const navigate = useNavigate();
@@ -101,6 +102,17 @@ export const PosBillingPage: React.FC = () => {
   const [posColumns, setPosColumns] = useState<ColumnSetting[]>([]);
   const [isFinalizing, setIsFinalizing] = useState(false);
   const isFinalizingRef = useRef(false);
+
+  // Print Preview Modal State
+  const [previewModalState, setPreviewModalState] = useState<{
+    isOpen: boolean;
+    data: InvoicePrintData | null;
+    initialFormat?: "a4" | "half_a4" | "thermal_80mm" | "thermal_58mm";
+    title?: string;
+  }>({
+    isOpen: false,
+    data: null,
+  });
 
   // References for focus control
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -625,21 +637,34 @@ export const PosBillingPage: React.FC = () => {
         const printData = preparePrintData(cartSnapshot);
         printData.invoice_number = `${editingInvoice.invoice_number} (Revised)`;
 
+        const appSettings = companySettingsService.getSettings();
+        const previewMode = appSettings.printing.previewMode || "always";
+        const isThermal = printFormat === "thermal";
+        const shouldDirectPrint = previewMode === "never" || (previewMode === "skip_thermal" && isThermal);
+
         let savedPdfPath: string | undefined;
-        if (printFormat === "thermal") {
-          await printingEngine.printThermalReceipt(printData);
-        } else if (printFormat === "a4") {
-          await printingEngine.printA4TaxInvoice(printData);
-        } else if (printFormat === "pdf") {
-          const exportRes = await printingEngine.exportToPdf(printData);
-          if (exportRes.cancelled) {
-            return;
+
+        if (shouldDirectPrint) {
+          if (printFormat === "thermal") {
+            await printingEngine.printThermalReceipt(printData);
+          } else if (printFormat === "a4") {
+            await printingEngine.printA4TaxInvoice(printData);
+          } else if (printFormat === "pdf") {
+            const exportRes = await printingEngine.exportToPdf(printData);
+            if (exportRes.cancelled) return;
+            if (!exportRes.success) {
+              showNotification(exportRes.error || "Failed to save revised PDF bill", "error");
+              return;
+            }
+            savedPdfPath = exportRes.file_path;
           }
-          if (!exportRes.success) {
-            showNotification(exportRes.error || "Failed to save revised PDF bill", "error");
-            return;
-          }
-          savedPdfPath = exportRes.file_path;
+        } else {
+          setPreviewModalState({
+            isOpen: true,
+            data: printData,
+            initialFormat: printFormat === "a4" ? "a4" : "thermal_80mm",
+            title: `Revised Invoice Preview - #${editingInvoice.invoice_number}`,
+          });
         }
 
         posCartService.clearCart();
@@ -789,26 +814,39 @@ export const PosBillingPage: React.FC = () => {
       });
 
       if (res.success) {
-        // 5. Execute print/export flow with snapshot
+        // 5. Check if we should open Print Preview or print directly
+        const appSettings = companySettingsService.getSettings();
+        const previewMode = appSettings.printing.previewMode || "always";
+        const isThermal = printFormat === "thermal";
+        const shouldDirectPrint = previewMode === "never" || (previewMode === "skip_thermal" && isThermal);
+
         let savedPdfPath: string | undefined;
-        if (printFormat === "thermal") {
-          await printingEngine.printThermalReceipt(printData);
-        } else if (printFormat === "a4") {
-          await printingEngine.printA4TaxInvoice(printData);
-        } else if (printFormat === "pdf") {
-          const exportRes = await printingEngine.exportToPdf(printData);
-          if (exportRes.cancelled) {
-            // User cancelled the file save picker - do not complete settlement
-            return;
+
+        if (shouldDirectPrint) {
+          if (printFormat === "thermal") {
+            await printingEngine.printThermalReceipt(printData);
+          } else if (printFormat === "a4") {
+            await printingEngine.printA4TaxInvoice(printData);
+          } else if (printFormat === "pdf") {
+            const exportRes = await printingEngine.exportToPdf(printData);
+            if (exportRes.cancelled) return;
+            if (!exportRes.success) {
+              showNotification(exportRes.error || "Failed to save PDF file", "error");
+              return;
+            }
+            savedPdfPath = exportRes.file_path;
           }
-          if (!exportRes.success) {
-            showNotification(exportRes.error || "Failed to save PDF file", "error");
-            return;
-          }
-          savedPdfPath = exportRes.file_path;
+        } else {
+          // Open Print Preview Modal with snapshot
+          setPreviewModalState({
+            isOpen: true,
+            data: printData,
+            initialFormat: printFormat === "a4" ? "a4" : "thermal_80mm",
+            title: `Tax Invoice Preview - #${invoiceNumber}`,
+          });
         }
 
-        // 6. Clear cart ONLY after BOTH save and print have succeeded
+        // 6. Clear cart ONLY after save has succeeded
         posCartService.clearCart();
         refreshCartState();
         setIsTenderModalOpen(false);
@@ -1721,6 +1759,19 @@ export const PosBillingPage: React.FC = () => {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Interactive Print Preview Modal */}
+      {previewModalState.isOpen && previewModalState.data && (
+        <PrintPreviewModal
+          isOpen={previewModalState.isOpen}
+          onClose={() => setPreviewModalState({ isOpen: false, data: null })}
+          docType="tax_invoice"
+          title={previewModalState.title || "Print Preview - Tax Invoice"}
+          data={previewModalState.data}
+          initialFormat={previewModalState.initialFormat}
+          customerPhone={customerPhone}
+        />
       )}
     </div>
   );

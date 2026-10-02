@@ -418,5 +418,84 @@ describe("Printing Engine & Document Layouts (PRN-001, PRN-002, PRN-005)", () =>
       expect(pdfStr).toContain("/ToUnicode");
       expect(pdfStr.toLowerCase()).toContain("20b9");
     });
+
+    it("renders authentic thermal receipt HTML for 80mm and 58mm POS paper widths", () => {
+      const invoiceData: InvoicePrintData = {
+        invoice_number: "INV-TH-101",
+        invoice_date: "2026-10-02",
+        store_name: "LamStone Pharmacy",
+        lines: [
+          { description: "Amoxicillin 500mg", batch_no: "AMX99", expiry_date: "2027-12", qty: 2, rate: 45, gst_percent: 12, amount: 90 },
+        ],
+        subtotal: 80.36,
+        tax_total: 9.64,
+        round_off: 0,
+        grand_total: 90,
+      };
+
+      const html80 = printingEngine.renderDocumentHtml("tax_invoice", invoiceData, {
+        paperSize: "thermal_80mm",
+        copyMarker: "Original for Recipient",
+      });
+      expect(html80).toContain("80mm");
+      expect(html80).toContain("Amoxicillin 500mg");
+      expect(html80).toContain("Original for Recipient");
+      expect(html80).toContain("₹90.00");
+
+      const html58 = printingEngine.renderDocumentHtml("tax_invoice", invoiceData, {
+        paperSize: "thermal_58mm",
+      });
+      expect(html58).toContain("58mm");
+      expect(html58).toContain("Amoxicillin 500mg");
+    });
+
+    it("renders Half-A4 landscape layout with tight tabular formatting", () => {
+      const invoiceData: InvoicePrintData = {
+        invoice_number: "INV-HALF-001",
+        invoice_date: "2026-10-02",
+        store_name: "LamStone Pharmacy",
+        lines: [
+          { description: "Azithromycin 500mg", batch_no: "AZ10", expiry_date: "2027-08", qty: 3, rate: 70, gst_percent: 12, amount: 210 },
+        ],
+        subtotal: 187.5,
+        tax_total: 22.5,
+        round_off: 0,
+        grand_total: 210,
+      };
+
+      const halfA4Html = printingEngine.renderDocumentHtml("tax_invoice", invoiceData, { paperSize: "half_a4" });
+      expect(halfA4Html).toContain("Half A4");
+      expect(halfA4Html).toContain("A5 landscape");
+      expect(halfA4Html).toContain("Azithromycin 500mg");
+      expect(halfA4Html).toContain("₹210.00");
+    });
+
+    it("dispatches Credit Note and Debit Note rendering across HTML and PDF targets", () => {
+      const creditNoteData = {
+        return_number: "CR-2026-001",
+        return_date: "2026-10-02",
+        store_name: "LamStone Pharmacy",
+        customer_name: "Test Customer",
+        lines: [
+          { description: "Cetirizine 10mg", batch_no: "CT01", expiry_date: "2027-05", qty: 1, rate: 20, gst_percent: 12, amount: 20 },
+        ],
+        subtotal: 17.86,
+        tax_total: 2.14,
+        round_off: 0,
+        grand_total: 20,
+        refund_mode: "Cash",
+      };
+
+      const cnHtml = printingEngine.renderDocumentHtml("credit_note", creditNoteData);
+      expect(cnHtml).toContain("CREDIT NOTE / SALES RETURN");
+      expect(cnHtml).toContain("CR-2026-001");
+
+      const cnThermal = printingEngine.renderDocumentHtml("credit_note", creditNoteData, { paperSize: "thermal_80mm" });
+      expect(cnThermal).toContain("*** CREDIT NOTE ***");
+
+      const cnPdf = printingEngine.renderDocumentPdf("credit_note", creditNoteData);
+      expect(cnPdf).toBeInstanceOf(Uint8Array);
+      expect(String.fromCharCode(...cnPdf.subarray(0, 5))).toBe("%PDF-");
+    });
   });
 });

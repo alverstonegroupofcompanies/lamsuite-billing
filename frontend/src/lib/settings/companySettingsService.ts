@@ -37,6 +37,11 @@ export interface PrintingConfig {
   printDoctorDetails: boolean;
   printPatientDetails: boolean;
   printUpiQrCode: boolean;
+  printHsnSummary: boolean;
+  printDiscountColumn: boolean;
+  printMrp: boolean;
+  previewMode: "always" | "skip_thermal" | "never";
+  defaultCopyMarker?: string;
   silentPrinting: boolean;
   selectedPrinterName?: string;
 }
@@ -182,6 +187,11 @@ export const DEFAULT_SETTINGS: CompanySettings = {
     printDoctorDetails: true,
     printPatientDetails: true,
     printUpiQrCode: true,
+    printHsnSummary: true,
+    printDiscountColumn: true,
+    printMrp: true,
+    previewMode: "always",
+    defaultCopyMarker: "Original for Recipient",
     silentPrinting: true,
     selectedPrinterName: "Default System Thermal Printer",
   },

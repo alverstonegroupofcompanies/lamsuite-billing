@@ -24,7 +24,8 @@ import {
   type RefundPaymentMode,
 } from "../lib/billing/salesReturnService";
 import { invoiceManagementService, type InvoiceRecord, type InvoiceItemRecord } from "../lib/billing/invoiceManagementService";
-import { printingEngine } from "../lib/printing/printingEngine";
+import { printingEngine, type CreditNotePrintData } from "../lib/printing/printingEngine";
+import { PrintPreviewModal } from "../components/PrintPreviewModal";
 
 const RETURN_REASONS: { value: ReturnReason; label: string }[] = [
   { value: "customer_return", label: "Customer Return" },
@@ -58,6 +59,16 @@ export const SalesReturnPage: React.FC = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const prefilledInvoiceId = searchParams.get("invoiceId");
+
+  // Print Preview Modal State
+  const [previewModalState, setPreviewModalState] = useState<{
+    isOpen: boolean;
+    data: CreditNotePrintData | null;
+    title?: string;
+  }>({
+    isOpen: false,
+    data: null,
+  });
 
   // --- List state ---
   const [returns, setReturns] = useState<SalesReturnRecord[]>([]);
@@ -246,6 +257,47 @@ export const SalesReturnPage: React.FC = () => {
 
   const totals = calcTotals();
 
+  const handlePrintCreditNote = (ret: any) => {
+    const printData: CreditNotePrintData = {
+      return_number: ret.return_number,
+      return_date: ret.return_date,
+      original_invoice_number: ret.original_invoice_number,
+      original_invoice_date: ret.original_invoice_date,
+      store_name: "LamStone Pharmacy & Retail",
+      store_address: "Main Road, Palakkad, Kerala - 678001",
+      store_phone: "9876543210",
+      store_gstin: "32AAAAA0000A1Z5",
+      customer_name: ret.customer_name || "Walk-in Customer",
+      customer_phone: ret.customer_phone,
+      customer_gstin: ret.customer_gstin,
+      lines: (ret.lines || []).map((l: any) => ({
+        description: l.product_name,
+        hsn_code: l.hsn_code,
+        batch_no: l.batch_no,
+        expiry_date: l.expiry_date,
+        qty: l.return_qty,
+        rate: l.unit_price,
+        gst_percent: l.gst_percent,
+        amount: l.total_amount,
+        reason: l.reason,
+      })),
+      subtotal: ret.subtotal,
+      cgst_total: ret.cgst_total,
+      sgst_total: ret.sgst_total,
+      tax_total: ret.tax_total,
+      round_off: ret.round_off,
+      grand_total: ret.grand_total,
+      refund_mode: ret.refund_mode,
+      notes: ret.notes,
+    };
+
+    setPreviewModalState({
+      isOpen: true,
+      data: printData,
+      title: `Credit Note Preview - #${ret.return_number}`,
+    });
+  };
+
   // ── Save return ───────────────────────────────────────────────────────────────
   const handleSave = async () => {
     if (selectedLines.length === 0) {
@@ -289,44 +341,11 @@ export const SalesReturnPage: React.FC = () => {
       setIsFormOpen(false);
       loadList();
 
-      // Prompt to print
+      // Open Print Preview Modal
       try {
         const ret = await salesReturnService.getSalesReturnById(result.returnId);
         if (ret) {
-          const html = printingEngine.generateCreditNoteA4Html({
-            return_number: ret.return_number,
-            return_date: ret.return_date,
-            original_invoice_number: ret.original_invoice_number,
-            original_invoice_date: ret.original_invoice_date,
-            store_name: "LamSuite Billing",
-            customer_name: ret.customer_name || "Walk-in Customer",
-            customer_phone: ret.customer_phone,
-            customer_gstin: ret.customer_gstin,
-            lines: ret.lines.map((l) => ({
-              description: l.product_name,
-              hsn_code: l.hsn_code,
-              batch_no: l.batch_no,
-              expiry_date: l.expiry_date,
-              qty: l.return_qty,
-              rate: l.unit_price,
-              gst_percent: l.gst_percent,
-              amount: l.total_amount,
-              reason: l.reason,
-            })),
-            subtotal: ret.subtotal,
-            cgst_total: ret.cgst_total,
-            sgst_total: ret.sgst_total,
-            tax_total: ret.tax_total,
-            round_off: ret.round_off,
-            grand_total: ret.grand_total,
-            refund_mode: ret.refund_mode,
-          });
-          const win = window.open("", "_blank", "width=900,height=650");
-          if (win) {
-            win.document.write(html);
-            win.document.close();
-            win.print();
-          }
+          handlePrintCreditNote(ret);
         }
       } catch (_) {
         // print failure is non-fatal
@@ -458,19 +477,20 @@ export const SalesReturnPage: React.FC = () => {
                 <th className="px-4 py-2.5 font-semibold text-right">Refund Amt</th>
                 <th className="px-4 py-2.5 font-semibold">Refund Mode</th>
                 <th className="px-4 py-2.5 font-semibold text-center">Status</th>
+                <th className="px-4 py-2.5 font-semibold text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {listLoading ? (
                 <tr>
-                  <td colSpan={7} className="py-10 text-center text-slate-400">
+                  <td colSpan={8} className="py-10 text-center text-slate-400">
                     <RefreshCw className="mx-auto h-6 w-6 animate-spin text-slate-300 mb-1" />
                     Loading...
                   </td>
                 </tr>
               ) : filteredReturns.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="py-12 text-center text-slate-400">
+                  <td colSpan={8} className="py-12 text-center text-slate-400">
                     <Undo2 className="mx-auto h-8 w-8 text-slate-300 mb-1" />
                     <p className="font-medium">No sales returns yet</p>
                     <p className="text-[11px]">Click "New Return" to process a customer return</p>
@@ -490,6 +510,16 @@ export const SalesReturnPage: React.FC = () => {
                       <span className="rounded bg-slate-100 px-2 py-0.5 text-[10px] font-semibold">{r.refund_mode}</span>
                     </td>
                     <td className="px-4 py-2.5 text-center">{statusBadge(r.status)}</td>
+                    <td className="px-4 py-2.5 text-right">
+                      <button
+                        onClick={() => handlePrintCreditNote(r)}
+                        className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold text-rose-700 hover:text-white bg-rose-50 hover:bg-rose-600 border border-rose-200 rounded-lg transition"
+                        title="Print Credit Note"
+                      >
+                        <Printer className="w-3.5 h-3.5" />
+                        <span>Print</span>
+                      </button>
+                    </td>
                   </tr>
                 ))
               )}
@@ -950,6 +980,19 @@ export const SalesReturnPage: React.FC = () => {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Print Preview Modal for Credit Notes */}
+      {previewModalState.isOpen && previewModalState.data && (
+        <PrintPreviewModal
+          isOpen={previewModalState.isOpen}
+          onClose={() => setPreviewModalState({ isOpen: false, data: null })}
+          docType="credit_note"
+          title={previewModalState.title || "Credit Note Preview"}
+          data={previewModalState.data}
+          initialFormat="a4"
+          customerPhone={previewModalState.data.customer_phone}
+        />
       )}
     </div>
   );

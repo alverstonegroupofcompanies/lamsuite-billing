@@ -58,6 +58,22 @@ export interface InvoicePrintData {
   footer_note?: string;
 }
 
+export interface PrintRenderOptions {
+  paperSize?: "a4" | "half_a4" | "thermal_80mm" | "thermal_58mm";
+  copies?: number;
+  orientation?: "portrait" | "landscape";
+  showHsnSummary?: boolean;
+  showUpiQr?: boolean;
+  showDoctorPatient?: boolean;
+  showDrugLicenses?: boolean;
+  showTerms?: boolean;
+  showDiscountColumn?: boolean;
+  showMrp?: boolean;
+  copyMarker?: string;
+  templateId?: string;
+  zoomScale?: number;
+}
+
 export interface HsnSummaryRow {
   hsnCode: string;
   taxableValue: number;
@@ -458,10 +474,25 @@ export class PrintingEngine {
   }
 
   /**
-   * Generates a complete, self-contained printable HTML document for Statutory A4 Tax Invoice
+   * Generates a complete, self-contained printable HTML document for Statutory A4 / Half-A4 / Thermal Tax Invoice
    */
-  generateInvoiceHtml(data: InvoicePrintData): string {
+  generateInvoiceHtml(data: InvoicePrintData, options?: PrintRenderOptions): string {
+    const paperSize = options?.paperSize || "a4";
+    if (paperSize === "thermal_80mm" || paperSize === "thermal_58mm") {
+      return this.generateThermalInvoiceHtml(data, paperSize === "thermal_58mm" ? 58 : 80, options);
+    }
+    if (paperSize === "half_a4") {
+      return this.generateHalfA4InvoiceHtml(data, options);
+    }
+
     const amountWords = data.amount_in_words || numberToWordsIndian(data.grand_total);
+    const showHsn = options?.showHsnSummary !== false;
+    const showQr = options?.showUpiQr !== false;
+    const showClinical = options?.showDoctorPatient !== false;
+    const showLicenses = options?.showDrugLicenses !== false;
+    const showTerms = options?.showTerms !== false;
+    const copyMarker = options?.copyMarker;
+
     const hsnRows = calculateHsnSummary(data.lines);
     const upiVpa = data.upi_vpa || "pharmacy@upi";
     const upiUri = generateUpiPaymentString(upiVpa, data.store_name, data.grand_total, data.invoice_number);
@@ -539,6 +570,7 @@ export class PrintingEngine {
     .store-sub { font-size: 10px; color: #475569; margin-top: 2px; }
     .store-licenses { font-size: 9.5px; font-weight: 700; color: #334155; margin-top: 3px; }
     .tax-badge { font-size: 13px; font-weight: 800; letter-spacing: 0.5px; color: #0f172a; margin-top: 6px; }
+    .copy-marker { font-size: 8.5px; font-weight: 800; color: #64748b; letter-spacing: 0.5px; text-transform: uppercase; margin-top: 2px; }
     
     .meta-grid { display: flex; justify-content: space-between; border: 1px solid #cbd5e1; border-radius: 6px; background: #f8fafc; padding: 8px 12px; margin-bottom: 12px; }
     .meta-col { width: 48%; }
@@ -550,7 +582,7 @@ export class PrintingEngine {
     .footer-container { margin-top: 12px; page-break-inside: avoid; }
     .amount-words-bar { background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 4px; padding: 6px 10px; font-size: 10px; font-weight: 700; color: #1e293b; margin-bottom: 10px; }
     
-    .footer-grid { display: grid; grid-template-columns: 1fr 310px; grid-template-rows: auto auto; gap: 10px 16px; align-items: stretch; }
+    .footer-grid { display: grid; grid-template-columns: ${showQr ? "1fr 310px" : "1fr 310px"}; grid-template-rows: auto auto; gap: 10px 16px; align-items: stretch; }
     .footer-cell { display: flex; flex-direction: column; }
     
     .qr-box { display: flex; align-items: center; gap: 12px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 8px 12px; height: 100%; box-sizing: border-box; }
@@ -572,20 +604,21 @@ export class PrintingEngine {
   <div class="header">
     <div class="store-name">${data.store_name}</div>
     <div class="store-sub">${data.store_address || "Main Road, Palakkad, Kerala - 678001"} • Phone: ${data.store_phone || "9876543210"}</div>
-    <div class="store-licenses">
+    ${showLicenses ? `<div class="store-licenses">
       ${data.store_gstin ? `GSTIN: ${data.store_gstin}` : ""}
       ${data.drug_license_numbers?.length ? `  |  DL: ${data.drug_license_numbers.join(", ")}` : ""}
       ${data.fssai_no ? `  |  FSSAI: ${data.fssai_no}` : ""}
-    </div>
+    </div>` : ""}
     <div class="tax-badge">TAX INVOICE</div>
+    ${copyMarker ? `<div class="copy-marker">[ ${copyMarker} ]</div>` : ""}
   </div>
 
   <div class="meta-grid">
     <div class="meta-col">
       <div><strong>Billed To:</strong> ${data.customer_name || "Walk-in Customer"}</div>
       <div>Mobile: ${data.customer_phone || "Not specified"}</div>
-      ${data.patient_name ? `<div>Patient: ${data.patient_name} ${data.patient_age ? `(${data.patient_age} yrs)` : ""}${data.patient_gender ? ` / ${data.patient_gender}` : ""}</div>` : ""}
-      ${data.doctor_name ? `<div>Doctor: ${data.doctor_name} ${data.doctor_reg_no ? `[Reg: ${data.doctor_reg_no}]` : ""}</div>` : ""}
+      ${showClinical && data.patient_name ? `<div>Patient: ${data.patient_name} ${data.patient_age ? `(${data.patient_age} yrs)` : ""}${data.patient_gender ? ` / ${data.patient_gender}` : ""}</div>` : ""}
+      ${showClinical && data.doctor_name ? `<div>Doctor: ${data.doctor_name} ${data.doctor_reg_no ? `[Reg: ${data.doctor_reg_no}]` : ""}</div>` : ""}
     </div>
     <div class="meta-col" style="text-align: right;">
       <div style="font-size: 12px; font-weight: 800; color: #1d4ed8;">#${data.invoice_number}</div>
@@ -695,6 +728,273 @@ export class PrintingEngine {
           <div class="sign-space"></div>
           <div class="sign-line">Authorised Signatory / Pharmacist</div>
         </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>`;
+  }
+
+  /**
+   * Generates continuous strip thermal receipt HTML for 80mm and 58mm POS thermal printers
+   */
+  generateThermalInvoiceHtml(data: InvoicePrintData, widthMm: 80 | 58 = 80, options?: PrintRenderOptions): string {
+    const is58 = widthMm === 58;
+    const showQr = options?.showUpiQr !== false;
+    const showClinical = options?.showDoctorPatient !== false;
+    const showLicenses = options?.showDrugLicenses !== false;
+    const showTerms = options?.showTerms !== false;
+    const copyMarker = options?.copyMarker;
+
+    const upiVpa = data.upi_vpa || "pharmacy@upi";
+    const upiUri = generateUpiPaymentString(upiVpa, data.store_name, data.grand_total, data.invoice_number);
+    const qrSvg = generateQrCodeSvg(upiUri, is58 ? 85 : 100);
+
+    const cgstTotal = data.cgst_total !== undefined ? data.cgst_total : round2(data.tax_total / 2);
+    const sgstTotal = data.sgst_total !== undefined ? data.sgst_total : round2(data.tax_total / 2);
+
+    const linesHtml = data.lines
+      .map((l, i) => {
+        if (is58) {
+          return `
+          <div style="margin-bottom: 4px; border-bottom: 1px dotted #cbd5e1; padding-bottom: 3px;">
+            <div style="font-weight: 700; word-break: break-word;">${i + 1}. ${l.description}</div>
+            <div style="display: flex; justify-content: space-between; font-size: 9px; color: #334155;">
+              <span>${l.qty}${l.loose_qty ? `+${l.loose_qty}L` : ""} × ₹${l.rate.toFixed(2)} (${l.gst_percent}%)</span>
+              <span style="font-weight: 700; color: #000;">₹${l.amount.toFixed(2)}</span>
+            </div>
+            ${l.batch_no ? `<div style="font-size: 8px; color: #64748b;">B: ${l.batch_no} ${l.expiry_date ? `Exp: ${l.expiry_date}` : ""}</div>` : ""}
+          </div>`;
+        }
+        return `
+        <div style="margin-bottom: 5px; border-bottom: 1px dotted #cbd5e1; padding-bottom: 3px;">
+          <div style="display: flex; justify-content: space-between; font-weight: 700; font-size: 10.5px;">
+            <span style="word-break: break-word; max-width: 70%;">${i + 1}. ${l.description}</span>
+            <span style="font-variant-numeric: tabular-nums;">₹${l.amount.toFixed(2)}</span>
+          </div>
+          <div style="display: flex; justify-content: space-between; font-size: 9.5px; color: #475569;">
+            <span>${l.batch_no ? `B: ${l.batch_no}` : ""}${l.expiry_date ? ` | Exp: ${l.expiry_date}` : ""}${l.hsn_code ? ` | HSN: ${l.hsn_code}` : ""}</span>
+            <span style="font-variant-numeric: tabular-nums;">${l.qty}${l.loose_qty ? `+${l.loose_qty}L` : ""} @ ₹${l.rate.toFixed(2)} (${l.gst_percent}% GST)</span>
+          </div>
+        </div>`;
+      })
+      .join("");
+
+    return `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Receipt - ${data.invoice_number}</title>
+  <style>
+    @media print {
+      @page { size: auto; margin: 0; }
+      body { margin: 0; padding: 3mm; width: ${widthMm}mm; background: #fff !important; }
+      .thermal-paper { box-shadow: none !important; border: none !important; width: 100% !important; padding: 0 !important; }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 16px;
+      display: flex;
+      justify-content: center;
+      background: #f1f5f9;
+      font-family: 'Courier New', Courier, monospace, monospace;
+      font-size: ${is58 ? "10px" : "11px"};
+      line-height: 1.3;
+      color: #0f172a;
+    }
+    .thermal-paper {
+      width: ${is58 ? "58mm" : "80mm"};
+      min-height: 120mm;
+      background: #ffffff;
+      padding: ${is58 ? "3mm" : "4.5mm"};
+      box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1);
+      border: 1px solid #e2e8f0;
+      border-radius: 2px;
+    }
+    .center { text-align: center; }
+    .bold { font-weight: 700; }
+    .divider { border-top: 1px dashed #475569; margin: 5px 0; }
+    .double-divider { border-top: 2px dashed #0f172a; margin: 6px 0; }
+    .flex-between { display: flex; justify-content: space-between; font-variant-numeric: tabular-nums; }
+  </style>
+</head>
+<body>
+  <div class="thermal-paper">
+    <div class="center bold" style="font-size: ${is58 ? "13px" : "15px"};">${data.store_name}</div>
+    ${data.store_address ? `<div class="center" style="font-size: ${is58 ? "8.5px" : "9.5px"}; color: #334155;">${data.store_address}</div>` : ""}
+    ${data.store_phone ? `<div class="center" style="font-size: ${is58 ? "8.5px" : "9.5px"};">Tel: ${data.store_phone}</div>` : ""}
+    ${showLicenses && data.store_gstin ? `<div class="center" style="font-size: 8.5px;">GSTIN: ${data.store_gstin}</div>` : ""}
+    ${showLicenses && data.drug_license_numbers?.length ? `<div class="center" style="font-size: 8px;">DL: ${data.drug_license_numbers.join(", ")}</div>` : ""}
+
+    <div class="divider"></div>
+    <div class="center bold" style="font-size: ${is58 ? "10px" : "11px"}; letter-spacing: 0.5px;">*** TAX INVOICE ***</div>
+    ${copyMarker ? `<div class="center bold" style="font-size: 8.5px; color: #475569;">[ ${copyMarker} ]</div>` : ""}
+    <div class="divider"></div>
+
+    <div class="flex-between"><span>Inv No:</span><span class="bold">#${data.invoice_number}</span></div>
+    <div class="flex-between"><span>Date:</span><span>${data.invoice_date}${data.invoice_time ? ` ${data.invoice_time}` : ""}</span></div>
+    <div class="flex-between"><span>Customer:</span><span class="bold">${data.customer_name || "Walk-in"}</span></div>
+    ${data.customer_phone ? `<div class="flex-between"><span>Mobile:</span><span>${data.customer_phone}</span></div>` : ""}
+    ${showClinical && data.patient_name ? `<div class="flex-between"><span>Patient:</span><span>${data.patient_name}</span></div>` : ""}
+    ${showClinical && data.doctor_name ? `<div class="flex-between"><span>Doctor:</span><span>${data.doctor_name}</span></div>` : ""}
+    <div class="flex-between"><span>Pay Mode:</span><span class="bold">${data.payment_mode || "Cash"} (${data.payment_status || "Paid"})</span></div>
+
+    <div class="divider"></div>
+    <div style="font-weight: 700; font-size: ${is58 ? "9px" : "10px"}; text-transform: uppercase; margin-bottom: 4px;">Items (${data.lines.length})</div>
+    
+    ${linesHtml}
+
+    <div class="divider"></div>
+    <div class="flex-between"><span>Subtotal:</span><span>₹${data.subtotal.toFixed(2)}</span></div>
+    <div class="flex-between"><span>CGST:</span><span>₹${cgstTotal.toFixed(2)}</span></div>
+    <div class="flex-between"><span>SGST:</span><span>₹${sgstTotal.toFixed(2)}</span></div>
+    ${data.round_off ? `<div class="flex-between"><span>Round Off:</span><span>${data.round_off > 0 ? "+" : ""}₹${data.round_off.toFixed(2)}</span></div>` : ""}
+    
+    <div class="double-divider"></div>
+    <div class="flex-between bold" style="font-size: ${is58 ? "13px" : "15px"};">
+      <span>NET PAYABLE:</span>
+      <span>₹${data.grand_total.toFixed(2)}</span>
+    </div>
+    <div class="double-divider"></div>
+
+    ${showQr && qrSvg ? `
+    <div class="center" style="margin: 8px 0;">
+      <div>${qrSvg}</div>
+      <div style="font-size: 8px; color: #475569; margin-top: 2px;">Scan with any UPI app to pay</div>
+      <div class="bold" style="font-size: 8.5px;">UPI: ${upiVpa}</div>
+    </div>
+    <div class="divider"></div>
+    ` : ""}
+
+    ${showTerms ? `
+    <div class="center" style="font-size: 8px; color: #475569; margin-top: 6px;">
+      <div>${data.terms_and_conditions || "Medicines strictly non-returnable without cash memo."}</div>
+      <div style="margin-top: 3px;">${data.jurisdiction_note || "Subject to local jurisdiction."}</div>
+    </div>
+    ` : ""}
+
+    <div class="center bold" style="font-size: 9px; margin-top: 8px;">
+      ${data.footer_note || "Thank you! Visit again"}
+    </div>
+  </div>
+</body>
+</html>`;
+  }
+
+  /**
+   * Generates Half A4 (A5 Landscape) Tax Invoice HTML
+   */
+  generateHalfA4InvoiceHtml(data: InvoicePrintData, options?: PrintRenderOptions): string {
+    const amountWords = data.amount_in_words || numberToWordsIndian(data.grand_total);
+    const showQr = options?.showUpiQr !== false;
+    const showLicenses = options?.showDrugLicenses !== false;
+    const copyMarker = options?.copyMarker;
+
+    const upiVpa = data.upi_vpa || "pharmacy@upi";
+    const upiUri = generateUpiPaymentString(upiVpa, data.store_name, data.grand_total, data.invoice_number);
+    const qrSvg = generateQrCodeSvg(upiUri, 58);
+
+    const cgstTotal = data.cgst_total !== undefined ? data.cgst_total : round2(data.tax_total / 2);
+    const sgstTotal = data.sgst_total !== undefined ? data.sgst_total : round2(data.tax_total / 2);
+
+    const itemsRows = data.lines
+      .map(
+        (l, i) => `
+        <tr>
+          <td style="padding: 3px 4px; text-align: center; border-bottom: 1px solid #cbd5e1;">${i + 1}</td>
+          <td style="padding: 3px 4px; border-bottom: 1px solid #cbd5e1; font-weight: 700;">${l.description}</td>
+          <td style="padding: 3px 4px; text-align: center; border-bottom: 1px solid #cbd5e1;">${l.batch_no || "-"}</td>
+          <td style="padding: 3px 4px; text-align: center; border-bottom: 1px solid #cbd5e1;">${l.expiry_date || "-"}</td>
+          <td style="padding: 3px 4px; text-align: right; border-bottom: 1px solid #cbd5e1;">${l.qty}${l.loose_qty ? `+${l.loose_qty}L` : ""}</td>
+          <td style="padding: 3px 4px; text-align: right; border-bottom: 1px solid #cbd5e1;">₹${l.rate.toFixed(2)}</td>
+          <td style="padding: 3px 4px; text-align: right; border-bottom: 1px solid #cbd5e1;">${l.gst_percent}%</td>
+          <td style="padding: 3px 4px; text-align: right; border-bottom: 1px solid #cbd5e1; font-weight: 700;">₹${l.amount.toFixed(2)}</td>
+        </tr>`
+      )
+      .join("");
+
+    return `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Tax Invoice (Half A4) - ${data.invoice_number}</title>
+  <style>
+    @media print {
+      @page { size: A5 landscape; margin: 5mm; }
+      body { margin: 0; padding: 0; background: #fff !important; }
+    }
+    * { box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      font-size: 9px;
+      line-height: 1.25;
+      color: #1e293b;
+      margin: 0;
+      padding: 10px;
+      background: #fff;
+    }
+    .header-bar { display: flex; justify-content: space-between; border-bottom: 1.5px solid #0f172a; padding-bottom: 4px; margin-bottom: 6px; }
+    .meta-bar { display: flex; justify-content: space-between; background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 4px; padding: 4px 8px; margin-bottom: 6px; font-size: 8.5px; }
+    table.data-table { width: 100%; border-collapse: collapse; font-size: 8.5px; margin-bottom: 6px; }
+    table.data-table th { background: #f1f5f9; color: #0f172a; font-weight: 700; padding: 3px 4px; border-top: 1px solid #cbd5e1; border-bottom: 1.5px solid #94a3b8; }
+    .bottom-grid { display: flex; justify-content: space-between; gap: 8px; }
+    .totals-box { width: 220px; border: 1px solid #cbd5e1; border-radius: 4px; background: #f8fafc; padding: 4px 8px; font-variant-numeric: tabular-nums; }
+  </style>
+</head>
+<body>
+  <div class="header-bar">
+    <div>
+      <div style="font-size: 14px; font-weight: 800; color: #0f172a;">${data.store_name}</div>
+      <div style="font-size: 8px; color: #475569;">${data.store_address || ""} • Tel: ${data.store_phone || ""}</div>
+      ${showLicenses && data.store_gstin ? `<div style="font-size: 8px; font-weight: 700;">GSTIN: ${data.store_gstin}</div>` : ""}
+    </div>
+    <div style="text-align: right;">
+      <div style="font-size: 11px; font-weight: 800; color: #1d4ed8;">TAX INVOICE</div>
+      ${copyMarker ? `<div style="font-size: 8px; color: #64748b;">[ ${copyMarker} ]</div>` : ""}
+      <div style="font-weight: 700;">#${data.invoice_number}</div>
+      <div style="font-size: 8px;">Date: ${data.invoice_date}</div>
+    </div>
+  </div>
+
+  <div class="meta-bar">
+    <div><strong>Customer:</strong> ${data.customer_name || "Walk-in"} ${data.customer_phone ? `(${data.customer_phone})` : ""}</div>
+    <div>Pay Mode: <strong>${data.payment_mode || "Cash"}</strong> (${data.payment_status || "Paid"})</div>
+  </div>
+
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th style="width: 20px; text-align: center;">#</th>
+        <th style="text-align: left;">Item Description</th>
+        <th style="width: 60px; text-align: center;">Batch</th>
+        <th style="width: 50px; text-align: center;">Exp</th>
+        <th style="width: 35px; text-align: right;">Qty</th>
+        <th style="width: 55px; text-align: right;">Rate (₹)</th>
+        <th style="width: 45px; text-align: right;">GST%</th>
+        <th style="width: 65px; text-align: right;">Total (₹)</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${itemsRows}
+    </tbody>
+  </table>
+
+  <div class="bottom-grid">
+    <div style="flex: 1; display: flex; gap: 8px; align-items: center;">
+      ${showQr && qrSvg ? `<div>${qrSvg}</div>` : ""}
+      <div style="font-size: 8px; color: #64748b;">
+        <div><strong>Words:</strong> ${amountWords}</div>
+        <div style="margin-top: 3px;">${data.terms_and_conditions || "Goods once sold cannot be returned without cash memo."}</div>
+      </div>
+    </div>
+
+    <div class="totals-box">
+      <div style="display: flex; justify-content: space-between;"><span>Taxable:</span><span>₹${data.subtotal.toFixed(2)}</span></div>
+      <div style="display: flex; justify-content: space-between;"><span>GST Total:</span><span>₹${data.tax_total.toFixed(2)}</span></div>
+      ${data.round_off ? `<div style="display: flex; justify-content: space-between;"><span>Round Off:</span><span>${data.round_off > 0 ? "+" : ""}₹${data.round_off.toFixed(2)}</span></div>` : ""}
+      <div style="display: flex; justify-content: space-between; font-size: 11px; font-weight: 800; border-top: 1.5px solid #0f172a; margin-top: 3px; padding-top: 3px; color: #1d4ed8;">
+        <span>Grand Total:</span><span>₹${data.grand_total.toFixed(2)}</span>
       </div>
     </div>
   </div>
@@ -1973,6 +2273,263 @@ export class PrintingEngine {
     doc.text("Authorised Signatory", marginX + signW - 3, rowY + 26, { align: "right" });
 
     return new Uint8Array(doc.output("arraybuffer"));
+  }
+
+  /**
+   * Inward Purchase Bill A4 HTML generator
+   */
+  generatePurchaseBillA4Html(data: any, options?: PrintRenderOptions): string {
+    const items = data.items || data.lines || [];
+    const itemsHtml = items
+      .map(
+        (it: any, idx: number) => `
+        <tr>
+          <td style="padding: 4px 6px; text-align: center; border-bottom: 1px solid #e2e8f0;">${idx + 1}</td>
+          <td style="padding: 4px 6px; border-bottom: 1px solid #e2e8f0;">
+            <div style="font-weight: 700;">${it.item_name || it.description || "Product"}</div>
+          </td>
+          <td style="padding: 4px 6px; text-align: center; border-bottom: 1px solid #e2e8f0;">${it.batch_no || "-"}</td>
+          <td style="padding: 4px 6px; text-align: center; border-bottom: 1px solid #e2e8f0;">${it.expiry_date || "-"}</td>
+          <td style="padding: 4px 6px; text-align: right; border-bottom: 1px solid #e2e8f0; font-weight: 700;">${it.qty || 0}</td>
+          <td style="padding: 4px 6px; text-align: right; border-bottom: 1px solid #e2e8f0;">₹ ${(it.ptr || it.rate || 0).toFixed(2)}</td>
+          <td style="padding: 4px 6px; text-align: right; border-bottom: 1px solid #e2e8f0;">${it.discount_percent || it.disc_percent || 0}%</td>
+          <td style="padding: 4px 6px; text-align: right; border-bottom: 1px solid #e2e8f0;">${it.gst_percent || 0}%</td>
+          <td style="padding: 4px 6px; text-align: right; border-bottom: 1px solid #e2e8f0; font-weight: 700;">₹ ${(it.net_amount || it.amount || 0).toFixed(2)}</td>
+        </tr>`
+      )
+      .join("");
+
+    return `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Purchase Inward - ${data.purchase_number || data.bill_number || "PUR"}</title>
+  <style>
+    @media print { body { margin: 0; padding: 8mm; } @page { size: A4 portrait; margin: 8mm; } }
+    * { box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 10px; color: #1e293b; margin: 0; padding: 16px; background: #fff; }
+    .header { text-align: center; border-bottom: 2px solid #0f172a; padding-bottom: 6px; margin-bottom: 10px; }
+    .title { font-size: 16px; font-weight: 800; color: #0f172a; }
+    .badge { font-size: 11px; font-weight: 800; color: #1e3a8a; margin-top: 4px; }
+    .meta-box { display: flex; justify-content: space-between; background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 6px; padding: 8px 12px; margin-bottom: 10px; }
+    table { width: 100%; border-collapse: collapse; font-size: 9.5px; margin-bottom: 10px; }
+    th { background: #f1f5f9; padding: 5px 6px; border-top: 1px solid #cbd5e1; border-bottom: 1.5px solid #94a3b8; font-weight: 700; color: #0f172a; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="title">${data.store_name || "LamStone Pharmacy"}</div>
+    <div class="badge">PURCHASE INWARD VOUCHER (GRN)</div>
+  </div>
+  <div class="meta-box">
+    <div>
+      <div><strong>Supplier:</strong> ${data.supplier_name || "Distributor"}</div>
+      ${data.supplier_gstin ? `<div>GSTIN: ${data.supplier_gstin}</div>` : ""}
+      <div>Supplier Bill No: <strong>${data.supplier_invoice_number || data.supplier_invoice_no || "-"}</strong></div>
+    </div>
+    <div style="text-align: right;">
+      <div style="font-weight: 800; color: #1e3a8a;">GRN #${data.purchase_number || data.id}</div>
+      <div>Date: ${data.purchase_date || data.bill_date || new Date().toISOString().split("T")[0]}</div>
+      <div>Payment Status: <strong>${data.payment_status || "Credit"}</strong></div>
+    </div>
+  </div>
+  <table>
+    <thead>
+      <tr>
+        <th style="width: 25px; text-align: center;">#</th>
+        <th style="text-align: left;">Product Description</th>
+        <th style="width: 65px; text-align: center;">Batch</th>
+        <th style="width: 55px; text-align: center;">Exp</th>
+        <th style="width: 45px; text-align: right;">Qty</th>
+        <th style="width: 65px; text-align: right;">PTR (₹)</th>
+        <th style="width: 50px; text-align: right;">Disc%</th>
+        <th style="width: 50px; text-align: right;">GST%</th>
+        <th style="width: 80px; text-align: right;">Amount (₹)</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${itemsHtml}
+    </tbody>
+  </table>
+  <div style="display: flex; justify-content: flex-end;">
+    <div style="width: 240px; border: 1px solid #cbd5e1; border-radius: 4px; background: #f8fafc; padding: 6px 10px;">
+      <div style="display: flex; justify-content: space-between;"><span>Taxable Subtotal:</span><span>₹ ${(data.subtotal || 0).toFixed(2)}</span></div>
+      <div style="display: flex; justify-content: space-between;"><span>Input GST Total:</span><span>₹ ${(data.tax_total || data.gst_total || 0).toFixed(2)}</span></div>
+      <div style="display: flex; justify-content: space-between; font-weight: 800; font-size: 12px; color: #1e3a8a; border-top: 1.5px solid #0f172a; margin-top: 4px; padding-top: 4px;">
+        <span>Total Purchase:</span><span>₹ ${(data.grand_total || data.total_amount || 0).toFixed(2)}</span>
+      </div>
+    </div>
+  </div>
+</body>
+</html>`;
+  }
+
+  /**
+   * Barcode Labels Sheet HTML generator
+   */
+  generateBarcodeLabelsHtml(data: any, options?: PrintRenderOptions): string {
+    const labels = data.labels || data.items || [];
+    const copies = options?.copies || 1;
+    const labelCards: string[] = [];
+
+    for (let c = 0; c < copies; c++) {
+      for (const item of labels) {
+        labelCards.push(`
+        <div style="border: 1px dashed #94a3b8; border-radius: 4px; padding: 6px; text-align: center; font-size: 9px; page-break-inside: avoid; background: #fff;">
+          <div style="font-weight: 800; font-size: 10px; color: #0f172a; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${item.item_name || item.name || "Item"}</div>
+          <div style="font-family: monospace; font-size: 8px; color: #475569;">B: ${item.batch_no || "-"} | Exp: ${item.expiry_date || "-"}</div>
+          <div style="font-size: 14px; font-weight: 800; color: #1d4ed8; margin: 3px 0;">₹ ${(item.mrp || item.rate || 0).toFixed(2)}</div>
+          <div style="font-family: monospace; font-size: 8.5px; letter-spacing: 1px; color: #0f172a;">*${item.barcode || item.code || "ITEM"}*</div>
+        </div>`);
+      }
+    }
+
+    return `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Barcode Labels</title>
+  <style>
+    @media print { body { margin: 0; padding: 5mm; } @page { size: A4 portrait; margin: 5mm; } }
+    * { box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; margin: 0; padding: 12px; background: #f8fafc; }
+    .label-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  </style>
+</head>
+<body>
+  <div class="label-grid">
+    ${labelCards.join("")}
+  </div>
+</body>
+</html>`;
+  }
+
+  /**
+   * Generic Report printable HTML generator
+   */
+  generateReportHtml(data: any, options?: PrintRenderOptions): string {
+    const columns: Array<{ key: string; label: string; align?: "left" | "center" | "right" }> = data.columns || [];
+    const rows: Array<Record<string, any>> = data.rows || [];
+
+    const ths = columns
+      .map((c) => `<th style="text-align: ${c.align || "left"}; padding: 5px 6px;">${c.label}</th>`)
+      .join("");
+
+    const trs = rows
+      .map(
+        (r, idx) => `
+        <tr>
+          <td style="padding: 4px 6px; text-align: center; border-bottom: 1px solid #e2e8f0;">${idx + 1}</td>
+          ${columns
+            .map(
+              (c) => `
+            <td style="padding: 4px 6px; text-align: ${c.align || "left"}; border-bottom: 1px solid #e2e8f0;">
+              ${r[c.key] !== undefined ? r[c.key] : "-"}
+            </td>`
+            )
+            .join("")}
+        </tr>`
+      )
+      .join("");
+
+    return `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>${data.title || "Report"}</title>
+  <style>
+    @media print { body { margin: 0; padding: 8mm; } @page { size: A4 ${options?.orientation || "portrait"}; margin: 8mm; } }
+    * { box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 10px; color: #1e293b; margin: 0; padding: 16px; background: #fff; }
+    .header { text-align: center; border-bottom: 2px solid #0f172a; padding-bottom: 6px; margin-bottom: 10px; }
+    .title { font-size: 16px; font-weight: 800; color: #0f172a; }
+    .subtitle { font-size: 10px; color: #475569; margin-top: 2px; }
+    table { width: 100%; border-collapse: collapse; font-size: 9px; }
+    th { background: #f1f5f9; padding: 5px 6px; border-top: 1px solid #cbd5e1; border-bottom: 1.5px solid #94a3b8; font-weight: 700; color: #0f172a; }
+    tr:nth-child(even) { background: #f8fafc; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="title">${data.store_name || "LamStone Pharmacy"}</div>
+    <div style="font-size: 12px; font-weight: 700; color: #1d4ed8; margin-top: 4px;">${data.title || "Audit Report"}</div>
+    <div class="subtitle">${data.subtitle || `Generated on ${new Date().toLocaleString()}`}</div>
+  </div>
+  <table>
+    <thead>
+      <tr>
+        <th style="width: 25px; text-align: center;">#</th>
+        ${ths}
+      </tr>
+    </thead>
+    <tbody>
+      ${trs}
+    </tbody>
+  </table>
+</body>
+</html>`;
+  }
+
+  /**
+   * Unified dispatcher to render HTML preview for any document type
+   */
+  renderDocumentHtml(docType: string, data: any, options?: PrintRenderOptions): string {
+    switch (docType) {
+      case "tax_invoice":
+      case "invoice":
+      case "bill":
+        return this.generateInvoiceHtml(data as InvoicePrintData, options);
+
+      case "sales_return":
+      case "credit_note":
+      case "customer_debit_note":
+        if (options?.paperSize === "thermal_80mm" || options?.paperSize === "thermal_58mm") {
+          return this.generateCreditNoteThermalSlip(data as CreditNotePrintData);
+        }
+        return this.generateCreditNoteA4Html(data as CreditNotePrintData);
+
+      case "purchase_return":
+      case "debit_note":
+        return this.generateDebitNoteA4Html(data as DebitNotePrintData);
+
+      case "purchase":
+      case "purchase_bill":
+        return this.generatePurchaseBillA4Html(data, options);
+
+      case "barcode":
+      case "barcode_labels":
+        return this.generateBarcodeLabelsHtml(data, options);
+
+      case "report":
+        return this.generateReportHtml(data, options);
+
+      default:
+        return this.generateInvoiceHtml(data as InvoicePrintData, options);
+    }
+  }
+
+  /**
+   * Unified dispatcher to render Vector PDF for any document type
+   */
+  renderDocumentPdf(docType: string, data: any, options?: PrintRenderOptions): Uint8Array {
+    switch (docType) {
+      case "tax_invoice":
+      case "invoice":
+      case "bill":
+        return this.generateInvoicePdf(data as InvoicePrintData);
+
+      case "sales_return":
+      case "credit_note":
+      case "customer_debit_note":
+        return this.generateCreditNotePdf(data as CreditNotePrintData);
+
+      case "purchase_return":
+      case "debit_note":
+        return this.generateDebitNotePdf(data as DebitNotePrintData);
+
+      default:
+        return this.generateInvoicePdf(data as InvoicePrintData);
+    }
   }
 }
 
