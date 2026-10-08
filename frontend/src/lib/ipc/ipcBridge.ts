@@ -85,17 +85,24 @@ class DesktopIpcBridge implements IpcBridge {
 
       try {
         return await callTauri<T>(snakeCmd, args);
-      } catch (tauriError) {
-        try {
-          return await callTauri<T>(command, args);
-        } catch {
-          // If Rust command is not implemented or during dev fallback, check mockHandlers
-          const handler = mockHandlers.get(command);
-          if (handler) {
-            return (await handler(args)) as T;
+      } catch (tauriError: any) {
+        const errText = String(tauriError?.message || tauriError || "");
+        // Only try original un-snaked command if command was not found
+        if (errText.includes("not found") || errText.includes("Command") || errText.includes("unrecognized")) {
+          try {
+            return await callTauri<T>(command, args);
+          } catch (innerError: any) {
+            const innerText = String(innerError?.message || innerError || "");
+            if (innerText.includes("not found") || innerText.includes("Command")) {
+              const handler = mockHandlers.get(command);
+              if (handler) {
+                return (await handler(args)) as T;
+              }
+            }
+            throw innerError;
           }
-          throw tauriError;
         }
+        throw tauriError;
       }
     }
 

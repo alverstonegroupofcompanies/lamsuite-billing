@@ -137,7 +137,7 @@ export class PrinterManagerService {
     });
 
     registerMockHandler("print_native_job", async (args?: any) => {
-      const printerName = args?.printer_name || args?.printerName;
+      const printerName = args?.printer_name || args?.printerName || "Default";
       if (printerName === "Offline_Printer_Test") {
         return {
           success: false,
@@ -145,6 +145,28 @@ export class PrinterManagerService {
           status: "offline",
         };
       }
+
+      // If running in browser window and not in Vitest/Node, trigger browser print/download
+      if (typeof window !== "undefined" && typeof document !== "undefined") {
+        const isPdf = printerName.toLowerCase().includes("pdf") || printerName === "Save as PDF";
+        if (isPdf && args?.pdf_base64) {
+          try {
+            const binary = atob(args.pdf_base64);
+            const bytes = new Uint8Array(binary.length);
+            for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+            const blob = new Blob([bytes], { type: "application/pdf" });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement("a");
+            link.href = url;
+            link.download = `${args.document_number || "invoice"}.pdf`;
+            link.click();
+            URL.revokeObjectURL(url);
+          } catch (e) {
+            console.warn("Browser PDF download failed:", e);
+          }
+        }
+      }
+
       return {
         success: true,
         job_id: `spool_job_${Date.now()}`,

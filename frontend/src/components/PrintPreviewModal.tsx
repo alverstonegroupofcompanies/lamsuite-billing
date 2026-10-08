@@ -37,6 +37,7 @@ import {
   PaperSize,
   PrintJobRecord,
 } from "../lib/printing/printerManagerService";
+import { isTauri } from "../lib/ipc/ipcBridge";
 import { companySettingsService } from "../lib/settings/companySettingsService";
 
 export interface PrintPreviewModalProps {
@@ -295,6 +296,16 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
       return;
     }
 
+    if (!isTauri() && !selectedPrinterName.toLowerCase().includes("pdf") && !selectedPrinterName.includes("Save as PDF")) {
+      if (iframeRef.current && iframeRef.current.contentWindow) {
+        iframeRef.current.contentWindow.focus();
+        iframeRef.current.contentWindow.print();
+        setStatusMessage({ text: "Sent to browser print dialog", type: "success" });
+        onAfterPrint?.({ success: true, mode: paperSize });
+        return;
+      }
+    }
+
     setIsPrinting(true);
     setStatusMessage({ text: `Sending job to ${selectedPrinterName}...`, type: "info" });
 
@@ -335,7 +346,7 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
       });
 
       if (res.success) {
-        setStatusMessage({ text: `Print job accepted by ${selectedPrinterName}!`, type: "success" });
+        setStatusMessage({ text: `Print job queued to ${selectedPrinterName}!`, type: "success" });
         onAfterPrint?.({ success: true, mode: paperSize });
         setTimeout(() => onClose(), 1200);
       } else {
