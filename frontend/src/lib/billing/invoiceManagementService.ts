@@ -416,7 +416,7 @@ export class InvoiceManagementService {
       const allBatches = await sqliteStorage.findAll<ProductBatch>("product_batches");
       const batch = allBatches.find((b) => b.id === line.selectedBatch.id);
       if (batch) {
-        batch.stock_qty = Math.max(0, batch.stock_qty - newBaseUnits);
+        batch.stock_qty = (batch.stock_qty || 0) - newBaseUnits;
         await productsStore.upsertBatch(batch);
       }
 

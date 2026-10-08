@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Search,
+  LayoutDashboard,
   ShoppingCart,
   Truck,
   Package,
@@ -68,6 +69,15 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose 
 
   const commands: CommandItem[] = [
     {
+      id: "nav_dashboard",
+      category: "Navigation",
+      title: "Go to Dashboard",
+      subtitle: "View live sales metrics, daily collection breakdown, and store health",
+      shortcut: "Home",
+      icon: LayoutDashboard,
+      action: () => { navigate("/dashboard"); onClose(); },
+    },
+    {
       id: "nav_pos",
       category: "Billing & POS",
       title: "New Retail Sale (POS)",
@@ -99,7 +109,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose 
       category: "Billing & POS",
       title: "Customer Debit Notes (B2B Multi-Invoice)",
       subtitle: "Reconcile received customer debit notes, auto-match invoices, and issue GST Credit Notes",
-      shortcut: "",
+      shortcut: "Shift+F7",
       icon: Building2,
       action: () => { navigate("/returns/debit-notes"); onClose(); },
     },
@@ -108,7 +118,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose 
       category: "Navigation",
       title: "Purchase Returns / Debit Notes",
       subtitle: "Return stock to supplier, issue debit notes, reverse input GST",
-      shortcut: "",
+      shortcut: "Shift+F2",
       icon: ArrowUpFromLine,
       action: () => { navigate("/returns/purchases"); onClose(); },
     },
@@ -147,6 +157,52 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose 
       shortcut: "F5",
       icon: Database,
       action: () => { navigate("/masters"); onClose(); },
+    },
+    {
+      id: "pos_columns_config",
+      category: "Billing & POS",
+      title: "Configure Billing Columns & Header Fields",
+      subtitle: "Show/hide table columns, metadata, and adjust counter layout",
+      shortcut: "Ctrl+Shift+C",
+      icon: Settings,
+      action: () => {
+        navigate("/pos?openColumns=true");
+        window.dispatchEvent(new CustomEvent("open-billing-columns-modal"));
+        onClose();
+      },
+    },
+    {
+      id: "pos_preset_pharmacy",
+      category: "Billing & POS",
+      title: "Switch Billing Preset: Pharmacy",
+      subtitle: "Show Batch, Expiry, Pack+Loose units, Doctor and Patient details",
+      icon: Settings,
+      action: () => {
+        window.dispatchEvent(new CustomEvent("apply-billing-preset", { detail: { presetId: "pharmacy" } }));
+        onClose();
+      },
+    },
+    {
+      id: "pos_preset_retail",
+      category: "Billing & POS",
+      title: "Switch Billing Preset: Retail",
+      subtitle: "Streamlined retail layout with Product, Qty, MRP, Rate, and Discount",
+      icon: Settings,
+      action: () => {
+        window.dispatchEvent(new CustomEvent("apply-billing-preset", { detail: { presetId: "retail" } }));
+        onClose();
+      },
+    },
+    {
+      id: "pos_preset_fast_counter",
+      category: "Billing & POS",
+      title: "Switch Billing Preset: Fast Counter (Minimal)",
+      subtitle: "Ultra-fast minimalist counter showing only Product, Qty, Rate, and Total",
+      icon: Settings,
+      action: () => {
+        window.dispatchEvent(new CustomEvent("apply-billing-preset", { detail: { presetId: "fast_counter" } }));
+        onClose();
+      },
     },
     {
       id: "nav_settings",

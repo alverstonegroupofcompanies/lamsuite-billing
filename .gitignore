@@ -12,3 +12,7 @@ backend/database/*.sqlite
 backend/bootstrap/cache/*
 !backend/bootstrap/cache/.gitignore
 backend/.env
+backend/.phpunit.result.cache
+*.sqlite
+*.sqlite3
+*.sqlite-journal

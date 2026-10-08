@@ -28,13 +28,23 @@ import {
   Eye,
   EyeOff,
   Hash,
+  ArrowUp,
+  ArrowDown,
+  Lock,
+  Sparkles,
+  Layers,
+  Columns as ColumnsIcon,
 } from "lucide-react";
 import {
   companySettingsService,
   type CompanySettings,
   DEFAULT_SETTINGS,
   DEFAULT_COLUMNS,
+  DEFAULT_HEADER_FIELDS,
+  BUILTIN_BILLING_PRESETS,
   type ColumnSetting,
+  type HeaderFieldSetting,
+  type BillingScreenPreset,
 } from "../lib/settings/companySettingsService";
 import { syncQueueService, type SyncQueueItem } from "../lib/sync/syncQueueService";
 import { cloudDeltaSyncService } from "../lib/sync/cloudDeltaSyncService";
@@ -45,6 +55,7 @@ import { sqliteStorage } from "../lib/db/sqliteStorage";
 import { productsStore } from "../lib/masters/productsStore";
 import { partiesStore } from "../lib/masters/partiesStore";
 import { seed50Products } from "../lib/masters/seedProductsData";
+import { applyWorkspaceSettings } from "../lib/settings/workspaceThemeService";
 
 export const SettingsPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState<
@@ -86,6 +97,9 @@ export const SettingsPage: React.FC = () => {
     try {
       const cfg = await companySettingsService.loadSettings();
       setSettings(cfg);
+      if (cfg.workspace) {
+        applyWorkspaceSettings(cfg.workspace);
+      }
       setDrugLicenseInput(cfg.drug_license_numbers ? cfg.drug_license_numbers.join(", ") : "");
 
       const queue = await sqliteStorage.findAll<SyncQueueItem>("sync_queue");
@@ -116,6 +130,9 @@ export const SettingsPage: React.FC = () => {
       });
 
       setSettings(updated);
+      if (updated.workspace) {
+        applyWorkspaceSettings(updated.workspace);
+      }
       showNotification("Configuration updated and saved successfully!");
     } catch (err) {
       showNotification("Failed to save settings", "error");
@@ -452,13 +469,13 @@ export const SettingsPage: React.FC = () => {
                     <label className="block text-[11px] font-semibold uppercase text-slate-600">Theme</label>
                     <select
                       value={settings.workspace.theme}
-                      onChange={(e) =>
-                        setSettings({
-                          ...settings,
-                          workspace: { ...settings.workspace, theme: e.target.value as any },
-                        })
-                      }
-                      className="mt-1 w-full rounded border border-slate-300 p-2 text-xs focus:border-blue-500 focus:outline-none"
+                      onChange={(e) => {
+                        const nextTheme = e.target.value as "light" | "dark" | "system";
+                        const nextWs = { ...settings.workspace, theme: nextTheme };
+                        setSettings({ ...settings, workspace: nextWs });
+                        applyWorkspaceSettings(nextWs);
+                      }}
+                      className="mt-1 w-full rounded border border-slate-300 p-2 text-xs focus:border-blue-500 focus:outline-none cursor-pointer"
                     >
                       <option value="light">Light Theme</option>
                       <option value="dark">Dark Slate</option>
@@ -469,13 +486,13 @@ export const SettingsPage: React.FC = () => {
                     <label className="block text-[11px] font-semibold uppercase text-slate-600">Grid Density</label>
                     <select
                       value={settings.workspace.density}
-                      onChange={(e) =>
-                        setSettings({
-                          ...settings,
-                          workspace: { ...settings.workspace, density: e.target.value as any },
-                        })
-                      }
-                      className="mt-1 w-full rounded border border-slate-300 p-2 text-xs focus:border-blue-500 focus:outline-none"
+                      onChange={(e) => {
+                        const nextDensity = e.target.value as "compact" | "comfortable";
+                        const nextWs = { ...settings.workspace, density: nextDensity };
+                        setSettings({ ...settings, workspace: nextWs });
+                        applyWorkspaceSettings(nextWs);
+                      }}
+                      className="mt-1 w-full rounded border border-slate-300 p-2 text-xs focus:border-blue-500 focus:outline-none cursor-pointer"
                     >
                       <option value="compact">Compact (Dense Data)</option>
                       <option value="comfortable">Comfortable</option>
@@ -485,18 +502,82 @@ export const SettingsPage: React.FC = () => {
                     <label className="block text-[11px] font-semibold uppercase text-slate-600">Font Size</label>
                     <select
                       value={settings.workspace.fontSize}
-                      onChange={(e) =>
-                        setSettings({
-                          ...settings,
-                          workspace: { ...settings.workspace, fontSize: e.target.value as any },
-                        })
-                      }
-                      className="mt-1 w-full rounded border border-slate-300 p-2 text-xs focus:border-blue-500 focus:outline-none"
+                      onChange={(e) => {
+                        const nextFontSize = e.target.value as "sm" | "base" | "lg";
+                        const nextWs = { ...settings.workspace, fontSize: nextFontSize };
+                        setSettings({ ...settings, workspace: nextWs });
+                        applyWorkspaceSettings(nextWs);
+                      }}
+                      className="mt-1 w-full rounded border border-slate-300 p-2 text-xs focus:border-blue-500 focus:outline-none cursor-pointer"
                     >
                       <option value="sm">Small (12px)</option>
-                      <option value="base">Standard (13px)</option>
-                      <option value="lg">Large (15px)</option>
+                      <option value="base">Standard (14px)</option>
+                      <option value="lg">Large (16px)</option>
                     </select>
+                  </div>
+                </div>
+
+                <div className="mt-4">
+                  <label className="block text-[11px] font-semibold uppercase text-slate-600">Startup Landing Screen</label>
+                  <p className="text-[11px] text-slate-500 mb-1">Choose the screen that opens when the application starts.</p>
+                  <select
+                    value={settings.workspace.defaultLandingPage || "dashboard"}
+                    onChange={(e) =>
+                      setSettings({
+                        ...settings,
+                        workspace: { ...settings.workspace, defaultLandingPage: e.target.value as any },
+                      })
+                    }
+                    className="w-full max-w-sm rounded border border-slate-300 p-2 text-xs focus:border-blue-500 focus:outline-none cursor-pointer"
+                  >
+                    <option value="dashboard">Store Dashboard (Overview & Reports)</option>
+                    <option value="pos">POS Billing Counter (Fast Retail Checkout)</option>
+                    <option value="bills">Past Bills & Invoices</option>
+                    <option value="stock">Inventory & Stock Ledger</option>
+                    <option value="purchases">Purchase Inward Register</option>
+                  </select>
+                </div>
+
+                <div className="mt-5 pt-4 border-t border-slate-200">
+                  <h4 className="text-xs font-bold text-slate-800">Top Navigation Modules Visibility</h4>
+                  <p className="text-[11px] text-slate-500 mb-2.5">
+                    Select which module tabs appear in the top navigation bar for this workstation.
+                  </p>
+                  <div className="grid grid-cols-3 gap-2">
+                    {[
+                      { id: "dashboard", label: "Dashboard (Home)" },
+                      { id: "pos", label: "POS Billing (F1)" },
+                      { id: "bills", label: "Past Bills (F6)" },
+                      { id: "sales_returns", label: "Sales Returns (F7)" },
+                      { id: "customer_debit_notes", label: "Debit Notes B2B (Shift+F7)" },
+                      { id: "purchases", label: "Purchases (F2)" },
+                      { id: "purchase_returns", label: "Purchase Returns (Shift+F2)" },
+                      { id: "stock", label: "Inventory (F3)" },
+                      { id: "reports", label: "Reports & GST (F4)" },
+                      { id: "masters", label: "Master Data (F5)" },
+                      { id: "settings", label: "Settings (F10)" },
+                    ].map((mod) => {
+                      const isEnabled = (settings.enabled_menu_items || []).includes(mod.id);
+                      return (
+                        <label
+                          key={mod.id}
+                          className="flex items-center gap-2 rounded border border-slate-200 p-2 text-xs hover:bg-slate-50 cursor-pointer"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={isEnabled}
+                            onChange={(e) => {
+                              const next = e.target.checked
+                                ? [...(settings.enabled_menu_items || []), mod.id]
+                                : (settings.enabled_menu_items || []).filter((id) => id !== mod.id);
+                              setSettings({ ...settings, enabled_menu_items: next });
+                            }}
+                            className="rounded text-blue-600 focus:ring-blue-500"
+                          />
+                          <span className="font-medium text-slate-700">{mod.label}</span>
+                        </label>
+                      );
+                    })}
                   </div>
                 </div>
               </div>
@@ -602,6 +683,119 @@ export const SettingsPage: React.FC = () => {
                 <label htmlFor="round_off_toggle" className="text-xs text-slate-700 font-medium">
                   Enable Statutory Whole-Rupee Round-Off (e.g. ₹123.40 rounded to ₹123.00)
                 </label>
+              </div>
+
+              {/* Out-of-Stock & Negative Inventory Billing Policy */}
+              <div className="mt-6 pt-4 border-t border-slate-200 space-y-4">
+                <div>
+                  <h3 className="text-xs font-bold uppercase tracking-wider text-slate-800">
+                    Out-of-Stock & Negative Inventory Billing Policy
+                  </h3>
+                  <p className="text-[11px] text-slate-500">
+                    Control how the POS counter handles stock shortages, unstocked products, and expired batches.
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-[11px] font-semibold uppercase text-slate-600">
+                      Allow Selling Out-of-Stock Items
+                    </label>
+                    <select
+                      value={settings.inventory?.allowSellingOutOfStock || "always"}
+                      onChange={(e) =>
+                        setSettings({
+                          ...settings,
+                          inventory: {
+                            ...settings.inventory,
+                            allowSellingOutOfStock: e.target.value as any,
+                            warnOnNegativeStock: settings.inventory?.warnOnNegativeStock ?? true,
+                            requireManagerPinForNegativeStock: settings.inventory?.requireManagerPinForNegativeStock ?? false,
+                            allowExpiredBatchSale: settings.inventory?.allowExpiredBatchSale ?? "warn_confirm",
+                          },
+                        })
+                      }
+                      className="mt-1 w-full rounded border border-slate-300 p-2 text-xs focus:border-blue-500 focus:outline-none"
+                    >
+                      <option value="always">Always (Fast Counter - Add with warning badge)</option>
+                      <option value="ask">Ask each time (Show single confirmation)</option>
+                      <option value="never">Never (Block adding out-of-stock items)</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-semibold uppercase text-slate-600">
+                      Expired Batches Sale Policy
+                    </label>
+                    <select
+                      value={settings.inventory?.allowExpiredBatchSale || "warn_confirm"}
+                      onChange={(e) =>
+                        setSettings({
+                          ...settings,
+                          inventory: {
+                            ...settings.inventory,
+                            allowExpiredBatchSale: e.target.value as any,
+                            allowSellingOutOfStock: settings.inventory?.allowSellingOutOfStock ?? "always",
+                            warnOnNegativeStock: settings.inventory?.warnOnNegativeStock ?? true,
+                            requireManagerPinForNegativeStock: settings.inventory?.requireManagerPinForNegativeStock ?? false,
+                          },
+                        })
+                      }
+                      className="mt-1 w-full rounded border border-slate-300 p-2 text-xs focus:border-blue-500 focus:outline-none"
+                    >
+                      <option value="warn_confirm">Warn and require explicit confirmation</option>
+                      <option value="block">Strictly block expired batches</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="space-y-2 pt-1">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={settings.inventory?.warnOnNegativeStock ?? true}
+                      onChange={(e) =>
+                        setSettings({
+                          ...settings,
+                          inventory: {
+                            ...settings.inventory,
+                            warnOnNegativeStock: e.target.checked,
+                            allowSellingOutOfStock: settings.inventory?.allowSellingOutOfStock ?? "always",
+                            requireManagerPinForNegativeStock: settings.inventory?.requireManagerPinForNegativeStock ?? false,
+                            allowExpiredBatchSale: settings.inventory?.allowExpiredBatchSale ?? "warn_confirm",
+                          },
+                        })
+                      }
+                      className="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                    />
+                    <span className="text-xs text-slate-700">
+                      Show non-blocking warning badge on cart lines when selling beyond stock
+                    </span>
+                  </label>
+
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={settings.inventory?.requireManagerPinForNegativeStock ?? false}
+                      onChange={(e) =>
+                        setSettings({
+                          ...settings,
+                          inventory: {
+                            ...settings.inventory,
+                            requireManagerPinForNegativeStock: e.target.checked,
+                            allowSellingOutOfStock: settings.inventory?.allowSellingOutOfStock ?? "always",
+                            warnOnNegativeStock: settings.inventory?.warnOnNegativeStock ?? true,
+                            allowExpiredBatchSale: settings.inventory?.allowExpiredBatchSale ?? "warn_confirm",
+                          },
+                        })
+                      }
+                      className="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                    />
+                    <span className="text-xs text-slate-700">
+                      Require Manager PIN authorization to sell out-of-stock items
+                    </span>
+                  </label>
+                </div>
               </div>
             </div>
           )}
@@ -1030,40 +1224,253 @@ export const SettingsPage: React.FC = () => {
             </div>
           )}
 
-          {/* TAB 5: POS Column Settings */}
+          {/* TAB 5: Billing Screen Layout & Presets */}
           {activeTab === "columns" && (
-            <div className="max-w-2xl space-y-6">
+            <div className="max-w-3xl space-y-6">
               <div>
-                <h2 className="text-sm font-bold text-slate-800">POS Cart Grid Table Columns</h2>
-                <p className="text-xs text-slate-500">Show or hide pricing tiers (PTR, PTS), HSN, discount, and batch details.</p>
+                <h2 className="text-sm font-bold text-slate-800">Billing Screen Layout & Presets</h2>
+                <p className="text-xs text-slate-500">
+                  Configure visible POS table columns, metadata headers, and industry presets (Pharmacy, Retail, Fast Counter).
+                </p>
               </div>
 
-              <div className="divide-y divide-slate-100 rounded-lg border border-slate-200">
-                {(settings.invoice_columns || DEFAULT_COLUMNS).map((col) => (
-                  <div key={col.id} className="flex items-center justify-between p-3 hover:bg-slate-50">
-                    <div className="flex items-center gap-3">
-                      <button
-                        onClick={() => toggleColumnVisibility(col.id)}
-                        className={`rounded p-1 ${col.visible ? "text-blue-600" : "text-slate-300"}`}
+              {/* Presets Cards */}
+              <div>
+                <h3 className="text-xs font-bold uppercase tracking-wider text-slate-700 mb-2.5 flex items-center gap-1.5">
+                  <Sparkles className="h-3.5 w-3.5 text-amber-500" />
+                  <span>Screen Layout Presets</span>
+                </h3>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  {companySettingsService.getBillingPresets().map((p) => {
+                    const isActive = (settings.active_billing_preset || "pharmacy") === p.id;
+                    return (
+                      <div
+                        key={p.id}
+                        className={`rounded-xl border p-3.5 flex flex-col justify-between transition-all ${
+                          isActive
+                            ? "border-blue-500 bg-blue-50/60 ring-2 ring-blue-500/20 shadow-xs"
+                            : "border-slate-200 bg-white hover:border-slate-300 hover:shadow-xs"
+                        }`}
                       >
-                        {col.visible ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
-                      </button>
-                      <input
-                        type="text"
-                        value={col.label}
-                        onChange={(e) => updateColumnLabel(col.id, e.target.value)}
-                        className="rounded border border-slate-200 px-2 py-1 text-xs font-medium text-slate-800 focus:border-blue-500 focus:outline-none"
-                      />
-                    </div>
-                    <span
-                      className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
-                        col.visible ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-500"
-                      }`}
-                    >
-                      {col.visible ? "Visible in POS" : "Hidden"}
-                    </span>
+                        <div>
+                          <div className="flex items-center justify-between mb-1">
+                            <span className="font-bold text-slate-900 text-xs">{p.name}</span>
+                            {p.isBuiltin && (
+                              <span className="rounded bg-slate-100 px-1.5 py-0.2 text-[9px] font-semibold text-slate-600">
+                                Default
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-[11px] text-slate-500 leading-snug">{p.description}</p>
+                        </div>
+
+                        <div className="mt-3 pt-2.5 border-t border-slate-100 flex items-center justify-between">
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              const res = await companySettingsService.applyBillingPreset(p.id, true);
+                              setSettings({
+                                ...settings,
+                                active_billing_preset: p.id,
+                                invoice_columns: res.columns,
+                                header_fields: res.headerFields,
+                              });
+                              showNotification(`Applied ${p.name} preset!`);
+                            }}
+                            className={`text-xs font-bold px-2.5 py-1 rounded transition-colors ${
+                              isActive
+                                ? "bg-blue-600 text-white"
+                                : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+                            }`}
+                          >
+                            {isActive ? "Active Preset" : "Apply Preset"}
+                          </button>
+
+                          {!p.isBuiltin && (
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                await companySettingsService.deleteCustomBillingPreset(p.id);
+                                loadData();
+                                showNotification("Preset removed");
+                              }}
+                              className="text-rose-500 hover:text-rose-700 p-1 rounded hover:bg-rose-50"
+                              title="Delete preset"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Grid Columns List */}
+              <div className="pt-2 border-t border-slate-200 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
+                      <ColumnsIcon className="h-3.5 w-3.5 text-blue-600" />
+                      <span>POS Grid Table Columns</span>
+                    </h3>
+                    <p className="text-[11px] text-slate-500">
+                      Toggle columns to show/hide, rename headers, and adjust order using arrow buttons.
+                    </p>
                   </div>
-                ))}
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      const res = await companySettingsService.resetBillingLayoutToDefault();
+                      setSettings({
+                        ...settings,
+                        invoice_columns: res.columns,
+                        header_fields: res.headerFields,
+                        active_billing_preset: "pharmacy",
+                      });
+                      showNotification("Reset all columns and layout to pharmacy default.");
+                    }}
+                    className="flex items-center gap-1 text-[11px] font-semibold text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 px-2.5 py-1 rounded"
+                  >
+                    <RotateCcw className="h-3 w-3" />
+                    <span>Reset Layout</span>
+                  </button>
+                </div>
+
+                <div className="divide-y divide-slate-100 rounded-lg border border-slate-200 overflow-hidden bg-white">
+                  {(settings.invoice_columns || DEFAULT_COLUMNS).map((col, idx) => (
+                    <div key={col.id} className="flex items-center justify-between p-2.5 hover:bg-slate-50 text-xs">
+                      <div className="flex items-center gap-3">
+                        <span className="font-mono text-slate-400 text-[11px] w-5 text-right">{idx + 1}.</span>
+                        <button
+                          type="button"
+                          disabled={col.required}
+                          onClick={() => toggleColumnVisibility(col.id)}
+                          className={`rounded p-1 ${
+                            col.visible ? "text-blue-600 hover:bg-blue-50" : "text-slate-300 hover:bg-slate-100"
+                          } disabled:opacity-40`}
+                          title={col.required ? "Required column" : col.visible ? "Hide column" : "Show column"}
+                        >
+                          {col.visible ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
+                        </button>
+                        <div>
+                          <input
+                            type="text"
+                            value={col.label}
+                            onChange={(e) => updateColumnLabel(col.id, e.target.value)}
+                            className="rounded border border-slate-200 px-2 py-0.5 text-xs font-medium text-slate-800 focus:border-blue-500 focus:outline-none"
+                          />
+                          <span className="ml-2 text-[10px] font-mono text-slate-400">ID: {col.id}</span>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        {col.required && (
+                          <span className="inline-flex items-center gap-0.5 rounded bg-slate-100 px-1.5 py-0.2 text-[10px] font-medium text-slate-600">
+                            <Lock className="h-2.5 w-2.5 text-slate-400" />
+                            Required
+                          </span>
+                        )}
+                        <button
+                          type="button"
+                          disabled={idx === 0}
+                          onClick={() => {
+                            const newCols = [...(settings.invoice_columns || DEFAULT_COLUMNS)];
+                            const [moved] = newCols.splice(idx, 1);
+                            newCols.splice(idx - 1, 0, moved);
+                            newCols.forEach((c, i) => (c.order = i + 1));
+                            setSettings({ ...settings, invoice_columns: newCols });
+                          }}
+                          className="p-1 text-slate-400 hover:text-slate-700 disabled:opacity-30 rounded hover:bg-slate-100"
+                          title="Move up"
+                        >
+                          <ArrowUp className="h-3.5 w-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          disabled={idx === (settings.invoice_columns || DEFAULT_COLUMNS).length - 1}
+                          onClick={() => {
+                            const newCols = [...(settings.invoice_columns || DEFAULT_COLUMNS)];
+                            const [moved] = newCols.splice(idx, 1);
+                            newCols.splice(idx + 1, 0, moved);
+                            newCols.forEach((c, i) => (c.order = i + 1));
+                            setSettings({ ...settings, invoice_columns: newCols });
+                          }}
+                          className="p-1 text-slate-400 hover:text-slate-700 disabled:opacity-30 rounded hover:bg-slate-100"
+                          title="Move down"
+                        >
+                          <ArrowDown className="h-3.5 w-3.5" />
+                        </button>
+                        <span
+                          className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                            col.visible ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-500"
+                          }`}
+                        >
+                          {col.visible ? "Visible" : "Hidden"}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Header Fields List */}
+              <div className="pt-2 border-t border-slate-200 space-y-3">
+                <div>
+                  <h3 className="text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
+                    <Layers className="h-3.5 w-3.5 text-indigo-600" />
+                    <span>Billing Header Metadata Fields</span>
+                  </h3>
+                  <p className="text-[11px] text-slate-500">
+                    Control which patient details, doctor fields, and payment options appear in the POS top section.
+                  </p>
+                </div>
+
+                <div className="divide-y divide-slate-100 rounded-lg border border-slate-200 overflow-hidden bg-white">
+                  {(settings.header_fields || DEFAULT_HEADER_FIELDS).map((field, idx) => (
+                    <div key={field.id} className="flex items-center justify-between p-2.5 hover:bg-slate-50 text-xs">
+                      <div className="flex items-center gap-3">
+                        <span className="font-mono text-slate-400 text-[11px] w-5 text-right">{idx + 1}.</span>
+                        <button
+                          type="button"
+                          disabled={field.required}
+                          onClick={() => {
+                            const updated = (settings.header_fields || DEFAULT_HEADER_FIELDS).map((f) =>
+                              f.id === field.id ? { ...f, visible: !f.visible } : f
+                            );
+                            setSettings({ ...settings, header_fields: updated });
+                          }}
+                          className={`rounded p-1 ${
+                            field.visible ? "text-blue-600 hover:bg-blue-50" : "text-slate-300 hover:bg-slate-100"
+                          } disabled:opacity-40`}
+                        >
+                          {field.visible ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
+                        </button>
+                        <div>
+                          <span className="font-medium text-slate-800">{field.label}</span>
+                          <span className="ml-2 text-[10px] font-mono text-slate-400">ID: {field.id}</span>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        {field.required && (
+                          <span className="inline-flex items-center gap-0.5 rounded bg-slate-100 px-1.5 py-0.2 text-[10px] font-medium text-slate-600">
+                            <Lock className="h-2.5 w-2.5 text-slate-400" />
+                            Required
+                          </span>
+                        )}
+                        <span
+                          className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                            field.visible ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-500"
+                          }`}
+                        >
+                          {field.visible ? "Visible" : "Hidden"}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
             </div>
           )}

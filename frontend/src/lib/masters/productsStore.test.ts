@@ -119,7 +119,7 @@ describe("ProductsStore & FEFO Batch Engine (MST-001, POS-001, POS-002)", () => 
     expect(isBatchExpired("2026-10", refDate)).toBe(false);
     expect(isBatchExpired("2027-12-31", refDate)).toBe(false);
 
-    // Selectability: requires both positive stock and non-expired
+    // Selectability: allows out of stock by default when allowNegativeStock is true, but requires allowNegativeStock=false to block
     const validBatch: ProductBatch = {
       id: "b1",
       product_id: "p1",
@@ -134,7 +134,10 @@ describe("ProductsStore & FEFO Batch Engine (MST-001, POS-001, POS-002)", () => 
       id: "b2",
       stock_qty: 0,
     };
-    expect(isBatchSelectable(outOfStockBatch, refDate)).toBe(false);
+    // Default allows out of stock
+    expect(isBatchSelectable(outOfStockBatch, refDate, true)).toBe(true);
+    // When selling negative stock is disabled
+    expect(isBatchSelectable(outOfStockBatch, refDate, false)).toBe(false);
 
     const expiredBatch: ProductBatch = {
       ...validBatch,
@@ -143,5 +146,6 @@ describe("ProductsStore & FEFO Batch Engine (MST-001, POS-001, POS-002)", () => 
       stock_qty: 25,
     };
     expect(isBatchSelectable(expiredBatch, refDate)).toBe(false);
+    expect(isBatchSelectable(expiredBatch, refDate, true, true)).toBe(true);
   });
 });

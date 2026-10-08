@@ -20,9 +20,132 @@
   --ring: 221.2 83.2% 53.3%;
 }
 
+html.dark {
+  --background: 222.2 84% 4.9%;
+  --foreground: 210 40% 98%;
+  --primary: 217.2 91.2% 59.8%;
+  --primary-foreground: 222.2 47.4% 11.2%;
+  --secondary: 217.2 32.6% 17.5%;
+  --secondary-foreground: 210 40% 98%;
+  --muted: 217.2 32.6% 17.5%;
+  --muted-foreground: 215 20.2% 65.1%;
+  --accent: 217.2 32.6% 17.5%;
+  --accent-foreground: 210 40% 98%;
+  --destructive: 0 62.8% 30.6%;
+  --destructive-foreground: 210 40% 98%;
+  --border: 217.2 32.6% 17.5%;
+  --input: 217.2 32.6% 17.5%;
+  --ring: 224.3 76.3% 48%;
+  color-scheme: dark;
+}
+
 body {
   margin: 0;
   padding: 0;
   overflow-x: hidden;
   user-select: none;
+}
+
+/* =========================================
+   1. Dynamic Font Sizing (Small, Standard, Large)
+   ========================================= */
+html[data-font-size="sm"] {
+  font-size: 13px;
+}
+
+html[data-font-size="base"] {
+  font-size: 14.5px;
+}
+
+html[data-font-size="lg"] {
+  font-size: 16px;
+}
+
+/* =========================================
+   2. Grid Density Modes (Compact vs Comfortable)
+   ========================================= */
+html[data-density="compact"] table th,
+html[data-density="compact"] table td {
+  padding-top: 0.25rem !important;
+  padding-bottom: 0.25rem !important;
+  padding-left: 0.5rem !important;
+  padding-right: 0.5rem !important;
+}
+
+html[data-density="compact"] .smart-qty-input-container {
+  padding: 0.125rem !important;
+}
+
+html[data-density="comfortable"] table th,
+html[data-density="comfortable"] table td {
+  padding-top: 0.5rem;
+  padding-bottom: 0.5rem;
+  padding-left: 0.75rem;
+  padding-right: 0.75rem;
+}
+
+/* =========================================
+   3. Dark Theme Comprehensive Surface Styling
+   ========================================= */
+html.dark body {
+  background-color: #0b1120;
+  color: #f1f5f9;
+}
+
+html.dark header,
+html.dark .bg-white {
+  background-color: #1e293b !important;
+  color: #f1f5f9;
+}
+
+html.dark .bg-slate-50,
+html.dark .bg-slate-100 {
+  background-color: #0f172a !important;
+}
+
+html.dark .border-slate-100,
+html.dark .border-slate-200,
+html.dark .border-slate-300 {
+  border-color: #334155 !important;
+}
+
+html.dark .text-slate-900,
+html.dark .text-slate-800,
+html.dark .text-slate-700 {
+  color: #f8fafc !important;
+}
+
+html.dark .text-slate-600,
+html.dark .text-slate-500 {
+  color: #94a3b8 !important;
+}
+
+html.dark input,
+html.dark select,
+html.dark textarea {
+  background-color: #0f172a !important;
+  color: #f8fafc !important;
+  border-color: #334155 !important;
+}
+
+html.dark input:focus,
+html.dark select:focus,
+html.dark textarea:focus {
+  border-color: #3b82f6 !important;
+  background-color: #1e293b !important;
+}
+
+html.dark table thead {
+  background-color: #0f172a !important;
+}
+
+html.dark table tbody tr:hover {
+  background-color: #334155/30 !important;
+}
+
+html.dark .shadow-sm,
+html.dark .shadow-md,
+html.dark .shadow-lg,
+html.dark .shadow-2xl {
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5), 0 8px 10px -6px rgba(0, 0, 0, 0.5);
 }

@@ -93,5 +93,51 @@ describe("PartiesStore & Statutory Validators (MST-003, MST-004, MST-005)", () =
       expect(retrieved?.credit_period_days).toBe(21);
       expect(retrieved?.name).toBe("Apex Healthcare Distributors");
     });
+
+    it("searches customers by name, phone, customer code, and gstin with ranking", async () => {
+      await partiesStore.seedSampleCustomersIfEmpty();
+
+      // Search by name "ravi"
+      const nameMatches = await partiesStore.searchCustomers("ravi");
+      expect(nameMatches.length).toBeGreaterThan(0);
+      expect(nameMatches[0].name).toBe("Ravi Kumar");
+
+      // Search by phone "98470"
+      const phoneMatches = await partiesStore.searchCustomers("98470");
+      expect(phoneMatches.length).toBeGreaterThan(0);
+      expect(phoneMatches[0].name).toBe("Priya Menon");
+
+      // Search by GSTIN snippet "AAACB"
+      const gstinMatches = await partiesStore.searchCustomers("AAACB");
+      expect(gstinMatches.length).toBeGreaterThan(0);
+      expect(gstinMatches[0].name).toBe("City Medicals & Healthcare");
+
+      // Search by customer code "CUST-1003"
+      const codeMatches = await partiesStore.searchCustomers("CUST-1003");
+      expect(codeMatches.length).toBeGreaterThan(0);
+      expect(codeMatches[0].name).toBe("Dr. Ananya Sharma");
+    });
+
+    it("creates new customer with quickCreateCustomer and prevents phone duplicate", async () => {
+      const newCust = await partiesStore.quickCreateCustomer({
+        name: "Anoop Varma",
+        phone: "9895001122",
+        gstin: "32AABCA1234A1Z1",
+        credit_limit: 10000,
+      });
+
+      expect(newCust.id).toBeDefined();
+      expect(newCust.name).toBe("Anoop Varma");
+      expect(newCust.phone).toBe("9895001122");
+
+      // If called again with the same phone, returns the existing record
+      const duplicate = await partiesStore.quickCreateCustomer({
+        name: "Anoop Varma (Duplicate Attempt)",
+        phone: "9895001122",
+      });
+
+      expect(duplicate.id).toBe(newCust.id);
+      expect(duplicate.name).toBe("Anoop Varma");
+    });
   });
 });

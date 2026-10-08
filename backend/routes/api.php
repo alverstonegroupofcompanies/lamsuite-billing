@@ -18,6 +18,7 @@ use App\Http\Controllers\Api\AdminAuditController;
 use App\Http\Controllers\Api\AdminNotificationController;
 use App\Http\Controllers\Api\StoreController;
 use App\Http\Controllers\Api\ProductController;
+use App\Http\Controllers\Api\CustomerController;
 use App\Http\Controllers\Api\InvoiceController;
 use App\Http\Controllers\Api\PurchaseController;
 use App\Http\Controllers\Api\StockController;
@@ -41,6 +42,11 @@ Route::post('/devices/register', [AuthController::class, 'registerDevice']);
 Route::middleware('auth:sanctum')->group(function () {
     Route::get('/store', [StoreController::class, 'show']);
     Route::put('/store', [StoreController::class, 'update']);
+
+    Route::get('/customers', [CustomerController::class, 'index']);
+    Route::post('/customers', [CustomerController::class, 'store']);
+    Route::get('/customers/{id}', [CustomerController::class, 'show']);
+    Route::put('/customers/{id}', [CustomerController::class, 'update']);
 
     Route::get('/products', [ProductController::class, 'index']);
     Route::post('/products', [ProductController::class, 'store']);
@@ -71,6 +77,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/reports/gstr-1', [ReportController::class, 'gstr1']);
     Route::get('/reports/hsn-summary', [ReportController::class, 'hsnSummary']);
     Route::get('/reports/customer-aging', [ReportController::class, 'customerAging']);
+    Route::get('/dashboard/metrics', [ReportController::class, 'dashboardMetrics']);
 });
 
 /*

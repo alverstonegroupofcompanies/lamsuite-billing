@@ -154,5 +154,88 @@ describe("Billing & Indian GST Calculation Engine (POS-002, POS-003, POS-004, NF
       expect(totals.total_tax).toBe(16.2);
       expect(totals.grand_total).toBe(106.2);
     });
+
+    it("applies percentage overall bill discount across invoice", () => {
+      const lines: BillingLineInput[] = [
+        {
+          qty: 2,
+          unit_price: 100, // Exclusive mode: Taxable 200, 18% Tax 36
+          gst_percent: 18,
+          rate_basis: "ptr",
+        },
+      ];
+
+      // 10% bill discount
+      const totals = calculateInvoiceTotals(lines, { type: "percent", value: 10 }, "inclusive", false, false);
+
+      expect(totals.taxable_subtotal).toBe(200);
+      expect(totals.bill_discount_amount).toBe(20);
+      // Net taxable = 180. Tax = 36 * 0.9 = 32.4
+      expect(totals.total_tax).toBe(32.4);
+      expect(totals.net_before_round).toBe(212.4);
+      expect(totals.grand_total).toBe(212.4);
+    });
+
+    it("respects manual custom round-off override over statutory auto round-off", () => {
+      const lines: BillingLineInput[] = [
+        {
+          qty: 1,
+          unit_price: 150.35,
+          gst_percent: 0,
+        },
+      ];
+
+      // Default auto round-off would round 150.35 to 150.00 (-0.35)
+      const autoTotals = calculateInvoiceTotals(lines, { type: "amount", value: 0 }, "inclusive", false, true);
+      expect(autoTotals.round_off).toBe(-0.35);
+      expect(autoTotals.grand_total).toBe(150);
+
+      // Manual round-off set to +0.65 -> grand total 151.00
+      const manualTotals1 = calculateInvoiceTotals(
+        lines,
+        { type: "amount", value: 0 },
+        "inclusive",
+        false,
+        false,
+        0.65
+      );
+      expect(manualTotals1.round_off).toBe(0.65);
+      expect(manualTotals1.grand_total).toBe(151);
+
+      // Manual round-off set to -5.35 (e.g. cashier sets final total to ₹145.00)
+      const manualTotals2 = calculateInvoiceTotals(
+        lines,
+        { type: "amount", value: 0 },
+        "inclusive",
+        false,
+        false,
+        -5.35
+      );
+      expect(manualTotals2.round_off).toBe(-5.35);
+      expect(manualTotals2.grand_total).toBe(145);
+    });
+
+    it("computes item-level flat amount discounts and percentage discounts together", () => {
+      const line1: BillingLineInput = {
+        qty: 1,
+        unit_price: 100,
+        discount_type: "amount",
+        discount_amount: 15,
+        gst_percent: 0,
+      };
+      const calc1 = calculateLineTotals(line1, "inclusive");
+      expect(calc1.discount_amount).toBe(15);
+      expect(calc1.net_amount).toBe(85);
+
+      const line2: BillingLineInput = {
+        qty: 2,
+        unit_price: 50,
+        discount_percent: 10,
+        gst_percent: 0,
+      };
+      const calc2 = calculateLineTotals(line2, "inclusive");
+      expect(calc2.discount_amount).toBe(10);
+      expect(calc2.net_amount).toBe(90);
+    });
   });
 });

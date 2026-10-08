@@ -249,5 +249,27 @@ describe("Inventory Control & Stock Ledger (STK-001 - STK-006)", () => {
       expect(lowStock.length).toBe(1);
       expect(lowStock[0].id).toBe("prod_low");
     });
+
+    it("retrieves batches with negative stock balances (shortages)", async () => {
+      await productsStore.upsertBatch({
+        id: "b_neg_1",
+        product_id: "p_neg",
+        batch_no: "NEG-01",
+        expiry_date: "2027-12-31",
+        stock_qty: -5,
+      });
+      await productsStore.upsertBatch({
+        id: "b_pos_1",
+        product_id: "p_neg",
+        batch_no: "POS-01",
+        expiry_date: "2027-12-31",
+        stock_qty: 15,
+      });
+
+      const negBatches = await inventoryService.getNegativeStockBatches();
+      expect(negBatches.length).toBe(1);
+      expect(negBatches[0].batch_no).toBe("NEG-01");
+      expect(negBatches[0].stock_qty).toBe(-5);
+    });
   });
 });

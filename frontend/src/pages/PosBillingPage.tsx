@@ -41,7 +41,7 @@ import {
   type InvoicePrintData,
 } from "../lib/printing/printingEngine";
 import { isTauri } from "../lib/ipc/ipcBridge";
-import { companySettingsService, type ColumnSetting } from "../lib/settings/companySettingsService";
+import { companySettingsService, DEFAULT_COLUMNS, type ColumnSetting, type HeaderFieldSetting } from "../lib/settings/companySettingsService";
 import type { InvoiceTotals } from "../lib/billing/billingCalculations";
 import {
   invoiceManagementService,
@@ -50,6 +50,17 @@ import {
   type InvoiceDiffResult,
 } from "../lib/billing/invoiceManagementService";
 import { PrintPreviewModal } from "../components/PrintPreviewModal";
+import { CustomerCombobox } from "../components/CustomerCombobox";
+import { SmartQtyInput } from "../components/SmartQtyInput";
+import { BillingColumnsModal } from "../components/BillingColumnsModal";
+import { ConversionModal } from "../components/ConversionModal";
+import { PosShortcutHintBar, type PosFocusContext } from "../components/PosShortcutHintBar";
+import { QuickLineEditModal } from "../components/QuickLineEditModal";
+import { KeyboardShortcutsModal } from "../components/KeyboardShortcutsModal";
+import { BillDiscountModal } from "../components/BillDiscountModal";
+import { RoundOffModal } from "../components/RoundOffModal";
+import { calculateDerivedLooseRate, formatQuantityDisplay } from "../lib/billing/unitConversion";
+import { partiesStore, type Customer, normalizeIndianPhone } from "../lib/masters/partiesStore";
 
 export const PosBillingPage: React.FC = () => {
   const navigate = useNavigate();
@@ -62,7 +73,29 @@ export const PosBillingPage: React.FC = () => {
   const [customerName, setCustomerName] = useState("Walk-in Customer");
   const [customerPhone, setCustomerPhone] = useState("");
   const [customerGstin, setCustomerGstin] = useState("");
+  const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
+  const [doctorName, setDoctorName] = useState("");
+  const [patientName, setPatientName] = useState("");
+  const [billNotes, setBillNotes] = useState("");
   const [invoiceNumber, setInvoiceNumber] = useState(`INV-${Date.now().toString().slice(-6)}`);
+
+  // Keyboard-first Grid & Focus State
+  const [selectedRowIndex, setSelectedRowIndex] = useState<number | null>(null);
+  const [focusContext, setFocusContext] = useState<PosFocusContext>("search");
+  const [undoDeleteBuffer, setUndoDeleteBuffer] = useState<{ line: PosCartLine; index: number } | null>(null);
+  const [quickEditModal, setQuickEditModal] = useState<{
+    isOpen: boolean;
+    type: "discount" | "rate";
+    line: PosCartLine | null;
+  }>({
+    isOpen: false,
+    type: "discount",
+    line: null,
+  });
+  const [isBillDiscountModalOpen, setIsBillDiscountModalOpen] = useState(false);
+  const [isRoundOffModalOpen, setIsRoundOffModalOpen] = useState(false);
+  const [isShortcutsModalOpen, setIsShortcutsModalOpen] = useState(false);
+  const [ariaAnnouncement, setAriaAnnouncement] = useState("");
 
   // Editing Past Invoice State
   const [editingInvoice, setEditingInvoice] = useState<InvoiceRecord | null>(null);
@@ -80,6 +113,12 @@ export const PosBillingPage: React.FC = () => {
   const [productBatches, setProductBatches] = useState<ProductBatch[]>([]);
   const [selectedBatchIndex, setSelectedBatchIndex] = useState(0);
 
+  // Billing Layout & Columns Modal
+  const [posColumns, setPosColumns] = useState<ColumnSetting[]>(() => companySettingsService.getBillingColumns());
+  const [posHeaders, setPosHeaders] = useState<HeaderFieldSetting[]>(() => companySettingsService.getHeaderFields());
+  const [isColumnsModalOpen, setIsColumnsModalOpen] = useState(false);
+  const [selectedLineForConversion, setSelectedLineForConversion] = useState<PosCartLine | null>(null);
+
   // Modals & Popups
   const [isTenderModalOpen, setIsTenderModalOpen] = useState(false);
   const [isRecallModalOpen, setIsRecallModalOpen] = useState(false);
@@ -91,7 +130,7 @@ export const PosBillingPage: React.FC = () => {
   }
   const [notification, setNotification] = useState<{
     message: string;
-    type: "success" | "error";
+    type: "success" | "error" | "info" | "warning";
     actions?: NotificationAction[];
   } | null>(null);
 
@@ -99,7 +138,6 @@ export const PosBillingPage: React.FC = () => {
   const [tenders, setTenders] = useState<PaymentTenderLine[]>([{ mode: "Cash", amount: 0 }]);
   const [receivedCash, setReceivedCash] = useState<number>(0);
   const [printFormat, setPrintFormat] = useState<"thermal" | "a4" | "pdf">("thermal");
-  const [posColumns, setPosColumns] = useState<ColumnSetting[]>([]);
   const [isFinalizing, setIsFinalizing] = useState(false);
   const isFinalizingRef = useRef(false);
 
@@ -116,9 +154,15 @@ export const PosBillingPage: React.FC = () => {
 
   // References for focus control
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const customerInputRef = useRef<HTMLInputElement>(null);
+  const customerPhoneInputRef = useRef<HTMLInputElement>(null);
+  const doctorInputRef = useRef<HTMLInputElement>(null);
+  const patientInputRef = useRef<HTMLInputElement>(null);
   const tenderCashInputRef = useRef<HTMLInputElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const batchListRef = useRef<HTMLDivElement>(null);
+  const lastKeyTimeRef = useRef<number>(0);
+  const scanBufferRef = useRef<string>("");
 
   // Load invoice if 'edit' query param is provided
   useEffect(() => {
@@ -147,6 +191,13 @@ export const PosBillingPage: React.FC = () => {
       setCustomerName(details.invoice.customer_name || "Walk-in Customer");
       setCustomerPhone(details.invoice.customer_phone || "");
       setCustomerGstin(details.invoice.customer_gstin || "");
+
+      if (details.invoice.customer_id) {
+        const cust = await partiesStore.getCustomerById(details.invoice.customer_id);
+        setSelectedCustomer(cust);
+      } else {
+        setSelectedCustomer(null);
+      }
 
       // Populate cart lines with previous invoice items
       posCartService.clearCart();
@@ -193,6 +244,8 @@ export const PosBillingPage: React.FC = () => {
     setCustomerName("Walk-in Customer");
     setCustomerPhone("");
     setCustomerGstin("");
+    setSelectedCustomer(null);
+    posCartService.setCustomer("", "Walk-in Customer", "", "", "");
     setEditReason("");
     showNotification("Edit cancelled. Started new bill.");
   };
@@ -201,6 +254,23 @@ export const PosBillingPage: React.FC = () => {
     setLines(posCartService.getLines());
     setTotals(posCartService.getTotals());
     setHeldBillsCount(billingTenderService.listHeldBills().length);
+  };
+
+  const handleSaveLineConversion = async (
+    lineId: string,
+    unitsPerPack: number,
+    packName: string,
+    looseName: string,
+    persistMaster: boolean
+  ) => {
+    await posCartService.updateLineConversion(lineId, unitsPerPack, packName, looseName, persistMaster);
+    refreshCartState();
+    showNotification(
+      persistMaster
+        ? `Updated conversion: 1 ${packName} = ${unitsPerPack} ${looseName} (Saved to Master)`
+        : `Updated conversion: 1 ${packName} = ${unitsPerPack} ${looseName} (This Bill)`,
+      "success"
+    );
   };
 
   const closeBatchModal = () => {
@@ -222,17 +292,267 @@ export const PosBillingPage: React.FC = () => {
     }
   };
 
-  // Focus search input on mount and handle global POS hotkeys
+  const handleFocusSearch = () => {
+    setSelectedRowIndex(null);
+    setFocusContext("search");
+    searchInputRef.current?.focus();
+    searchInputRef.current?.select();
+  };
+
+  const handleSelectRow = (idx: number) => {
+    if (idx >= 0 && idx < lines.length) {
+      setSelectedRowIndex(idx);
+      setFocusContext("grid");
+      searchInputRef.current?.blur();
+      setTimeout(() => {
+        const line = lines[idx];
+        if (line) {
+          const rowEl = document.getElementById(`cart-row-${line.id}`);
+          rowEl?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+        }
+      }, 20);
+    }
+  };
+
+  const handleQtyEnterAdvance = (currentIdx: number) => {
+    if (currentIdx < lines.length - 1) {
+      const nextIdx = currentIdx + 1;
+      handleSelectRow(nextIdx);
+      setFocusContext("cell_edit");
+      setTimeout(() => {
+        const nextLine = lines[nextIdx];
+        if (nextLine) {
+          const el = (document.getElementById(`qty-input-${nextLine.id}-pack`) ||
+            document.getElementById(`qty-input-${nextLine.id}`)) as HTMLInputElement | null;
+          if (el) {
+            el.focus();
+            el.select();
+          }
+        }
+      }, 30);
+    } else {
+      handleFocusSearch();
+    }
+  };
+
+  const activeHintContext: PosFocusContext = useMemo(() => {
+    if (
+      isTenderModalOpen ||
+      isRecallModalOpen ||
+      isDiffModalOpen ||
+      isColumnsModalOpen ||
+      selectedProductForBatch ||
+      isShortcutsModalOpen ||
+      quickEditModal.isOpen ||
+      selectedLineForConversion
+    ) {
+      return "modal";
+    }
+    if (focusContext === "cell_edit") {
+      return "cell_edit";
+    }
+    if (focusContext === "grid" && selectedRowIndex !== null && selectedRowIndex >= 0 && selectedRowIndex < lines.length) {
+      return "grid";
+    }
+    return "search";
+  }, [
+    isTenderModalOpen,
+    isRecallModalOpen,
+    isDiffModalOpen,
+    isColumnsModalOpen,
+    selectedProductForBatch,
+    isShortcutsModalOpen,
+    quickEditModal.isOpen,
+    selectedLineForConversion,
+    focusContext,
+    selectedRowIndex,
+    lines.length,
+  ]);
+
+  const handleDeleteSelectedLine = (indexToDelete?: number) => {
+    const targetIdx = indexToDelete !== undefined ? indexToDelete : selectedRowIndex;
+    if (targetIdx === null || targetIdx === undefined || targetIdx < 0 || targetIdx >= lines.length) return;
+
+    const targetLine = lines[targetIdx];
+    const { removedLine, index } = posCartService.removeLine(targetLine.id);
+    if (removedLine) {
+      setUndoDeleteBuffer({ line: removedLine, index });
+      refreshCartState();
+      const nextIdx = lines.length > 1 ? Math.min(targetIdx, lines.length - 2) : null;
+      setSelectedRowIndex(nextIdx);
+      if (nextIdx === null) {
+        handleFocusSearch();
+      }
+      setAriaAnnouncement(`Removed ${targetLine.product.name} from bill. Press Ctrl+Z to undo.`);
+      showNotification(
+        `Deleted ${targetLine.product.name}`,
+        "info",
+        [{ label: "Undo (Ctrl+Z)", onClick: handleUndoDelete }]
+      );
+    }
+  };
+
+  const handleUndoDelete = () => {
+    if (!undoDeleteBuffer) return;
+    posCartService.restoreLine(undoDeleteBuffer.line, undoDeleteBuffer.index);
+    refreshCartState();
+    setSelectedRowIndex(undoDeleteBuffer.index);
+    setFocusContext("grid");
+    setAriaAnnouncement(`Restored ${undoDeleteBuffer.line.product.name} to bill.`);
+    showNotification(`Restored ${undoDeleteBuffer.line.product.name}`, "success");
+    setUndoDeleteBuffer(null);
+  };
+
+  const handleMoveLine = (direction: "up" | "down") => {
+    if (selectedRowIndex === null || selectedRowIndex < 0) return;
+    const targetIdx = direction === "up" ? selectedRowIndex - 1 : selectedRowIndex + 1;
+    if (targetIdx < 0 || targetIdx >= lines.length) return;
+    posCartService.moveLine(selectedRowIndex, targetIdx);
+    refreshCartState();
+    setSelectedRowIndex(targetIdx);
+  };
+
+  const handleOpenBatchForSelectedLine = () => {
+    if (selectedRowIndex === null || !lines[selectedRowIndex]) return;
+    const line = lines[selectedRowIndex];
+    selectProductAndAddToCart(line.product);
+  };
+
+  const handleToggleUnitRateForSelectedLine = () => {
+    if (selectedRowIndex === null || !lines[selectedRowIndex]) return;
+    const line = lines[selectedRowIndex];
+    if (line.product.units_per_pack <= 1) return;
+    const nextBasis = line.rate_basis === "loose_rate" ? "sel_rate" : "loose_rate";
+    const newPrice = nextBasis === "loose_rate"
+      ? calculateDerivedLooseRate(line.product.sel_rate, line.product.units_per_pack, line.product.loose_selling_rate)
+      : (line.selectedBatch.selling_rate || line.product.sel_rate);
+    posCartService.updateLinePrice(line.id, newPrice, nextBasis);
+    refreshCartState();
+    showNotification(`Switched ${line.product.name} to ${nextBasis === "loose_rate" ? "Unit Rate" : "Pack Rate"}`);
+  };
+
+  const handleQuickDiscount = (line?: PosCartLine) => {
+    const target = line || (selectedRowIndex !== null ? lines[selectedRowIndex] : null);
+    if (!target) return;
+    setQuickEditModal({ isOpen: true, type: "discount", line: target });
+  };
+
+  const handleQuickRate = (line?: PosCartLine) => {
+    const target = line || (selectedRowIndex !== null ? lines[selectedRowIndex] : null);
+    if (!target) return;
+    setQuickEditModal({ isOpen: true, type: "rate", line: target });
+  };
+
+  const handleApplyBillDiscount = (type: "percent" | "amount", value: number) => {
+    posCartService.setBillDiscount(type, value);
+    refreshCartState();
+    if (value > 0) {
+      showNotification(`Bill discount applied: ${type === "percent" ? `${value}%` : `₹${value}`}`, "success");
+    } else {
+      showNotification("Bill discount cleared", "info");
+    }
+  };
+
+  const handleApplyManualRoundOff = (manualAmount: number | null) => {
+    posCartService.setManualRoundOff(manualAmount);
+    refreshCartState();
+    if (manualAmount !== null) {
+      showNotification(
+        `Round-off adjusted to ${manualAmount >= 0 ? `+₹${manualAmount.toFixed(2)}` : `-₹${Math.abs(manualAmount).toFixed(2)}`}`,
+        "success"
+      );
+    } else {
+      showNotification("Reverted to automatic statutory round-off", "info");
+    }
+  };
+
+  // Focus search input on initial mount only
   useEffect(() => {
     searchInputRef.current?.focus();
     refreshCartState();
+  }, []);
 
+  // Global POS Hotkeys Listener
+  useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      const code = e.code;
+      const keyLower = e.key.toLowerCase();
+      const isCmdOrCtrl = e.ctrlKey || e.metaKey;
+
+      // 1. Hardware Barcode Scanner Fast-Keystroke Interceptor (< 45ms per keystroke)
+      const now = Date.now();
+      const interval = now - lastKeyTimeRef.current;
+      lastKeyTimeRef.current = now;
+
+      if (e.key === "Enter" && scanBufferRef.current.length >= 3 && interval < 60) {
+        const scanned = scanBufferRef.current;
+        scanBufferRef.current = "";
+        e.preventDefault();
+        e.stopPropagation();
+        productsStore.findProductByBarcode(scanned).then(async (matched) => {
+          if (matched) {
+            await selectProductAndAddToCart(matched);
+            setSearchQuery("");
+            setSearchResults([]);
+          } else {
+            setSearchQuery(scanned);
+            searchInputRef.current?.focus();
+          }
+        });
+        return;
+      }
+
+      if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        if (interval < 45) {
+          scanBufferRef.current += e.key;
+        } else {
+          scanBufferRef.current = e.key;
+        }
+      } else if (e.key !== "Shift" && e.key !== "Control" && e.key !== "Alt" && e.key !== "Meta") {
+        scanBufferRef.current = "";
+      }
+
       // If batch modal is open, let batch modal listeners handle navigation
       if (selectedProductForBatch) {
         if (e.key === "Escape" || e.key === "F1") {
           e.preventDefault();
           closeBatchModal();
+        }
+        return;
+      }
+
+      // If quick edit modal is open
+      if (quickEditModal.isOpen) {
+        if (e.key === "Escape") {
+          e.preventDefault();
+          setQuickEditModal({ isOpen: false, type: "discount", line: null });
+        }
+        return;
+      }
+
+      // If bill discount modal is open
+      if (isBillDiscountModalOpen) {
+        if (e.key === "Escape") {
+          e.preventDefault();
+          setIsBillDiscountModalOpen(false);
+        }
+        return;
+      }
+
+      // If round off modal is open
+      if (isRoundOffModalOpen) {
+        if (e.key === "Escape") {
+          e.preventDefault();
+          setIsRoundOffModalOpen(false);
+        }
+        return;
+      }
+
+      // If shortcuts modal is open
+      if (isShortcutsModalOpen) {
+        if (e.key === "Escape") {
+          e.preventDefault();
+          setIsShortcutsModalOpen(false);
         }
         return;
       }
@@ -255,62 +575,432 @@ export const PosBillingPage: React.FC = () => {
         return;
       }
 
-      // If tender modal is open, handle tender modal hotkeys (F12, Enter, Escape)
+      // If tender modal is open, handle settlement mode keys (1-5, C, U, D, R, S, T, F12, Enter, Escape)
       if (isTenderModalOpen) {
         if (e.key === "Escape") {
           e.preventDefault();
           if (!isFinalizingRef.current) {
             setIsTenderModalOpen(false);
+            setFocusContext("search");
             searchInputRef.current?.focus();
           }
           return;
         }
-        if (e.key === "F12" || e.key === "Enter") {
+        if (e.key === "F12" || (isCmdOrCtrl && e.key === "Enter")) {
           e.preventDefault();
           handleFinalizeAndPrint();
           return;
         }
+
+        const activeTag = (document.activeElement?.tagName || "").toLowerCase();
+        const isTypingField = activeTag === "input" || activeTag === "textarea";
+
+        if (!isTypingField || (e.ctrlKey || e.altKey || e.metaKey)) {
+          if (e.key === "1" || keyLower === "c" || code === "KeyC") {
+            e.preventDefault();
+            setTenders([{ mode: "Cash", amount: totals.grand_total }]);
+          } else if (e.key === "2" || keyLower === "u" || code === "KeyU") {
+            e.preventDefault();
+            setTenders([{ mode: "UPI", amount: totals.grand_total }]);
+          } else if (e.key === "3" || keyLower === "d" || code === "KeyD") {
+            e.preventDefault();
+            setTenders([{ mode: "Card", amount: totals.grand_total }]);
+          } else if (e.key === "4" || keyLower === "r" || code === "KeyR") {
+            e.preventDefault();
+            setTenders([{ mode: "Credit", amount: totals.grand_total }]);
+          } else if (e.key === "5" || keyLower === "s" || code === "KeyS") {
+            e.preventDefault();
+            setTenders([
+              { mode: "Cash", amount: Math.round(totals.grand_total / 2) },
+              { mode: "UPI", amount: totals.grand_total - Math.round(totals.grand_total / 2) },
+            ]);
+          } else if (keyLower === "t" || code === "KeyT") {
+            e.preventDefault();
+            setPrintFormat((prev) => (prev === "thermal" ? "a4" : prev === "a4" ? "pdf" : "thermal"));
+          }
+        }
         return;
       }
 
-      // F1: Focus Search/Barcode
-      if (e.key === "F1") {
+      // Check if user is currently inside an input/textarea
+      const activeEl = document.activeElement;
+      const isInputFocused = activeEl && (activeEl.tagName === "INPUT" || activeEl.tagName === "TEXTAREA");
+
+      // --- Bill-Level Global Hotkeys ---
+
+      // F1 or Alt+1: Focus Search/Barcode
+      if ((e.key === "F1" && !e.ctrlKey && !e.altKey && !e.shiftKey) || (e.altKey && (e.key === "1" || code === "Digit1" || code === "Numpad1"))) {
         e.preventDefault();
-        searchInputRef.current?.focus();
+        handleFocusSearch();
+        return;
       }
-      // F6: Recall / Find Past Bill
-      else if (e.key === "F6") {
+
+      // Alt+C: Focus Customer Combobox (supports Mac Option key character mapping)
+      if (e.altKey && (keyLower === "c" || code === "KeyC")) {
+        e.preventDefault();
+        customerInputRef.current?.focus();
+        return;
+      }
+
+      // Alt+M: Focus Customer Mobile
+      if (e.altKey && (keyLower === "m" || code === "KeyM")) {
+        e.preventDefault();
+        customerPhoneInputRef.current?.focus();
+        return;
+      }
+
+      // Alt+D: Focus Doctor Details
+      if (e.altKey && !e.shiftKey && (keyLower === "d" || code === "KeyD")) {
+        e.preventDefault();
+        doctorInputRef.current?.focus();
+        return;
+      }
+
+      // Alt+P: Focus Patient Details
+      if (e.altKey && !e.shiftKey && (keyLower === "p" || code === "KeyP")) {
+        e.preventDefault();
+        patientInputRef.current?.focus();
+        return;
+      }
+
+      // F6: Find / Manage Past Bills
+      if (e.key === "F6") {
         e.preventDefault();
         navigate("/bills");
+        return;
       }
-      // F8: Hold Current Bill
-      else if (e.key === "F8") {
+
+      // F8 or Alt+H or Alt+8: Hold Current Bill
+      if (e.key === "F8" || (e.altKey && (keyLower === "h" || code === "KeyH" || e.key === "8" || code === "Digit8"))) {
         e.preventDefault();
         handleHoldBill();
+        return;
       }
-      // F9: Recall Held Bill
-      else if (e.key === "F9") {
+
+      // F9 or Alt+J or Alt+9: Recall Held Bill
+      if (e.key === "F9" || (e.altKey && (keyLower === "j" || code === "KeyJ" || e.key === "9" || code === "Digit9"))) {
         e.preventDefault();
         setIsRecallModalOpen(true);
+        return;
       }
-      // F12: Open Checkout / Tender
-      else if (e.key === "F12") {
+
+      // F12 or Ctrl+Enter or Cmd+Enter or Alt+Enter: Open Checkout / Settlement
+      if (e.key === "F12" || (isCmdOrCtrl && e.key === "Enter") || (e.altKey && e.key === "Enter")) {
         e.preventDefault();
         openTenderModal();
+        return;
       }
-      // Escape: Close dropdown or open modals
-      else if (e.key === "Escape") {
+
+      // Ctrl+F2 / Cmd+F2 / Shift+F2 / Ctrl+Shift+D / Cmd+Shift+D / Alt+Shift+D / Alt+O: Open Overall Bill Discount Modal
+      if (
+        (isCmdOrCtrl && e.key === "F2") ||
+        (e.shiftKey && e.key === "F2") ||
+        (isCmdOrCtrl && e.shiftKey && (keyLower === "d" || code === "KeyD")) ||
+        (e.altKey && e.shiftKey && (keyLower === "d" || code === "KeyD")) ||
+        (e.altKey && (keyLower === "o" || code === "KeyO"))
+      ) {
+        e.preventDefault();
+        setIsBillDiscountModalOpen(true);
+        return;
+      }
+
+      // Alt+R / Ctrl+Shift+R / Cmd+Shift+R / Ctrl+Alt+R: Open Round-Off / Net Payable Modal
+      if (
+        (e.altKey && (keyLower === "r" || code === "KeyR")) ||
+        (isCmdOrCtrl && e.shiftKey && (keyLower === "r" || code === "KeyR")) ||
+        (isCmdOrCtrl && e.altKey && (keyLower === "r" || code === "KeyR"))
+      ) {
+        e.preventDefault();
+        setIsRoundOffModalOpen(true);
+        return;
+      }
+
+      // Ctrl+Shift+C / Cmd+Shift+C: Open Columns Configuration Modal
+      if (isCmdOrCtrl && e.shiftKey && (keyLower === "c" || code === "KeyC")) {
+        e.preventDefault();
+        setIsColumnsModalOpen((prev) => !prev);
+        return;
+      }
+
+      // Ctrl+N / Cmd+N: Start New Bill
+      if (isCmdOrCtrl && (keyLower === "n" || code === "KeyN")) {
+        e.preventDefault();
+        cancelEditingMode();
+        return;
+      }
+
+      // Ctrl+Backspace / Cmd+Backspace: Clear Current Bill with Confirmation
+      if (isCmdOrCtrl && e.key === "Backspace") {
+        e.preventDefault();
+        if (lines.length > 0) {
+          const ok = window.confirm("Are you sure you want to clear all items in this bill?");
+          if (ok) {
+            posCartService.clearCart();
+            refreshCartState();
+            showNotification("Bill cleared", "info");
+            handleFocusSearch();
+          }
+        }
+        return;
+      }
+
+      // Ctrl+Z / Cmd+Z: Undo Delete Line
+      if (isCmdOrCtrl && (keyLower === "z" || code === "KeyZ")) {
+        if (undoDeleteBuffer) {
+          e.preventDefault();
+          handleUndoDelete();
+          return;
+        }
+      }
+
+      // ?: Open Keyboard Shortcuts Cheatsheet
+      if (e.key === "?" && !isInputFocused) {
+        e.preventDefault();
+        setIsShortcutsModalOpen(true);
+        return;
+      }
+
+      // --- Grid Row-Level Actions ---
+
+      // When search input is active:
+      if (activeEl === searchInputRef.current) {
+        if (e.key === "ArrowDown" && searchResults.length === 0 && lines.length > 0) {
+          e.preventDefault();
+          handleSelectRow(0);
+          return;
+        }
+        if (isCmdOrCtrl && e.key === "ArrowDown" && lines.length > 0) {
+          e.preventDefault();
+          handleSelectRow(0);
+          return;
+        }
+      }
+
+      // If no row is selected and not in an input, ArrowDown selects row 0
+      if (selectedRowIndex === null && lines.length > 0 && !isInputFocused) {
+        if (e.key === "ArrowDown") {
+          e.preventDefault();
+          handleSelectRow(0);
+          return;
+        }
+      }
+
+      // Global Item-level shortcuts (F2 for item discount, F3 for item rate)
+      const isItemDiscountKey =
+        (e.key === "F2" && !e.ctrlKey && !e.metaKey && !e.shiftKey) ||
+        (e.altKey && (e.key === "2" || code === "Digit2" || code === "Numpad2")) ||
+        (isCmdOrCtrl && e.shiftKey && (keyLower === "i" || code === "KeyI"));
+
+      const isItemRateKey =
+        (e.key === "F3" && !e.ctrlKey && !e.metaKey && !e.shiftKey) ||
+        (e.altKey && (e.key === "3" || code === "Digit3" || code === "Numpad3")) ||
+        (isCmdOrCtrl && e.shiftKey && (keyLower === "p" || code === "KeyP"));
+
+      if (isItemDiscountKey && lines.length > 0) {
+        e.preventDefault();
+        const targetIdx = selectedRowIndex !== null && selectedRowIndex >= 0 && selectedRowIndex < lines.length
+          ? selectedRowIndex
+          : 0;
+        handleSelectRow(targetIdx);
+        handleQuickDiscount(lines[targetIdx]);
+        return;
+      }
+
+      if (isItemRateKey && lines.length > 0) {
+        e.preventDefault();
+        const targetIdx = selectedRowIndex !== null && selectedRowIndex >= 0 && selectedRowIndex < lines.length
+          ? selectedRowIndex
+          : 0;
+        handleSelectRow(targetIdx);
+        handleQuickRate(lines[targetIdx]);
+        return;
+      }
+
+      // When a row is selected in the grid:
+      if (selectedRowIndex !== null && selectedRowIndex >= 0 && selectedRowIndex < lines.length) {
+        // Alt+ArrowUp / Alt+ArrowDown: Reorder Lines
+        if (e.altKey && (e.key === "ArrowUp" || code === "ArrowUp")) {
+          e.preventDefault();
+          handleMoveLine("up");
+          return;
+        }
+        if (e.altKey && (e.key === "ArrowDown" || code === "ArrowDown")) {
+          e.preventDefault();
+          handleMoveLine("down");
+          return;
+        }
+
+        // Ctrl+ArrowDown / Cmd+ArrowDown: Jump to next row's Qty field
+        if (isCmdOrCtrl && e.key === "ArrowDown") {
+          e.preventDefault();
+          const nextIdx = Math.min(lines.length - 1, selectedRowIndex + 1);
+          handleSelectRow(nextIdx);
+          const nextLine = lines[nextIdx];
+          const el = (document.getElementById(`qty-input-${nextLine.id}-pack`) ||
+            document.getElementById(`qty-input-${nextLine.id}`)) as HTMLInputElement | null;
+          el?.focus();
+          el?.select();
+          setFocusContext("cell_edit");
+          return;
+        }
+
+        // Ctrl+ArrowUp / Cmd+ArrowUp: Jump to prev row's Qty field (or search if row 0)
+        if (isCmdOrCtrl && e.key === "ArrowUp") {
+          e.preventDefault();
+          if (selectedRowIndex === 0) {
+            handleFocusSearch();
+          } else {
+            const prevIdx = selectedRowIndex - 1;
+            handleSelectRow(prevIdx);
+            const prevLine = lines[prevIdx];
+            const el = (document.getElementById(`qty-input-${prevLine.id}-pack`) ||
+              document.getElementById(`qty-input-${prevLine.id}`)) as HTMLInputElement | null;
+            el?.focus();
+            el?.select();
+            setFocusContext("cell_edit");
+          }
+          return;
+        }
+
+        // Delete or Ctrl+D / Cmd+D: Delete Line
+        if ((isCmdOrCtrl && (keyLower === "d" || code === "KeyD")) || (e.key === "Delete" && !isInputFocused)) {
+          e.preventDefault();
+          handleDeleteSelectedLine();
+          return;
+        }
+
+        // Ctrl+B / Cmd+B: Change Batch
+        if (isCmdOrCtrl && (keyLower === "b" || code === "KeyB")) {
+          e.preventDefault();
+          handleOpenBatchForSelectedLine();
+          return;
+        }
+
+        // Ctrl+U / Cmd+U: Toggle Unit Rate / Pack Rate
+        if (isCmdOrCtrl && (keyLower === "u" || code === "KeyU")) {
+          e.preventDefault();
+          handleToggleUnitRateForSelectedLine();
+          return;
+        }
+
+        // Ctrl+E / Cmd+E: Edit Unit Conversion
+        if (isCmdOrCtrl && (keyLower === "e" || code === "KeyE")) {
+          e.preventDefault();
+          setSelectedLineForConversion(lines[selectedRowIndex]);
+          return;
+        }
+
+        // If not typing in an input: ArrowUp / ArrowDown moves between rows
+        if (!isInputFocused) {
+          if (e.key === "ArrowDown") {
+            e.preventDefault();
+            handleSelectRow(Math.min(lines.length - 1, selectedRowIndex + 1));
+            return;
+          }
+          if (e.key === "ArrowUp") {
+            e.preventDefault();
+            if (selectedRowIndex === 0) {
+              handleFocusSearch();
+            } else {
+              handleSelectRow(selectedRowIndex - 1);
+            }
+            return;
+          }
+          if (e.key === "Enter") {
+            e.preventDefault();
+            const activeLine = lines[selectedRowIndex];
+            const el = (document.getElementById(`qty-input-${activeLine.id}-pack`) ||
+              document.getElementById(`qty-input-${activeLine.id}`)) as HTMLInputElement | null;
+            el?.focus();
+            el?.select();
+            setFocusContext("cell_edit");
+            return;
+          }
+        }
+      } else if (lines.length > 0 && isCmdOrCtrl && (keyLower === "d" || code === "KeyD")) {
+        // If user presses Ctrl+D with items in cart but no specific row selected, delete the last line
+        e.preventDefault();
+        handleDeleteSelectedLine(lines.length - 1);
+        return;
+      }
+
+      // Escape: Close dropdowns / modals / cancel edit
+      if (e.key === "Escape") {
         if (searchResults.length > 0) {
           setSearchResults([]);
           return;
         }
+        if (isBillDiscountModalOpen) {
+          setIsBillDiscountModalOpen(false);
+          return;
+        }
+        if (isRoundOffModalOpen) {
+          setIsRoundOffModalOpen(false);
+          return;
+        }
+        if (selectedRowIndex !== null) {
+          handleFocusSearch();
+          return;
+        }
         if (isRecallModalOpen) setIsRecallModalOpen(false);
+        if (isColumnsModalOpen) setIsColumnsModalOpen(false);
+      }
+    };
+
+    const handleOpenColumnsModal = () => setIsColumnsModalOpen(true);
+    const handleApplyPresetEvent = (e: any) => {
+      if (e.detail?.presetId) {
+        companySettingsService.applyBillingPreset(e.detail.presetId).then((res) => {
+          setPosColumns([...res.columns]);
+          setPosHeaders([...res.headerFields]);
+          showNotification(`Switched preset to ${e.detail.presetId.toUpperCase()}`);
+        });
       }
     };
 
     window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isTenderModalOpen, isRecallModalOpen, isDiffModalOpen, selectedProductForBatch, searchResults.length, lines.length, editingInvoice, originalInvoiceItems]);
+    window.addEventListener("open-billing-columns-modal", handleOpenColumnsModal);
+    window.addEventListener("apply-billing-preset", handleApplyPresetEvent);
+
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("open-billing-columns-modal", handleOpenColumnsModal);
+      window.removeEventListener("apply-billing-preset", handleApplyPresetEvent);
+    };
+  }, [
+    isTenderModalOpen,
+    isRecallModalOpen,
+    isDiffModalOpen,
+    isColumnsModalOpen,
+    selectedProductForBatch,
+    searchResults.length,
+    lines,
+    selectedRowIndex,
+    undoDeleteBuffer,
+    isShortcutsModalOpen,
+    isBillDiscountModalOpen,
+    isRoundOffModalOpen,
+    quickEditModal.isOpen,
+    focusContext,
+    editingInvoice,
+    originalInvoiceItems,
+    totals.grand_total,
+  ]);
+
+  const handleCustomerPhoneChange = async (newPhone: string) => {
+    setCustomerPhone(newPhone);
+    const clean = normalizeIndianPhone(newPhone);
+    if (clean.length === 10) {
+      const match = await partiesStore.findCustomerByPhone(clean);
+      if (match) {
+        setSelectedCustomer(match);
+        setCustomerName(match.name);
+        setCustomerGstin(match.gstin || "");
+        posCartService.setCustomer(match.id, match.name, match.gstin || "", match.place_of_supply || "", match.phone);
+        showNotification(`Matched customer: ${match.name}`);
+      }
+    }
+  };
 
   // When batch modal opens: focus inside the modal and highlight earliest expiry (row 0)
   useEffect(() => {
@@ -428,7 +1118,7 @@ export const PosBillingPage: React.FC = () => {
 
   const showNotification = (
     message: string,
-    type: "success" | "error" = "success",
+    type: "success" | "error" | "info" | "warning" = "success",
     actions?: NotificationAction[]
   ) => {
     setNotification({ message, type, actions });
@@ -440,6 +1130,8 @@ export const PosBillingPage: React.FC = () => {
       e.preventDefault();
       if (searchResults.length > 0) {
         setSelectedSearchIndex((prev) => (prev < searchResults.length - 1 ? prev + 1 : prev));
+      } else if (lines.length > 0) {
+        handleSelectRow(0);
       }
       return;
     }
@@ -485,25 +1177,95 @@ export const PosBillingPage: React.FC = () => {
   };
 
   const selectProductAndAddToCart = async (product: ProductItem) => {
-    // Retrieve all batches in FEFO order (including out-of-stock batches to display in modal)
+    // Retrieve all batches in FEFO order (including out-of-stock batches)
     const batches = await productsStore.getBatchesForProduct(product.id, false);
+    const appSettings = companySettingsService.getSettings();
+    const allowSellingOutOfStock = appSettings.inventory?.allowSellingOutOfStock || "always";
 
     if (batches.length === 0) {
-      showNotification(`No stock batches available for ${product.name}`, "error");
-      return;
-    }
+      if (allowSellingOutOfStock === "never") {
+        showNotification(`No stock batches available for ${product.name} (Selling out-of-stock is disabled)`, "error");
+        return;
+      }
 
-    const selectableBatches = batches.filter((b) => isBatchSelectable(b));
+      // Ad-hoc batch on the fly
+      const adhocBatch: ProductBatch = {
+        id: `batch_adhoc_${product.id}_${Date.now()}`,
+        product_id: product.id,
+        batch_no: "NO_BATCH",
+        expiry_date: new Date(Date.now() + 365 * 86400000).toISOString().slice(0, 10),
+        stock_qty: 0,
+        mrp: product.mrp,
+        selling_rate: product.sel_rate,
+        purchase_rate: product.sel_rate * 0.7,
+      };
 
-    if (batches.length === 1 && selectableBatches.length === 1) {
-      // Single selectable batch: auto-add with FEFO
-      posCartService.addProductToCart(product, batches[0], 1, 0);
+      const res = posCartService.addProductToCart(product, adhocBatch, 1, 0, { isAdhocBatch: true });
       refreshCartState();
       setSearchQuery("");
       setSearchResults([]);
-      searchInputRef.current?.focus();
+      if (res.line) {
+        const newLines = posCartService.getLines();
+        const newIdx = newLines.findIndex((l) => l.id === res.line!.id);
+        const targetIdx = newIdx >= 0 ? newIdx : newLines.length - 1;
+        setSelectedRowIndex(targetIdx);
+        setFocusContext("cell_edit");
+        searchInputRef.current?.blur();
+        setTimeout(() => {
+          const el = (document.getElementById(`qty-input-${res.line!.id}-pack`) ||
+            document.getElementById(`qty-input-${res.line!.id}`)) as HTMLInputElement | null;
+          if (el) {
+            el.focus();
+            el.select();
+          }
+        }, 50);
+      }
+      setAriaAnnouncement(`Added ${product.name}, Quantity 1. Total: ₹${posCartService.getTotals().grand_total.toFixed(2)}`);
+      if (appSettings.inventory?.warnOnNegativeStock ?? true) {
+        showNotification(`${product.name} added without existing batch (Stock 0)`, "info");
+      }
+      return;
+    }
+
+    const unexpiredBatches = batches.filter((b) => !isBatchExpired(b.expiry_date));
+
+    if (batches.length === 1 && unexpiredBatches.length === 1) {
+      const b = batches[0];
+      const isOutOfStock = (b.stock_qty || 0) <= 0;
+
+      if (isOutOfStock && allowSellingOutOfStock === "never") {
+        showNotification(`Batch ${b.batch_no} is out of stock`, "error");
+        return;
+      }
+
+      if (isOutOfStock && allowSellingOutOfStock === "ask") {
+        const confirmed = window.confirm(`Batch ${b.batch_no} is out of stock (0 available). Add anyway?`);
+        if (!confirmed) return;
+      }
+
+      const res = posCartService.addProductToCart(product, b, 1, 0);
+      refreshCartState();
+      setSearchQuery("");
+      setSearchResults([]);
+      if (res.line) {
+        const newLines = posCartService.getLines();
+        const newIdx = newLines.findIndex((l) => l.id === res.line!.id);
+        const targetIdx = newIdx >= 0 ? newIdx : newLines.length - 1;
+        setSelectedRowIndex(targetIdx);
+        setFocusContext("cell_edit");
+        searchInputRef.current?.blur();
+        setTimeout(() => {
+          const el = (document.getElementById(`qty-input-${res.line!.id}-pack`) ||
+            document.getElementById(`qty-input-${res.line!.id}`)) as HTMLInputElement | null;
+          if (el) {
+            el.focus();
+            el.select();
+          }
+        }, 50);
+      }
+      setAriaAnnouncement(`Added ${product.name}, Quantity 1. Total: ₹${posCartService.getTotals().grand_total.toFixed(2)}`);
     } else {
-      // Multiple batches or non-selectable batch: display batch picker modal
+      // Multiple batches or expired batch: display batch picker modal
       setSelectedProductForBatch(product);
       setProductBatches(batches);
       setSelectedBatchIndex(0);
@@ -512,25 +1274,63 @@ export const PosBillingPage: React.FC = () => {
 
   const addBatchToCart = (batch: ProductBatch) => {
     if (!selectedProductForBatch) return;
-    if (!isBatchSelectable(batch)) {
-      const isOutOfStock = (batch.stock_qty || 0) <= 0;
-      showNotification(
-        isOutOfStock
-          ? `Batch ${batch.batch_no} is out of stock`
-          : `Batch ${batch.batch_no} is expired (${batch.expiry_date}) and cannot be billed`,
-        "error"
+    const appSettings = companySettingsService.getSettings();
+    const allowSellingOutOfStock = appSettings.inventory?.allowSellingOutOfStock || "always";
+    const allowExpiredBatchSale = appSettings.inventory?.allowExpiredBatchSale || "warn_confirm";
+
+    const isExpired = isBatchExpired(batch.expiry_date);
+    const isOutOfStock = (batch.stock_qty || 0) <= 0;
+
+    if (isExpired) {
+      if (allowExpiredBatchSale === "block") {
+        showNotification(
+          `Batch ${batch.batch_no} is expired (${batch.expiry_date}) and cannot be billed`,
+          "error"
+        );
+        return;
+      }
+      const confirmed = window.confirm(
+        `COMPLIANCE WARNING: Batch ${batch.batch_no} is expired (${batch.expiry_date}). Do you explicitly confirm adding this expired batch?`
       );
-      return;
+      if (!confirmed) return;
     }
-    posCartService.addProductToCart(selectedProductForBatch, batch, 1, 0);
+
+    if (isOutOfStock) {
+      if (allowSellingOutOfStock === "never") {
+        showNotification(`Batch ${batch.batch_no} is out of stock`, "error");
+        return;
+      }
+      if (allowSellingOutOfStock === "ask") {
+        const confirmed = window.confirm(
+          `Batch ${batch.batch_no} has 0 stock. Do you want to sell beyond available stock?`
+        );
+        if (!confirmed) return;
+      }
+    }
+
+    const res = posCartService.addProductToCart(selectedProductForBatch, batch, 1, 0);
     refreshCartState();
     setSelectedProductForBatch(null);
     setSelectedBatchIndex(0);
     setSearchQuery("");
     setSearchResults([]);
-    setTimeout(() => {
-      searchInputRef.current?.focus();
-    }, 50);
+    if (res.line) {
+      const newLines = posCartService.getLines();
+      const newIdx = newLines.findIndex((l) => l.id === res.line!.id);
+      const targetIdx = newIdx >= 0 ? newIdx : newLines.length - 1;
+      setSelectedRowIndex(targetIdx);
+      setFocusContext("cell_edit");
+      searchInputRef.current?.blur();
+      setTimeout(() => {
+        const el = (document.getElementById(`qty-input-${res.line!.id}-pack`) ||
+          document.getElementById(`qty-input-${res.line!.id}`)) as HTMLInputElement | null;
+        if (el) {
+          el.focus();
+          el.select();
+        }
+      }, 50);
+    }
+    setAriaAnnouncement(`Added ${selectedProductForBatch.name}, Quantity 1. Total: ₹${posCartService.getTotals().grand_total.toFixed(2)}`);
   };
 
   const updateQuantity = (lineId: string, delta: number) => {
@@ -554,7 +1354,12 @@ export const PosBillingPage: React.FC = () => {
     }
 
     const holdRef = billingTenderService.holdBill(
-      { lines: currentLines, customerPhone },
+      {
+        lines: currentLines,
+        customerPhone,
+        customerGstin,
+        selectedCustomer,
+      },
       currentLines.length,
       totals.grand_total,
       customerName
@@ -578,11 +1383,28 @@ export const PosBillingPage: React.FC = () => {
       posCartService.addProductToCart(line.product, line.selectedBatch, line.qty, line.loose_qty);
     }
 
-    setCustomerName(recalled.customer_name || "Walk-in Customer");
-    setCustomerPhone((recalled.cart_payload.customerPhone as string) || "");
+    const payload = recalled.cart_payload || {};
+    const recalledName = recalled.customer_name || "Walk-in Customer";
+    const recalledPhone = (payload.customerPhone as string) || "";
+    const recalledGstin = (payload.customerGstin as string) || "";
+    const recalledCustomer = (payload.selectedCustomer as Customer) || null;
+
+    setCustomerName(recalledName);
+    setCustomerPhone(recalledPhone);
+    setCustomerGstin(recalledGstin);
+    setSelectedCustomer(recalledCustomer);
+
+    posCartService.setCustomer(
+      recalledCustomer?.id || "",
+      recalledName,
+      recalledGstin,
+      recalledCustomer?.place_of_supply || "",
+      recalledPhone
+    );
+
     setIsRecallModalOpen(false);
     refreshCartState();
-    showNotification(`Recalled bill for ${recalled.customer_name}`);
+    showNotification(`Recalled bill for ${recalledName}`);
   };
 
   const openTenderModal = () => {
@@ -677,6 +1499,8 @@ export const PosBillingPage: React.FC = () => {
         setCustomerName("Walk-in Customer");
         setCustomerPhone("");
         setCustomerGstin("");
+        setSelectedCustomer(null);
+        posCartService.setCustomer("", "Walk-in Customer", "", "", "");
         setEditReason("");
         showNotification(
           savedPdfPath
@@ -722,19 +1546,24 @@ export const PosBillingPage: React.FC = () => {
     const activeLines = linesSource || (posCartService.getLines().length > 0 ? posCartService.getLines() : lines);
     const activeTotals = totalsSource || (posCartService.getLines().length > 0 ? posCartService.getTotals() : totals);
 
+    const settings = companySettingsService.getSettings();
+
     return {
       invoice_number: invoiceNumber,
       invoice_date: new Date().toISOString().slice(0, 10),
-      store_name: "LamStone Pharmacy & Retail",
-      store_address: "Main Road, Palakkad, Kerala - 678001",
-      store_phone: "9876543210",
-      store_gstin: "32ABCDE1234F1Z5",
-      drug_license_numbers: ["20B/KL-PKD-1029", "21B/KL-PKD-1030"],
-      fssai_no: "10020042001234",
-      place_of_supply: "32-Kerala",
+      store_name: settings.display_name || settings.store_name || "LamStone Pharmacy & Retail",
+      store_address: settings.address || "Main Road, Palakkad, Kerala - 678001",
+      store_phone: settings.phone || "9876543210",
+      store_email: settings.email || undefined,
+      store_gstin: settings.gstin || "32ABCDE1234F1Z5",
+      drug_license_numbers: settings.drug_license_numbers && settings.drug_license_numbers.length > 0 ? settings.drug_license_numbers : ["20B/KL-PKD-1029", "21B/KL-PKD-1030"],
+      fssai_no: settings.fssai_no || undefined,
+      place_of_supply: settings.state_code ? `${settings.state_code}-Kerala` : "32-Kerala",
       customer_name: customerName || "Walk-in Customer",
       customer_phone: customerPhone || "",
       customer_gstin: customerGstin || undefined,
+      doctor_name: doctorName || undefined,
+      patient_name: patientName || undefined,
       payment_mode: tenders[0]?.mode || "Cash",
       payment_status: "Paid",
       lines: activeLines.map((l) => ({
@@ -754,7 +1583,10 @@ export const PosBillingPage: React.FC = () => {
       tax_total: activeTotals.total_tax,
       round_off: activeTotals.round_off,
       grand_total: activeTotals.grand_total,
-      upi_vpa: "pharmacy@upi",
+      upi_vpa: (settings.printing as any)?.upi_vpa || "pharmacy@upi",
+      terms_and_conditions: settings.printing?.termsAndConditions,
+      jurisdiction_note: settings.printing?.jurisdictionNote,
+      footer_note: settings.printing?.footerNote,
     };
   };
 
@@ -801,6 +1633,15 @@ export const PosBillingPage: React.FC = () => {
         showNotification("Cannot finalize: Cart is empty", "error");
         return;
       }
+
+      // Sync customer details to cart service
+      posCartService.setCustomer(
+        selectedCustomer?.id || "",
+        customerName || "Walk-in Customer",
+        customerGstin || "",
+        selectedCustomer?.place_of_supply || "32-Kerala",
+        customerPhone || ""
+      );
 
       // 3. Prepare snapshot of print data BEFORE saving or clearing
       const printData = preparePrintData(cartSnapshot, totalsSnapshot);
@@ -873,6 +1714,9 @@ export const PosBillingPage: React.FC = () => {
         setInvoiceNumber(`INV-${Date.now().toString().slice(-6)}`);
         setCustomerName("Walk-in Customer");
         setCustomerPhone("");
+        setCustomerGstin("");
+        setSelectedCustomer(null);
+        posCartService.setCustomer("", "Walk-in Customer", "", "", "");
         setTimeout(() => {
           searchInputRef.current?.focus();
         }, 50);
@@ -893,14 +1737,20 @@ export const PosBillingPage: React.FC = () => {
           className={`fixed top-4 right-4 z-50 flex flex-col gap-2 rounded-xl p-3.5 text-xs font-semibold shadow-2xl transition-all max-w-lg border ${
             notification.type === "success"
               ? "bg-slate-900 text-slate-100 border-emerald-500/50"
+              : notification.type === "info"
+              ? "bg-blue-900 text-white border-blue-600"
+              : notification.type === "warning"
+              ? "bg-amber-900 text-white border-amber-600"
               : "bg-red-800 text-white border-red-600"
           }`}
         >
           <div className="flex items-start gap-2.5">
             {notification.type === "success" ? (
               <CheckCircle className="h-4 w-4 text-emerald-400 shrink-0 mt-0.5" />
+            ) : notification.type === "info" ? (
+              <AlertCircle className="h-4 w-4 text-blue-300 shrink-0 mt-0.5" />
             ) : (
-              <AlertCircle className="h-4 w-4 text-red-200 shrink-0 mt-0.5" />
+              <AlertCircle className="h-4 w-4 text-amber-200 shrink-0 mt-0.5" />
             )}
             <div className="flex-1 overflow-hidden">
               <p className="font-medium break-all leading-relaxed">{notification.message}</p>
@@ -936,40 +1786,122 @@ export const PosBillingPage: React.FC = () => {
 
       {/* Header Strip: Customer & Bill Meta */}
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-200 bg-white px-4 py-2.5 shadow-sm">
-        <div className="flex items-center gap-4">
-          <div>
-            <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">Invoice No</span>
-            <p className="text-xs font-bold text-blue-700">{invoiceNumber}</p>
-          </div>
-          <div className="h-6 w-px bg-slate-200" />
-          <div className="flex items-center gap-2">
-            <UserCheck className="h-4 w-4 text-slate-400" />
-            <input
-              type="text"
-              value={customerName}
-              onChange={(e) => setCustomerName(e.target.value)}
-              placeholder="Customer Name"
-              className="rounded border border-slate-200 px-2 py-1 text-xs font-medium text-slate-700 focus:border-blue-500 focus:outline-none"
-            />
+        <div className="flex flex-wrap items-center gap-4">
+          {posHeaders.find((h) => h.id === "invoice_no")?.visible !== false && (
+            <div>
+              <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">Invoice No</span>
+              <p className="text-xs font-bold text-blue-700">{invoiceNumber}</p>
+            </div>
+          )}
+
+          {posHeaders.find((h) => h.id === "customer_name")?.visible !== false && (
+            <>
+              <div className="h-6 w-px bg-slate-200 hidden sm:block" />
+              <div className="flex items-center gap-2">
+                <UserCheck className="h-4 w-4 text-slate-400" />
+                <CustomerCombobox
+                  value={customerName}
+                  phone={customerPhone}
+                  gstin={customerGstin}
+                  selectedCustomer={selectedCustomer}
+                  inputRef={customerInputRef}
+                  onChange={(sel) => {
+                    setCustomerName(sel.name);
+                    if (sel.phone !== undefined) setCustomerPhone(sel.phone);
+                    if (sel.gstin !== undefined) setCustomerGstin(sel.gstin);
+                    setSelectedCustomer(sel.customer || null);
+                    posCartService.setCustomer(
+                      sel.customer?.id || "",
+                      sel.name,
+                      sel.gstin || "",
+                      sel.customer?.place_of_supply || "",
+                      sel.phone || ""
+                    );
+                  }}
+                  onQuickAddSuccess={(cust) => {
+                    showNotification(`Added new customer: ${cust.name}`);
+                  }}
+                />
+              </div>
+            </>
+          )}
+
+          {posHeaders.find((h) => h.id === "customer_phone")?.visible !== false && (
             <input
               type="text"
               value={customerPhone}
-              onChange={(e) => setCustomerPhone(e.target.value)}
+              onChange={(e) => handleCustomerPhoneChange(e.target.value)}
               placeholder="Mobile (+91)"
-              className="w-32 rounded border border-slate-200 px-2 py-1 text-xs font-medium text-slate-700 focus:border-blue-500 focus:outline-none"
+              className="w-28 rounded border border-slate-200 px-2 py-1 text-xs font-medium text-slate-700 focus:border-blue-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
             />
-          </div>
+          )}
+
+          {posHeaders.find((h) => h.id === "customer_gstin")?.visible && (
+            <input
+              type="text"
+              value={customerGstin}
+              onChange={(e) => setCustomerGstin(e.target.value)}
+              placeholder="GSTIN"
+              className="w-32 rounded border border-slate-200 px-2 py-1 text-xs font-mono text-slate-700 focus:border-blue-500 focus:outline-none uppercase"
+            />
+          )}
+
+          {posHeaders.find((h) => h.id === "doctor")?.visible && (
+            <input
+              type="text"
+              value={doctorName}
+              onChange={(e) => {
+                setDoctorName(e.target.value);
+                posCartService.setPrescriptionMeta({ doctor_name: e.target.value });
+              }}
+              placeholder="Dr. Name"
+              className="w-28 rounded border border-slate-200 px-2 py-1 text-xs text-slate-700 focus:border-blue-500 focus:outline-none"
+            />
+          )}
+
+          {posHeaders.find((h) => h.id === "patient")?.visible && (
+            <input
+              type="text"
+              value={patientName}
+              onChange={(e) => {
+                setPatientName(e.target.value);
+                posCartService.setPrescriptionMeta({ patient_name: e.target.value });
+              }}
+              placeholder="Patient Name"
+              className="w-28 rounded border border-slate-200 px-2 py-1 text-xs text-slate-700 focus:border-blue-500 focus:outline-none"
+            />
+          )}
+
+          {posHeaders.find((h) => h.id === "notes")?.visible && (
+            <input
+              type="text"
+              value={billNotes}
+              onChange={(e) => setBillNotes(e.target.value)}
+              placeholder="Bill Remarks"
+              className="w-32 rounded border border-slate-200 px-2 py-1 text-xs text-slate-700 focus:border-blue-500 focus:outline-none"
+            />
+          )}
         </div>
 
-        {/* Action Shortcuts: Hold, Recall, Find Bill */}
+        {/* Action Shortcuts: Hold, Recall, Find Bill, Columns config */}
         <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setIsColumnsModalOpen(true)}
+            className="flex items-center gap-1.5 rounded border border-slate-300 bg-white hover:bg-slate-50 px-2.5 py-1.5 text-xs font-semibold text-slate-700 shadow-2xs transition-colors"
+            title="Configure POS Columns & Presets (Ctrl+Shift+C)"
+          >
+            <Sliders className="h-3.5 w-3.5 text-blue-600" />
+            <span className="hidden sm:inline">Columns (Ctrl+Shift+C)</span>
+          </button>
+
           <button
             onClick={() => navigate("/bills")}
             className="flex items-center gap-1.5 rounded bg-blue-50 px-3 py-1.5 text-xs font-semibold text-blue-700 hover:bg-blue-100"
             title="Recall / Find Past Bills (F6)"
           >
             <FileText className="h-3.5 w-3.5" />
-            <span>Recall / Find Bill (F6)</span>
+            <span className="hidden md:inline">Find Bill (F6)</span>
           </button>
 
           <button
@@ -1035,6 +1967,8 @@ export const PosBillingPage: React.FC = () => {
               onChange={(e) => setSearchQuery(e.target.value)}
               onKeyDown={handleBarcodeOrEnter}
               onFocus={() => {
+                setFocusContext("search");
+                setSelectedRowIndex(null);
                 if (searchQuery.trim().length > 0 && searchResults.length === 0) {
                   productsStore.searchProducts(searchQuery.trim()).then((res) => {
                     setSearchResults(res);
@@ -1045,6 +1979,15 @@ export const PosBillingPage: React.FC = () => {
                   updateDropdownPosition();
                 }
               }}
+              onBlur={(e) => {
+                const related = e.relatedTarget as Node | null;
+                if (dropdownRef.current && related && dropdownRef.current.contains(related)) {
+                  return;
+                }
+                setTimeout(() => {
+                  setSearchResults([]);
+                }, 180);
+              }}
               placeholder="Scan barcode or type medicine / product name (Press Enter)... [F1]"
               className="w-full rounded-md border border-slate-300 bg-white pl-10 pr-24 py-2 text-xs font-medium text-slate-800 placeholder-slate-400 focus:border-blue-600 focus:outline-none focus:ring-1 focus:ring-blue-600 shadow-sm"
             />
@@ -1054,7 +1997,7 @@ export const PosBillingPage: React.FC = () => {
             </div>
           </div>
 
-          {/* Search Dropdown Results rendered in React Portal to escape overflow & stacking contexts */}
+          {/* Search Dropdown Results rendered in React Portal */}
           {searchResults.length > 0 && dropdownPosition && createPortal(
             <div
               ref={dropdownRef}
@@ -1118,87 +2061,298 @@ export const PosBillingPage: React.FC = () => {
           )}
         </div>
 
-        {/* POS Grid Table */}
-        <div className="flex-1 overflow-auto">
-          <table className="w-full text-left text-xs">
-            <thead className="sticky top-0 bg-slate-100/90 backdrop-blur-sm border-b border-slate-200 text-slate-700">
-              <tr>
-                <th className="px-3 py-2 w-10 text-center">#</th>
-                <th className="px-3 py-2">Product Name</th>
-                <th className="px-3 py-2 w-28">Batch</th>
-                <th className="px-3 py-2 w-24">Expiry</th>
-                <th className="px-3 py-2 w-28 text-center">Qty</th>
-                <th className="px-3 py-2 w-24 text-right">MRP</th>
-                <th className="px-3 py-2 w-24 text-right">Rate</th>
-                <th className="px-3 py-2 w-20 text-center">GST %</th>
-                <th className="px-3 py-2 w-28 text-right font-semibold">Total (₹)</th>
-                <th className="px-3 py-2 w-12 text-center">Action</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {lines.length === 0 ? (
-                <tr>
-                  <td colSpan={10} className="py-16 text-center text-slate-400">
-                    <Barcode className="mx-auto h-8 w-8 text-slate-300 mb-2" />
-                    <p className="font-medium">Billing cart is empty</p>
-                    <p className="text-[11px] text-slate-400 mt-0.5">Scan a barcode or type a product name to begin billing</p>
-                  </td>
-                </tr>
-              ) : (
-                lines.map((line, idx) => (
-                  <tr key={line.id} className="hover:bg-slate-50 transition-colors">
-                    <td className="px-3 py-2 text-center text-slate-400">{idx + 1}</td>
-                    <td className="px-3 py-2 font-semibold text-slate-800">
-                      {line.product.name}
-                      {line.product.units_per_pack > 1 && (
-                        <span className="ml-1.5 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-500 font-normal">
-                          {line.product.units_per_pack}s
-                        </span>
-                      )}
-                    </td>
-                    <td className="px-3 py-2 font-mono text-[11px] text-slate-600">{line.selectedBatch.batch_no}</td>
-                    <td className="px-3 py-2 font-mono text-[11px] text-slate-500">{line.selectedBatch.expiry_date}</td>
-                    <td className="px-3 py-2 text-center">
-                      <div className="inline-flex items-center rounded border border-slate-200 bg-white">
-                        <button
-                          onClick={() => updateQuantity(line.id, -1)}
-                          className="px-1.5 py-0.5 hover:bg-slate-100 text-slate-600"
+        {/* Dynamic POS Grid Table */}
+        {(() => {
+          const visibleCols: ColumnSetting[] = (posColumns && posColumns.length > 0 ? posColumns : DEFAULT_COLUMNS)
+            .filter((c: ColumnSetting) => c.visible !== false)
+            .sort((a: ColumnSetting, b: ColumnSetting) => (a.order || 0) - (b.order || 0));
+
+          return (
+            <div className="flex-1 overflow-auto">
+              <table role="grid" aria-label="POS Billing Items" className="w-full text-left text-xs">
+                <thead className="sticky top-0 bg-slate-100/90 backdrop-blur-sm border-b border-slate-200 text-slate-700">
+                  <tr>
+                    {visibleCols.map((col: ColumnSetting) => {
+                      let alignClass = "text-left";
+                      if (["idx", "qty", "gst", "discount", "hsn", "free_qty", "actions"].includes(col.id)) {
+                        alignClass = "text-center";
+                      } else if (["mrp", "rate", "current_stock", "total"].includes(col.id)) {
+                        alignClass = "text-right";
+                      }
+                      return (
+                        <th
+                          key={col.id}
+                          style={col.width ? { width: `${col.width}px` } : undefined}
+                          className={`px-3 py-2 ${alignClass} font-semibold`}
                         >
-                          <Minus className="h-3 w-3" />
-                        </button>
-                        <span className="px-2 font-bold text-slate-800">{line.qty}</span>
-                        <button
-                          onClick={() => updateQuantity(line.id, 1)}
-                          className="px-1.5 py-0.5 hover:bg-slate-100 text-slate-600"
-                        >
-                          <Plus className="h-3 w-3" />
-                        </button>
-                      </div>
-                    </td>
-                    <td className="px-3 py-2 text-right text-slate-500">₹ {line.product.mrp.toFixed(2)}</td>
-                    <td className="px-3 py-2 text-right font-medium text-slate-700">₹ {line.unit_price.toFixed(2)}</td>
-                    <td className="px-3 py-2 text-center text-slate-600">{line.product.gst_percent}%</td>
-                    <td className="px-3 py-2 text-right font-bold text-slate-900">
-                      ₹ {line.calculated.total_amount.toFixed(2)}
-                    </td>
-                    <td className="px-3 py-2 text-center">
-                      <button
-                        onClick={() => removeLine(line.id)}
-                        className="rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-600"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </button>
-                    </td>
+                          {col.label}
+                        </th>
+                      );
+                    })}
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {lines.length === 0 ? (
+                    <tr>
+                      <td colSpan={visibleCols.length} className="py-16 text-center text-slate-400">
+                        <Barcode className="mx-auto h-8 w-8 text-slate-300 mb-2" />
+                        <p className="font-medium">Billing cart is empty</p>
+                        <p className="text-[11px] text-slate-400 mt-0.5">Scan a barcode or type a product name to begin billing</p>
+                      </td>
+                    </tr>
+                  ) : (
+                    lines.map((line, idx) => {
+                      const isRowSelected = selectedRowIndex === idx;
+                      return (
+                        <tr
+                          key={line.id}
+                          id={`cart-row-${line.id}`}
+                          role="row"
+                          aria-selected={isRowSelected}
+                          onClick={() => handleSelectRow(idx)}
+                          className={`transition-all cursor-pointer ${
+                            isRowSelected
+                              ? "bg-blue-100/90 ring-2 ring-inset ring-blue-500 font-semibold shadow-xs"
+                              : "hover:bg-slate-50"
+                          }`}
+                        >
+                        {visibleCols.map((col: ColumnSetting) => {
+                          switch (col.id) {
+                            case "idx":
+                              return (
+                                <td key="idx" className="px-3 py-2 text-center text-slate-400 font-mono text-[11px]">
+                                  {idx + 1}
+                                </td>
+                              );
+
+                            case "product_name":
+                              return (
+                                <td key="product_name" className="px-3 py-2 font-semibold text-slate-800">
+                                  <div className="flex flex-col">
+                                    <div className="flex items-center gap-1.5 flex-wrap">
+                                      <span>{line.product.name}</span>
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          setSelectedLineForConversion(line);
+                                        }}
+                                        className={`inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[10px] font-medium transition-colors cursor-pointer ${
+                                          line.product.units_per_pack > 1
+                                            ? "border-blue-200 bg-blue-50/70 text-blue-700 hover:bg-blue-100"
+                                            : "border-slate-200 bg-slate-100/80 text-slate-600 hover:bg-slate-200"
+                                        }`}
+                                        title="Click or press Ctrl+E to adjust packaging & unit conversion"
+                                      >
+                                        <span>
+                                          {line.product.units_per_pack > 1
+                                            ? `1 ${line.product.unit_name || "pack"} = ${line.product.units_per_pack} ${line.product.sub_unit_name || "pcs"}`
+                                            : (line.product.unit_name || "pc")}
+                                        </span>
+                                        <span className="text-[9px] text-slate-400">✏️</span>
+                                      </button>
+                                      {line.isAdhocBatch && (
+                                        <span className="rounded bg-purple-100 text-purple-700 border border-purple-200 px-1.5 py-0.2 text-[10px] font-bold">
+                                          Ad-hoc
+                                        </span>
+                                      )}
+                                    </div>
+                                    {line.isNegativeStock && (
+                                      <div className="mt-0.5 flex items-center gap-1 text-[11px] font-medium text-amber-700">
+                                        <span className="inline-block w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
+                                        {(line.availableStockSnapshot ?? 0) <= 0
+                                          ? "Stock 0 (Selling beyond available)"
+                                          : `Short by ${line.shortageQty || Math.max(1, line.qty - (line.availableStockSnapshot ?? 0))}`}
+                                      </div>
+                                    )}
+                                  </div>
+                                </td>
+                              );
+
+                            case "batch_no":
+                              return (
+                                <td key="batch_no" className="px-3 py-2 font-mono text-[11px] text-slate-600">
+                                  {line.selectedBatch.batch_no}
+                                </td>
+                              );
+
+                            case "expiry_date":
+                              return (
+                                <td key="expiry_date" className="px-3 py-2 font-mono text-[11px] text-slate-500">
+                                  {line.selectedBatch.expiry_date}
+                                </td>
+                              );
+
+                            case "qty":
+                              return (
+                                <td key="qty" className="px-3 py-2 text-center" onClick={(e) => e.stopPropagation()}>
+                                  <SmartQtyInput
+                                    inputId={`qty-input-${line.id}`}
+                                    packs={line.qty}
+                                    loose={line.loose_qty || 0}
+                                    unitsPerPack={line.product.units_per_pack || 1}
+                                    packName={line.product.unit_name || (line.product.units_per_pack > 1 ? "pack" : "pc")}
+                                    looseName={line.product.sub_unit_name || (line.product.units_per_pack > 1 ? "pc" : "unit")}
+                                    allowLoose={line.product.allow_loose_sale ?? ((line.product.units_per_pack || 1) > 1)}
+                                    onFocusInput={() => {
+                                      setSelectedRowIndex(idx);
+                                      setFocusContext("cell_edit");
+                                    }}
+                                    onEnter={() => {
+                                      handleQtyEnterAdvance(idx);
+                                    }}
+                                    onChange={(newPacks, newLoose) => {
+                                      posCartService.updateLineQuantity(line.id, newPacks, newLoose);
+                                      refreshCartState();
+                                    }}
+                                  />
+                                </td>
+                              );
+
+                            case "mrp":
+                              return (
+                                <td key="mrp" className="px-3 py-2 text-right text-slate-500">
+                                  ₹ {line.product.mrp.toFixed(2)}
+                                </td>
+                              );
+
+                            case "rate":
+                              return (
+                                <td key="rate" className="px-3 py-2 text-right">
+                                  <div className="flex flex-col items-end">
+                                    <span className="font-medium text-slate-700">
+                                      ₹ {line.unit_price.toFixed(2)}
+                                      <span className="text-[10px] text-slate-400 ml-0.5 font-normal">
+                                        /{line.rate_basis === "loose_rate"
+                                          ? (line.product.sub_unit_name || "pc")
+                                          : (line.product.unit_name || (line.product.units_per_pack > 1 ? "pack" : "pc"))}
+                                      </span>
+                                    </span>
+                                    {line.product.units_per_pack > 1 && (
+                                      <button
+                                        type="button"
+                                        tabIndex={-1}
+                                        onClick={() => {
+                                          const nextBasis = line.rate_basis === "loose_rate" ? "sel_rate" : "loose_rate";
+                                          const newPrice = nextBasis === "loose_rate"
+                                            ? calculateDerivedLooseRate(line.product.sel_rate, line.product.units_per_pack, line.product.loose_selling_rate)
+                                            : (line.selectedBatch.selling_rate || line.product.sel_rate);
+                                          posCartService.updateLinePrice(line.id, newPrice, nextBasis);
+                                          refreshCartState();
+                                        }}
+                                        className="text-[9px] text-blue-600 hover:text-blue-800 underline mt-0.5 cursor-pointer"
+                                      >
+                                        {line.rate_basis === "loose_rate" ? "switch to pack rate" : "switch to unit rate"}
+                                      </button>
+                                    )}
+                                  </div>
+                                </td>
+                              );
+
+                            case "discount":
+                              return (
+                                <td
+                                  key="discount"
+                                  className="px-3 py-2 text-center"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setSelectedRowIndex(idx);
+                                    handleQuickDiscount(line);
+                                  }}
+                                >
+                                  <button
+                                    type="button"
+                                    tabIndex={-1}
+                                    className={`group inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-semibold cursor-pointer transition-colors ${
+                                      line.discount_percent > 0 || line.discount_amount > 0
+                                        ? "bg-amber-100 text-amber-800 hover:bg-amber-200 border border-amber-200"
+                                        : "text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                                    }`}
+                                    title="Click or press F2 to edit item discount"
+                                  >
+                                    <span>
+                                      {line.discount_percent > 0
+                                        ? `${line.discount_percent}%`
+                                        : line.discount_amount > 0
+                                        ? `₹${line.discount_amount.toFixed(2)}`
+                                        : "-"}
+                                    </span>
+                                  </button>
+                                </td>
+                              );
+
+                            case "gst":
+                              return (
+                                <td key="gst" className="px-3 py-2 text-center text-slate-600">
+                                  {line.product.gst_percent}%
+                                </td>
+                              );
+
+                            case "hsn":
+                              return (
+                                <td key="hsn" className="px-3 py-2 text-center font-mono text-[11px] text-slate-500">
+                                  {line.product.hsn_sac_code || "-"}
+                                </td>
+                              );
+
+                            case "free_qty":
+                              return (
+                                <td key="free_qty" className="px-3 py-2 text-center text-slate-500">
+                                  -
+                                </td>
+                              );
+
+                            case "rack_shelf":
+                              return (
+                                <td key="rack_shelf" className="px-3 py-2 text-center text-slate-500">
+                                  {line.selectedBatch.rack_location || line.product.rack_location || "-"}
+                                </td>
+                              );
+
+                            case "current_stock":
+                              return (
+                                <td key="current_stock" className="px-3 py-2 text-right font-semibold text-slate-700">
+                                  {line.selectedBatch.stock_qty ?? line.product.current_stock ?? 0}
+                                </td>
+                              );
+
+                            case "total":
+                              return (
+                                <td key="total" className="px-3 py-2 text-right font-bold text-slate-900">
+                                  ₹ {line.calculated.total_amount.toFixed(2)}
+                                </td>
+                              );
+
+                            case "actions":
+                              return (
+                                <td key="actions" className="px-3 py-2 text-center">
+                                  <button
+                                    onClick={() => removeLine(line.id)}
+                                    className="rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-600 cursor-pointer"
+                                    title="Delete line"
+                                  >
+                                    <Trash2 className="h-3.5 w-3.5" />
+                                  </button>
+                                </td>
+                              );
+
+                            default:
+                              return null;
+                          }
+                        })}
+                      </tr>
+                    );
+                  })
+                )}
+                </tbody>
+              </table>
+            </div>
+          );
+        })()}
 
         {/* Bottom Totals & Settlement Bar */}
-        <div className="flex flex-wrap items-center justify-between border-t border-slate-200 bg-slate-50 px-4 py-3">
-          <div className="flex items-center gap-6 text-xs text-slate-600">
+        <div className="flex flex-wrap items-center justify-between border-t border-slate-200 bg-slate-50 px-4 py-3 gap-3">
+          <div className="flex flex-wrap items-center gap-4 sm:gap-6 text-xs text-slate-600">
             <div>
               <span className="text-slate-400">Items: </span>
               <span className="font-bold text-slate-800">{lines.length}</span>
@@ -1207,194 +2361,304 @@ export const PosBillingPage: React.FC = () => {
               <span className="text-slate-400">Subtotal: </span>
               <span className="font-bold text-slate-800">₹ {totals.taxable_subtotal.toFixed(2)}</span>
             </div>
+            {totals.line_discount_total > 0 && (
+              <div className="text-amber-700">
+                <span className="text-amber-600">Line Disc: </span>
+                <span className="font-bold">-₹ {totals.line_discount_total.toFixed(2)}</span>
+              </div>
+            )}
+            <div>
+              {totals.bill_discount_amount > 0 ? (
+                <button
+                  type="button"
+                  tabIndex={-1}
+                  onClick={() => setIsBillDiscountModalOpen(true)}
+                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-amber-100 hover:bg-amber-200 text-amber-800 font-bold border border-amber-300 shadow-2xs transition-colors cursor-pointer"
+                  title="Edit Overall Bill Discount (Ctrl+F2)"
+                >
+                  <span>Bill Disc: -₹{totals.bill_discount_amount.toFixed(2)}</span>
+                  <span className="text-[10px] text-amber-600 font-normal">Ctrl+F2</span>
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  tabIndex={-1}
+                  onClick={() => setIsBillDiscountModalOpen(true)}
+                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-slate-200/70 hover:bg-amber-100 hover:text-amber-800 text-slate-600 font-semibold text-[11px] border border-slate-300 transition-colors cursor-pointer"
+                  title="Add Overall Bill Discount (Ctrl+F2)"
+                >
+                  <span>+ Bill Disc</span>
+                  <span className="text-[9px] text-slate-400">Ctrl+F2</span>
+                </button>
+              )}
+            </div>
             <div>
               <span className="text-slate-400">GST Tax: </span>
               <span className="font-bold text-slate-800">₹ {totals.total_tax.toFixed(2)}</span>
             </div>
-            {totals.round_off !== 0 && (
-              <div>
-                <span className="text-slate-400">Round-off: </span>
-                <span className="font-semibold text-slate-700">
-                  {totals.round_off > 0 ? `+₹${totals.round_off.toFixed(2)}` : `-₹${Math.abs(totals.round_off).toFixed(2)}`}
+            <div>
+              <button
+                type="button"
+                tabIndex={-1}
+                onClick={() => setIsRoundOffModalOpen(true)}
+                className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-lg font-semibold text-[11px] border transition-colors cursor-pointer ${
+                  posCartService.getManualRoundOff() !== null
+                    ? "bg-blue-100 text-blue-800 border-blue-300 hover:bg-blue-200 shadow-2xs font-bold"
+                    : "bg-slate-200/70 text-slate-700 border-slate-300 hover:bg-slate-300"
+                }`}
+                title="Adjust Round-Off / Net Payable (Alt+R)"
+              >
+                <span>
+                  Round-off: {totals.round_off >= 0 ? `+₹${totals.round_off.toFixed(2)}` : `-₹${Math.abs(totals.round_off).toFixed(2)}`}
                 </span>
-              </div>
-            )}
+                <span className="text-[9px] text-slate-400 font-normal">Alt+R</span>
+              </button>
+            </div>
           </div>
 
           <div className="flex items-center gap-4">
-            <div className="text-right">
-              <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wide">Net Payable</span>
-              <p className="text-xl font-black text-blue-700">₹ {totals.grand_total.toFixed(2)}</p>
+            <div
+              className="text-right cursor-pointer group"
+              onClick={() => setIsRoundOffModalOpen(true)}
+              title="Click to adjust round-off / net payable (Alt+R)"
+            >
+              <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wide group-hover:text-blue-600 transition-colors">
+                Net Payable
+              </span>
+              <p className="text-xl font-black text-blue-700 group-hover:underline">₹ {totals.grand_total.toFixed(2)}</p>
             </div>
 
             <button
               onClick={openTenderModal}
               disabled={lines.length === 0}
-              className="flex items-center gap-2 rounded-lg bg-blue-600 px-5 py-2.5 text-xs font-bold text-white shadow-md hover:bg-blue-700 disabled:opacity-50 transition-all"
+              className="flex items-center gap-2 rounded-lg bg-blue-600 px-5 py-2.5 text-xs font-bold text-white shadow-md hover:bg-blue-700 disabled:opacity-50 transition-all cursor-pointer"
             >
               <CreditCard className="h-4 w-4" />
               <span>Checkout & Pay (F12)</span>
             </button>
           </div>
         </div>
+
+        {/* Contextual Keyboard Shortcut Hint Bar */}
+        <PosShortcutHintBar
+          context={activeHintContext}
+          onOpenShortcutsModal={() => setIsShortcutsModalOpen(true)}
+          onFocusSearch={handleFocusSearch}
+          onCheckout={openTenderModal}
+          onHold={handleHoldBill}
+          onRecall={() => setIsRecallModalOpen(true)}
+          onNewBill={cancelEditingMode}
+          onColumnsConfig={() => setIsColumnsModalOpen(true)}
+        />
       </div>
 
       {/* Batch Selection Modal (FEFO Order with keyboard navigation & ARIA listbox) */}
-      {selectedProductForBatch && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="batch-modal-title"
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-xs p-4"
-        >
-          <div className="w-full max-w-lg rounded-lg bg-white shadow-2xl overflow-hidden border border-slate-200">
-            <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3 bg-slate-50">
-              <div>
-                <h3 id="batch-modal-title" className="text-xs font-bold text-slate-800">
-                  Select Batch (FEFO Order): {selectedProductForBatch.name}
-                </h3>
-                <p className="text-[11px] text-slate-500 mt-0.5">
-                  Use ↑/↓ arrows to navigate, Enter to select, Esc to cancel
-                </p>
+      {selectedProductForBatch && (() => {
+        const appSettings = companySettingsService.getSettings();
+        const allowSellingOutOfStock = appSettings.inventory?.allowSellingOutOfStock || "always";
+        const allowExpiredBatchSale = appSettings.inventory?.allowExpiredBatchSale || "warn_confirm";
+
+        return (
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="batch-modal-title"
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-xs p-4"
+          >
+            <div className="w-full max-w-lg rounded-lg bg-white shadow-2xl overflow-hidden border border-slate-200">
+              <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3 bg-slate-50">
+                <div>
+                  <h3 id="batch-modal-title" className="text-xs font-bold text-slate-800">
+                    Select Batch (FEFO Order): {selectedProductForBatch.name}
+                  </h3>
+                  <p className="text-[11px] text-slate-500 mt-0.5">
+                    Use ↑/↓ arrows to navigate, Enter to select, Esc to cancel
+                  </p>
+                </div>
+                <button
+                  onClick={closeBatchModal}
+                  className="text-slate-400 hover:text-slate-600 rounded p-1 transition-colors"
+                  aria-label="Close batch selection"
+                >
+                  <X className="h-4 w-4" />
+                </button>
               </div>
-              <button
-                onClick={closeBatchModal}
-                className="text-slate-400 hover:text-slate-600 rounded p-1 transition-colors"
-                aria-label="Close batch selection"
+
+              <div
+                ref={batchListRef}
+                role="listbox"
+                id="batch-listbox"
+                tabIndex={0}
+                aria-label="Select Batch (FEFO Order)"
+                aria-activedescendant={
+                  productBatches.length > 0 ? `batch-option-${selectedBatchIndex}` : undefined
+                }
+                className="max-h-64 overflow-y-auto divide-y divide-slate-100 outline-none focus:ring-1 focus:ring-blue-500/20"
               >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
+                {productBatches.map((b, idx) => {
+                  const isSelected = idx === selectedBatchIndex;
+                  const selectable = isBatchSelectable(
+                    b,
+                    undefined,
+                    allowSellingOutOfStock !== "never",
+                    allowExpiredBatchSale !== "block"
+                  );
+                  const isExpired = isBatchExpired(b.expiry_date);
+                  const isOutOfStock = (b.stock_qty || 0) <= 0;
 
-            <div
-              ref={batchListRef}
-              role="listbox"
-              id="batch-listbox"
-              tabIndex={0}
-              aria-label="Select Batch (FEFO Order)"
-              aria-activedescendant={
-                productBatches.length > 0 ? `batch-option-${selectedBatchIndex}` : undefined
-              }
-              className="max-h-64 overflow-y-auto divide-y divide-slate-100 outline-none focus:ring-1 focus:ring-blue-500/20"
-            >
-              {productBatches.map((b, idx) => {
-                const isSelected = idx === selectedBatchIndex;
-                const selectable = isBatchSelectable(b);
-                const isExpired = isBatchExpired(b.expiry_date);
-                const isOutOfStock = (b.stock_qty || 0) <= 0;
+                  return (
+                    <div
+                      key={b.id}
+                      id={`batch-option-${idx}`}
+                      role="option"
+                      aria-selected={isSelected}
+                      aria-disabled={!selectable}
+                      onMouseEnter={() => setSelectedBatchIndex(idx)}
+                      onClick={() => {
+                        if (selectable) {
+                          addBatchToCart(b);
+                        } else {
+                          showNotification(
+                            isExpired
+                              ? "This batch has expired and cannot be billed"
+                              : "This batch is out of stock",
+                            "error"
+                          );
+                        }
+                      }}
+                      className={`flex items-center justify-between px-4 py-2.5 text-xs transition-colors ${
+                        !selectable
+                          ? isSelected
+                            ? "bg-slate-100/90 text-slate-500 border-l-4 border-l-slate-400 pl-3 cursor-not-allowed"
+                            : "bg-slate-50/50 text-slate-400 cursor-not-allowed opacity-60"
+                          : isSelected
+                          ? "bg-blue-50/90 text-blue-950 border-l-4 border-l-blue-600 pl-3 ring-1 ring-blue-500/20 font-medium cursor-pointer"
+                          : "hover:bg-slate-50 text-slate-800 cursor-pointer"
+                      }`}
+                    >
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono font-bold text-slate-800">{b.batch_no}</span>
+                          {idx === 0 && selectable && (
+                            <span className="rounded bg-blue-100 px-1.5 py-0.2 text-[10px] font-semibold text-blue-800">
+                              FEFO Recommendation
+                            </span>
+                          )}
+                          {isExpired && (
+                            <span className="rounded bg-rose-100 px-1.5 py-0.2 text-[10px] font-bold text-rose-700">
+                              Expired
+                            </span>
+                          )}
+                          {isOutOfStock && !isExpired && (
+                            <span className="rounded bg-amber-100 text-amber-800 border border-amber-300 font-bold px-1.5 py-0.2 text-[10px]">
+                              Out of Stock
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-3 text-[11px] mt-0.5">
+                          <span className={isExpired ? "text-rose-600 font-semibold" : "text-slate-500"}>
+                            Exp: {b.expiry_date}
+                          </span>
+                          {b.rack_location && (
+                            <span className="text-slate-400">Rack: {b.rack_location}</span>
+                          )}
+                          {b.shelf_location && (
+                            <span className="text-slate-400">Shelf: {b.shelf_location}</span>
+                          )}
+                        </div>
+                      </div>
+                      <div className="text-right shrink-0 ml-4">
+                        <p className="font-bold text-slate-900">
+                          ₹ {(b.selling_rate || b.mrp || selectedProductForBatch.sel_rate).toFixed(2)}
+                        </p>
+                        <span
+                          className={`inline-block mt-0.5 rounded px-2 py-0.5 text-[10px] font-semibold ${
+                            isExpired
+                              ? "bg-rose-50 text-rose-600"
+                              : isOutOfStock
+                              ? "bg-amber-50 text-amber-700 font-bold border border-amber-200"
+                              : "bg-emerald-50 text-emerald-700"
+                          }`}
+                        >
+                          {b.stock_qty} in stock
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
 
-                return (
-                  <div
-                    key={b.id}
-                    id={`batch-option-${idx}`}
-                    role="option"
-                    aria-selected={isSelected}
-                    aria-disabled={!selectable}
-                    onMouseEnter={() => setSelectedBatchIndex(idx)}
+              <div className="border-t border-slate-200 px-4 py-2.5 bg-slate-50 flex items-center justify-between text-[11px] text-slate-500">
+                <span>
+                  Navigate with <kbd className="font-mono bg-white px-1 py-0.5 rounded border border-slate-300 text-slate-700">↑</kbd> <kbd className="font-mono bg-white px-1 py-0.5 rounded border border-slate-300 text-slate-700">↓</kbd>
+                </span>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
                     onClick={() => {
-                      if (selectable) {
+                      if (!selectedProductForBatch) return;
+                      const adhocBatch: ProductBatch = {
+                        id: `batch_adhoc_${selectedProductForBatch.id}_${Date.now()}`,
+                        product_id: selectedProductForBatch.id,
+                        batch_no: "NO_BATCH",
+                        expiry_date: new Date(Date.now() + 365 * 86400000).toISOString().slice(0, 10),
+                        stock_qty: 0,
+                        mrp: selectedProductForBatch.mrp,
+                        selling_rate: selectedProductForBatch.sel_rate,
+                        purchase_rate: selectedProductForBatch.sel_rate * 0.7,
+                      };
+                      posCartService.addProductToCart(selectedProductForBatch, adhocBatch, 1, 0, { isAdhocBatch: true });
+                      refreshCartState();
+                      closeBatchModal();
+                      setSearchQuery("");
+                      setSearchResults([]);
+                    }}
+                    className="rounded border border-purple-300 bg-purple-50 px-2.5 py-1 text-purple-700 hover:bg-purple-100 text-xs font-semibold"
+                  >
+                    + Ad-hoc Batch
+                  </button>
+                  <button
+                    type="button"
+                    onClick={closeBatchModal}
+                    className="rounded px-2.5 py-1 text-slate-600 hover:bg-slate-200 text-xs"
+                  >
+                    Cancel (Esc)
+                  </button>
+                  <button
+                    type="button"
+                    disabled={
+                      productBatches.length === 0 ||
+                      !isBatchSelectable(
+                        productBatches[selectedBatchIndex],
+                        undefined,
+                        allowSellingOutOfStock !== "never",
+                        allowExpiredBatchSale !== "block"
+                      )
+                    }
+                    onClick={() => {
+                      const b = productBatches[selectedBatchIndex];
+                      if (
+                        b &&
+                        isBatchSelectable(
+                          b,
+                          undefined,
+                          allowSellingOutOfStock !== "never",
+                          allowExpiredBatchSale !== "block"
+                        )
+                      ) {
                         addBatchToCart(b);
-                      } else {
-                        showNotification(
-                          isOutOfStock ? "This batch is out of stock" : "This batch has expired and cannot be billed",
-                          "error"
-                        );
                       }
                     }}
-                    className={`flex items-center justify-between px-4 py-2.5 text-xs transition-colors ${
-                      !selectable
-                        ? isSelected
-                          ? "bg-slate-100/90 text-slate-500 border-l-4 border-l-slate-400 pl-3 cursor-not-allowed"
-                          : "bg-slate-50/50 text-slate-400 cursor-not-allowed opacity-60"
-                        : isSelected
-                        ? "bg-blue-50/90 text-blue-950 border-l-4 border-l-blue-600 pl-3 ring-1 ring-blue-500/20 font-medium cursor-pointer"
-                        : "hover:bg-slate-50 text-slate-800 cursor-pointer"
-                    }`}
+                    className="rounded bg-blue-600 px-3 py-1 font-semibold text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-xs transition-colors shadow-xs"
                   >
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="font-mono font-bold text-slate-800">{b.batch_no}</span>
-                        {idx === 0 && selectable && (
-                          <span className="rounded bg-blue-100 px-1.5 py-0.2 text-[10px] font-semibold text-blue-800">
-                            FEFO Recommendation
-                          </span>
-                        )}
-                        {isExpired && (
-                          <span className="rounded bg-rose-100 px-1.5 py-0.2 text-[10px] font-bold text-rose-700">
-                            Expired
-                          </span>
-                        )}
-                        {isOutOfStock && !isExpired && (
-                          <span className="rounded bg-slate-200 px-1.5 py-0.2 text-[10px] font-semibold text-slate-600">
-                            Out of Stock
-                          </span>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-3 text-[11px] mt-0.5">
-                        <span className={isExpired ? "text-rose-600 font-semibold" : "text-slate-500"}>
-                          Exp: {b.expiry_date}
-                        </span>
-                        {b.rack_location && (
-                          <span className="text-slate-400">Rack: {b.rack_location}</span>
-                        )}
-                        {b.shelf_location && (
-                          <span className="text-slate-400">Shelf: {b.shelf_location}</span>
-                        )}
-                      </div>
-                    </div>
-                    <div className="text-right shrink-0 ml-4">
-                      <p className="font-bold text-slate-900">
-                        ₹ {(b.selling_rate || b.mrp || selectedProductForBatch.sel_rate).toFixed(2)}
-                      </p>
-                      <span
-                        className={`inline-block mt-0.5 rounded px-2 py-0.5 text-[10px] font-semibold ${
-                          selectable
-                            ? "bg-emerald-50 text-emerald-700"
-                            : isExpired
-                            ? "bg-rose-50 text-rose-600"
-                            : "bg-slate-100 text-slate-500"
-                        }`}
-                      >
-                        {b.stock_qty} in stock
-                      </span>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-
-            <div className="border-t border-slate-200 px-4 py-2.5 bg-slate-50 flex items-center justify-between text-[11px] text-slate-500">
-              <span>
-                Navigate with <kbd className="font-mono bg-white px-1 py-0.5 rounded border border-slate-300 text-slate-700">↑</kbd> <kbd className="font-mono bg-white px-1 py-0.5 rounded border border-slate-300 text-slate-700">↓</kbd>
-              </span>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={closeBatchModal}
-                  className="rounded px-2.5 py-1 text-slate-600 hover:bg-slate-200 text-xs"
-                >
-                  Cancel (Esc)
-                </button>
-                <button
-                  type="button"
-                  disabled={
-                    productBatches.length === 0 || !isBatchSelectable(productBatches[selectedBatchIndex])
-                  }
-                  onClick={() => {
-                    const b = productBatches[selectedBatchIndex];
-                    if (b && isBatchSelectable(b)) {
-                      addBatchToCart(b);
-                    }
-                  }}
-                  className="rounded bg-blue-600 px-3 py-1 font-semibold text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-xs transition-colors shadow-xs"
-                >
-                  Select Batch (Enter)
-                </button>
+                    Select Batch (Enter)
+                  </button>
+                </div>
               </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* Tender / Settlement Modal (F12) */}
       {isTenderModalOpen && (
@@ -1773,6 +3037,76 @@ export const PosBillingPage: React.FC = () => {
           customerPhone={customerPhone}
         />
       )}
+
+      {/* Dynamic Columns & Billing Layout Configuration Modal */}
+      <BillingColumnsModal
+        isOpen={isColumnsModalOpen}
+        onClose={() => setIsColumnsModalOpen(false)}
+        onLayoutChange={(cols, hdrs) => {
+          setPosColumns([...cols]);
+          setPosHeaders([...hdrs]);
+        }}
+      />
+
+      {/* Manual Unit Conversion Editor Modal */}
+      <ConversionModal
+        isOpen={Boolean(selectedLineForConversion)}
+        line={selectedLineForConversion}
+        onClose={() => setSelectedLineForConversion(null)}
+        onSave={handleSaveLineConversion}
+      />
+
+      {/* Quick Line Edit (F2 / F3) Modal */}
+      <QuickLineEditModal
+        isOpen={quickEditModal.isOpen}
+        type={quickEditModal.type}
+        line={quickEditModal.line}
+        onClose={() => setQuickEditModal({ isOpen: false, type: "discount", line: null })}
+        onSaveDiscount={(lineId, percent, amount) => {
+          posCartService.updateLineDiscount(lineId, percent, amount);
+          refreshCartState();
+          showNotification("Item discount updated!", "success");
+        }}
+        onSaveRate={(lineId, unitPrice) => {
+          const targetLine = lines.find((l) => l.id === lineId);
+          if (targetLine) {
+            posCartService.updateLinePrice(lineId, unitPrice, targetLine.rate_basis);
+            refreshCartState();
+            showNotification("Rate updated!", "success");
+          }
+        }}
+      />
+
+      {/* Overall Bill Discount (Ctrl+F2) Modal */}
+      <BillDiscountModal
+        isOpen={isBillDiscountModalOpen}
+        currentDiscount={posCartService.getBillDiscount()}
+        taxableSubtotal={totals.taxable_subtotal}
+        totalTax={totals.total_tax}
+        onClose={() => setIsBillDiscountModalOpen(false)}
+        onApplyDiscount={handleApplyBillDiscount}
+      />
+
+      {/* Editable Round-Off / Net Payable (Alt+R) Modal */}
+      <RoundOffModal
+        isOpen={isRoundOffModalOpen}
+        netBeforeRound={totals.net_before_round}
+        currentRoundOff={totals.round_off}
+        isManual={posCartService.getManualRoundOff() !== null}
+        onClose={() => setIsRoundOffModalOpen(false)}
+        onApplyRoundOff={handleApplyManualRoundOff}
+      />
+
+      {/* Keyboard Shortcuts Cheatsheet Modal (?) */}
+      <KeyboardShortcutsModal
+        isOpen={isShortcutsModalOpen}
+        onClose={() => setIsShortcutsModalOpen(false)}
+      />
+
+      {/* ARIA Live Region for Screen Readers */}
+      <div className="sr-only" aria-live="polite" aria-atomic="true">
+        {ariaAnnouncement}
+      </div>
     </div>
   );
 };

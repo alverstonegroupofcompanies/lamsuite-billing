@@ -1,11 +1,71 @@
 import { sqliteStorage } from "../db/sqliteStorage";
 
+const memoryFallbackStorage = new Map<string, string>();
+
+const safeStorage = {
+  getItem(key: string): string | null {
+    try {
+      if (typeof window !== "undefined" && window.localStorage && typeof window.localStorage.getItem === "function") {
+        return window.localStorage.getItem(key);
+      }
+      if (typeof localStorage !== "undefined" && typeof localStorage.getItem === "function") {
+        return localStorage.getItem(key);
+      }
+    } catch (_) {}
+    return memoryFallbackStorage.get(key) ?? null;
+  },
+  setItem(key: string, value: string): void {
+    try {
+      if (typeof window !== "undefined" && window.localStorage && typeof window.localStorage.setItem === "function") {
+        window.localStorage.setItem(key, value);
+        return;
+      }
+      if (typeof localStorage !== "undefined" && typeof localStorage.setItem === "function") {
+        localStorage.setItem(key, value);
+        return;
+      }
+    } catch (_) {}
+    memoryFallbackStorage.set(key, value);
+  },
+  removeItem(key: string): void {
+    try {
+      if (typeof window !== "undefined" && window.localStorage && typeof window.localStorage.removeItem === "function") {
+        window.localStorage.removeItem(key);
+        return;
+      }
+      if (typeof localStorage !== "undefined" && typeof localStorage.removeItem === "function") {
+        localStorage.removeItem(key);
+        return;
+      }
+    } catch (_) {}
+    memoryFallbackStorage.delete(key);
+  },
+};
+
 export interface ColumnSetting {
   id: string;
   label: string;
   visible: boolean;
   width?: number; // width in pixels or flex
   order: number;
+  required?: boolean; // If true, cannot be hidden (e.g. product, qty, total)
+}
+
+export interface HeaderFieldSetting {
+  id: string;
+  label: string;
+  visible: boolean;
+  required?: boolean;
+  order: number;
+}
+
+export interface BillingScreenPreset {
+  id: string;
+  name: string;
+  description: string;
+  isBuiltin?: boolean;
+  columns: ColumnSetting[];
+  headerFields: HeaderFieldSetting[];
 }
 
 export interface DocumentSequenceConfig {
@@ -53,6 +113,14 @@ export interface WorkspaceSettings {
   notificationsEnabled: boolean;
   autoUpdateCheck: boolean;
   wifiStrengthSimulator: number; // 0 - 100%
+  defaultLandingPage?: "dashboard" | "pos" | "bills" | "stock" | "purchases";
+}
+
+export interface InventoryStockSettings {
+  allowSellingOutOfStock: "always" | "ask" | "never";
+  warnOnNegativeStock: boolean;
+  requireManagerPinForNegativeStock: boolean;
+  allowExpiredBatchSale: "warn_confirm" | "block";
 }
 
 export interface SecurityConfig {
@@ -78,6 +146,15 @@ export interface EmailSmtpConfig {
   replyTo?: string;
   username?: string;
   password?: string;
+}
+
+export interface BillingKeyboardSettings {
+  enterAfterQty: "search" | "next_column" | "next_row";
+  autoFocusQtyAfterAdd: boolean;
+  selectAllOnFocus: boolean;
+  quickDeleteWithoutConfirm: boolean;
+  scannerSpeedThresholdMs: number;
+  keyBindings?: Record<string, string>;
 }
 
 export interface CompanySettings {
@@ -112,26 +189,92 @@ export interface CompanySettings {
   printing: PrintingConfig;
   workspace: WorkspaceSettings;
   security: SecurityConfig;
+  inventory: InventoryStockSettings;
   wallet: WalletConfig;
   smtp: EmailSmtpConfig;
+  keyboard: BillingKeyboardSettings;
   invoice_columns: ColumnSetting[];
+  header_fields: HeaderFieldSetting[];
+  active_billing_preset: string;
+  saved_billing_presets: BillingScreenPreset[];
 
   enabled_menu_items: string[];
   is_active?: boolean;
 }
 
 export const DEFAULT_COLUMNS: ColumnSetting[] = [
-  { id: "item", label: "Item / Particulars", visible: true, width: 220, order: 1 },
-  { id: "batch", label: "Batch & Exp", visible: true, width: 110, order: 2 },
-  { id: "hsn", label: "HSN/SAC", visible: true, width: 90, order: 3 },
-  { id: "qty", label: "Quantity", visible: true, width: 70, order: 4 },
-  { id: "mrp", label: "MRP (₹)", visible: true, width: 80, order: 5 },
-  { id: "rate", label: "Rate (₹)", visible: true, width: 80, order: 6 },
-  { id: "ptr", label: "PTR (₹)", visible: false, width: 80, order: 7 },
-  { id: "pts", label: "PTS (₹)", visible: false, width: 80, order: 8 },
-  { id: "disc", label: "Disc %", visible: true, width: 70, order: 9 },
-  { id: "tax", label: "GST %", visible: true, width: 70, order: 10 },
-  { id: "total", label: "Total (₹)", visible: true, width: 90, order: 11 },
+  { id: "idx", label: "#", visible: true, width: 40, order: 1, required: true },
+  { id: "product_name", label: "Product Name", visible: true, width: 260, order: 2, required: true },
+  { id: "batch_no", label: "Batch", visible: true, width: 110, order: 3 },
+  { id: "expiry_date", label: "Expiry", visible: true, width: 95, order: 4 },
+  { id: "qty", label: "Quantity", visible: true, width: 175, order: 5, required: true },
+  { id: "mrp", label: "MRP (₹)", visible: true, width: 85, order: 6 },
+  { id: "rate", label: "Rate (₹)", visible: true, width: 85, order: 7 },
+  { id: "discount", label: "Disc %", visible: true, width: 75, order: 8 },
+  { id: "gst", label: "GST %", visible: true, width: 75, order: 9 },
+  { id: "hsn", label: "HSN/SAC", visible: false, width: 90, order: 10 },
+  { id: "free_qty", label: "Free Qty", visible: false, width: 75, order: 11 },
+  { id: "rack_shelf", label: "Rack/Shelf", visible: false, width: 90, order: 12 },
+  { id: "current_stock", label: "Stock", visible: false, width: 80, order: 13 },
+  { id: "total", label: "Total (₹)", visible: true, width: 100, order: 14, required: true },
+  { id: "actions", label: "Action", visible: true, width: 60, order: 15, required: true },
+];
+
+export const DEFAULT_HEADER_FIELDS: HeaderFieldSetting[] = [
+  { id: "invoice_no", label: "Invoice No", visible: true, required: true, order: 1 },
+  { id: "customer_name", label: "Customer Name", visible: true, required: true, order: 2 },
+  { id: "customer_phone", label: "Mobile Number", visible: true, order: 3 },
+  { id: "customer_gstin", label: "Customer GSTIN", visible: false, order: 4 },
+  { id: "doctor", label: "Doctor Details", visible: true, order: 5 },
+  { id: "patient", label: "Patient Details", visible: true, order: 6 },
+  { id: "payment_mode", label: "Payment Mode", visible: true, order: 7 },
+  { id: "salesman", label: "Salesman / Staff", visible: false, order: 8 },
+  { id: "notes", label: "Bill Notes / Remarks", visible: false, order: 9 },
+];
+
+export const BUILTIN_BILLING_PRESETS: BillingScreenPreset[] = [
+  {
+    id: "pharmacy",
+    name: "Pharmacy",
+    description: "Complete clinical billing with Batch, Expiry, Pack+Loose units, Doctor, and Patient details.",
+    isBuiltin: true,
+    columns: DEFAULT_COLUMNS.map((c) => ({
+      ...c,
+      visible: ["idx", "product_name", "batch_no", "expiry_date", "qty", "mrp", "rate", "discount", "gst", "total", "actions"].includes(c.id),
+    })),
+    headerFields: DEFAULT_HEADER_FIELDS.map((h) => ({
+      ...h,
+      visible: ["invoice_no", "customer_name", "customer_phone", "doctor", "patient", "payment_mode"].includes(h.id),
+    })),
+  },
+  {
+    id: "retail",
+    name: "Retail",
+    description: "Standard retail counter layout with Product, Qty, MRP, Rate, Discount, and GST.",
+    isBuiltin: true,
+    columns: DEFAULT_COLUMNS.map((c) => ({
+      ...c,
+      visible: ["idx", "product_name", "qty", "mrp", "rate", "discount", "gst", "total", "actions"].includes(c.id),
+    })),
+    headerFields: DEFAULT_HEADER_FIELDS.map((h) => ({
+      ...h,
+      visible: ["invoice_no", "customer_name", "customer_phone", "payment_mode"].includes(h.id),
+    })),
+  },
+  {
+    id: "fast_counter",
+    name: "Fast Counter (Minimal)",
+    description: "Streamlined ultra-fast checkout showing only Product, Qty, Rate, and Net Total.",
+    isBuiltin: true,
+    columns: DEFAULT_COLUMNS.map((c) => ({
+      ...c,
+      visible: ["idx", "product_name", "qty", "rate", "total", "actions"].includes(c.id),
+    })),
+    headerFields: DEFAULT_HEADER_FIELDS.map((h) => ({
+      ...h,
+      visible: ["invoice_no", "customer_name", "payment_mode"].includes(h.id),
+    })),
+  },
 ];
 
 export const DEFAULT_SETTINGS: CompanySettings = {
@@ -203,6 +346,7 @@ export const DEFAULT_SETTINGS: CompanySettings = {
     notificationsEnabled: true,
     autoUpdateCheck: true,
     wifiStrengthSimulator: 95,
+    defaultLandingPage: "dashboard",
   },
 
   security: {
@@ -210,6 +354,13 @@ export const DEFAULT_SETTINGS: CompanySettings = {
     maxFailedLogins: 5,
     allowBiometricSignIn: true,
     defaultRole: "cashier",
+  },
+
+  inventory: {
+    allowSellingOutOfStock: "always",
+    warnOnNegativeStock: true,
+    requireManagerPinForNegativeStock: false,
+    allowExpiredBatchSale: "warn_confirm",
   },
 
   wallet: {
@@ -228,8 +379,53 @@ export const DEFAULT_SETTINGS: CompanySettings = {
     replyTo: "support@lamstone.in",
   },
 
+  keyboard: {
+    enterAfterQty: "search",
+    autoFocusQtyAfterAdd: true,
+    selectAllOnFocus: true,
+    quickDeleteWithoutConfirm: true,
+    scannerSpeedThresholdMs: 45,
+    keyBindings: {
+      focusSearch: "F1",
+      checkout: "F12",
+      holdBill: "F8",
+      recallBill: "F9",
+      findBill: "F6",
+      newBill: "Ctrl+N",
+      clearBill: "Ctrl+Backspace",
+      deleteLine: "Delete",
+      undoDelete: "Ctrl+Z",
+      changeBatch: "Ctrl+B",
+      toggleUnitRate: "Ctrl+U",
+      editConversion: "Ctrl+E",
+      editDiscount: "F2",
+      editRate: "F3",
+      focusCustomer: "Alt+C",
+      focusMobile: "Alt+M",
+      focusDoctor: "Alt+D",
+      focusPatient: "Alt+P",
+      columnsConfig: "Ctrl+Shift+C",
+      shortcutsHelp: "?",
+    },
+  },
+
   invoice_columns: [...DEFAULT_COLUMNS],
-  enabled_menu_items: ["pos", "bills", "purchases", "stock", "reports", "masters", "settings"],
+  header_fields: [...DEFAULT_HEADER_FIELDS],
+  active_billing_preset: "pharmacy",
+  saved_billing_presets: [...BUILTIN_BILLING_PRESETS],
+  enabled_menu_items: [
+    "dashboard",
+    "pos",
+    "bills",
+    "sales_returns",
+    "customer_debit_notes",
+    "purchases",
+    "purchase_returns",
+    "stock",
+    "reports",
+    "masters",
+    "settings",
+  ],
 };
 
 export class CompanySettingsService {
@@ -245,9 +441,13 @@ export class CompanySettingsService {
         printing: { ...DEFAULT_SETTINGS.printing, ...(record.printing || {}) },
         workspace: { ...DEFAULT_SETTINGS.workspace, ...(record.workspace || {}) },
         security: { ...DEFAULT_SETTINGS.security, ...(record.security || {}) },
+        inventory: { ...DEFAULT_SETTINGS.inventory, ...(record.inventory || {}) },
         wallet: { ...DEFAULT_SETTINGS.wallet, ...(record.wallet || {}) },
         smtp: { ...DEFAULT_SETTINGS.smtp, ...(record.smtp || {}) },
         invoice_columns: record.invoice_columns?.length ? record.invoice_columns : [...DEFAULT_COLUMNS],
+        header_fields: record.header_fields?.length ? record.header_fields : [...DEFAULT_HEADER_FIELDS],
+        active_billing_preset: record.active_billing_preset || "pharmacy",
+        saved_billing_presets: record.saved_billing_presets?.length ? record.saved_billing_presets : [...BUILTIN_BILLING_PRESETS],
       };
     }
     return { ...this.currentSettings };
@@ -255,6 +455,122 @@ export class CompanySettingsService {
 
   getSettings(): CompanySettings {
     return { ...this.currentSettings };
+  }
+
+  getBillingColumns(): ColumnSetting[] {
+    const local = safeStorage.getItem("lamsuite_counter_columns");
+    if (local) {
+      try {
+        const parsed = JSON.parse(local);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      } catch (_) {}
+    }
+    return this.currentSettings.invoice_columns?.length
+      ? this.currentSettings.invoice_columns
+      : [...DEFAULT_COLUMNS];
+  }
+
+  async setBillingColumns(columns: ColumnSetting[], persistStore = false): Promise<void> {
+    safeStorage.setItem("lamsuite_counter_columns", JSON.stringify(columns));
+    this.currentSettings.invoice_columns = [...columns];
+    if (persistStore) {
+      await this.updateSettings({ invoice_columns: columns });
+    }
+  }
+
+  getHeaderFields(): HeaderFieldSetting[] {
+    const local = safeStorage.getItem("lamsuite_counter_header_fields");
+    if (local) {
+      try {
+        const parsed = JSON.parse(local);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      } catch (_) {}
+    }
+    return this.currentSettings.header_fields?.length
+      ? this.currentSettings.header_fields
+      : [...DEFAULT_HEADER_FIELDS];
+  }
+
+  async setHeaderFields(fields: HeaderFieldSetting[], persistStore = false): Promise<void> {
+    safeStorage.setItem("lamsuite_counter_header_fields", JSON.stringify(fields));
+    this.currentSettings.header_fields = [...fields];
+    if (persistStore) {
+      await this.updateSettings({ header_fields: fields });
+    }
+  }
+
+  getBillingPresets(): BillingScreenPreset[] {
+    const storePresets = this.currentSettings.saved_billing_presets || [];
+    const map = new Map<string, BillingScreenPreset>();
+    BUILTIN_BILLING_PRESETS.forEach((p) => map.set(p.id, p));
+    storePresets.forEach((p) => map.set(p.id, p));
+    return Array.from(map.values());
+  }
+
+  async applyBillingPreset(presetId: string, persistStore = false): Promise<{ columns: ColumnSetting[]; headerFields: HeaderFieldSetting[] }> {
+    const presets = this.getBillingPresets();
+    const preset = presets.find((p) => p.id === presetId) || BUILTIN_BILLING_PRESETS[0];
+
+    const columns = [...preset.columns];
+    const headerFields = [...preset.headerFields];
+
+    await this.setBillingColumns(columns, persistStore);
+    await this.setHeaderFields(headerFields, persistStore);
+    this.currentSettings.active_billing_preset = preset.id;
+
+    if (persistStore) {
+      await this.updateSettings({
+        active_billing_preset: preset.id,
+        invoice_columns: columns,
+        header_fields: headerFields,
+      });
+    }
+
+    return { columns, headerFields };
+  }
+
+  async saveCustomBillingPreset(
+    name: string,
+    description: string,
+    columns: ColumnSetting[],
+    headerFields: HeaderFieldSetting[]
+  ): Promise<BillingScreenPreset> {
+    const newPreset: BillingScreenPreset = {
+      id: `preset_custom_${Date.now()}`,
+      name,
+      description,
+      isBuiltin: false,
+      columns,
+      headerFields,
+    };
+
+    const currentPresets = this.getBillingPresets().filter((p) => !p.isBuiltin);
+    currentPresets.push(newPreset);
+
+    await this.updateSettings({
+      saved_billing_presets: [...BUILTIN_BILLING_PRESETS, ...currentPresets],
+      active_billing_preset: newPreset.id,
+    });
+
+    return newPreset;
+  }
+
+  async deleteCustomBillingPreset(presetId: string): Promise<boolean> {
+    const target = this.getBillingPresets().find((p) => p.id === presetId);
+    if (!target || target.isBuiltin) return false;
+
+    const remaining = (this.currentSettings.saved_billing_presets || []).filter((p) => p.id !== presetId);
+    await this.updateSettings({
+      saved_billing_presets: remaining,
+      active_billing_preset: "pharmacy",
+    });
+    return true;
+  }
+
+  async resetBillingLayoutToDefault(): Promise<{ columns: ColumnSetting[]; headerFields: HeaderFieldSetting[] }> {
+    safeStorage.removeItem("lamsuite_counter_columns");
+    safeStorage.removeItem("lamsuite_counter_header_fields");
+    return await this.applyBillingPreset("pharmacy", true);
   }
 
   async updateSettings(updates: Partial<CompanySettings>): Promise<CompanySettings> {

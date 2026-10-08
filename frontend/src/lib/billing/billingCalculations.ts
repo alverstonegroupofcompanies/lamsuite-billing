@@ -4,7 +4,7 @@ export interface BillingLineInput {
   qty: number;
   loose_qty?: number;
   units_per_pack?: number;
-  unit_price: number; // Price per pack / unit
+  unit_price: number; // Price per pack / unit (or per loose unit if rate_basis is loose_rate)
   mrp?: number;
   ptr?: number;
   pts?: number;
@@ -14,7 +14,7 @@ export interface BillingLineInput {
   discount_type?: "percent" | "amount";
   gst_percent: number;
   cess_percent?: number;
-  rate_basis?: "sel_rate" | "mrp" | "ptr" | "pts" | "ptss";
+  rate_basis?: "sel_rate" | "mrp" | "ptr" | "pts" | "ptss" | "loose_rate";
 }
 
 export interface CalculatedLine {
@@ -56,17 +56,25 @@ export function isLineGstInclusive(line: BillingLineInput, defaultTaxMode: Compa
     return false;
   }
 
-  // Selling rate follows company sales tax preference
+  // Selling rate and loose rate follow company sales tax preference
   return defaultTaxMode === "inclusive";
 }
 
-/** Compute loose tablet / cut strip fraction price */
+/** Compute pack and loose tablet price with protection against rounding drift */
 export function calculateLineGross(line: BillingLineInput): number {
   const packs = Math.max(0, Number(line.qty) || 0);
   const loose = Math.max(0, Number(line.loose_qty) || 0);
   const unitsPerPack = Math.max(1, Number(line.units_per_pack) || 1);
   const price = Math.max(0, Number(line.unit_price) || 0);
 
+  if (line.rate_basis === "loose_rate") {
+    // Unit price is per loose tablet / piece
+    const packGross = packs * unitsPerPack * price;
+    const looseGross = loose * price;
+    return round2(packGross + looseGross);
+  }
+
+  // Default: Unit price is per pack / strip
   const packGross = packs * price;
   const looseGross = loose > 0 ? (loose / unitsPerPack) * price : 0;
 
@@ -168,7 +176,8 @@ export function calculateInvoiceTotals(
   billDiscount: { type: "percent" | "amount"; value: number } = { type: "amount", value: 0 },
   companyTaxMode: CompanyTaxMode = "inclusive",
   isInterState = false,
-  autoRoundOff = true
+  autoRoundOff = true,
+  manualRoundOff?: number | null
 ): InvoiceTotals {
   let taxableSubtotal = 0;
   let lineDiscountTotal = 0;
@@ -210,7 +219,10 @@ export function calculateInvoiceTotals(
   let roundOff = 0;
   let grandTotal = netBeforeRound;
 
-  if (autoRoundOff) {
+  if (manualRoundOff !== undefined && manualRoundOff !== null) {
+    roundOff = round2(manualRoundOff);
+    grandTotal = round2(Math.max(0, netBeforeRound + roundOff));
+  } else if (autoRoundOff) {
     const ro = computeAutoRoundOff(netBeforeRound);
     roundOff = ro.roundOff;
     grandTotal = ro.grandTotal;

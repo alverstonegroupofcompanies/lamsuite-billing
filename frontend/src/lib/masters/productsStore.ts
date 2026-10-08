@@ -24,11 +24,18 @@ export const isBatchExpired = (expiryDate: string, referenceDate: Date = new Dat
   return expiryDate < todayStr;
 };
 
-/** A batch can only be selected in billing if it has positive stock and is not expired */
-export const isBatchSelectable = (batch: ProductBatch, referenceDate: Date = new Date()): boolean => {
-  const isOutOfStock = (batch.stock_qty || 0) <= 0;
+/** A batch can be selected in billing if it is not expired (or override allowed), and out-of-stock batches are allowed when allowNegativeStock is true */
+export const isBatchSelectable = (
+  batch: ProductBatch,
+  referenceDate: Date = new Date(),
+  allowNegativeStock = true,
+  allowExpired = false
+): boolean => {
   const isExpired = isBatchExpired(batch.expiry_date, referenceDate);
-  return !isOutOfStock && !isExpired;
+  if (isExpired && !allowExpired) return false;
+  const isOutOfStock = (batch.stock_qty || 0) <= 0;
+  if (isOutOfStock && !allowNegativeStock) return false;
+  return true;
 };
 
 export interface ProductItem {
@@ -47,6 +54,12 @@ export interface ProductItem {
   pts?: number;
   gst_percent: number;
   units_per_pack: number;
+  unit_name?: string;
+  sub_unit_name?: string;
+  allow_loose_sale?: boolean;
+  loose_selling_rate?: number;
+  loose_mrp?: number;
+  precision?: number;
   generic_name?: string;
   strength?: string;
   rack_location?: string;

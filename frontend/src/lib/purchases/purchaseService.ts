@@ -101,6 +101,12 @@ export class PurchaseService {
         purchase_rate: line.purchase_rate,
       });
 
+      const prod = await productsStore.getProductById(line.product_id);
+      if (prod) {
+        prod.current_stock = (prod.current_stock || 0) + calc.total_stock_units;
+        await productsStore.upsertProduct(prod);
+      }
+
       // 2. Post double-entry stock transaction
       const stockTxId = `stk_tx_${Date.now()}_${Math.random().toString(16).slice(2, 6)}`;
       await sqliteStorage.insertRecord("stock_transactions", stockTxId, {

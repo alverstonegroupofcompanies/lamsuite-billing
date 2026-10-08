@@ -162,6 +162,12 @@ export class OperatorAuthService {
     if (permission === "reports.view_profit") {
       return false; // only admin
     }
+    if (permission === "pos.sell_negative_stock") {
+      return role === "manager" || role === "pharmacist" || role === "cashier";
+    }
+    if (permission === "pos.sell_expired_stock") {
+      return role === "manager" || role === "pharmacist";
+    }
     return true;
   }
 }

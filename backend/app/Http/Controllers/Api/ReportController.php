@@ -114,4 +114,96 @@ class ReportController
             'table_9_credit_debit_notes' => $table9CreditNotes,
         ]);
     }
+
+    /**
+     * Store dashboard live metrics endpoint for POS/Admin API parity.
+     */
+    public function dashboardMetrics(Request $request): JsonResponse
+    {
+        $startDate = $request->query('start_date', date('Y-m-d'));
+        $endDate = $request->query('end_date', date('Y-m-d'));
+
+        $invoices = Invoice::with('items')
+            ->whereBetween('invoice_date', [$startDate, $endDate])
+            ->where('status', '!=', 'cancelled')
+            ->get();
+
+        $grossSales = 0;
+        $totalReturns = 0;
+        $billsCount = 0;
+
+        $cash = 0;
+        $upi = 0;
+        $card = 0;
+        $credit = 0;
+        $other = 0;
+
+        $slabMap = [];
+        $totalTaxAccrued = 0;
+
+        foreach ($invoices as $inv) {
+            $isReturn = in_array($inv->module_key, ['credit_note', 'sales_return']) || str_starts_with($inv->invoice_number, 'SR-');
+            $val = (float) $inv->grand_total;
+            $sign = $isReturn ? -1 : 1;
+
+            if (!$isReturn) {
+                $billsCount++;
+                $grossSales += $val;
+            } else {
+                $totalReturns += $val;
+            }
+
+            $mode = strtolower(trim($inv->payment_mode ?? 'cash'));
+            if (str_contains($mode, 'cash')) $cash += ($sign * $val);
+            elseif (str_contains($mode, 'upi')) $upi += ($sign * $val);
+            elseif (str_contains($mode, 'card')) $card += ($sign * $val);
+            elseif (str_contains($mode, 'credit')) $credit += ($sign * $val);
+            else $other += ($sign * $val);
+
+            foreach ($inv->items as $item) {
+                $rate = (int) $item->gst_percent;
+                $cgst = (float) ($item->cgst_amount ?? 0) * $sign;
+                $sgst = (float) ($item->sgst_amount ?? 0) * $sign;
+                $igst = (float) ($item->igst_amount ?? 0) * $sign;
+                $lineTax = $cgst + $sgst + $igst;
+                $lineTaxable = ((float) $item->total_amount * $sign) - $lineTax;
+
+                if (!isset($slabMap[$rate])) {
+                    $slabMap[$rate] = ['rate' => $rate, 'taxable' => 0, 'cgst' => 0, 'sgst' => 0, 'igst' => 0, 'tax' => 0];
+                }
+                $slabMap[$rate]['taxable'] += $lineTaxable;
+                $slabMap[$rate]['cgst'] += $cgst;
+                $slabMap[$rate]['sgst'] += $sgst;
+                $slabMap[$rate]['igst'] += $igst;
+                $slabMap[$rate]['tax'] += $lineTax;
+                $totalTaxAccrued += $lineTax;
+            }
+        }
+
+        $netSales = max(0, $grossSales - $totalReturns);
+        $avgTicket = $billsCount > 0 ? round($netSales / $billsCount, 2) : 0;
+        $digitalTotal = max(0, $upi + $card + $other);
+        $totalCollected = max(0, $cash + $digitalTotal);
+        $digitalPercent = $totalCollected > 0 ? round(($digitalTotal / $totalCollected) * 100) : 0;
+
+        return response()->json([
+            'net_sales' => round($netSales, 2),
+            'gross_sales' => round($grossSales, 2),
+            'total_returns' => round($totalReturns, 2),
+            'bills_count' => $billsCount,
+            'average_ticket' => $avgTicket,
+            'payments' => [
+                'cash' => round(max(0, $cash), 2),
+                'upi' => round(max(0, $upi), 2),
+                'card' => round(max(0, $card), 2),
+                'credit' => round(max(0, $credit), 2),
+                'digital_total' => round($digitalTotal, 2),
+                'digital_percent' => $digitalPercent,
+            ],
+            'gst' => [
+                'slabs' => array_values($slabMap),
+                'total_tax_accrued' => round(max(0, $totalTaxAccrued), 2),
+            ],
+        ]);
+    }
 }

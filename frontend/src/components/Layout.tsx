@@ -1,12 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
-  ShoppingCart,
-  Truck,
-  Package,
-  FileBarChart,
-  Database,
-  Settings,
   Wifi,
   WifiOff,
   User,
@@ -14,16 +8,12 @@ import {
   Search,
   Maximize,
   Minimize,
-  Sliders,
-  Layers,
-  FileText,
-  Undo2,
-  ArrowUpFromLine,
   AlertTriangle,
-  Building2,
 } from "lucide-react";
 import { companySettingsService } from "../lib/settings/companySettingsService";
 import { CommandPalette } from "./CommandPalette";
+import { TopNav } from "./TopNav";
+import { KeyboardShortcutsModal } from "./KeyboardShortcutsModal";
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -35,9 +25,11 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
   const [time, setTime] = useState<string>(new Date().toLocaleTimeString());
   const [isOnline, setIsOnline] = useState<boolean>(navigator.onLine);
   const [isCmdPaletteOpen, setIsCmdPaletteOpen] = useState(false);
+  const [isShortcutsModalOpen, setIsShortcutsModalOpen] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isStoreDisabled, setIsStoreDisabled] = useState(false);
   const [enabledMenus, setEnabledMenus] = useState<string[]>([
+    "dashboard",
     "pos",
     "bills",
     "sales_returns",
@@ -58,17 +50,60 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
     window.addEventListener("online", handleOnline);
     window.addEventListener("offline", handleOffline);
 
-    // Global keyboard navigation shortcuts (F1-F6, F10, F11, Ctrl+K / Cmd+K)
+    // Global keyboard navigation shortcuts
     const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+      // If event was already handled or prevented, ignore
+      if (e.defaultPrevented) return;
+
+      const isPosPage = location.pathname === "/pos" || location.pathname.startsWith("/pos");
+
+      // Command Palette (Ctrl+K / Cmd+K)
+      if ((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === "k" || e.code === "KeyK")) {
         e.preventDefault();
         setIsCmdPaletteOpen((prev) => !prev);
-      } else if (e.key === "F1") {
+        return;
+      }
+
+      // Ignore text input fields for standard navigation letters
+      const isInput =
+        e.target instanceof HTMLInputElement ||
+        e.target instanceof HTMLTextAreaElement ||
+        e.target instanceof HTMLSelectElement;
+
+      if (e.key === "Home" && !isInput) {
+        e.preventDefault();
+        navigate("/dashboard");
+        return;
+      }
+
+      // On POS page, let POS Billing handle F1, F2, F3, F6, F8, F9, F12, Ctrl+D, Shift+F2, Alt+R, etc.
+      if (isPosPage) {
+        if (
+          e.key === "F1" ||
+          e.key === "F2" ||
+          e.key === "F3" ||
+          e.key === "F6" ||
+          e.key === "F8" ||
+          e.key === "F9" ||
+          e.key === "F12" ||
+          ((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === "d" || e.code === "KeyD"))
+        ) {
+          // Let POS billing component handle these
+          return;
+        }
+      }
+
+      // Function key navigation shortcuts for other pages
+      if (e.key === "F1") {
         e.preventDefault();
         navigate("/pos");
       } else if (e.key === "F2") {
         e.preventDefault();
-        navigate("/purchases");
+        if (e.shiftKey) {
+          navigate("/returns/purchases");
+        } else {
+          navigate("/purchases");
+        }
       } else if (e.key === "F3") {
         e.preventDefault();
         navigate("/stock");
@@ -83,7 +118,11 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
         navigate("/bills");
       } else if (e.key === "F7") {
         e.preventDefault();
-        navigate("/returns/sales");
+        if (e.shiftKey) {
+          navigate("/returns/debit-notes");
+        } else {
+          navigate("/returns/sales");
+        }
       } else if (e.key === "F10") {
         e.preventDefault();
         navigate("/settings");
@@ -92,6 +131,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
         toggleFullscreen();
       }
     };
+
     window.addEventListener("keydown", handleKeyDown);
 
     return () => {
@@ -100,7 +140,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
       window.removeEventListener("offline", handleOffline);
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, [navigate]);
+  }, [navigate, location.pathname]);
 
   useEffect(() => {
     companySettingsService.loadSettings().then((cfg) => {
@@ -125,21 +165,6 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
     }
   };
 
-  const allNavItems = [
-    { id: "pos", name: "POS Billing", path: "/pos", key: "F1", icon: ShoppingCart, group: "Sales & Billing" },
-    { id: "bills", name: "Bills", path: "/bills", key: "F6", icon: FileText, group: "Sales & Billing" },
-    { id: "sales_returns", name: "Sales Returns", path: "/returns/sales", key: "F7", icon: Undo2, group: "Sales & Billing" },
-    { id: "customer_debit_notes", name: "Debit Notes (B2B)", path: "/returns/debit-notes", key: "", icon: Building2, group: "Sales & Billing" },
-    { id: "purchases", name: "Purchases", path: "/purchases", key: "F2", icon: Truck, group: "Purchase" },
-    { id: "purchase_returns", name: "Purchase Returns", path: "/returns/purchases", key: "", icon: ArrowUpFromLine, group: "Purchase" },
-    { id: "stock", name: "Stock Ledger", path: "/stock", key: "F3", icon: Package, group: "Inventory" },
-    { id: "reports", name: "Reports & GST", path: "/reports", key: "F4", icon: FileBarChart, group: "Reports" },
-    { id: "masters", name: "Master Data", path: "/masters", key: "F5", icon: Database, group: "Master" },
-    { id: "settings", name: "Settings", path: "/settings", key: "F10", icon: Settings, group: "Administration" },
-  ];
-
-  const navItems = allNavItems.filter((item) => enabledMenus.includes(item.id));
-
   if (isStoreDisabled) {
     return (
       <div className="flex h-screen flex-col items-center justify-center bg-slate-900 text-white p-6 font-sans">
@@ -160,48 +185,54 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
   }
 
   return (
-    <div className="flex h-screen flex-col bg-slate-100 font-sans select-none">
+    <div className="flex h-screen flex-col bg-slate-100 font-sans select-none overflow-hidden">
       {/* Top Header Bar */}
-      <header className="flex h-12 items-center justify-between border-b border-slate-200 bg-white px-4 shadow-sm">
-        <div className="flex items-center gap-3">
-          <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-600 font-bold text-white shadow-sm">
-            LS
-          </span>
+      <header className="flex h-12 shrink-0 items-center justify-between border-b border-slate-200 bg-white px-4 shadow-xs">
+        <Link
+          to="/dashboard"
+          className="flex items-center gap-2.5 hover:opacity-85 transition-opacity cursor-pointer text-inherit no-underline shrink-0"
+          title="Go to Dashboard (Home / Ctrl+D)"
+        >
+          <img
+            src="/app-icon.png"
+            alt="LamSuite Logo"
+            className="h-8 w-8 rounded-lg shadow-xs object-cover border border-slate-200/80 bg-white shrink-0"
+          />
           <div>
-            <h1 className="text-sm font-bold text-slate-800 leading-tight">LamSuite Billing</h1>
-            <p className="text-[10px] text-slate-500 font-medium">Retail & Pharmacy POS (Offline-First)</p>
+            <h1 className="text-sm font-bold text-slate-800 leading-tight whitespace-nowrap">LamSuite Billing</h1>
+            <p className="text-[10px] text-slate-500 font-medium whitespace-nowrap">Retail & Pharmacy POS</p>
           </div>
-        </div>
+        </Link>
 
         {/* Center: Command Palette Trigger Button */}
         <div className="flex-1 max-w-md mx-4">
           <button
             onClick={() => setIsCmdPaletteOpen(true)}
-            className="flex w-full items-center justify-between rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs text-slate-500 hover:border-slate-300 hover:bg-slate-100 transition-colors shadow-inner"
+            className="flex w-full items-center justify-between rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs text-slate-500 hover:border-slate-300 hover:bg-slate-100 transition-colors shadow-inner cursor-pointer"
           >
             <div className="flex items-center gap-2">
               <Search className="h-3.5 w-3.5 text-slate-400" />
-              <span>Search actions, modules, or tools...</span>
+              <span className="truncate">Search actions, modules, or tools...</span>
             </div>
-            <kbd className="rounded border border-slate-200 bg-white px-1.5 py-0.5 text-[10px] font-mono text-slate-500 shadow-xs">
+            <kbd className="rounded border border-slate-200 bg-white px-1.5 py-0.5 text-[10px] font-mono text-slate-500 shadow-xs shrink-0">
               Ctrl+K
             </kbd>
           </button>
         </div>
 
         {/* Status Indicators */}
-        <div className="flex items-center gap-3 text-xs font-medium text-slate-600">
+        <div className="flex items-center gap-3 text-xs font-medium text-slate-600 shrink-0">
           <button
             onClick={toggleFullscreen}
             title="Toggle Fullscreen (F11)"
-            className="rounded p-1.5 text-slate-500 hover:bg-slate-100 hover:text-slate-800"
+            className="rounded p-1.5 text-slate-500 hover:bg-slate-100 hover:text-slate-800 cursor-pointer"
           >
             {isFullscreen ? <Minimize className="h-4 w-4" /> : <Maximize className="h-4 w-4" />}
           </button>
 
           <div className="flex items-center gap-1.5 rounded-full bg-slate-100 px-2.5 py-1">
             <User className="h-3.5 w-3.5 text-slate-500" />
-            <span>Counter 01</span>
+            <span className="whitespace-nowrap">Counter 01</span>
           </div>
 
           <div
@@ -211,60 +242,41 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
           >
             {isOnline ? (
               <>
-                <Wifi className="h-3.5 w-3.5 text-emerald-600" />
-                <span>LAN / Cloud Sync</span>
+                <Wifi className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
+                <span className="whitespace-nowrap">LAN / Cloud Sync</span>
               </>
             ) : (
               <>
-                <WifiOff className="h-3.5 w-3.5 text-amber-600" />
-                <span>Offline Active</span>
+                <WifiOff className="h-3.5 w-3.5 text-amber-600 shrink-0" />
+                <span className="whitespace-nowrap">Offline Active</span>
               </>
             )}
           </div>
 
           <div className="flex items-center gap-1.5 text-slate-500 font-mono text-[11px]">
-            <Clock className="h-3.5 w-3.5" />
-            <span>{time}</span>
+            <Clock className="h-3.5 w-3.5 shrink-0" />
+            <span className="whitespace-nowrap">{time}</span>
           </div>
         </div>
       </header>
 
-      {/* Navigation Sub-Header */}
-      <nav className="flex h-11 items-center justify-between border-b border-slate-200 bg-slate-800 px-3 text-white">
-        <div className="flex items-center gap-1">
-          {navItems.map((item) => {
-            const isActive = location.pathname.startsWith(item.path);
-            const Icon = item.icon;
-            return (
-              <Link
-                key={item.path}
-                to={item.path}
-                className={`flex items-center gap-2 rounded px-3 py-1.5 text-xs font-medium transition-colors ${
-                  isActive ? "bg-blue-600 text-white shadow" : "text-slate-300 hover:bg-slate-700 hover:text-white"
-                }`}
-              >
-                <Icon className="h-3.5 w-3.5" />
-                <span>{item.name}</span>
-                <span className="rounded bg-black/25 px-1 py-0.5 text-[10px] text-slate-300">{item.key}</span>
-              </Link>
-            );
-          })}
-        </div>
-
-        {/* Right Nav Shortcut Help */}
-        <div className="flex items-center gap-2 text-[11px] text-slate-400 pr-2">
-          <span>MARG Keyboard Navigation:</span>
-          <span className="font-mono text-slate-300">F1-F5</span>
-          <span>•</span>
-          <span className="font-mono text-slate-300">F11 Full</span>
-        </div>
-      </nav>
+      {/* Redesigned Navigation Sub-Header */}
+      <TopNav
+        enabledMenus={enabledMenus}
+        onOpenShortcutsHelp={() => setIsShortcutsModalOpen(true)}
+      />
 
       {/* Main Content Viewport */}
       <main className="flex-1 overflow-auto p-4">{children}</main>
 
       {/* MARG-Style Command Palette Modal */}
       <CommandPalette isOpen={isCmdPaletteOpen} onClose={() => setIsCmdPaletteOpen(false)} />
+
+      {/* Keyboard Shortcuts Cheatsheet Modal */}
+      <KeyboardShortcutsModal
+        isOpen={isShortcutsModalOpen}
+        onClose={() => setIsShortcutsModalOpen(false)}
+      />
     </div>
   );
 };

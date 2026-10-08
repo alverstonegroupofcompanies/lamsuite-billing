@@ -21,10 +21,11 @@ import { productsStore, type ProductBatch, type ProductItem } from "../lib/maste
 import { sqliteStorage } from "../lib/db/sqliteStorage";
 
 export const StockLedgerPage: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<"ledger" | "adjustments" | "expiry" | "low_stock">("ledger");
+  const [activeTab, setActiveTab] = useState<"ledger" | "adjustments" | "expiry" | "low_stock" | "negative_stock">("ledger");
   const [transactions, setTransactions] = useState<any[]>([]);
   const [nearExpiryBatches, setNearExpiryBatches] = useState<ProductBatch[]>([]);
   const [lowStockProducts, setLowStockProducts] = useState<ProductItem[]>([]);
+  const [negativeStockBatches, setNegativeStockBatches] = useState<ProductBatch[]>([]);
   const [allBatches, setAllBatches] = useState<ProductBatch[]>([]);
   const [notification, setNotification] = useState<{ message: string; type: "success" | "error" } | null>(null);
 
@@ -59,6 +60,9 @@ export const StockLedgerPage: React.FC = () => {
 
     const low = await inventoryService.getLowStockProducts();
     setLowStockProducts(low);
+
+    const neg = await inventoryService.getNegativeStockBatches();
+    setNegativeStockBatches(neg);
   };
 
   const showNotification = (message: string, type: "success" | "error" = "success") => {
@@ -199,6 +203,17 @@ export const StockLedgerPage: React.FC = () => {
           <AlertTriangle className="h-3.5 w-3.5" />
           <span>Low Stock Alerts ({lowStockProducts.length})</span>
         </button>
+        <button
+          onClick={() => setActiveTab("negative_stock")}
+          className={`flex items-center gap-1.5 border-b-2 px-4 py-2 text-xs font-bold transition-colors ${
+            activeTab === "negative_stock"
+              ? "border-amber-600 text-amber-600"
+              : "border-transparent text-slate-500 hover:text-slate-800"
+          }`}
+        >
+          <span className="inline-block w-2 h-2 rounded-full bg-amber-500" />
+          <span>Negative Stock ({negativeStockBatches.length})</span>
+        </button>
       </div>
 
       {/* Tab 1: Double-Entry Transactions Audit Ledger */}
@@ -330,6 +345,54 @@ export const StockLedgerPage: React.FC = () => {
                     <td className="px-4 py-2.5 text-center">
                       <span className="rounded-full bg-red-50 px-2 py-0.5 text-[10px] font-semibold text-red-700">
                         REORDER
+                      </span>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* Tab 4: Negative Stock (Shortages / Oversold Batches) */}
+      {activeTab === "negative_stock" && (
+        <div className="rounded-lg border border-slate-200 bg-white shadow-sm overflow-hidden">
+          <table className="w-full text-left text-xs">
+            <thead className="bg-slate-50 text-slate-600 border-b border-slate-200">
+              <tr>
+                <th className="px-4 py-2.5 font-semibold">Batch No</th>
+                <th className="px-4 py-2.5 font-semibold">Expiry Date</th>
+                <th className="px-4 py-2.5 font-semibold text-right">Stock on Hand</th>
+                <th className="px-4 py-2.5 font-semibold text-right">Deficit (Shortage)</th>
+                <th className="px-4 py-2.5 font-semibold text-right">Selling Rate (₹)</th>
+                <th className="px-4 py-2.5 font-semibold text-center">Status</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {negativeStockBatches.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="py-12 text-center text-slate-400">
+                    <CheckCircle className="mx-auto h-8 w-8 text-emerald-300 mb-1" />
+                    <p className="font-medium">No negative stock batches found</p>
+                    <p className="text-[11px] text-slate-400 mt-0.5">All batches have non-negative balances on hand</p>
+                  </td>
+                </tr>
+              ) : (
+                negativeStockBatches.map((b) => (
+                  <tr key={b.id} className="hover:bg-slate-50">
+                    <td className="px-4 py-2.5 font-mono font-bold text-slate-800">{b.batch_no}</td>
+                    <td className="px-4 py-2.5 font-mono text-slate-600">{b.expiry_date}</td>
+                    <td className="px-4 py-2.5 text-right font-black text-rose-600">{b.stock_qty}</td>
+                    <td className="px-4 py-2.5 text-right font-bold text-amber-700">
+                      {Math.abs(b.stock_qty || 0)} units short
+                    </td>
+                    <td className="px-4 py-2.5 text-right text-slate-700">
+                      ₹ {Number(b.selling_rate || b.mrp || 0).toFixed(2)}
+                    </td>
+                    <td className="px-4 py-2.5 text-center">
+                      <span className="rounded-full bg-rose-50 border border-rose-200 px-2 py-0.5 text-[10px] font-bold text-rose-700">
+                        OVERSOLD
                       </span>
                     </td>
                   </tr>

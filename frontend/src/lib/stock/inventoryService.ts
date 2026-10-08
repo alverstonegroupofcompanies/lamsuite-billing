@@ -29,9 +29,16 @@ export class InventoryService {
     const batch = await sqliteStorage.findById<ProductBatch>("product_batches", input.batch_id);
     if (!batch) throw new Error("Batch not found for stock adjustment");
 
-    const newStock = Math.max(0, batch.stock_qty + input.adjustment_qty);
+    const newStock = batch.stock_qty + input.adjustment_qty;
     batch.stock_qty = newStock;
     await productsStore.upsertBatch(batch);
+
+    // Also update product current_stock
+    const product = await productsStore.getProductById(input.product_id);
+    if (product) {
+      product.current_stock = (product.current_stock || 0) + input.adjustment_qty;
+      await productsStore.upsertProduct(product);
+    }
 
     const adjustmentId = `adj_${Date.now()}_${Math.random().toString(16).slice(2, 6)}`;
     const now = Date.now();
@@ -133,6 +140,11 @@ export class InventoryService {
   async getLowStockProducts(): Promise<ProductItem[]> {
     const all = await sqliteStorage.findAll<ProductItem>("products");
     return all.filter((p) => p.is_active && (p.reorder_level || 0) > 0 && (p.current_stock || 0) <= (p.reorder_level || 0));
+  }
+
+  async getNegativeStockBatches(): Promise<ProductBatch[]> {
+    const all = await sqliteStorage.findAll<ProductBatch>("product_batches");
+    return all.filter((b) => (b.stock_qty || 0) < 0);
   }
 }
 
