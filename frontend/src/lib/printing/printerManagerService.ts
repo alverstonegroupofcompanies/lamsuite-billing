@@ -2,7 +2,7 @@ import { isTauri, invokeCommand, registerMockHandler } from "../ipc/ipcBridge";
 import { sqliteStorage } from "../db/sqliteStorage";
 
 export type PrinterStatus = "ready" | "offline" | "paper_out" | "error" | "busy" | "unknown";
-export type PaperSize = "a4" | "a5" | "half_a4" | "thermal_80mm" | "thermal_58mm" | "dot_matrix_80col" | "barcode_label";
+export type PaperSize = "a4" | "a5" | "half_a4" | "thermal_80mm" | "thermal_58mm" | "dot_matrix_80col" | "dot_matrix_132col" | "barcode_label";
 export type PrinterType = "laser_inkjet" | "thermal_pos" | "dot_matrix" | "virtual_pdf";
 
 export interface SystemPrinterInfo {
@@ -38,8 +38,14 @@ export interface PrinterProfileConfig {
   enableCashDrawerKick?: boolean;
   cashDrawerPin?: "pin_2" | "pin_5";
   // Dot matrix specifics
-  dotMatrixFontMode?: "draft_condensed_17cpi" | "draft_10cpi" | "nlq_12cpi";
-  formLengthInches?: 6 | 11 | 12;
+  dotMatrixColumns?: 80 | 132;
+  dotMatrixCommandSet?: "esc_p" | "tvs_native" | "plain_ascii";
+  dotMatrixPitch?: "10cpi" | "12cpi" | "17cpi_condensed";
+  linesPerPage?: number;
+  doubleStrikeCarbon?: boolean;
+  prePrintedStationery?: boolean;
+  leftMarginSpaces?: number;
+  topMarginLines?: number;
   // Document type mapping
   assignedDocTypes?: string[];
   isDefaultForPaperSize?: boolean;
@@ -219,12 +225,12 @@ export class PrinterManagerService {
       printerName: printer.name,
       displayName: printer.displayName,
       paperSize: defaultPaper,
-      marginsMm: isThermal ? { top: 0, right: 0, bottom: 0, left: 0 } : { top: 8, right: 8, bottom: 8, left: 8 },
+      marginsMm: isThermal || isDotMatrix ? { top: 0, right: 0, bottom: 0, left: 0 } : { top: 8, right: 8, bottom: 8, left: 8 },
       scalePercent: 100, // strictly 100% scale
       orientation: "portrait",
       copies: 1,
       isColor: false,
-      silentPrint: isThermal, // silent by default for thermal POS
+      silentPrint: isThermal || isDotMatrix,
       currencySymbolFormat: isDotMatrix ? "rs_text" : "rupee_symbol",
       thermalWidthMm: isThermal ? 80 : undefined,
       enableAutoCut: isThermal,
@@ -232,9 +238,19 @@ export class PrinterManagerService {
       feedLinesBeforeCut: isThermal ? 3 : 0,
       enableCashDrawerKick: isThermal,
       cashDrawerPin: "pin_2",
-      dotMatrixFontMode: isDotMatrix ? "draft_condensed_17cpi" : undefined,
-      formLengthInches: isDotMatrix ? 11 : undefined,
-      assignedDocTypes: isThermal ? ["tax_invoice", "sales_return", "bill"] : ["tax_invoice", "purchase", "report"],
+      dotMatrixColumns: isDotMatrix ? 80 : undefined,
+      dotMatrixCommandSet: isDotMatrix ? "esc_p" : undefined,
+      dotMatrixPitch: isDotMatrix ? "10cpi" : undefined,
+      linesPerPage: isDotMatrix ? 66 : undefined,
+      doubleStrikeCarbon: false,
+      prePrintedStationery: false,
+      leftMarginSpaces: 0,
+      topMarginLines: 0,
+      assignedDocTypes: isThermal
+        ? ["tax_invoice", "sales_return", "bill"]
+        : isDotMatrix
+        ? ["tax_invoice", "sales_return", "credit_note", "debit_note", "purchase", "bill"]
+        : ["tax_invoice", "purchase", "report"],
     };
   }
 

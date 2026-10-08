@@ -4,6 +4,7 @@ import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
 import * as QRCodeModule from "qrcode";
 import { ROBOTO_REGULAR_BASE64, ROBOTO_BOLD_BASE64 } from "./embeddedFonts";
+import { dotMatrixRenderer, DotMatrixOptions } from "./dotMatrixRenderer";
 
 const QRCode = (QRCodeModule as any).default || QRCodeModule;
 
@@ -60,7 +61,7 @@ export interface InvoicePrintData {
 }
 
 export interface PrintRenderOptions {
-  paperSize?: "a4" | "a5" | "half_a4" | "thermal_80mm" | "thermal_58mm" | "dot_matrix_80col" | "barcode_label";
+  paperSize?: "a4" | "a5" | "half_a4" | "thermal_80mm" | "thermal_58mm" | "dot_matrix_80col" | "dot_matrix_132col" | "barcode_label";
   copies?: number;
   orientation?: "portrait" | "landscape";
   showHsnSummary?: boolean;
@@ -2485,6 +2486,41 @@ export class PrintingEngine {
    * Unified dispatcher to render HTML preview for any document type
    */
   renderDocumentHtml(docType: string, data: any, options?: PrintRenderOptions): string {
+    const isDotMatrix = options?.paperSize === "dot_matrix_80col" || options?.paperSize === "dot_matrix_132col";
+    if (isDotMatrix) {
+      let rawText = "";
+      const dotOpts: DotMatrixOptions = {
+        columns: options?.paperSize === "dot_matrix_132col" ? 132 : 80,
+        isDuplicate: options?.isDuplicate,
+        copyMarker: options?.copyMarker,
+        showHsnSummary: options?.showHsnSummary,
+        showDoctorPatient: options?.showDoctorPatient,
+        showDrugLicenses: options?.showDrugLicenses,
+        showTerms: options?.showTerms,
+        currencyPrefix: options?.currencySymbolFormat === "rupee_symbol" ? "Rs." : "Rs.",
+      };
+
+      switch (docType) {
+        case "sales_return":
+        case "credit_note":
+        case "customer_debit_note":
+          rawText = dotMatrixRenderer.renderCreditNote(data as CreditNotePrintData, dotOpts);
+          break;
+        case "purchase_return":
+        case "debit_note":
+          rawText = dotMatrixRenderer.renderDebitNote(data as DebitNotePrintData, dotOpts);
+          break;
+        default:
+          rawText = dotMatrixRenderer.renderInvoice(data as InvoicePrintData, dotOpts);
+          break;
+      }
+      return dotMatrixRenderer.generateMonospaceHtmlPreview(rawText, {
+        columns: options?.paperSize === "dot_matrix_132col" ? 132 : 80,
+        showRuler: true,
+        showPageBreaks: true,
+      });
+    }
+
     switch (docType) {
       case "tax_invoice":
       case "invoice":
@@ -2614,53 +2650,46 @@ export class PrintingEngine {
   }
 
   /**
-   * Generates formatted fixed-width 80-column ASCII draft text for Dot Matrix printers with form feed.
+   * Generates formatted fixed-width ASCII draft text for Dot Matrix printers with form feed.
    */
-  generateDotMatrixText(data: InvoicePrintData, _options?: { formLengthLines?: number }): string {
-    const maxCols = 80;
-    const divider = "=".repeat(maxCols);
-    const singleDivider = "-".repeat(maxCols);
-
-    let out = "";
-    out += `${divider}\n`;
-    out += `${data.store_name.toUpperCase().padStart(Math.floor(40 + data.store_name.length / 2))}\n`;
-    if (data.store_address) out += `${data.store_address.padStart(Math.floor(40 + data.store_address.length / 2))}\n`;
-    if (data.store_phone) out += `Ph: ${data.store_phone} | GSTIN: ${data.store_gstin || "N/A"}\n`;
-    out += `${divider}\n`;
-    out += `TAX INVOICE : #${data.invoice_number.padEnd(25)} Date: ${data.invoice_date} ${data.invoice_time || ""}\n`;
-    out += `CUSTOMER    : ${(data.customer_name || "Walk-in Customer").padEnd(25)} Phone: ${data.customer_phone || "-"}\n`;
-    if (data.doctor_name) out += `DOCTOR      : ${(data.doctor_name).padEnd(25)} Reg: ${data.doctor_reg_no || "-"}\n`;
-    out += `${singleDivider}\n`;
-    out += ` #  Item Description              Batch      Exp   Qty    Rate(Rs) GST%   Amount(Rs)\n`;
-    out += `${singleDivider}\n`;
-
-    data.lines.forEach((l, idx) => {
-      const num = String(idx + 1).padStart(2);
-      const desc = l.description.substring(0, 27).padEnd(27);
-      const batch = (l.batch_no || "-").substring(0, 10).padEnd(10);
-      const exp = (l.expiry_date || "-").substring(0, 5).padEnd(5);
-      const qty = `${l.qty}${l.loose_qty ? `+${l.loose_qty}L` : ""}`.padStart(5);
-      const rate = l.rate.toFixed(2).padStart(9);
-      const gst = `${l.gst_percent}%`.padStart(5);
-      const amt = l.amount.toFixed(2).padStart(11);
-      out += `${num}  ${desc} ${batch} ${exp} ${qty} ${rate} ${gst} ${amt}\n`;
-    });
-
-    out += `${singleDivider}\n`;
-    out += `Taxable: Rs.${data.subtotal.toFixed(2)}  CGST: Rs.${(data.cgst_total || data.tax_total / 2).toFixed(2)}  SGST: Rs.${(data.sgst_total || data.tax_total / 2).toFixed(2)}  RoundOff: Rs.${(data.round_off || 0).toFixed(2)}\n`;
-    out += `GRAND TOTAL : Rs. ${data.grand_total.toFixed(2)} (${data.amount_in_words || numberToWordsIndian(data.grand_total)})\n`;
-    out += `${divider}\n`;
-    out += `Terms: Goods once sold cannot be returned without cash memo.\n`;
-    out += `Auth Signatory: ___________________________\n`;
-
-    out += "\x0C";
-    return out;
+  generateDotMatrixText(data: InvoicePrintData, options?: DotMatrixOptions): string {
+    return dotMatrixRenderer.renderInvoice(data, options);
   }
 
   /**
-   * Unified dispatcher to render Vector PDF for any document type
+   * Unified dispatcher to render Vector / Monospace PDF for any document type
    */
   renderDocumentPdf(docType: string, data: any, options?: PrintRenderOptions): Uint8Array {
+    const isDotMatrix = options?.paperSize === "dot_matrix_80col" || options?.paperSize === "dot_matrix_132col";
+    if (isDotMatrix) {
+      const dotOpts: DotMatrixOptions = {
+        columns: options?.paperSize === "dot_matrix_132col" ? 132 : 80,
+        isDuplicate: options?.isDuplicate,
+        copyMarker: options?.copyMarker,
+        showHsnSummary: options?.showHsnSummary,
+        showDoctorPatient: options?.showDoctorPatient,
+        showDrugLicenses: options?.showDrugLicenses,
+        showTerms: options?.showTerms,
+      };
+
+      let text = "";
+      switch (docType) {
+        case "sales_return":
+        case "credit_note":
+        case "customer_debit_note":
+          text = dotMatrixRenderer.renderCreditNote(data as CreditNotePrintData, dotOpts);
+          break;
+        case "purchase_return":
+        case "debit_note":
+          text = dotMatrixRenderer.renderDebitNote(data as DebitNotePrintData, dotOpts);
+          break;
+        default:
+          text = dotMatrixRenderer.renderInvoice(data as InvoicePrintData, dotOpts);
+          break;
+      }
+      return dotMatrixRenderer.generateMonospacePdf(text, dotOpts);
+    }
+
     switch (docType) {
       case "tax_invoice":
       case "invoice":

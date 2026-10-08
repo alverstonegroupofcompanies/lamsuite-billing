@@ -38,6 +38,7 @@ import {
   PrintJobRecord,
 } from "../lib/printing/printerManagerService";
 import { isTauri } from "../lib/ipc/ipcBridge";
+import { dotMatrixRenderer, DotMatrixOptions } from "../lib/printing/dotMatrixRenderer";
 import { companySettingsService } from "../lib/settings/companySettingsService";
 
 export interface PrintPreviewModalProps {
@@ -312,7 +313,7 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
     try {
       const docNo = data.invoice_number || data.return_number || data.purchase_number || "DOC";
       const isThermal = paperSize.startsWith("thermal");
-      const isDot = paperSize === "dot_matrix_80col";
+      const isDot = paperSize === "dot_matrix_80col" || paperSize === "dot_matrix_132col";
 
       let rawEscPosBytes: Uint8Array | undefined;
       let pdfBytes: Uint8Array | undefined;
@@ -323,7 +324,40 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
           autoCut: printerProfile?.enableAutoCut ?? true,
           cashDrawer: printerProfile?.enableCashDrawerKick ?? true,
         });
-      } else if (!isDot) {
+      } else if (isDot) {
+        const dotOpts: DotMatrixOptions = {
+          columns: paperSize === "dot_matrix_132col" ? 132 : 80,
+          linesPerPage: printerProfile?.linesPerPage || 66,
+          cpi: printerProfile?.dotMatrixPitch || "10cpi",
+          doubleStrikeCarbon: printerProfile?.doubleStrikeCarbon || false,
+          prePrintedStationery: printerProfile?.prePrintedStationery || false,
+          leftMarginSpaces: printerProfile?.leftMarginSpaces || 0,
+          topMarginLines: printerProfile?.topMarginLines || 0,
+          showHsnSummary,
+          showDoctorPatient,
+          showDrugLicenses,
+          showTerms,
+          isDuplicate,
+          copyMarker: copyMarker === "None" ? undefined : copyMarker,
+        };
+
+        let rawText = "";
+        switch (docType) {
+          case "sales_return":
+          case "credit_note":
+          case "customer_debit_note":
+            rawText = dotMatrixRenderer.renderCreditNote(data as CreditNotePrintData, dotOpts);
+            break;
+          case "purchase_return":
+          case "debit_note":
+            rawText = dotMatrixRenderer.renderDebitNote(data as DebitNotePrintData, dotOpts);
+            break;
+          default:
+            rawText = dotMatrixRenderer.renderInvoice(data as InvoicePrintData, dotOpts);
+            break;
+        }
+        rawEscPosBytes = dotMatrixRenderer.generateEscPBytes(rawText, dotOpts);
+      } else {
         pdfBytes = printingEngine.renderDocumentPdf(docType, data, {
           paperSize,
           copies,
@@ -384,6 +418,16 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
         grand_total: 118,
       };
 
+      const isDot = paperSize === "dot_matrix_80col" || paperSize === "dot_matrix_132col";
+      let rawBytes: Uint8Array | undefined;
+      if (isDot) {
+        const text = dotMatrixRenderer.renderInvoice(testData, {
+          columns: paperSize === "dot_matrix_132col" ? 132 : 80,
+          linesPerPage: 66,
+        });
+        rawBytes = dotMatrixRenderer.generateEscPBytes(text);
+      }
+
       const res = await printerManagerService.executePrintJob({
         printerName: selectedPrinterName,
         paperSize,
@@ -391,6 +435,7 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
         docNumber: "TEST-01",
         copies: 1,
         htmlContent: printingEngine.generateInvoiceHtml(testData, { paperSize }),
+        rawEscPosBytes: rawBytes,
       });
 
       if (res.success) {
@@ -405,15 +450,55 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
     }
   };
 
-  // Save as High-Fidelity Vector PDF Action
+  // Save as High-Fidelity Vector / Monospace PDF Action
   const handleSavePdf = async () => {
     if (isSavingPdf) return;
     setIsSavingPdf(true);
-    setStatusMessage({ text: "Generating high-fidelity vector PDF...", type: "info" });
+    setStatusMessage({ text: "Generating PDF...", type: "info" });
 
     try {
       const invNo = data.invoice_number || data.return_number || data.purchase_number || "Document";
       const fileName = `${invNo.replace(/[^a-zA-Z0-9_-]/g, "_")}.pdf`;
+      const isDot = paperSize === "dot_matrix_80col" || paperSize === "dot_matrix_132col";
+
+      if (isDot) {
+        const dotOpts: DotMatrixOptions = {
+          columns: paperSize === "dot_matrix_132col" ? 132 : 80,
+          linesPerPage: printerProfile?.linesPerPage || 66,
+          isDuplicate,
+          copyMarker: copyMarker === "None" ? undefined : copyMarker,
+          showHsnSummary,
+          showDoctorPatient,
+          showDrugLicenses,
+          showTerms,
+        };
+        let rawText = "";
+        switch (docType) {
+          case "sales_return":
+          case "credit_note":
+          case "customer_debit_note":
+            rawText = dotMatrixRenderer.renderCreditNote(data as CreditNotePrintData, dotOpts);
+            break;
+          case "purchase_return":
+          case "debit_note":
+            rawText = dotMatrixRenderer.renderDebitNote(data as DebitNotePrintData, dotOpts);
+            break;
+          default:
+            rawText = dotMatrixRenderer.renderInvoice(data as InvoicePrintData, dotOpts);
+            break;
+        }
+        const pdfBytes = dotMatrixRenderer.generateMonospacePdf(rawText, dotOpts);
+        const blob = new Blob([pdfBytes.buffer as ArrayBuffer], { type: "application/pdf" });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = fileName;
+        link.click();
+        URL.revokeObjectURL(url);
+        setSavedFilePath(fileName);
+        setStatusMessage({ text: `Monospace PDF saved successfully: ${fileName}`, type: "success" });
+        return;
+      }
 
       if (docType === "sales_return" || docType === "credit_note") {
         const pdfBytes = printingEngine.generateCreditNotePdf(data as CreditNotePrintData);
@@ -559,6 +644,10 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
                     : "82mm"
                   : paperSize === "a5"
                   ? "150mm"
+                  : paperSize === "dot_matrix_132col"
+                  ? "320mm"
+                  : paperSize === "dot_matrix_80col"
+                  ? "220mm"
                   : "215mm",
                 minHeight: isThermal ? "120mm" : paperSize === "a5" ? "210mm" : "297mm",
               }}
@@ -568,7 +657,13 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
                 title="Print Preview Frame"
                 className="w-full border-0 pointer-events-auto bg-white"
                 style={{
-                  height: isThermal ? "750px" : paperSize === "a5" ? "820px" : "1122px",
+                  height: isThermal
+                    ? "750px"
+                    : paperSize === "a5"
+                    ? "820px"
+                    : paperSize.startsWith("dot_matrix")
+                    ? "950px"
+                    : "1122px",
                 }}
                 sandbox="allow-same-origin allow-scripts allow-modals"
               />
@@ -709,6 +804,7 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
                         { id: "thermal_80mm", label: "Thermal 80mm" },
                         { id: "thermal_58mm", label: "Thermal 58mm" },
                         { id: "dot_matrix_80col", label: "Dot Matrix 80C" },
+                        { id: "dot_matrix_132col", label: "Dot Matrix 132C" },
                       ].map((p) => (
                         <button
                           key={p.id}
@@ -725,6 +821,96 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
                       ))}
                     </div>
                   </div>
+
+                  {/* Dot Matrix Specific Controls */}
+                  {(paperSize === "dot_matrix_80col" || paperSize === "dot_matrix_132col") && (
+                    <div className="bg-emerald-50/70 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/60 rounded-lg p-3 space-y-3">
+                      <div className="text-xs font-bold text-emerald-900 dark:text-emerald-300 flex items-center justify-between">
+                        <span>Dot Matrix Text-Mode Settings</span>
+                        <span className="text-[10px] font-mono uppercase bg-emerald-200 dark:bg-emerald-900 px-1.5 py-0.5 rounded">
+                          Fixed-Width ASCII
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">
+                            Command Set
+                          </label>
+                          <select
+                            value={printerProfile?.dotMatrixCommandSet || "esc_p"}
+                            onChange={(e) => {
+                              if (printerProfile) {
+                                const updated = { ...printerProfile, dotMatrixCommandSet: e.target.value as any };
+                                setPrinterProfile(updated);
+                                printerManagerService.saveProfile(updated);
+                              }
+                            }}
+                            className="w-full text-xs bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded p-1.5 text-slate-800 dark:text-slate-100"
+                          >
+                            <option value="esc_p">ESC/P (Epson Standard)</option>
+                            <option value="tvs_native">TVS MSP Native</option>
+                            <option value="plain_ascii">Generic Text Only</option>
+                          </select>
+                        </div>
+
+                        <div>
+                          <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">
+                            Lines / Page
+                          </label>
+                          <select
+                            value={printerProfile?.linesPerPage || 66}
+                            onChange={(e) => {
+                              if (printerProfile) {
+                                const updated = { ...printerProfile, linesPerPage: parseInt(e.target.value) || 66 };
+                                setPrinterProfile(updated);
+                                printerManagerService.saveProfile(updated);
+                              }
+                            }}
+                            className="w-full text-xs bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded p-1.5 text-slate-800 dark:text-slate-100"
+                          >
+                            <option value={66}>66 Lines (11" Standard)</option>
+                            <option value={72}>72 Lines (12" Form)</option>
+                            <option value={33}>33 Lines (6" Half-Page)</option>
+                          </select>
+                        </div>
+                      </div>
+
+                      <div className="space-y-1.5 pt-1 border-t border-emerald-200/60 dark:border-emerald-800/40">
+                        <label className="flex items-center space-x-2 text-xs text-slate-700 dark:text-slate-300 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={Boolean(printerProfile?.doubleStrikeCarbon)}
+                            onChange={(e) => {
+                              if (printerProfile) {
+                                const updated = { ...printerProfile, doubleStrikeCarbon: e.target.checked };
+                                setPrinterProfile(updated);
+                                printerManagerService.saveProfile(updated);
+                              }
+                            }}
+                            className="rounded text-emerald-600"
+                          />
+                          <span>Double-Strike Mode (Darker for Carbon Copies)</span>
+                        </label>
+
+                        <label className="flex items-center space-x-2 text-xs text-slate-700 dark:text-slate-300 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={Boolean(printerProfile?.prePrintedStationery)}
+                            onChange={(e) => {
+                              if (printerProfile) {
+                                const updated = { ...printerProfile, prePrintedStationery: e.target.checked };
+                                setPrinterProfile(updated);
+                                printerManagerService.saveProfile(updated);
+                              }
+                            }}
+                            className="rounded text-emerald-600"
+                          />
+                          <span>Pre-Printed Stationery (Data Only, No Borders)</span>
+                        </label>
+                      </div>
+                    </div>
+                  )}
 
                   {/* Copies & Quick Controls */}
                   <div className="grid grid-cols-2 gap-3">
