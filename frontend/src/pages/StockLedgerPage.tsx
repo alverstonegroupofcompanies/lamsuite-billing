@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   Package,
   Plus,
@@ -21,6 +22,7 @@ import { productsStore, type ProductBatch, type ProductItem } from "../lib/maste
 import { sqliteStorage } from "../lib/db/sqliteStorage";
 
 export const StockLedgerPage: React.FC = () => {
+  const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState<"ledger" | "adjustments" | "expiry" | "low_stock" | "negative_stock">("ledger");
   const [transactions, setTransactions] = useState<any[]>([]);
   const [nearExpiryBatches, setNearExpiryBatches] = useState<ProductBatch[]>([]);
@@ -160,11 +162,11 @@ export const StockLedgerPage: React.FC = () => {
             <span>Stock Adjustment</span>
           </button>
           <button
-            onClick={() => setIsTransferModalOpen(true)}
-            className="flex items-center gap-2 rounded bg-blue-600 px-3.5 py-2 text-xs font-semibold text-white shadow-sm hover:bg-blue-700"
+            onClick={() => navigate("/stock/transfers")}
+            className="flex items-center gap-2 rounded-xl bg-blue-600 px-3.5 py-2 text-xs font-semibold text-white shadow-sm hover:bg-blue-700 transition-colors"
           >
             <ArrowRightLeft className="h-4 w-4" />
-            <span>Inter-Store Transfer</span>
+            <span>Inter-Store Transfers</span>
           </button>
         </div>
       </div>

@@ -59,8 +59,8 @@ export const KeyboardShortcutsModal: React.FC<KeyboardShortcutsModalProps> = ({ 
       shortcuts: [
         { key: "Home or Ctrl+D", description: "Go to Dashboard" },
         { key: "Ctrl + K", description: "Open Command Palette / Fast Search" },
-        { key: "F2", description: "Purchase Register" },
-        { key: "F3", description: "Inventory & Stock Ledger" },
+        { key: "F2 / Shift+F2", description: "Purchase Register / Purchase Returns" },
+        { key: "F3 / Shift+F3", description: "Stock Ledger / Inter-Store Transfers" },
         { key: "F4 / F5 / F10", description: "Reports / Masters / Settings" },
         { key: "?", description: "Open Keyboard Shortcuts Help" },
         { key: "Esc", description: "Cancel / Close modal or dropdown" },

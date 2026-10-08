@@ -17,11 +17,54 @@ class StockController
         ]);
     }
 
-    public function dispatchTransfer(Request $request): JsonResponse
+    public function listTransfers(Request $request): JsonResponse
     {
         return response()->json([
             'success' => true,
-            'transfer_id' => 'st_' . time(),
+            'data' => [],
+        ]);
+    }
+
+    public function dispatchTransfer(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'from_store_id' => 'nullable|string',
+            'to_store_id' => 'required|string',
+            'transfer_no' => 'nullable|string',
+            'lines' => 'required|array|min:1',
+            'lines.*.product_id' => 'required|string',
+            'lines.*.batch_no' => 'required|string',
+            'lines.*.qty' => 'required|numeric|min:0.01',
+        ]);
+
+        $transferId = 'st_' . time() . '_' . substr(md5(uniqid()), 0, 4);
+
+        return response()->json([
+            'success' => true,
+            'transfer_id' => $transferId,
+            'transfer_no' => $validated['transfer_no'] ?? ('TRF-' . date('Ymd') . '-' . rand(100, 999)),
+            'status' => 'dispatched',
+            'item_count' => count($validated['lines']),
+        ], 201);
+    }
+
+    public function receiveTransfer(Request $request, string $id): JsonResponse
+    {
+        return response()->json([
+            'success' => true,
+            'transfer_id' => $id,
+            'status' => 'received',
+            'received_at' => date('Y-m-d H:i:s'),
+        ]);
+    }
+
+    public function cancelTransfer(Request $request, string $id): JsonResponse
+    {
+        return response()->json([
+            'success' => true,
+            'transfer_id' => $id,
+            'status' => 'cancelled',
+            'cancelled_at' => date('Y-m-d H:i:s'),
         ]);
     }
 

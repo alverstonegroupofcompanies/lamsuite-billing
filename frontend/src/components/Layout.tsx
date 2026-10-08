@@ -37,6 +37,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
     "purchases",
     "purchase_returns",
     "stock",
+    "stock_transfers",
     "reports",
     "masters",
     "settings",
@@ -106,7 +107,11 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
         }
       } else if (e.key === "F3") {
         e.preventDefault();
-        navigate("/stock");
+        if (e.shiftKey) {
+          navigate("/stock/transfers");
+        } else {
+          navigate("/stock");
+        }
       } else if (e.key === "F4") {
         e.preventDefault();
         navigate("/reports");

@@ -65,7 +65,10 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/purchases/{id}', [PurchaseController::class, 'show']);
 
     Route::post('/stock/adjustments', [StockController::class, 'recordAdjustment']);
+    Route::get('/stock/transfers', [StockController::class, 'listTransfers']);
     Route::post('/stock/transfers', [StockController::class, 'dispatchTransfer']);
+    Route::post('/stock/transfers/{id}/receive', [StockController::class, 'receiveTransfer']);
+    Route::post('/stock/transfers/{id}/cancel', [StockController::class, 'cancelTransfer']);
     Route::get('/stock/batches/near-expiry', [StockController::class, 'nearExpiry']);
     Route::get('/stock/products/low-stock', [StockController::class, 'lowStock']);
 

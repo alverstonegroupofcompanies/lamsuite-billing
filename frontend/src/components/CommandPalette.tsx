@@ -19,6 +19,7 @@ import {
   FileText,
   Undo2,
   ArrowUpFromLine,
+  ArrowRightLeft,
   Building2,
 } from "lucide-react";
 
@@ -139,6 +140,15 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose 
       shortcut: "F3",
       icon: Package,
       action: () => { navigate("/stock"); onClose(); },
+    },
+    {
+      id: "nav_inter_store_transfers",
+      category: "Inventory",
+      title: "Inter-Store Stock Transfers",
+      subtitle: "Multi-product branch dispatch, in-transit tracking, and delivery challans",
+      shortcut: "Shift+F3",
+      icon: ArrowRightLeft,
+      action: () => { navigate("/stock/transfers"); onClose(); },
     },
     {
       id: "nav_reports",

@@ -12,6 +12,7 @@ import { BillsPage } from "./pages/BillsPage";
 import { SalesReturnPage } from "./pages/SalesReturnPage";
 import { PurchaseReturnPage } from "./pages/PurchaseReturnPage";
 import { CustomerDebitNotePage } from "./pages/CustomerDebitNotePage";
+import { InterStoreTransferPage } from "./pages/InterStoreTransferPage";
 import { companySettingsService } from "./lib/settings/companySettingsService";
 import { initWorkspaceSettings, applyWorkspaceSettings } from "./lib/settings/workspaceThemeService";
 
@@ -55,6 +56,7 @@ export const App: React.FC = () => {
           <Route path="/bills" element={<BillsPage />} />
           <Route path="/purchases" element={<PurchasesPage />} />
           <Route path="/stock" element={<StockLedgerPage />} />
+          <Route path="/stock/transfers" element={<InterStoreTransferPage />} />
           <Route path="/reports" element={<ReportsPage />} />
           <Route path="/masters" element={<MastersPage />} />
           <Route path="/settings" element={<SettingsPage />} />

@@ -10,6 +10,7 @@ import {
   Building2,
   Truck,
   ArrowUpFromLine,
+  ArrowRightLeft,
   Package,
   FileBarChart,
   Database,
@@ -133,11 +134,27 @@ export const TopNav: React.FC<TopNavProps> = ({ enabledMenus, onOpenShortcutsHel
       ],
     },
     {
-      id: "stock",
+      id: "stock_group",
       name: "Inventory",
-      path: "/stock",
-      key: "F3",
       icon: Package,
+      children: [
+        {
+          id: "stock",
+          name: "Stock Ledger & Adjustments",
+          path: "/stock",
+          key: "F3",
+          icon: Package,
+          description: "Audit ledger, write-offs, reconciliation & near-expiry",
+        },
+        {
+          id: "stock_transfers",
+          name: "Inter-Store Transfers",
+          path: "/stock/transfers",
+          key: "Shift+F3",
+          icon: ArrowRightLeft,
+          description: "Multi-item branch dispatch, receipt & delivery challan",
+        },
+      ],
     },
     {
       id: "reports",
