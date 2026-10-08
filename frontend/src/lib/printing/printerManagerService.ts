@@ -503,16 +503,25 @@ export class PrinterManagerService {
       // Invoke native print command
       const profile = await this.getProfileForPrinter(params.printerName);
       const res = await invokeCommand<{ success: boolean; job_id?: string; error?: string }>("print_native_job", {
+        printerName: params.printerName,
         printer_name: params.printerName,
+        paperSize: params.paperSize,
         paper_size: params.paperSize,
+        documentType: params.docType,
         document_type: params.docType,
+        documentNumber: params.docNumber,
         document_number: params.docNumber,
         copies: params.copies || profile.copies || 1,
         silent: profile.silentPrint && !params.useSystemDialog,
+        htmlContent: params.htmlContent,
         html_content: params.htmlContent,
+        pdfBase64: params.pdfBytes ? this.uint8ArrayToBase64(params.pdfBytes) : undefined,
         pdf_base64: params.pdfBytes ? this.uint8ArrayToBase64(params.pdfBytes) : undefined,
+        rawBytes: params.rawEscPosBytes ? Array.from(params.rawEscPosBytes) : undefined,
         raw_bytes: params.rawEscPosBytes ? Array.from(params.rawEscPosBytes) : undefined,
+        autoCut: profile.enableAutoCut,
         auto_cut: profile.enableAutoCut,
+        cashDrawer: profile.enableCashDrawerKick,
         cash_drawer: profile.enableCashDrawerKick,
       });
 

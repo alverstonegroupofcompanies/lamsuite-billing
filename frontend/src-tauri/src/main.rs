@@ -290,10 +290,10 @@ fn get_system_printers() -> Result<Value, String> {
 
 #[tauri::command]
 fn print_native_job(
-    printer_name: String,
-    paper_size: String,
-    document_type: String,
-    document_number: String,
+    printer_name: Option<String>,
+    paper_size: Option<String>,
+    document_type: Option<String>,
+    document_number: Option<String>,
     copies: Option<u32>,
     silent: Option<bool>,
     html_content: Option<String>,
@@ -302,6 +302,10 @@ fn print_native_job(
     auto_cut: Option<bool>,
     cash_drawer: Option<bool>,
 ) -> Result<Value, String> {
+    let printer_name = printer_name.unwrap_or_else(|| "Default".into());
+    let paper_size = paper_size.unwrap_or_else(|| "a4".into());
+    let document_type = document_type.unwrap_or_else(|| "invoice".into());
+    let document_number = document_number.unwrap_or_else(|| "DOC".into());
     let num_copies = copies.unwrap_or(1);
     let is_silent = silent.unwrap_or(false);
     let job_id = format!("job_{}_{}", chrono::Utc::now().timestamp_millis(), uuid::Uuid::new_v4().simple());
