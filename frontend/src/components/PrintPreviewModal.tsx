@@ -917,19 +917,22 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
                             Lines / Page
                           </label>
                           <select
-                            value={printerProfile?.linesPerPage || 66}
+                            value={printerProfile?.linesPerPage ?? 66}
                             onChange={(e) => {
                               if (printerProfile) {
-                                const updated = { ...printerProfile, linesPerPage: parseInt(e.target.value) || 66 };
+                                const val = parseInt(e.target.value);
+                                const linesPerPage = isNaN(val) ? 66 : val;
+                                const updated = { ...printerProfile, linesPerPage };
                                 setPrinterProfile(updated);
                                 printerManagerService.saveProfile(updated);
                               }
                             }}
                             className="w-full text-xs bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded p-1.5 text-slate-800 dark:text-slate-100"
                           >
-                            <option value={66}>66 Lines (11" Standard)</option>
-                            <option value={72}>72 Lines (12" Form)</option>
-                            <option value={33}>33 Lines (6" Half-Page)</option>
+                            <option value={66}>66 Lines (11" Standard Continuous)</option>
+                            <option value={72}>72 Lines (12" Continuous Form)</option>
+                            <option value={33}>33 Lines (6" Half-Page Continuous)</option>
+                            <option value={0}>Continuous (No Page Breaks / Roll)</option>
                           </select>
                         </div>
                       </div>

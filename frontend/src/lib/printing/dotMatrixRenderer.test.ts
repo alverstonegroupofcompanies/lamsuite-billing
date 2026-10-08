@@ -192,6 +192,37 @@ describe("Dot Matrix Plain-Text Renderer & ESC/P Generator", () => {
         expect(l.replace(/\x0C/g, "").length).toBeLessThanOrEqual(80);
       });
     });
+
+    it("renders a 60-item bill in continuous roll mode (linesPerPage: 0) as a single seamless page without page splits", () => {
+      const items60 = Array.from({ length: 60 }, (_, idx) => ({
+        description: `Pharma Capsule Line #${idx + 1}`,
+        hsn_code: "30049099",
+        batch_no: `LOT${3000 + idx}`,
+        expiry_date: "2029-10",
+        qty: idx + 1,
+        rate: 120.0 + idx,
+        gst_percent: 18,
+        amount: (idx + 1) * (120.0 + idx),
+      }));
+
+      const invoice60: InvoicePrintData = {
+        ...sampleInvoice,
+        lines: items60,
+        subtotal: 150000,
+        tax_total: 27000,
+        grand_total: 177000,
+      };
+
+      const text = dotMatrixRenderer.renderInvoice(invoice60, { columns: 80, linesPerPage: 0 });
+      const pages = text.split("\x0C").filter((p) => p.trim().length > 0);
+      
+      // Continuous roll mode produces exactly 1 unbroken page
+      expect(pages.length).toBe(1);
+      expect(text).not.toContain("[ Continued on Next Page... ]");
+      expect(text).not.toContain("[ Continued from Page 1");
+      expect(text).toContain("LOT3000");
+      expect(text).toContain("LOT3059");
+    });
   });
 
   describe("Description Wrapping vs Truncation", () => {

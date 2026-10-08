@@ -168,7 +168,7 @@ export class DotMatrixRenderer {
    */
   private renderInvoice80(data: InvoicePrintData, options?: DotMatrixOptions): string {
     const cols = 80;
-    const linesPerPage = options?.linesPerPage || 66;
+    const linesPerPage = options?.linesPerPage !== undefined ? options.linesPerPage : 66;
     const curr = options?.currencyPrefix || "Rs.";
     const leftMargin = " ".repeat(options?.leftMarginSpaces || 0);
     const divDouble = leftMargin + "=".repeat(cols);
@@ -382,7 +382,7 @@ export class DotMatrixRenderer {
    */
   private renderInvoice132(data: InvoicePrintData, options?: DotMatrixOptions): string {
     const cols = 132;
-    const linesPerPage = options?.linesPerPage || 66;
+    const linesPerPage = options?.linesPerPage !== undefined ? options.linesPerPage : 66;
     const curr = options?.currencyPrefix || "Rs.";
     const leftMargin = " ".repeat(options?.leftMarginSpaces || 0);
     const divDouble = leftMargin + "=".repeat(cols);
@@ -627,7 +627,7 @@ export class DotMatrixRenderer {
       headerLines,
       itemLines,
       footerLines,
-      linesPerPage: options?.linesPerPage || 66,
+      linesPerPage: options?.linesPerPage !== undefined ? options.linesPerPage : 66,
       cols,
       leftMargin,
       documentNumber: data.return_number,
@@ -689,7 +689,7 @@ export class DotMatrixRenderer {
       headerLines,
       itemLines,
       footerLines,
-      linesPerPage: options?.linesPerPage || 66,
+      linesPerPage: options?.linesPerPage !== undefined ? options.linesPerPage : 66,
       cols,
       leftMargin,
       documentNumber: data.return_number,
@@ -709,6 +709,12 @@ export class DotMatrixRenderer {
     documentNumber: string;
   }): string {
     const { headerLines, itemLines, footerLines, linesPerPage, cols, leftMargin, documentNumber } = params;
+
+    // Continuous Seamless Flow (linesPerPage: 0): Single continuous roll with no artificial page breaks
+    if (!linesPerPage || linesPerPage === 0) {
+      const allLines = [...headerLines, ...itemLines, ...footerLines];
+      return allLines.join("\n") + "\n\x0C";
+    }
 
     const printableLinesPerPage = linesPerPage - 2; // Reserve 2 lines for form-feed margins
     const continuationHead = cols === 132
