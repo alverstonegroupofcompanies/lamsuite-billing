@@ -23,10 +23,13 @@ export interface DotMatrixOptions {
   truncateDescriptions?: boolean; // If false, wraps descriptions on next line
 }
 
-export interface DotMatrixPage {
-  pageNumber: number;
-  totalPages: number;
-  lines: string[];
+export interface DotMatrixPreviewOptions {
+  columns?: 80 | 132;
+  showRuler?: boolean;
+  showLineNumbers?: boolean;
+  showPageBreaks?: boolean;
+  showTractorFeed?: boolean;
+  enableBold?: boolean;
 }
 
 export class DotMatrixRenderer {
@@ -60,7 +63,31 @@ export class DotMatrixRenderer {
   }
 
   /**
-   * Wraps long text into lines of specified maximum width.
+   * Robustly formats expiry date to standard MM/YY (5 characters).
+   * Parses YYYY-MM, YYYY-MM-DD, MM/YYYY, MM/YY, etc. Never truncates to "2027-".
+   */
+  formatExpiry(exp?: string): string {
+    if (!exp) return "-";
+    const trimmed = exp.trim();
+    // Case 1: YYYY-MM or YYYY-MM-DD
+    const ymd = trimmed.match(/^(\d{4})[-/](\d{1,2})/);
+    if (ymd) {
+      const yr = ymd[1].slice(-2);
+      const mo = ymd[2].padStart(2, "0");
+      return `${mo}/${yr}`;
+    }
+    // Case 2: MM/YYYY or MM/YY
+    const mmy = trimmed.match(/^(\d{1,2})[-/](\d{2,4})/);
+    if (mmy) {
+      const mo = mmy[1].padStart(2, "0");
+      const yr = mmy[2].slice(-2);
+      return `${mo}/${yr}`;
+    }
+    return trimmed.substring(0, 5);
+  }
+
+  /**
+   * Wraps long text into lines of specified maximum width at word boundaries.
    */
   wrapText(text: string, width: number): string[] {
     if (!text) return [];
@@ -71,7 +98,6 @@ export class DotMatrixRenderer {
     for (const word of words) {
       if (!currentLine) {
         if (word.length > width) {
-          // Word longer than width, split forcefully
           let remaining = word;
           while (remaining.length > width) {
             lines.push(remaining.substring(0, width));
@@ -102,7 +128,7 @@ export class DotMatrixRenderer {
   }
 
   /**
-   * Formats numbers to 2 decimal places with standard commas.
+   * Formats numbers to 2 decimal places with Indian grouping commas.
    */
   formatAmount(num: number | undefined | null): string {
     if (num === undefined || num === null || isNaN(num)) return "0.00";
@@ -114,7 +140,7 @@ export class DotMatrixRenderer {
   }
 
   /**
-   * Formats quantity with loose pieces.
+   * Formats quantity with loose pieces (e.g. "1" or "1+4L").
    */
   formatQty(qty: number, looseQty?: number): string {
     if (looseQty && looseQty > 0) {
@@ -128,23 +154,17 @@ export class DotMatrixRenderer {
    */
   renderInvoice(data: InvoicePrintData, options?: DotMatrixOptions): string {
     const cols = options?.columns === 132 ? 132 : 80;
-    const linesPerPage = options?.linesPerPage || 66; // 11" stationery default
-    const curr = options?.currencyPrefix || "Rs.";
-    const leftMargin = " ".repeat(options?.leftMarginSpaces || 0);
-
     if (options?.prePrintedStationery) {
       return this.renderPrePrintedInvoice(data, options);
     }
-
     if (cols === 132) {
       return this.renderInvoice132(data, options);
     }
-
     return this.renderInvoice80(data, options);
   }
 
   /**
-   * 80-Column Standard Dot Matrix Format (for standard 9-pin/24-pin 80-column printers)
+   * 80-Column Standard Dot Matrix Format (for 9-pin/24-pin 80-column printers like Epson LX-310, TVS MSP).
    */
   private renderInvoice80(data: InvoicePrintData, options?: DotMatrixOptions): string {
     const cols = 80;
@@ -160,12 +180,18 @@ export class DotMatrixRenderer {
       for (let i = 0; i < options.topMarginLines; i++) headerLines.push("");
     }
 
-    // Duplicate Marker
-    if (options?.isDuplicate || options?.copyMarker) {
-      headerLines.push(leftMargin + this.center(`*** ${options?.copyMarker || "DUPLICATE COPY"} ***`, cols));
+    // Title / Duplicate Marker Bar
+    const isDup = options?.isDuplicate || options?.copyMarker;
+    const dupText = options?.copyMarker || "DUPLICATE COPY";
+    if (isDup) {
+      const title = "TAX INVOICE";
+      const dupTag = `*** ${dupText} ***`;
+      headerLines.push(leftMargin + title + " ".repeat(Math.max(1, cols - title.length - dupTag.length)) + dupTag);
+    } else {
+      headerLines.push(leftMargin + this.center("TAX INVOICE", cols));
     }
 
-    // Store Header
+    // Store Details (Centered, non-wrapping)
     headerLines.push(leftMargin + this.center(data.store_name.toUpperCase(), cols));
     if (data.store_address) {
       const addrLines = this.wrapText(data.store_address, cols);
@@ -176,52 +202,67 @@ export class DotMatrixRenderer {
     if (data.store_phone) contactParts.push(`Ph: ${data.store_phone}`);
     if (data.store_email) contactParts.push(`Email: ${data.store_email}`);
     if (contactParts.length > 0) {
-      const contactStr = contactParts.join(" | ");
-      const lines = this.wrapText(contactStr, cols);
+      const lines = this.wrapText(contactParts.join(" | "), cols);
       lines.forEach((l) => headerLines.push(leftMargin + this.center(l, cols)));
     }
 
-    const licenseParts: string[] = [];
-    if (data.store_gstin) licenseParts.push(`GSTIN: ${data.store_gstin}`);
-    if (options?.showDrugLicenses !== false && data.drug_license_numbers && data.drug_license_numbers.length > 0) {
-      licenseParts.push(`DL: ${data.drug_license_numbers.join(", ")}`);
+    if (data.store_gstin) {
+      headerLines.push(leftMargin + this.center(`GSTIN: ${data.store_gstin}`, cols));
     }
-    if (data.fssai_no) licenseParts.push(`FSSAI: ${data.fssai_no}`);
-    if (licenseParts.length > 0) {
-      const licStr = licenseParts.join(" | ");
-      const lines = this.wrapText(licStr, cols);
+
+    if (options?.showDrugLicenses !== false && data.drug_license_numbers && data.drug_license_numbers.length > 0) {
+      const dlStr = `DL: ${data.drug_license_numbers.join(", ")}`;
+      const lines = this.wrapText(dlStr, cols);
       lines.forEach((l) => headerLines.push(leftMargin + this.center(l, cols)));
+    }
+
+    if (data.fssai_no) {
+      headerLines.push(leftMargin + this.center(`FSSAI: ${data.fssai_no}`, cols));
     }
 
     headerLines.push(divDouble);
 
-    // Document & Customer Meta Box (2-column layout in 80 cols)
-    const docNoDate = `TAX INVOICE: #${data.invoice_number}`.padEnd(42) + `Date: ${data.invoice_date} ${data.invoice_time || ""}`;
-    headerLines.push(leftMargin + this.padRight(docNoDate, cols));
+    // Document & Customer Meta Grid (2 Columns: Left 42 cols, Right 38 cols)
+    const leftColWidth = 42;
+    const rightColWidth = 38;
 
-    const custName = `Customer   : ${data.customer_name || "Cash Customer"}`.padEnd(42) + `Phone: ${data.customer_phone || "-"}`;
-    headerLines.push(leftMargin + this.padRight(custName, cols));
-
-    if (data.customer_gstin || data.place_of_supply) {
-      const gstinPos = `Cust GSTIN : ${data.customer_gstin || "-"}`.padEnd(42) + `POS: ${data.place_of_supply || "State"}`;
-      headerLines.push(leftMargin + this.padRight(gstinPos, cols));
+    const leftMeta: string[] = [];
+    leftMeta.push(`Customer   : ${data.customer_name || "Walk-in Customer"}`);
+    leftMeta.push(`Phone      : ${data.customer_phone || "-"}`);
+    if (data.customer_gstin) {
+      leftMeta.push(`Cust GSTIN : ${data.customer_gstin}`);
     }
-
-    if (options?.showDoctorPatient !== false && (data.patient_name || data.doctor_name)) {
+    if (options?.showDoctorPatient !== false) {
       if (data.patient_name) {
         const pat = `Patient    : ${data.patient_name}${data.patient_age ? ` (${data.patient_age}Y/${data.patient_gender || ""})` : ""}`;
-        headerLines.push(leftMargin + this.padRight(pat, cols));
+        leftMeta.push(pat);
       }
       if (data.doctor_name) {
-        const doc = `Doctor     : ${data.doctor_name}${data.doctor_reg_no ? ` [Reg: ${data.doctor_reg_no}]` : ""}`;
-        headerLines.push(leftMargin + this.padRight(doc, cols));
+        const doc = `Doctor     : ${data.doctor_name}${data.doctor_reg_no ? ` [${data.doctor_reg_no}]` : ""}`;
+        leftMeta.push(doc);
       }
+    }
+
+    const rightMeta: string[] = [];
+    rightMeta.push(`Invoice No : #${data.invoice_number}`);
+    rightMeta.push(`Date       : ${data.invoice_date}${data.invoice_time ? ` ${data.invoice_time}` : ""}`);
+    rightMeta.push(`Payment    : ${data.payment_mode || "Cash"}`);
+    if (data.place_of_supply) {
+      rightMeta.push(`POS        : ${data.place_of_supply}`);
+    }
+
+    const maxMetaRows = Math.max(leftMeta.length, rightMeta.length);
+    for (let i = 0; i < maxMetaRows; i++) {
+      const l = this.padRight(leftMeta[i] || "", leftColWidth);
+      const r = this.padRight(rightMeta[i] || "", rightColWidth);
+      headerLines.push(leftMargin + l + r);
     }
 
     headerLines.push(divSingle);
 
-    // Item Table Header (Exact 80 chars)
-    const itemTableHead = `${this.padRight("#", 2)} ${this.padRight("Item Description", 23)} ${this.padRight("HSN", 6)} ${this.padRight("Batch", 8)} ${this.padRight("Exp", 5)} ${this.padLeft("Qty", 5)} ${this.padLeft("Rate", 7)} ${this.padLeft("GST", 4)} ${this.padLeft("Amount", 9)}`;
+    // Item Table Header (Exact 80 Columns: 2 + 1 + 25 + 1 + 8 + 1 + 8 + 1 + 5 + 1 + 4 + 1 + 7 + 1 + 4 + 1 + 9 = 80)
+    // #  Item Description           HSN      Batch    Exp   Qty    Rate  GST    Amount
+    const itemTableHead = `${this.padRight("#", 2)} ${this.padRight("Item Description", 25)} ${this.padRight("HSN", 8)} ${this.padRight("Batch", 8)} ${this.padRight("Exp", 5)} ${this.padLeft("Qty", 4)} ${this.padLeft("Rate", 7)} ${this.padLeft("GST", 4)} ${this.padLeft("Amount", 9)}`;
     headerLines.push(leftMargin + itemTableHead);
     headerLines.push(divSingle);
 
@@ -229,21 +270,21 @@ export class DotMatrixRenderer {
     const itemLines: string[] = [];
     data.lines.forEach((item, idx) => {
       const num = this.padRight(idx + 1, 2);
-      const descFirst = item.description.substring(0, 23).padEnd(23);
-      const hsn = this.padRight((item.hsn_code || "-").substring(0, 6), 6);
+      const descFirst = item.description.substring(0, 25).padEnd(25);
+      const hsn = this.padRight((item.hsn_code || "-").substring(0, 8), 8);
       const batch = this.padRight((item.batch_no || "-").substring(0, 8), 8);
-      const exp = this.padRight((item.expiry_date || "-").substring(0, 5), 5);
-      const qty = this.padLeft(this.formatQty(item.qty, item.loose_qty), 5);
+      const exp = this.padRight(this.formatExpiry(item.expiry_date), 5);
+      const qty = this.padLeft(this.formatQty(item.qty, item.loose_qty), 4);
       const rate = this.padLeft(item.rate.toFixed(2), 7);
       const gst = this.padLeft(`${item.gst_percent}%`, 4);
       const amt = this.padLeft(this.formatAmount(item.amount), 9);
 
       itemLines.push(`${leftMargin}${num} ${descFirst} ${hsn} ${batch} ${exp} ${qty} ${rate} ${gst} ${amt}`);
 
-      // If description is longer than 23 chars and truncation is disabled, wrap onto next line
-      if (!options?.truncateDescriptions && item.description.length > 23) {
-        const remainingDesc = item.description.substring(23);
-        const wrapped = this.wrapText(remainingDesc, 55);
+      // If description is longer than 25 chars and truncation is disabled, wrap onto indented lines
+      if (!options?.truncateDescriptions && item.description.length > 25) {
+        const remainingDesc = item.description.substring(25);
+        const wrapped = this.wrapText(remainingDesc, 50);
         wrapped.forEach((w) => {
           itemLines.push(`${leftMargin}   ${w}`);
         });
@@ -254,46 +295,48 @@ export class DotMatrixRenderer {
     const footerLines: string[] = [];
     footerLines.push(divSingle);
 
-    // HSN Summary (Compact Table)
+    // HSN Summary Table (Aligned strictly <= 80 cols)
     if (options?.showHsnSummary !== false) {
       const hsnRows = calculateHsnSummary(data.lines);
       if (hsnRows.length > 0) {
-        footerLines.push(leftMargin + "HSN/SAC     TaxableVal(Rs)  CGST%   CGST(Rs)  SGST%   SGST(Rs)  TotalTax(Rs)");
+        const hsnHead = `${this.padRight("HSN/SAC", 8)} ${this.padLeft("TaxableVal(Rs)", 14)} ${this.padLeft("CGST%", 5)} ${this.padLeft("CGST(Rs)", 9)} ${this.padLeft("SGST%", 5)} ${this.padLeft("SGST(Rs)", 9)} ${this.padLeft("TotalTax(Rs)", 12)}`;
+        footerLines.push(leftMargin + hsnHead);
+        footerLines.push(divSingle);
         hsnRows.forEach((h) => {
-          const hCode = this.padRight(h.hsnCode, 11);
+          const hCode = this.padRight(h.hsnCode, 8);
           const tVal = this.padLeft(this.formatAmount(h.taxableValue), 14);
-          const cRate = this.padLeft(`${h.cgstRate}%`, 7);
-          const cAmt = this.padLeft(this.formatAmount(h.cgstAmount), 10);
-          const sRate = this.padLeft(`${h.sgstRate}%`, 7);
-          const sAmt = this.padLeft(this.formatAmount(h.sgstAmount), 10);
-          const totTax = this.padLeft(this.formatAmount(h.totalTax), 13);
+          const cRate = this.padLeft(`${h.cgstRate}%`, 5);
+          const cAmt = this.padLeft(this.formatAmount(h.cgstAmount), 9);
+          const sRate = this.padLeft(`${h.sgstRate}%`, 5);
+          const sAmt = this.padLeft(this.formatAmount(h.sgstAmount), 9);
+          const totTax = this.padLeft(this.formatAmount(h.totalTax), 12);
           footerLines.push(`${leftMargin}${hCode} ${tVal} ${cRate} ${cAmt} ${sRate} ${sAmt} ${totTax}`);
         });
         footerLines.push(divSingle);
       }
     }
 
-    // Totals Box (Right Aligned)
-    const subtotalStr = `Taxable Subtotal: ${curr} ` + this.padLeft(this.formatAmount(data.subtotal), 12);
+    // Totals Box (Right Aligned to 80 cols)
+    const subtotalStr = `Taxable Subtotal  : ${curr} ` + this.padLeft(this.formatAmount(data.subtotal), 11);
     footerLines.push(leftMargin + this.padLeft(subtotalStr, cols));
 
     if (data.cgst_total !== undefined && data.sgst_total !== undefined) {
-      const cgstStr = `CGST Total      : ${curr} ` + this.padLeft(this.formatAmount(data.cgst_total), 12);
-      const sgstStr = `SGST Total      : ${curr} ` + this.padLeft(this.formatAmount(data.sgst_total), 12);
+      const cgstStr = `Central GST (CGST): ${curr} ` + this.padLeft(this.formatAmount(data.cgst_total), 11);
+      const sgstStr = `State GST (SGST)  : ${curr} ` + this.padLeft(this.formatAmount(data.sgst_total), 11);
       footerLines.push(leftMargin + this.padLeft(cgstStr, cols));
       footerLines.push(leftMargin + this.padLeft(sgstStr, cols));
     } else if (data.tax_total > 0) {
-      const taxStr = `GST Tax Total   : ${curr} ` + this.padLeft(this.formatAmount(data.tax_total), 12);
+      const taxStr = `GST Tax Total     : ${curr} ` + this.padLeft(this.formatAmount(data.tax_total), 11);
       footerLines.push(leftMargin + this.padLeft(taxStr, cols));
     }
 
     if (data.round_off && Math.abs(data.round_off) > 0.001) {
-      const roStr = `Round Off       : ${curr} ` + this.padLeft(this.formatAmount(data.round_off), 12);
+      const roStr = `Round Off         : ${curr} ` + this.padLeft(this.formatAmount(data.round_off), 11);
       footerLines.push(leftMargin + this.padLeft(roStr, cols));
     }
 
     footerLines.push(divDouble);
-    const grandTotalStr = `GRAND TOTAL     : ${curr} ` + this.padLeft(this.formatAmount(data.grand_total), 12);
+    const grandTotalStr = `GRAND TOTAL       : ${curr} ` + this.padLeft(this.formatAmount(data.grand_total), 11);
     footerLines.push(leftMargin + this.padLeft(grandTotalStr, cols));
     footerLines.push(divDouble);
 
@@ -302,22 +345,24 @@ export class DotMatrixRenderer {
     const wordsLines = this.wrapText(`Amount in Words: ${words}`, cols);
     wordsLines.forEach((w) => footerLines.push(leftMargin + w));
 
-    // UPI Payment text (No QR graphics on Dot Matrix)
+    // UPI text (Simple, clean format)
     if (data.upi_vpa) {
-      footerLines.push(leftMargin + `Scan/Pay via UPI: ${data.upi_vpa} | Pay: ${curr} ${this.formatAmount(data.grand_total)}`);
+      footerLines.push(leftMargin + `UPI ID: ${data.upi_vpa}`);
     }
 
-    // Terms and Signatures
+    // Terms
     if (options?.showTerms !== false && data.terms_and_conditions) {
       const terms = this.wrapText(`Terms: ${data.terms_and_conditions}`, cols);
       terms.forEach((t) => footerLines.push(leftMargin + t));
     }
 
     footerLines.push("");
-    const signBox = `Customer Signature` + " ".repeat(cols - 18 - 25) + `For ${data.store_name.substring(0, 20)}`;
-    footerLines.push(leftMargin + signBox);
+    const storeShortName = data.store_name.length > 30 ? data.store_name.substring(0, 30) : data.store_name;
+    const forShop = `For ${storeShortName}`;
+    const signRow = `Customer Signature` + " ".repeat(Math.max(2, cols - 18 - forShop.length)) + forShop;
+    footerLines.push(leftMargin + signRow);
     footerLines.push("");
-    const authSign = " ".repeat(cols - 25) + `Authorised Signatory`;
+    const authSign = " ".repeat(cols - 20) + `Authorised Signatory`;
     footerLines.push(leftMargin + authSign);
 
     // Assemble Paginated Output
@@ -348,8 +393,14 @@ export class DotMatrixRenderer {
       for (let i = 0; i < options.topMarginLines; i++) headerLines.push("");
     }
 
-    if (options?.isDuplicate || options?.copyMarker) {
-      headerLines.push(leftMargin + this.center(`*** ${options?.copyMarker || "DUPLICATE COPY"} ***`, cols));
+    const isDup = options?.isDuplicate || options?.copyMarker;
+    const dupText = options?.copyMarker || "DUPLICATE COPY";
+    if (isDup) {
+      const title = "TAX INVOICE";
+      const dupTag = `*** ${dupText} ***`;
+      headerLines.push(leftMargin + title + " ".repeat(Math.max(1, cols - title.length - dupTag.length)) + dupTag);
+    } else {
+      headerLines.push(leftMargin + this.center("TAX INVOICE", cols));
     }
 
     headerLines.push(leftMargin + this.center(data.store_name.toUpperCase(), cols));
@@ -357,33 +408,41 @@ export class DotMatrixRenderer {
       headerLines.push(leftMargin + this.center(data.store_address, cols));
     }
 
-    const regLine = `GSTIN: ${data.store_gstin || "-"} | DL: ${(data.drug_license_numbers || []).join(", ") || "-"} | Ph: ${data.store_phone || "-"}`;
-    headerLines.push(leftMargin + this.center(regLine, cols));
+    const subHeaders: string[] = [];
+    if (data.store_gstin) subHeaders.push(`GSTIN: ${data.store_gstin}`);
+    if (data.store_phone) subHeaders.push(`Ph: ${data.store_phone}`);
+    if (data.store_email) subHeaders.push(`Email: ${data.store_email}`);
+    if (options?.showDrugLicenses !== false && data.drug_license_numbers && data.drug_license_numbers.length > 0) {
+      subHeaders.push(`DL: ${data.drug_license_numbers.join(", ")}`);
+    }
+    if (subHeaders.length > 0) {
+      headerLines.push(leftMargin + this.center(subHeaders.join(" | "), cols));
+    }
+
     headerLines.push(divDouble);
 
-    // 3-Column Header Meta Box in 132 columns
-    const col1 = `INVOICE NO : #${data.invoice_number}`.padEnd(45);
-    const col2 = `DATE: ${data.invoice_date} ${data.invoice_time || ""}`.padEnd(45);
-    const col3 = `POS: ${data.place_of_supply || "State"}`;
-    headerLines.push(leftMargin + col1 + col2 + col3);
+    // 3-Column Meta Grid in 132 columns
+    const p1 = `Customer : ${data.customer_name || "Walk-in Customer"}`.padEnd(46);
+    const p2 = `Invoice No: #${data.invoice_number}`.padEnd(42);
+    const p3 = `Date: ${data.invoice_date} ${data.invoice_time || ""}`.padEnd(44);
+    headerLines.push(leftMargin + p1 + p2 + p3);
 
-    const cust1 = `CUSTOMER   : ${data.customer_name || "Cash Customer"}`.padEnd(45);
-    const cust2 = `PHONE: ${data.customer_phone || "-"}`.padEnd(45);
-    const cust3 = `GSTIN: ${data.customer_gstin || "-"}`;
-    headerLines.push(leftMargin + cust1 + cust2 + cust3);
+    const g1 = `Phone    : ${data.customer_phone || "-"}`.padEnd(46);
+    const g2 = `Cust GSTIN: ${data.customer_gstin || "-"}`.padEnd(42);
+    const g3 = `POS : ${data.place_of_supply || "State"}`.padEnd(44);
+    headerLines.push(leftMargin + g1 + g2 + g3);
 
-    if (data.doctor_name || data.patient_name) {
-      const p1 = `PATIENT    : ${data.patient_name || "-"}`.padEnd(45);
-      const p2 = `DOCTOR: ${data.doctor_name || "-"}`.padEnd(45);
-      const p3 = `REG: ${data.doctor_reg_no || "-"}`;
-      headerLines.push(leftMargin + p1 + p2 + p3);
+    if (options?.showDoctorPatient !== false && (data.patient_name || data.doctor_name)) {
+      const d1 = `Patient  : ${data.patient_name || "-"}${data.patient_age ? ` (${data.patient_age}Y/${data.patient_gender || ""})` : ""}`.padEnd(46);
+      const d2 = `Doctor   : ${data.doctor_name || "-"}`.padEnd(42);
+      const d3 = `Payment : ${data.payment_mode || "Cash"}`.padEnd(44);
+      headerLines.push(leftMargin + d1 + d2 + d3);
     }
 
     headerLines.push(divSingle);
 
     // 132-Column Item Table Header
-    // #  Item Description                                 HSN Code    Batch No   Expiry      Qty       Rate(Rs)   Disc(Rs)   Taxable(Rs)   GST%    Amount(Rs)
-    const itemHead132 = " #  Item Description                                 HSN Code    Batch No   Expiry      Qty       Rate(Rs)   Disc(Rs)   Taxable(Rs)   GST%    Amount(Rs)";
+    const itemHead132 = `${this.padRight("#", 3)} ${this.padRight("Item Description", 46)} ${this.padRight("HSN Code", 10)} ${this.padRight("Batch No", 10)} ${this.padRight("Expiry", 7)} ${this.padLeft("Qty", 8)} ${this.padLeft("Rate(Rs)", 14)} ${this.padLeft("Disc(Rs)", 10)} ${this.padLeft("Taxable(Rs)", 13)} ${this.padLeft("GST%", 6)} ${this.padLeft("Amount(Rs)", 13)}`;
     headerLines.push(leftMargin + itemHead132);
     headerLines.push(divSingle);
 
@@ -393,7 +452,7 @@ export class DotMatrixRenderer {
       const desc = item.description.substring(0, 46).padEnd(46);
       const hsn = this.padRight((item.hsn_code || "-").substring(0, 10), 10);
       const batch = this.padRight((item.batch_no || "-").substring(0, 10), 10);
-      const exp = this.padRight((item.expiry_date || "-").substring(0, 7), 7);
+      const exp = this.padRight(this.formatExpiry(item.expiry_date), 7);
       const qty = this.padLeft(this.formatQty(item.qty, item.loose_qty), 8);
       const rate = this.padLeft(item.rate.toFixed(2), 14);
       const disc = this.padLeft(this.formatAmount(item.discount_amount || 0), 10);
@@ -424,46 +483,40 @@ export class DotMatrixRenderer {
           const cVal = this.padLeft(this.formatAmount(h.cgstAmount), 20);
           const sRate = this.padLeft(`${h.sgstRate}%`, 11);
           const sVal = this.padLeft(this.formatAmount(h.sgstAmount), 20);
-          const tot = this.padLeft(this.formatAmount(h.totalTax), 26);
-          footerLines.push(`${leftMargin}${cCode} ${tAmt} ${cRate} ${cVal} ${sRate} ${sVal} ${tot}`);
+          const totVal = this.padLeft(this.formatAmount(h.totalTax), 26);
+          footerLines.push(`${leftMargin}${cCode}${tAmt}${cRate}${cVal}${sRate}${sVal}${totVal}`);
         });
         footerLines.push(divSingle);
       }
     }
 
-    // Totals Block
-    const subStr = `Taxable Subtotal : ${curr} ` + this.padLeft(this.formatAmount(data.subtotal), 14);
-    footerLines.push(leftMargin + this.padLeft(subStr, cols));
-
+    // Totals Box
+    footerLines.push(leftMargin + this.padLeft(`Taxable Subtotal  : ${curr} ` + this.padLeft(this.formatAmount(data.subtotal), 14), cols));
     if (data.cgst_total !== undefined && data.sgst_total !== undefined) {
-      const cgstStr = `CGST Total       : ${curr} ` + this.padLeft(this.formatAmount(data.cgst_total), 14);
-      const sgstStr = `SGST Total       : ${curr} ` + this.padLeft(this.formatAmount(data.sgst_total), 14);
-      footerLines.push(leftMargin + this.padLeft(cgstStr, cols));
-      footerLines.push(leftMargin + this.padLeft(sgstStr, cols));
+      footerLines.push(leftMargin + this.padLeft(`CGST Amount       : ${curr} ` + this.padLeft(this.formatAmount(data.cgst_total), 14), cols));
+      footerLines.push(leftMargin + this.padLeft(`SGST Amount       : ${curr} ` + this.padLeft(this.formatAmount(data.sgst_total), 14), cols));
     }
-
-    if (data.round_off && Math.abs(data.round_off) > 0.001) {
-      const roStr = `Round Off        : ${curr} ` + this.padLeft(this.formatAmount(data.round_off), 14);
-      footerLines.push(leftMargin + this.padLeft(roStr, cols));
+    if (data.round_off) {
+      footerLines.push(leftMargin + this.padLeft(`Round Off         : ${curr} ` + this.padLeft(this.formatAmount(data.round_off), 14), cols));
     }
-
     footerLines.push(divDouble);
-    const gtStr = `GRAND TOTAL      : ${curr} ` + this.padLeft(this.formatAmount(data.grand_total), 14);
-    footerLines.push(leftMargin + this.padLeft(gtStr, cols));
+    footerLines.push(leftMargin + this.padLeft(`GRAND TOTAL       : ${curr} ` + this.padLeft(this.formatAmount(data.grand_total), 14), cols));
     footerLines.push(divDouble);
 
     const words = data.amount_in_words || numberToWordsIndian(data.grand_total);
     footerLines.push(leftMargin + `Amount in Words: ${words}`);
-
     if (data.upi_vpa) {
-      footerLines.push(leftMargin + `UPI ID: ${data.upi_vpa} | Pay Amount: ${curr} ${this.formatAmount(data.grand_total)}`);
+      footerLines.push(leftMargin + `UPI ID: ${data.upi_vpa}`);
+    }
+    if (options?.showTerms !== false && data.terms_and_conditions) {
+      footerLines.push(leftMargin + `Terms: ${data.terms_and_conditions}`);
     }
 
     footerLines.push("");
     const signBox = `Customer Signature` + " ".repeat(cols - 18 - 30) + `For ${data.store_name.substring(0, 25)}`;
     footerLines.push(leftMargin + signBox);
     footerLines.push("");
-    footerLines.push(leftMargin + " ".repeat(cols - 30) + `Authorised Signatory`);
+    footerLines.push(leftMargin + " ".repeat(cols - 25) + `Authorised Signatory`);
 
     return this.paginateDocument({
       headerLines,
@@ -477,29 +530,31 @@ export class DotMatrixRenderer {
   }
 
   /**
-   * Pre-printed stationery mode: prints values at predefined line/column slots without borders
+   * Pre-printed stationery format (Prints values at fixed coordinates without borders).
    */
   private renderPrePrintedInvoice(data: InvoicePrintData, options?: DotMatrixOptions): string {
-    const cols = options?.columns === 132 ? 132 : 80;
     const linesPerPage = options?.linesPerPage || 66;
     const leftMargin = " ".repeat(options?.leftMarginSpaces || 0);
     const outLines: string[] = [];
 
-    // Header offset
-    for (let i = 0; i < 4; i++) outLines.push("");
+    // Header offset for pre-printed letterhead
+    for (let i = 0; i < (options?.topMarginLines || 8); i++) {
+      outLines.push("");
+    }
 
-    outLines.push(leftMargin + " ".repeat(10) + data.invoice_number.padEnd(30) + data.invoice_date);
-    outLines.push(leftMargin + " ".repeat(10) + (data.customer_name || "Cash Customer").padEnd(30) + (data.customer_phone || ""));
+    // Document Meta
+    outLines.push(leftMargin + `               ${data.invoice_number.padEnd(25)} ${data.invoice_date}`);
+    outLines.push(leftMargin + `               ${(data.customer_name || "Cash").padEnd(25)} ${data.customer_phone || ""}`);
     outLines.push("");
 
-    // Item lines (formatted plain without frames)
-    data.lines.forEach((l, idx) => {
+    // Items
+    data.lines.forEach((item, idx) => {
       const num = this.padRight(idx + 1, 3);
-      const desc = l.description.substring(0, 28).padEnd(28);
-      const batch = (l.batch_no || "-").substring(0, 8).padEnd(8);
-      const qty = this.padLeft(l.qty, 5);
-      const rate = this.padLeft(l.rate.toFixed(2), 8);
-      const amt = this.padLeft(this.formatAmount(l.amount), 10);
+      const desc = item.description.substring(0, 25).padEnd(25);
+      const batch = this.padRight(item.batch_no || "-", 8);
+      const qty = this.padLeft(item.qty, 5);
+      const rate = this.padLeft(item.rate.toFixed(2), 8);
+      const amt = this.padLeft(this.formatAmount(item.amount), 10);
       outLines.push(`${leftMargin}${num} ${desc} ${batch} ${qty} ${rate} ${amt}`);
     });
 
@@ -514,74 +569,6 @@ export class DotMatrixRenderer {
     outLines.push("\x0C");
 
     return outLines.join("\n");
-  }
-
-  /**
-   * Continuous multi-page pagination logic with repeated headers and Form Feeds (\x0C)
-   */
-  private paginateDocument(params: {
-    headerLines: string[];
-    itemLines: string[];
-    footerLines: string[];
-    linesPerPage: number;
-    cols: number;
-    leftMargin: string;
-    documentNumber: string;
-  }): string {
-    const { headerLines, itemLines, footerLines, linesPerPage, cols, leftMargin, documentNumber } = params;
-
-    const printableLinesPerPage = linesPerPage - 2; // Reserve 2 lines for form-feed margins
-    const continuationHead = cols === 132
-      ? `${this.padRight("#", 3)} ${this.padRight("Item Description", 46)} ${this.padRight("HSN Code", 10)} ${this.padRight("Batch No", 10)} ${this.padRight("Expiry", 7)} ${this.padLeft("Qty", 8)} ${this.padLeft("Rate(Rs)", 14)} ${this.padLeft("Disc(Rs)", 10)} ${this.padLeft("Taxable(Rs)", 13)} ${this.padLeft("GST%", 6)} ${this.padLeft("Amount(Rs)", 13)}`
-      : `${this.padRight("#", 2)} ${this.padRight("Item Description", 23)} ${this.padRight("HSN", 6)} ${this.padRight("Batch", 8)} ${this.padRight("Exp", 5)} ${this.padLeft("Qty", 5)} ${this.padLeft("Rate", 7)} ${this.padLeft("GST", 4)} ${this.padLeft("Amount", 9)}`;
-
-    const continuationHeader = [
-      leftMargin + `[ Continued from Page 1 - Document #${documentNumber} ]`,
-      leftMargin + "-".repeat(cols),
-      leftMargin + continuationHead,
-      leftMargin + "-".repeat(cols),
-    ];
-    const continuationFooter = [
-      leftMargin + "-".repeat(cols),
-      leftMargin + this.center("[ Continued on Next Page... ]", cols),
-    ];
-
-    const pages: string[][] = [];
-    let currentPage: string[] = [...headerLines];
-    let pageNum = 1;
-
-    for (let i = 0; i < itemLines.length; i++) {
-      const line = itemLines[i];
-      // Check if adding this item line (plus potential continuation footer) exceeds page limit
-      if (currentPage.length + 1 + continuationFooter.length > printableLinesPerPage) {
-        // Page full, add continuation footer and advance page
-        currentPage.push(...continuationFooter);
-        pages.push(currentPage);
-        pageNum++;
-        currentPage = [...continuationHeader];
-      }
-      currentPage.push(line);
-    }
-
-    // Now check if footerLines fit on the current page
-    if (currentPage.length + footerLines.length > printableLinesPerPage) {
-      // Doesn't fit on current page, push current page and place footer on a new page
-      currentPage.push(...continuationFooter);
-      pages.push(currentPage);
-      pageNum++;
-      currentPage = [
-        leftMargin + `[ Document #${documentNumber} - Totals & Summary ]`,
-        leftMargin + "-".repeat(cols),
-        ...footerLines,
-      ];
-      pages.push(currentPage);
-    } else {
-      currentPage.push(...footerLines);
-      pages.push(currentPage);
-    }
-
-    // Join pages with Form Feed character (\x0C / \f) so dot-matrix advances to top of form
-    return pages.map((p) => p.join("\n")).join("\n\x0C\n") + "\n\x0C";
   }
 
   /**
@@ -604,31 +591,32 @@ export class DotMatrixRenderer {
     if (data.original_invoice_number) {
       headerLines.push(leftMargin + `Orig Invoice   : #${data.original_invoice_number}`.padEnd(42) + `Inv Date: ${data.original_invoice_date || "-"}`);
     }
-    headerLines.push(leftMargin + `Customer       : ${data.customer_name}`.padEnd(42) + `Phone: ${data.customer_phone || "-"}`);
+    const cName = this.padRight(`Customer       : ${data.customer_name.substring(0, 25)}`, 42);
+    headerLines.push(leftMargin + cName + `Phone: ${data.customer_phone || "-"}`);
     headerLines.push(divSingle);
 
-    headerLines.push(leftMargin + " #  Item Description          HSN    Batch     Qty       Rate    GST%     Amount");
+    headerLines.push(leftMargin + `${this.padRight("#", 2)} ${this.padRight("Item Description", 25)} ${this.padRight("HSN", 8)} ${this.padRight("Batch", 8)} ${this.padLeft("Qty", 4)} ${this.padLeft("Rate", 7)} ${this.padLeft("GST", 4)} ${this.padLeft("Amount", 9)}`);
     headerLines.push(divSingle);
 
     const itemLines: string[] = [];
     data.lines.forEach((l, idx) => {
-      const num = this.padRight(idx + 1, 3);
+      const num = this.padRight(idx + 1, 2);
       const desc = l.description.substring(0, 25).padEnd(25);
-      const hsn = this.padRight((l.hsn_code || "-").substring(0, 6), 6);
+      const hsn = this.padRight((l.hsn_code || "-").substring(0, 8), 8);
       const batch = this.padRight((l.batch_no || "-").substring(0, 8), 8);
-      const qty = this.padLeft(l.qty, 6);
-      const rate = this.padLeft(l.rate.toFixed(2), 10);
-      const gst = this.padLeft(`${l.gst_percent}%`, 7);
-      const amt = this.padLeft(this.formatAmount(l.amount), 11);
+      const qty = this.padLeft(l.qty, 4);
+      const rate = this.padLeft(l.rate.toFixed(2), 7);
+      const gst = this.padLeft(`${l.gst_percent}%`, 4);
+      const amt = this.padLeft(this.formatAmount(l.amount), 9);
       itemLines.push(`${leftMargin}${num} ${desc} ${hsn} ${batch} ${qty} ${rate} ${gst} ${amt}`);
     });
 
     const footerLines: string[] = [];
     footerLines.push(divSingle);
-    footerLines.push(leftMargin + this.padLeft(`Taxable Total : ${curr} ` + this.padLeft(this.formatAmount(data.subtotal), 12), cols));
-    footerLines.push(leftMargin + this.padLeft(`Tax Total     : ${curr} ` + this.padLeft(this.formatAmount(data.tax_total), 12), cols));
+    footerLines.push(leftMargin + this.padLeft(`Taxable Total : ${curr} ` + this.padLeft(this.formatAmount(data.subtotal), 11), cols));
+    footerLines.push(leftMargin + this.padLeft(`Tax Total     : ${curr} ` + this.padLeft(this.formatAmount(data.tax_total), 11), cols));
     footerLines.push(divDouble);
-    footerLines.push(leftMargin + this.padLeft(`CREDIT TOTAL  : ${curr} ` + this.padLeft(this.formatAmount(data.grand_total), 12), cols));
+    footerLines.push(leftMargin + this.padLeft(`CREDIT TOTAL  : ${curr} ` + this.padLeft(this.formatAmount(data.grand_total), 11), cols));
     footerLines.push(divDouble);
     footerLines.push(leftMargin + `Amount in Words: ${data.amount_in_words || numberToWordsIndian(data.grand_total)}`);
     footerLines.push(leftMargin + `Refund Mode: ${data.refund_mode}`);
@@ -665,31 +653,32 @@ export class DotMatrixRenderer {
     if (data.supplier_invoice_no) {
       headerLines.push(leftMargin + `Supplier Inv   : #${data.supplier_invoice_no}`.padEnd(42) + `Purch No: ${data.original_purchase_number || "-"}`);
     }
-    headerLines.push(leftMargin + `Supplier       : ${data.supplier_name}`.padEnd(42) + `GSTIN: ${data.supplier_gstin || "-"}`);
+    const sName = this.padRight(`Supplier       : ${data.supplier_name.substring(0, 25)}`, 42);
+    headerLines.push(leftMargin + sName + `GSTIN: ${data.supplier_gstin || "-"}`);
     headerLines.push(divSingle);
 
-    headerLines.push(leftMargin + " #  Item Description          HSN    Batch     Qty       Rate    GST%     Amount");
+    headerLines.push(leftMargin + `${this.padRight("#", 2)} ${this.padRight("Item Description", 25)} ${this.padRight("HSN", 8)} ${this.padRight("Batch", 8)} ${this.padLeft("Qty", 4)} ${this.padLeft("Rate", 7)} ${this.padLeft("GST", 4)} ${this.padLeft("Amount", 9)}`);
     headerLines.push(divSingle);
 
     const itemLines: string[] = [];
     data.lines.forEach((l, idx) => {
-      const num = this.padRight(idx + 1, 3);
+      const num = this.padRight(idx + 1, 2);
       const desc = l.description.substring(0, 25).padEnd(25);
-      const hsn = this.padRight((l.hsn_code || "-").substring(0, 6), 6);
+      const hsn = this.padRight((l.hsn_code || "-").substring(0, 8), 8);
       const batch = this.padRight((l.batch_no || "-").substring(0, 8), 8);
-      const qty = this.padLeft(l.qty, 6);
-      const rate = this.padLeft(l.rate.toFixed(2), 10);
-      const gst = this.padLeft(`${l.gst_percent}%`, 7);
-      const amt = this.padLeft(this.formatAmount(l.amount), 11);
+      const qty = this.padLeft(l.qty, 4);
+      const rate = this.padLeft(l.rate.toFixed(2), 7);
+      const gst = this.padLeft(`${l.gst_percent}%`, 4);
+      const amt = this.padLeft(this.formatAmount(l.amount), 9);
       itemLines.push(`${leftMargin}${num} ${desc} ${hsn} ${batch} ${qty} ${rate} ${gst} ${amt}`);
     });
 
     const footerLines: string[] = [];
     footerLines.push(divSingle);
-    footerLines.push(leftMargin + this.padLeft(`Taxable Total : ${curr} ` + this.padLeft(this.formatAmount(data.subtotal), 12), cols));
-    footerLines.push(leftMargin + this.padLeft(`Tax Total     : ${curr} ` + this.padLeft(this.formatAmount(data.tax_total), 12), cols));
+    footerLines.push(leftMargin + this.padLeft(`Taxable Total : ${curr} ` + this.padLeft(this.formatAmount(data.subtotal), 11), cols));
+    footerLines.push(leftMargin + this.padLeft(`Tax Total     : ${curr} ` + this.padLeft(this.formatAmount(data.tax_total), 11), cols));
     footerLines.push(divDouble);
-    footerLines.push(leftMargin + this.padLeft(`DEBIT TOTAL   : ${curr} ` + this.padLeft(this.formatAmount(data.grand_total), 12), cols));
+    footerLines.push(leftMargin + this.padLeft(`DEBIT TOTAL   : ${curr} ` + this.padLeft(this.formatAmount(data.grand_total), 11), cols));
     footerLines.push(divDouble);
     footerLines.push(leftMargin + `Amount in Words: ${data.amount_in_words || numberToWordsIndian(data.grand_total)}`);
     footerLines.push(leftMargin + `Settlement: ${data.settlement_type}`);
@@ -708,6 +697,70 @@ export class DotMatrixRenderer {
   }
 
   /**
+   * Continuous multi-page pagination logic with repeated headers and Form Feeds (\x0C)
+   */
+  private paginateDocument(params: {
+    headerLines: string[];
+    itemLines: string[];
+    footerLines: string[];
+    linesPerPage: number;
+    cols: number;
+    leftMargin: string;
+    documentNumber: string;
+  }): string {
+    const { headerLines, itemLines, footerLines, linesPerPage, cols, leftMargin, documentNumber } = params;
+
+    const printableLinesPerPage = linesPerPage - 2; // Reserve 2 lines for form-feed margins
+    const continuationHead = cols === 132
+      ? `${this.padRight("#", 3)} ${this.padRight("Item Description", 46)} ${this.padRight("HSN Code", 10)} ${this.padRight("Batch No", 10)} ${this.padRight("Expiry", 7)} ${this.padLeft("Qty", 8)} ${this.padLeft("Rate(Rs)", 14)} ${this.padLeft("Disc(Rs)", 10)} ${this.padLeft("Taxable(Rs)", 13)} ${this.padLeft("GST%", 6)} ${this.padLeft("Amount(Rs)", 13)}`
+      : `${this.padRight("#", 2)} ${this.padRight("Item Description", 25)} ${this.padRight("HSN", 8)} ${this.padRight("Batch", 8)} ${this.padRight("Exp", 5)} ${this.padLeft("Qty", 4)} ${this.padLeft("Rate", 7)} ${this.padLeft("GST", 4)} ${this.padLeft("Amount", 9)}`;
+
+    const continuationHeader = [
+      leftMargin + `[ Continued from Page 1 - Document #${documentNumber} ]`,
+      leftMargin + "-".repeat(cols),
+      leftMargin + continuationHead,
+      leftMargin + "-".repeat(cols),
+    ];
+    const continuationFooter = [
+      leftMargin + "-".repeat(cols),
+      leftMargin + this.center("[ Continued on Next Page... ]", cols),
+    ];
+
+    const pages: string[][] = [];
+    let currentPage: string[] = [...headerLines];
+    let pageNum = 1;
+
+    for (let i = 0; i < itemLines.length; i++) {
+      const line = itemLines[i];
+      if (currentPage.length + 1 + continuationFooter.length > printableLinesPerPage) {
+        currentPage.push(...continuationFooter);
+        pages.push(currentPage);
+        pageNum++;
+        currentPage = [...continuationHeader];
+      }
+      currentPage.push(line);
+    }
+
+    if (currentPage.length + footerLines.length > printableLinesPerPage) {
+      currentPage.push(...continuationFooter);
+      pages.push(currentPage);
+      pageNum++;
+      currentPage = [
+        leftMargin + `[ Document #${documentNumber} - Totals & Summary ]`,
+        leftMargin + "-".repeat(cols),
+        ...footerLines,
+      ];
+      pages.push(currentPage);
+    } else {
+      currentPage.push(...footerLines);
+      pages.push(currentPage);
+    }
+
+    // Join pages with Form Feed character (\x0C)
+    return pages.map((p) => p.join("\n")).join("\n\x0C\n") + "\n\x0C";
+  }
+
+  /**
    * Generates ESC/P binary sequence with escape commands for hardware dot matrix printers.
    */
   generateEscPBytes(rawText: string, options?: DotMatrixOptions): Uint8Array {
@@ -722,17 +775,14 @@ export class DotMatrixRenderer {
 
     // 3. Set Pitch / CPI
     if (options?.columns === 132 || options?.cpi === "17cpi_condensed") {
-      // SI: Condensed Mode (17.14 CPI)
       bytes.push(0x0F);
     } else if (options?.cpi === "12cpi") {
-      // ESC M: 12 CPI Elite
       bytes.push(0x1B, 0x4D);
     } else {
-      // ESC P: 10 CPI Pica (Default)
       bytes.push(0x1B, 0x50);
     }
 
-    // 4. Set Line Spacing (ESC 2 = 1/6", ESC 0 = 1/8")
+    // 4. Set Line Spacing (ESC 2 = 1/6")
     bytes.push(0x1B, 0x32);
 
     // 5. Optional Double Strike for Carbon Copies (ESC G)
@@ -745,7 +795,7 @@ export class DotMatrixRenderer {
       bytes.push(0x1B, 0x43, Math.min(127, options.linesPerPage));
     }
 
-    // Encode text to pure ASCII with CRLF line endings
+    // Convert non-ASCII symbols (e.g. ₹ -> Rs.) and encode with CRLF line endings
     const cleanText = rawText
       .replace(/₹/g, "Rs.")
       .replace(/\r\n/g, "\n")
@@ -756,7 +806,7 @@ export class DotMatrixRenderer {
       bytes.push(encoded[i]);
     }
 
-    // 7. Ensure terminating Form Feed (\x0C) to advance continuous paper to tear perforation
+    // 7. Ensure terminating Form Feed (\x0C)
     if (bytes[bytes.length - 1] !== 0x0C && bytes[bytes.length - 2] !== 0x0C) {
       bytes.push(0x0C);
     }
@@ -765,60 +815,86 @@ export class DotMatrixRenderer {
   }
 
   /**
-   * Generates a realistic HTML preview for Dot Matrix stationery with monospace layout, column ruler, and line numbers.
+   * Generates authentic Continuous-Form HTML Preview with tractor-feed strips,
+   * exact character grid, column ruler, line numbers gutter, and page boundaries.
    */
-  generateMonospaceHtmlPreview(text: string, options?: { showRuler?: boolean; showPageBreaks?: boolean; columns?: 80 | 132 }): string {
+  generateMonospaceHtmlPreview(text: string, options?: DotMatrixPreviewOptions): string {
     const cols = options?.columns || 80;
+    const showRuler = options?.showRuler !== false;
+    const showLineNumbers = options?.showLineNumbers !== false;
+    const showPageBreaks = options?.showPageBreaks !== false;
+    const is132 = cols === 132;
+
     const pages = text.split("\x0C").filter((p) => p.trim().length > 0);
 
-    // Column Ruler
-    let ruler = "";
-    if (options?.showRuler !== false) {
-      let r1 = "";
-      let r2 = "";
-      for (let i = 1; i <= cols; i++) {
-        if (i % 10 === 0) {
-          r1 += String(i / 10).padStart(10, " ");
-          r2 += "0";
-        } else {
-          r2 += String(i % 10);
-        }
+    // 1. Exact Column Ruler (Tens and Units align with 100% character grid accuracy)
+    let rTens = "";
+    let rUnits = "";
+    for (let i = 1; i <= cols; i++) {
+      if (i % 10 === 0) {
+        rTens += String(i / 10);
+      } else {
+        rTens += " ";
       }
-      ruler = `<div class="ruler font-mono text-[10px] text-emerald-800 bg-emerald-100/80 dark:bg-emerald-950/50 dark:text-emerald-400 p-2 border-b border-emerald-300 dark:border-emerald-800 select-none overflow-x-auto">
-        <div class="tracking-widest">${r1}</div>
-        <div class="tracking-widest">${r2}</div>
-      </div>`;
+      rUnits += String(i % 10);
     }
 
+    const rulerHtml = showRuler
+      ? `<div class="ruler-container font-mono select-none">
+          <div class="ruler-tens">${rTens}</div>
+          <div class="ruler-units">${rUnits}</div>
+        </div>`
+      : "";
+
+    // 2. Render Pages with Tractor Feed Margins
     const renderedPagesHtml = pages
-      .map((pageText, idx) => {
-        const pageLines = pageText.split("\n");
-        const numberedLines = pageLines
-          .map((line, lIdx) => {
+      .map((pageText, pIdx) => {
+        const lines = pageText.split("\n");
+        const renderedLines = lines
+          .map((rawLine, lIdx) => {
             const lineNum = String(lIdx + 1).padStart(2, "0");
-            const escapedLine = line
+            const escaped = rawLine
               .replace(/&/g, "&amp;")
               .replace(/</g, "&lt;")
               .replace(/>/g, "&gt;");
-            return `<div class="dot-line flex hover:bg-emerald-500/10">
-              <span class="line-no text-[10px] text-slate-400 select-none w-7 text-right pr-2 border-r border-slate-300 dark:border-slate-700">${lineNum}</span>
-              <span class="line-content pl-2 whitespace-pre text-slate-900 dark:text-slate-100">${escapedLine || " "}</span>
+
+            // Detect bold lines (store name, TAX INVOICE, GRAND TOTAL, headers)
+            const isBoldLine =
+              rawLine.includes("TAX INVOICE") ||
+              rawLine.includes("GRAND TOTAL") ||
+              rawLine.includes("Item Description") ||
+              rawLine.includes("========================================");
+
+            const lineNumHtml = showLineNumbers
+              ? `<span class="line-no">${lineNum}</span>`
+              : "";
+
+            return `<div class="dot-line ${isBoldLine ? "font-bold text-slate-950 dark:text-white" : ""}">
+              ${lineNumHtml}
+              <span class="line-content">${escaped || " "}</span>
             </div>`;
           })
           .join("");
 
+        const pageBreakHtml =
+          showPageBreaks && pIdx < pages.length - 1
+            ? `<div class="page-break-badge select-none">
+                <span class="badge-line"></span>
+                <span class="badge-text">PAGE BREAK • FORM FEED (PAGE ${pIdx + 1} OF ${pages.length})</span>
+                <span class="badge-line"></span>
+              </div>`
+            : "";
+
         return `
-          <div class="dot-matrix-form mb-6 bg-[#faf8f0] dark:bg-[#0f172a] shadow-xl border border-slate-300 dark:border-slate-800 rounded-sm p-6 font-mono text-[12px] leading-[18px]">
-            <div class="page-perforation-header flex justify-between items-center text-[10px] text-emerald-700 dark:text-emerald-400 border-b border-dashed border-emerald-400 pb-1 mb-3 select-none">
-              <span>* CONTINUOUS FORM PERFORATION *</span>
-              <span>PAGE ${idx + 1} OF ${pages.length}</span>
-              <span>80-COL 10-CPI DRAFT</span>
+          <div class="page-wrapper mb-6">
+            <div class="paper-card">
+              <div class="tractor-strip-left"></div>
+              <div class="paper-body">
+                ${renderedLines}
+              </div>
+              <div class="tractor-strip-right"></div>
             </div>
-            ${numberedLines}
-            <div class="page-perforation-footer flex justify-between items-center text-[10px] text-emerald-700 dark:text-emerald-400 border-t border-dashed border-emerald-400 pt-1 mt-3 select-none">
-              <span>* TEAR-OFF LINE (FORM FEED) *</span>
-              <span>TOP OF FORM</span>
-            </div>
+            ${pageBreakHtml}
           </div>
         `;
       })
@@ -827,33 +903,146 @@ export class DotMatrixRenderer {
     return `<!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
+  <meta charset="UTF-8" />
   <title>Dot Matrix Continuous Form Preview</title>
   <style>
     @page { size: auto; margin: 0; }
+    * { box-sizing: border-box; }
     body {
       margin: 0;
       padding: 16px;
-      font-family: 'Courier New', 'DejaVu Sans Mono', 'Liberation Mono', Menlo, Consolas, monospace;
-      background-color: #f1f5f9;
-      color: #0f172a;
+      font-family: 'Courier New', Courier, 'DejaVu Sans Mono', 'Liberation Mono', Menlo, Consolas, monospace;
+      background-color: #0f172a;
+      color: #1e293b;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      min-height: 100vh;
     }
-    @media (prefers-color-scheme: dark) {
-      body { background-color: #020617; color: #f8fafc; }
+    @media (prefers-color-scheme: light) {
+      body { background-color: #e2e8f0; }
     }
+    
+    .ruler-container {
+      font-family: 'Courier New', Courier, monospace;
+      font-size: 11px;
+      line-height: 14px;
+      color: #10b981;
+      background-color: #064e3b;
+      padding: 6px 12px 6px ${showLineNumbers ? "52px" : "16px"};
+      border-radius: 4px;
+      margin-bottom: 12px;
+      white-space: pre;
+      letter-spacing: 0px;
+      box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3);
+      width: fit-content;
+    }
+    .ruler-tens { font-weight: bold; color: #34d399; }
+    .ruler-units { opacity: 0.85; }
+
+    .forms-container {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      width: 100%;
+    }
+
+    .page-wrapper {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      width: fit-content;
+    }
+
+    .paper-card {
+      display: flex;
+      background-color: #faf8f2;
+      border-radius: 2px;
+      box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.4), 0 8px 10px -6px rgba(0, 0, 0, 0.3);
+      border: 1px solid #d1d5db;
+      overflow: hidden;
+      width: fit-content;
+    }
+
+    /* Tractor Feed Hole Strips (Continuous Stationery) */
+    .tractor-strip-left, .tractor-strip-right {
+      width: 24px;
+      background-color: #f1ede2;
+      background-image: radial-gradient(circle at 12px 10px, #cbd5e1 3.5px, transparent 4.5px);
+      background-size: 24px 20px;
+      flex-shrink: 0;
+    }
+    .tractor-strip-left { border-right: 1px dashed #cbd5e1; }
+    .tractor-strip-right { border-left: 1px dashed #cbd5e1; }
+
+    .paper-body {
+      padding: 16px 20px;
+      background-color: #fefdfa;
+      min-width: ${is132 ? "1050px" : "680px"};
+    }
+
+    .dot-line {
+      display: flex;
+      align-items: baseline;
+      font-family: 'Courier New', Courier, 'DejaVu Sans Mono', monospace;
+      font-size: 13px;
+      line-height: 18px;
+      white-space: pre;
+      letter-spacing: 0px;
+    }
+    .dot-line:hover {
+      background-color: rgba(16, 185, 129, 0.08);
+    }
+
+    .line-no {
+      display: inline-block;
+      width: 28px;
+      text-align: right;
+      padding-right: 8px;
+      margin-right: 10px;
+      color: #94a3b8;
+      font-size: 11px;
+      user-select: none;
+      border-right: 1px solid #e2e8f0;
+      flex-shrink: 0;
+    }
+
+    .line-content {
+      white-space: pre;
+      font-family: inherit;
+      color: #1e293b;
+    }
+
+    .page-break-badge {
+      display: flex;
+      align-items: center;
+      width: 100%;
+      margin: 16px 0;
+      color: #10b981;
+      font-size: 10px;
+      font-weight: bold;
+    }
+    .badge-line {
+      flex: 1;
+      border-bottom: 2px dashed #059669;
+    }
+    .badge-text {
+      padding: 0 12px;
+      letter-spacing: 1px;
+    }
+
     @media print {
-      body { background-color: white !important; color: black !important; padding: 0 !important; }
-      .ruler, .page-perforation-header, .page-perforation-footer, .line-no { display: none !important; }
-      .dot-matrix-form { border: 0 !important; box-shadow: none !important; margin: 0 !important; padding: 0 !important; background: transparent !important; page-break-after: always; }
+      body { background-color: white !important; padding: 0 !important; }
+      .ruler-container, .tractor-strip-left, .tractor-strip-right, .line-no, .page-break-badge { display: none !important; }
+      .paper-card { box-shadow: none !important; border: none !important; background: transparent !important; page-break-after: always; }
+      .paper-body { padding: 0 !important; min-width: auto !important; }
       .line-content { font-size: 10pt !important; line-height: 1.2 !important; color: black !important; }
     }
-    .ruler { font-family: monospace; white-space: pre; }
-    .dot-line { font-family: monospace; }
   </style>
 </head>
 <body>
-  ${ruler}
-  <div class="forms-container mt-4">
+  ${rulerHtml}
+  <div class="forms-container">
     ${renderedPagesHtml}
   </div>
 </body>
@@ -861,7 +1050,7 @@ export class DotMatrixRenderer {
   }
 
   /**
-   * Generates a high-fidelity Monospace PDF document for Dot Matrix preview saving.
+   * Generates a Monospace PDF document for Dot Matrix preview saving.
    */
   generateMonospacePdf(text: string, options?: DotMatrixOptions): Uint8Array {
     const is132 = options?.columns === 132;

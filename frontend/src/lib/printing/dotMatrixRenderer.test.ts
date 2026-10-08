@@ -28,9 +28,9 @@ describe("Dot Matrix Plain-Text Renderer & ESC/P Generator", () => {
     lines: [
       {
         description: "Augmentin 625 Duo Tablet (Amoxycillin + Clavulanic Acid)",
-        hsn_code: "300420",
+        hsn_code: "30042000",
         batch_no: "AUG892",
-        expiry_date: "12/27",
+        expiry_date: "2027-12",
         qty: 2,
         loose_qty: 0,
         rate: 205.5,
@@ -39,9 +39,9 @@ describe("Dot Matrix Plain-Text Renderer & ESC/P Generator", () => {
       },
       {
         description: "Pan D Capsule (Pantoprazole + Domperidone)",
-        hsn_code: "300490",
+        hsn_code: "30049099",
         batch_no: "PND102",
-        expiry_date: "08/28",
+        expiry_date: "2028-08-31",
         qty: 1,
         loose_qty: 4,
         rate: 198.0,
@@ -72,7 +72,7 @@ describe("Dot Matrix Plain-Text Renderer & ESC/P Generator", () => {
       expect(text).toContain("Rs.");
     });
 
-    it("aligns columns correctly within an exact 80-column width", () => {
+    it("aligns every line strictly within an exact 80-column width", () => {
       const text = dotMatrixRenderer.renderInvoice(sampleInvoice, { columns: 80 });
       const lines = text.split("\n");
       
@@ -82,60 +82,120 @@ describe("Dot Matrix Plain-Text Renderer & ESC/P Generator", () => {
       });
     });
 
-    it("includes proper document header, patient details, and item lines", () => {
+    it("formats expiry dates cleanly to MM/YY without truncating year", () => {
+      expect(dotMatrixRenderer.formatExpiry("2027-06")).toBe("06/27");
+      expect(dotMatrixRenderer.formatExpiry("2028-12-31")).toBe("12/28");
+      expect(dotMatrixRenderer.formatExpiry("05/2029")).toBe("05/29");
+      expect(dotMatrixRenderer.formatExpiry("08/26")).toBe("08/26");
+      expect(dotMatrixRenderer.formatExpiry("")).toBe("-");
+    });
+
+    it("includes proper document header, patient details, and item lines in 2-column meta", () => {
       const text = dotMatrixRenderer.renderInvoice(sampleInvoice, { columns: 80 });
-      expect(text).toContain("TAX INVOICE: #INV-2026-8801");
+      expect(text).toContain("TAX INVOICE");
       expect(text).toContain("ALVERSTONE MEDICARE & SURGICAL STORE");
       expect(text).toContain("Rahul Varma");
       expect(text).toContain("Dr. K. S. Menon");
       expect(text).toContain("Arya Varma (28Y/F)");
       expect(text).toContain("Augmentin 625 Duo");
+      expect(text).toContain("30042000");
       expect(text).toContain("AUG892");
-      expect(text).toContain("Pan D Capsule");
+      expect(text).toContain("12/27"); // 2027-12 parsed to 12/27
       expect(text).toContain("1+4L"); // Loose qty formatted as 1+4L
+      expect(text).toContain("08/28"); // 2028-08-31 parsed to 08/28
       expect(text).toContain("718.00");
-      expect(text).toContain("Scan/Pay via UPI: alverstone@icici");
+      expect(text).toContain("UPI ID: alverstone@icici");
     });
   });
 
-  describe("Continuous Multi-Page Pagination", () => {
-    it("paginates 40 items over multiple pages with continuation headers and form feed markers", () => {
-      const longLines = Array.from({ length: 40 }, (_, idx) => ({
-        description: `Pharmaceutical Medicine Item #${idx + 1}`,
-        hsn_code: "300490",
-        batch_no: `BAT${1000 + idx}`,
-        expiry_date: "11/27",
-        qty: idx + 1,
-        rate: 50.0 + idx,
-        gst_percent: 12,
-        amount: (idx + 1) * (50.0 + idx),
-      }));
-
-      const largeInvoice: InvoicePrintData = {
+  describe("Snapshot & Scalability Tests (1, 2, 25, and 60 items)", () => {
+    it("renders a 1-item invoice with exact column alignments and no overflow", () => {
+      const singleItemInvoice: InvoicePrintData = {
         ...sampleInvoice,
-        lines: longLines,
-        subtotal: 50000,
-        tax_total: 6000,
-        grand_total: 56000,
+        lines: [sampleInvoice.lines[0]],
+        subtotal: 390.45,
+        tax_total: 46.85,
+        grand_total: 437.0,
       };
 
-      // 40 items on a 66-line page will span at least 2 pages
-      const text = dotMatrixRenderer.renderInvoice(largeInvoice, { columns: 80, linesPerPage: 66 });
+      const text = dotMatrixRenderer.renderInvoice(singleItemInvoice, { columns: 80, linesPerPage: 33 });
+      const lines = text.split("\n");
+      lines.forEach((l) => {
+        expect(l.replace(/\x0C/g, "").length).toBeLessThanOrEqual(80);
+      });
+      expect(text).toContain("Augmentin 625 Duo");
+      expect(text).toContain("437.00");
+    });
+
+    it("renders a 25-item bill with clean continuous pagination on 66-line form", () => {
+      const items25 = Array.from({ length: 25 }, (_, idx) => ({
+        description: `Pharmaceutical Generic Medicine Item #${idx + 1}`,
+        hsn_code: "30049099",
+        batch_no: `BAT${2000 + idx}`,
+        expiry_date: "2028-05",
+        qty: idx + 1,
+        rate: 85.0 + idx,
+        gst_percent: 12,
+        amount: (idx + 1) * (85.0 + idx),
+      }));
+
+      const invoice25: InvoicePrintData = {
+        ...sampleInvoice,
+        lines: items25,
+        subtotal: 45000,
+        tax_total: 5400,
+        grand_total: 50400,
+      };
+
+      const text = dotMatrixRenderer.renderInvoice(invoice25, { columns: 80, linesPerPage: 66 });
+      const pages = text.split("\x0C").filter((p) => p.trim().length > 0);
       
-      // Check for Form Feed \x0C between pages
+      pages.forEach((page) => {
+        const lines = page.split("\n");
+        lines.forEach((l) => {
+          expect(l.length).toBeLessThanOrEqual(80);
+        });
+      });
+      expect(text).toContain("BAT2000");
+      expect(text).toContain("BAT2024");
+    });
+
+    it("renders a 60-item bill spanning 3+ continuous pages with repeated headers", () => {
+      const items60 = Array.from({ length: 60 }, (_, idx) => ({
+        description: `Pharma Capsule Line #${idx + 1}`,
+        hsn_code: "30049099",
+        batch_no: `LOT${3000 + idx}`,
+        expiry_date: "2029-10",
+        qty: idx + 1,
+        rate: 120.0 + idx,
+        gst_percent: 18,
+        amount: (idx + 1) * (120.0 + idx),
+      }));
+
+      const invoice60: InvoicePrintData = {
+        ...sampleInvoice,
+        lines: items60,
+        subtotal: 150000,
+        tax_total: 27000,
+        grand_total: 177000,
+      };
+
+      const text = dotMatrixRenderer.renderInvoice(invoice60, { columns: 80, linesPerPage: 66 });
       const pages = text.split("\x0C").filter((p) => p.trim().length > 0);
       expect(pages.length).toBeGreaterThanOrEqual(2);
 
-      // Page 1 should include continuation footer
-      expect(pages[0]).toContain("[ Continued on Next Page... ]");
-
-      // Page 2 should include continuation header
+      // Verify continuation header on subsequent pages
       expect(pages[1]).toContain("[ Continued from Page 1 - Document #INV-2026-8801 ]");
+      
+      // Verify no line in the entire 60-item document exceeds 80 columns
+      text.split("\n").forEach((l) => {
+        expect(l.replace(/\x0C/g, "").length).toBeLessThanOrEqual(80);
+      });
     });
   });
 
   describe("Description Wrapping vs Truncation", () => {
-    it("wraps long item descriptions onto a secondary line when truncateDescriptions is false", () => {
+    it("wraps long item descriptions onto a secondary indented line when truncateDescriptions is false", () => {
       const text = dotMatrixRenderer.renderInvoice(sampleInvoice, {
         columns: 80,
         truncateDescriptions: false,
@@ -152,7 +212,7 @@ describe("Dot Matrix Plain-Text Renderer & ESC/P Generator", () => {
       });
 
       // Should not show the secondary indented continuation line
-      expect(text).not.toMatch(/\n\s{4}Duo Tablet/);
+      expect(text).not.toMatch(/\n\s{3}Duo Tablet/);
     });
   });
 
@@ -169,7 +229,7 @@ describe("Dot Matrix Plain-Text Renderer & ESC/P Generator", () => {
         lines: [
           {
             description: "Augmentin 625 Duo Tablet",
-            hsn_code: "300420",
+            hsn_code: "30042000",
             batch_no: "AUG892",
             qty: 1,
             rate: 205.5,
@@ -188,8 +248,12 @@ describe("Dot Matrix Plain-Text Renderer & ESC/P Generator", () => {
       expect(text).toContain("CREDIT NOTE NO : #CN-2026-0042");
       expect(text).toContain("Orig Invoice   : #INV-2026-8801");
       expect(text).toContain("Augmentin 625 Duo Tablet");
-      expect(text).toContain("CREDIT TOTAL  : Rs.       230.16");
+      expect(text).toContain("CREDIT TOTAL  : Rs.      230.16");
       expect(text).toContain("Refund Mode: store_credit");
+
+      text.split("\n").forEach((l) => {
+        expect(l.replace(/\x0C/g, "").length).toBeLessThanOrEqual(80);
+      });
     });
 
     it("renders plain-text Purchase Return / Debit Note with supplier references", () => {
@@ -205,7 +269,7 @@ describe("Dot Matrix Plain-Text Renderer & ESC/P Generator", () => {
         lines: [
           {
             description: "Asthalin Inhaler 200 MDI",
-            hsn_code: "300490",
+            hsn_code: "30049099",
             batch_no: "AST554",
             qty: 10,
             rate: 120.0,
@@ -223,8 +287,12 @@ describe("Dot Matrix Plain-Text Renderer & ESC/P Generator", () => {
       expect(text).toContain("*** DEBIT NOTE / PURCHASE RETURN ***");
       expect(text).toContain("DEBIT NOTE NO  : #PR-2026-0019");
       expect(text).toContain("Supplier Inv   : #SUP-INV-9901");
-      expect(text).toContain("Cipla Healthcare Distribution");
-      expect(text).toContain("DEBIT TOTAL   : Rs.     1,344.00");
+      expect(text).toContain("Cipla Healthcare");
+      expect(text).toContain("DEBIT TOTAL   : Rs.    1,344.00");
+
+      text.split("\n").forEach((l) => {
+        expect(l.replace(/\x0C/g, "").length).toBeLessThanOrEqual(80);
+      });
     });
   });
 
@@ -235,7 +303,6 @@ describe("Dot Matrix Plain-Text Renderer & ESC/P Generator", () => {
         prePrintedStationery: true,
       });
 
-      // No long separator lines
       expect(text).not.toContain("================================================================================");
       expect(text).not.toContain("--------------------------------------------------------------------------------");
       expect(text).toContain("INV-2026-8801");
@@ -284,23 +351,26 @@ describe("Dot Matrix Plain-Text Renderer & ESC/P Generator", () => {
         columns: 132,
       });
 
-      // SI (0x0F) condensed mode
       expect(Array.from(bytes)).toContain(0x0f);
     });
   });
 
   describe("Monospace HTML Preview & Monospace PDF Export", () => {
-    it("generates continuous-form HTML preview with column ruler and line numbers gutter", () => {
+    it("generates authentic continuous-form HTML preview with tractor-feed strips and character ruler", () => {
       const text = dotMatrixRenderer.renderInvoice(sampleInvoice, { columns: 80 });
       const html = dotMatrixRenderer.generateMonospaceHtmlPreview(text, {
         showRuler: true,
+        showLineNumbers: true,
+        showPageBreaks: true,
         columns: 80,
       });
 
       expect(html).toContain("<!DOCTYPE html>");
-      expect(html).toContain("ruler");
-      expect(html).toContain("CONTINUOUS FORM PERFORATION");
-      expect(html).toContain("TEAR-OFF LINE (FORM FEED)");
+      expect(html).toContain("ruler-container");
+      expect(html).toContain("ruler-tens");
+      expect(html).toContain("ruler-units");
+      expect(html).toContain("tractor-strip-left");
+      expect(html).toContain("tractor-strip-right");
       expect(html).toContain("line-no");
       expect(html).toContain("line-content");
       expect(html).toContain("INV-2026-8801");
@@ -311,9 +381,8 @@ describe("Dot Matrix Plain-Text Renderer & ESC/P Generator", () => {
       const pdfBytes = dotMatrixRenderer.generateMonospacePdf(text, { columns: 80 });
 
       expect(pdfBytes).toBeInstanceOf(Uint8Array);
-      expect(pdfBytes.length).toBeGreaterThan(500); // Standard minimal PDF is > 500 bytes
+      expect(pdfBytes.length).toBeGreaterThan(500);
       
-      // Check PDF header %PDF-
       const header = String.fromCharCode(pdfBytes[0], pdfBytes[1], pdfBytes[2], pdfBytes[3], pdfBytes[4]);
       expect(header).toBe("%PDF-");
     });

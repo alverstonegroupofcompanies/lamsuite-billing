@@ -106,6 +106,11 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
   const [showDrugLicenses, setShowDrugLicenses] = useState<boolean>(settings.printing.printDrugLicenses ?? true);
   const [showTerms, setShowTerms] = useState<boolean>(true);
 
+  // Dot Matrix View Toggles
+  const [showRuler, setShowRuler] = useState<boolean>(true);
+  const [showLineNumbers, setShowLineNumbers] = useState<boolean>(true);
+  const [showPageBreaks, setShowPageBreaks] = useState<boolean>(true);
+
   // Zoom & Action State
   const [zoomScale, setZoomScale] = useState<number>(100);
   const [isPrinting, setIsPrinting] = useState<boolean>(false);
@@ -205,6 +210,42 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
   // Build Rendered HTML
   const renderedHtml = useMemo(() => {
     if (!isOpen || !data) return "";
+    const isDot = paperSize === "dot_matrix_80col" || paperSize === "dot_matrix_132col";
+    if (isDot) {
+      const dotOpts: DotMatrixOptions = {
+        columns: paperSize === "dot_matrix_132col" ? 132 : 80,
+        linesPerPage: printerProfile?.linesPerPage || 66,
+        isDuplicate,
+        copyMarker: copyMarker === "None" ? undefined : copyMarker,
+        showHsnSummary,
+        showDoctorPatient,
+        showDrugLicenses,
+        showTerms,
+        currencyPrefix: "Rs.",
+      };
+      let rawText = "";
+      switch (docType) {
+        case "sales_return":
+        case "credit_note":
+        case "customer_debit_note":
+          rawText = dotMatrixRenderer.renderCreditNote(data as CreditNotePrintData, dotOpts);
+          break;
+        case "purchase_return":
+        case "debit_note":
+          rawText = dotMatrixRenderer.renderDebitNote(data as DebitNotePrintData, dotOpts);
+          break;
+        default:
+          rawText = dotMatrixRenderer.renderInvoice(data as InvoicePrintData, dotOpts);
+          break;
+      }
+      return dotMatrixRenderer.generateMonospaceHtmlPreview(rawText, {
+        columns: paperSize === "dot_matrix_132col" ? 132 : 80,
+        showRuler,
+        showLineNumbers,
+        showPageBreaks,
+      });
+    }
+
     const options: PrintRenderOptions = {
       paperSize,
       copies,
@@ -215,7 +256,7 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
       showDrugLicenses,
       showTerms,
       copyMarker: copyMarker === "None" ? undefined : copyMarker,
-      currencySymbolFormat,
+      currencySymbolFormat: "rupee_symbol",
       isDuplicate,
       printerName: selectedPrinterName,
     };
@@ -236,6 +277,10 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
     currencySymbolFormat,
     isDuplicate,
     selectedPrinterName,
+    printerProfile,
+    showRuler,
+    showLineNumbers,
+    showPageBreaks,
   ]);
 
   // Write HTML into preview iframe
@@ -791,6 +836,19 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
                     </div>
                   )}
 
+                  {/* Dot Matrix on Non-Dot Matrix Printer Notice */}
+                  {paperSize.startsWith("dot_matrix") && selectedPrinterInfo && selectedPrinterInfo.printerType !== "dot_matrix" && (
+                    <div className="bg-blue-50 dark:bg-blue-950/40 border border-blue-300 dark:border-blue-700/60 rounded-lg p-3 text-xs text-blue-900 dark:text-blue-200 flex items-start gap-2">
+                      <Printer className="w-4 h-4 text-blue-600 shrink-0 mt-0.5" />
+                      <div className="space-y-1">
+                        <div className="font-semibold">Dot Matrix Plain-Text Output Active</div>
+                        <div className="text-[11px] text-blue-700 dark:text-blue-300 leading-tight">
+                          Sending this job to &apos;{selectedPrinterInfo.displayName}&apos; will print as plain text. For graphical boxed invoices on laser/inkjet printers, select <strong>A4</strong> or <strong>A5</strong>.
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
                   {/* Paper Format Picker */}
                   <div>
                     <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300 mb-2">
@@ -880,6 +938,36 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
                         <label className="flex items-center space-x-2 text-xs text-slate-700 dark:text-slate-300 cursor-pointer">
                           <input
                             type="checkbox"
+                            checked={showRuler}
+                            onChange={(e) => setShowRuler(e.target.checked)}
+                            className="rounded text-emerald-600"
+                          />
+                          <span>Show Column Ruler (80/132 Cols)</span>
+                        </label>
+
+                        <label className="flex items-center space-x-2 text-xs text-slate-700 dark:text-slate-300 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={showLineNumbers}
+                            onChange={(e) => setShowLineNumbers(e.target.checked)}
+                            className="rounded text-emerald-600"
+                          />
+                          <span>Show Line Numbers Gutter</span>
+                        </label>
+
+                        <label className="flex items-center space-x-2 text-xs text-slate-700 dark:text-slate-300 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={showPageBreaks}
+                            onChange={(e) => setShowPageBreaks(e.target.checked)}
+                            className="rounded text-emerald-600"
+                          />
+                          <span>Show Continuous Page Breaks</span>
+                        </label>
+
+                        <label className="flex items-center space-x-2 text-xs text-slate-700 dark:text-slate-300 cursor-pointer">
+                          <input
+                            type="checkbox"
                             checked={Boolean(printerProfile?.doubleStrikeCarbon)}
                             onChange={(e) => {
                               if (printerProfile) {
@@ -933,12 +1021,21 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
                         Currency Format
                       </label>
                       <select
-                        value={currencySymbolFormat}
+                        disabled={paperSize.startsWith("dot_matrix")}
+                        value={paperSize.startsWith("dot_matrix") ? "rs_text" : currencySymbolFormat}
                         onChange={(e) => setCurrencySymbolFormat(e.target.value as any)}
-                        className="w-full text-xs bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg p-2 text-slate-800 dark:text-slate-100"
+                        className={`w-full text-xs bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg p-2 text-slate-800 dark:text-slate-100 ${
+                          paperSize.startsWith("dot_matrix") ? "opacity-75 cursor-not-allowed" : ""
+                        }`}
                       >
-                        <option value="rupee_symbol">₹ (Unicode)</option>
-                        <option value="rs_text">Rs. (Text Mode)</option>
+                        {paperSize.startsWith("dot_matrix") ? (
+                          <option value="rs_text">Rs. (Fixed Plain-Text ASCII)</option>
+                        ) : (
+                          <>
+                            <option value="rupee_symbol">₹ (Unicode)</option>
+                            <option value="rs_text">Rs. (Text Mode)</option>
+                          </>
+                        )}
                       </select>
                     </div>
                   </div>
