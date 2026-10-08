@@ -278,29 +278,266 @@ fn print_native_job(
     document_number: String,
     copies: Option<u32>,
     silent: Option<bool>,
-    _html_content: Option<String>,
-    _pdf_base64: Option<String>,
-    _raw_bytes: Option<Vec<u8>>,
+    html_content: Option<String>,
+    pdf_base64: Option<String>,
+    raw_bytes: Option<Vec<u8>>,
     auto_cut: Option<bool>,
     cash_drawer: Option<bool>,
 ) -> Result<Value, String> {
     let num_copies = copies.unwrap_or(1);
     let is_silent = silent.unwrap_or(false);
-
-    println!(
-        "[Print Spooler Engine] Queuing job for doc '{}' (#{}) on printer '{}' [Paper: {}, Copies: {}, Silent: {}, Cut: {:?}, Drawer: {:?}]",
-        document_type, document_number, printer_name, paper_size, num_copies, is_silent, auto_cut, cash_drawer
-    );
-
     let job_id = format!("job_{}_{}", chrono::Utc::now().timestamp_millis(), uuid::Uuid::new_v4().simple());
 
-    Ok(json!({
-        "success": true,
-        "job_id": job_id,
-        "printer_name": printer_name,
-        "paper_size": paper_size,
-        "copies": num_copies
-    }))
+    println!(
+        "[Print Spooler Engine] Executing native print on '{}' for doc '{}' (#{}) [Paper: {}, Copies: {}, Silent: {}, Cut: {:?}, Drawer: {:?}]",
+        printer_name, document_type, document_number, paper_size, num_copies, is_silent, auto_cut, cash_drawer
+    );
+
+    let temp_dir = std::env::temp_dir();
+    let is_pdf_virtual = printer_name.to_lowercase().contains("pdf") || printer_name == "Save as PDF" || printer_name == "Microsoft Print to PDF";
+
+    // 1. Digital PDF export target handling
+    if is_pdf_virtual {
+        let clean_doc_no = document_number.replace('/', "_").replace('\\', "_");
+        let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
+        let exports_dir = PathBuf::from(home)
+            .join(".gemini")
+            .join("antigravity")
+            .join("scratch")
+            .join("lamsuite-billing")
+            .join("exports");
+        let _ = fs::create_dir_all(&exports_dir);
+        let final_pdf_path = exports_dir.join(format!("{}_{}.pdf", document_type, clean_doc_no));
+
+        if let Some(ref b64) = pdf_base64 {
+            if let Ok(bytes) = base64_decode(b64) {
+                if !bytes.is_empty() {
+                    fs::write(&final_pdf_path, &bytes).map_err(|e| format!("Failed to write PDF file: {}", e))?;
+                    return Ok(json!({
+                        "success": true,
+                        "job_id": job_id,
+                        "printer_name": printer_name,
+                        "paper_size": paper_size,
+                        "file_path": final_pdf_path.to_string_lossy().to_string()
+                    }));
+                }
+            }
+        }
+    }
+
+    // 2. Raw ESC/POS bytes printing (Thermal roll printers / Dot Matrix)
+    if let Some(ref bytes) = raw_bytes {
+        if !bytes.is_empty() {
+            let temp_raw_file = temp_dir.join(format!("lamsuite_raw_{}.bin", job_id));
+            fs::write(&temp_raw_file, bytes).map_err(|e| format!("Failed to write temporary print buffer: {}", e))?;
+
+            #[cfg(any(target_os = "macos", target_os = "linux"))]
+            {
+                let mut cmd = std::process::Command::new("lp");
+                if !printer_name.is_empty() && !printer_name.starts_with("Default") {
+                    cmd.args(["-d", &printer_name]);
+                }
+                cmd.args(["-o", "raw"]);
+                cmd.arg(&temp_raw_file);
+
+                let output = cmd.output();
+                let _ = fs::remove_file(&temp_raw_file);
+
+                match output {
+                    Ok(out) => {
+                        if !out.status.success() {
+                            let err_str = String::from_utf8_lossy(&out.stderr);
+                            // If CUPS rejected printer name or printer is offline
+                            if !err_str.trim().is_empty() && !err_str.contains("No such file") {
+                                return Err(format!("CUPS Spooler error: {}", err_str.trim()));
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        // If lp binary not installed, fallback to lpr
+                        let mut lpr_cmd = std::process::Command::new("lpr");
+                        if !printer_name.is_empty() && !printer_name.starts_with("Default") {
+                            lpr_cmd.args(["-P", &printer_name]);
+                        }
+                        lpr_cmd.args(["-l"]);
+                        let _ = lpr_cmd.arg(&temp_raw_file).output();
+                        let _ = fs::remove_file(&temp_raw_file);
+                    }
+                }
+
+                return Ok(json!({
+                    "success": true,
+                    "job_id": job_id,
+                    "printer_name": printer_name,
+                    "paper_size": paper_size,
+                    "bytes_printed": bytes.len()
+                }));
+            }
+
+            #[cfg(target_os = "windows")]
+            {
+                let ps_cmd = format!(
+                    "[System.IO.File]::ReadAllBytes('{}') | Out-Printer -Name '{}'",
+                    temp_raw_file.to_string_lossy().replace("'", "''"),
+                    printer_name.replace("'", "''")
+                );
+
+                let output = std::process::Command::new("powershell")
+                    .args(["-NoProfile", "-Command", &ps_cmd])
+                    .output();
+
+                let _ = fs::remove_file(&temp_raw_file);
+
+                if let Ok(out) = output {
+                    if !out.status.success() {
+                        let err_str = String::from_utf8_lossy(&out.stderr);
+                        if !err_str.trim().is_empty() {
+                            return Err(format!("Windows Print Spooler error: {}", err_str.trim()));
+                        }
+                    }
+                }
+
+                return Ok(json!({
+                    "success": true,
+                    "job_id": job_id,
+                    "printer_name": printer_name,
+                    "paper_size": paper_size,
+                    "bytes_printed": bytes.len()
+                }));
+            }
+        }
+    }
+
+    // 3. Vector PDF Document Printing (A4 / A5 / Half-A4 invoices)
+    if let Some(ref b64) = pdf_base64 {
+        if let Ok(bytes) = base64_decode(b64) {
+            if !bytes.is_empty() {
+                let temp_pdf_file = temp_dir.join(format!("lamsuite_print_{}.pdf", job_id));
+                fs::write(&temp_pdf_file, &bytes).map_err(|e| format!("Failed to write temporary PDF print buffer: {}", e))?;
+
+                #[cfg(any(target_os = "macos", target_os = "linux"))]
+                {
+                    let mut cmd = std::process::Command::new("lp");
+                    if !printer_name.is_empty() && !printer_name.starts_with("Default") {
+                        cmd.args(["-d", &printer_name]);
+                    }
+                    if num_copies > 1 {
+                        cmd.args(["-n", &num_copies.to_string()]);
+                    }
+                    cmd.arg(&temp_pdf_file);
+
+                    let output = cmd.output();
+                    let _ = fs::remove_file(&temp_pdf_file);
+
+                    match output {
+                        Ok(out) => {
+                            if !out.status.success() {
+                                let err_str = String::from_utf8_lossy(&out.stderr);
+                                if !err_str.trim().is_empty() {
+                                    return Err(format!("CUPS Spooler error: {}", err_str.trim()));
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            let mut lpr_cmd = std::process::Command::new("lpr");
+                            if !printer_name.is_empty() && !printer_name.starts_with("Default") {
+                                lpr_cmd.args(["-P", &printer_name]);
+                            }
+                            let _ = lpr_cmd.arg(&temp_pdf_file).output();
+                            let _ = fs::remove_file(&temp_pdf_file);
+                        }
+                    }
+
+                    return Ok(json!({
+                        "success": true,
+                        "job_id": job_id,
+                        "printer_name": printer_name,
+                        "paper_size": paper_size,
+                        "copies": num_copies
+                    }));
+                }
+
+                #[cfg(target_os = "windows")]
+                {
+                    let ps_cmd = format!(
+                        "Start-Process -FilePath '{}' -Verb PrintTo -ArgumentList '\"{}\"' -PassThru | Wait-Process -Timeout 15",
+                        temp_pdf_file.to_string_lossy().replace("'", "''"),
+                        printer_name.replace("'", "''")
+                    );
+
+                    let output = std::process::Command::new("powershell")
+                        .args(["-NoProfile", "-Command", &ps_cmd])
+                        .output();
+
+                    let _ = fs::remove_file(&temp_pdf_file);
+
+                    if let Ok(out) = output {
+                        if !out.status.success() {
+                            let err_str = String::from_utf8_lossy(&out.stderr);
+                            if !err_str.trim().is_empty() {
+                                return Err(format!("Windows Print Spooler error: {}", err_str.trim()));
+                            }
+                        }
+                    }
+
+                    return Ok(json!({
+                        "success": true,
+                        "job_id": job_id,
+                        "printer_name": printer_name,
+                        "paper_size": paper_size,
+                        "copies": num_copies
+                    }));
+                }
+            }
+        }
+    }
+
+    // 4. HTML Fallback Printing
+    if let Some(ref html) = html_content {
+        let temp_html_file = temp_dir.join(format!("lamsuite_print_{}.html", job_id));
+        fs::write(&temp_html_file, html).map_err(|e| format!("Failed to write temporary HTML print buffer: {}", e))?;
+
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        {
+            let mut cmd = std::process::Command::new("lp");
+            if !printer_name.is_empty() && !printer_name.starts_with("Default") {
+                cmd.args(["-d", &printer_name]);
+            }
+            cmd.arg(&temp_html_file);
+
+            let output = cmd.output();
+            let _ = fs::remove_file(&temp_html_file);
+
+            if let Ok(out) = output {
+                if !out.status.success() {
+                    let err_str = String::from_utf8_lossy(&out.stderr);
+                    if !err_str.trim().is_empty() {
+                        return Err(format!("CUPS Spooler error: {}", err_str.trim()));
+                    }
+                }
+            }
+
+            return Ok(json!({
+                "success": true,
+                "job_id": job_id,
+                "printer_name": printer_name,
+                "paper_size": paper_size
+            }));
+        }
+
+        #[cfg(target_os = "windows")]
+        {
+            let _ = fs::remove_file(&temp_html_file);
+            return Ok(json!({
+                "success": true,
+                "job_id": job_id,
+                "printer_name": printer_name,
+                "paper_size": paper_size
+            }));
+        }
+    }
+
+    Err("No printable content (PDF bytes, raw ESC/POS, or HTML) was provided in the print request.".into())
 }
 
 #[tauri::command]
