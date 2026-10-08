@@ -547,11 +547,12 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
         <div className="flex flex-1 overflow-hidden bg-slate-100 dark:bg-slate-950">
           
           {/* Document Canvas Preview Container */}
-          <div className="flex-1 flex items-center justify-center p-6 overflow-auto relative select-none">
+          <div className="flex-1 flex justify-center items-start p-6 overflow-y-auto overflow-x-auto relative select-none bg-slate-100 dark:bg-slate-950">
             <div
-              className="transition-transform duration-100 origin-top shadow-2xl rounded-sm bg-white overflow-hidden"
+              className="transition-transform duration-100 shadow-2xl rounded-sm bg-white overflow-hidden shrink-0 my-4"
               style={{
                 transform: `scale(${zoomScale / 100})`,
+                transformOrigin: "top center",
                 width: isThermal
                   ? paperSize === "thermal_58mm"
                     ? "60mm"
@@ -565,7 +566,10 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
               <iframe
                 ref={iframeRef}
                 title="Print Preview Frame"
-                className="w-full h-[880px] border-0 pointer-events-auto bg-white"
+                className="w-full border-0 pointer-events-auto bg-white"
+                style={{
+                  height: isThermal ? "750px" : paperSize === "a5" ? "820px" : "1122px",
+                }}
                 sandbox="allow-same-origin allow-scripts allow-modals"
               />
             </div>
