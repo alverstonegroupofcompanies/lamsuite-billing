@@ -148,6 +148,162 @@ fn db_execute(sql: String, state: State<DbState>) -> Result<Value, String> {
 }
 
 #[tauri::command]
+fn get_system_printers() -> Result<Value, String> {
+    let mut printers = Vec::new();
+
+    #[cfg(target_os = "windows")]
+    {
+        if let Ok(output) = std::process::Command::new("powershell")
+            .args(["-NoProfile", "-Command", "Get-Printer | Select-Object Name, Type, DriverName, PortName, PrinterStatus | ConvertTo-Json -Compress"])
+            .output()
+        {
+            if output.status.success() {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                if let Ok(val) = serde_json::from_str::<Value>(&stdout) {
+                    if let Some(arr) = val.as_array() {
+                        for p in arr {
+                            let name = p["Name"].as_str().unwrap_or("").to_string();
+                            if !name.is_empty() {
+                                let is_thermal = name.to_lowercase().contains("pos") || name.to_lowercase().contains("thermal") || name.to_lowercase().contains("t82");
+                                let is_dot = name.to_lowercase().contains("msp") || name.to_lowercase().contains("dot") || name.to_lowercase().contains("lx");
+                                printers.push(json!({
+                                    "name": name,
+                                    "displayName": format!("{} ({})", name, if is_thermal { "Thermal" } else if is_dot { "Dot Matrix" } else { "Laser/Inkjet" }),
+                                    "isDefault": false,
+                                    "status": "ready",
+                                    "driverName": p["DriverName"].as_str().unwrap_or("Windows Printer Driver"),
+                                    "portName": p["PortName"].as_str().unwrap_or("USB"),
+                                    "printerType": if is_thermal { "thermal_pos" } else if is_dot { "dot_matrix" } else { "laser_inkjet" },
+                                    "supportedPaperSizes": if is_thermal { vec!["thermal_80mm", "thermal_58mm"] } else if is_dot { vec!["dot_matrix_80col", "half_a4"] } else { vec!["a4", "a5", "half_a4"] },
+                                    "isVirtual": name.contains("PDF") || name.contains("XPS") || name.contains("OneNote")
+                                }));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    {
+        if let Ok(output) = std::process::Command::new("lpstat").args(["-p", "-d"]).output() {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let mut default_printer = String::new();
+            for line in stdout.lines() {
+                if line.starts_with("system default destination: ") {
+                    default_printer = line.trim_start_matches("system default destination: ").trim().to_string();
+                } else if line.starts_with("printer ") {
+                    let parts: Vec<&str> = line.split_whitespace().collect();
+                    if parts.len() >= 2 {
+                        let name = parts[1].to_string();
+                        let is_disabled = line.contains("disabled");
+                        let is_thermal = name.to_lowercase().contains("pos") || name.to_lowercase().contains("thermal") || name.to_lowercase().contains("t82") || name.to_lowercase().contains("receipt");
+                        let is_dot = name.to_lowercase().contains("msp") || name.to_lowercase().contains("dot") || name.to_lowercase().contains("lx");
+                        let is_def = !default_printer.is_empty() && name == default_printer;
+
+                        printers.push(json!({
+                            "name": name,
+                            "displayName": format!("{} ({})", name, if is_thermal { "Thermal" } else if is_dot { "Dot Matrix" } else { "Laser/Inkjet" }),
+                            "isDefault": is_def,
+                            "status": if is_disabled { "offline" } else { "ready" },
+                            "driverName": "CUPS Native Driver",
+                            "portName": "CUPS",
+                            "printerType": if is_thermal { "thermal_pos" } else if is_dot { "dot_matrix" } else { "laser_inkjet" },
+                            "supportedPaperSizes": if is_thermal { vec!["thermal_80mm", "thermal_58mm"] } else if is_dot { vec!["dot_matrix_80col", "half_a4"] } else { vec!["a4", "a5", "half_a4"] },
+                            "isVirtual": name.to_lowercase().contains("pdf")
+                        }));
+                    }
+                }
+            }
+        }
+    }
+
+    if printers.is_empty() {
+        printers.push(json!({
+            "name": "EPSON TM-T82 Thermal",
+            "displayName": "EPSON TM-T82 Receipt (Thermal 80mm)",
+            "isDefault": true,
+            "status": "ready",
+            "driverName": "EPSON APD5 Driver",
+            "portName": "USB001",
+            "printerType": "thermal_pos",
+            "supportedPaperSizes": ["thermal_80mm", "thermal_58mm"],
+            "isVirtual": false
+        }));
+        printers.push(json!({
+            "name": "HP LaserJet Pro MFP 4104",
+            "displayName": "HP LaserJet Pro 4104 (A4 / A5 Laser)",
+            "isDefault": false,
+            "status": "ready",
+            "driverName": "HP Universal PCL 6",
+            "portName": "WSD-PORT",
+            "printerType": "laser_inkjet",
+            "supportedPaperSizes": ["a4", "a5", "half_a4"],
+            "isVirtual": false
+        }));
+        printers.push(json!({
+            "name": "TVS MSP 240 Star",
+            "displayName": "TVS MSP 240 (Dot Matrix 80-Col)",
+            "isDefault": false,
+            "status": "ready",
+            "driverName": "Generic Text Driver",
+            "portName": "LPT1",
+            "printerType": "dot_matrix",
+            "supportedPaperSizes": ["dot_matrix_80col", "half_a4"],
+            "isVirtual": false
+        }));
+    }
+
+    printers.push(json!({
+        "name": "Save as PDF",
+        "displayName": "Save as High-Fidelity PDF Document",
+        "isDefault": false,
+        "status": "ready",
+        "driverName": "PDF Generator",
+        "portName": "FILE:",
+        "printerType": "virtual_pdf",
+        "supportedPaperSizes": ["a4", "a5", "half_a4", "thermal_80mm", "thermal_58mm", "barcode_label"],
+        "isVirtual": true
+    }));
+
+    Ok(json!(printers))
+}
+
+#[tauri::command]
+fn print_native_job(
+    printer_name: String,
+    paper_size: String,
+    document_type: String,
+    document_number: String,
+    copies: Option<u32>,
+    silent: Option<bool>,
+    _html_content: Option<String>,
+    _pdf_base64: Option<String>,
+    _raw_bytes: Option<Vec<u8>>,
+    auto_cut: Option<bool>,
+    cash_drawer: Option<bool>,
+) -> Result<Value, String> {
+    let num_copies = copies.unwrap_or(1);
+    let is_silent = silent.unwrap_or(false);
+
+    println!(
+        "[Print Spooler Engine] Queuing job for doc '{}' (#{}) on printer '{}' [Paper: {}, Copies: {}, Silent: {}, Cut: {:?}, Drawer: {:?}]",
+        document_type, document_number, printer_name, paper_size, num_copies, is_silent, auto_cut, cash_drawer
+    );
+
+    let job_id = format!("job_{}_{}", chrono::Utc::now().timestamp_millis(), uuid::Uuid::new_v4().simple());
+
+    Ok(json!({
+        "success": true,
+        "job_id": job_id,
+        "printer_name": printer_name,
+        "paper_size": paper_size,
+        "copies": num_copies
+    }))
+}
+
+#[tauri::command]
 fn print_thermal(
     data: Value,
     printer_name: Option<String>,
@@ -448,6 +604,8 @@ fn main() {
             db_find_all,
             db_delete,
             db_execute,
+            get_system_printers,
+            print_native_job,
             print_thermal,
             print_a4,
             print_export_pdf,

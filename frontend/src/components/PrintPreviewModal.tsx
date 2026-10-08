@@ -6,21 +6,20 @@ import {
   X,
   ZoomIn,
   ZoomOut,
-  Maximize2,
-  Minimize2,
-  Check,
   RotateCw,
   Settings2,
   Copy,
-  ChevronLeft,
-  ChevronRight,
-  Sparkles,
+  AlertCircle,
+  AlertTriangle,
+  CheckCircle2,
+  RefreshCw,
   Smartphone,
   Mail,
-  AlertCircle,
-  Eye,
-  CheckCircle2,
-  Save,
+  FileText,
+  Sliders,
+  Check,
+  Tag,
+  Zap,
 } from "lucide-react";
 import {
   printingEngine,
@@ -31,6 +30,13 @@ import {
   generateWhatsAppShareUrl,
   generateEmailShareUrl,
 } from "../lib/printing/printingEngine";
+import {
+  printerManagerService,
+  SystemPrinterInfo,
+  PrinterProfileConfig,
+  PaperSize,
+  PrintJobRecord,
+} from "../lib/printing/printerManagerService";
 import { companySettingsService } from "../lib/settings/companySettingsService";
 
 export interface PrintPreviewModalProps {
@@ -51,7 +57,7 @@ export interface PrintPreviewModalProps {
     | "report";
   title?: string;
   data: any;
-  initialFormat?: "a4" | "half_a4" | "thermal_80mm" | "thermal_58mm";
+  initialFormat?: "a4" | "a5" | "half_a4" | "thermal_80mm" | "thermal_58mm" | "dot_matrix_80col" | "barcode_label";
   onAfterPrint?: (result: { success: boolean; mode: string }) => void;
   customerPhone?: string;
   customerEmail?: string;
@@ -70,22 +76,27 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
 }) => {
   const settings = companySettingsService.getSettings();
 
-  // Determine initial paper size based on preference & props
-  const defaultPaper = useMemo<"a4" | "half_a4" | "thermal_80mm" | "thermal_58mm">(() => {
-    if (initialFormat) return initialFormat;
-    const settingPaper = settings.printing.paperSize;
-    if (settingPaper === "a4" || settingPaper === "thermal_80mm" || settingPaper === "thermal_58mm") {
-      return settingPaper;
-    }
-    return "a4";
-  }, [initialFormat, settings.printing.paperSize]);
+  // Tab State
+  const [activeTab, setActiveTab] = useState<"device" | "layout" | "share">("device");
 
-  // Options State
-  const [paperSize, setPaperSize] = useState<"a4" | "half_a4" | "thermal_80mm" | "thermal_58mm">(defaultPaper);
+  // Printer Management State
+  const [systemPrinters, setSystemPrinters] = useState<SystemPrinterInfo[]>([]);
+  const [selectedPrinterName, setSelectedPrinterName] = useState<string>("");
+  const [isRefreshingPrinters, setIsRefreshingPrinters] = useState<boolean>(false);
+  const [printerProfile, setPrinterProfile] = useState<PrinterProfileConfig | null>(null);
+  const [isTestingPrinter, setIsTestingPrinter] = useState<boolean>(false);
+  const [lastPrintJob, setLastPrintJob] = useState<PrintJobRecord | null>(null);
+
+  // Print Format & Layout State
+  const [paperSize, setPaperSize] = useState<PaperSize>(initialFormat || (settings.printing.paperSize as PaperSize) || "a4");
   const [copies, setCopies] = useState<number>(settings.printing.copies || 1);
   const [orientation, setOrientation] = useState<"portrait" | "landscape">("portrait");
   const [copyMarker, setCopyMarker] = useState<string>(settings.printing.defaultCopyMarker || "Original for Recipient");
-  
+  const [currencySymbolFormat, setCurrencySymbolFormat] = useState<"rupee_symbol" | "rs_text">("rupee_symbol");
+  const [isDuplicate, setIsDuplicate] = useState<boolean>(false);
+  const [silentPrint, setSilentPrint] = useState<boolean>(false);
+  const [useSystemDialog, setUseSystemDialog] = useState<boolean>(false);
+
   // Customization Toggles
   const [showHsnSummary, setShowHsnSummary] = useState<boolean>(settings.printing.printHsnSummary ?? true);
   const [showUpiQr, setShowUpiQr] = useState<boolean>(settings.printing.printUpiQrCode ?? true);
@@ -93,7 +104,7 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
   const [showDrugLicenses, setShowDrugLicenses] = useState<boolean>(settings.printing.printDrugLicenses ?? true);
   const [showTerms, setShowTerms] = useState<boolean>(true);
 
-  // Zoom & View state
+  // Zoom & Action State
   const [zoomScale, setZoomScale] = useState<number>(100);
   const [isPrinting, setIsPrinting] = useState<boolean>(false);
   const [isSavingPdf, setIsSavingPdf] = useState<boolean>(false);
@@ -101,25 +112,95 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
   const [savedFilePath, setSavedFilePath] = useState<string | null>(null);
 
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
+  const printerSelectRef = useRef<HTMLSelectElement | null>(null);
 
-  // Synchronize initial format when modal opens
+  // Load Printers & Last Used Mapping on Open
   useEffect(() => {
-    if (isOpen) {
-      if (initialFormat) {
-        setPaperSize(initialFormat);
-      } else {
-        const p = settings.printing.paperSize;
-        if (p === "a4" || p === "thermal_80mm" || p === "thermal_58mm") {
-          setPaperSize(p);
-        }
-      }
-      setStatusMessage(null);
-      setSavedFilePath(null);
-      setZoomScale(paperSize.startsWith("thermal") ? 110 : 95);
-    }
-  }, [isOpen, initialFormat]);
+    if (!isOpen) return;
 
-  // Build rendered HTML whenever options change
+    let mounted = true;
+
+    const loadPrintersAndHistory = async () => {
+      try {
+        const printers = await printerManagerService.getSystemPrinters();
+        if (!mounted) return;
+        setSystemPrinters(printers);
+
+        // Determine effective paper format
+        const effectivePaper: PaperSize = initialFormat || (settings.printing.paperSize as PaperSize) || "a4";
+        setPaperSize(effectivePaper);
+
+        // Resolve last-used or default printer
+        const defaultOrLastPrinter = await printerManagerService.getLastUsedPrinter(docType, effectivePaper);
+        if (mounted) {
+          setSelectedPrinterName(defaultOrLastPrinter);
+          const prof = await printerManagerService.getProfileForPrinter(defaultOrLastPrinter);
+          setPrinterProfile(prof);
+          setSilentPrint(prof.silentPrint);
+          setCurrencySymbolFormat(prof.currencySymbolFormat);
+        }
+
+        // Fetch last printed record for duplicate badge & audit info
+        const docNo = data?.invoice_number || data?.return_number || data?.purchase_number;
+        if (docNo) {
+          const lastJob = await printerManagerService.getLastPrintJobForDocument(docNo);
+          if (mounted && lastJob) {
+            setLastPrintJob(lastJob);
+            setIsDuplicate(true);
+            setCopyMarker("DUPLICATE");
+          }
+        }
+      } catch (err) {
+        console.error("Error loading printer configurations:", err);
+      }
+    };
+
+    loadPrintersAndHistory();
+    setStatusMessage(null);
+    setSavedFilePath(null);
+    setZoomScale(paperSize.startsWith("thermal") ? 110 : 95);
+
+    return () => {
+      mounted = false;
+    };
+  }, [isOpen, initialFormat, docType, data]);
+
+  // Refresh Printers Action
+  const handleRefreshPrinters = async () => {
+    setIsRefreshingPrinters(true);
+    try {
+      const printers = await printerManagerService.getSystemPrinters(true);
+      setSystemPrinters(printers);
+      setStatusMessage({ text: `Found ${printers.length} system printer(s)`, type: "info" });
+    } catch (err: any) {
+      setStatusMessage({ text: "Failed to scan system printers", type: "error" });
+    } finally {
+      setIsRefreshingPrinters(false);
+    }
+  };
+
+  // Switch Selected Printer
+  const handleSelectPrinter = async (printerName: string) => {
+    setSelectedPrinterName(printerName);
+    const prof = await printerManagerService.getProfileForPrinter(printerName);
+    setPrinterProfile(prof);
+    setSilentPrint(prof.silentPrint);
+    setCurrencySymbolFormat(prof.currencySymbolFormat);
+    await printerManagerService.setLastUsedPrinter(docType, paperSize, printerName);
+  };
+
+  // Selected Printer Info
+  const selectedPrinterInfo = useMemo(() => {
+    return systemPrinters.find((p) => p.name.toLowerCase() === selectedPrinterName.toLowerCase()) || null;
+  }, [systemPrinters, selectedPrinterName]);
+
+  // Paper Compatibility Verification
+  const paperCompatibility = useMemo(() => {
+    if (!selectedPrinterInfo) return { compatible: true };
+    return printerManagerService.validatePaperCompatibility(selectedPrinterInfo, paperSize);
+  }, [selectedPrinterInfo, paperSize]);
+
+  // Build Rendered HTML
   const renderedHtml = useMemo(() => {
     if (!isOpen || !data) return "";
     const options: PrintRenderOptions = {
@@ -132,6 +213,9 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
       showDrugLicenses,
       showTerms,
       copyMarker: copyMarker === "None" ? undefined : copyMarker,
+      currencySymbolFormat,
+      isDuplicate,
+      printerName: selectedPrinterName,
     };
     return printingEngine.renderDocumentHtml(docType, data, options);
   }, [
@@ -147,9 +231,12 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
     showDrugLicenses,
     showTerms,
     copyMarker,
+    currencySymbolFormat,
+    isDuplicate,
+    selectedPrinterName,
   ]);
 
-  // Push HTML into sandbox preview iframe
+  // Write HTML into preview iframe
   useEffect(() => {
     if (isOpen && iframeRef.current && renderedHtml) {
       const doc = iframeRef.current.contentDocument;
@@ -161,7 +248,7 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
     }
   }, [isOpen, renderedHtml]);
 
-  // Keyboard Shortcuts Listener
+  // Keyboard Shortcuts
   useEffect(() => {
     if (!isOpen) return;
 
@@ -169,12 +256,12 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
       if (e.key === "Escape") {
         e.preventDefault();
         onClose();
-      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "p") {
+      } else if (e.key === "F9" || ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "p")) {
         e.preventDefault();
         handleExecutePrint();
-      } else if (e.key === "Enter" && !e.shiftKey && !e.ctrlKey && !e.metaKey && (e.target as HTMLElement).tagName !== "BUTTON" && (e.target as HTMLElement).tagName !== "SELECT" && (e.target as HTMLElement).tagName !== "INPUT") {
+      } else if (e.altKey && e.key.toLowerCase() === "p") {
         e.preventDefault();
-        handleExecutePrint();
+        printerSelectRef.current?.focus();
       } else if (e.key === "+" || e.key === "=") {
         e.preventDefault();
         setZoomScale((z) => Math.min(200, z + 10));
@@ -189,51 +276,125 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isOpen, renderedHtml, paperSize, copies, copyMarker]);
+  }, [isOpen, renderedHtml, paperSize, copies, selectedPrinterName, useSystemDialog, isDuplicate]);
 
-  // Execute Print Action
+  // Execute Print Job Action
   const handleExecutePrint = async () => {
     if (isPrinting) return;
+
+    if (selectedPrinterName === "Save as PDF" || selectedPrinterName === "Microsoft Print to PDF") {
+      await handleSavePdf();
+      return;
+    }
+
+    if (useSystemDialog && iframeRef.current && iframeRef.current.contentWindow) {
+      iframeRef.current.contentWindow.focus();
+      iframeRef.current.contentWindow.print();
+      setStatusMessage({ text: "Sent to OS system print dialog", type: "success" });
+      onAfterPrint?.({ success: true, mode: "system_dialog" });
+      return;
+    }
+
     setIsPrinting(true);
-    setStatusMessage({ text: "Sending job to printer...", type: "info" });
+    setStatusMessage({ text: `Sending job to ${selectedPrinterName}...`, type: "info" });
 
     try {
-      if (paperSize.startsWith("thermal")) {
-        const res = await printingEngine.printThermalReceipt(data);
-        if (res.success) {
-          setStatusMessage({ text: "Thermal receipt printed successfully!", type: "success" });
-          onAfterPrint?.({ success: true, mode: "thermal" });
-          setTimeout(() => onClose(), 1200);
-        } else {
-          setStatusMessage({ text: "Printer communication failed. Please verify printer status.", type: "error" });
-        }
+      const docNo = data.invoice_number || data.return_number || data.purchase_number || "DOC";
+      const isThermal = paperSize.startsWith("thermal");
+      const isDot = paperSize === "dot_matrix_80col";
+
+      let rawEscPosBytes: Uint8Array | undefined;
+      let pdfBytes: Uint8Array | undefined;
+
+      if (isThermal) {
+        rawEscPosBytes = printingEngine.generateEscPosReceiptBytes(data as InvoicePrintData, {
+          paperWidthMm: paperSize === "thermal_58mm" ? 58 : 80,
+          autoCut: printerProfile?.enableAutoCut ?? true,
+          cashDrawer: printerProfile?.enableCashDrawerKick ?? true,
+        });
+      } else if (!isDot) {
+        pdfBytes = printingEngine.renderDocumentPdf(docType, data, {
+          paperSize,
+          copies,
+          orientation,
+          isDuplicate,
+        });
+      }
+
+      const res = await printerManagerService.executePrintJob({
+        printerName: selectedPrinterName,
+        paperSize,
+        docType,
+        docNumber: docNo,
+        copies,
+        isDuplicate,
+        htmlContent: renderedHtml,
+        pdfBytes,
+        rawEscPosBytes,
+        useSystemDialog,
+      });
+
+      if (res.success) {
+        setStatusMessage({ text: `Print job accepted by ${selectedPrinterName}!`, type: "success" });
+        onAfterPrint?.({ success: true, mode: paperSize });
+        setTimeout(() => onClose(), 1200);
       } else {
-        // A4 / Half-A4 Print
-        if (iframeRef.current && iframeRef.current.contentWindow) {
-          iframeRef.current.contentWindow.focus();
-          iframeRef.current.contentWindow.print();
-          setStatusMessage({ text: "Sent to system print spooler", type: "success" });
-          onAfterPrint?.({ success: true, mode: "a4" });
-        } else {
-          const res = await printingEngine.printA4TaxInvoice(data);
-          if (res.success) {
-            setStatusMessage({ text: "A4 Tax Invoice sent to printer!", type: "success" });
-            onAfterPrint?.({ success: true, mode: "a4" });
-            setTimeout(() => onClose(), 1200);
-          } else {
-            setStatusMessage({ text: "Print failed.", type: "error" });
-          }
-        }
+        setStatusMessage({ text: `Print failed: ${res.error || "Printer rejected job"}`, type: "error" });
       }
     } catch (err: any) {
-      console.error("Print error:", err);
-      setStatusMessage({ text: `Print error: ${err?.message || "Unknown error"}`, type: "error" });
+      console.error("Print execution error:", err);
+      setStatusMessage({ text: `Print error: ${err?.message || "Communication failed"}`, type: "error" });
     } finally {
       setIsPrinting(false);
     }
   };
 
-  // Save PDF Action
+  // Test Print Action
+  const handleTestPrint = async () => {
+    if (isTestingPrinter || !selectedPrinterName) return;
+    setIsTestingPrinter(true);
+    setStatusMessage({ text: `Sending test slip to ${selectedPrinterName}...`, type: "info" });
+
+    try {
+      const testData: InvoicePrintData = {
+        invoice_number: "TEST-PAGE-01",
+        invoice_date: new Date().toISOString().split("T")[0],
+        invoice_time: new Date().toLocaleTimeString(),
+        store_name: settings.store_name || "LamStone Pharmacy",
+        store_address: settings.address || "Main Street Branch",
+        store_phone: settings.phone || "9876543210",
+        store_gstin: settings.gstin || "32AAAAA0000A1Z5",
+        lines: [
+          { description: "Printer Calibration Test Item", qty: 1, rate: 100, gst_percent: 18, amount: 118 },
+        ],
+        subtotal: 100,
+        tax_total: 18,
+        round_off: 0,
+        grand_total: 118,
+      };
+
+      const res = await printerManagerService.executePrintJob({
+        printerName: selectedPrinterName,
+        paperSize,
+        docType: "test_print",
+        docNumber: "TEST-01",
+        copies: 1,
+        htmlContent: printingEngine.generateInvoiceHtml(testData, { paperSize }),
+      });
+
+      if (res.success) {
+        setStatusMessage({ text: `Test print sent successfully to ${selectedPrinterName}!`, type: "success" });
+      } else {
+        setStatusMessage({ text: `Test print error: ${res.error}`, type: "error" });
+      }
+    } catch (err: any) {
+      setStatusMessage({ text: `Test print failed: ${err.message}`, type: "error" });
+    } finally {
+      setIsTestingPrinter(false);
+    }
+  };
+
+  // Save as High-Fidelity Vector PDF Action
   const handleSavePdf = async () => {
     if (isSavingPdf) return;
     setIsSavingPdf(true);
@@ -284,50 +445,11 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
     }
   };
 
-  // WhatsApp Share Action
-  const handleShareWhatsApp = () => {
-    const phone = customerPhone || data.customer_phone || "";
-    if (docType === "tax_invoice" || docType === "invoice") {
-      const url = generateWhatsAppShareUrl(phone, data as InvoicePrintData);
-      window.open(url, "_blank");
-    } else {
-      const text = encodeURIComponent(
-        `Dear Customer, here are your document details from ${data.store_name}:\nDocument: #${data.return_number || data.invoice_number}\nAmount: ₹${(data.grand_total || 0).toFixed(2)}\nThank you!`
-      );
-      window.open(`https://wa.me/${phone.replace(/[^0-9]/g, "")}?text=${text}`, "_blank");
-    }
-  };
-
-  // Email Share Action
-  const handleShareEmail = () => {
-    const email = customerEmail || data.customer_email || "customer@example.com";
-    if (docType === "tax_invoice" || docType === "invoice") {
-      const url = generateEmailShareUrl(email, data as InvoicePrintData);
-      window.location.href = url;
-    } else {
-      const subject = encodeURIComponent(`${data.store_name} Document #${data.return_number || data.invoice_number}`);
-      const body = encodeURIComponent(
-        `Dear Customer,\n\nPlease find details for #${data.return_number || data.invoice_number}.\nTotal Amount: ₹${(data.grand_total || 0).toFixed(2)}\n\nThank you,\n${data.store_name}`
-      );
-      window.location.href = `mailto:${email}?subject=${subject}&body=${body}`;
-    }
-  };
-
-  // Save current choices as defaults for this doc type
-  const handleSaveAsDefaults = () => {
-    companySettingsService.updateSettings({
-      printing: {
-        ...settings.printing,
-        paperSize: paperSize === "half_a4" ? "a4" : paperSize,
-        copies,
-        defaultCopyMarker: copyMarker,
-        printHsnSummary: showHsnSummary,
-        printUpiQrCode: showUpiQr,
-        printDoctorDetails: showDoctorPatient,
-        printDrugLicenses: showDrugLicenses,
-      },
-    });
-    setStatusMessage({ text: "Saved preferences as default settings!", type: "success" });
+  // Set Current Printer as Default for Paper Size
+  const handleSetAsDefault = async () => {
+    if (!selectedPrinterName) return;
+    await printerManagerService.setDefaultPrinterForPaperSize(paperSize, selectedPrinterName);
+    setStatusMessage({ text: `'${selectedPrinterName}' set as default for ${paperSize.toUpperCase()}`, type: "success" });
   };
 
   if (!isOpen) return null;
@@ -336,7 +458,7 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/80 backdrop-blur-sm p-4">
-      <div className="flex flex-col h-[94vh] w-full max-w-7xl bg-white dark:bg-slate-900 rounded-2xl shadow-2xl overflow-hidden border border-slate-200 dark:border-slate-800 animate-in fade-in zoom-in-95 duration-150">
+      <div className="flex flex-col h-[95vh] w-full max-w-7xl bg-white dark:bg-slate-900 rounded-2xl shadow-2xl overflow-hidden border border-slate-200 dark:border-slate-800 animate-in fade-in zoom-in-95 duration-150">
         
         {/* Top Header Bar */}
         <div className="flex items-center justify-between px-6 py-3.5 bg-slate-900 text-white border-b border-slate-800">
@@ -350,14 +472,19 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
                 <span className="px-2 py-0.5 text-xs font-semibold uppercase tracking-wider bg-blue-500/20 text-blue-300 border border-blue-400/30 rounded">
                   {paperSize.replace("_", " ")}
                 </span>
-                {copyMarker !== "None" && (
-                  <span className="px-2 py-0.5 text-xs font-medium bg-slate-800 text-slate-300 border border-slate-700 rounded">
-                    {copyMarker}
+                {isDuplicate && (
+                  <span className="px-2 py-0.5 text-xs font-bold uppercase tracking-wider bg-amber-500/20 text-amber-300 border border-amber-400/30 rounded flex items-center gap-1">
+                    <Tag className="w-3 h-3" /> Duplicate
+                  </span>
+                )}
+                {lastPrintJob && (
+                  <span className="text-xs text-slate-400 font-mono hidden md:inline">
+                    (Printed: {new Date(lastPrintJob.timestamp).toLocaleTimeString()})
                   </span>
                 )}
               </div>
               <p className="text-xs text-slate-400 mt-0.5">
-                Exact print & PDF match • Embedded TrueType fonts • High-fidelity vector rendering
+                Exact print & PDF match • True 100% scale • Real-time OS spooler status
               </p>
             </div>
           </div>
@@ -392,14 +519,6 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
               >
                 100%
               </button>
-              <button
-                type="button"
-                onClick={() => setZoomScale(isThermal ? 120 : 85)}
-                className="px-2 py-1 text-xs hover:bg-slate-700 text-slate-300 hover:text-white rounded transition"
-                title="Fit to screen"
-              >
-                Fit
-              </button>
             </div>
 
             <button
@@ -413,7 +532,7 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
           </div>
         </div>
 
-        {/* Main Center Area: Canvas on Left + Options Sidebar on Right */}
+        {/* Main Center Area: Canvas on Left + Side Panel on Right */}
         <div className="flex flex-1 overflow-hidden bg-slate-100 dark:bg-slate-950">
           
           {/* Document Canvas Preview Container */}
@@ -424,304 +543,435 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
                 transform: `scale(${zoomScale / 100})`,
                 width: isThermal
                   ? paperSize === "thermal_58mm"
-                    ? "68mm"
-                    : "92mm"
-                  : paperSize === "half_a4"
-                  ? "215mm"
+                    ? "60mm"
+                    : "82mm"
+                  : paperSize === "a5"
+                  ? "150mm"
                   : "215mm",
-                minHeight: isThermal ? "140mm" : paperSize === "half_a4" ? "150mm" : "297mm",
+                minHeight: isThermal ? "120mm" : paperSize === "a5" ? "210mm" : "297mm",
               }}
             >
               <iframe
                 ref={iframeRef}
                 title="Print Preview Frame"
-                className="w-full h-[850px] border-0 pointer-events-auto bg-white"
+                className="w-full h-[880px] border-0 pointer-events-auto bg-white"
                 sandbox="allow-same-origin allow-scripts allow-modals"
               />
             </div>
           </div>
 
           {/* Right Control Sidebar */}
-          <div className="w-84 border-l border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 overflow-y-auto flex flex-col justify-between">
-            <div className="space-y-5">
-              
-              {/* Format / Paper Size */}
-              <div>
-                <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-2">
-                  Paper Format
-                </label>
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setPaperSize("a4");
-                      setZoomScale(90);
-                    }}
-                    className={`px-3 py-2 text-xs font-semibold rounded-lg border text-left flex flex-col transition ${
-                      paperSize === "a4"
-                        ? "bg-blue-50 dark:bg-blue-900/30 border-blue-600 text-blue-600 dark:text-blue-400 shadow-sm"
-                        : "border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300"
-                    }`}
-                  >
-                    <span>A4 Tax Invoice</span>
-                    <span className="text-[10px] text-slate-400 font-normal">Full page laser</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setPaperSize("half_a4");
-                      setZoomScale(95);
-                    }}
-                    className={`px-3 py-2 text-xs font-semibold rounded-lg border text-left flex flex-col transition ${
-                      paperSize === "half_a4"
-                        ? "bg-blue-50 dark:bg-blue-900/30 border-blue-600 text-blue-600 dark:text-blue-400 shadow-sm"
-                        : "border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300"
-                    }`}
-                  >
-                    <span>Half A4 (A5)</span>
-                    <span className="text-[10px] text-slate-400 font-normal">Dot-matrix / 2-in-1</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setPaperSize("thermal_80mm");
-                      setZoomScale(110);
-                    }}
-                    className={`px-3 py-2 text-xs font-semibold rounded-lg border text-left flex flex-col transition ${
-                      paperSize === "thermal_80mm"
-                        ? "bg-blue-50 dark:bg-blue-900/30 border-blue-600 text-blue-600 dark:text-blue-400 shadow-sm"
-                        : "border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300"
-                    }`}
-                  >
-                    <span>Thermal 80mm</span>
-                    <span className="text-[10px] text-slate-400 font-normal">Standard POS Roll</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setPaperSize("thermal_58mm");
-                      setZoomScale(120);
-                    }}
-                    className={`px-3 py-2 text-xs font-semibold rounded-lg border text-left flex flex-col transition ${
-                      paperSize === "thermal_58mm"
-                        ? "bg-blue-50 dark:bg-blue-900/30 border-blue-600 text-blue-600 dark:text-blue-400 shadow-sm"
-                        : "border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300"
-                    }`}
-                  >
-                    <span>Thermal 58mm</span>
-                    <span className="text-[10px] text-slate-400 font-normal">Compact 2-inch</span>
-                  </button>
-                </div>
-              </div>
-
-              {/* Copies & Orientation */}
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1">
-                    Copies
-                  </label>
-                  <input
-                    type="number"
-                    min="1"
-                    max="10"
-                    value={copies}
-                    onChange={(e) => setCopies(Math.max(1, parseInt(e.target.value) || 1))}
-                    className="w-full px-3 py-1.5 text-xs font-semibold rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 focus:ring-2 focus:ring-blue-500"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1">
-                    Orientation
-                  </label>
-                  <select
-                    value={orientation}
-                    onChange={(e) => setOrientation(e.target.value as "portrait" | "landscape")}
-                    disabled={isThermal}
-                    className="w-full px-3 py-1.5 text-xs font-semibold rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
-                  >
-                    <option value="portrait">Portrait</option>
-                    <option value="landscape">Landscape</option>
-                  </select>
-                </div>
-              </div>
-
-              {/* Copy Marker Dropdown */}
-              <div>
-                <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1">
-                  Copy Marker
-                </label>
-                <select
-                  value={copyMarker}
-                  onChange={(e) => setCopyMarker(e.target.value)}
-                  className="w-full px-3 py-1.5 text-xs font-medium rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 focus:ring-2 focus:ring-blue-500"
-                >
-                  <option value="Original for Recipient">Original for Recipient</option>
-                  <option value="Duplicate for Transporter">Duplicate for Transporter</option>
-                  <option value="Triplicate for Supplier">Triplicate for Supplier</option>
-                  <option value="Revised Tax Invoice">Revised Tax Invoice</option>
-                  <option value="Customer Copy">Customer Copy</option>
-                  <option value="Office Copy">Office Copy</option>
-                  <option value="None">None (No Marker)</option>
-                </select>
-              </div>
-
-              {/* Customization Toggles */}
-              <div className="border-t border-slate-200 dark:border-slate-800 pt-4 space-y-2.5">
-                <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-2">
-                  Sections & Layout
-                </label>
-
-                <label className="flex items-center justify-between text-xs text-slate-700 dark:text-slate-300 cursor-pointer select-none">
-                  <span>Show HSN / GST Summary</span>
-                  <input
-                    type="checkbox"
-                    checked={showHsnSummary}
-                    onChange={(e) => setShowHsnSummary(e.target.checked)}
-                    className="rounded text-blue-600 focus:ring-blue-500"
-                  />
-                </label>
-
-                <label className="flex items-center justify-between text-xs text-slate-700 dark:text-slate-300 cursor-pointer select-none">
-                  <span>Show Dynamic UPI QR Code</span>
-                  <input
-                    type="checkbox"
-                    checked={showUpiQr}
-                    onChange={(e) => setShowUpiQr(e.target.checked)}
-                    className="rounded text-blue-600 focus:ring-blue-500"
-                  />
-                </label>
-
-                <label className="flex items-center justify-between text-xs text-slate-700 dark:text-slate-300 cursor-pointer select-none">
-                  <span>Show Doctor & Patient Details</span>
-                  <input
-                    type="checkbox"
-                    checked={showDoctorPatient}
-                    onChange={(e) => setShowDoctorPatient(e.target.checked)}
-                    className="rounded text-blue-600 focus:ring-blue-500"
-                  />
-                </label>
-
-                <label className="flex items-center justify-between text-xs text-slate-700 dark:text-slate-300 cursor-pointer select-none">
-                  <span>Show Drug Licenses & GSTIN</span>
-                  <input
-                    type="checkbox"
-                    checked={showDrugLicenses}
-                    onChange={(e) => setShowDrugLicenses(e.target.checked)}
-                    className="rounded text-blue-600 focus:ring-blue-500"
-                  />
-                </label>
-
-                <label className="flex items-center justify-between text-xs text-slate-700 dark:text-slate-300 cursor-pointer select-none">
-                  <span>Show Terms & Conditions</span>
-                  <input
-                    type="checkbox"
-                    checked={showTerms}
-                    onChange={(e) => setShowTerms(e.target.checked)}
-                    className="rounded text-blue-600 focus:ring-blue-500"
-                  />
-                </label>
-              </div>
-
-              {/* Save Preferences Button */}
+          <div className="w-96 border-l border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 flex flex-col justify-between overflow-hidden">
+            
+            {/* Sidebar Tab Selector */}
+            <div className="flex border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/50">
               <button
                 type="button"
-                onClick={handleSaveAsDefaults}
-                className="w-full flex items-center justify-center space-x-1.5 py-1.5 px-3 text-xs font-semibold text-slate-600 dark:text-slate-400 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-lg transition"
+                onClick={() => setActiveTab("device")}
+                className={`flex-1 py-3 text-xs font-bold border-b-2 flex items-center justify-center gap-1.5 transition ${
+                  activeTab === "device"
+                    ? "border-blue-600 text-blue-600 dark:text-blue-400 bg-white dark:bg-slate-900"
+                    : "border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"
+                }`}
               >
-                <Save className="w-3.5 h-3.5" />
-                <span>Save as Default Settings</span>
+                <Printer className="w-3.5 h-3.5" /> Printer & Profile
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab("layout")}
+                className={`flex-1 py-3 text-xs font-bold border-b-2 flex items-center justify-center gap-1.5 transition ${
+                  activeTab === "layout"
+                    ? "border-blue-600 text-blue-600 dark:text-blue-400 bg-white dark:bg-slate-900"
+                    : "border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"
+                }`}
+              >
+                <Sliders className="w-3.5 h-3.5" /> Layout & GST
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab("share")}
+                className={`flex-1 py-3 text-xs font-bold border-b-2 flex items-center justify-center gap-1.5 transition ${
+                  activeTab === "share"
+                    ? "border-blue-600 text-blue-600 dark:text-blue-400 bg-white dark:bg-slate-900"
+                    : "border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"
+                }`}
+              >
+                <Share2 className="w-3.5 h-3.5" /> Share & PDF
               </button>
             </div>
 
-            {/* Quick Share Buttons */}
-            <div className="border-t border-slate-200 dark:border-slate-800 pt-4 mt-4 space-y-2">
-              <div className="text-xs font-bold text-slate-500 dark:text-slate-400 mb-1">
-                Instant Share
+            {/* Tab Contents */}
+            <div className="flex-1 p-5 overflow-y-auto space-y-5">
+              
+              {activeTab === "device" && (
+                <div className="space-y-4">
+                  {/* Printer Selection Header */}
+                  <div>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label className="text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300">
+                        Target Printer <span className="text-slate-400 font-normal">(Alt+P)</span>
+                      </label>
+                      <button
+                        type="button"
+                        onClick={handleRefreshPrinters}
+                        disabled={isRefreshingPrinters}
+                        className="text-xs text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1"
+                        title="Scan OS for new printers"
+                      >
+                        <RefreshCw className={`w-3 h-3 ${isRefreshingPrinters ? "animate-spin" : ""}`} /> Refresh
+                      </button>
+                    </div>
+
+                    <select
+                      ref={printerSelectRef}
+                      value={selectedPrinterName}
+                      onChange={(e) => handleSelectPrinter(e.target.value)}
+                      className="w-full text-xs font-medium bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg p-2.5 text-slate-800 dark:text-slate-100 focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                    >
+                      {systemPrinters.map((p) => (
+                        <option key={p.name} value={p.name}>
+                          {p.isDefault ? "★ " : ""}{p.displayName} {p.status === "offline" ? "[OFFLINE]" : ""}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Printer Status Card */}
+                  {selectedPrinterInfo && (
+                    <div className="bg-slate-50 dark:bg-slate-800/70 border border-slate-200 dark:border-slate-700 rounded-lg p-3 text-xs space-y-1.5">
+                      <div className="flex items-center justify-between">
+                        <span className="text-slate-500 dark:text-slate-400">Device Status:</span>
+                        <span
+                          className={`px-2 py-0.5 rounded font-bold uppercase text-[10px] ${
+                            selectedPrinterInfo.status === "ready"
+                              ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-400"
+                              : "bg-rose-100 text-rose-700 dark:bg-rose-950/60 dark:text-rose-400"
+                          }`}
+                        >
+                          {selectedPrinterInfo.status}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between text-slate-600 dark:text-slate-300">
+                        <span>Driver:</span>
+                        <span className="font-mono text-[11px] truncate max-w-[180px]">{selectedPrinterInfo.driverName || "Standard Spooler"}</span>
+                      </div>
+                      <div className="flex items-center justify-between text-slate-600 dark:text-slate-300">
+                        <span>Port:</span>
+                        <span className="font-mono text-[11px]">{selectedPrinterInfo.portName || "USB"}</span>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Incompatibility Warning */}
+                  {!paperCompatibility.compatible && (
+                    <div className="bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-700/60 rounded-lg p-3 text-xs text-amber-800 dark:text-amber-200 flex items-start gap-2">
+                      <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                      <div className="space-y-1.5">
+                        <div className="font-semibold">{paperCompatibility.warning}</div>
+                        {paperCompatibility.suggestedPaper && (
+                          <button
+                            type="button"
+                            onClick={() => setPaperSize(paperCompatibility.suggestedPaper!)}
+                            className="px-2 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded text-[11px] font-bold transition"
+                          >
+                            Switch to {paperCompatibility.suggestedPaper.toUpperCase()}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Paper Format Picker */}
+                  <div>
+                    <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300 mb-2">
+                      Paper Size
+                    </label>
+                    <div className="grid grid-cols-2 gap-2">
+                      {[
+                        { id: "a4", label: "A4 (210×297mm)" },
+                        { id: "a5", label: "A5 (148×210mm)" },
+                        { id: "half_a4", label: "Half-A4 (V-Cut)" },
+                        { id: "thermal_80mm", label: "Thermal 80mm" },
+                        { id: "thermal_58mm", label: "Thermal 58mm" },
+                        { id: "dot_matrix_80col", label: "Dot Matrix 80C" },
+                      ].map((p) => (
+                        <button
+                          key={p.id}
+                          type="button"
+                          onClick={() => setPaperSize(p.id as PaperSize)}
+                          className={`p-2 rounded-lg text-xs font-bold text-left transition border ${
+                            paperSize === p.id
+                              ? "bg-blue-50 dark:bg-blue-950/60 border-blue-500 text-blue-700 dark:text-blue-300 shadow-sm"
+                              : "bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-50"
+                          }`}
+                        >
+                          {p.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Copies & Quick Controls */}
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1">
+                        Copies
+                      </label>
+                      <input
+                        type="number"
+                        min={1}
+                        max={10}
+                        value={copies}
+                        onChange={(e) => setCopies(Math.max(1, parseInt(e.target.value) || 1))}
+                        className="w-full text-xs font-bold bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg p-2 text-slate-800 dark:text-slate-100"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1">
+                        Currency Format
+                      </label>
+                      <select
+                        value={currencySymbolFormat}
+                        onChange={(e) => setCurrencySymbolFormat(e.target.value as any)}
+                        className="w-full text-xs bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg p-2 text-slate-800 dark:text-slate-100"
+                      >
+                        <option value="rupee_symbol">₹ (Unicode)</option>
+                        <option value="rs_text">Rs. (Text Mode)</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* Device Specific Options */}
+                  <div className="space-y-2 pt-2 border-t border-slate-200 dark:border-slate-800">
+                    <label className="flex items-center space-x-2 text-xs text-slate-700 dark:text-slate-300 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={silentPrint}
+                        onChange={(e) => setSilentPrint(e.target.checked)}
+                        className="rounded text-blue-600"
+                      />
+                      <span>Silent Background Print (No OS popup)</span>
+                    </label>
+
+                    <label className="flex items-center space-x-2 text-xs text-slate-700 dark:text-slate-300 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={useSystemDialog}
+                        onChange={(e) => setUseSystemDialog(e.target.checked)}
+                        className="rounded text-blue-600"
+                      />
+                      <span>Force Native OS Print Dialog</span>
+                    </label>
+
+                    <label className="flex items-center space-x-2 text-xs text-slate-700 dark:text-slate-300 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={isDuplicate}
+                        onChange={(e) => {
+                          setIsDuplicate(e.target.checked);
+                          if (e.target.checked) setCopyMarker("DUPLICATE");
+                        }}
+                        className="rounded text-blue-600"
+                      />
+                      <span>Mark as DUPLICATE Reprint</span>
+                    </label>
+                  </div>
+
+                  {/* Device Action Buttons */}
+                  <div className="flex gap-2 pt-2">
+                    <button
+                      type="button"
+                      onClick={handleSetAsDefault}
+                      className="flex-1 py-2 px-3 text-xs font-semibold bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-lg border border-slate-300 dark:border-slate-600 transition"
+                    >
+                      Set as Paper Default
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleTestPrint}
+                      disabled={isTestingPrinter}
+                      className="py-2 px-3 text-xs font-semibold bg-blue-50 dark:bg-blue-950/50 hover:bg-blue-100 text-blue-700 dark:text-blue-300 rounded-lg border border-blue-300 dark:border-blue-700 transition flex items-center gap-1"
+                    >
+                      <Zap className="w-3 h-3" /> Test
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {activeTab === "layout" && (
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300 mb-2">
+                      Copy Classification Marker
+                    </label>
+                    <select
+                      value={copyMarker}
+                      onChange={(e) => setCopyMarker(e.target.value)}
+                      className="w-full text-xs font-medium bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg p-2.5 text-slate-800 dark:text-slate-100"
+                    >
+                      <option value="Original for Recipient">Original for Recipient</option>
+                      <option value="Duplicate for Transporter">Duplicate for Transporter</option>
+                      <option value="Triplicate for Supplier">Triplicate for Supplier</option>
+                      <option value="DUPLICATE">DUPLICATE (Reprint)</option>
+                      <option value="Delivery Challan">Delivery Challan / Stock Transfer</option>
+                      <option value="None">None</option>
+                    </select>
+                  </div>
+
+                  {/* Statutory Toggles */}
+                  <div className="space-y-2.5">
+                    <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-1">
+                      Statutory GST & Clinical Details
+                    </label>
+                    
+                    <label className="flex items-center justify-between text-xs text-slate-700 dark:text-slate-300 p-2 bg-slate-50 dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700 cursor-pointer">
+                      <span>HSN / GST Tax Summary Table</span>
+                      <input
+                        type="checkbox"
+                        checked={showHsnSummary}
+                        onChange={(e) => setShowHsnSummary(e.target.checked)}
+                        className="rounded text-blue-600"
+                      />
+                    </label>
+
+                    <label className="flex items-center justify-between text-xs text-slate-700 dark:text-slate-300 p-2 bg-slate-50 dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700 cursor-pointer">
+                      <span>Dynamic UPI QR Code</span>
+                      <input
+                        type="checkbox"
+                        checked={showUpiQr}
+                        onChange={(e) => setShowUpiQr(e.target.checked)}
+                        className="rounded text-blue-600"
+                      />
+                    </label>
+
+                    <label className="flex items-center justify-between text-xs text-slate-700 dark:text-slate-300 p-2 bg-slate-50 dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700 cursor-pointer">
+                      <span>Doctor & Patient Metadata</span>
+                      <input
+                        type="checkbox"
+                        checked={showDoctorPatient}
+                        onChange={(e) => setShowDoctorPatient(e.target.checked)}
+                        className="rounded text-blue-600"
+                      />
+                    </label>
+
+                    <label className="flex items-center justify-between text-xs text-slate-700 dark:text-slate-300 p-2 bg-slate-50 dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700 cursor-pointer">
+                      <span>Drug Licenses (20B, 21B, FSSAI)</span>
+                      <input
+                        type="checkbox"
+                        checked={showDrugLicenses}
+                        onChange={(e) => setShowDrugLicenses(e.target.checked)}
+                        className="rounded text-blue-600"
+                      />
+                    </label>
+
+                    <label className="flex items-center justify-between text-xs text-slate-700 dark:text-slate-300 p-2 bg-slate-50 dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700 cursor-pointer">
+                      <span>Terms & Conditions & Jurisdiction</span>
+                      <input
+                        type="checkbox"
+                        checked={showTerms}
+                        onChange={(e) => setShowTerms(e.target.checked)}
+                        className="rounded text-blue-600"
+                      />
+                    </label>
+                  </div>
+                </div>
+              )}
+
+              {activeTab === "share" && (
+                <div className="space-y-4">
+                  <div className="bg-slate-50 dark:bg-slate-800/70 border border-slate-200 dark:border-slate-700 rounded-lg p-3 text-xs space-y-2">
+                    <div className="font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                      <FileDown className="w-4 h-4 text-blue-600" /> Digital PDF Export
+                    </div>
+                    <p className="text-slate-500 dark:text-slate-400">
+                      Generates a standalone vector PDF with embedded Roboto TrueType fonts and ₹ glyph.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={handleSavePdf}
+                      disabled={isSavingPdf}
+                      className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg transition shadow flex items-center justify-center gap-2"
+                    >
+                      <FileDown className="w-4 h-4" /> Save High-Fidelity PDF
+                    </button>
+                  </div>
+
+                  {/* WhatsApp Share */}
+                  <div className="bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 rounded-lg p-3 text-xs space-y-2">
+                    <div className="font-bold text-emerald-900 dark:text-emerald-200 flex items-center gap-1.5">
+                      <Smartphone className="w-4 h-4 text-emerald-600" /> WhatsApp Customer Dispatch
+                    </div>
+                    <p className="text-emerald-700 dark:text-emerald-300">
+                      Send document link and summary directly to the customer's WhatsApp.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const phone = customerPhone || data.customer_phone || "";
+                        const url = generateWhatsAppShareUrl(phone, data as InvoicePrintData);
+                        window.open(url, "_blank");
+                      }}
+                      className="w-full py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-lg transition shadow"
+                    >
+                      Share on WhatsApp
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Status Notifications */}
+            {statusMessage && (
+              <div
+                className={`mx-5 mb-3 p-3 rounded-lg text-xs font-semibold flex items-center gap-2 border animate-in fade-in ${
+                  statusMessage.type === "success"
+                    ? "bg-emerald-50 text-emerald-800 border-emerald-300 dark:bg-emerald-950 dark:text-emerald-300"
+                    : statusMessage.type === "error"
+                    ? "bg-rose-50 text-rose-800 border-rose-300 dark:bg-rose-950 dark:text-rose-300"
+                    : "bg-blue-50 text-blue-800 border-blue-300 dark:bg-blue-950 dark:text-blue-300"
+                }`}
+              >
+                {statusMessage.type === "success" ? (
+                  <CheckCircle2 className="w-4 h-4 shrink-0" />
+                ) : (
+                  <AlertCircle className="w-4 h-4 shrink-0" />
+                )}
+                <span className="truncate">{statusMessage.text}</span>
               </div>
-              <div className="grid grid-cols-2 gap-2">
+            )}
+
+            {/* Bottom Actions */}
+            <div className="p-5 border-t border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/80 space-y-2.5">
+              <div className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400 font-mono">
+                <span className="truncate">Printer: {selectedPrinterName || "None"}</span>
+                <span>F9 / Ctrl+P</span>
+              </div>
+
+              <div className="flex gap-2">
                 <button
                   type="button"
-                  onClick={handleShareWhatsApp}
-                  className="flex items-center justify-center space-x-1 py-1.5 px-2 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 border border-emerald-300 dark:border-emerald-800 rounded-lg text-xs font-semibold hover:bg-emerald-100 transition"
+                  onClick={onClose}
+                  className="py-2.5 px-4 text-xs font-bold text-slate-700 dark:text-slate-300 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 hover:bg-slate-100 rounded-lg transition"
                 >
-                  <Smartphone className="w-3.5 h-3.5" />
-                  <span>WhatsApp</span>
+                  Cancel
                 </button>
 
                 <button
                   type="button"
-                  onClick={handleShareEmail}
-                  className="flex items-center justify-center space-x-1 py-1.5 px-2 bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-400 border border-indigo-300 dark:border-indigo-800 rounded-lg text-xs font-semibold hover:bg-indigo-100 transition"
+                  onClick={handleExecutePrint}
+                  disabled={isPrinting}
+                  className="flex-1 py-2.5 px-4 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-lg transition shadow-lg flex items-center justify-center gap-2 disabled:opacity-50"
                 >
-                  <Mail className="w-3.5 h-3.5" />
-                  <span>Email</span>
+                  <Printer className="w-4 h-4" />
+                  {isPrinting ? "Spooling..." : "Print Document (F9)"}
                 </button>
               </div>
             </div>
+
           </div>
         </div>
 
-        {/* Bottom Action & Status Footer */}
-        <div className="flex items-center justify-between px-6 py-3.5 bg-slate-50 dark:bg-slate-900/90 border-t border-slate-200 dark:border-slate-800">
-          
-          {/* Status Message */}
-          <div className="flex items-center space-x-2">
-            {statusMessage ? (
-              <div
-                className={`flex items-center space-x-2 text-xs font-medium px-3 py-1.5 rounded-lg ${
-                  statusMessage.type === "success"
-                    ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 border border-emerald-300"
-                    : statusMessage.type === "error"
-                    ? "bg-rose-100 text-rose-800 dark:bg-rose-950/60 dark:text-rose-300 border border-rose-300"
-                    : "bg-blue-100 text-blue-800 dark:bg-blue-950/60 dark:text-blue-300 border border-blue-300"
-                }`}
-              >
-                {statusMessage.type === "success" && <CheckCircle2 className="w-4 h-4" />}
-                {statusMessage.type === "error" && <AlertCircle className="w-4 h-4" />}
-                <span>{statusMessage.text}</span>
-              </div>
-            ) : (
-              <div className="text-xs text-slate-500 dark:text-slate-400">
-                Keyboard shortcuts: <kbd className="px-1.5 py-0.5 bg-slate-200 dark:bg-slate-800 rounded text-slate-700 dark:text-slate-300 font-mono text-[10px]">Enter</kbd> to Print, <kbd className="px-1.5 py-0.5 bg-slate-200 dark:bg-slate-800 rounded text-slate-700 dark:text-slate-300 font-mono text-[10px]">Esc</kbd> to Cancel
-              </div>
-            )}
-          </div>
-
-          {/* Action Buttons */}
-          <div className="flex items-center space-x-3">
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-4 py-2 text-xs font-bold text-slate-600 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-800 rounded-xl transition"
-            >
-              Cancel (Esc)
-            </button>
-
-            <button
-              type="button"
-              onClick={handleSavePdf}
-              disabled={isSavingPdf}
-              className="flex items-center space-x-1.5 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-bold shadow transition disabled:opacity-50"
-            >
-              <FileDown className="w-4 h-4" />
-              <span>{isSavingPdf ? "Saving PDF..." : "Save PDF"}</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={handleExecutePrint}
-              disabled={isPrinting}
-              className="flex items-center space-x-2 px-6 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold shadow-lg shadow-blue-500/25 transition disabled:opacity-50"
-            >
-              <Printer className="w-4 h-4" />
-              <span>{isPrinting ? "Printing..." : `Print (${paperSize.toUpperCase()})`}</span>
-            </button>
-          </div>
-        </div>
       </div>
     </div>
   );

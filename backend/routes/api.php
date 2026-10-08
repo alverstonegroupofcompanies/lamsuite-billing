@@ -24,6 +24,7 @@ use App\Http\Controllers\Api\PurchaseController;
 use App\Http\Controllers\Api\StockController;
 use App\Http\Controllers\Api\SyncController;
 use App\Http\Controllers\Api\ReportController;
+use App\Http\Controllers\Api\PrintController;
 
 /*
 |--------------------------------------------------------------------------
@@ -199,4 +200,9 @@ Route::middleware(['auth:sanctum', 'session.timeout', 'ip.allowlist', 'scope.sto
     Route::post('/notifications/{id}/read', [AdminNotificationController::class, 'markAsRead'])->middleware('rbac:notifications,view');
     Route::post('/notifications/mark-all-read', [AdminNotificationController::class, 'markAllAsRead'])->middleware('rbac:notifications,view');
     Route::post('/notifications/check-alerts', [AdminNotificationController::class, 'checkAlerts'])->middleware('rbac:notifications,view');
+
+    // Module 14: Print & Vector PDF Parity
+    Route::post('/print/render-pdf', [PrintController::class, 'renderPdf']);
+    Route::get('/print/templates', [PrintController::class, 'syncTemplates']);
+    Route::post('/print/history', [PrintController::class, 'recordHistory']);
 });

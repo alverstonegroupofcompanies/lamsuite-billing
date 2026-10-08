@@ -62,7 +62,21 @@ describe("Printing Engine & Document Layouts (PRN-001, PRN-002, PRN-005)", () =>
   describe("Native Print Dispatch & Templates", () => {
     it("invokes native thermal print via desktop IPC bridge", async () => {
       resetMockHandlers();
-      registerMockHandler("print:thermal", async (args) => {
+      registerMockHandler("db:insert", async () => ({ success: true }));
+      registerMockHandler("db:findById", async () => null);
+      registerMockHandler("db:findAll", async () => []);
+      registerMockHandler("get_system_printers", async () => [
+        {
+          name: "EPSON TM-T82 Thermal",
+          displayName: "EPSON TM-T82 Thermal",
+          isDefault: true,
+          status: "ready",
+          printerType: "thermal_pos",
+          supportedPaperSizes: ["thermal_80mm", "thermal_58mm"],
+          isVirtual: false,
+        },
+      ]);
+      registerMockHandler("print_native_job", async (args) => {
         return { success: true, job_id: "spool_job_881", received: args };
       });
 
@@ -77,7 +91,7 @@ describe("Printing Engine & Document Layouts (PRN-001, PRN-002, PRN-005)", () =>
         grand_total: 34,
       };
 
-      const res = await printingEngine.printThermalReceipt(sampleData, "EPSON TM-T82");
+      const res = await printingEngine.printThermalReceipt(sampleData, "EPSON TM-T82 Thermal");
       expect(res.success).toBe(true);
       expect(res.job_id).toBe("spool_job_881");
     });
@@ -496,6 +510,107 @@ describe("Printing Engine & Document Layouts (PRN-001, PRN-002, PRN-005)", () =>
       const cnPdf = printingEngine.renderDocumentPdf("credit_note", creditNoteData);
       expect(cnPdf).toBeInstanceOf(Uint8Array);
       expect(String.fromCharCode(...cnPdf.subarray(0, 5))).toBe("%PDF-");
+    });
+
+    it("generates ESC/POS binary bytes with initialize, cutter, and drawer kick commands", () => {
+      const sampleData: InvoicePrintData = {
+        invoice_number: "INV-ESC-001",
+        invoice_date: "2026-10-08",
+        store_name: "LamStone Pharmacy",
+        lines: [
+          { description: "Amoxicillin 500mg", qty: 2, rate: 50, gst_percent: 12, amount: 100 },
+        ],
+        subtotal: 89.28,
+        tax_total: 10.72,
+        round_off: 0,
+        grand_total: 100,
+      };
+
+      const bytes = printingEngine.generateEscPosReceiptBytes(sampleData, {
+        paperWidthMm: 80,
+        autoCut: true,
+        cashDrawer: true,
+      });
+
+      expect(bytes).toBeInstanceOf(Uint8Array);
+      expect(bytes.length).toBeGreaterThan(50);
+      // Check ESC @ (0x1B, 0x40)
+      expect(bytes[0]).toBe(0x1B);
+      expect(bytes[1]).toBe(0x40);
+      // Check cash drawer kick (0x1B, 0x70)
+      expect(bytes[2]).toBe(0x1B);
+      expect(bytes[3]).toBe(0x70);
+      // Check GS V cutter command at end (0x1D, 0x56, 0x41)
+      const lastFour = bytes.subarray(bytes.length - 4);
+      expect(lastFour[0]).toBe(0x1D);
+      expect(lastFour[1]).toBe(0x56);
+      expect(lastFour[2]).toBe(0x41);
+    });
+
+    it("generates Dot Matrix 80-column ASCII draft text with form feed", () => {
+      const sampleData: InvoicePrintData = {
+        invoice_number: "INV-DOT-001",
+        invoice_date: "2026-10-08",
+        store_name: "LamStone Pharmacy",
+        lines: [
+          { description: "Paracetamol 500mg", batch_no: "PC01", expiry_date: "2027-01", qty: 5, rate: 10, gst_percent: 12, amount: 50 },
+        ],
+        subtotal: 44.64,
+        tax_total: 5.36,
+        round_off: 0,
+        grand_total: 50,
+      };
+
+      const text = printingEngine.generateDotMatrixText(sampleData);
+      expect(text).toContain("TAX INVOICE");
+      expect(text).toContain("INV-DOT-001");
+      expect(text).toContain("Paracetamol 500mg");
+      // Check for ASCII form feed character (\x0C)
+      expect(text).toContain("\x0C");
+    });
+
+    it("renders clean multi-item batches for 1, 2, 40, and 100+ items", () => {
+      const createData = (count: number): InvoicePrintData => ({
+        invoice_number: `INV-MULTI-${count}`,
+        invoice_date: "2026-10-08",
+        store_name: "LamStone Super Meds",
+        lines: Array.from({ length: count }, (_, i) => ({
+          description: `Product Line Item #${i + 1}`,
+          batch_no: `BAT-${1000 + i}`,
+          expiry_date: "2028-05",
+          qty: 1,
+          rate: 100,
+          gst_percent: 18,
+          amount: 118,
+        })),
+        subtotal: count * 100,
+        tax_total: count * 18,
+        round_off: 0,
+        grand_total: count * 118,
+      });
+
+      // 1 item A4 & thermal
+      const html1 = printingEngine.generateInvoiceHtml(createData(1), { paperSize: "a4" });
+      expect(html1).toContain("Product Line Item #1");
+      const therm1 = printingEngine.generateInvoiceHtml(createData(1), { paperSize: "thermal_80mm" });
+      expect(therm1).toContain("Product Line Item #1");
+
+      // 2 items A4 & thermal
+      const html2 = printingEngine.generateInvoiceHtml(createData(2), { paperSize: "a4" });
+      expect(html2).toContain("Product Line Item #2");
+
+      // 40 items A4 & PDF
+      const data40 = createData(40);
+      const html40 = printingEngine.generateInvoiceHtml(data40, { paperSize: "a4" });
+      expect(html40).toContain("Product Line Item #40");
+      expect(html40).toContain("table-header-group");
+      const pdf40 = printingEngine.generateInvoicePdf(data40);
+      expect(pdf40.byteLength).toBeGreaterThan(1000);
+
+      // 100 items A4 & thermal
+      const data100 = createData(100);
+      const html100 = printingEngine.generateInvoiceHtml(data100, { paperSize: "a4" });
+      expect(html100).toContain("Product Line Item #100");
     });
   });
 });

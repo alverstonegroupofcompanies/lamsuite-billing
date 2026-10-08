@@ -1,4 +1,5 @@
 import { getIpcBridge, isTauri, invokeCommand } from "../ipc/ipcBridge";
+import { printerManagerService } from "./printerManagerService";
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
 import * as QRCodeModule from "qrcode";
@@ -59,7 +60,7 @@ export interface InvoicePrintData {
 }
 
 export interface PrintRenderOptions {
-  paperSize?: "a4" | "half_a4" | "thermal_80mm" | "thermal_58mm";
+  paperSize?: "a4" | "a5" | "half_a4" | "thermal_80mm" | "thermal_58mm" | "dot_matrix_80col" | "barcode_label";
   copies?: number;
   orientation?: "portrait" | "landscape";
   showHsnSummary?: boolean;
@@ -72,6 +73,9 @@ export interface PrintRenderOptions {
   copyMarker?: string;
   templateId?: string;
   zoomScale?: number;
+  currencySymbolFormat?: "rupee_symbol" | "rs_text";
+  isDuplicate?: boolean;
+  printerName?: string;
 }
 
 export interface HsnSummaryRow {
@@ -391,32 +395,27 @@ export class PrintingEngine {
     }
   }
 
-  async printThermalReceipt(data: InvoicePrintData, printerName?: string): Promise<{ success: boolean; job_id?: string }> {
-    const dynamicHeight = generateDynamicSlipHeightMm(data.lines.length, Boolean(data.doctor_name || data.patient_name));
+  async printThermalReceipt(data: InvoicePrintData, printerName?: string): Promise<{ success: boolean; job_id?: string; error?: string }> {
+    const targetPrinter = printerName || (await printerManagerService.getDefaultPrinterForPaperSize("thermal_80mm"));
+    const html = this.generateInvoiceHtml(data, { paperSize: "thermal_80mm" });
+    const rawEscPos = this.generateEscPosReceiptBytes(data, { paperWidthMm: 80, autoCut: true, cashDrawer: true });
 
-    if (isTauri()) {
-      return await invokeCommand<{ success: boolean; job_id?: string }>("print:thermal", {
-        data,
-        dynamicHeightMm: dynamicHeight,
-        printerName: printerName || this.printerProfiles.find((p) => p.isDefault)?.name,
-      });
+    const res = await printerManagerService.executePrintJob({
+      printerName: targetPrinter,
+      paperSize: "thermal_80mm",
+      docType: "tax_invoice",
+      docNumber: data.invoice_number,
+      htmlContent: html,
+      rawEscPosBytes: rawEscPos,
+    });
+
+    if (res.success) {
+      return { success: true, job_id: res.jobId };
     }
 
-    const bridge = getIpcBridge();
-    if (bridge.runtime === "mock") {
+    // Browser runtime fallback
+    if (typeof window !== "undefined" && !isTauri()) {
       try {
-        return await bridge.invoke<{ success: boolean; job_id?: string }>("print:thermal", {
-          data,
-          dynamicHeightMm: dynamicHeight,
-          printerName: printerName || this.printerProfiles.find((p) => p.isDefault)?.name,
-        });
-      } catch {}
-    }
-
-    // In plain browser: open print preview window with thermal receipt formatting
-    if (typeof window !== "undefined") {
-      try {
-        const html = this.generateInvoiceHtml(data);
         const printWindow = window.open("", "_blank", "width=400,height=750");
         if (printWindow) {
           printWindow.document.open();
@@ -427,35 +426,34 @@ export class PrintingEngine {
           return { success: true, job_id: "browser_print_thermal" };
         }
       } catch (e) {
-        console.warn("Browser thermal print failed:", e);
+        console.warn("Browser thermal print fallback failed:", e);
       }
     }
 
-    return { success: true, job_id: "thermal_preview_fallback" };
+    return { success: false, error: res.error || "Print failed" };
   }
 
-  async printA4TaxInvoice(data: InvoicePrintData, printerName?: string): Promise<{ success: boolean; job_id?: string }> {
-    if (isTauri()) {
-      return await invokeCommand<{ success: boolean; job_id?: string }>("print:a4", {
-        data,
-        printerName: printerName || this.printerProfiles.find((p) => p.paperSize === "a4")?.name,
-      });
+  async printA4TaxInvoice(data: InvoicePrintData, printerName?: string): Promise<{ success: boolean; job_id?: string; error?: string }> {
+    const targetPrinter = printerName || (await printerManagerService.getDefaultPrinterForPaperSize("a4"));
+    const html = this.generateInvoiceHtml(data, { paperSize: "a4" });
+    const pdfBytes = this.generateInvoicePdf(data);
+
+    const res = await printerManagerService.executePrintJob({
+      printerName: targetPrinter,
+      paperSize: "a4",
+      docType: "tax_invoice",
+      docNumber: data.invoice_number,
+      htmlContent: html,
+      pdfBytes,
+    });
+
+    if (res.success) {
+      return { success: true, job_id: res.jobId };
     }
 
-    const bridge = getIpcBridge();
-    if (bridge.runtime === "mock") {
+    // Browser runtime fallback
+    if (typeof window !== "undefined" && !isTauri()) {
       try {
-        return await bridge.invoke<{ success: boolean; job_id?: string }>("print:a4", {
-          data,
-          printerName: printerName || this.printerProfiles.find((p) => p.paperSize === "a4")?.name,
-        });
-      } catch {}
-    }
-
-    // In plain browser: open print preview with statutory A4 tax invoice and trigger native print
-    if (typeof window !== "undefined") {
-      try {
-        const html = this.generateInvoiceHtml(data);
         const printWindow = window.open("", "_blank", "width=850,height=900");
         if (printWindow) {
           printWindow.document.open();
@@ -470,7 +468,7 @@ export class PrintingEngine {
       }
     }
 
-    return { success: true, job_id: "preview_fallback" };
+    return { success: false, error: res.error || "Print failed" };
   }
 
   /**
@@ -553,6 +551,12 @@ export class PrintingEngine {
     @media print {
       body { margin: 0; padding: 8mm; }
       @page { size: A4 portrait; margin: 8mm; }
+      table.data-table thead { display: table-header-group; }
+      table.data-table tfoot { display: table-footer-group; }
+      table.data-table tr { page-break-inside: avoid; break-inside: avoid; }
+      .footer-container { page-break-inside: avoid; break-inside: avoid; }
+      .meta-grid { page-break-inside: avoid; break-inside: avoid; }
+      .no-print { display: none !important; }
     }
     * { box-sizing: border-box; }
     body {
@@ -565,21 +569,25 @@ export class PrintingEngine {
       background: #fff;
       font-variant-numeric: tabular-nums;
     }
-    .header { text-align: center; border-bottom: 2px solid #0f172a; padding-bottom: 8px; margin-bottom: 12px; }
+    .header { text-align: center; border-bottom: 2px solid #0f172a; padding-bottom: 8px; margin-bottom: 12px; position: relative; }
     .store-name { font-size: 19px; font-weight: 800; color: #0f172a; }
     .store-sub { font-size: 10px; color: #475569; margin-top: 2px; }
     .store-licenses { font-size: 9.5px; font-weight: 700; color: #334155; margin-top: 3px; }
     .tax-badge { font-size: 13px; font-weight: 800; letter-spacing: 0.5px; color: #0f172a; margin-top: 6px; }
     .copy-marker { font-size: 8.5px; font-weight: 800; color: #64748b; letter-spacing: 0.5px; text-transform: uppercase; margin-top: 2px; }
+    .duplicate-watermark { position: absolute; top: 0; right: 0; border: 2px solid #ef4444; color: #ef4444; font-weight: 800; font-size: 11px; padding: 3px 8px; border-radius: 4px; letter-spacing: 1px; transform: rotate(-5deg); }
     
-    .meta-grid { display: flex; justify-content: space-between; border: 1px solid #cbd5e1; border-radius: 6px; background: #f8fafc; padding: 8px 12px; margin-bottom: 12px; }
+    .meta-grid { display: flex; justify-content: space-between; border: 1px solid #cbd5e1; border-radius: 6px; background: #f8fafc; padding: 8px 12px; margin-bottom: 12px; page-break-inside: avoid; break-inside: avoid; }
     .meta-col { width: 48%; }
     
     table.data-table { width: 100%; border-collapse: collapse; font-size: 10px; margin-bottom: 12px; }
+    table.data-table thead { display: table-header-group; }
+    table.data-table tfoot { display: table-footer-group; }
+    table.data-table tr { page-break-inside: avoid; break-inside: avoid; }
     table.data-table th { background: #f1f5f9; color: #0f172a; font-weight: 700; padding: 6px; border-top: 1px solid #cbd5e1; border-bottom: 2px solid #94a3b8; }
     table.data-table tr:nth-child(even) { background: #f8fafc; }
 
-    .footer-container { margin-top: 12px; page-break-inside: avoid; }
+    .footer-container { margin-top: 12px; page-break-inside: avoid; break-inside: avoid; }
     .amount-words-bar { background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 4px; padding: 6px 10px; font-size: 10px; font-weight: 700; color: #1e293b; margin-bottom: 10px; }
     
     .footer-grid { display: grid; grid-template-columns: ${showQr ? "1fr 310px" : "1fr 310px"}; grid-template-rows: auto auto; gap: 10px 16px; align-items: stretch; }
@@ -787,14 +795,16 @@ export class PrintingEngine {
   <title>Receipt - ${data.invoice_number}</title>
   <style>
     @media print {
-      @page { size: auto; margin: 0; }
-      body { margin: 0; padding: 3mm; width: ${widthMm}mm; background: #fff !important; }
-      .thermal-paper { box-shadow: none !important; border: none !important; width: 100% !important; padding: 0 !important; }
+      @page { size: ${widthMm}mm auto; margin: 0; }
+      html, body { margin: 0 !important; padding: 0 !important; width: ${widthMm}mm !important; background: #fff !important; }
+      .thermal-paper { box-shadow: none !important; border: none !important; width: ${widthMm}mm !important; padding: ${is58 ? "2mm 1.5mm" : "3mm 2.5mm"} !important; min-height: auto !important; margin: 0 !important; }
+      .no-print { display: none !important; }
     }
     * { box-sizing: border-box; }
+    html { margin: 0; padding: 0; }
     body {
       margin: 0;
-      padding: 16px;
+      padding: 12px;
       display: flex;
       justify-content: center;
       background: #f1f5f9;
@@ -805,12 +815,13 @@ export class PrintingEngine {
     }
     .thermal-paper {
       width: ${is58 ? "58mm" : "80mm"};
-      min-height: 120mm;
+      min-height: auto;
       background: #ffffff;
       padding: ${is58 ? "3mm" : "4.5mm"};
       box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1);
       border: 1px solid #e2e8f0;
       border-radius: 2px;
+      margin: 0 auto;
     }
     .center { text-align: center; }
     .bold { font-weight: 700; }
@@ -2506,6 +2517,144 @@ export class PrintingEngine {
       default:
         return this.generateInvoiceHtml(data as InvoicePrintData, options);
     }
+  }
+
+  /**
+   * Generates ESC/POS byte sequence for thermal slip printing with cut & cash drawer commands.
+   */
+  generateEscPosReceiptBytes(data: InvoicePrintData, options?: { paperWidthMm?: 58 | 80; autoCut?: boolean; cashDrawer?: boolean }): Uint8Array {
+    const is58 = options?.paperWidthMm === 58;
+    const maxCols = is58 ? 32 : 42;
+    const bytes: number[] = [];
+
+    const encoder = new TextEncoder();
+    const pushStr = (s: string) => {
+      const clean = s.replace(/₹/g, "Rs.");
+      const encoded = encoder.encode(clean);
+      for (let i = 0; i < encoded.length; i++) {
+        bytes.push(encoded[i]);
+      }
+    };
+
+    // ESC @: Initialize printer
+    bytes.push(0x1B, 0x40);
+
+    // Optional Cash Drawer Kick (Pin 2: ESC p 0 25 250)
+    if (options?.cashDrawer) {
+      bytes.push(0x1B, 0x70, 0x00, 0x19, 0xFA);
+    }
+
+    // Center Align: ESC a 1
+    bytes.push(0x1B, 0x61, 0x01);
+
+    // Double-height Store Name
+    bytes.push(0x1B, 0x21, 0x10);
+    pushStr(`${data.store_name}\n`);
+
+    // Normal text
+    bytes.push(0x1B, 0x21, 0x00);
+    if (data.store_address) pushStr(`${data.store_address}\n`);
+    if (data.store_phone) pushStr(`Tel: ${data.store_phone}\n`);
+    if (data.store_gstin) pushStr(`GSTIN: ${data.store_gstin}\n`);
+
+    const divider = "-".repeat(maxCols);
+    pushStr(`${divider}\n`);
+    pushStr(`*** TAX INVOICE ***\n`);
+    pushStr(`${divider}\n`);
+
+    // Left Align: ESC a 0
+    bytes.push(0x1B, 0x61, 0x00);
+    pushStr(`Inv No: #${data.invoice_number}\n`);
+    pushStr(`Date  : ${data.invoice_date} ${data.invoice_time || ""}\n`);
+    pushStr(`Cust  : ${data.customer_name || "Walk-in"}\n`);
+    pushStr(`Pay   : ${data.payment_mode || "Cash"} (${data.payment_status || "Paid"})\n`);
+    pushStr(`${divider}\n`);
+
+    // Items Header
+    if (is58) {
+      pushStr(`Item              Qty     Total\n`);
+    } else {
+      pushStr(`Item Description      Qty   Rate   Total\n`);
+    }
+    pushStr(`${divider}\n`);
+
+    for (const l of data.lines) {
+      const desc = l.description.substring(0, is58 ? 16 : 20).padEnd(is58 ? 16 : 20);
+      const qtyStr = `${l.qty}${l.loose_qty ? `+${l.loose_qty}L` : ""}`.padStart(5);
+      const amtStr = `Rs.${l.amount.toFixed(2)}`.padStart(is58 ? 9 : 10);
+      if (is58) {
+        pushStr(`${desc} ${qtyStr} ${amtStr}\n`);
+      } else {
+        const rateStr = `${l.rate.toFixed(2)}`.padStart(6);
+        pushStr(`${desc} ${qtyStr} ${rateStr} ${amtStr}\n`);
+      }
+    }
+
+    pushStr(`${divider}\n`);
+    const totalLabel = "Grand Total:".padEnd(maxCols - 14);
+    const totalVal = `Rs.${data.grand_total.toFixed(2)}`.padStart(14);
+    bytes.push(0x1B, 0x21, 0x20); // Bold / large total
+    pushStr(`${totalLabel}${totalVal}\n`);
+    bytes.push(0x1B, 0x21, 0x00);
+
+    pushStr(`${divider}\n`);
+    bytes.push(0x1B, 0x61, 0x01); // Center
+    pushStr(`Thank you for your visit!\n`);
+    if (data.terms_and_conditions) {
+      pushStr(`${data.terms_and_conditions.substring(0, maxCols)}\n`);
+    }
+
+    pushStr("\n\n\n");
+
+    if (options?.autoCut !== false) {
+      bytes.push(0x1D, 0x56, 0x41, 0x03);
+    }
+
+    return new Uint8Array(bytes);
+  }
+
+  /**
+   * Generates formatted fixed-width 80-column ASCII draft text for Dot Matrix printers with form feed.
+   */
+  generateDotMatrixText(data: InvoicePrintData, _options?: { formLengthLines?: number }): string {
+    const maxCols = 80;
+    const divider = "=".repeat(maxCols);
+    const singleDivider = "-".repeat(maxCols);
+
+    let out = "";
+    out += `${divider}\n`;
+    out += `${data.store_name.toUpperCase().padStart(Math.floor(40 + data.store_name.length / 2))}\n`;
+    if (data.store_address) out += `${data.store_address.padStart(Math.floor(40 + data.store_address.length / 2))}\n`;
+    if (data.store_phone) out += `Ph: ${data.store_phone} | GSTIN: ${data.store_gstin || "N/A"}\n`;
+    out += `${divider}\n`;
+    out += `TAX INVOICE : #${data.invoice_number.padEnd(25)} Date: ${data.invoice_date} ${data.invoice_time || ""}\n`;
+    out += `CUSTOMER    : ${(data.customer_name || "Walk-in Customer").padEnd(25)} Phone: ${data.customer_phone || "-"}\n`;
+    if (data.doctor_name) out += `DOCTOR      : ${(data.doctor_name).padEnd(25)} Reg: ${data.doctor_reg_no || "-"}\n`;
+    out += `${singleDivider}\n`;
+    out += ` #  Item Description              Batch      Exp   Qty    Rate(Rs) GST%   Amount(Rs)\n`;
+    out += `${singleDivider}\n`;
+
+    data.lines.forEach((l, idx) => {
+      const num = String(idx + 1).padStart(2);
+      const desc = l.description.substring(0, 27).padEnd(27);
+      const batch = (l.batch_no || "-").substring(0, 10).padEnd(10);
+      const exp = (l.expiry_date || "-").substring(0, 5).padEnd(5);
+      const qty = `${l.qty}${l.loose_qty ? `+${l.loose_qty}L` : ""}`.padStart(5);
+      const rate = l.rate.toFixed(2).padStart(9);
+      const gst = `${l.gst_percent}%`.padStart(5);
+      const amt = l.amount.toFixed(2).padStart(11);
+      out += `${num}  ${desc} ${batch} ${exp} ${qty} ${rate} ${gst} ${amt}\n`;
+    });
+
+    out += `${singleDivider}\n`;
+    out += `Taxable: Rs.${data.subtotal.toFixed(2)}  CGST: Rs.${(data.cgst_total || data.tax_total / 2).toFixed(2)}  SGST: Rs.${(data.sgst_total || data.tax_total / 2).toFixed(2)}  RoundOff: Rs.${(data.round_off || 0).toFixed(2)}\n`;
+    out += `GRAND TOTAL : Rs. ${data.grand_total.toFixed(2)} (${data.amount_in_words || numberToWordsIndian(data.grand_total)})\n`;
+    out += `${divider}\n`;
+    out += `Terms: Goods once sold cannot be returned without cash memo.\n`;
+    out += `Auth Signatory: ___________________________\n`;
+
+    out += "\x0C";
+    return out;
   }
 
   /**
