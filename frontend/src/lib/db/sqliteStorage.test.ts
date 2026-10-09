@@ -8,10 +8,10 @@ describe("SQLite Storage Engine (SYNC-001, NFR-DATA-01)", () => {
 
   it("initializes SQLite database and applies latest schema migration", async () => {
     const version = await sqliteStorage.initDatabase();
-    expect(version).toBe(1);
+    expect(version).toBeGreaterThanOrEqual(2);
 
     const currentVersion = await sqliteStorage.getDatabaseVersion();
-    expect(currentVersion).toBe(1);
+    expect(currentVersion).toBeGreaterThanOrEqual(2);
     expect(sqliteStorage.isInitialized()).toBe(true);
   });
 

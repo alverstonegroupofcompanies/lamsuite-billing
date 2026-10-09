@@ -2,7 +2,7 @@ import { sqliteStorage } from "../db/sqliteStorage";
 
 export interface SyncQueueItem {
   id: string;
-  entity_type: "invoice" | "product" | "customer" | "stock_event";
+  entity_type: "invoice" | "product" | "customer" | "stock_event" | "purchase" | "purchase_order" | "payment" | "purchase_return";
   entity_id: string;
   action: "create" | "update" | "delete";
   payload_json: string;
@@ -36,7 +36,7 @@ export class SyncQueueService {
     entityType: SyncQueueItem["entity_type"],
     entityId: string,
     action: SyncQueueItem["action"],
-    payload: Record<string, unknown>
+    payload: Record<string, unknown> | object
   ): Promise<string> {
     const queueId = `sync_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`;
     const idempotencyKey = this.generateIdempotencyKey(entityType, entityId);
