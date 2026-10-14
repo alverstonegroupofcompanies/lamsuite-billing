@@ -61,6 +61,7 @@ import { BillDiscountModal } from "../components/BillDiscountModal";
 import { RoundOffModal } from "../components/RoundOffModal";
 import { calculateDerivedLooseRate, formatQuantityDisplay } from "../lib/billing/unitConversion";
 import { partiesStore, type Customer, normalizeIndianPhone } from "../lib/masters/partiesStore";
+import { useModalEscape } from "../lib/ui/modalEscapeManager";
 
 export const PosBillingPage: React.FC = () => {
   const navigate = useNavigate();
@@ -280,6 +281,11 @@ export const PosBillingPage: React.FC = () => {
       searchInputRef.current?.focus();
     }, 50);
   };
+
+  useModalEscape(Boolean(selectedProductForBatch), closeBatchModal);
+  useModalEscape(isTenderModalOpen, () => setIsTenderModalOpen(false));
+  useModalEscape(isRecallModalOpen, () => setIsRecallModalOpen(false));
+  useModalEscape(isDiffModalOpen, () => setIsDiffModalOpen(false));
 
   const updateDropdownPosition = () => {
     if (searchInputRef.current) {
@@ -924,26 +930,18 @@ export const PosBillingPage: React.FC = () => {
         return;
       }
 
-      // Escape: Close dropdowns / modals / cancel edit
+      // Escape: Close dropdowns / cancel edit safely without exiting fullscreen
       if (e.key === "Escape") {
         if (searchResults.length > 0) {
+          e.preventDefault();
           setSearchResults([]);
           return;
         }
-        if (isBillDiscountModalOpen) {
-          setIsBillDiscountModalOpen(false);
-          return;
-        }
-        if (isRoundOffModalOpen) {
-          setIsRoundOffModalOpen(false);
-          return;
-        }
         if (selectedRowIndex !== null) {
+          e.preventDefault();
           handleFocusSearch();
           return;
         }
-        if (isRecallModalOpen) setIsRecallModalOpen(false);
-        if (isColumnsModalOpen) setIsColumnsModalOpen(false);
       }
     };
 
@@ -1810,6 +1808,16 @@ export const PosBillingPage: React.FC = () => {
                     if (sel.phone !== undefined) setCustomerPhone(sel.phone);
                     if (sel.gstin !== undefined) setCustomerGstin(sel.gstin);
                     setSelectedCustomer(sel.customer || null);
+
+                    const companySettings = companySettingsService.getSettings();
+                    const homeState = (companySettings.state_code || "32").trim();
+                    const custGstin = sel.gstin || sel.customer?.gstin || "";
+                    const custStateFromGstin = custGstin.length >= 2 ? custGstin.slice(0, 2) : "";
+                    const custPlaceOfSupply = sel.customer?.place_of_supply || "";
+                    const custStateCode = custStateFromGstin || (custPlaceOfSupply.slice(0, 2).match(/^\d{2}$/) ? custPlaceOfSupply.slice(0, 2) : homeState);
+                    const isInterState = custStateCode !== "" && custStateCode !== homeState;
+
+                    posCartService.setIsInterState(isInterState);
                     posCartService.setCustomer(
                       sel.customer?.id || "",
                       sel.name,
@@ -1817,6 +1825,7 @@ export const PosBillingPage: React.FC = () => {
                       sel.customer?.place_of_supply || "",
                       sel.phone || ""
                     );
+                    refreshCartState();
                   }}
                   onQuickAddSuccess={(cust) => {
                     showNotification(`Added new customer: ${cust.name}`);
@@ -2085,7 +2094,9 @@ export const PosBillingPage: React.FC = () => {
                           style={col.width ? { width: `${col.width}px` } : undefined}
                           className={`px-3 py-2 ${alignClass} font-semibold`}
                         >
-                          {col.label}
+                          {col.id === "gst" && (totals.igst_total > 0 || posCartService.getIsInterState())
+                            ? "IGST %"
+                            : col.label}
                         </th>
                       );
                     })}
@@ -2130,7 +2141,7 @@ export const PosBillingPage: React.FC = () => {
                                 <td key="product_name" className="px-3 py-2 font-semibold text-slate-800">
                                   <div className="flex flex-col">
                                     <div className="flex items-center gap-1.5 flex-wrap">
-                                      <span>{line.product.name}</span>
+                                      <span className="font-bold">{line.product.name}</span>
                                       <button
                                         type="button"
                                         onClick={(e) => {
@@ -2156,7 +2167,31 @@ export const PosBillingPage: React.FC = () => {
                                           Ad-hoc
                                         </span>
                                       )}
+                                      {(line.product.schedule_type === "H" || line.product.schedule_type === "H1" || line.product.schedule_type === "X") && (
+                                        <span
+                                          className={`rounded px-1.5 py-0.2 text-[10px] font-black border ${
+                                            doctorName.trim()
+                                              ? "bg-emerald-50 text-emerald-700 border-emerald-300"
+                                              : "bg-red-100 text-red-700 border-red-300 animate-pulse"
+                                          }`}
+                                          title={
+                                            doctorName.trim()
+                                              ? `Prescription drug (Schedule ${line.product.schedule_type}) - Doctor recorded`
+                                              : `Schedule ${line.product.schedule_type}: Doctor details required by law!`
+                                          }
+                                        >
+                                          Rx Sch-{line.product.schedule_type} {!doctorName.trim() ? "⚠️" : ""}
+                                        </span>
+                                      )}
                                     </div>
+                                    {(line.product.generic_name || line.product.strength) && (
+                                      <div
+                                        className="text-[11px] font-normal text-slate-500 truncate max-w-[280px]"
+                                        title={`${line.product.generic_name || ""} ${line.product.strength || ""}`.trim()}
+                                      >
+                                        {[line.product.generic_name, line.product.strength].filter(Boolean).join(" • ")}
+                                      </div>
+                                    )}
                                     {line.isNegativeStock && (
                                       <div className="mt-0.5 flex items-center gap-1 text-[11px] font-medium text-amber-700">
                                         <span className="inline-block w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
@@ -2393,7 +2428,9 @@ export const PosBillingPage: React.FC = () => {
               )}
             </div>
             <div>
-              <span className="text-slate-400">GST Tax: </span>
+              <span className="text-slate-400">
+                {totals.igst_total > 0 || posCartService.getIsInterState() ? "IGST Tax: " : "GST Tax: "}
+              </span>
               <span className="font-bold text-slate-800">₹ {totals.total_tax.toFixed(2)}</span>
             </div>
             <div>
@@ -3029,7 +3066,12 @@ export const PosBillingPage: React.FC = () => {
       {previewModalState.isOpen && previewModalState.data && (
         <PrintPreviewModal
           isOpen={previewModalState.isOpen}
-          onClose={() => setPreviewModalState({ isOpen: false, data: null })}
+          onClose={() => {
+            setPreviewModalState({ isOpen: false, data: null });
+            setTimeout(() => {
+              searchInputRef.current?.focus();
+            }, 50);
+          }}
           docType="tax_invoice"
           title={previewModalState.title || "Print Preview - Tax Invoice"}
           data={previewModalState.data}

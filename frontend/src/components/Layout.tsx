@@ -14,6 +14,11 @@ import { companySettingsService } from "../lib/settings/companySettingsService";
 import { CommandPalette } from "./CommandPalette";
 import { TopNav } from "./TopNav";
 import { KeyboardShortcutsModal } from "./KeyboardShortcutsModal";
+import { staffAuthService, type ActiveStaffSession } from "../lib/auth/staffAuthService";
+import { storeDeviceService } from "../lib/auth/storeDeviceService";
+import { LockOverlay } from "./LockOverlay";
+import { AccountSwitcherModal } from "./AccountSwitcherModal";
+import { Lock, Users } from "lucide-react";
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -28,6 +33,8 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
   const [isShortcutsModalOpen, setIsShortcutsModalOpen] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isStoreDisabled, setIsStoreDisabled] = useState(false);
+  const [session, setSession] = useState<ActiveStaffSession | null>(staffAuthService.getCurrentSession());
+  const [isAccountSwitcherOpen, setIsAccountSwitcherOpen] = useState(false);
   const [enabledMenus, setEnabledMenus] = useState<string[]>([
     "dashboard",
     "pos",
@@ -40,8 +47,16 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
     "stock_transfers",
     "reports",
     "masters",
+    "import_export",
+    "migration",
     "settings",
+    "counters",
   ]);
+
+  useEffect(() => {
+    const unsub = staffAuthService.onSessionChange(setSession);
+    return unsub;
+  }, []);
 
   useEffect(() => {
     const timer = setInterval(() => setTime(new Date().toLocaleTimeString()), 1000);
@@ -57,6 +72,20 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
       if (e.defaultPrevented) return;
 
       const isPosPage = location.pathname === "/pos" || location.pathname.startsWith("/pos");
+
+      // Manual Lock Terminal (Ctrl+L)
+      if ((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === "l" || e.code === "KeyL")) {
+        e.preventDefault();
+        staffAuthService.lockCurrentSession();
+        return;
+      }
+
+      // Quick Account Switcher (F12)
+      if (e.key === "F12" && !isPosPage) {
+        e.preventDefault();
+        setIsAccountSwitcherOpen(true);
+        return;
+      }
 
       // Command Palette (Ctrl+K / Cmd+K)
       if ((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === "k" || e.code === "KeyK")) {
@@ -77,19 +106,16 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
         return;
       }
 
-      // On POS page, let POS Billing handle F1, F2, F3, F6, F8, F9, F12, Ctrl+D, Shift+F2, Alt+R, etc.
+      // On POS page, let POS Billing handle F1, F2, F3, F6, F9, Ctrl+D, Shift+F2, Alt+R, etc.
       if (isPosPage) {
         if (
           e.key === "F1" ||
           e.key === "F2" ||
           e.key === "F3" ||
           e.key === "F6" ||
-          e.key === "F8" ||
           e.key === "F9" ||
-          e.key === "F12" ||
           ((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === "d" || e.code === "KeyD"))
         ) {
-          // Let POS billing component handle these
           return;
         }
       }
@@ -128,6 +154,12 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
         } else {
           navigate("/returns/sales");
         }
+      } else if (e.key === "F8") {
+        e.preventDefault();
+        navigate("/counters");
+      } else if (e.key === "F9") {
+        e.preventDefault();
+        navigate("/import-export");
       } else if (e.key === "F10") {
         e.preventDefault();
         navigate("/settings");
@@ -146,6 +178,30 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
       window.removeEventListener("keydown", handleKeyDown);
     };
   }, [navigate, location.pathname]);
+
+  // Idle auto-lock watcher
+  useEffect(() => {
+    let idleTimer: NodeJS.Timeout;
+    const resetIdle = () => {
+      staffAuthService.recordActivity();
+      clearTimeout(idleTimer);
+      idleTimer = setTimeout(() => {
+        staffAuthService.lockCurrentSession();
+      }, staffAuthService.getIdleTimeoutMs());
+    };
+
+    window.addEventListener("mousemove", resetIdle);
+    window.addEventListener("keydown", resetIdle);
+    window.addEventListener("click", resetIdle);
+    resetIdle();
+
+    return () => {
+      clearTimeout(idleTimer);
+      window.removeEventListener("mousemove", resetIdle);
+      window.removeEventListener("keydown", resetIdle);
+      window.removeEventListener("click", resetIdle);
+    };
+  }, []);
 
   useEffect(() => {
     companySettingsService.loadSettings().then((cfg) => {
@@ -235,10 +291,27 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
             {isFullscreen ? <Minimize className="h-4 w-4" /> : <Maximize className="h-4 w-4" />}
           </button>
 
-          <div className="flex items-center gap-1.5 rounded-full bg-slate-100 px-2.5 py-1">
-            <User className="h-3.5 w-3.5 text-slate-500" />
-            <span className="whitespace-nowrap">Counter 01</span>
+          <div
+            onClick={() => setIsAccountSwitcherOpen(true)}
+            title="Click to Switch Cashier (F12)"
+            className="flex items-center gap-1.5 rounded-full bg-slate-100 hover:bg-slate-200 border border-slate-200 px-2.5 py-1 cursor-pointer transition-colors shadow-2xs"
+          >
+            <User className="h-3.5 w-3.5 text-blue-600" />
+            <span className="whitespace-nowrap font-bold text-slate-800">
+              {session?.user.full_name || "Cashier"}
+            </span>
+            <span className="text-[10px] bg-blue-100 text-blue-700 font-semibold px-1.5 py-0.2 rounded-full uppercase">
+              {session?.counterCode || "C01"}
+            </span>
           </div>
+
+          <button
+            onClick={() => staffAuthService.lockCurrentSession()}
+            title="Lock Terminal (Ctrl+L)"
+            className="rounded p-1.5 text-slate-500 hover:bg-slate-100 hover:text-slate-800 cursor-pointer"
+          >
+            <Lock className="h-4 w-4 text-slate-500" />
+          </button>
 
           <div
             className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 ${
@@ -281,6 +354,21 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
       <KeyboardShortcutsModal
         isOpen={isShortcutsModalOpen}
         onClose={() => setIsShortcutsModalOpen(false)}
+      />
+
+      {/* Security Lock Overlay */}
+      {session?.isLocked && (
+        <LockOverlay
+          session={session}
+          onSwitchUser={() => setIsAccountSwitcherOpen(true)}
+        />
+      )}
+
+      {/* Account Switcher Modal */}
+      <AccountSwitcherModal
+        isOpen={isAccountSwitcherOpen}
+        onClose={() => setIsAccountSwitcherOpen(false)}
+        onSwitched={() => setSession(staffAuthService.getCurrentSession())}
       />
     </div>
   );

@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { X, FileClock, Trash2, ArrowRight, RefreshCw } from "lucide-react";
 import { purchaseDraftService, type PurchaseDraftItem } from "../../lib/purchases/purchaseDraftService";
+import { useModalEscape } from "../../lib/ui/modalEscapeManager";
 
 interface PurchaseDraftsModalProps {
   isOpen: boolean;
@@ -13,6 +14,8 @@ export const PurchaseDraftsModal: React.FC<PurchaseDraftsModalProps> = ({
   onClose,
   onSelectDraft,
 }) => {
+  useModalEscape(isOpen, onClose);
+
   const [drafts, setDrafts] = useState<PurchaseDraftItem[]>([]);
   const [isLoading, setIsLoading] = useState(false);
 

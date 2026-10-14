@@ -21,7 +21,14 @@ import {
   ArrowUpFromLine,
   ArrowRightLeft,
   Building2,
+  UploadCloud,
+  FileSpreadsheet,
+  Layers,
 } from "lucide-react";
+import { reportRegistry } from "../reports/registry";
+import { useModalEscape } from "../lib/ui/modalEscapeManager";
+import { companySettingsService } from "../lib/settings/companySettingsService";
+import { operatorAuthService } from "../lib/auth/operatorAuthService";
 
 interface CommandPaletteProps {
   isOpen: boolean;
@@ -47,16 +54,8 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose 
     setSelectedIndex(0);
   }, [query]);
 
-  // Handle ESC key to close
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && isOpen) {
-        onClose();
-      }
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isOpen, onClose]);
+  // Handle ESC key to close modal safely without exiting fullscreen
+  useModalEscape(isOpen, onClose);
 
   if (!isOpen) return null;
 
@@ -67,6 +66,13 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose 
       document.exitFullscreen().catch(() => {});
     }
   };
+
+  const userRole = operatorAuthService.getSession()?.user?.role || "admin";
+  const enabledMenus = companySettingsService.getSettings()?.enabled_menu_items || ["reports"];
+  const isReportsAllowed = enabledMenus.includes("reports");
+  const accessibleReports = isReportsAllowed
+    ? reportRegistry.getAccessibleReports(userRole, enabledMenus)
+    : [];
 
   const commands: CommandItem[] = [
     {
@@ -150,15 +156,27 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose 
       icon: ArrowRightLeft,
       action: () => { navigate("/stock/transfers"); onClose(); },
     },
-    {
-      id: "nav_reports",
-      category: "Reports",
-      title: "Statutory Reports & GSTR-1",
-      subtitle: "View B2B, B2C, HSN tax summary, and daily collections",
-      shortcut: "F4",
-      icon: FileBarChart,
-      action: () => { navigate("/reports"); onClose(); },
-    },
+    ...(isReportsAllowed
+      ? [
+          {
+            id: "nav_reports",
+            category: "Reports" as const,
+            title: "Statutory Reports & GSTR-1 Hub",
+            subtitle: "Browse all accessible financial, GST, and stock reports",
+            shortcut: "F4",
+            icon: FileBarChart,
+            action: () => { navigate("/reports"); onClose(); },
+          },
+          ...accessibleReports.map((r) => ({
+            id: `nav_rep_${r.id}`,
+            category: "Reports" as const,
+            title: r.title,
+            subtitle: r.description,
+            icon: FileBarChart,
+            action: () => { navigate(`/reports?report=${r.id}`); onClose(); },
+          })),
+        ]
+      : []),
     {
       id: "nav_masters",
       category: "Navigation",
@@ -167,6 +185,48 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose 
       shortcut: "F5",
       icon: Database,
       action: () => { navigate("/masters"); onClose(); },
+    },
+    {
+      id: "nav_import_export",
+      category: "Navigation",
+      title: "Universal Import & Export Hub",
+      subtitle: "Pluggable Excel/CSV data exchange, templates, and full store backup",
+      shortcut: "F9",
+      icon: Layers,
+      action: () => { navigate("/import-export"); onClose(); },
+    },
+    {
+      id: "nav_counters",
+      category: "Navigation",
+      title: "Store Counters & Fleet Topology",
+      subtitle: "Monitor active LAN cash counters, shifts, drawer balances, and failover status",
+      shortcut: "F8",
+      icon: Settings,
+      action: () => { navigate("/counters"); onClose(); },
+    },
+    {
+      id: "action_import_wizard_items",
+      category: "Navigation",
+      title: "Import Wizard: Products & Items",
+      subtitle: "Upload Excel/CSV product catalog with Marg/Busy/Tally column auto-mapping",
+      icon: UploadCloud,
+      action: () => { navigate("/import-export?type=items"); onClose(); },
+    },
+    {
+      id: "action_import_wizard_batches",
+      category: "Navigation",
+      title: "Import Wizard: Batches & Opening Stock",
+      subtitle: "Upload batch numbers, expiry dates, and opening inventory balances",
+      icon: UploadCloud,
+      action: () => { navigate("/import-export?type=batches"); onClose(); },
+    },
+    {
+      id: "action_import_wizard_parties",
+      category: "Navigation",
+      title: "Import Wizard: Customers & Suppliers",
+      subtitle: "Bulk upload parties with GSTIN validation and contact details",
+      icon: UploadCloud,
+      action: () => { navigate("/import-export?type=customers"); onClose(); },
     },
     {
       id: "pos_columns_config",

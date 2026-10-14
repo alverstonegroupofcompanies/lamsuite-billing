@@ -54,8 +54,19 @@ import {
 import { createStockAdjustmentTool } from "./write/stock.js";
 import { cancelInvoiceTool } from "./write/cancel.js";
 import { createPurchaseTool } from "./write/purchase.js";
+import { getImportTemplateTool, exportDataTool } from "./read/dataExchange.js";
+import { importDataTool } from "./write/dataExchange.js";
+import {
+  migrationPrecheckTool,
+  migrationStartTool,
+  migrationReconcileTool,
+  migrationRollbackTool,
+  migrationCutoverTool,
+} from "./write/migrationTools.js";
 
 export const ALL_READ_TOOLS: ToolDefinition[] = [
+  getImportTemplateTool,
+  exportDataTool,
   searchItemsTool,
   getItemTool,
   lowStockTool,
@@ -79,6 +90,8 @@ export const ALL_READ_TOOLS: ToolDefinition[] = [
   outstandingReportTool,
   stockLedgerTool,
   stockBalanceTool,
+  migrationPrecheckTool,
+  migrationReconcileTool,
 ];
 
 export const ALL_WRITE_TOOLS: ToolDefinition[] = [
@@ -93,6 +106,10 @@ export const ALL_WRITE_TOOLS: ToolDefinition[] = [
   createStockAdjustmentTool,
   cancelInvoiceTool,
   createPurchaseTool,
+  importDataTool,
+  migrationStartTool,
+  migrationRollbackTool,
+  migrationCutoverTool,
 ];
 
 export class ToolRegistry {

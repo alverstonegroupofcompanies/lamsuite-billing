@@ -20,6 +20,7 @@ import {
   isValidGstin,
   normalizeIndianPhone,
 } from "../lib/masters/partiesStore";
+import { useModalEscape } from "../lib/ui/modalEscapeManager";
 
 export interface CustomerComboboxSelection {
   name: string;
@@ -96,6 +97,7 @@ export const CustomerCombobox: React.FC<CustomerComboboxProps> = ({
 
   // Quick Add Modal State
   const [isQuickAddOpen, setIsQuickAddOpen] = useState(false);
+  useModalEscape(isQuickAddOpen, () => setIsQuickAddOpen(false));
   const [quickAddName, setQuickAddName] = useState("");
   const [quickAddPhone, setQuickAddPhone] = useState("");
   const [quickAddGstin, setQuickAddGstin] = useState("");

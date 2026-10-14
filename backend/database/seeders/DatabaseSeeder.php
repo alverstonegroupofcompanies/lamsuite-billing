@@ -597,5 +597,8 @@ class DatabaseSeeder extends Seeder
             'is_read' => false,
             'data' => ['batch_id' => 2],
         ]);
+
+        // Automatically sync full enterprise catalog & transaction records
+        \Illuminate\Support\Facades\Artisan::call('data:sync-actual');
     }
 }

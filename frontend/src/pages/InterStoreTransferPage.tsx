@@ -48,6 +48,7 @@ import { PrintPreviewModal } from "../components/PrintPreviewModal";
 import { CsvTransferImportModal } from "../components/CsvTransferImportModal";
 import { TransferReceiptModal } from "../components/TransferReceiptModal";
 import type { InvoicePrintData } from "../lib/printing/printingEngine";
+import { useModalEscape } from "../lib/ui/modalEscapeManager";
 
 export const InterStoreTransferPage: React.FC = () => {
   // Navigation Tabs
@@ -85,6 +86,7 @@ export const InterStoreTransferPage: React.FC = () => {
   const [searchResults, setSearchResults] = useState<ProductItem[]>([]);
   const [selectedSearchIndex, setSelectedSearchIndex] = useState(0);
   const [batchModalProduct, setBatchModalProduct] = useState<ProductItem | null>(null);
+  useModalEscape(Boolean(batchModalProduct), () => setBatchModalProduct(null));
   const [availableBatches, setAvailableBatches] = useState<ProductBatch[]>([]);
   const [selectedBatchIndex, setSelectedBatchIndex] = useState(0);
 
@@ -576,6 +578,18 @@ export const InterStoreTransferPage: React.FC = () => {
         "error"
       );
       return;
+    }
+
+    // Validate 12-digit e-Way Bill number if entered
+    if (transport.eway_bill_number && transport.eway_bill_number.trim()) {
+      const cleanEway = transport.eway_bill_number.trim().replace(/\D/g, "");
+      if (cleanEway.length !== 12) {
+        showNotification(
+          "Invalid e-Way Bill format: Statutory GST e-Way Bill must be exactly 12 numeric digits",
+          "error"
+        );
+        return;
+      }
     }
 
     try {

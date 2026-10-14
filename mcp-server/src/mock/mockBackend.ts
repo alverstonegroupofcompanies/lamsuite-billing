@@ -894,6 +894,44 @@ export class MockLamSuiteBackend {
         debit_note_number: `DN-${Date.now().toString().slice(-4)}`,
       });
     });
+
+    this.app.get("/counters", (_req: Request, res: Response) => {
+      res.json([
+        {
+          id: "cntr_01",
+          counter_name: "Counter 01 (Store Hub)",
+          counter_code: "C01",
+          is_hub: true,
+          status: "active",
+          current_user: "Muhammad Anshad",
+          user_role: "admin",
+          drawer_cash: 14500,
+        },
+        {
+          id: "cntr_02",
+          counter_name: "Counter 02",
+          counter_code: "C02",
+          is_hub: false,
+          status: "active",
+          current_user: "Ananya Nair",
+          user_role: "cashier",
+          drawer_cash: 8200,
+        },
+      ]);
+    });
+
+    this.app.get("/shifts", (_req: Request, res: Response) => {
+      res.json([
+        {
+          id: "shift_1",
+          counter_id: "cntr_01",
+          user_name: "Muhammad Anshad",
+          opening_cash: 2000,
+          expected_cash: 14500,
+          status: "open",
+        },
+      ]);
+    });
   }
 
   async start(): Promise<string> {

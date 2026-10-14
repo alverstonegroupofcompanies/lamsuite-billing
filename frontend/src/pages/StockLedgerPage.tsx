@@ -20,6 +20,7 @@ import {
 } from "../lib/stock/inventoryService";
 import { productsStore, type ProductBatch, type ProductItem } from "../lib/masters/productsStore";
 import { sqliteStorage } from "../lib/db/sqliteStorage";
+import { useModalEscape } from "../lib/ui/modalEscapeManager";
 
 export const StockLedgerPage: React.FC = () => {
   const navigate = useNavigate();
@@ -33,7 +34,9 @@ export const StockLedgerPage: React.FC = () => {
 
   // Modals State
   const [isAdjustmentModalOpen, setIsAdjustmentModalOpen] = useState(false);
+  useModalEscape(isAdjustmentModalOpen, () => setIsAdjustmentModalOpen(false));
   const [isTransferModalOpen, setIsTransferModalOpen] = useState(false);
+  useModalEscape(isTransferModalOpen, () => setIsTransferModalOpen(false));
 
   // Adjustment Form State
   const [adjBatchId, setAdjBatchId] = useState("");

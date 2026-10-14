@@ -6,6 +6,7 @@ import {
   generateEmailShareUrl,
   numberToWordsIndian,
   calculateHsnSummary,
+  chunkInvoiceLines,
   printingEngine,
   type InvoicePrintData,
 } from "./printingEngine";
@@ -504,8 +505,37 @@ describe("Printing Engine & Document Layouts (PRN-001, PRN-002, PRN-005)", () =>
       expect(cnHtml).toContain("CREDIT NOTE / SALES RETURN");
       expect(cnHtml).toContain("CR-2026-001");
 
-      const cnThermal = printingEngine.renderDocumentHtml("credit_note", creditNoteData, { paperSize: "thermal_80mm" });
-      expect(cnThermal).toContain("*** CREDIT NOTE ***");
+      const cnThermal80 = printingEngine.renderDocumentHtml("credit_note", creditNoteData, { paperSize: "thermal_80mm" });
+      expect(cnThermal80).toContain("*** CREDIT NOTE ***");
+      expect(cnThermal80).toContain("80mm");
+      expect(cnThermal80).not.toContain("width: 72mm;");
+
+      const cnThermal58 = printingEngine.renderDocumentHtml("credit_note", creditNoteData, { paperSize: "thermal_58mm" });
+      expect(cnThermal58).toContain("*** CREDIT NOTE ***");
+      expect(cnThermal58).toContain("58mm");
+      expect(cnThermal58).toContain("Cetirizine 10mg");
+      expect(cnThermal58).toContain("TOTAL REFUND:");
+      expect(cnThermal58).not.toContain("width: 72mm;");
+
+      const debitNoteData = {
+        return_number: "DN-2026-001",
+        return_date: "2026-10-02",
+        store_name: "LamStone Pharmacy",
+        supplier_name: "Apollo Wholesalers",
+        lines: [
+          { description: "Paracetamol 500mg", batch_no: "PR01", expiry_date: "2027-08", qty: 10, rate: 15, gst_percent: 12, amount: 150 },
+        ],
+        subtotal: 133.93,
+        tax_total: 16.07,
+        round_off: 0,
+        grand_total: 150,
+        settlement_type: "Adjust in Ledger",
+      };
+
+      const dnThermal58 = printingEngine.renderDocumentHtml("debit_note", debitNoteData, { paperSize: "thermal_58mm" });
+      expect(dnThermal58).toContain("*** DEBIT NOTE ***");
+      expect(dnThermal58).toContain("58mm");
+      expect(dnThermal58).toContain("Apollo Wholesalers");
 
       const cnPdf = printingEngine.renderDocumentPdf("credit_note", creditNoteData);
       expect(cnPdf).toBeInstanceOf(Uint8Array);
@@ -611,6 +641,119 @@ describe("Printing Engine & Document Layouts (PRN-001, PRN-002, PRN-005)", () =>
       const data100 = createData(100);
       const html100 = printingEngine.generateInvoiceHtml(data100, { paperSize: "a4" });
       expect(html100).toContain("Product Line Item #100");
+    });
+
+    it("chunks items into balanced pages without overflowing A4 boundaries", () => {
+      // Single page: 10 items
+      const items10 = Array.from({ length: 10 }, (_, i) => ({ id: i }));
+      const chunks10 = chunkInvoiceLines(items10, 14, 16, 24, 14);
+      expect(chunks10.length).toBe(1);
+      expect(chunks10[0].length).toBe(10);
+
+      // Single page: 14 items
+      const items14 = Array.from({ length: 14 }, (_, i) => ({ id: i }));
+      const chunks14 = chunkInvoiceLines(items14, 14, 16, 24, 14);
+      expect(chunks14.length).toBe(1);
+      expect(chunks14[0].length).toBe(14);
+
+      // 24 items (the user's invoice case): should cleanly split into 2 balanced pages (12 and 12)
+      const items24 = Array.from({ length: 24 }, (_, i) => ({ id: i }));
+      const chunks24 = chunkInvoiceLines(items24, 14, 16, 24, 14);
+      expect(chunks24.length).toBe(2);
+      expect(chunks24[0].length).toBe(12);
+      expect(chunks24[1].length).toBe(12);
+
+      // 45 items: splits into 3 pages
+      const items45 = Array.from({ length: 45 }, (_, i) => ({ id: i }));
+      const chunks45 = chunkInvoiceLines(items45, 14, 16, 24, 14);
+      expect(chunks45.length).toBe(3);
+      expect(chunks45[0].length).toBe(16);
+      expect(chunks45[1].length + chunks45[2].length).toBe(29);
+    });
+
+    it("renders 24-item A4 invoice as 2 separate sheets with repeated headers, continued notice, and vertical lines", () => {
+      const lines24 = Array.from({ length: 24 }, (_, i) => ({
+        description: `Pharmaceutical Medicine Item #${i + 1}`,
+        hsn_code: "300490",
+        batch_no: `BT-${2000 + i}`,
+        expiry_date: "10/28",
+        qty: 2,
+        rate: 50,
+        gst_percent: 12,
+        amount: 100,
+      }));
+
+      const invoiceData: InvoicePrintData = {
+        invoice_number: "INV-556277",
+        invoice_date: "2026-10-14",
+        store_name: "LamStone Pharmacy",
+        customer_name: "Abdul Rahman",
+        lines: lines24,
+        subtotal: 2142.86,
+        tax_total: 257.14,
+        round_off: 0,
+        grand_total: 2400,
+      };
+
+      const html = printingEngine.generateInvoiceHtml(invoiceData, { paperSize: "a4" });
+
+      // Must have exactly two .a4-sheet elements
+      const sheetMatches = html.match(/class="a4-sheet"/g);
+      expect(sheetMatches).not.toBeNull();
+      expect(sheetMatches!.length).toBe(2);
+
+      // Page 1 assertions
+      expect(html).toContain("Page 1 of 2");
+      expect(html).toContain("Continued on Page 2 &rarr;");
+      expect(html).toContain("Pharmaceutical Medicine Item #1");
+      expect(html).toContain("Pharmaceutical Medicine Item #12");
+
+      // Page 2 assertions
+      expect(html).toContain("Page 2 of 2");
+      expect(html).toContain("Tax Invoice #INV-556277");
+      expect(html).toContain("Pharmaceutical Medicine Item #13");
+      expect(html).toContain("Pharmaceutical Medicine Item #24");
+
+      // HSN summary, words, and totals must be on the final page
+      expect(html).toContain("HSN / GST Tax Summary");
+      expect(html).toContain("Amount in Words:");
+      expect(html).toContain("Scan & Pay via UPI");
+
+      // Vertical lines styling on table cells
+      expect(html).toContain("border-right: 1px solid #cbd5e1;");
+
+      // Page-break rules for physical print & Save PDF parity
+      expect(html).toContain("page-break-after: always !important;");
+      expect(html).toContain(".a4-sheet:last-child");
+      expect(html).toContain("page-break-after: auto !important;");
+    });
+
+    it("renders single-page invoice compactly without continuation banner or extra sheets", () => {
+      const lines5 = Array.from({ length: 5 }, (_, i) => ({
+        description: `Medicine #${i + 1}`,
+        hsn_code: "300490",
+        qty: 1,
+        rate: 50,
+        gst_percent: 12,
+        amount: 50,
+      }));
+
+      const invoiceData: InvoicePrintData = {
+        invoice_number: "INV-SINGLE-01",
+        invoice_date: "2026-10-14",
+        store_name: "LamStone Pharmacy",
+        lines: lines5,
+        subtotal: 223.21,
+        tax_total: 26.79,
+        round_off: 0,
+        grand_total: 250,
+      };
+
+      const html = printingEngine.generateInvoiceHtml(invoiceData, { paperSize: "a4" });
+      const sheetMatches = html.match(/class="a4-sheet"/g);
+      expect(sheetMatches!.length).toBe(1);
+      expect(html).toContain("Page 1 of 1");
+      expect(html).not.toContain("Continued on Page");
     });
   });
 });

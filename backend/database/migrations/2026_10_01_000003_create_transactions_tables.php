@@ -11,6 +11,8 @@ return new class extends Migration
         Schema::create('invoices', function (Blueprint $table) {
             $table->id();
             $table->foreignId('store_id')->constrained('stores')->cascadeOnDelete();
+            $table->string('counter_id', 50)->nullable()->index();
+            $table->foreignId('user_id')->nullable()->constrained('users')->nullOnDelete();
             $table->string('module_key', 30)->default('invoice'); // invoice, quotation, credit_note, proforma
             $table->string('invoice_number', 50)->index();
             $table->date('invoice_date')->index();

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { X, Percent, Tag, Check } from "lucide-react";
 import type { PosCartLine } from "../lib/billing/posCartService";
+import { useModalEscape } from "../lib/ui/modalEscapeManager";
 
 interface QuickLineEditModalProps {
   isOpen: boolean;
@@ -19,6 +20,8 @@ export const QuickLineEditModal: React.FC<QuickLineEditModalProps> = ({
   onSaveDiscount,
   onSaveRate,
 }) => {
+  useModalEscape(isOpen && Boolean(line), onClose);
+
   if (!isOpen || !line) return null;
 
   const [value, setValue] = useState<string>("");

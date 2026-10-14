@@ -42,7 +42,8 @@ class AdminInventoryController
             return response()->json(['data' => $query->get()]);
         }
 
-        return response()->json($query->paginate(25));
+        $perPage = (int) $request->query('per_page', 50);
+        return response()->json($query->paginate($perPage));
     }
 
     /**

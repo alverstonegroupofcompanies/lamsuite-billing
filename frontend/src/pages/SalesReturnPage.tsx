@@ -23,6 +23,7 @@ import {
   type ReturnCondition,
   type RefundPaymentMode,
 } from "../lib/billing/salesReturnService";
+import { useModalEscape } from "../lib/ui/modalEscapeManager";
 import { invoiceManagementService, type InvoiceRecord, type InvoiceItemRecord } from "../lib/billing/invoiceManagementService";
 import { printingEngine, type CreditNotePrintData } from "../lib/printing/printingEngine";
 import { PrintPreviewModal } from "../components/PrintPreviewModal";
@@ -78,6 +79,7 @@ export const SalesReturnPage: React.FC = () => {
 
   // --- Form modal state ---
   const [isFormOpen, setIsFormOpen] = useState(false);
+  useModalEscape(isFormOpen, () => setIsFormOpen(false));
   const [returnSource, setReturnSource] = useState<"counter" | "customer_debit_note">("counter");
   const [formStep, setFormStep] = useState<"invoice_search" | "line_selection" | "payment">("invoice_search");
 
@@ -819,7 +821,8 @@ export const SalesReturnPage: React.FC = () => {
                                 onChange={(e) => updateLineField(idx, "condition", e.target.value as ReturnCondition)}
                                 className="rounded border border-slate-200 px-2 py-1 text-xs text-slate-700 focus:outline-none disabled:bg-slate-100"
                               >
-                                <option value="restock">Restock</option>
+                                <option value="restock">Restock to Inventory</option>
+                                <option value="quarantine">Quarantine Shelf (Hold)</option>
                                 <option value="damaged_discard">Damaged / Discard</option>
                               </select>
                             </td>

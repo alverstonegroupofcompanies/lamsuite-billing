@@ -25,6 +25,15 @@ export class MockSqliteDatabase {
     this.ensureTable("stock_transactions");
     this.ensureTable("sync_queue");
     this.ensureTable("store_settings");
+    this.ensureTable("purchase_documents");
+    this.ensureTable("purchase_items");
+    this.ensureTable("sales_returns");
+    this.ensureTable("sales_return_items");
+    this.ensureTable("purchase_returns");
+    this.ensureTable("quotations");
+    this.ensureTable("expense_heads");
+    this.ensureTable("party_ledger_entries");
+    this.ensureTable("supplier_payments");
   }
 
   ensureTable(tableName: string): Map<string, Record<string, unknown>> {
@@ -65,17 +74,48 @@ export class MockSqliteDatabase {
     const t = this.ensureTable(table);
     t.set(id, { ...(record as Record<string, unknown>) });
     this.persistTable(table);
+
+    // Keep purchases and purchase_documents synchronized in mock/browser mode
+    if (table === "purchase_documents") {
+      const alt = this.ensureTable("purchases");
+      alt.set(id, { ...(record as Record<string, unknown>) });
+      this.persistTable("purchases");
+    } else if (table === "purchases") {
+      const alt = this.ensureTable("purchase_documents");
+      alt.set(id, { ...(record as Record<string, unknown>) });
+      this.persistTable("purchase_documents");
+    }
   }
 
   findById<T = Record<string, unknown>>(table: string, id: string): T | null {
     const t = this.ensureTable(table);
-    const row = t.get(id);
+    let row = t.get(id);
+    if (!row && table === "purchases") {
+      row = this.ensureTable("purchase_documents").get(id);
+    } else if (!row && table === "purchase_documents") {
+      row = this.ensureTable("purchases").get(id);
+    }
     return row ? ({ ...row } as T) : null;
   }
 
   findAll<T = Record<string, unknown>>(table: string, filter?: (item: Record<string, unknown>) => boolean): T[] {
-    const t = this.ensureTable(table);
-    const rows = Array.from(t.values());
+    let rows: Record<string, unknown>[];
+    if (table === "purchases" || table === "purchase_documents") {
+      const docs = Array.from(this.ensureTable("purchase_documents").values());
+      const alts = Array.from(this.ensureTable("purchases").values());
+      const map = new Map<string, Record<string, unknown>>();
+      for (const item of alts) {
+        if (item && item.id) map.set(item.id as string, item);
+      }
+      for (const item of docs) {
+        if (item && item.id) map.set(item.id as string, item);
+      }
+      rows = Array.from(map.values());
+    } else {
+      const t = this.ensureTable(table);
+      rows = Array.from(t.values());
+    }
+
     if (filter) {
       return rows.filter(filter) as T[];
     }

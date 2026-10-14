@@ -64,10 +64,10 @@ export const MastersPage: React.FC = () => {
     setIsLoading(true);
     try {
       if (activeTab === "products") {
-        const res = await api.get<{ data: Product[] }>("/admin/products", { search });
+        const res = await api.get<{ data: Product[] }>("/admin/products", { search, per_page: 100 });
         setProducts(res.data || []);
       } else if (activeTab === "parties") {
-        const res = await api.get<{ data: Party[] }>("/admin/parties", { type: partyType, search });
+        const res = await api.get<{ data: Party[] }>("/admin/parties", { type: partyType, search, per_page: 100 });
         setParties(res.data || []);
       }
     } catch (err) {

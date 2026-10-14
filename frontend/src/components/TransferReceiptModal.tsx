@@ -14,6 +14,7 @@ import {
   type InterStoreTransfer,
   type TransferReceiptLineInput,
 } from "../lib/stock/interStoreTransferService";
+import { useModalEscape } from "../lib/ui/modalEscapeManager";
 
 interface TransferReceiptModalProps {
   isOpen: boolean;
@@ -28,6 +29,8 @@ export const TransferReceiptModal: React.FC<TransferReceiptModalProps> = ({
   onClose,
   onConfirmReceipt,
 }) => {
+  useModalEscape(isOpen && Boolean(transfer), onClose);
+
   const [receiptRows, setReceiptRows] = useState<
     Array<{
       line_id: string;

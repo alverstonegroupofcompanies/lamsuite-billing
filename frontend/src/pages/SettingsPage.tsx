@@ -319,8 +319,15 @@ export const SettingsPage: React.FC = () => {
     }
 
     try {
+      // Auto-trigger encrypted safety snapshot before clearing data
+      try {
+        await backupService.createBackupSnapshot();
+      } catch (backupErr) {
+        console.warn("Safety pre-reset backup failed:", backupErr);
+      }
+
       const res = await companySettingsService.resetLocalData(resetScope);
-      showNotification(`Reset executed: ${res.clearedTables.length} tables cleared.`);
+      showNotification(`Safety backup created & Reset executed: ${res.clearedTables.length} tables cleared.`);
       setResetConfirmPhrase("");
       loadData();
     } catch (err: any) {
@@ -553,8 +560,11 @@ export const SettingsPage: React.FC = () => {
                       { id: "purchases", label: "Purchases (F2)" },
                       { id: "purchase_returns", label: "Purchase Returns (Shift+F2)" },
                       { id: "stock", label: "Inventory (F3)" },
+                      { id: "stock_transfers", label: "Transfers (Shift+F3)" },
                       { id: "reports", label: "Reports & GST (F4)" },
                       { id: "masters", label: "Master Data (F5)" },
+                      { id: "counters", label: "Store Counters (F8)" },
+                      { id: "import_export", label: "Import / Export Hub (F9)" },
                       { id: "settings", label: "Settings (F10)" },
                     ].map((mod) => {
                       const isEnabled = (settings.enabled_menu_items || []).includes(mod.id);
@@ -810,7 +820,12 @@ export const SettingsPage: React.FC = () => {
 
               <div className="grid grid-cols-2 gap-4">
                 <div className="rounded-lg border border-slate-200 p-3 bg-slate-50/50">
-                  <div className="text-xs font-bold text-slate-800">Sales Invoices</div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-slate-800">Sales Invoices</span>
+                    <span className="rounded bg-blue-100 px-2 py-0.5 font-mono text-[11px] font-bold text-blue-700">
+                      {(settings.sequences?.invoicePrefix || "INV")}-{settings.sequences?.nextInvoiceNumber || 1001}
+                    </span>
+                  </div>
                   <div className="grid grid-cols-2 gap-2 mt-2">
                     <div>
                       <span className="text-[10px] text-slate-500">Prefix</span>
@@ -846,7 +861,12 @@ export const SettingsPage: React.FC = () => {
                 </div>
 
                 <div className="rounded-lg border border-slate-200 p-3 bg-slate-50/50">
-                  <div className="text-xs font-bold text-slate-800">Sales Returns / Credit Notes</div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-slate-800">Sales Returns / Credit Notes</span>
+                    <span className="rounded bg-indigo-100 px-2 py-0.5 font-mono text-[11px] font-bold text-indigo-700">
+                      {(settings.sequences?.returnPrefix || "RET")}-{settings.sequences?.nextReturnNumber || 101}
+                    </span>
+                  </div>
                   <div className="grid grid-cols-2 gap-2 mt-2">
                     <div>
                       <span className="text-[10px] text-slate-500">Prefix</span>
@@ -880,7 +900,12 @@ export const SettingsPage: React.FC = () => {
                 </div>
 
                 <div className="rounded-lg border border-slate-200 p-3 bg-slate-50/50">
-                  <div className="text-xs font-bold text-slate-800">Purchase Inwards</div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-slate-800">Purchase Inwards</span>
+                    <span className="rounded bg-emerald-100 px-2 py-0.5 font-mono text-[11px] font-bold text-emerald-700">
+                      {(settings.sequences?.purchasePrefix || "PUR")}-{settings.sequences?.nextPurchaseNumber || 201}
+                    </span>
+                  </div>
                   <div className="grid grid-cols-2 gap-2 mt-2">
                     <div>
                       <span className="text-[10px] text-slate-500">Prefix</span>
@@ -914,7 +939,12 @@ export const SettingsPage: React.FC = () => {
                 </div>
 
                 <div className="rounded-lg border border-slate-200 p-3 bg-slate-50/50">
-                  <div className="text-xs font-bold text-slate-800">Estimates & Quotations</div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-slate-800">Estimates & Quotations</span>
+                    <span className="rounded bg-amber-100 px-2 py-0.5 font-mono text-[11px] font-bold text-amber-800">
+                      {(settings.sequences?.quotationPrefix || "QUO")}-{settings.sequences?.nextQuotationNumber || 301}
+                    </span>
+                  </div>
                   <div className="grid grid-cols-2 gap-2 mt-2">
                     <div>
                       <span className="text-[10px] text-slate-500">Prefix</span>

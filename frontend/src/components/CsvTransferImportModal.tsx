@@ -6,6 +6,7 @@ import {
   type TransferRateBasis,
   type TransferGstTreatment,
 } from "../lib/stock/interStoreTransferService";
+import { useModalEscape } from "../lib/ui/modalEscapeManager";
 
 interface CsvTransferImportModalProps {
   isOpen: boolean;
@@ -22,6 +23,8 @@ export const CsvTransferImportModal: React.FC<CsvTransferImportModalProps> = ({
   onClose,
   onImportSuccess,
 }) => {
+  useModalEscape(isOpen, onClose);
+
   const [pastedText, setPastedText] = useState("");
   const [parsedResult, setParsedResult] = useState<{
     validLines: InterStoreTransferLine[];

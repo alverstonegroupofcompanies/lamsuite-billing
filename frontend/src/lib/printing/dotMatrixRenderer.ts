@@ -846,9 +846,15 @@ export class DotMatrixRenderer {
     }
 
     const rulerHtml = showRuler
-      ? `<div class="ruler-container font-mono select-none">
-          <div class="ruler-tens">${rTens}</div>
-          <div class="ruler-units">${rUnits}</div>
+      ? `<div class="ruler-container select-none mb-3">
+          <div class="dot-line ruler-tens-line text-emerald-400">
+            ${showLineNumbers ? `<span class="line-no text-emerald-600 border-emerald-800">COL</span>` : ""}
+            <span class="line-content ruler-tens font-bold">${rTens}</span>
+          </div>
+          <div class="dot-line ruler-units-line text-emerald-300">
+            ${showLineNumbers ? `<span class="line-no text-emerald-600 border-emerald-800"></span>` : ""}
+            <span class="line-content ruler-units">${rUnits}</span>
+          </div>
         </div>`
       : "";
 
@@ -896,6 +902,7 @@ export class DotMatrixRenderer {
             <div class="paper-card">
               <div class="tractor-strip-left"></div>
               <div class="paper-body">
+                ${pIdx === 0 ? rulerHtml : ""}
                 ${renderedLines}
               </div>
               <div class="tractor-strip-right"></div>
@@ -916,35 +923,31 @@ export class DotMatrixRenderer {
     * { box-sizing: border-box; }
     body {
       margin: 0;
-      padding: 16px;
+      padding: 24px;
       font-family: 'Courier New', Courier, 'DejaVu Sans Mono', 'Liberation Mono', Menlo, Consolas, monospace;
-      background-color: #0f172a;
+      background-color: #1e293b;
       color: #1e293b;
       display: flex;
       flex-direction: column;
       align-items: center;
       min-height: 100vh;
     }
-    @media (prefers-color-scheme: light) {
-      body { background-color: #e2e8f0; }
-    }
     
     .ruler-container {
       font-family: 'Courier New', Courier, monospace;
-      font-size: 11px;
-      line-height: 14px;
-      color: #10b981;
+      font-size: 13px;
+      line-height: 18px;
       background-color: #064e3b;
-      padding: 6px 12px 6px ${showLineNumbers ? "52px" : "16px"};
+      padding: 6px 8px;
       border-radius: 4px;
       margin-bottom: 12px;
       white-space: pre;
       letter-spacing: 0px;
-      box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3);
-      width: fit-content;
+      box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.4);
+      width: 100%;
     }
     .ruler-tens { font-weight: bold; color: #34d399; }
-    .ruler-units { opacity: 0.85; }
+    .ruler-units { color: #6ee7b7; opacity: 0.9; }
 
     .forms-container {
       display: flex;
@@ -962,20 +965,22 @@ export class DotMatrixRenderer {
 
     .paper-card {
       display: flex;
+      align-items: stretch;
       background-color: #faf8f2;
       border-radius: 2px;
-      box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.4), 0 8px 10px -6px rgba(0, 0, 0, 0.3);
-      border: 1px solid #d1d5db;
+      box-shadow: 0 12px 30px -5px rgba(0, 0, 0, 0.4), 0 8px 10px -6px rgba(0, 0, 0, 0.3);
+      border: 1px solid #cbd5e1;
       overflow: hidden;
       width: fit-content;
     }
 
     /* Tractor Feed Hole Strips (Continuous Stationery) */
     .tractor-strip-left, .tractor-strip-right {
-      width: 24px;
+      width: 28px;
+      align-self: stretch;
       background-color: #f1ede2;
-      background-image: radial-gradient(circle at 12px 10px, #cbd5e1 3.5px, transparent 4.5px);
-      background-size: 24px 20px;
+      background-image: radial-gradient(circle at 14px 12px, #94a3b8 4px, #f1ede2 4.5px);
+      background-size: 28px 24px;
       flex-shrink: 0;
     }
     .tractor-strip-left { border-right: 1px dashed #cbd5e1; }
@@ -1047,10 +1052,19 @@ export class DotMatrixRenderer {
   </style>
 </head>
 <body>
-  ${rulerHtml}
   <div class="forms-container">
     ${renderedPagesHtml}
   </div>
+  <script>
+    window.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
+        window.parent.postMessage({ type: 'MODAL_ESCAPE' }, '*');
+      }
+    }, true);
+  </script>
 </body>
 </html>`;
   }

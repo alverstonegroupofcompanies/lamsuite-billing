@@ -1,5 +1,6 @@
-import React, { useEffect } from "react";
+import React from "react";
 import { X, Keyboard, Command } from "lucide-react";
+import { useModalEscape } from "../lib/ui/modalEscapeManager";
 
 interface KeyboardShortcutsModalProps {
   isOpen: boolean;
@@ -12,16 +13,7 @@ interface ShortcutGroup {
 }
 
 export const KeyboardShortcutsModal: React.FC<KeyboardShortcutsModalProps> = ({ isOpen, onClose }) => {
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && isOpen) {
-        e.preventDefault();
-        onClose();
-      }
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isOpen, onClose]);
+  useModalEscape(isOpen, onClose);
 
   if (!isOpen) return null;
 
@@ -61,7 +53,8 @@ export const KeyboardShortcutsModal: React.FC<KeyboardShortcutsModalProps> = ({ 
         { key: "Ctrl + K", description: "Open Command Palette / Fast Search" },
         { key: "F2 / Shift+F2", description: "Purchase Register / Purchase Returns" },
         { key: "F3 / Shift+F3", description: "Stock Ledger / Inter-Store Transfers" },
-        { key: "F4 / F5 / F10", description: "Reports / Masters / Settings" },
+        { key: "F4 / F5", description: "Reports & GST Hub / Master Data" },
+        { key: "F8 / F9 / F10", description: "Store Counters / Import-Export Hub / Settings" },
         { key: "?", description: "Open Keyboard Shortcuts Help" },
         { key: "Esc", description: "Cancel / Close modal or dropdown" },
       ],

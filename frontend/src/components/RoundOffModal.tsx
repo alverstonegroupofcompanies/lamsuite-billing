@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { X, Check, RotateCcw, Calculator, ArrowRightLeft } from "lucide-react";
 import { round2, computeAutoRoundOff } from "../lib/billing/billingCalculations";
+import { useModalEscape } from "../lib/ui/modalEscapeManager";
 
 interface RoundOffModalProps {
   isOpen: boolean;
@@ -19,6 +20,8 @@ export const RoundOffModal: React.FC<RoundOffModalProps> = ({
   onClose,
   onApplyRoundOff,
 }) => {
+  useModalEscape(isOpen, onClose);
+
   const [entryMode, setEntryMode] = useState<"round_off" | "final_total">("final_total");
   const [roundOffInput, setRoundOffInput] = useState<string>("");
   const [finalTotalInput, setFinalTotalInput] = useState<string>("");
@@ -88,9 +91,22 @@ export const RoundOffModal: React.FC<RoundOffModalProps> = ({
               <Calculator className="h-4 w-4" />
             </div>
             <div>
-              <h3 className="text-sm font-bold text-slate-800">
-                Adjust Round-Off / Net Payable <span className="text-xs text-blue-600 font-medium">(Alt+R)</span>
-              </h3>
+              <div className="flex items-center gap-2">
+                <h3 className="text-sm font-bold text-slate-800">
+                  Adjust Round-Off / Net Payable <span className="text-xs text-blue-600 font-medium">(Alt+R)</span>
+                </h3>
+                <span
+                  className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
+                    effectiveRoundOff < 0
+                      ? "bg-amber-100 text-amber-800 border border-amber-200"
+                      : effectiveRoundOff > 0
+                      ? "bg-emerald-100 text-emerald-800 border border-emerald-200"
+                      : "bg-slate-100 text-slate-600 border border-slate-200"
+                  }`}
+                >
+                  Delta: {effectiveRoundOff >= 0 ? `+₹${effectiveRoundOff.toFixed(2)}` : `-₹${Math.abs(effectiveRoundOff).toFixed(2)}`}
+                </span>
+              </div>
               <p className="text-[11px] text-slate-500 font-medium">
                 Customize statutory rounding or override final invoice amount
               </p>

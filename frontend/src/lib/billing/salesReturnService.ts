@@ -7,7 +7,7 @@ import { round2 } from "./billingCalculations";
 import type { InvoiceRecord, InvoiceItemRecord } from "../reports/reportEngine";
 
 export type ReturnReason = "damaged" | "expired" | "wrong_item" | "customer_return" | "other";
-export type ReturnCondition = "restock" | "damaged_discard";
+export type ReturnCondition = "restock" | "damaged_discard" | "quarantine";
 export type RefundPaymentMode = "Cash" | "UPI" | "Card" | "Credit Adjust" | "Store Credit";
 
 export interface SalesReturnLineInput {
@@ -263,6 +263,21 @@ export class SalesReturnService {
           unit_cost: line.unit_price,
           reference_type: "SALES_RETURN",
           reference_id: returnNumber,
+          created_at: now,
+        });
+      } else if (line.condition === "quarantine") {
+        // Quarantine Shelf: Log to quarantine bucket for inspection without adding to sellable inventory
+        const stockTxId = `stk_quar_${now}_${Math.random().toString(16).slice(2, 6)}`;
+        await sqliteStorage.insertRecord("stock_transactions", stockTxId, {
+          id: stockTxId,
+          product_id: line.product_id,
+          batch_id: line.batch_id,
+          event_type: "QUARANTINE_RETURN",
+          qty_delta: 0,
+          unit_cost: line.unit_price,
+          reference_type: "SALES_RETURN",
+          reference_id: returnNumber,
+          notes: "Quarantine shelf - pending QA inspection",
           created_at: now,
         });
       } else {

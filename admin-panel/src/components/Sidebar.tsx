@@ -151,6 +151,14 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen = false, onClose }) => 
           shortcut: "Alt+A",
           visible: hasPermission("audit", "view"),
         },
+        {
+          id: "migrations",
+          name: "Migration Hub",
+          path: "/migrations",
+          icon: Database,
+          shortcut: "Alt+M",
+          visible: true,
+        },
       ],
     },
   ];

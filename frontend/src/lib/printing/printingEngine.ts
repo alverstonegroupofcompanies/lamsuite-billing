@@ -346,6 +346,54 @@ export function generateEmailShareUrl(email: string, data: InvoicePrintData): st
   return `mailto:${encodeURIComponent(email)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
 }
 
+/**
+ * Chunks invoice line items across discrete A4/A5 pages.
+ * Single page invoices (<= maxSingle) fit compactly on 1 page.
+ * Multi-page invoices are cleanly balanced across pages.
+ */
+export function chunkInvoiceLines<T>(
+  lines: T[],
+  maxSingle: number = 14,
+  maxPage1: number = 16,
+  maxMiddle: number = 24,
+  maxFinal: number = 14
+): T[][] {
+  if (lines.length <= maxSingle) {
+    return [lines];
+  }
+
+  const total = lines.length;
+  // If it can fit in exactly 2 pages:
+  if (total <= maxPage1 + maxFinal) {
+    const half = Math.ceil(total / 2);
+    const p1Count = Math.min(maxPage1, Math.max(half, total - maxFinal));
+    return [lines.slice(0, p1Count), lines.slice(p1Count)];
+  }
+
+  // 3 or more pages:
+  const pages: T[][] = [];
+  pages.push(lines.slice(0, maxPage1));
+  let remaining = lines.slice(maxPage1);
+
+  while (remaining.length > maxFinal) {
+    if (remaining.length <= maxMiddle + maxFinal) {
+      const half = Math.ceil(remaining.length / 2);
+      const midCount = Math.min(maxMiddle, Math.max(half, remaining.length - maxFinal));
+      pages.push(remaining.slice(0, midCount));
+      pages.push(remaining.slice(midCount));
+      return pages;
+    }
+    pages.push(remaining.slice(0, maxMiddle));
+    remaining = remaining.slice(maxMiddle);
+  }
+
+  if (remaining.length > 0) {
+    pages.push(remaining);
+  }
+
+  return pages;
+}
+
 export class PrintingEngine {
   private templates: NamedPrintTemplate[] = [...STANDARD_TEMPLATES];
   private printerProfiles: PrinterProfile[] = [
@@ -491,6 +539,7 @@ export class PrintingEngine {
     const showLicenses = options?.showDrugLicenses !== false;
     const showTerms = options?.showTerms !== false;
     const copyMarker = options?.copyMarker;
+    const isDuplicate = options?.isDuplicate;
 
     const hsnRows = calculateHsnSummary(data.lines);
     const upiVpa = data.upi_vpa || "pharmacy@upi";
@@ -499,25 +548,6 @@ export class PrintingEngine {
 
     const cgstTotal = data.cgst_total !== undefined ? data.cgst_total : round2(data.tax_total / 2);
     const sgstTotal = data.sgst_total !== undefined ? data.sgst_total : round2(data.tax_total / 2);
-
-    const itemsRows = data.lines
-      .map(
-        (l, i) => `
-        <tr>
-          <td style="padding: 5px 6px; text-align: center; border-bottom: 1px solid #e2e8f0;">${i + 1}</td>
-          <td style="padding: 5px 6px; border-bottom: 1px solid #e2e8f0;">
-            <div style="font-weight: 700; color: #0f172a;">${l.description}</div>
-          </td>
-          <td style="padding: 5px 6px; text-align: center; border-bottom: 1px solid #e2e8f0;">${l.hsn_code || "300490"}</td>
-          <td style="padding: 5px 6px; text-align: center; border-bottom: 1px solid #e2e8f0;">${l.batch_no || "-"}</td>
-          <td style="padding: 5px 6px; text-align: center; border-bottom: 1px solid #e2e8f0;">${l.expiry_date || "-"}</td>
-          <td style="padding: 5px 6px; text-align: right; border-bottom: 1px solid #e2e8f0; font-variant-numeric: tabular-nums;">${l.qty}${l.loose_qty ? ` + ${l.loose_qty}L` : ""}</td>
-          <td style="padding: 5px 6px; text-align: right; border-bottom: 1px solid #e2e8f0; font-variant-numeric: tabular-nums;">₹ ${l.rate.toFixed(2)}</td>
-          <td style="padding: 5px 6px; text-align: right; border-bottom: 1px solid #e2e8f0; font-variant-numeric: tabular-nums;">${l.gst_percent}%</td>
-          <td style="padding: 5px 6px; text-align: right; border-bottom: 1px solid #e2e8f0; font-weight: 700; color: #0f172a; font-variant-numeric: tabular-nums;">₹ ${l.amount.toFixed(2)}</td>
-        </tr>`
-      )
-      .join("");
 
     let totalHsnTaxable = 0;
     let totalHsnCgst = 0;
@@ -532,14 +562,231 @@ export class PrintingEngine {
         totalHsnTax += r.totalTax;
         return `
         <tr>
-          <td style="padding: 4px 6px; text-align: center; border-bottom: 1px solid #e2e8f0;">${r.hsnCode}</td>
-          <td style="padding: 4px 6px; text-align: right; border-bottom: 1px solid #e2e8f0; font-variant-numeric: tabular-nums;">₹ ${r.taxableValue.toFixed(2)}</td>
-          <td style="padding: 4px 6px; text-align: right; border-bottom: 1px solid #e2e8f0; font-variant-numeric: tabular-nums;">${r.cgstRate}%</td>
-          <td style="padding: 4px 6px; text-align: right; border-bottom: 1px solid #e2e8f0; font-variant-numeric: tabular-nums;">₹ ${r.cgstAmount.toFixed(2)}</td>
-          <td style="padding: 4px 6px; text-align: right; border-bottom: 1px solid #e2e8f0; font-variant-numeric: tabular-nums;">${r.sgstRate}%</td>
-          <td style="padding: 4px 6px; text-align: right; border-bottom: 1px solid #e2e8f0; font-variant-numeric: tabular-nums;">₹ ${r.sgstAmount.toFixed(2)}</td>
-          <td style="padding: 4px 6px; text-align: right; border-bottom: 1px solid #e2e8f0; font-weight: 700; font-variant-numeric: tabular-nums;">₹ ${r.totalTax.toFixed(2)}</td>
+          <td style="padding: 4px 6px; text-align: center; border-bottom: 1px solid #cbd5e1; border-right: 1px solid #cbd5e1;">${r.hsnCode}</td>
+          <td style="padding: 4px 6px; text-align: right; border-bottom: 1px solid #cbd5e1; border-right: 1px solid #cbd5e1; font-variant-numeric: tabular-nums;">₹ ${r.taxableValue.toFixed(2)}</td>
+          <td style="padding: 4px 6px; text-align: right; border-bottom: 1px solid #cbd5e1; border-right: 1px solid #cbd5e1; font-variant-numeric: tabular-nums;">${r.cgstRate}%</td>
+          <td style="padding: 4px 6px; text-align: right; border-bottom: 1px solid #cbd5e1; border-right: 1px solid #cbd5e1; font-variant-numeric: tabular-nums;">₹ ${r.cgstAmount.toFixed(2)}</td>
+          <td style="padding: 4px 6px; text-align: right; border-bottom: 1px solid #cbd5e1; border-right: 1px solid #cbd5e1; font-variant-numeric: tabular-nums;">${r.sgstRate}%</td>
+          <td style="padding: 4px 6px; text-align: right; border-bottom: 1px solid #cbd5e1; border-right: 1px solid #cbd5e1; font-variant-numeric: tabular-nums;">₹ ${r.sgstAmount.toFixed(2)}</td>
+          <td style="padding: 4px 6px; text-align: right; border-bottom: 1px solid #cbd5e1; font-weight: 700; font-variant-numeric: tabular-nums;">₹ ${r.totalTax.toFixed(2)}</td>
         </tr>`;
+      })
+      .join("");
+
+    const pageChunks = chunkInvoiceLines(data.lines, 14, 16, 24, 14);
+    const totalPages = pageChunks.length;
+
+    let cumulativeIdx = 0;
+    const pagesHtml = pageChunks
+      .map((chunk, pageIdx) => {
+        const pageNum = pageIdx + 1;
+        const isFirstPage = pageNum === 1;
+        const isLastPage = pageNum === totalPages;
+        const startIdx = cumulativeIdx;
+        cumulativeIdx += chunk.length;
+        const endIdx = cumulativeIdx;
+
+        const itemsRowsHtml = chunk
+          .map((l, i) => {
+            const itemNumber = startIdx + i + 1;
+            return `
+          <tr>
+            <td style="padding: 4px 6px; text-align: center; border-bottom: 1px solid #cbd5e1; border-right: 1px solid #cbd5e1;">${itemNumber}</td>
+            <td style="padding: 4px 6px; border-bottom: 1px solid #cbd5e1; border-right: 1px solid #cbd5e1;">
+              <div style="font-weight: 700; color: #0f172a;">${l.description}</div>
+            </td>
+            <td style="padding: 4px 6px; text-align: center; border-bottom: 1px solid #cbd5e1; border-right: 1px solid #cbd5e1;">${l.hsn_code || "300490"}</td>
+            <td style="padding: 4px 6px; text-align: center; border-bottom: 1px solid #cbd5e1; border-right: 1px solid #cbd5e1; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;">${l.batch_no || "-"}</td>
+            <td style="padding: 4px 6px; text-align: center; border-bottom: 1px solid #cbd5e1; border-right: 1px solid #cbd5e1;">${l.expiry_date || "-"}</td>
+            <td style="padding: 4px 6px; text-align: right; border-bottom: 1px solid #cbd5e1; border-right: 1px solid #cbd5e1; font-variant-numeric: tabular-nums;">${l.qty}${l.loose_qty ? ` + ${l.loose_qty}L` : ""}</td>
+            <td style="padding: 4px 6px; text-align: right; border-bottom: 1px solid #cbd5e1; border-right: 1px solid #cbd5e1; font-variant-numeric: tabular-nums;">₹ ${l.rate.toFixed(2)}</td>
+            <td style="padding: 4px 6px; text-align: right; border-bottom: 1px solid #cbd5e1; border-right: 1px solid #cbd5e1; font-variant-numeric: tabular-nums;">${l.gst_percent}%</td>
+            <td style="padding: 4px 6px; text-align: right; border-bottom: 1px solid #cbd5e1; font-weight: 700; color: #0f172a; font-variant-numeric: tabular-nums;">₹ ${l.amount.toFixed(2)}</td>
+          </tr>`;
+          })
+          .join("");
+
+        return `
+      <div class="a4-sheet">
+        ${
+          isFirstPage
+            ? `
+        <div class="header">
+          <div class="store-name">${data.store_name}</div>
+          <div class="store-sub">${data.store_address || "Main Road, Palakkad, Kerala - 678001"} • Phone: ${data.store_phone || "9876543210"}</div>
+          ${
+            showLicenses
+              ? `<div class="store-licenses">
+            ${data.store_gstin ? `GSTIN: ${data.store_gstin}` : ""}
+            ${data.drug_license_numbers?.length ? `  |  DL: ${data.drug_license_numbers.join(", ")}` : ""}
+            ${data.fssai_no ? `  |  FSSAI: ${data.fssai_no}` : ""}
+          </div>`
+              : ""
+          }
+          <div class="tax-badge">TAX INVOICE</div>
+          ${copyMarker ? `<div class="copy-marker">[ ${copyMarker} ]</div>` : ""}
+          ${isDuplicate ? `<div class="duplicate-watermark">DUPLICATE</div>` : ""}
+        </div>
+
+        <div class="meta-grid">
+          <div class="meta-col">
+            <div><strong>Billed To:</strong> ${data.customer_name || "Walk-in Customer"}</div>
+            <div>Mobile: ${data.customer_phone || "Not specified"}</div>
+            ${showClinical && data.patient_name ? `<div>Patient: ${data.patient_name} ${data.patient_age ? `(${data.patient_age} yrs)` : ""}${data.patient_gender ? ` / ${data.patient_gender}` : ""}</div>` : ""}
+            ${showClinical && data.doctor_name ? `<div>Doctor: ${data.doctor_name} ${data.doctor_reg_no ? `[Reg: ${data.doctor_reg_no}]` : ""}</div>` : ""}
+          </div>
+          <div class="meta-col" style="text-align: right;">
+            <div style="font-size: 12px; font-weight: 800; color: #1d4ed8;">#${data.invoice_number}</div>
+            <div>Date: ${data.invoice_date}${data.invoice_time ? ` ${data.invoice_time}` : ""}</div>
+            <div>Payment Mode: <strong>${data.payment_mode || "Cash"}</strong> (${data.payment_status || "Paid"})</div>
+            <div>Place of Supply: ${data.place_of_supply || "32-Kerala"}</div>
+          </div>
+        </div>
+        `
+            : `
+        <div class="running-header">
+          <div>
+            <span class="running-store">${data.store_name}</span>
+            <span class="running-inv">Tax Invoice #${data.invoice_number}</span>
+            <span class="running-date">Date: ${data.invoice_date}</span>
+          </div>
+          <div class="running-page">Page ${pageNum} of ${totalPages}</div>
+        </div>
+        `
+        }
+
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th style="width: 28px; text-align: center; border-right: 1px solid #cbd5e1;">#</th>
+              <th style="text-align: left; border-right: 1px solid #cbd5e1;">Item Description</th>
+              <th style="width: 60px; text-align: center; border-right: 1px solid #cbd5e1;">HSN</th>
+              <th style="width: 65px; text-align: center; border-right: 1px solid #cbd5e1;">Batch</th>
+              <th style="width: 55px; text-align: center; border-right: 1px solid #cbd5e1;">Exp</th>
+              <th style="width: 45px; text-align: right; border-right: 1px solid #cbd5e1;">Qty</th>
+              <th style="width: 75px; text-align: right; border-right: 1px solid #cbd5e1;">Rate (₹)</th>
+              <th style="width: 55px; text-align: right; border-right: 1px solid #cbd5e1;">GST %</th>
+              <th style="width: 85px; text-align: right;">Total (₹)</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${itemsRowsHtml}
+          </tbody>
+        </table>
+
+        ${
+          !isLastPage
+            ? `
+        <div class="continuation-bar">
+          <div>Showing items ${startIdx + 1} to ${endIdx} of ${data.lines.length} Total Items</div>
+          <div class="continuation-link">Continued on Page ${pageNum + 1} &rarr;</div>
+        </div>
+        `
+            : ""
+        }
+
+        ${
+          isLastPage
+            ? `
+        ${
+          showHsn
+            ? `
+        <!-- HSN Tax Summary -->
+        <div style="margin-top: 10px; margin-bottom: 10px;">
+          <div style="font-weight: 700; font-size: 9px; color: #475569; text-transform: uppercase; margin-bottom: 3px;">HSN / GST Tax Summary</div>
+          <table class="data-table" style="margin-bottom: 0;">
+            <thead>
+              <tr>
+                <th style="text-align: center; border-right: 1px solid #cbd5e1;">HSN/SAC</th>
+                <th style="text-align: right; border-right: 1px solid #cbd5e1;">Taxable Value (₹)</th>
+                <th style="text-align: right; border-right: 1px solid #cbd5e1;">CGST %</th>
+                <th style="text-align: right; border-right: 1px solid #cbd5e1;">CGST (₹)</th>
+                <th style="text-align: right; border-right: 1px solid #cbd5e1;">SGST %</th>
+                <th style="text-align: right; border-right: 1px solid #cbd5e1;">SGST (₹)</th>
+                <th style="text-align: right;">Total Tax (₹)</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${hsnRowsHtml}
+              <tr style="background: #f1f5f9; font-weight: 700;">
+                <td style="padding: 4px 6px; text-align: center; border-top: 1px solid #94a3b8; border-right: 1px solid #cbd5e1;">Total</td>
+                <td style="padding: 4px 6px; text-align: right; border-top: 1px solid #94a3b8; border-right: 1px solid #cbd5e1; font-variant-numeric: tabular-nums;">₹ ${totalHsnTaxable.toFixed(2)}</td>
+                <td style="padding: 4px 6px; border-top: 1px solid #94a3b8; border-right: 1px solid #cbd5e1;"></td>
+                <td style="padding: 4px 6px; text-align: right; border-top: 1px solid #94a3b8; border-right: 1px solid #cbd5e1; font-variant-numeric: tabular-nums;">₹ ${totalHsnCgst.toFixed(2)}</td>
+                <td style="padding: 4px 6px; border-top: 1px solid #94a3b8; border-right: 1px solid #cbd5e1;"></td>
+                <td style="padding: 4px 6px; text-align: right; border-top: 1px solid #94a3b8; border-right: 1px solid #cbd5e1; font-variant-numeric: tabular-nums;">₹ ${totalHsnSgst.toFixed(2)}</td>
+                <td style="padding: 4px 6px; text-align: right; border-top: 1px solid #94a3b8; font-variant-numeric: tabular-nums;">₹ ${totalHsnTax.toFixed(2)}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>`
+            : ""
+        }
+
+        <div class="footer-container">
+          <div class="amount-words-bar">
+            <span style="color: #64748b; font-weight: 600;">Amount in Words:</span> ${amountWords}
+          </div>
+
+          <div class="footer-grid">
+            <!-- Top-Left: UPI QR -->
+            <div class="footer-cell">
+              <div class="qr-box">
+                ${showQr ? qrSvg : ""}
+                <div style="font-size: 9.5px; color: #334155;">
+                  <div style="font-weight: 800; color: #0f172a; margin-bottom: 2px;">Scan & Pay via UPI</div>
+                  <div style="margin-bottom: 1px;">UPI ID: <strong>${upiVpa}</strong></div>
+                  <div style="margin-bottom: 2px;">Amount: <strong>₹ ${data.grand_total.toFixed(2)}</strong></div>
+                  <div style="font-size: 8.5px; color: #64748b;">Supports GPay, PhonePe, Paytm & UPI Apps</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Top-Right: Totals -->
+            <div class="footer-cell">
+              <div class="totals-card">
+                <div class="total-line"><span>Taxable Subtotal:</span><span style="font-weight: 600;">₹ ${data.subtotal.toFixed(2)}</span></div>
+                <div class="total-line"><span>Central GST (CGST):</span><span style="font-weight: 600;">₹ ${cgstTotal.toFixed(2)}</span></div>
+                <div class="total-line"><span>State GST (SGST):</span><span style="font-weight: 600;">₹ ${sgstTotal.toFixed(2)}</span></div>
+                <div class="total-line"><span>Total GST:</span><span style="font-weight: 600;">₹ ${data.tax_total.toFixed(2)}</span></div>
+                ${data.round_off ? `<div class="total-line"><span>Round Off:</span><span style="font-weight: 600;">${data.round_off > 0 ? "+" : ""}₹ ${data.round_off.toFixed(2)}</span></div>` : ""}
+                <div class="grand-total-line"><span>Grand Total:</span><span>₹ ${data.grand_total.toFixed(2)}</span></div>
+              </div>
+            </div>
+
+            <!-- Bottom-Left: Terms -->
+            <div class="footer-cell">
+              <div class="terms-card">
+                <div>
+                  <div class="terms-title">Terms & Conditions:</div>
+                  <div>1. Goods once sold will not be returned without original cash memo.</div>
+                  <div>2. Refrigerated medicines are strictly non-returnable.</div>
+                  <div>3. ${data.jurisdiction_note || "Subject to local jurisdiction."}</div>
+                </div>
+                <div class="terms-brand">${data.footer_note || "Computer Generated Tax Invoice • LamSuite POS"}</div>
+              </div>
+            </div>
+
+            <!-- Bottom-Right: Signature -->
+            <div class="footer-cell">
+              <div class="sign-card">
+                <div class="sign-store">For ${data.store_name}</div>
+                <div class="sign-space"></div>
+                <div class="sign-line">Authorised Signatory / Pharmacist</div>
+              </div>
+            </div>
+          </div>
+        </div>
+        `
+            : ""
+        }
+
+        <div class="spacer-fill"></div>
+        <div class="page-footer">
+          <div>Computer Generated Tax Invoice • ${data.store_name}</div>
+          <div class="page-num">Page ${pageNum} of ${totalPages}</div>
+        </div>
+      </div>`;
       })
       .join("");
 
@@ -549,197 +796,163 @@ export class PrintingEngine {
   <meta charset="utf-8" />
   <title>Tax Invoice - ${data.invoice_number}</title>
   <style>
-    @media print {
-      body { margin: 0; padding: 8mm; }
-      @page { size: A4 portrait; margin: 8mm; }
-      table.data-table thead { display: table-header-group; }
-      table.data-table tfoot { display: table-footer-group; }
-      table.data-table tr { page-break-inside: avoid; break-inside: avoid; }
-      .footer-container { page-break-inside: avoid; break-inside: avoid; }
-      .meta-grid { page-break-inside: avoid; break-inside: avoid; }
-      .no-print { display: none !important; }
+    @page {
+      size: A4 portrait;
+      margin: 8mm;
     }
-    * { box-sizing: border-box; }
+    * {
+      box-sizing: border-box;
+      -webkit-print-color-adjust: exact !important;
+      print-color-adjust: exact !important;
+    }
     body {
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-      font-size: 10.5px;
+      font-size: 10px;
       line-height: 1.35;
       color: #1e293b;
       margin: 0;
-      padding: 20px;
-      background: #fff;
+      padding: 24px 16px;
+      background-color: #cbd5e1;
       font-variant-numeric: tabular-nums;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 24px;
+      min-height: 100vh;
     }
-    .header { text-align: center; border-bottom: 2px solid #0f172a; padding-bottom: 8px; margin-bottom: 12px; position: relative; }
-    .store-name { font-size: 19px; font-weight: 800; color: #0f172a; }
+    .a4-sheet {
+      width: 210mm;
+      max-width: 210mm;
+      min-height: 297mm;
+      flex-shrink: 0;
+      background: #ffffff;
+      box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.15), 0 0 1px rgba(0, 0, 0, 0.2);
+      border: 1px solid #cbd5e1;
+      border-radius: 2px;
+      padding: 12mm 14mm;
+      display: flex;
+      flex-direction: column;
+      box-sizing: border-box;
+      overflow: hidden;
+      position: relative;
+    }
+    @media print {
+      body {
+        background: white !important;
+        padding: 0 !important;
+        margin: 0 !important;
+        display: block !important;
+      }
+      .a4-sheet {
+        box-shadow: none !important;
+        border: none !important;
+        margin: 0 !important;
+        padding: 8mm !important;
+        width: 100% !important;
+        min-height: auto !important;
+        page-break-after: always !important;
+        break-after: page !important;
+      }
+      .a4-sheet:last-child {
+        page-break-after: auto !important;
+        break-after: auto !important;
+      }
+      .no-print {
+        display: none !important;
+      }
+    }
+    .header { text-align: center; border-bottom: 2px solid #0f172a; padding-bottom: 6px; margin-bottom: 10px; position: relative; }
+    .store-name { font-size: 18px; font-weight: 800; color: #0f172a; }
     .store-sub { font-size: 10px; color: #475569; margin-top: 2px; }
     .store-licenses { font-size: 9.5px; font-weight: 700; color: #334155; margin-top: 3px; }
-    .tax-badge { font-size: 13px; font-weight: 800; letter-spacing: 0.5px; color: #0f172a; margin-top: 6px; }
+    .tax-badge { font-size: 12px; font-weight: 800; letter-spacing: 0.5px; color: #0f172a; margin-top: 5px; }
     .copy-marker { font-size: 8.5px; font-weight: 800; color: #64748b; letter-spacing: 0.5px; text-transform: uppercase; margin-top: 2px; }
-    .duplicate-watermark { position: absolute; top: 0; right: 0; border: 2px solid #ef4444; color: #ef4444; font-weight: 800; font-size: 11px; padding: 3px 8px; border-radius: 4px; letter-spacing: 1px; transform: rotate(-5deg); }
-    
-    .meta-grid { display: flex; justify-content: space-between; border: 1px solid #cbd5e1; border-radius: 6px; background: #f8fafc; padding: 8px 12px; margin-bottom: 12px; page-break-inside: avoid; break-inside: avoid; }
-    .meta-col { width: 48%; }
-    
-    table.data-table { width: 100%; border-collapse: collapse; font-size: 10px; margin-bottom: 12px; }
+    .duplicate-watermark { position: absolute; top: 0; right: 0; border: 2px solid #ef4444; color: #ef4444; font-weight: 800; font-size: 11px; padding: 2px 7px; border-radius: 4px; letter-spacing: 1px; transform: rotate(-5deg); }
+
+    .running-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 1.5px solid #0f172a;
+      padding-bottom: 6px;
+      margin-bottom: 8px;
+      font-size: 9.5px;
+    }
+    .running-store { font-weight: 800; color: #0f172a; font-size: 11px; }
+    .running-inv { color: #1d4ed8; font-weight: 700; margin-left: 8px; }
+    .running-date { color: #64748b; margin-left: 8px; }
+    .running-page { font-weight: 700; color: #475569; }
+
+    .meta-grid { display: flex; justify-content: space-between; border: 1px solid #cbd5e1; border-radius: 5px; background: #f8fafc; padding: 7px 10px; margin-bottom: 10px; page-break-inside: avoid; break-inside: avoid; }
+    .meta-col { width: 48%; line-height: 1.4; }
+
+    table.data-table { width: 100%; border-collapse: collapse; font-size: 9.5px; margin-bottom: 8px; border: 1px solid #cbd5e1; }
     table.data-table thead { display: table-header-group; }
     table.data-table tfoot { display: table-footer-group; }
     table.data-table tr { page-break-inside: avoid; break-inside: avoid; }
-    table.data-table th { background: #f1f5f9; color: #0f172a; font-weight: 700; padding: 6px; border-top: 1px solid #cbd5e1; border-bottom: 2px solid #94a3b8; }
+    table.data-table th { background: #f1f5f9; color: #0f172a; font-weight: 700; padding: 5px 6px; border-top: 1px solid #cbd5e1; border-bottom: 2px solid #94a3b8; }
     table.data-table tr:nth-child(even) { background: #f8fafc; }
 
-    .footer-container { margin-top: 12px; page-break-inside: avoid; break-inside: avoid; }
-    .amount-words-bar { background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 4px; padding: 6px 10px; font-size: 10px; font-weight: 700; color: #1e293b; margin-bottom: 10px; }
-    
-    .footer-grid { display: grid; grid-template-columns: ${showQr ? "1fr 310px" : "1fr 310px"}; grid-template-rows: auto auto; gap: 10px 16px; align-items: stretch; }
+    .continuation-bar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: #f8fafc;
+      border: 1px dashed #94a3b8;
+      border-radius: 4px;
+      padding: 5px 10px;
+      margin-top: 6px;
+      font-size: 9px;
+      color: #475569;
+    }
+    .continuation-link { font-weight: 700; color: #1d4ed8; }
+
+    .footer-container { margin-top: 10px; page-break-inside: avoid; break-inside: avoid; }
+    .amount-words-bar { background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 4px; padding: 5px 9px; font-size: 9.5px; font-weight: 700; color: #1e293b; margin-bottom: 8px; }
+
+    .footer-grid { display: grid; grid-template-columns: ${showQr ? "1fr 310px" : "1fr 310px"}; gap: 8px 14px; align-items: stretch; }
     .footer-cell { display: flex; flex-direction: column; }
-    
-    .qr-box { display: flex; align-items: center; gap: 12px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 8px 12px; height: 100%; box-sizing: border-box; }
-    .totals-card { border: 1px solid #cbd5e1; border-radius: 6px; background: #f8fafc; padding: 8px 14px; font-variant-numeric: tabular-nums; box-sizing: border-box; }
-    .total-line { display: flex; justify-content: space-between; padding: 2.5px 0; font-size: 10.5px; color: #475569; }
-    .grand-total-line { display: flex; justify-content: space-between; padding-top: 6px; margin-top: 6px; border-top: 2px solid #0f172a; font-size: 13px; font-weight: 800; color: #1d4ed8; }
-    
-    .terms-card { border: 1px solid #e2e8f0; border-radius: 6px; background: #fff; padding: 8px 10px; font-size: 9px; color: #64748b; line-height: 1.45; height: 100%; display: flex; flex-direction: column; justify-content: space-between; box-sizing: border-box; }
+
+    .qr-box { display: flex; align-items: center; gap: 10px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 5px; padding: 7px 10px; height: 100%; box-sizing: border-box; }
+    .totals-card { border: 1px solid #cbd5e1; border-radius: 5px; background: #f8fafc; padding: 7px 12px; font-variant-numeric: tabular-nums; box-sizing: border-box; }
+    .total-line { display: flex; justify-content: space-between; padding: 2px 0; font-size: 10px; color: #475569; }
+    .grand-total-line { display: flex; justify-content: space-between; padding-top: 5px; margin-top: 5px; border-top: 2px solid #0f172a; font-size: 12.5px; font-weight: 800; color: #1d4ed8; }
+
+    .terms-card { border: 1px solid #e2e8f0; border-radius: 5px; background: #fff; padding: 6px 9px; font-size: 8.5px; color: #64748b; line-height: 1.4; height: 100%; display: flex; flex-direction: column; justify-content: space-between; box-sizing: border-box; }
     .terms-title { font-weight: 700; text-transform: uppercase; color: #475569; margin-bottom: 2px; }
-    .terms-brand { margin-top: 6px; font-size: 8.5px; color: #94a3b8; border-top: 1px dashed #e2e8f0; padding-top: 4px; }
-    
-    .sign-card { border: 1px solid #cbd5e1; border-radius: 6px; background: #f8fafc; padding: 8px 14px; text-align: center; display: flex; flex-direction: column; justify-content: space-between; height: 100%; min-height: 70px; box-sizing: border-box; }
-    .sign-store { font-size: 10px; font-weight: 700; color: #1e293b; }
-    .sign-space { min-height: 24px; }
-    .sign-line { font-size: 9px; font-weight: 600; color: #475569; border-top: 1px solid #94a3b8; padding-top: 3px; }
+    .terms-brand { margin-top: 4px; font-size: 8px; color: #94a3b8; border-top: 1px dashed #e2e8f0; padding-top: 3px; }
+
+    .sign-card { border: 1px solid #cbd5e1; border-radius: 5px; background: #f8fafc; padding: 7px 12px; text-align: center; display: flex; flex-direction: column; justify-content: space-between; height: 100%; min-height: 65px; box-sizing: border-box; }
+    .sign-store { font-size: 9.5px; font-weight: 700; color: #1e293b; }
+    .sign-space { min-height: 20px; }
+    .sign-line { font-size: 8.5px; font-weight: 600; color: #475569; border-top: 1px solid #94a3b8; padding-top: 2px; }
+
+    .spacer-fill { flex-grow: 1; min-height: 6px; }
+    .page-footer {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-top: 1px solid #e2e8f0;
+      padding-top: 6px;
+      margin-top: 8px;
+      font-size: 8.5px;
+      color: #64748b;
+    }
+    .page-num { font-weight: 700; color: #334155; }
   </style>
 </head>
 <body>
-  <div class="header">
-    <div class="store-name">${data.store_name}</div>
-    <div class="store-sub">${data.store_address || "Main Road, Palakkad, Kerala - 678001"} • Phone: ${data.store_phone || "9876543210"}</div>
-    ${showLicenses ? `<div class="store-licenses">
-      ${data.store_gstin ? `GSTIN: ${data.store_gstin}` : ""}
-      ${data.drug_license_numbers?.length ? `  |  DL: ${data.drug_license_numbers.join(", ")}` : ""}
-      ${data.fssai_no ? `  |  FSSAI: ${data.fssai_no}` : ""}
-    </div>` : ""}
-    <div class="tax-badge">TAX INVOICE</div>
-    ${copyMarker ? `<div class="copy-marker">[ ${copyMarker} ]</div>` : ""}
-  </div>
-
-  <div class="meta-grid">
-    <div class="meta-col">
-      <div><strong>Billed To:</strong> ${data.customer_name || "Walk-in Customer"}</div>
-      <div>Mobile: ${data.customer_phone || "Not specified"}</div>
-      ${showClinical && data.patient_name ? `<div>Patient: ${data.patient_name} ${data.patient_age ? `(${data.patient_age} yrs)` : ""}${data.patient_gender ? ` / ${data.patient_gender}` : ""}</div>` : ""}
-      ${showClinical && data.doctor_name ? `<div>Doctor: ${data.doctor_name} ${data.doctor_reg_no ? `[Reg: ${data.doctor_reg_no}]` : ""}</div>` : ""}
-    </div>
-    <div class="meta-col" style="text-align: right;">
-      <div style="font-size: 12px; font-weight: 800; color: #1d4ed8;">#${data.invoice_number}</div>
-      <div>Date: ${data.invoice_date}${data.invoice_time ? ` ${data.invoice_time}` : ""}</div>
-      <div>Payment Mode: <strong>${data.payment_mode || "Cash"}</strong> (${data.payment_status || "Paid"})</div>
-      <div>Place of Supply: ${data.place_of_supply || "32-Kerala"}</div>
-    </div>
-  </div>
-
-  <table class="data-table">
-    <thead>
-      <tr>
-        <th style="width: 28px; text-align: center;">#</th>
-        <th style="text-align: left;">Item Description</th>
-        <th style="width: 60px; text-align: center;">HSN</th>
-        <th style="width: 65px; text-align: center;">Batch</th>
-        <th style="width: 55px; text-align: center;">Exp</th>
-        <th style="width: 45px; text-align: right;">Qty</th>
-        <th style="width: 75px; text-align: right;">Rate (₹)</th>
-        <th style="width: 55px; text-align: right;">GST %</th>
-        <th style="width: 85px; text-align: right;">Total (₹)</th>
-      </tr>
-    </thead>
-    <tbody>
-      ${itemsRows}
-    </tbody>
-  </table>
-
-  <!-- HSN Tax Summary -->
-  <div style="margin-top: 10px; margin-bottom: 12px;">
-    <div style="font-weight: 700; font-size: 9.5px; color: #475569; text-transform: uppercase; margin-bottom: 4px;">HSN / GST Tax Summary</div>
-    <table class="data-table" style="margin-bottom: 0;">
-      <thead>
-        <tr>
-          <th style="text-align: center;">HSN/SAC</th>
-          <th style="text-align: right;">Taxable Value (₹)</th>
-          <th style="text-align: right;">CGST %</th>
-          <th style="text-align: right;">CGST (₹)</th>
-          <th style="text-align: right;">SGST %</th>
-          <th style="text-align: right;">SGST (₹)</th>
-          <th style="text-align: right;">Total Tax (₹)</th>
-        </tr>
-      </thead>
-      <tbody>
-        ${hsnRowsHtml}
-        <tr style="background: #f1f5f9; font-weight: 700;">
-          <td style="padding: 4px 6px; text-align: center; border-top: 1px solid #94a3b8;">Total</td>
-          <td style="padding: 4px 6px; text-align: right; border-top: 1px solid #94a3b8; font-variant-numeric: tabular-nums;">₹ ${totalHsnTaxable.toFixed(2)}</td>
-          <td style="padding: 4px 6px; border-top: 1px solid #94a3b8;"></td>
-          <td style="padding: 4px 6px; text-align: right; border-top: 1px solid #94a3b8; font-variant-numeric: tabular-nums;">₹ ${totalHsnCgst.toFixed(2)}</td>
-          <td style="padding: 4px 6px; border-top: 1px solid #94a3b8;"></td>
-          <td style="padding: 4px 6px; text-align: right; border-top: 1px solid #94a3b8; font-variant-numeric: tabular-nums;">₹ ${totalHsnSgst.toFixed(2)}</td>
-          <td style="padding: 4px 6px; text-align: right; border-top: 1px solid #94a3b8; font-variant-numeric: tabular-nums;">₹ ${totalHsnTax.toFixed(2)}</td>
-        </tr>
-      </tbody>
-    </table>
-  </div>
-
-  <div class="footer-container">
-    <div class="amount-words-bar">
-      <span style="color: #64748b; font-weight: 600;">Amount in Words:</span> ${amountWords}
-    </div>
-
-    <div class="footer-grid">
-      <!-- Top-Left: UPI QR -->
-      <div class="footer-cell">
-        <div class="qr-box">
-          ${qrSvg}
-          <div style="font-size: 9.5px; color: #334155;">
-            <div style="font-weight: 800; color: #0f172a; margin-bottom: 2px;">Scan & Pay via UPI</div>
-            <div style="margin-bottom: 1px;">UPI ID: <strong>${upiVpa}</strong></div>
-            <div style="margin-bottom: 2px;">Amount: <strong>₹ ${data.grand_total.toFixed(2)}</strong></div>
-            <div style="font-size: 8.5px; color: #64748b;">Supports GPay, PhonePe, Paytm & UPI Apps</div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Top-Right: Totals -->
-      <div class="footer-cell">
-        <div class="totals-card">
-          <div class="total-line"><span>Taxable Subtotal:</span><span style="font-weight: 600;">₹ ${data.subtotal.toFixed(2)}</span></div>
-          <div class="total-line"><span>Central GST (CGST):</span><span style="font-weight: 600;">₹ ${cgstTotal.toFixed(2)}</span></div>
-          <div class="total-line"><span>State GST (SGST):</span><span style="font-weight: 600;">₹ ${sgstTotal.toFixed(2)}</span></div>
-          <div class="total-line"><span>Total GST:</span><span style="font-weight: 600;">₹ ${data.tax_total.toFixed(2)}</span></div>
-          ${data.round_off ? `<div class="total-line"><span>Round Off:</span><span style="font-weight: 600;">${data.round_off > 0 ? "+" : ""}₹ ${data.round_off.toFixed(2)}</span></div>` : ""}
-          <div class="grand-total-line"><span>Grand Total:</span><span>₹ ${data.grand_total.toFixed(2)}</span></div>
-        </div>
-      </div>
-
-      <!-- Bottom-Left: Terms -->
-      <div class="footer-cell">
-        <div class="terms-card">
-          <div>
-            <div class="terms-title">Terms & Conditions:</div>
-            <div>1. Goods once sold will not be returned without original cash memo.</div>
-            <div>2. Refrigerated medicines are strictly non-returnable.</div>
-            <div>3. ${data.jurisdiction_note || "Subject to local jurisdiction."}</div>
-          </div>
-          <div class="terms-brand">${data.footer_note || "Computer Generated Tax Invoice • LamSuite POS"}</div>
-        </div>
-      </div>
-
-      <!-- Bottom-Right: Signature -->
-      <div class="footer-cell">
-        <div class="sign-card">
-          <div class="sign-store">For ${data.store_name}</div>
-          <div class="sign-space"></div>
-          <div class="sign-line">Authorised Signatory / Pharmacist</div>
-        </div>
-      </div>
-    </div>
-  </div>
+  ${pagesHtml}
+  <script>
+    window.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
+        window.parent.postMessage({ type: 'MODAL_ESCAPE' }, '*');
+      }
+    }, true);
+  </script>
 </body>
 </html>`;
   }
@@ -805,7 +1018,7 @@ export class PrintingEngine {
     html { margin: 0; padding: 0; }
     body {
       margin: 0;
-      padding: 12px;
+      padding: ${is58 ? "2px 0" : "8px 0"};
       display: flex;
       justify-content: center;
       background: #f1f5f9;
@@ -816,9 +1029,10 @@ export class PrintingEngine {
     }
     .thermal-paper {
       width: ${is58 ? "58mm" : "80mm"};
+      max-width: 100%;
       min-height: auto;
       background: #ffffff;
-      padding: ${is58 ? "3mm" : "4.5mm"};
+      padding: ${is58 ? "2.5mm 2mm" : "4.5mm 3.5mm"};
       box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1);
       border: 1px solid #e2e8f0;
       border-radius: 2px;
@@ -1663,24 +1877,158 @@ export class PrintingEngine {
     const sgstTotal = data.sgst_total !== undefined ? data.sgst_total : round2(data.tax_total / 2);
     const amountWords = data.amount_in_words || numberToWordsIndian(data.grand_total);
 
-    const itemsRows = data.lines
-      .map(
-        (it, idx) => `
-      <tr>
-        <td style="padding: 5px 6px; text-align: center; border-bottom: 1px solid #e2e8f0;">${idx + 1}</td>
-        <td style="padding: 5px 6px; border-bottom: 1px solid #e2e8f0;">
-          <div style="font-weight: 700; color: #0f172a;">${it.description}</div>
-          ${it.reason ? `<div style="font-size: 8.5px; color: #dc2626;">Reason: ${it.reason}</div>` : ""}
-        </td>
-        <td style="padding: 5px 6px; text-align: center; border-bottom: 1px solid #e2e8f0;">${it.hsn_code || "300490"}</td>
-        <td style="padding: 5px 6px; text-align: center; border-bottom: 1px solid #e2e8f0; font-family: monospace;">${it.batch_no || "-"}</td>
-        <td style="padding: 5px 6px; text-align: center; border-bottom: 1px solid #e2e8f0;">${it.expiry_date || "-"}</td>
-        <td style="padding: 5px 6px; text-align: right; border-bottom: 1px solid #e2e8f0; font-weight: 700;">${it.qty}</td>
-        <td style="padding: 5px 6px; text-align: right; border-bottom: 1px solid #e2e8f0; font-variant-numeric: tabular-nums;">₹ ${it.rate.toFixed(2)}</td>
-        <td style="padding: 5px 6px; text-align: right; border-bottom: 1px solid #e2e8f0;">${it.gst_percent}%</td>
-        <td style="padding: 5px 6px; text-align: right; border-bottom: 1px solid #e2e8f0; font-weight: 700; font-variant-numeric: tabular-nums;">₹ ${it.amount.toFixed(2)}</td>
-      </tr>`
-      )
+    const pageChunks = chunkInvoiceLines(data.lines, 14, 16, 24, 14);
+    const totalPages = pageChunks.length;
+
+    let cumulativeIdx = 0;
+    const pagesHtml = pageChunks
+      .map((chunk, pageIdx) => {
+        const pageNum = pageIdx + 1;
+        const isFirstPage = pageNum === 1;
+        const isLastPage = pageNum === totalPages;
+        const startIdx = cumulativeIdx;
+        cumulativeIdx += chunk.length;
+        const endIdx = cumulativeIdx;
+
+        const itemsRows = chunk
+          .map(
+            (it, idx) => `
+          <tr>
+            <td style="padding: 4px 6px; text-align: center; border-bottom: 1px solid #e2e8f0; border-right: 1px solid #e2e8f0;">${startIdx + idx + 1}</td>
+            <td style="padding: 4px 6px; border-bottom: 1px solid #e2e8f0; border-right: 1px solid #e2e8f0;">
+              <div style="font-weight: 700; color: #0f172a;">${it.description}</div>
+              ${it.reason ? `<div style="font-size: 8.5px; color: #dc2626;">Reason: ${it.reason}</div>` : ""}
+            </td>
+            <td style="padding: 4px 6px; text-align: center; border-bottom: 1px solid #e2e8f0; border-right: 1px solid #e2e8f0;">${it.hsn_code || "300490"}</td>
+            <td style="padding: 4px 6px; text-align: center; border-bottom: 1px solid #e2e8f0; border-right: 1px solid #e2e8f0; font-family: monospace;">${it.batch_no || "-"}</td>
+            <td style="padding: 4px 6px; text-align: center; border-bottom: 1px solid #e2e8f0; border-right: 1px solid #e2e8f0;">${it.expiry_date || "-"}</td>
+            <td style="padding: 4px 6px; text-align: right; border-bottom: 1px solid #e2e8f0; border-right: 1px solid #e2e8f0; font-weight: 700;">${it.qty}</td>
+            <td style="padding: 4px 6px; text-align: right; border-bottom: 1px solid #e2e8f0; border-right: 1px solid #e2e8f0; font-variant-numeric: tabular-nums;">₹ ${it.rate.toFixed(2)}</td>
+            <td style="padding: 4px 6px; text-align: right; border-bottom: 1px solid #e2e8f0; border-right: 1px solid #e2e8f0;">${it.gst_percent}%</td>
+            <td style="padding: 4px 6px; text-align: right; border-bottom: 1px solid #e2e8f0; font-weight: 700; font-variant-numeric: tabular-nums;">₹ ${it.amount.toFixed(2)}</td>
+          </tr>`
+          )
+          .join("");
+
+        return `
+      <div class="a4-sheet">
+        ${
+          isFirstPage
+            ? `
+        <div class="header">
+          <div class="store-name">${data.store_name}</div>
+          <div style="font-size: 10px; color: #475569;">${data.store_address || ""} • Phone: ${data.store_phone || ""}</div>
+          <div style="font-size: 9.5px; font-weight: 700; color: #334155; margin-top: 2px;">
+            ${data.store_gstin ? `GSTIN: ${data.store_gstin}` : ""}
+          </div>
+          <div class="tax-badge">CREDIT NOTE / SALES RETURN</div>
+        </div>
+
+        <div class="meta-grid">
+          <div class="meta-col">
+            <div><strong>Customer:</strong> ${data.customer_name}</div>
+            <div>Mobile: ${data.customer_phone || "Not specified"}</div>
+            ${data.customer_gstin ? `<div>GSTIN: ${data.customer_gstin}</div>` : ""}
+            <div>Refund Mode: <strong>${data.refund_mode}</strong></div>
+            ${data.customer_debit_note_number ? `<div style="margin-top: 3px; color: #991b1b; font-weight: 700;">Customer DN Ref: #${data.customer_debit_note_number} ${data.customer_debit_note_date ? `(${data.customer_debit_note_date})` : ""}</div>` : ""}
+          </div>
+          <div class="meta-col" style="text-align: right;">
+            <div style="font-size: 12px; font-weight: 800; color: #b91c1c;">#${data.return_number}</div>
+            <div>Credit Note Date: ${data.return_date}</div>
+            ${data.original_invoice_number ? `<div>Original Invoice: <strong>#${data.original_invoice_number}</strong> ${data.original_invoice_date ? `(${data.original_invoice_date})` : ""}</div>` : data.invoice_references && data.invoice_references.length > 0 ? `<div>Invoices: <strong>${data.invoice_references.map((r) => `#${r.invoice_number}`).join(", ")}</strong></div>` : "<div>Standalone Sales Return</div>"}
+          </div>
+        </div>
+        `
+            : `
+        <div class="running-header">
+          <div>
+            <span class="running-store">${data.store_name}</span>
+            <span class="running-inv">Credit Note #${data.return_number}</span>
+            <span class="running-date">Date: ${data.return_date}</span>
+          </div>
+          <div class="running-page">Page ${pageNum} of ${totalPages}</div>
+        </div>
+        `
+        }
+
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th style="width: 28px; text-align: center; border-right: 1px solid #fecaca;">#</th>
+              <th style="text-align: left; border-right: 1px solid #fecaca;">Returned Item Description</th>
+              <th style="width: 60px; text-align: center; border-right: 1px solid #fecaca;">HSN</th>
+              <th style="width: 65px; text-align: center; border-right: 1px solid #fecaca;">Batch</th>
+              <th style="width: 55px; text-align: center; border-right: 1px solid #fecaca;">Exp</th>
+              <th style="width: 45px; text-align: right; border-right: 1px solid #fecaca;">Qty</th>
+              <th style="width: 75px; text-align: right; border-right: 1px solid #fecaca;">Rate (₹)</th>
+              <th style="width: 55px; text-align: right; border-right: 1px solid #fecaca;">GST %</th>
+              <th style="width: 85px; text-align: right;">Reversal (₹)</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${itemsRows}
+          </tbody>
+        </table>
+
+        ${
+          !isLastPage
+            ? `
+        <div class="continuation-bar">
+          <div>Showing items ${startIdx + 1} to ${endIdx} of ${data.lines.length} Total Returned Items</div>
+          <div class="continuation-link">Continued on Page ${pageNum + 1} &rarr;</div>
+        </div>
+        `
+            : ""
+        }
+
+        ${
+          isLastPage
+            ? `
+        <div class="footer-container">
+          <div class="amount-words-bar">
+            <span style="color: #64748b; font-weight: 600;">Refund Amount in Words:</span> ${amountWords}
+          </div>
+
+          <div class="footer-grid">
+            <div style="border: 1px solid #e2e8f0; border-radius: 6px; padding: 10px; font-size: 9px; color: #64748b;">
+              <div style="font-weight: 700; color: #475569; text-transform: uppercase; margin-bottom: 4px;">Notes & Settlement Terms:</div>
+              <div>1. Credit Note issued against returned goods as per Statutory GST Rule 53.</div>
+              <div>2. Adjusted in customer ledger or refunded via ${data.refund_mode}.</div>
+              ${data.notes ? `<div style="margin-top: 6px; color: #0f172a; font-weight: 600;">Remarks: ${data.notes}</div>` : ""}
+              <div style="margin-top: 12px; font-size: 8.5px; color: #94a3b8;">Computer Generated Credit Note • LamSuite POS</div>
+            </div>
+
+            <div class="totals-card">
+              <div class="total-line"><span>Taxable Reversal:</span><span style="font-weight: 600;">₹ ${data.subtotal.toFixed(2)}</span></div>
+              <div class="total-line"><span>Central GST (CGST):</span><span style="font-weight: 600;">₹ ${cgstTotal.toFixed(2)}</span></div>
+              <div class="total-line"><span>State GST (SGST):</span><span style="font-weight: 600;">₹ ${sgstTotal.toFixed(2)}</span></div>
+              <div class="total-line"><span>Total GST Reversal:</span><span style="font-weight: 600;">₹ ${data.tax_total.toFixed(2)}</span></div>
+              ${data.round_off ? `<div class="total-line"><span>Round Off:</span><span style="font-weight: 600;">${data.round_off > 0 ? "+" : ""}₹ ${data.round_off.toFixed(2)}</span></div>` : ""}
+              <div class="grand-total-line"><span>Total Refund:</span><span>₹ ${data.grand_total.toFixed(2)}</span></div>
+            </div>
+          </div>
+
+          <div style="display: flex; justify-content: flex-end; margin-top: 12px;">
+            <div class="sign-card" style="width: 250px;">
+              <div style="font-size: 10px; font-weight: 700; color: #1e293b;">For ${data.store_name}</div>
+              <div style="min-height: 20px;"></div>
+              <div style="font-size: 8.5px; font-weight: 600; color: #475569; border-top: 1px solid #94a3b8; padding-top: 2px;">
+                Authorised Signatory / Pharmacist
+              </div>
+            </div>
+          </div>
+        </div>
+        `
+            : ""
+        }
+
+        <div class="spacer-fill"></div>
+        <div class="page-footer">
+          <div>Computer Generated Credit Note • ${data.store_name}</div>
+          <div class="page-num">Page ${pageNum} of ${totalPages}</div>
+        </div>
+      </div>`;
+      })
       .join("");
 
     return `<!DOCTYPE html>
@@ -1689,101 +2037,198 @@ export class PrintingEngine {
   <meta charset="utf-8" />
   <title>Credit Note - ${data.return_number}</title>
   <style>
-    @media print { body { margin: 0; padding: 8mm; } @page { size: A4 portrait; margin: 8mm; } }
-    * { box-sizing: border-box; }
-    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 10.5px; line-height: 1.35; color: #1e293b; margin: 0; padding: 20px; background: #fff; font-variant-numeric: tabular-nums; }
-    .header { text-align: center; border-bottom: 2px solid #b91c1c; padding-bottom: 8px; margin-bottom: 12px; }
-    .store-name { font-size: 19px; font-weight: 800; color: #0f172a; }
-    .tax-badge { font-size: 13px; font-weight: 800; letter-spacing: 0.5px; color: #b91c1c; margin-top: 6px; }
-    .meta-grid { display: flex; justify-content: space-between; border: 1px solid #fca5a5; border-radius: 6px; background: #fff1f2; padding: 8px 12px; margin-bottom: 12px; }
+    @page { size: A4 portrait; margin: 8mm; }
+    * { box-sizing: border-box; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 10px; line-height: 1.35; color: #1e293b; margin: 0; padding: 24px 16px; background: #cbd5e1; font-variant-numeric: tabular-nums; display: flex; flex-direction: column; align-items: center; gap: 24px; min-height: 100vh; }
+    .a4-sheet { width: 210mm; max-width: 210mm; min-height: 297mm; flex-shrink: 0; background: #ffffff; box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.15), 0 0 1px rgba(0, 0, 0, 0.2); border: 1px solid #cbd5e1; border-radius: 2px; padding: 12mm 14mm; display: flex; flex-direction: column; box-sizing: border-box; overflow: hidden; position: relative; }
+    @media print {
+      body { background: white !important; padding: 0 !important; margin: 0 !important; display: block !important; }
+      .a4-sheet { box-shadow: none !important; border: none !important; margin: 0 !important; padding: 8mm !important; width: 100% !important; min-height: auto !important; page-break-after: always !important; break-after: page !important; }
+      .a4-sheet:last-child { page-break-after: auto !important; break-after: auto !important; }
+    }
+    .header { text-align: center; border-bottom: 2px solid #b91c1c; padding-bottom: 6px; margin-bottom: 10px; }
+    .store-name { font-size: 18px; font-weight: 800; color: #0f172a; }
+    .tax-badge { font-size: 12px; font-weight: 800; letter-spacing: 0.5px; color: #b91c1c; margin-top: 5px; }
+    .running-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1.5px solid #b91c1c; padding-bottom: 6px; margin-bottom: 8px; font-size: 9.5px; }
+    .running-store { font-weight: 800; color: #0f172a; font-size: 11px; }
+    .running-inv { color: #b91c1c; font-weight: 700; margin-left: 8px; }
+    .running-date { color: #64748b; margin-left: 8px; }
+    .running-page { font-weight: 700; color: #475569; }
+    .meta-grid { display: flex; justify-content: space-between; border: 1px solid #fca5a5; border-radius: 5px; background: #fff1f2; padding: 7px 10px; margin-bottom: 10px; }
     .meta-col { width: 48%; }
-    table.data-table { width: 100%; border-collapse: collapse; font-size: 10px; margin-bottom: 12px; }
-    table.data-table th { background: #fef2f2; color: #991b1b; font-weight: 700; padding: 6px; border-top: 1px solid #fecaca; border-bottom: 2px solid #f87171; }
-    .footer-container { margin-top: 12px; page-break-inside: avoid; }
-    .amount-words-bar { background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 4px; padding: 6px 10px; font-size: 10px; font-weight: 700; color: #1e293b; margin-bottom: 10px; }
-    .footer-grid { display: grid; grid-template-columns: 1fr 310px; gap: 10px 16px; align-items: stretch; }
-    .totals-card { border: 1px solid #cbd5e1; border-radius: 6px; background: #f8fafc; padding: 8px 14px; font-variant-numeric: tabular-nums; }
-    .total-line { display: flex; justify-content: space-between; padding: 2.5px 0; font-size: 10.5px; color: #475569; }
-    .grand-total-line { display: flex; justify-content: space-between; padding-top: 6px; margin-top: 6px; border-top: 2px solid #b91c1c; font-size: 13px; font-weight: 800; color: #b91c1c; }
-    .sign-card { border: 1px solid #cbd5e1; border-radius: 6px; background: #f8fafc; padding: 8px 14px; text-align: center; display: flex; flex-direction: column; justify-content: space-between; min-height: 70px; }
+    table.data-table { width: 100%; border-collapse: collapse; font-size: 9.5px; margin-bottom: 8px; border: 1px solid #fca5a5; }
+    table.data-table th { background: #fef2f2; color: #991b1b; font-weight: 700; padding: 5px 6px; border-top: 1px solid #fecaca; border-bottom: 2px solid #f87171; }
+    .continuation-bar { display: flex; justify-content: space-between; align-items: center; background: #fff1f2; border: 1px dashed #f87171; border-radius: 4px; padding: 5px 10px; margin-top: 6px; font-size: 9px; color: #991b1b; }
+    .continuation-link { font-weight: 700; color: #b91c1c; }
+    .footer-container { margin-top: 10px; page-break-inside: avoid; }
+    .amount-words-bar { background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 4px; padding: 5px 9px; font-size: 9.5px; font-weight: 700; color: #1e293b; margin-bottom: 8px; }
+    .footer-grid { display: grid; grid-template-columns: 1fr 310px; gap: 8px 14px; align-items: stretch; }
+    .totals-card { border: 1px solid #cbd5e1; border-radius: 5px; background: #f8fafc; padding: 7px 12px; font-variant-numeric: tabular-nums; }
+    .total-line { display: flex; justify-content: space-between; padding: 2px 0; font-size: 10px; color: #475569; }
+    .grand-total-line { display: flex; justify-content: space-between; padding-top: 5px; margin-top: 5px; border-top: 2px solid #b91c1c; font-size: 12.5px; font-weight: 800; color: #b91c1c; }
+    .sign-card { border: 1px solid #cbd5e1; border-radius: 5px; background: #f8fafc; padding: 7px 12px; text-align: center; display: flex; flex-direction: column; justify-content: space-between; min-height: 65px; }
+    .spacer-fill { flex-grow: 1; min-height: 6px; }
+    .page-footer { display: flex; justify-content: space-between; align-items: center; border-top: 1px solid #e2e8f0; padding-top: 6px; margin-top: 8px; font-size: 8.5px; color: #64748b; }
+    .page-num { font-weight: 700; color: #334155; }
   </style>
 </head>
 <body>
-  <div class="header">
-    <div class="store-name">${data.store_name}</div>
-    <div style="font-size: 10px; color: #475569;">${data.store_address || ""} • Phone: ${data.store_phone || ""}</div>
-    <div style="font-size: 9.5px; font-weight: 700; color: #334155; margin-top: 2px;">
-      ${data.store_gstin ? `GSTIN: ${data.store_gstin}` : ""}
+  ${pagesHtml}
+  <script>
+    window.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
+        window.parent.postMessage({ type: 'MODAL_ESCAPE' }, '*');
+      }
+    }, true);
+  </script>
+</body>
+</html>`;
+  }
+
+  /**
+   * Generates compact thermal receipt slip for Credit Notes (58mm and 80mm supported)
+   */
+  generateCreditNoteThermalSlip(
+    data: CreditNotePrintData,
+    widthMm: 80 | 58 = 80,
+    options?: PrintRenderOptions
+  ): string {
+    const is58 = widthMm === 58;
+    const showLicenses = options?.showDrugLicenses !== false;
+    const copyMarker = options?.copyMarker;
+    const curr = options?.currencySymbolFormat === "rs_text" ? "Rs. " : "₹";
+
+    const cgstTotal = data.cgst_total !== undefined ? data.cgst_total : round2(data.tax_total / 2);
+    const sgstTotal = data.sgst_total !== undefined ? data.sgst_total : round2(data.tax_total / 2);
+
+    const linesHtml = data.lines
+      .map((l, i) => {
+        if (is58) {
+          return `
+          <div style="margin-bottom: 4px; border-bottom: 1px dotted #cbd5e1; padding-bottom: 3px;">
+            <div style="font-weight: 700; word-break: break-word;">${i + 1}. ${l.description}</div>
+            <div style="display: flex; justify-content: space-between; font-size: 9px; color: #334155; margin-top: 1px;">
+              <span>${l.qty} × ${curr}${l.rate.toFixed(2)}${l.gst_percent ? ` (${l.gst_percent}%)` : ""}</span>
+              <span style="font-weight: 700; color: #000; font-variant-numeric: tabular-nums;">${curr}${l.amount.toFixed(2)}</span>
+            </div>
+            ${(l.batch_no || l.expiry_date) ? `<div style="font-size: 8px; color: #64748b;">${l.batch_no ? `B: ${l.batch_no}` : ""}${l.batch_no && l.expiry_date ? " " : ""}${l.expiry_date ? `Exp: ${l.expiry_date}` : ""}</div>` : ""}
+            ${l.reason ? `<div style="font-size: 8px; color: #2563eb;">Reason: ${l.reason}</div>` : ""}
+          </div>`;
+        }
+        return `
+        <div style="margin-bottom: 5px; border-bottom: 1px dotted #cbd5e1; padding-bottom: 3px;">
+          <div style="display: flex; justify-content: space-between; font-weight: 700; font-size: 10.5px;">
+            <span style="word-break: break-word; max-width: 70%;">${i + 1}. ${l.description}</span>
+            <span style="font-variant-numeric: tabular-nums;">${curr}${l.amount.toFixed(2)}</span>
+          </div>
+          <div style="display: flex; justify-content: space-between; font-size: 9.5px; color: #475569; margin-top: 1px;">
+            <span>${l.batch_no ? `B: ${l.batch_no}` : ""}${l.expiry_date ? ` | Exp: ${l.expiry_date}` : ""}${l.hsn_code ? ` | HSN: ${l.hsn_code}` : ""}${l.reason ? ` | ${l.reason}` : ""}</span>
+            <span style="font-variant-numeric: tabular-nums;">${l.qty} @ ${curr}${l.rate.toFixed(2)}${l.gst_percent ? ` (${l.gst_percent}%)` : ""}</span>
+          </div>
+        </div>`;
+      })
+      .join("");
+
+    return `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Credit Note - ${data.return_number}</title>
+  <style>
+    @media print {
+      @page { size: ${widthMm}mm auto; margin: 0; }
+      html, body { margin: 0 !important; padding: 0 !important; width: ${widthMm}mm !important; background: #fff !important; }
+      .thermal-paper { box-shadow: none !important; border: none !important; width: ${widthMm}mm !important; padding: ${is58 ? "2mm 1.5mm" : "3mm 2.5mm"} !important; min-height: auto !important; margin: 0 !important; }
+      .no-print { display: none !important; }
+    }
+    * { box-sizing: border-box; }
+    html { margin: 0; padding: 0; }
+    body {
+      margin: 0;
+      padding: ${is58 ? "2px 0" : "8px 0"};
+      display: flex;
+      justify-content: center;
+      background: #f1f5f9;
+      font-family: 'Courier New', Courier, monospace, monospace;
+      font-size: ${is58 ? "10px" : "11px"};
+      line-height: 1.3;
+      color: #0f172a;
+    }
+    .thermal-paper {
+      width: ${is58 ? "58mm" : "80mm"};
+      max-width: 100%;
+      min-height: auto;
+      background: #ffffff;
+      padding: ${is58 ? "2.5mm 2mm" : "4.5mm 3.5mm"};
+      box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1);
+      border: 1px solid #e2e8f0;
+      border-radius: 2px;
+      margin: 0 auto;
+    }
+    .center { text-align: center; }
+    .bold { font-weight: 700; }
+    .divider { border-top: 1px dashed #475569; margin: 5px 0; }
+    .double-divider { border-top: 2px dashed #0f172a; margin: 6px 0; }
+    .flex-between { display: flex; justify-content: space-between; font-variant-numeric: tabular-nums; }
+  </style>
+</head>
+<body>
+  <div class="thermal-paper">
+    <div class="center bold" style="font-size: ${is58 ? "13px" : "15px"};">${data.store_name}</div>
+    ${data.store_address ? `<div class="center" style="font-size: ${is58 ? "8.5px" : "9.5px"}; color: #334155;">${data.store_address}</div>` : ""}
+    ${data.store_phone ? `<div class="center" style="font-size: ${is58 ? "8.5px" : "9.5px"};">Tel: ${data.store_phone}</div>` : ""}
+    ${showLicenses && data.store_gstin ? `<div class="center" style="font-size: 8.5px;">GSTIN: ${data.store_gstin}</div>` : ""}
+    ${showLicenses && data.drug_license_numbers?.length ? `<div class="center" style="font-size: 8px;">DL: ${data.drug_license_numbers.join(", ")}</div>` : ""}
+
+    <div class="divider"></div>
+    <div class="center bold" style="font-size: ${is58 ? "10px" : "11px"}; letter-spacing: 0.5px;">*** CREDIT NOTE ***</div>
+    <div class="center" style="font-size: 8.5px; color: #475569;">(SALES RETURN / GST CREDIT NOTE)</div>
+    ${copyMarker ? `<div class="center bold" style="font-size: 8.5px; color: #475569; margin-top: 2px;">[ ${copyMarker} ]</div>` : ""}
+    <div class="divider"></div>
+
+    <div class="flex-between"><span>Note #:</span><span class="bold">#${data.return_number}</span></div>
+    <div class="flex-between"><span>Date:</span><span>${data.return_date}</span></div>
+    ${data.original_invoice_number ? `<div class="flex-between"><span>Orig Inv:</span><span>#${data.original_invoice_number}${data.original_invoice_date ? ` (${data.original_invoice_date})` : ""}</span></div>` : ""}
+    ${data.customer_debit_note_number ? `<div class="flex-between"><span>Cust Ref:</span><span>${data.customer_debit_note_number}</span></div>` : ""}
+    <div class="flex-between"><span>Customer:</span><span class="bold">${data.customer_name || "Walk-in Customer"}</span></div>
+    ${data.customer_phone ? `<div class="flex-between"><span>Mobile:</span><span>${data.customer_phone}</span></div>` : ""}
+    ${data.customer_gstin ? `<div class="flex-between"><span>Cust GSTIN:</span><span>${data.customer_gstin}</span></div>` : ""}
+
+    <div class="divider"></div>
+    <div style="font-weight: 700; font-size: ${is58 ? "9px" : "10px"}; text-transform: uppercase; margin-bottom: 4px;">Returned Items (${data.lines.length})</div>
+
+    ${linesHtml}
+
+    <div class="divider"></div>
+
+    <div class="flex-between"><span>Taxable Reversal:</span><span>${curr}${data.subtotal.toFixed(2)}</span></div>
+    <div class="flex-between"><span>CGST Reversal:</span><span>${curr}${cgstTotal.toFixed(2)}</span></div>
+    <div class="flex-between"><span>SGST Reversal:</span><span>${curr}${sgstTotal.toFixed(2)}</span></div>
+    ${data.round_off ? `<div class="flex-between"><span>Round Off:</span><span>${data.round_off > 0 ? "+" : ""}${curr}${data.round_off.toFixed(2)}</span></div>` : ""}
+    
+    <div class="double-divider"></div>
+    <div class="flex-between" style="font-size: ${is58 ? "12px" : "13px"}; font-weight: 700; margin: 3px 0;">
+      <span>TOTAL REFUND:</span>
+      <span>${curr}${data.grand_total.toFixed(2)}</span>
     </div>
-    <div class="tax-badge">CREDIT NOTE / SALES RETURN</div>
-  </div>
+    <div class="double-divider"></div>
 
-  <div class="meta-grid">
-    <div class="meta-col">
-      <div><strong>Customer:</strong> ${data.customer_name}</div>
-      <div>Mobile: ${data.customer_phone || "Not specified"}</div>
-      ${data.customer_gstin ? `<div>GSTIN: ${data.customer_gstin}</div>` : ""}
-      <div>Refund Mode: <strong>${data.refund_mode}</strong></div>
-      ${data.customer_debit_note_number ? `<div style="margin-top: 3px; color: #991b1b; font-weight: 700;">Customer DN Ref: #${data.customer_debit_note_number} ${data.customer_debit_note_date ? `(${data.customer_debit_note_date})` : ""}</div>` : ""}
-    </div>
-    <div class="meta-col" style="text-align: right;">
-      <div style="font-size: 12px; font-weight: 800; color: #b91c1c;">#${data.return_number}</div>
-      <div>Credit Note Date: ${data.return_date}</div>
-      ${data.original_invoice_number ? `<div>Original Invoice: <strong>#${data.original_invoice_number}</strong> ${data.original_invoice_date ? `(${data.original_invoice_date})` : ""}</div>` : data.invoice_references && data.invoice_references.length > 0 ? `<div>Invoices: <strong>${data.invoice_references.map((r) => `#${r.invoice_number}`).join(", ")}</strong></div>` : "<div>Standalone Sales Return</div>"}
-    </div>
-  </div>
-
-  <table class="data-table">
-    <thead>
-      <tr>
-        <th style="width: 28px; text-align: center;">#</th>
-        <th style="text-align: left;">Returned Item Description</th>
-        <th style="width: 60px; text-align: center;">HSN</th>
-        <th style="width: 65px; text-align: center;">Batch</th>
-        <th style="width: 55px; text-align: center;">Exp</th>
-        <th style="width: 45px; text-align: right;">Qty</th>
-        <th style="width: 75px; text-align: right;">Rate (₹)</th>
-        <th style="width: 55px; text-align: right;">GST %</th>
-        <th style="width: 85px; text-align: right;">Reversal (₹)</th>
-      </tr>
-    </thead>
-    <tbody>
-      ${itemsRows}
-    </tbody>
-  </table>
-
-  <div class="footer-container">
-    <div class="amount-words-bar">
-      <span style="color: #64748b; font-weight: 600;">Refund Amount in Words:</span> ${amountWords}
+    <div class="flex-between" style="font-size: ${is58 ? "8.5px" : "9.5px"}; margin-top: 4px;">
+      <span>Refund Mode:</span>
+      <span class="bold">${data.refund_mode || "Cash"}</span>
     </div>
 
-    <div class="footer-grid">
-      <div style="border: 1px solid #e2e8f0; border-radius: 6px; padding: 10px; font-size: 9px; color: #64748b;">
-        <div style="font-weight: 700; color: #475569; text-transform: uppercase; margin-bottom: 4px;">Notes & Settlement Terms:</div>
-        <div>1. Credit Note issued against returned goods as per Statutory GST Rule 53.</div>
-        <div>2. Adjusted in customer ledger or refunded via ${data.refund_mode}.</div>
-        ${data.notes ? `<div style="margin-top: 6px; color: #0f172a; font-weight: 600;">Remarks: ${data.notes}</div>` : ""}
-        <div style="margin-top: 12px; font-size: 8.5px; color: #94a3b8;">Computer Generated Credit Note • LamSuite POS</div>
-      </div>
+    ${data.notes ? `<div style="font-size: 8.5px; color: #475569; margin-top: 4px; border-top: 1px dotted #cbd5e1; padding-top: 2px;">Note: ${data.notes}</div>` : ""}
 
-      <div class="totals-card">
-        <div class="total-line"><span>Taxable Reversal:</span><span style="font-weight: 600;">₹ ${data.subtotal.toFixed(2)}</span></div>
-        <div class="total-line"><span>Central GST (CGST):</span><span style="font-weight: 600;">₹ ${cgstTotal.toFixed(2)}</span></div>
-        <div class="total-line"><span>State GST (SGST):</span><span style="font-weight: 600;">₹ ${sgstTotal.toFixed(2)}</span></div>
-        <div class="total-line"><span>Total GST Reversal:</span><span style="font-weight: 600;">₹ ${data.tax_total.toFixed(2)}</span></div>
-        ${data.round_off ? `<div class="total-line"><span>Round Off:</span><span style="font-weight: 600;">${data.round_off > 0 ? "+" : ""}₹ ${data.round_off.toFixed(2)}</span></div>` : ""}
-        <div class="grand-total-line"><span>Total Refund:</span><span>₹ ${data.grand_total.toFixed(2)}</span></div>
-      </div>
-    </div>
-
-    <div style="display: flex; justify-content: flex-end; margin-top: 16px;">
-      <div class="sign-card" style="width: 250px;">
-        <div style="font-size: 10px; font-weight: 700; color: #1e293b;">For ${data.store_name}</div>
-        <div style="min-height: 24px;"></div>
-        <div style="font-size: 9px; font-weight: 600; color: #475569; border-top: 1px solid #94a3b8; padding-top: 3px;">
-          Authorised Signatory / Pharmacist
-        </div>
-      </div>
+    <div class="divider"></div>
+    <div class="center" style="font-size: ${is58 ? "8px" : "9px"}; color: #475569; line-height: 1.35; margin-top: 6px;">
+      Goods returned & verified by Pharmacist<br/>
+      For ${data.store_name}<br/>
+      Authorised Signatory<br/>
+      <span style="font-size: 7.5px; color: #94a3b8;">Powered by LamSuite Retail</span>
     </div>
   </div>
 </body>
@@ -1791,63 +2236,146 @@ export class PrintingEngine {
   }
 
   /**
-   * Generates compact 80mm thermal receipt slip for Credit Notes
+   * Generates compact thermal receipt slip for Debit Notes / Purchase Returns (58mm and 80mm supported)
    */
-  generateCreditNoteThermalSlip(data: CreditNotePrintData): string {
-    const linesStr = data.lines
-      .map(
-        (l) => `
-    <div style="display:flex; justify-content:space-between; margin-bottom: 2px;">
-      <span style="font-weight:bold;">${l.description}</span>
-      <span>₹ ${l.amount.toFixed(2)}</span>
-    </div>
-    <div style="display:flex; justify-content:space-between; font-size: 10px; color:#555;">
-      <span>Batch: ${l.batch_no || "-"} | Exp: ${l.expiry_date || "-"}</span>
-      <span>${l.qty} x ₹ ${l.rate.toFixed(2)}</span>
-    </div>`
-      )
+  generateDebitNoteThermalSlip(
+    data: DebitNotePrintData,
+    widthMm: 80 | 58 = 80,
+    options?: PrintRenderOptions
+  ): string {
+    const is58 = widthMm === 58;
+    const showLicenses = options?.showDrugLicenses !== false;
+    const copyMarker = options?.copyMarker;
+    const curr = options?.currencySymbolFormat === "rs_text" ? "Rs. " : "₹";
+
+    const cgstTotal = data.cgst_total !== undefined ? data.cgst_total : round2(data.tax_total / 2);
+    const sgstTotal = data.sgst_total !== undefined ? data.sgst_total : round2(data.tax_total / 2);
+
+    const linesHtml = data.lines
+      .map((l, i) => {
+        if (is58) {
+          return `
+          <div style="margin-bottom: 4px; border-bottom: 1px dotted #cbd5e1; padding-bottom: 3px;">
+            <div style="font-weight: 700; word-break: break-word;">${i + 1}. ${l.description}</div>
+            <div style="display: flex; justify-content: space-between; font-size: 9px; color: #334155; margin-top: 1px;">
+              <span>${l.qty} × ${curr}${l.rate.toFixed(2)}${l.gst_percent ? ` (${l.gst_percent}%)` : ""}</span>
+              <span style="font-weight: 700; color: #000; font-variant-numeric: tabular-nums;">${curr}${l.amount.toFixed(2)}</span>
+            </div>
+            ${(l.batch_no || l.expiry_date) ? `<div style="font-size: 8px; color: #64748b;">${l.batch_no ? `B: ${l.batch_no}` : ""}${l.batch_no && l.expiry_date ? " " : ""}${l.expiry_date ? `Exp: ${l.expiry_date}` : ""}</div>` : ""}
+            ${l.reason ? `<div style="font-size: 8px; color: #2563eb;">Reason: ${l.reason}</div>` : ""}
+          </div>`;
+        }
+        return `
+        <div style="margin-bottom: 5px; border-bottom: 1px dotted #cbd5e1; padding-bottom: 3px;">
+          <div style="display: flex; justify-content: space-between; font-weight: 700; font-size: 10.5px;">
+            <span style="word-break: break-word; max-width: 70%;">${i + 1}. ${l.description}</span>
+            <span style="font-variant-numeric: tabular-nums;">${curr}${l.amount.toFixed(2)}</span>
+          </div>
+          <div style="display: flex; justify-content: space-between; font-size: 9.5px; color: #475569; margin-top: 1px;">
+            <span>${l.batch_no ? `B: ${l.batch_no}` : ""}${l.expiry_date ? ` | Exp: ${l.expiry_date}` : ""}${l.hsn_code ? ` | HSN: ${l.hsn_code}` : ""}${l.reason ? ` | ${l.reason}` : ""}</span>
+            <span style="font-variant-numeric: tabular-nums;">${l.qty} @ ${curr}${l.rate.toFixed(2)}${l.gst_percent ? ` (${l.gst_percent}%)` : ""}</span>
+          </div>
+        </div>`;
+      })
       .join("");
 
     return `<!DOCTYPE html>
 <html>
 <head>
   <meta charset="utf-8" />
+  <title>Debit Note - ${data.return_number}</title>
   <style>
-    body { font-family: monospace; font-size: 11px; margin: 0; padding: 10px; width: 72mm; color: #000; }
+    @media print {
+      @page { size: ${widthMm}mm auto; margin: 0; }
+      html, body { margin: 0 !important; padding: 0 !important; width: ${widthMm}mm !important; background: #fff !important; }
+      .thermal-paper { box-shadow: none !important; border: none !important; width: ${widthMm}mm !important; padding: ${is58 ? "2mm 1.5mm" : "3mm 2.5mm"} !important; min-height: auto !important; margin: 0 !important; }
+      .no-print { display: none !important; }
+    }
+    * { box-sizing: border-box; }
+    html { margin: 0; padding: 0; }
+    body {
+      margin: 0;
+      padding: ${is58 ? "2px 0" : "8px 0"};
+      display: flex;
+      justify-content: center;
+      background: #f1f5f9;
+      font-family: 'Courier New', Courier, monospace, monospace;
+      font-size: ${is58 ? "10px" : "11px"};
+      line-height: 1.3;
+      color: #0f172a;
+    }
+    .thermal-paper {
+      width: ${is58 ? "58mm" : "80mm"};
+      max-width: 100%;
+      min-height: auto;
+      background: #ffffff;
+      padding: ${is58 ? "2.5mm 2mm" : "4.5mm 3.5mm"};
+      box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1);
+      border: 1px solid #e2e8f0;
+      border-radius: 2px;
+      margin: 0 auto;
+    }
     .center { text-align: center; }
-    .bold { font-weight: bold; }
-    .divider { border-top: 1px dashed #000; margin: 6px 0; }
+    .bold { font-weight: 700; }
+    .divider { border-top: 1px dashed #475569; margin: 5px 0; }
+    .double-divider { border-top: 2px dashed #0f172a; margin: 6px 0; }
+    .flex-between { display: flex; justify-content: space-between; font-variant-numeric: tabular-nums; }
   </style>
 </head>
 <body>
-  <div class="center bold" style="font-size: 14px;">${data.store_name}</div>
-  <div class="center" style="font-size: 10px;">${data.store_phone || ""}</div>
-  <div class="center bold" style="margin: 4px 0; font-size: 12px;">*** CREDIT NOTE ***</div>
-  <div class="divider"></div>
-  <div>Note #: <strong>${data.return_number}</strong></div>
-  <div>Date: ${data.return_date}</div>
-  ${data.original_invoice_number ? `<div>Original Inv: #${data.original_invoice_number}</div>` : ""}
-  <div>Customer: ${data.customer_name}</div>
-  <div class="divider"></div>
-  ${linesStr}
-  <div class="divider"></div>
-  <div style="display:flex; justify-content:space-between;">
-    <span>Taxable Reversal:</span>
-    <span>₹ ${data.subtotal.toFixed(2)}</span>
-  </div>
-  <div style="display:flex; justify-content:space-between;">
-    <span>GST Reversal:</span>
-    <span>₹ ${data.tax_total.toFixed(2)}</span>
-  </div>
-  <div style="display:flex; justify-content:space-between; font-size: 13px; font-weight: bold; margin-top: 4px;">
-    <span>TOTAL REFUND:</span>
-    <span>₹ ${data.grand_total.toFixed(2)}</span>
-  </div>
-  <div style="margin-top: 4px; font-size: 10px;">Refund Mode: <strong>${data.refund_mode}</strong></div>
-  <div class="divider"></div>
-  <div class="center" style="font-size: 9px; margin-top: 8px;">
-    Goods returned and verified by Pharmacist<br/>
-    Powered by LamSuite Retail
+  <div class="thermal-paper">
+    <div class="center bold" style="font-size: ${is58 ? "13px" : "15px"};">${data.store_name}</div>
+    ${data.store_address ? `<div class="center" style="font-size: ${is58 ? "8.5px" : "9.5px"}; color: #334155;">${data.store_address}</div>` : ""}
+    ${data.store_phone ? `<div class="center" style="font-size: ${is58 ? "8.5px" : "9.5px"};">Tel: ${data.store_phone}</div>` : ""}
+    ${showLicenses && data.store_gstin ? `<div class="center" style="font-size: 8.5px;">GSTIN: ${data.store_gstin}</div>` : ""}
+
+    <div class="divider"></div>
+    <div class="center bold" style="font-size: ${is58 ? "10px" : "11px"}; letter-spacing: 0.5px;">*** DEBIT NOTE ***</div>
+    <div class="center" style="font-size: 8.5px; color: #475569;">(PURCHASE RETURN / DEBIT NOTE)</div>
+    ${copyMarker ? `<div class="center bold" style="font-size: 8.5px; color: #475569; margin-top: 2px;">[ ${copyMarker} ]</div>` : ""}
+    <div class="divider"></div>
+
+    <div class="flex-between"><span>Debit Note #:</span><span class="bold">#${data.return_number}</span></div>
+    <div class="flex-between"><span>Date:</span><span>${data.return_date}</span></div>
+    ${data.original_purchase_number ? `<div class="flex-between"><span>Orig PO/Bill:</span><span>#${data.original_purchase_number}</span></div>` : ""}
+    ${data.supplier_invoice_no ? `<div class="flex-between"><span>Supplier Inv:</span><span>#${data.supplier_invoice_no}</span></div>` : ""}
+    <div class="flex-between"><span>Supplier:</span><span class="bold">${data.supplier_name}</span></div>
+    ${data.supplier_phone ? `<div class="flex-between"><span>Mobile:</span><span>${data.supplier_phone}</span></div>` : ""}
+    ${data.supplier_gstin ? `<div class="flex-between"><span>Supp GSTIN:</span><span>${data.supplier_gstin}</span></div>` : ""}
+
+    <div class="divider"></div>
+    <div style="font-weight: 700; font-size: ${is58 ? "9px" : "10px"}; text-transform: uppercase; margin-bottom: 4px;">Returned Items (${data.lines.length})</div>
+
+    ${linesHtml}
+
+    <div class="divider"></div>
+
+    <div class="flex-between"><span>Taxable Reversal:</span><span>${curr}${data.subtotal.toFixed(2)}</span></div>
+    <div class="flex-between"><span>CGST Reversal:</span><span>${curr}${cgstTotal.toFixed(2)}</span></div>
+    <div class="flex-between"><span>SGST Reversal:</span><span>${curr}${sgstTotal.toFixed(2)}</span></div>
+    ${data.round_off ? `<div class="flex-between"><span>Round Off:</span><span>${data.round_off > 0 ? "+" : ""}${curr}${data.round_off.toFixed(2)}</span></div>` : ""}
+    
+    <div class="double-divider"></div>
+    <div class="flex-between" style="font-size: ${is58 ? "12px" : "13px"}; font-weight: 700; margin: 3px 0;">
+      <span>TOTAL DEBIT:</span>
+      <span>${curr}${data.grand_total.toFixed(2)}</span>
+    </div>
+    <div class="double-divider"></div>
+
+    <div class="flex-between" style="font-size: ${is58 ? "8.5px" : "9.5px"}; margin-top: 4px;">
+      <span>Settlement:</span>
+      <span class="bold">${data.settlement_type || "Adjust in Ledger"}</span>
+    </div>
+
+    ${data.notes ? `<div style="font-size: 8.5px; color: #475569; margin-top: 4px; border-top: 1px dotted #cbd5e1; padding-top: 2px;">Note: ${data.notes}</div>` : ""}
+
+    <div class="divider"></div>
+    <div class="center" style="font-size: ${is58 ? "8px" : "9px"}; color: #475569; line-height: 1.35; margin-top: 6px;">
+      Goods returned to supplier as per GST rules<br/>
+      For ${data.store_name}<br/>
+      Authorised Signatory<br/>
+      <span style="font-size: 7.5px; color: #94a3b8;">Powered by LamSuite Retail</span>
+    </div>
   </div>
 </body>
 </html>`;
@@ -2011,24 +2539,157 @@ export class PrintingEngine {
     const sgstTotal = data.sgst_total !== undefined ? data.sgst_total : round2(data.tax_total / 2);
     const amountWords = data.amount_in_words || numberToWordsIndian(data.grand_total);
 
-    const itemsRows = data.lines
-      .map(
-        (it, idx) => `
-      <tr>
-        <td style="padding: 5px 6px; text-align: center; border-bottom: 1px solid #e2e8f0;">${idx + 1}</td>
-        <td style="padding: 5px 6px; border-bottom: 1px solid #e2e8f0;">
-          <div style="font-weight: 700; color: #0f172a;">${it.description}</div>
-          ${it.reason ? `<div style="font-size: 8.5px; color: #2563eb;">Reason: ${it.reason}</div>` : ""}
-        </td>
-        <td style="padding: 5px 6px; text-align: center; border-bottom: 1px solid #e2e8f0;">${it.hsn_code || "300490"}</td>
-        <td style="padding: 5px 6px; text-align: center; border-bottom: 1px solid #e2e8f0; font-family: monospace;">${it.batch_no || "-"}</td>
-        <td style="padding: 5px 6px; text-align: center; border-bottom: 1px solid #e2e8f0;">${it.expiry_date || "-"}</td>
-        <td style="padding: 5px 6px; text-align: right; border-bottom: 1px solid #e2e8f0; font-weight: 700;">${it.qty}</td>
-        <td style="padding: 5px 6px; text-align: right; border-bottom: 1px solid #e2e8f0; font-variant-numeric: tabular-nums;">₹ ${it.rate.toFixed(2)}</td>
-        <td style="padding: 5px 6px; text-align: right; border-bottom: 1px solid #e2e8f0;">${it.gst_percent}%</td>
-        <td style="padding: 5px 6px; text-align: right; border-bottom: 1px solid #e2e8f0; font-weight: 700; font-variant-numeric: tabular-nums;">₹ ${it.amount.toFixed(2)}</td>
-      </tr>`
-      )
+    const pageChunks = chunkInvoiceLines(data.lines, 14, 16, 24, 14);
+    const totalPages = pageChunks.length;
+
+    let cumulativeIdx = 0;
+    const pagesHtml = pageChunks
+      .map((chunk, pageIdx) => {
+        const pageNum = pageIdx + 1;
+        const isFirstPage = pageNum === 1;
+        const isLastPage = pageNum === totalPages;
+        const startIdx = cumulativeIdx;
+        cumulativeIdx += chunk.length;
+        const endIdx = cumulativeIdx;
+
+        const itemsRows = chunk
+          .map(
+            (it, idx) => `
+          <tr>
+            <td style="padding: 4px 6px; text-align: center; border-bottom: 1px solid #e2e8f0; border-right: 1px solid #e2e8f0;">${startIdx + idx + 1}</td>
+            <td style="padding: 4px 6px; border-bottom: 1px solid #e2e8f0; border-right: 1px solid #e2e8f0;">
+              <div style="font-weight: 700; color: #0f172a;">${it.description}</div>
+              ${it.reason ? `<div style="font-size: 8.5px; color: #2563eb;">Reason: ${it.reason}</div>` : ""}
+            </td>
+            <td style="padding: 4px 6px; text-align: center; border-bottom: 1px solid #e2e8f0; border-right: 1px solid #e2e8f0;">${it.hsn_code || "300490"}</td>
+            <td style="padding: 4px 6px; text-align: center; border-bottom: 1px solid #e2e8f0; border-right: 1px solid #e2e8f0; font-family: monospace;">${it.batch_no || "-"}</td>
+            <td style="padding: 4px 6px; text-align: center; border-bottom: 1px solid #e2e8f0; border-right: 1px solid #e2e8f0;">${it.expiry_date || "-"}</td>
+            <td style="padding: 4px 6px; text-align: right; border-bottom: 1px solid #e2e8f0; border-right: 1px solid #e2e8f0; font-weight: 700;">${it.qty}</td>
+            <td style="padding: 4px 6px; text-align: right; border-bottom: 1px solid #e2e8f0; border-right: 1px solid #e2e8f0; font-variant-numeric: tabular-nums;">₹ ${it.rate.toFixed(2)}</td>
+            <td style="padding: 4px 6px; text-align: right; border-bottom: 1px solid #e2e8f0; border-right: 1px solid #e2e8f0;">${it.gst_percent}%</td>
+            <td style="padding: 4px 6px; text-align: right; border-bottom: 1px solid #e2e8f0; font-weight: 700; font-variant-numeric: tabular-nums;">₹ ${it.amount.toFixed(2)}</td>
+          </tr>`
+          )
+          .join("");
+
+        return `
+      <div class="a4-sheet">
+        ${
+          isFirstPage
+            ? `
+        <div class="header">
+          <div class="store-name">${data.store_name}</div>
+          <div style="font-size: 10px; color: #475569;">${data.store_address || ""} • Phone: ${data.store_phone || ""}</div>
+          <div style="font-size: 9.5px; font-weight: 700; color: #334155; margin-top: 2px;">
+            ${data.store_gstin ? `GSTIN: ${data.store_gstin}` : ""}
+          </div>
+          <div class="tax-badge">DEBIT NOTE / PURCHASE RETURN</div>
+        </div>
+
+        <div class="meta-grid">
+          <div class="meta-col">
+            <div><strong>To Supplier:</strong> ${data.supplier_name}</div>
+            ${data.supplier_gstin ? `<div>GSTIN: ${data.supplier_gstin}</div>` : ""}
+            <div>Settlement: <strong>${data.settlement_type === "credit_adjust" ? "Adjust against Payable" : "Refund Received"}</strong></div>
+          </div>
+          <div class="meta-col" style="text-align: right;">
+            <div style="font-size: 12px; font-weight: 800; color: #1e3a8a;">#${data.return_number}</div>
+            <div>Return Date: ${data.return_date}</div>
+            ${data.original_purchase_number ? `<div>Purchase Ref: <strong>#${data.original_purchase_number}</strong></div>` : ""}
+            ${data.supplier_invoice_no ? `<div>Supplier Bill #: ${data.supplier_invoice_no}</div>` : ""}
+          </div>
+        </div>
+        `
+            : `
+        <div class="running-header">
+          <div>
+            <span class="running-store">${data.store_name}</span>
+            <span class="running-inv">Debit Note #${data.return_number}</span>
+            <span class="running-date">Date: ${data.return_date}</span>
+          </div>
+          <div class="running-page">Page ${pageNum} of ${totalPages}</div>
+        </div>
+        `
+        }
+
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th style="width: 28px; text-align: center; border-right: 1px solid #bbf7d0;">#</th>
+              <th style="text-align: left; border-right: 1px solid #bbf7d0;">Returned Item Description</th>
+              <th style="width: 60px; text-align: center; border-right: 1px solid #bbf7d0;">HSN</th>
+              <th style="width: 65px; text-align: center; border-right: 1px solid #bbf7d0;">Batch</th>
+              <th style="width: 55px; text-align: center; border-right: 1px solid #bbf7d0;">Exp</th>
+              <th style="width: 45px; text-align: right; border-right: 1px solid #bbf7d0;">Qty</th>
+              <th style="width: 75px; text-align: right; border-right: 1px solid #bbf7d0;">Purchase Rate (₹)</th>
+              <th style="width: 55px; text-align: right; border-right: 1px solid #bbf7d0;">GST %</th>
+              <th style="width: 85px; text-align: right;">Reversal (₹)</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${itemsRows}
+          </tbody>
+        </table>
+
+        ${
+          !isLastPage
+            ? `
+        <div class="continuation-bar">
+          <div>Showing items ${startIdx + 1} to ${endIdx} of ${data.lines.length} Total Returned Items</div>
+          <div class="continuation-link">Continued on Page ${pageNum + 1} &rarr;</div>
+        </div>
+        `
+            : ""
+        }
+
+        ${
+          isLastPage
+            ? `
+        <div class="footer-container">
+          <div class="amount-words-bar">
+            <span style="color: #64748b; font-weight: 600;">Reversal Amount in Words:</span> ${amountWords}
+          </div>
+
+          <div class="footer-grid">
+            <div style="border: 1px solid #e2e8f0; border-radius: 6px; padding: 10px; font-size: 9px; color: #64748b;">
+              <div style="font-weight: 700; color: #475569; text-transform: uppercase; margin-bottom: 4px;">Input GST Reversal & Settlement:</div>
+              <div>1. Debit Note issued to supplier for return of goods as per GST statutory provisions.</div>
+              <div>2. Input Tax Credit (ITC) reversed accordingly.</div>
+              ${data.notes ? `<div style="margin-top: 6px; color: #0f172a; font-weight: 600;">Remarks: ${data.notes}</div>` : ""}
+              <div style="margin-top: 12px; font-size: 8.5px; color: #94a3b8;">Computer Generated Debit Note • LamSuite POS</div>
+            </div>
+
+            <div class="totals-card">
+              <div class="total-line"><span>Taxable Purchase Value:</span><span style="font-weight: 600;">₹ ${data.subtotal.toFixed(2)}</span></div>
+              <div class="total-line"><span>CGST Reversal:</span><span style="font-weight: 600;">₹ ${cgstTotal.toFixed(2)}</span></div>
+              <div class="total-line"><span>SGST Reversal:</span><span style="font-weight: 600;">₹ ${sgstTotal.toFixed(2)}</span></div>
+              <div class="total-line"><span>Total Input GST Reversed:</span><span style="font-weight: 600;">₹ ${data.tax_total.toFixed(2)}</span></div>
+              ${data.round_off ? `<div class="total-line"><span>Round Off:</span><span style="font-weight: 600;">${data.round_off > 0 ? "+" : ""}₹ ${data.round_off.toFixed(2)}</span></div>` : ""}
+              <div class="grand-total-line"><span>Total Debit Amount:</span><span>₹ ${data.grand_total.toFixed(2)}</span></div>
+            </div>
+          </div>
+
+          <div style="display: flex; justify-content: flex-end; margin-top: 12px;">
+            <div class="sign-card" style="width: 250px;">
+              <div style="font-size: 10px; font-weight: 700; color: #1e293b;">For ${data.store_name}</div>
+              <div style="min-height: 20px;"></div>
+              <div style="font-size: 8.5px; font-weight: 600; color: #475569; border-top: 1px solid #94a3b8; padding-top: 2px;">
+                Authorised Signatory
+              </div>
+            </div>
+          </div>
+        </div>
+        `
+            : ""
+        }
+
+        <div class="spacer-fill"></div>
+        <div class="page-footer">
+          <div>Computer Generated Debit Note • ${data.store_name}</div>
+          <div class="page-num">Page ${pageNum} of ${totalPages}</div>
+        </div>
+      </div>`;
+      })
       .join("");
 
     return `<!DOCTYPE html>
@@ -2037,102 +2698,53 @@ export class PrintingEngine {
   <meta charset="utf-8" />
   <title>Debit Note - ${data.return_number}</title>
   <style>
-    @media print { body { margin: 0; padding: 8mm; } @page { size: A4 portrait; margin: 8mm; } }
-    * { box-sizing: border-box; }
-    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 10.5px; line-height: 1.35; color: #1e293b; margin: 0; padding: 20px; background: #fff; font-variant-numeric: tabular-nums; }
-    .header { text-align: center; border-bottom: 2px solid #1e3a8a; padding-bottom: 8px; margin-bottom: 12px; }
-    .store-name { font-size: 19px; font-weight: 800; color: #0f172a; }
-    .tax-badge { font-size: 13px; font-weight: 800; letter-spacing: 0.5px; color: #1e3a8a; margin-top: 6px; }
-    .meta-grid { display: flex; justify-content: space-between; border: 1px solid #93c5fd; border-radius: 6px; background: #eff6ff; padding: 8px 12px; margin-bottom: 12px; }
+    @page { size: A4 portrait; margin: 8mm; }
+    * { box-sizing: border-box; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 10px; line-height: 1.35; color: #1e293b; margin: 0; padding: 24px 16px; background: #cbd5e1; font-variant-numeric: tabular-nums; display: flex; flex-direction: column; align-items: center; gap: 24px; min-height: 100vh; }
+    .a4-sheet { width: 210mm; max-width: 210mm; min-height: 297mm; flex-shrink: 0; background: #ffffff; box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.15), 0 0 1px rgba(0, 0, 0, 0.2); border: 1px solid #cbd5e1; border-radius: 2px; padding: 12mm 14mm; display: flex; flex-direction: column; box-sizing: border-box; overflow: hidden; position: relative; }
+    @media print {
+      body { background: white !important; padding: 0 !important; margin: 0 !important; display: block !important; }
+      .a4-sheet { box-shadow: none !important; border: none !important; margin: 0 !important; padding: 8mm !important; width: 100% !important; min-height: auto !important; page-break-after: always !important; break-after: page !important; }
+      .a4-sheet:last-child { page-break-after: auto !important; break-after: auto !important; }
+    }
+    .header { text-align: center; border-bottom: 2px solid #1e3a8a; padding-bottom: 6px; margin-bottom: 10px; }
+    .store-name { font-size: 18px; font-weight: 800; color: #0f172a; }
+    .tax-badge { font-size: 12px; font-weight: 800; letter-spacing: 0.5px; color: #1e3a8a; margin-top: 5px; }
+    .running-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1.5px solid #1e3a8a; padding-bottom: 6px; margin-bottom: 8px; font-size: 9.5px; }
+    .running-store { font-weight: 800; color: #0f172a; font-size: 11px; }
+    .running-inv { color: #1e3a8a; font-weight: 700; margin-left: 8px; }
+    .running-date { color: #64748b; margin-left: 8px; }
+    .running-page { font-weight: 700; color: #475569; }
+    .meta-grid { display: flex; justify-content: space-between; border: 1px solid #93c5fd; border-radius: 5px; background: #eff6ff; padding: 7px 10px; margin-bottom: 10px; }
     .meta-col { width: 48%; }
-    table.data-table { width: 100%; border-collapse: collapse; font-size: 10px; margin-bottom: 12px; }
-    table.data-table th { background: #f0fdf4; color: #166534; font-weight: 700; padding: 6px; border-top: 1px solid #bbf7d0; border-bottom: 2px solid #86efac; }
-    .footer-container { margin-top: 12px; page-break-inside: avoid; }
-    .amount-words-bar { background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 4px; padding: 6px 10px; font-size: 10px; font-weight: 700; color: #1e293b; margin-bottom: 10px; }
-    .footer-grid { display: grid; grid-template-columns: 1fr 310px; gap: 10px 16px; align-items: stretch; }
-    .totals-card { border: 1px solid #cbd5e1; border-radius: 6px; background: #f8fafc; padding: 8px 14px; font-variant-numeric: tabular-nums; }
-    .total-line { display: flex; justify-content: space-between; padding: 2.5px 0; font-size: 10.5px; color: #475569; }
-    .grand-total-line { display: flex; justify-content: space-between; padding-top: 6px; margin-top: 6px; border-top: 2px solid #1e3a8a; font-size: 13px; font-weight: 800; color: #1e3a8a; }
-    .sign-card { border: 1px solid #cbd5e1; border-radius: 6px; background: #f8fafc; padding: 8px 14px; text-align: center; display: flex; flex-direction: column; justify-content: space-between; min-height: 70px; }
+    table.data-table { width: 100%; border-collapse: collapse; font-size: 9.5px; margin-bottom: 8px; border: 1px solid #93c5fd; }
+    table.data-table th { background: #f0fdf4; color: #166534; font-weight: 700; padding: 5px 6px; border-top: 1px solid #bbf7d0; border-bottom: 2px solid #86efac; }
+    .continuation-bar { display: flex; justify-content: space-between; align-items: center; background: #eff6ff; border: 1px dashed #93c5fd; border-radius: 4px; padding: 5px 10px; margin-top: 6px; font-size: 9px; color: #1e3a8a; }
+    .continuation-link { font-weight: 700; color: #1e3a8a; }
+    .footer-container { margin-top: 10px; page-break-inside: avoid; }
+    .amount-words-bar { background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 4px; padding: 5px 9px; font-size: 9.5px; font-weight: 700; color: #1e293b; margin-bottom: 8px; }
+    .footer-grid { display: grid; grid-template-columns: 1fr 310px; gap: 8px 14px; align-items: stretch; }
+    .totals-card { border: 1px solid #cbd5e1; border-radius: 5px; background: #f8fafc; padding: 7px 12px; font-variant-numeric: tabular-nums; }
+    .total-line { display: flex; justify-content: space-between; padding: 2px 0; font-size: 10px; color: #475569; }
+    .grand-total-line { display: flex; justify-content: space-between; padding-top: 5px; margin-top: 5px; border-top: 2px solid #1e3a8a; font-size: 12.5px; font-weight: 800; color: #1e3a8a; }
+    .sign-card { border: 1px solid #cbd5e1; border-radius: 5px; background: #f8fafc; padding: 7px 12px; text-align: center; display: flex; flex-direction: column; justify-content: space-between; min-height: 65px; }
+    .spacer-fill { flex-grow: 1; min-height: 6px; }
+    .page-footer { display: flex; justify-content: space-between; align-items: center; border-top: 1px solid #e2e8f0; padding-top: 6px; margin-top: 8px; font-size: 8.5px; color: #64748b; }
+    .page-num { font-weight: 700; color: #334155; }
   </style>
 </head>
 <body>
-  <div class="header">
-    <div class="store-name">${data.store_name}</div>
-    <div style="font-size: 10px; color: #475569;">${data.store_address || ""} • Phone: ${data.store_phone || ""}</div>
-    <div style="font-size: 9.5px; font-weight: 700; color: #334155; margin-top: 2px;">
-      ${data.store_gstin ? `GSTIN: ${data.store_gstin}` : ""}
-    </div>
-    <div class="tax-badge">DEBIT NOTE / PURCHASE RETURN</div>
-  </div>
-
-  <div class="meta-grid">
-    <div class="meta-col">
-      <div><strong>To Supplier:</strong> ${data.supplier_name}</div>
-      ${data.supplier_gstin ? `<div>GSTIN: ${data.supplier_gstin}</div>` : ""}
-      <div>Settlement: <strong>${data.settlement_type === "credit_adjust" ? "Adjust against Payable" : "Refund Received"}</strong></div>
-    </div>
-    <div class="meta-col" style="text-align: right;">
-      <div style="font-size: 12px; font-weight: 800; color: #1e3a8a;">#${data.return_number}</div>
-      <div>Return Date: ${data.return_date}</div>
-      ${data.original_purchase_number ? `<div>Purchase Ref: <strong>#${data.original_purchase_number}</strong></div>` : ""}
-      ${data.supplier_invoice_no ? `<div>Supplier Bill #: ${data.supplier_invoice_no}</div>` : ""}
-    </div>
-  </div>
-
-  <table class="data-table">
-    <thead>
-      <tr>
-        <th style="width: 28px; text-align: center;">#</th>
-        <th style="text-align: left;">Returned Item Description</th>
-        <th style="width: 60px; text-align: center;">HSN</th>
-        <th style="width: 65px; text-align: center;">Batch</th>
-        <th style="width: 55px; text-align: center;">Exp</th>
-        <th style="width: 45px; text-align: right;">Qty</th>
-        <th style="width: 75px; text-align: right;">Purchase Rate (₹)</th>
-        <th style="width: 55px; text-align: right;">GST %</th>
-        <th style="width: 85px; text-align: right;">Reversal (₹)</th>
-      </tr>
-    </thead>
-    <tbody>
-      ${itemsRows}
-    </tbody>
-  </table>
-
-  <div class="footer-container">
-    <div class="amount-words-bar">
-      <span style="color: #64748b; font-weight: 600;">Reversal Amount in Words:</span> ${amountWords}
-    </div>
-
-    <div class="footer-grid">
-      <div style="border: 1px solid #e2e8f0; border-radius: 6px; padding: 10px; font-size: 9px; color: #64748b;">
-        <div style="font-weight: 700; color: #475569; text-transform: uppercase; margin-bottom: 4px;">Input GST Reversal & Settlement:</div>
-        <div>1. Debit Note issued to supplier for return of goods as per GST statutory provisions.</div>
-        <div>2. Input Tax Credit (ITC) reversed accordingly.</div>
-        ${data.notes ? `<div style="margin-top: 6px; color: #0f172a; font-weight: 600;">Remarks: ${data.notes}</div>` : ""}
-        <div style="margin-top: 12px; font-size: 8.5px; color: #94a3b8;">Computer Generated Debit Note • LamSuite POS</div>
-      </div>
-
-      <div class="totals-card">
-        <div class="total-line"><span>Taxable Purchase Value:</span><span style="font-weight: 600;">₹ ${data.subtotal.toFixed(2)}</span></div>
-        <div class="total-line"><span>CGST Reversal:</span><span style="font-weight: 600;">₹ ${cgstTotal.toFixed(2)}</span></div>
-        <div class="total-line"><span>SGST Reversal:</span><span style="font-weight: 600;">₹ ${sgstTotal.toFixed(2)}</span></div>
-        <div class="total-line"><span>Total Input GST Reversed:</span><span style="font-weight: 600;">₹ ${data.tax_total.toFixed(2)}</span></div>
-        ${data.round_off ? `<div class="total-line"><span>Round Off:</span><span style="font-weight: 600;">${data.round_off > 0 ? "+" : ""}₹ ${data.round_off.toFixed(2)}</span></div>` : ""}
-        <div class="grand-total-line"><span>Total Debit Amount:</span><span>₹ ${data.grand_total.toFixed(2)}</span></div>
-      </div>
-    </div>
-
-    <div style="display: flex; justify-content: flex-end; margin-top: 16px;">
-      <div class="sign-card" style="width: 250px;">
-        <div style="font-size: 10px; font-weight: 700; color: #1e293b;">For ${data.store_name}</div>
-        <div style="min-height: 24px;"></div>
-        <div style="font-size: 9px; font-weight: 600; color: #475569; border-top: 1px solid #94a3b8; padding-top: 3px;">
-          Authorised Signatory
-        </div>
-      </div>
-    </div>
-  </div>
+  ${pagesHtml}
+  <script>
+    window.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
+        window.parent.postMessage({ type: 'MODAL_ESCAPE' }, '*');
+      }
+    }, true);
+  </script>
 </body>
 </html>`;
   }
@@ -2292,23 +2904,125 @@ export class PrintingEngine {
    */
   generatePurchaseBillA4Html(data: any, options?: PrintRenderOptions): string {
     const items = data.items || data.lines || [];
-    const itemsHtml = items
-      .map(
-        (it: any, idx: number) => `
-        <tr>
-          <td style="padding: 4px 6px; text-align: center; border-bottom: 1px solid #e2e8f0;">${idx + 1}</td>
-          <td style="padding: 4px 6px; border-bottom: 1px solid #e2e8f0;">
-            <div style="font-weight: 700;">${it.item_name || it.description || "Product"}</div>
-          </td>
-          <td style="padding: 4px 6px; text-align: center; border-bottom: 1px solid #e2e8f0;">${it.batch_no || "-"}</td>
-          <td style="padding: 4px 6px; text-align: center; border-bottom: 1px solid #e2e8f0;">${it.expiry_date || "-"}</td>
-          <td style="padding: 4px 6px; text-align: right; border-bottom: 1px solid #e2e8f0; font-weight: 700;">${it.qty || 0}</td>
-          <td style="padding: 4px 6px; text-align: right; border-bottom: 1px solid #e2e8f0;">₹ ${(it.ptr || it.rate || 0).toFixed(2)}</td>
-          <td style="padding: 4px 6px; text-align: right; border-bottom: 1px solid #e2e8f0;">${it.discount_percent || it.disc_percent || 0}%</td>
-          <td style="padding: 4px 6px; text-align: right; border-bottom: 1px solid #e2e8f0;">${it.gst_percent || 0}%</td>
-          <td style="padding: 4px 6px; text-align: right; border-bottom: 1px solid #e2e8f0; font-weight: 700;">₹ ${(it.net_amount || it.amount || 0).toFixed(2)}</td>
-        </tr>`
-      )
+    const pageChunks = chunkInvoiceLines(items, 16, 18, 26, 16);
+    const totalPages = pageChunks.length;
+
+    let cumulativeIdx = 0;
+    const pagesHtml = pageChunks
+      .map((chunk: any[], pageIdx: number) => {
+        const pageNum = pageIdx + 1;
+        const isFirstPage = pageNum === 1;
+        const isLastPage = pageNum === totalPages;
+        const startIdx = cumulativeIdx;
+        cumulativeIdx += chunk.length;
+        const endIdx = cumulativeIdx;
+
+        const itemsHtml = chunk
+          .map(
+            (it: any, idx: number) => `
+          <tr>
+            <td style="padding: 4px 6px; text-align: center; border-bottom: 1px solid #e2e8f0; border-right: 1px solid #e2e8f0;">${startIdx + idx + 1}</td>
+            <td style="padding: 4px 6px; border-bottom: 1px solid #e2e8f0; border-right: 1px solid #e2e8f0;">
+              <div style="font-weight: 700;">${it.item_name || it.description || "Product"}</div>
+            </td>
+            <td style="padding: 4px 6px; text-align: center; border-bottom: 1px solid #e2e8f0; border-right: 1px solid #e2e8f0; font-family: monospace;">${it.batch_no || "-"}</td>
+            <td style="padding: 4px 6px; text-align: center; border-bottom: 1px solid #e2e8f0; border-right: 1px solid #e2e8f0;">${it.expiry_date || "-"}</td>
+            <td style="padding: 4px 6px; text-align: right; border-bottom: 1px solid #e2e8f0; border-right: 1px solid #e2e8f0; font-weight: 700;">${it.qty || 0}</td>
+            <td style="padding: 4px 6px; text-align: right; border-bottom: 1px solid #e2e8f0; border-right: 1px solid #e2e8f0;">₹ ${(it.ptr || it.rate || 0).toFixed(2)}</td>
+            <td style="padding: 4px 6px; text-align: right; border-bottom: 1px solid #e2e8f0; border-right: 1px solid #e2e8f0;">${it.discount_percent || it.disc_percent || 0}%</td>
+            <td style="padding: 4px 6px; text-align: right; border-bottom: 1px solid #e2e8f0; border-right: 1px solid #e2e8f0;">${it.gst_percent || 0}%</td>
+            <td style="padding: 4px 6px; text-align: right; border-bottom: 1px solid #e2e8f0; font-weight: 700;">₹ ${(it.net_amount || it.amount || 0).toFixed(2)}</td>
+          </tr>`
+          )
+          .join("");
+
+        return `
+      <div class="a4-sheet">
+        ${
+          isFirstPage
+            ? `
+        <div class="header">
+          <div class="title">${data.store_name || "LamStone Pharmacy"}</div>
+          <div class="badge">PURCHASE INWARD VOUCHER (GRN)</div>
+        </div>
+        <div class="meta-box">
+          <div>
+            <div><strong>Supplier:</strong> ${data.supplier_name || "Distributor"}</div>
+            ${data.supplier_gstin ? `<div>GSTIN: ${data.supplier_gstin}</div>` : ""}
+            <div>Supplier Bill No: <strong>${data.supplier_invoice_number || data.supplier_invoice_no || "-"}</strong></div>
+          </div>
+          <div style="text-align: right;">
+            <div style="font-weight: 800; color: #1e3a8a;">GRN #${data.purchase_number || data.id}</div>
+            <div>Date: ${data.purchase_date || data.bill_date || new Date().toISOString().split("T")[0]}</div>
+            <div>Payment Status: <strong>${data.payment_status || "Credit"}</strong></div>
+          </div>
+        </div>
+        `
+            : `
+        <div class="running-header">
+          <div>
+            <span class="running-store">${data.store_name || "LamStone Pharmacy"}</span>
+            <span class="running-inv">GRN #${data.purchase_number || data.id}</span>
+            <span class="running-date">Supplier: ${data.supplier_name || "Distributor"}</span>
+          </div>
+          <div class="running-page">Page ${pageNum} of ${totalPages}</div>
+        </div>
+        `
+        }
+
+        <table>
+          <thead>
+            <tr>
+              <th style="width: 28px; text-align: center; border-right: 1px solid #cbd5e1;">#</th>
+              <th style="text-align: left; border-right: 1px solid #cbd5e1;">Product Description</th>
+              <th style="width: 65px; text-align: center; border-right: 1px solid #cbd5e1;">Batch</th>
+              <th style="width: 55px; text-align: center; border-right: 1px solid #cbd5e1;">Exp</th>
+              <th style="width: 45px; text-align: right; border-right: 1px solid #cbd5e1;">Qty</th>
+              <th style="width: 65px; text-align: right; border-right: 1px solid #cbd5e1;">PTR (₹)</th>
+              <th style="width: 50px; text-align: right; border-right: 1px solid #cbd5e1;">Disc%</th>
+              <th style="width: 50px; text-align: right; border-right: 1px solid #cbd5e1;">GST%</th>
+              <th style="width: 80px; text-align: right;">Amount (₹)</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${itemsHtml}
+          </tbody>
+        </table>
+
+        ${
+          !isLastPage
+            ? `
+        <div class="continuation-bar">
+          <div>Showing items ${startIdx + 1} to ${endIdx} of ${items.length} Total Items</div>
+          <div class="continuation-link">Continued on Page ${pageNum + 1} &rarr;</div>
+        </div>
+        `
+            : ""
+        }
+
+        ${
+          isLastPage
+            ? `
+        <div style="display: flex; justify-content: flex-end; margin-top: 10px;">
+          <div style="width: 240px; border: 1px solid #cbd5e1; border-radius: 4px; background: #f8fafc; padding: 6px 10px;">
+            <div style="display: flex; justify-content: space-between;"><span>Taxable Subtotal:</span><span>₹ ${(data.subtotal || 0).toFixed(2)}</span></div>
+            <div style="display: flex; justify-content: space-between;"><span>Input GST Total:</span><span>₹ ${(data.tax_total || data.gst_total || 0).toFixed(2)}</span></div>
+            <div style="display: flex; justify-content: space-between; font-weight: 800; font-size: 12px; color: #1e3a8a; border-top: 1.5px solid #0f172a; margin-top: 4px; padding-top: 4px;">
+              <span>Total Purchase:</span><span>₹ ${(data.grand_total || data.total_amount || 0).toFixed(2)}</span>
+            </div>
+          </div>
+        </div>
+        `
+            : ""
+        }
+
+        <div class="spacer-fill"></div>
+        <div class="page-footer">
+          <div>Goods Received Note • ${data.store_name || "LamStone Pharmacy"}</div>
+          <div class="page-num">Page ${pageNum} of ${totalPages}</div>
+        </div>
+      </div>`;
+      })
       .join("");
 
     return `<!DOCTYPE html>
@@ -2317,61 +3031,45 @@ export class PrintingEngine {
   <meta charset="utf-8" />
   <title>Purchase Inward - ${data.purchase_number || data.bill_number || "PUR"}</title>
   <style>
-    @media print { body { margin: 0; padding: 8mm; } @page { size: A4 portrait; margin: 8mm; } }
-    * { box-sizing: border-box; }
-    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 10px; color: #1e293b; margin: 0; padding: 16px; background: #fff; }
+    @page { size: A4 portrait; margin: 8mm; }
+    * { box-sizing: border-box; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 10px; color: #1e293b; margin: 0; padding: 24px 16px; background: #cbd5e1; display: flex; flex-direction: column; align-items: center; gap: 24px; min-height: 100vh; }
+    .a4-sheet { width: 210mm; max-width: 210mm; min-height: 297mm; flex-shrink: 0; background: #ffffff; box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.15), 0 0 1px rgba(0, 0, 0, 0.2); border: 1px solid #cbd5e1; border-radius: 2px; padding: 12mm 14mm; display: flex; flex-direction: column; box-sizing: border-box; overflow: hidden; position: relative; }
+    @media print {
+      body { background: white !important; padding: 0 !important; margin: 0 !important; display: block !important; }
+      .a4-sheet { box-shadow: none !important; border: none !important; margin: 0 !important; padding: 8mm !important; width: 100% !important; min-height: auto !important; page-break-after: always !important; break-after: page !important; }
+      .a4-sheet:last-child { page-break-after: auto !important; break-after: auto !important; }
+    }
     .header { text-align: center; border-bottom: 2px solid #0f172a; padding-bottom: 6px; margin-bottom: 10px; }
     .title { font-size: 16px; font-weight: 800; color: #0f172a; }
     .badge { font-size: 11px; font-weight: 800; color: #1e3a8a; margin-top: 4px; }
-    .meta-box { display: flex; justify-content: space-between; background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 6px; padding: 8px 12px; margin-bottom: 10px; }
-    table { width: 100%; border-collapse: collapse; font-size: 9.5px; margin-bottom: 10px; }
+    .running-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1.5px solid #0f172a; padding-bottom: 6px; margin-bottom: 8px; font-size: 9.5px; }
+    .running-store { font-weight: 800; color: #0f172a; font-size: 11px; }
+    .running-inv { color: #1e3a8a; font-weight: 700; margin-left: 8px; }
+    .running-date { color: #64748b; margin-left: 8px; }
+    .running-page { font-weight: 700; color: #475569; }
+    .meta-box { display: flex; justify-content: space-between; background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 5px; padding: 7px 10px; margin-bottom: 10px; }
+    table { width: 100%; border-collapse: collapse; font-size: 9.5px; margin-bottom: 8px; border: 1px solid #cbd5e1; }
     th { background: #f1f5f9; padding: 5px 6px; border-top: 1px solid #cbd5e1; border-bottom: 1.5px solid #94a3b8; font-weight: 700; color: #0f172a; }
+    .continuation-bar { display: flex; justify-content: space-between; align-items: center; background: #f8fafc; border: 1px dashed #94a3b8; border-radius: 4px; padding: 5px 10px; margin-top: 6px; font-size: 9px; color: #475569; }
+    .continuation-link { font-weight: 700; color: #1d4ed8; }
+    .spacer-fill { flex-grow: 1; min-height: 6px; }
+    .page-footer { display: flex; justify-content: space-between; align-items: center; border-top: 1px solid #e2e8f0; padding-top: 6px; margin-top: 8px; font-size: 8.5px; color: #64748b; }
+    .page-num { font-weight: 700; color: #334155; }
   </style>
 </head>
 <body>
-  <div class="header">
-    <div class="title">${data.store_name || "LamStone Pharmacy"}</div>
-    <div class="badge">PURCHASE INWARD VOUCHER (GRN)</div>
-  </div>
-  <div class="meta-box">
-    <div>
-      <div><strong>Supplier:</strong> ${data.supplier_name || "Distributor"}</div>
-      ${data.supplier_gstin ? `<div>GSTIN: ${data.supplier_gstin}</div>` : ""}
-      <div>Supplier Bill No: <strong>${data.supplier_invoice_number || data.supplier_invoice_no || "-"}</strong></div>
-    </div>
-    <div style="text-align: right;">
-      <div style="font-weight: 800; color: #1e3a8a;">GRN #${data.purchase_number || data.id}</div>
-      <div>Date: ${data.purchase_date || data.bill_date || new Date().toISOString().split("T")[0]}</div>
-      <div>Payment Status: <strong>${data.payment_status || "Credit"}</strong></div>
-    </div>
-  </div>
-  <table>
-    <thead>
-      <tr>
-        <th style="width: 25px; text-align: center;">#</th>
-        <th style="text-align: left;">Product Description</th>
-        <th style="width: 65px; text-align: center;">Batch</th>
-        <th style="width: 55px; text-align: center;">Exp</th>
-        <th style="width: 45px; text-align: right;">Qty</th>
-        <th style="width: 65px; text-align: right;">PTR (₹)</th>
-        <th style="width: 50px; text-align: right;">Disc%</th>
-        <th style="width: 50px; text-align: right;">GST%</th>
-        <th style="width: 80px; text-align: right;">Amount (₹)</th>
-      </tr>
-    </thead>
-    <tbody>
-      ${itemsHtml}
-    </tbody>
-  </table>
-  <div style="display: flex; justify-content: flex-end;">
-    <div style="width: 240px; border: 1px solid #cbd5e1; border-radius: 4px; background: #f8fafc; padding: 6px 10px;">
-      <div style="display: flex; justify-content: space-between;"><span>Taxable Subtotal:</span><span>₹ ${(data.subtotal || 0).toFixed(2)}</span></div>
-      <div style="display: flex; justify-content: space-between;"><span>Input GST Total:</span><span>₹ ${(data.tax_total || data.gst_total || 0).toFixed(2)}</span></div>
-      <div style="display: flex; justify-content: space-between; font-weight: 800; font-size: 12px; color: #1e3a8a; border-top: 1.5px solid #0f172a; margin-top: 4px; padding-top: 4px;">
-        <span>Total Purchase:</span><span>₹ ${(data.grand_total || data.total_amount || 0).toFixed(2)}</span>
-      </div>
-    </div>
-  </div>
+  ${pagesHtml}
+  <script>
+    window.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
+        window.parent.postMessage({ type: 'MODAL_ESCAPE' }, '*');
+      }
+    }, true);
+  </script>
 </body>
 </html>`;
   }
@@ -2521,38 +3219,75 @@ export class PrintingEngine {
       });
     }
 
+    let html = "";
     switch (docType) {
       case "tax_invoice":
       case "invoice":
       case "bill":
-        return this.generateInvoiceHtml(data as InvoicePrintData, options);
+        html = this.generateInvoiceHtml(data as InvoicePrintData, options);
+        break;
 
       case "sales_return":
       case "credit_note":
       case "customer_debit_note":
         if (options?.paperSize === "thermal_80mm" || options?.paperSize === "thermal_58mm") {
-          return this.generateCreditNoteThermalSlip(data as CreditNotePrintData);
+          html = this.generateCreditNoteThermalSlip(
+            data as CreditNotePrintData,
+            options.paperSize === "thermal_58mm" ? 58 : 80,
+            options
+          );
+        } else {
+          html = this.generateCreditNoteA4Html(data as CreditNotePrintData);
         }
-        return this.generateCreditNoteA4Html(data as CreditNotePrintData);
+        break;
 
       case "purchase_return":
       case "debit_note":
-        return this.generateDebitNoteA4Html(data as DebitNotePrintData);
+        if (options?.paperSize === "thermal_80mm" || options?.paperSize === "thermal_58mm") {
+          html = this.generateDebitNoteThermalSlip(
+            data as DebitNotePrintData,
+            options.paperSize === "thermal_58mm" ? 58 : 80,
+            options
+          );
+        } else {
+          html = this.generateDebitNoteA4Html(data as DebitNotePrintData);
+        }
+        break;
 
       case "purchase":
       case "purchase_bill":
-        return this.generatePurchaseBillA4Html(data, options);
+        html = this.generatePurchaseBillA4Html(data, options);
+        break;
 
       case "barcode":
       case "barcode_labels":
-        return this.generateBarcodeLabelsHtml(data, options);
+        html = this.generateBarcodeLabelsHtml(data, options);
+        break;
 
       case "report":
-        return this.generateReportHtml(data, options);
+        html = this.generateReportHtml(data, options);
+        break;
 
       default:
-        return this.generateInvoiceHtml(data as InvoicePrintData, options);
+        html = this.generateInvoiceHtml(data as InvoicePrintData, options);
+        break;
     }
+
+    const escapeScript = `<script>
+      window.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          e.stopPropagation();
+          e.stopImmediatePropagation();
+          window.parent.postMessage({ type: 'MODAL_ESCAPE' }, '*');
+        }
+      }, true);
+    </script>`;
+
+    if (html.includes("</body>")) {
+      return html.replace("</body>", `${escapeScript}</body>`);
+    }
+    return html + escapeScript;
   }
 
   /**

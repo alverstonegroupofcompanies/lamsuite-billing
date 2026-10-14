@@ -842,6 +842,56 @@ fn lan_discover_main(port: Option<u16>) -> Result<Option<Value>, String> {
     })))
 }
 
+fn get_secure_vault_path() -> PathBuf {
+    let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
+    let app_dir = PathBuf::from(home)
+        .join(".gemini")
+        .join("antigravity")
+        .join("scratch")
+        .join("lamsuite-billing");
+    let _ = fs::create_dir_all(&app_dir);
+    app_dir.join(".lamsuite_secure_vault.dat")
+}
+
+#[tauri::command]
+fn secure_store_set(key: String, value: String) -> Result<Value, String> {
+    let path = get_secure_vault_path();
+    let mut map: std::collections::HashMap<String, String> = if path.exists() {
+        let content = fs::read_to_string(&path).unwrap_or_default();
+        serde_json::from_str(&content).unwrap_or_default()
+    } else {
+        std::collections::HashMap::new()
+    };
+    map.insert(key, value);
+    let serialized = serde_json::to_string(&map).map_err(|e| e.to_string())?;
+    fs::write(&path, serialized).map_err(|e| e.to_string())?;
+    Ok(json!({ "success": true }))
+}
+
+#[tauri::command]
+fn secure_store_get(key: String) -> Result<Option<String>, String> {
+    let path = get_secure_vault_path();
+    if !path.exists() {
+        return Ok(None);
+    }
+    let content = fs::read_to_string(&path).map_err(|e| e.to_string())?;
+    let map: std::collections::HashMap<String, String> = serde_json::from_str(&content).unwrap_or_default();
+    Ok(map.get(&key).cloned())
+}
+
+#[tauri::command]
+fn secure_store_delete(key: String) -> Result<Value, String> {
+    let path = get_secure_vault_path();
+    if path.exists() {
+        let content = fs::read_to_string(&path).unwrap_or_default();
+        let mut map: std::collections::HashMap<String, String> = serde_json::from_str(&content).unwrap_or_default();
+        map.remove(&key);
+        let serialized = serde_json::to_string(&map).map_err(|e| e.to_string())?;
+        let _ = fs::write(&path, serialized);
+    }
+    Ok(json!({ "success": true }))
+}
+
 fn get_db_path() -> PathBuf {
     let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
     let app_dir = PathBuf::from(home)
@@ -888,7 +938,10 @@ fn main() {
             print_export_pdf,
             open_file,
             reveal_file,
-            lan_discover_main
+            lan_discover_main,
+            secure_store_set,
+            secure_store_get,
+            secure_store_delete
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

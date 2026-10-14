@@ -47,7 +47,8 @@ class AdminMasterController
             return response()->json(['data' => $query->get()]);
         }
 
-        return response()->json($query->paginate(20));
+        $perPage = (int) $request->query('per_page', 50);
+        return response()->json($query->paginate($perPage));
     }
 
     /**
@@ -297,7 +298,8 @@ class AdminMasterController
             return response()->json(['data' => $query->get()]);
         }
 
-        return response()->json($query->paginate(20));
+        $perPage = (int) $request->query('per_page', 50);
+        return response()->json($query->paginate($perPage));
     }
 
     public function storeParty(Request $request): JsonResponse

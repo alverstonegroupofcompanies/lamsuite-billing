@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { X, Percent, Tag, Check, Sparkles, Trash2 } from "lucide-react";
 import { round2 } from "../lib/billing/billingCalculations";
+import { useModalEscape } from "../lib/ui/modalEscapeManager";
 
 interface BillDiscountModalProps {
   isOpen: boolean;
@@ -19,6 +20,8 @@ export const BillDiscountModal: React.FC<BillDiscountModalProps> = ({
   onClose,
   onApplyDiscount,
 }) => {
+  useModalEscape(isOpen, onClose);
+
   const [discType, setDiscType] = useState<"percent" | "amount">("percent");
   const [value, setValue] = useState<string>("");
   const inputRef = useRef<HTMLInputElement>(null);

@@ -40,6 +40,7 @@ export const salesSummaryTool: ToolDefinition = {
       .describe("Time period for the sales report"),
     start_date: z.string().optional().describe("Custom start date (YYYY-MM-DD) if period is custom"),
     end_date: z.string().optional().describe("Custom end date (YYYY-MM-DD) if period is custom"),
+    counter_id: z.string().optional().describe("Optional counter ID to filter sales (e.g. C01, C02)"),
   }),
   annotations: {
     readOnlyHint: true,
@@ -58,9 +59,9 @@ export const salesSummaryTool: ToolDefinition = {
       end = args.end_date;
     }
 
-    const data = await client.getDailyCollection(start, end);
+    const data = await client.getDailyCollection(start, end, args.counter_id);
 
-    let summary = `### Sales Summary (${data.date_range.start_date} to ${data.date_range.end_date})\n`;
+    let summary = `### Sales Summary (${data.date_range.start_date} to ${data.date_range.end_date})${args.counter_id ? ` - Counter ${args.counter_id}` : ""}\n`;
     summary += `- **Total Invoices**: ${data.total_invoices_count}\n`;
     summary += `- **Gross Sales**: ${formatINR(data.gross_sales)}\n`;
     summary += `- **Total Returns**: ${formatINR(data.total_returns)}\n`;

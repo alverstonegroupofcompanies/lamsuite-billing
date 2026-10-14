@@ -15,8 +15,11 @@ import {
   ShieldCheck,
   Building2,
   Layers,
+  Upload,
+  Download,
 } from "lucide-react";
 import { productsStore, type ProductItem, type ProductBatch } from "../lib/masters/productsStore";
+import { useModalEscape } from "../lib/ui/modalEscapeManager";
 import {
   partiesStore,
   type Customer,
@@ -30,32 +33,40 @@ import {
 } from "../lib/masters/partiesStore";
 import { discountSchemaEngine, type DiscountRule } from "../lib/masters/discountSchemaEngine";
 import { sqliteStorage } from "../lib/db/sqliteStorage";
+import { ImportWizardModal } from "../lib/data-exchange/ui/ImportWizardModal";
+import { ExportDialogModal } from "../lib/data-exchange/ui/ExportDialogModal";
 
 export const MastersPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState<"products" | "batches" | "parties" | "discounts">("products");
   const [searchQuery, setSearchQuery] = useState("");
   const [notification, setNotification] = useState<{ message: string; type: "success" | "error" } | null>(null);
+  const [importEntityId, setImportEntityId] = useState<string | null>(null);
+  const [exportEntityId, setExportEntityId] = useState<string | null>(null);
 
   // Products state
   const [products, setProducts] = useState<ProductItem[]>([]);
   const [isProductModalOpen, setIsProductModalOpen] = useState(false);
+  useModalEscape(isProductModalOpen, () => setIsProductModalOpen(false));
   const [editingProduct, setEditingProduct] = useState<ProductItem | null>(null);
 
   // Batches state
   const [batches, setBatches] = useState<ProductBatch[]>([]);
   const [selectedProductIdForBatches, setSelectedProductIdForBatches] = useState<string>("");
   const [isBatchModalOpen, setIsBatchModalOpen] = useState(false);
+  useModalEscape(isBatchModalOpen, () => setIsBatchModalOpen(false));
   const [editingBatch, setEditingBatch] = useState<ProductBatch | null>(null);
 
   // Parties state
   const [partyTypeFilter, setPartyTypeFilter] = useState<"all" | "customer" | "supplier" | "doctor" | "patient">("all");
   const [parties, setParties] = useState<PartyMaster[]>([]);
   const [isPartyModalOpen, setIsPartyModalOpen] = useState(false);
+  useModalEscape(isPartyModalOpen, () => setIsPartyModalOpen(false));
   const [editingParty, setEditingParty] = useState<PartyMaster | null>(null);
 
   // Discount rules state
   const [discountRules, setDiscountRules] = useState<DiscountRule[]>([]);
   const [isDiscountModalOpen, setIsDiscountModalOpen] = useState(false);
+  useModalEscape(isDiscountModalOpen, () => setIsDiscountModalOpen(false));
 
   // Product Form state
   const [prodForm, setProdForm] = useState<Partial<ProductItem>>({
@@ -325,8 +336,46 @@ export const MastersPage: React.FC = () => {
           </div>
         </div>
 
-        {/* Tab Switcher */}
-        <div className="flex rounded-lg bg-slate-100 p-1 border border-slate-200">
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => {
+                const entity =
+                  activeTab === "products"
+                    ? "items"
+                    : activeTab === "batches"
+                    ? "batches"
+                    : activeTab === "parties"
+                    ? "customers"
+                    : "discount_schemas";
+                setImportEntityId(entity);
+              }}
+              className="flex items-center gap-1.5 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-bold text-indigo-700 hover:bg-indigo-100 transition-colors shadow-2xs cursor-pointer"
+            >
+              <Upload className="h-3.5 w-3.5" />
+              <span>Import Wizard (Excel/CSV)</span>
+            </button>
+            <button
+              onClick={() => {
+                const entity =
+                  activeTab === "products"
+                    ? "items"
+                    : activeTab === "batches"
+                    ? "batches"
+                    : activeTab === "parties"
+                    ? "customers"
+                    : "discount_schemas";
+                setExportEntityId(entity);
+              }}
+              className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition-colors shadow-2xs cursor-pointer"
+            >
+              <Download className="h-3.5 w-3.5 text-slate-500" />
+              <span>Export</span>
+            </button>
+          </div>
+
+          {/* Tab Switcher */}
+          <div className="flex rounded-lg bg-slate-100 p-1 border border-slate-200">
           <button
             onClick={() => { setActiveTab("products"); setSearchQuery(""); }}
             className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
@@ -363,6 +412,7 @@ export const MastersPage: React.FC = () => {
             <Percent className="h-3.5 w-3.5" />
             <span>Discounts ({discountRules.length})</span>
           </button>
+        </div>
         </div>
       </div>
 
@@ -411,80 +461,117 @@ export const MastersPage: React.FC = () => {
         </div>
 
         {/* Action Button */}
-        <div>
+        <div className="flex items-center gap-2">
           {activeTab === "products" && (
-            <button
-              onClick={() => {
-                setEditingProduct(null);
-                setProdForm({
-                  name: "",
-                  barcode: String(Math.floor(100000000000 + Math.random() * 900000000000)),
-                  hsn_sac_code: "30049099",
-                  mrp: 0,
-                  sel_rate: 0,
-                  ptr: 0,
-                  pts: 0,
-                  gst_percent: 12,
-                  units_per_pack: 1,
-                  generic_name: "",
-                  rack_location: "R1",
-                  shelf_location: "S1",
-                  reorder_level: 10,
-                  current_stock: 0,
-                  is_active: true,
-                });
-                setIsProductModalOpen(true);
-              }}
-              className="flex items-center gap-1.5 rounded-md bg-indigo-600 px-3 py-2 text-xs font-semibold text-white shadow-sm hover:bg-indigo-700"
-            >
-              <Plus className="h-4 w-4" />
-              <span>Add Product</span>
-            </button>
+            <>
+              <button
+                onClick={() => setImportEntityId("items")}
+                className="flex items-center gap-1.5 rounded-md border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 shadow-2xs hover:bg-slate-50 cursor-pointer"
+              >
+                <Upload className="h-3.5 w-3.5 text-indigo-600" />
+                <span>Import Products</span>
+              </button>
+              <button
+                onClick={() => {
+                  setEditingProduct(null);
+                  setProdForm({
+                    name: "",
+                    barcode: String(Math.floor(100000000000 + Math.random() * 900000000000)),
+                    hsn_sac_code: "30049099",
+                    mrp: 0,
+                    sel_rate: 0,
+                    ptr: 0,
+                    pts: 0,
+                    gst_percent: 12,
+                    units_per_pack: 1,
+                    generic_name: "",
+                    rack_location: "R1",
+                    shelf_location: "S1",
+                    reorder_level: 10,
+                    current_stock: 0,
+                    is_active: true,
+                  });
+                  setIsProductModalOpen(true);
+                }}
+                className="flex items-center gap-1.5 rounded-md bg-indigo-600 px-3 py-2 text-xs font-semibold text-white shadow-sm hover:bg-indigo-700 cursor-pointer"
+              >
+                <Plus className="h-4 w-4" />
+                <span>Add Product</span>
+              </button>
+            </>
           )}
           {activeTab === "batches" && (
-            <button
-              onClick={() => {
-                setEditingBatch(null);
-                setBatchForm({
-                  product_id: products[0]?.id || "",
-                  batch_no: `B${Math.floor(1000 + Math.random() * 9000)}`,
-                  expiry_date: "2027-12",
-                  stock_qty: 100,
-                  mrp: 120,
-                  purchase_rate: 80,
-                  selling_rate: 110,
-                  rack_location: "R1",
-                  shelf_location: "S1",
-                });
-                setIsBatchModalOpen(true);
-              }}
-              className="flex items-center gap-1.5 rounded-md bg-indigo-600 px-3 py-2 text-xs font-semibold text-white shadow-sm hover:bg-indigo-700"
-            >
-              <Plus className="h-4 w-4" />
-              <span>Add Batch</span>
-            </button>
+            <>
+              <button
+                onClick={() => setImportEntityId("batches")}
+                className="flex items-center gap-1.5 rounded-md border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 shadow-2xs hover:bg-slate-50 cursor-pointer"
+              >
+                <Upload className="h-3.5 w-3.5 text-indigo-600" />
+                <span>Import Batches</span>
+              </button>
+              <button
+                onClick={() => {
+                  setEditingBatch(null);
+                  setBatchForm({
+                    product_id: products[0]?.id || "",
+                    batch_no: `B${Math.floor(1000 + Math.random() * 9000)}`,
+                    expiry_date: "2027-12",
+                    stock_qty: 100,
+                    mrp: 120,
+                    purchase_rate: 80,
+                    selling_rate: 110,
+                    rack_location: "R1",
+                    shelf_location: "S1",
+                  });
+                  setIsBatchModalOpen(true);
+                }}
+                className="flex items-center gap-1.5 rounded-md bg-indigo-600 px-3 py-2 text-xs font-semibold text-white shadow-sm hover:bg-indigo-700 cursor-pointer"
+              >
+                <Plus className="h-4 w-4" />
+                <span>Add Batch</span>
+              </button>
+            </>
           )}
           {activeTab === "parties" && (
-            <button
-              onClick={() => {
-                setEditingParty(null);
-                setPartyForm({
-                  type: partyTypeFilter === "all" ? "customer" : partyTypeFilter,
-                  name: "",
-                  phone: "",
-                  gstin: "",
-                  address: "",
-                  credit_limit: 5000,
-                  credit_period_days: 30,
-                  is_active: true,
-                });
-                setIsPartyModalOpen(true);
-              }}
-              className="flex items-center gap-1.5 rounded-md bg-indigo-600 px-3 py-2 text-xs font-semibold text-white shadow-sm hover:bg-indigo-700"
-            >
-              <Plus className="h-4 w-4" />
-              <span>Add Party</span>
-            </button>
+            <>
+              <button
+                onClick={() =>
+                  setImportEntityId(
+                    partyTypeFilter === "supplier"
+                      ? "suppliers"
+                      : partyTypeFilter === "doctor"
+                      ? "doctors"
+                      : partyTypeFilter === "patient"
+                      ? "patients"
+                      : "customers"
+                  )
+                }
+                className="flex items-center gap-1.5 rounded-md border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 shadow-2xs hover:bg-slate-50 cursor-pointer"
+              >
+                <Upload className="h-3.5 w-3.5 text-indigo-600" />
+                <span>Import Parties</span>
+              </button>
+              <button
+                onClick={() => {
+                  setEditingParty(null);
+                  setPartyForm({
+                    type: partyTypeFilter === "all" ? "customer" : partyTypeFilter,
+                    name: "",
+                    phone: "",
+                    gstin: "",
+                    address: "",
+                    credit_limit: 5000,
+                    credit_period_days: 30,
+                    is_active: true,
+                  });
+                  setIsPartyModalOpen(true);
+                }}
+                className="flex items-center gap-1.5 rounded-md bg-indigo-600 px-3 py-2 text-xs font-semibold text-white shadow-sm hover:bg-indigo-700 cursor-pointer"
+              >
+                <Plus className="h-4 w-4" />
+                <span>Add Party</span>
+              </button>
+            </>
           )}
           {activeTab === "discounts" && (
             <button
@@ -498,7 +585,7 @@ export const MastersPage: React.FC = () => {
                 });
                 setIsDiscountModalOpen(true);
               }}
-              className="flex items-center gap-1.5 rounded-md bg-indigo-600 px-3 py-2 text-xs font-semibold text-white shadow-sm hover:bg-indigo-700"
+              className="flex items-center gap-1.5 rounded-md bg-indigo-600 px-3 py-2 text-xs font-semibold text-white shadow-sm hover:bg-indigo-700 cursor-pointer"
             >
               <Plus className="h-4 w-4" />
               <span>Add Schema</span>
@@ -1268,6 +1355,27 @@ export const MastersPage: React.FC = () => {
             </form>
           </div>
         </div>
+      )}
+
+      {importEntityId && (
+        <ImportWizardModal
+          isOpen={Boolean(importEntityId)}
+          initialEntityId={importEntityId}
+          onClose={() => setImportEntityId(null)}
+          onSuccess={() => {
+            setImportEntityId(null);
+            loadData();
+            showNotification("Master data imported successfully!");
+          }}
+        />
+      )}
+
+      {exportEntityId && (
+        <ExportDialogModal
+          isOpen={Boolean(exportEntityId)}
+          initialEntityId={exportEntityId}
+          onClose={() => setExportEntityId(null)}
+        />
       )}
     </div>
   );

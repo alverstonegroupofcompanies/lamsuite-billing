@@ -23,6 +23,7 @@ import {
 import { sqliteStorage } from "../lib/db/sqliteStorage";
 import { printingEngine, type DebitNotePrintData } from "../lib/printing/printingEngine";
 import { PrintPreviewModal } from "../components/PrintPreviewModal";
+import { useModalEscape } from "../lib/ui/modalEscapeManager";
 
 const RETURN_REASONS: { value: PurchaseReturnReason; label: string }[] = [
   { value: "expired", label: "Expired" },
@@ -74,6 +75,7 @@ export const PurchaseReturnPage: React.FC = () => {
 
   // --- Form state ---
   const [isFormOpen, setIsFormOpen] = useState(false);
+  useModalEscape(isFormOpen, () => setIsFormOpen(false));
   const [formStep, setFormStep] = useState<"purchase_search" | "line_selection" | "settlement">("purchase_search");
 
   // Step 1

@@ -41,6 +41,7 @@ import { posCartService } from "../lib/billing/posCartService";
 import { productsStore, type ProductBatch, type ProductItem } from "../lib/masters/productsStore";
 import { companySettingsService } from "../lib/settings/companySettingsService";
 import { PrintPreviewModal } from "../components/PrintPreviewModal";
+import { useModalEscape } from "../lib/ui/modalEscapeManager";
 
 export const BillsPage: React.FC = () => {
   const navigate = useNavigate();
@@ -61,15 +62,18 @@ export const BillsPage: React.FC = () => {
   const [selectedInvoiceItems, setSelectedInvoiceItems] = useState<InvoiceItemRecord[]>([]);
   const [selectedInvoiceAudit, setSelectedInvoiceAudit] = useState<InvoiceAuditEntry[]>([]);
   const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
+  useModalEscape(isDetailModalOpen, () => setIsDetailModalOpen(false));
 
   // Cancel & PIN Dialog
   const [isCancelModalOpen, setIsCancelModalOpen] = useState(false);
+  useModalEscape(isCancelModalOpen, () => setIsCancelModalOpen(false));
   const [cancelReason, setCancelReason] = useState("");
   const [managerPin, setManagerPin] = useState("");
   const [pinError, setPinError] = useState("");
 
   // Edit PIN Dialog
   const [isEditPinModalOpen, setIsEditPinModalOpen] = useState(false);
+  useModalEscape(isEditPinModalOpen, () => setIsEditPinModalOpen(false));
   const [editPin, setEditPin] = useState("");
   const [editPinError, setEditPinError] = useState("");
 

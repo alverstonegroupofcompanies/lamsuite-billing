@@ -15,9 +15,11 @@ import {
   FileBarChart,
   Database,
   Settings,
+  Monitor,
   Keyboard,
   X,
   LucideIcon,
+  Layers,
 } from "lucide-react";
 
 export interface NavChildItem {
@@ -171,11 +173,32 @@ export const TopNav: React.FC<TopNavProps> = ({ enabledMenus, onOpenShortcutsHel
       icon: Database,
     },
     {
+      id: "import_export",
+      name: "Import / Export",
+      path: "/import-export",
+      key: "F9",
+      icon: Layers,
+    },
+    {
+      id: "migration",
+      name: "Data Migration",
+      path: "/migration",
+      key: "Shift+F9",
+      icon: Database,
+    },
+    {
       id: "settings",
       name: "Settings",
       path: "/settings",
       key: "F10",
       icon: Settings,
+    },
+    {
+      id: "counters",
+      name: "Counters",
+      path: "/counters",
+      key: "F8",
+      icon: Monitor,
     },
   ];
 
@@ -190,7 +213,7 @@ export const TopNav: React.FC<TopNavProps> = ({ enabledMenus, onOpenShortcutsHel
           children: filteredChildren,
         };
       }
-      return enabledMenus.includes(item.id) ? item : null;
+      return item.id === "migration" || enabledMenus.includes(item.id) ? item : null;
     })
     .filter((item): item is NavItemConfig => item !== null);
 

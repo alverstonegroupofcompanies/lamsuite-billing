@@ -22,6 +22,7 @@ import { BarcodePrintModal } from "./BarcodePrintModal";
 import { SupplierPaymentModal } from "./SupplierPaymentModal";
 import { PrintPreviewModal } from "../PrintPreviewModal";
 import { useNavigate } from "react-router-dom";
+import { useModalEscape } from "../../lib/ui/modalEscapeManager";
 
 interface PurchaseDetailsDrawerProps {
   isOpen: boolean;
@@ -37,12 +38,15 @@ export const PurchaseDetailsDrawer: React.FC<PurchaseDetailsDrawerProps> = ({
   onPurchaseUpdated,
 }) => {
   const navigate = useNavigate();
+  useModalEscape(isOpen, onClose);
+
   const [doc, setDoc] = useState<PurchaseDocumentRecord | null>(null);
   const [items, setItems] = useState<PurchaseItemRecord[]>([]);
   const [isBarcodeOpen, setIsBarcodeOpen] = useState(false);
   const [isPaymentOpen, setIsPaymentOpen] = useState(false);
   const [isPrintOpen, setIsPrintOpen] = useState(false);
   const [isCancelConfirmOpen, setIsCancelConfirmOpen] = useState(false);
+  useModalEscape(isCancelConfirmOpen, () => setIsCancelConfirmOpen(false));
   const [cancelReason, setCancelReason] = useState("");
   const [isCancelling, setIsCancelling] = useState(false);
   const [cancelError, setCancelError] = useState<string | null>(null);
@@ -115,9 +119,9 @@ export const PurchaseDetailsDrawer: React.FC<PurchaseDetailsDrawerProps> = ({
             <strong>Place of Supply:</strong> ${doc.place_of_supply || "State"}
           </div>
           <div>
-            <strong>Supplier Inv #:</strong> ${doc.supplier_invoice_no}<br/>
-            <strong>Status:</strong> ${doc.status.toUpperCase()}<br/>
-            <strong>Payment Status:</strong> ${doc.payment_status.toUpperCase()}
+            <strong>Supplier Inv #:</strong> ${doc.supplier_invoice_no || "N/A"}<br/>
+            <strong>Status:</strong> ${(doc.status || "received").toUpperCase()}<br/>
+            <strong>Payment Status:</strong> ${(doc.payment_status || "unpaid").toUpperCase()}
           </div>
         </div>
         <table>
@@ -161,12 +165,12 @@ export const PurchaseDetailsDrawer: React.FC<PurchaseDetailsDrawerProps> = ({
           </tbody>
         </table>
         <table class="totals-table">
-          <tr><td>Taxable Subtotal:</td><td class="text-right">₹${doc.subtotal.toFixed(2)}</td></tr>
-          <tr><td>GST Tax:</td><td class="text-right">₹${doc.tax_total.toFixed(2)}</td></tr>
-          <tr><td>Round Off:</td><td class="text-right">₹${doc.round_off.toFixed(2)}</td></tr>
-          <tr><td><strong>Grand Total:</strong></td><td class="text-right"><strong>₹${doc.grand_total.toFixed(2)}</strong></td></tr>
-          <tr><td>Paid Amount:</td><td class="text-right">₹${(doc.paid_amount || 0).toFixed(2)}</td></tr>
-          <tr><td><strong>Balance Due:</strong></td><td class="text-right"><strong>₹${Math.max(0, doc.grand_total - (doc.paid_amount || 0)).toFixed(2)}</strong></td></tr>
+          <tr><td>Taxable Subtotal:</td><td class="text-right">₹${Number(doc.subtotal || 0).toFixed(2)}</td></tr>
+          <tr><td>GST Tax:</td><td class="text-right">₹${Number(doc.tax_total || 0).toFixed(2)}</td></tr>
+          <tr><td>Round Off:</td><td class="text-right">₹${Number(doc.round_off || 0).toFixed(2)}</td></tr>
+          <tr><td><strong>Grand Total:</strong></td><td class="text-right"><strong>₹${Number(doc.grand_total || 0).toFixed(2)}</strong></td></tr>
+          <tr><td>Paid Amount:</td><td class="text-right">₹${Number(doc.paid_amount || 0).toFixed(2)}</td></tr>
+          <tr><td><strong>Balance Due:</strong></td><td class="text-right"><strong>₹${Math.max(0, Number(doc.grand_total || 0) - Number(doc.paid_amount || 0)).toFixed(2)}</strong></td></tr>
         </table>
       </body>
       </html>
@@ -189,18 +193,18 @@ export const PurchaseDetailsDrawer: React.FC<PurchaseDetailsDrawerProps> = ({
                       : "bg-red-100 text-red-800"
                   }`}
                 >
-                  {doc.status.toUpperCase()}
+                  {(doc.status || "received").toUpperCase()}
                 </span>
                 <span
                   className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
-                    doc.payment_status === "paid"
+                    (doc.payment_status || "unpaid") === "paid"
                       ? "bg-blue-100 text-blue-800"
-                      : doc.payment_status === "partial"
+                      : (doc.payment_status || "unpaid") === "partial"
                       ? "bg-amber-100 text-amber-800"
                       : "bg-slate-100 text-slate-700"
                   }`}
                 >
-                  {doc.payment_status.toUpperCase()}
+                  {(doc.payment_status || "unpaid").toUpperCase()}
                 </span>
               </div>
               <p className="text-xs text-slate-500 mt-0.5">Supplier Inv #: {doc.supplier_invoice_no}</p>
@@ -229,7 +233,7 @@ export const PurchaseDetailsDrawer: React.FC<PurchaseDetailsDrawerProps> = ({
               <span>Barcodes</span>
             </button>
 
-            {doc.status !== "cancelled" && doc.payment_status !== "paid" && (
+            {doc.status !== "cancelled" && (doc.payment_status || "unpaid") !== "paid" && (
               <button
                 onClick={() => setIsPaymentOpen(true)}
                 className="flex items-center gap-1.5 rounded bg-emerald-600 px-3 py-1.5 text-xs font-bold text-white shadow-xs hover:bg-emerald-700"
@@ -327,49 +331,49 @@ export const PurchaseDetailsDrawer: React.FC<PurchaseDetailsDrawerProps> = ({
             <div className="rounded-lg border border-slate-200 bg-slate-50 p-3.5 space-y-1.5 ml-auto w-72 text-xs">
               <div className="flex justify-between text-slate-600">
                 <span>Taxable Subtotal:</span>
-                <span>₹ {doc.subtotal.toFixed(2)}</span>
+                <span>₹ {Number(doc.subtotal || 0).toFixed(2)}</span>
               </div>
-              {doc.discount_total > 0 && (
+              {Number(doc.discount_total || 0) > 0 && (
                 <div className="flex justify-between text-emerald-600">
                   <span>Discounts:</span>
-                  <span>- ₹ {doc.discount_total.toFixed(2)}</span>
+                  <span>- ₹ {Number(doc.discount_total || 0).toFixed(2)}</span>
                 </div>
               )}
               {doc.is_interstate === 1 ? (
                 <div className="flex justify-between text-slate-600">
                   <span>IGST Tax:</span>
-                  <span>₹ {doc.igst_total.toFixed(2)}</span>
+                  <span>₹ {Number(doc.igst_total || 0).toFixed(2)}</span>
                 </div>
               ) : (
                 <>
                   <div className="flex justify-between text-slate-600">
                     <span>CGST:</span>
-                    <span>₹ {doc.cgst_total.toFixed(2)}</span>
+                    <span>₹ {Number(doc.cgst_total || 0).toFixed(2)}</span>
                   </div>
                   <div className="flex justify-between text-slate-600">
                     <span>SGST:</span>
-                    <span>₹ {doc.sgst_total.toFixed(2)}</span>
+                    <span>₹ {Number(doc.sgst_total || 0).toFixed(2)}</span>
                   </div>
                 </>
               )}
-              {doc.round_off !== 0 && (
+              {Number(doc.round_off || 0) !== 0 && (
                 <div className="flex justify-between text-slate-600">
                   <span>Round Off:</span>
-                  <span>₹ {doc.round_off.toFixed(2)}</span>
+                  <span>₹ {Number(doc.round_off || 0).toFixed(2)}</span>
                 </div>
               )}
               <div className="flex justify-between font-black text-slate-900 text-sm border-t border-slate-200 pt-1.5">
                 <span>Grand Total:</span>
-                <span className="text-blue-700">₹ {doc.grand_total.toFixed(2)}</span>
+                <span className="text-blue-700">₹ {Number(doc.grand_total || 0).toFixed(2)}</span>
               </div>
               <div className="flex justify-between text-slate-600 border-t border-slate-200 pt-1">
                 <span>Paid Amount:</span>
-                <span className="font-semibold text-emerald-700">₹ {(doc.paid_amount || 0).toFixed(2)}</span>
+                <span className="font-semibold text-emerald-700">₹ {Number(doc.paid_amount || 0).toFixed(2)}</span>
               </div>
               <div className="flex justify-between font-bold text-slate-800">
                 <span>Balance Due:</span>
                 <span className="text-red-600">
-                  ₹ {Math.max(0, doc.grand_total - (doc.paid_amount || 0)).toFixed(2)}
+                  ₹ {Math.max(0, Number(doc.grand_total || 0) - Number(doc.paid_amount || 0)).toFixed(2)}
                 </span>
               </div>
             </div>

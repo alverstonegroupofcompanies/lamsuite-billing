@@ -9,6 +9,8 @@ import {
 } from "./billingCalculations";
 import { sqliteStorage } from "../db/sqliteStorage";
 import { syncQueueService } from "../sync/syncQueueService";
+import { staffAuthService } from "../auth/staffAuthService";
+import { cashShiftService } from "./cashShiftService";
 
 export interface PosCartLine {
   id: string;
@@ -105,6 +107,15 @@ export class PosCartService {
 
   setIsInterState(isInterState: boolean) {
     this.isInterState = isInterState;
+    // Recalculate existing lines with new interstate setting
+    this.lines = this.lines.map((l) => ({
+      ...l,
+      calculated: this.calculateLine(l),
+    }));
+  }
+
+  getIsInterState(): boolean {
+    return this.isInterState;
   }
 
   setPrescriptionMeta(meta: PosPrescriptionMeta) {
@@ -443,6 +454,11 @@ export class PosCartService {
     const externalId = `ext_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`;
     const now = Date.now();
 
+    const currentSession = staffAuthService.getCurrentSession();
+    const activeCounterId = currentSession?.counterId || "Counter 01";
+    const activeUserId = currentSession?.user?.id || options?.operatorId || "usr_cashier_01";
+    const activeUserName = currentSession?.user?.full_name || "Store Cashier";
+
     const invoiceRow = {
       id: invoiceId,
       module_key: "invoice",
@@ -461,6 +477,9 @@ export class PosCartService {
       paid_amount: totals.grand_total,
       payment_mode: paymentMode,
       status: "issued",
+      counter_id: activeCounterId,
+      created_by_user_id: activeUserId,
+      created_by_user_name: activeUserName,
       patient_name: this.prescriptionMeta.patient_name,
       doctor_name: this.prescriptionMeta.doctor_name,
       doctor_reg_no: this.prescriptionMeta.doctor_reg_no,
@@ -469,6 +488,9 @@ export class PosCartService {
       created_at: now,
       updated_at: now,
     };
+
+    // Record tender in active counter shift
+    await cashShiftService.recordSaleTender(activeCounterId, paymentMode, totals.grand_total);
 
     // 1. Commit Invoice to local SQLite
     await sqliteStorage.insertRecord("invoices", invoiceId, invoiceRow);
@@ -537,6 +559,8 @@ export class PosCartService {
         qty_delta: -deductedBaseUnits,
         reference_type: "INVOICE",
         reference_id: invoiceId,
+        counter_id: activeCounterId,
+        created_by_user_id: activeUserId,
         notes: noteStr,
         created_at: now,
       });

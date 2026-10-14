@@ -16,13 +16,17 @@ class AdminFeatureController
         $allPossibleMenus = [
             ['id' => 'pos', 'name' => 'POS Billing', 'description' => 'Fast checkout, barcode scan & invoice generation'],
             ['id' => 'bills', 'name' => 'Bills & Invoices', 'description' => 'History of issued sales invoices & thermal reprint'],
-            ['id' => 'purchases', 'name' => 'Purchase Management', 'description' => 'Inward stock bills, supplier invoice entry & debit notes'],
+            ['id' => 'sales_returns', 'name' => 'Sales Returns & Credit Notes', 'description' => 'Customer returns, batch restock & refunds'],
+            ['id' => 'customer_debit_notes', 'name' => 'Customer Debit Notes (B2B)', 'description' => 'Multi-invoice reconciliation & GST credit notes'],
+            ['id' => 'purchases', 'name' => 'Purchase Management', 'description' => 'Inward stock bills, supplier invoice entry & ITC'],
+            ['id' => 'purchase_returns', 'name' => 'Purchase Returns (Debit Notes)', 'description' => 'Stock debit notes & supplier return notes'],
             ['id' => 'stock', 'name' => 'Stock & Inventory', 'description' => 'Stock ledger, batch view, near-expiry alerts & adjustments'],
-            ['id' => 'reports', 'name' => 'Reports & GST', 'description' => 'GSTR-1, HSN summary, collections, daily sales & doctor reports'],
+            ['id' => 'stock_transfers', 'name' => 'Inter-Store Transfers', 'description' => 'Multi-item branch dispatch, receipt & delivery challans'],
+            ['id' => 'reports', 'name' => 'Reports & GST Hub', 'description' => 'GSTR-1, HSN summary, collections, daily sales & doctor reports'],
             ['id' => 'masters', 'name' => 'Master Data', 'description' => 'Catalog products, batches, customers, doctors & suppliers'],
+            ['id' => 'counters', 'name' => 'Store Counters & Fleet', 'description' => 'Multi-counter LAN topology, cashier shifts & drawer management'],
+            ['id' => 'import_export', 'name' => 'Universal Import / Export Hub', 'description' => 'Excel/CSV templates, data exchange & backups'],
             ['id' => 'settings', 'name' => 'Store Settings', 'description' => 'Printers, invoice sequences, GST rates & company profile'],
-            ['id' => 'expenses', 'name' => 'Expenses Tracker', 'description' => 'Daily petty cash & store overhead payments'],
-            ['id' => 'returns', 'name' => 'Returns & Refunds', 'description' => 'Sales return memos & customer credit note management'],
         ];
 
         $defaultFeatureFlags = [

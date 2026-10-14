@@ -4,6 +4,7 @@ import { purchaseOrderService, type POLineItemInput } from "../../lib/purchases/
 import { supplierLedgerService, type SupplierMaster } from "../../lib/purchases/supplierLedgerService";
 import { sqliteStorage } from "../../lib/db/sqliteStorage";
 import { type ProductItem } from "../../lib/masters/productsStore";
+import { useModalEscape } from "../../lib/ui/modalEscapeManager";
 
 interface PurchaseOrderModalProps {
   isOpen: boolean;
@@ -18,6 +19,8 @@ export const PurchaseOrderModal: React.FC<PurchaseOrderModalProps> = ({
   moduleKey = "po",
   onCreated,
 }) => {
+  useModalEscape(isOpen, onClose);
+
   const [suppliers, setSuppliers] = useState<SupplierMaster[]>([]);
   const [supplierId, setSupplierId] = useState("");
   const [poDate, setPoDate] = useState(new Date().toISOString().slice(0, 10));

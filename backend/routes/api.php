@@ -25,6 +25,8 @@ use App\Http\Controllers\Api\StockController;
 use App\Http\Controllers\Api\SyncController;
 use App\Http\Controllers\Api\ReportController;
 use App\Http\Controllers\Api\PrintController;
+use App\Http\Controllers\Api\DataExchangeController;
+use App\Http\Controllers\Api\MigrationController;
 
 /*
 |--------------------------------------------------------------------------
@@ -34,6 +36,8 @@ use App\Http\Controllers\Api\PrintController;
 Route::post('/login', [AdminAuthController::class, 'login']);
 Route::post('/auth/login', [AdminAuthController::class, 'login']);
 Route::post('/devices/register', [AuthController::class, 'registerDevice']);
+Route::get('/branches', [AuthController::class, 'branches']);
+Route::get('/license/check', [AuthController::class, 'checkLicense']);
 
 /*
 |--------------------------------------------------------------------------
@@ -82,6 +86,13 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/reports/hsn-summary', [ReportController::class, 'hsnSummary']);
     Route::get('/reports/customer-aging', [ReportController::class, 'customerAging']);
     Route::get('/dashboard/metrics', [ReportController::class, 'dashboardMetrics']);
+
+    // Data Exchange (Universal Import / Export)
+    Route::post('/data-exchange/preview', [DataExchangeController::class, 'preview']);
+    Route::post('/data-exchange/commit', [DataExchangeController::class, 'commit']);
+    Route::get('/data-exchange/templates/{type}', [DataExchangeController::class, 'template']);
+    Route::get('/data-exchange/export/{type}', [DataExchangeController::class, 'export']);
+    Route::get('/data-exchange/history', [DataExchangeController::class, 'history']);
 });
 
 /*
@@ -205,4 +216,20 @@ Route::middleware(['auth:sanctum', 'session.timeout', 'ip.allowlist', 'scope.sto
     Route::post('/print/render-pdf', [PrintController::class, 'renderPdf']);
     Route::get('/print/templates', [PrintController::class, 'syncTemplates']);
     Route::post('/print/history', [PrintController::class, 'recordHistory']);
+
+    // Module 15: Universal Data Exchange
+    Route::post('/data-exchange/preview', [DataExchangeController::class, 'preview'])->middleware('rbac:masters,create');
+    Route::post('/data-exchange/commit', [DataExchangeController::class, 'commit'])->middleware('rbac:masters,create');
+    Route::get('/data-exchange/templates/{type}', [DataExchangeController::class, 'template'])->middleware('rbac:masters,view');
+    Route::get('/data-exchange/export/{type}', [DataExchangeController::class, 'export'])->middleware('rbac:masters,view');
+    Route::get('/data-exchange/history', [DataExchangeController::class, 'history'])->middleware('rbac:audit,view');
+
+    // Module 16: Data Migration Engine
+    Route::get('/migrations', [MigrationController::class, 'index']);
+    Route::post('/migrations/precheck', [MigrationController::class, 'precheck']);
+    Route::post('/migrations/start', [MigrationController::class, 'start']);
+    Route::get('/migrations/{uuid}', [MigrationController::class, 'show']);
+    Route::post('/migrations/{uuid}/reconcile', [MigrationController::class, 'reconcile']);
+    Route::post('/migrations/{uuid}/rollback', [MigrationController::class, 'rollback']);
+    Route::post('/migrations/{uuid}/cutover', [MigrationController::class, 'cutover']);
 });

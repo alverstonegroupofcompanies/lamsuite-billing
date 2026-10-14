@@ -422,9 +422,12 @@ export const DEFAULT_SETTINGS: CompanySettings = {
     "purchases",
     "purchase_returns",
     "stock",
+    "stock_transfers",
     "reports",
     "masters",
+    "import_export",
     "settings",
+    "counters",
   ],
 };
 
@@ -448,6 +451,11 @@ export class CompanySettingsService {
         header_fields: record.header_fields?.length ? record.header_fields : [...DEFAULT_HEADER_FIELDS],
         active_billing_preset: record.active_billing_preset || "pharmacy",
         saved_billing_presets: record.saved_billing_presets?.length ? record.saved_billing_presets : [...BUILTIN_BILLING_PRESETS],
+        enabled_menu_items: record.enabled_menu_items?.length
+          ? (record.enabled_menu_items.includes("import_export")
+              ? record.enabled_menu_items
+              : [...record.enabled_menu_items, "import_export"])
+          : [...DEFAULT_SETTINGS.enabled_menu_items],
       };
     }
     return { ...this.currentSettings };

@@ -24,6 +24,7 @@ import {
   Download,
   Eye,
   RefreshCw,
+  Upload,
 } from "lucide-react";
 import {
   purchaseService,
@@ -43,6 +44,7 @@ import {
 import { sqliteStorage } from "../lib/db/sqliteStorage";
 import { PurchaseEntryForm } from "../components/purchases/PurchaseEntryForm";
 import { PurchaseDetailsDrawer } from "../components/purchases/PurchaseDetailsDrawer";
+import { ImportWizardModal } from "../lib/data-exchange/ui/ImportWizardModal";
 import { PurchaseOrderModal } from "../components/purchases/PurchaseOrderModal";
 import { SupplierPaymentModal } from "../components/purchases/SupplierPaymentModal";
 import { SupplierQuickAddModal } from "../components/purchases/SupplierQuickAddModal";
@@ -81,6 +83,7 @@ export const PurchasesPage: React.FC = () => {
   const [ageingList, setAgeingList] = useState<SupplierAgeingSummary[]>([]);
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
   const [isQuickAddSupplierOpen, setIsQuickAddSupplierOpen] = useState(false);
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
 
   // Feedback Notification
   const [notification, setNotification] = useState<{ message: string; type: "success" | "error" } | null>(null);
@@ -150,7 +153,8 @@ export const PurchasesPage: React.FC = () => {
   // Filter Inward Bills
   const filteredPurchases = purchasesList.filter((p) => {
     if (selectedSupplierFilter !== "all" && p.supplier_id !== selectedSupplierFilter) return false;
-    if (paymentStatusFilter !== "all" && p.payment_status !== paymentStatusFilter) return false;
+    const effectivePaymentStatus = p.payment_status || "unpaid";
+    if (paymentStatusFilter !== "all" && effectivePaymentStatus !== paymentStatusFilter) return false;
 
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
@@ -243,11 +247,18 @@ export const PurchasesPage: React.FC = () => {
 
         <div className="flex items-center gap-2">
           <button
+            onClick={() => setIsImportModalOpen(true)}
+            className="flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3.5 py-2 text-xs font-bold text-slate-700 shadow-2xs hover:bg-slate-50 transition-colors cursor-pointer"
+          >
+            <Upload className="h-4 w-4 text-blue-600" />
+            <span>Import Invoices (Excel/CSV)</span>
+          </button>
+          <button
             onClick={() => {
               setPoToConvert(null);
               setIsEntryFormOpen(true);
             }}
-            className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-xs font-bold text-white shadow-xs hover:bg-blue-700"
+            className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-xs font-bold text-white shadow-xs hover:bg-blue-700 cursor-pointer"
           >
             <Plus className="h-4 w-4" />
             <span>New Inward Bill (F2)</span>
@@ -470,9 +481,9 @@ export const PurchasesPage: React.FC = () => {
                         <td className="px-4 py-3 text-center">
                           <span
                             className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
-                              p.payment_status === "paid"
+                              (p.payment_status || "unpaid") === "paid"
                                 ? "bg-emerald-100 text-emerald-800"
-                                : p.payment_status === "partial"
+                                : (p.payment_status || "unpaid") === "partial"
                                 ? "bg-amber-100 text-amber-800"
                                 : "bg-slate-100 text-slate-600"
                             }`}
@@ -857,6 +868,20 @@ export const PurchasesPage: React.FC = () => {
             loadAllData();
             setSelectedLedgerSupplierId(s.id);
             showNotification(`Supplier ${s.name} added!`);
+          }}
+        />
+      )}
+
+      {/* Import Wizard Modal */}
+      {isImportModalOpen && (
+        <ImportWizardModal
+          isOpen={isImportModalOpen}
+          initialEntityId="purchases"
+          onClose={() => setIsImportModalOpen(false)}
+          onSuccess={() => {
+            setIsImportModalOpen(false);
+            loadAllData();
+            showNotification("Purchases imported successfully!");
           }}
         />
       )}

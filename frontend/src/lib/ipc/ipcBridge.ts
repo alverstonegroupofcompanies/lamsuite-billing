@@ -3,6 +3,23 @@ export type DesktopRuntime = "tauri" | "electron" | "mock";
 export type MockHandler = (args?: unknown) => Promise<unknown> | unknown;
 
 const mockHandlers = new Map<string, MockHandler>();
+const inMemorySecureVault = new Map<string, string>();
+
+function initDefaultMockHandlers() {
+  mockHandlers.set("secure_store_set", (args: any) => {
+    inMemorySecureVault.set(args.key, args.value);
+    return { success: true };
+  });
+  mockHandlers.set("secure_store_get", (args: any) => {
+    return inMemorySecureVault.get(args.key) || null;
+  });
+  mockHandlers.set("secure_store_delete", (args: any) => {
+    inMemorySecureVault.delete(args.key);
+    return { success: true };
+  });
+}
+
+initDefaultMockHandlers();
 
 export function registerMockHandler(command: string, handler: MockHandler): void {
   mockHandlers.set(command, handler);
@@ -10,6 +27,8 @@ export function registerMockHandler(command: string, handler: MockHandler): void
 
 export function resetMockHandlers(): void {
   mockHandlers.clear();
+  inMemorySecureVault.clear();
+  initDefaultMockHandlers();
 }
 
 function getGlobalScope(): Record<string, unknown> {

@@ -46,7 +46,7 @@ export const InventoryPage: React.FC = () => {
     setIsLoading(true);
     try {
       if (activeTab === "batches") {
-        const res = await api.get<{ data: ProductBatch[] }>("/admin/inventory/batches", { search });
+        const res = await api.get<{ data: ProductBatch[] }>("/admin/inventory/batches", { search, per_page: 100 });
         setBatches(res.data || []);
       } else if (activeTab === "ledger") {
         const res = await api.get<{ data: any[] }>("/admin/inventory/ledger");

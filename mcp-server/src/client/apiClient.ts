@@ -385,11 +385,11 @@ export class LamSuiteApiClient {
     });
   }
 
-  // --- Reports ---
-  async getDailyCollection(startDate?: string, endDate?: string): Promise<SalesSummaryData> {
+  async getDailyCollection(startDate?: string, endDate?: string, counterId?: string): Promise<SalesSummaryData> {
     const q = new URLSearchParams();
     if (startDate) q.set("start_date", startDate);
     if (endDate) q.set("end_date", endDate);
+    if (counterId) q.set("counter_id", counterId);
     const qs = q.toString() ? `?${q.toString()}` : "";
     return this.request<SalesSummaryData>(`/reports/daily-collection${qs}`);
   }

@@ -16,9 +16,17 @@ class ReportController
         $startDate = $request->query('start_date', date('Y-m-d'));
         $endDate = $request->query('end_date', date('Y-m-d'));
 
-        $invoices = Invoice::whereBetween('invoice_date', [$startDate, $endDate])
-            ->where('status', '!=', 'cancelled')
-            ->get();
+        $counterId = $request->query('counter_id');
+
+        $query = Invoice::whereDate('invoice_date', '>=', $startDate)
+            ->whereDate('invoice_date', '<=', $endDate)
+            ->where('status', '!=', 'cancelled');
+
+        if (!empty($counterId)) {
+            $query->where('counter_id', $counterId);
+        }
+
+        $invoices = $query->get();
 
         $grossSales = $invoices->where('module_key', 'invoice')->sum('grand_total');
         $returns = $invoices->where('module_key', 'credit_note')->sum('grand_total');

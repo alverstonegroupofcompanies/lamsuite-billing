@@ -1,0 +1,19 @@
+{
+  "mcpServers": {
+    "lamsuite": {
+      "command": "node",
+      "args": [
+        "/Users/anshad/.gemini/antigravity/scratch/lamsuite-billing/mcp-server/dist/index.js",
+        "--mock"
+      ],
+      "env": {
+        "LAMSUITE_STORE_ID": "1",
+        "LAMSUITE_READ_ONLY": "false",
+        "LAMSUITE_API_ROLE": "admin"
+      }
+    },
+    "lamsuite-http": {
+      "serverUrl": "http://127.0.0.1:3000/sse"
+    }
+  }
+}

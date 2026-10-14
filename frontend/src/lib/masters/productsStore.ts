@@ -66,6 +66,7 @@ export interface ProductItem {
   shelf_location?: string;
   reorder_level?: number;
   current_stock?: number;
+  schedule_type?: "H" | "H1" | "X" | "G" | "NONE";
   is_active: boolean;
   external_id?: string;
 }

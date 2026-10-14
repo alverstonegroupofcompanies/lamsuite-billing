@@ -20,6 +20,8 @@ import {
   Check,
   Tag,
   Zap,
+  Maximize2,
+  Minimize2,
 } from "lucide-react";
 import {
   printingEngine,
@@ -40,6 +42,7 @@ import {
 import { isTauri } from "../lib/ipc/ipcBridge";
 import { dotMatrixRenderer, DotMatrixOptions } from "../lib/printing/dotMatrixRenderer";
 import { companySettingsService } from "../lib/settings/companySettingsService";
+import { useModalEscape } from "../lib/ui/modalEscapeManager";
 
 export interface PrintPreviewModalProps {
   isOpen: boolean;
@@ -63,6 +66,7 @@ export interface PrintPreviewModalProps {
   onAfterPrint?: (result: { success: boolean; mode: string }) => void;
   customerPhone?: string;
   customerEmail?: string;
+  defaultFullscreen?: boolean;
 }
 
 export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
@@ -75,8 +79,29 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
   onAfterPrint,
   customerPhone,
   customerEmail,
+  defaultFullscreen,
 }) => {
   const settings = companySettingsService.getSettings();
+
+  // Fullscreen State (defaults to true for immersive full-screen view)
+  const [isFullscreen, setIsFullscreen] = useState<boolean>(() => {
+    if (defaultFullscreen !== undefined) return defaultFullscreen;
+    try {
+      return localStorage.getItem("print_preview_fullscreen") !== "false";
+    } catch {
+      return true;
+    }
+  });
+
+  const toggleFullscreen = () => {
+    setIsFullscreen((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem("print_preview_fullscreen", String(next));
+      } catch {}
+      return next;
+    });
+  };
 
   // Tab State
   const [activeTab, setActiveTab] = useState<"device" | "layout" | "share">("device");
@@ -117,6 +142,8 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
   const [isSavingPdf, setIsSavingPdf] = useState<boolean>(false);
   const [statusMessage, setStatusMessage] = useState<{ text: string; type: "info" | "success" | "error" } | null>(null);
   const [savedFilePath, setSavedFilePath] = useState<string | null>(null);
+  const [iframeHeight, setIframeHeight] = useState<string>("1150px");
+  const [previewPageCount, setPreviewPageCount] = useState<number>(1);
 
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const printerSelectRef = useRef<HTMLSelectElement | null>(null);
@@ -163,9 +190,8 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
     };
 
     loadPrintersAndHistory();
-    setStatusMessage(null);
-    setSavedFilePath(null);
-    setZoomScale(paperSize.startsWith("thermal") ? 110 : 95);
+    const isWideDisplay = typeof window !== "undefined" && window.innerWidth >= 1920;
+    setZoomScale(paperSize.startsWith("thermal") ? (isWideDisplay ? 120 : 110) : 95);
 
     return () => {
       mounted = false;
@@ -283,6 +309,9 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
     showPageBreaks,
   ]);
 
+  // Register global modal escape handler to close and prevent fullscreen exit
+  useModalEscape(isOpen, onClose);
+
   // Write HTML into preview iframe
   useEffect(() => {
     if (isOpen && iframeRef.current && renderedHtml) {
@@ -291,9 +320,58 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
         doc.open();
         doc.write(renderedHtml);
         doc.close();
+
+        const updatePreviewDimensions = () => {
+          try {
+            if (!iframeRef.current?.contentDocument) return;
+            const d = iframeRef.current.contentDocument;
+            const sheets = d.querySelectorAll(".a4-sheet, .page-sheet, .paper-card");
+            if (sheets && sheets.length > 0) {
+              setPreviewPageCount(sheets.length);
+            } else {
+              setPreviewPageCount(1);
+            }
+            const scrollHeight = Math.max(
+              d.body?.scrollHeight || 0,
+              d.documentElement?.scrollHeight || 0,
+              d.body?.offsetHeight || 0
+            );
+            if (scrollHeight > 100) {
+              setIframeHeight(`${scrollHeight + 30}px`);
+            }
+          } catch {
+            // cross-origin
+          }
+        };
+
+        updatePreviewDimensions();
+        requestAnimationFrame(updatePreviewDimensions);
+        const timer = setTimeout(updatePreviewDimensions, 100);
+
+        try {
+          const win = iframeRef.current.contentWindow;
+          if (win) {
+            win.addEventListener(
+              "keydown",
+              (e) => {
+                if (e.key === "Escape") {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  e.stopImmediatePropagation();
+                  onClose();
+                }
+              },
+              true
+            );
+          }
+        } catch {
+          // ignore cross-origin restrictions if any
+        }
+
+        return () => clearTimeout(timer);
       }
     }
-  }, [isOpen, renderedHtml]);
+  }, [isOpen, renderedHtml, onClose]);
 
   // Keyboard Shortcuts
   useEffect(() => {
@@ -302,6 +380,8 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
         onClose();
       } else if (e.key === "F9" || ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "p")) {
         e.preventDefault();
@@ -318,12 +398,15 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
       } else if (e.key === "0" && (e.ctrlKey || e.metaKey)) {
         e.preventDefault();
         setZoomScale(100);
+      } else if (e.key === "F11") {
+        e.preventDefault();
+        toggleFullscreen();
       }
     };
 
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isOpen, renderedHtml, paperSize, copies, selectedPrinterName, useSystemDialog, isDuplicate]);
+    window.addEventListener("keydown", handleKeyDown, true);
+    return () => window.removeEventListener("keydown", handleKeyDown, true);
+  }, [isOpen, renderedHtml, paperSize, copies, selectedPrinterName, useSystemDialog, isDuplicate, onClose]);
 
   // Execute Print Job Action
   const handleExecutePrint = async () => {
@@ -598,8 +681,20 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
   const isThermal = paperSize.startsWith("thermal");
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/80 backdrop-blur-sm p-4">
-      <div className="flex flex-col h-[95vh] w-full max-w-7xl bg-white dark:bg-slate-900 rounded-2xl shadow-2xl overflow-hidden border border-slate-200 dark:border-slate-800 animate-in fade-in zoom-in-95 duration-150">
+    <div
+      className={
+        isFullscreen
+          ? "fixed inset-0 z-50 flex flex-col bg-slate-900 w-screen h-screen overflow-hidden select-none"
+          : "fixed inset-0 z-50 flex items-center justify-center bg-slate-900/80 backdrop-blur-sm p-4 select-none"
+      }
+    >
+      <div
+        className={
+          isFullscreen
+            ? "flex flex-col h-full w-full bg-white dark:bg-slate-900 overflow-hidden"
+            : "flex flex-col h-[95vh] w-full max-w-7xl bg-white dark:bg-slate-900 rounded-2xl shadow-2xl overflow-hidden border border-slate-200 dark:border-slate-800 animate-in fade-in zoom-in-95 duration-150"
+        }
+      >
         
         {/* Top Header Bar */}
         <div className="flex items-center justify-between px-6 py-3.5 bg-slate-900 text-white border-b border-slate-800">
@@ -630,8 +725,14 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
             </div>
           </div>
 
-          {/* Zoom and Quick Nav Controls */}
+          {/* Zoom, Fullscreen and Close Controls */}
           <div className="flex items-center space-x-2">
+            {previewPageCount > 1 && (
+              <div className="flex items-center gap-1.5 px-3 py-1 bg-blue-900/40 border border-blue-700/60 rounded-lg text-xs font-semibold text-blue-200">
+                <FileText className="w-3.5 h-3.5 text-blue-400" />
+                <span>{previewPageCount} Pages (Separate A4 Sheets)</span>
+              </div>
+            )}
             <div className="flex items-center bg-slate-800 rounded-lg p-1 border border-slate-700">
               <button
                 type="button"
@@ -662,6 +763,16 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
               </button>
             </div>
 
+            {/* Fullscreen Toggle */}
+            <button
+              type="button"
+              onClick={toggleFullscreen}
+              className="p-2 hover:bg-slate-800 text-slate-400 hover:text-white rounded-lg transition"
+              title={isFullscreen ? "Exit Fullscreen (F11)" : "Fullscreen (F11)"}
+            >
+              {isFullscreen ? <Minimize2 className="w-5 h-5" /> : <Maximize2 className="w-5 h-5" />}
+            </button>
+
             <button
               type="button"
               onClick={onClose}
@@ -677,9 +788,13 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
         <div className="flex flex-1 overflow-hidden bg-slate-100 dark:bg-slate-950">
           
           {/* Document Canvas Preview Container */}
-          <div className="flex-1 flex justify-center items-start p-6 overflow-y-auto overflow-x-auto relative select-none bg-slate-100 dark:bg-slate-950">
+          <div className="flex-1 flex justify-center items-start p-6 overflow-y-auto overflow-x-auto relative select-none bg-slate-200/80 dark:bg-slate-950">
             <div
-              className="transition-transform duration-100 shadow-2xl rounded-sm bg-white overflow-hidden shrink-0 my-4"
+              className={`transition-transform duration-100 shrink-0 my-4 flex flex-col items-center ${
+                isThermal || paperSize.startsWith("dot_matrix")
+                  ? "shadow-2xl rounded-sm bg-white overflow-hidden"
+                  : ""
+              }`}
               style={{
                 transform: `scale(${zoomScale / 100})`,
                 transformOrigin: "top center",
@@ -688,7 +803,7 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
                     ? "60mm"
                     : "82mm"
                   : paperSize === "a5"
-                  ? "150mm"
+                  ? "155mm"
                   : paperSize === "dot_matrix_132col"
                   ? "320mm"
                   : paperSize === "dot_matrix_80col"
@@ -700,15 +815,10 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
               <iframe
                 ref={iframeRef}
                 title="Print Preview Frame"
-                className="w-full border-0 pointer-events-auto bg-white"
+                className="w-full border-0 pointer-events-auto bg-transparent"
                 style={{
-                  height: isThermal
-                    ? "750px"
-                    : paperSize === "a5"
-                    ? "820px"
-                    : paperSize.startsWith("dot_matrix")
-                    ? "950px"
-                    : "1122px",
+                  height: iframeHeight,
+                  minHeight: isThermal ? "120mm" : paperSize === "a5" ? "210mm" : "297mm",
                 }}
                 sandbox="allow-same-origin allow-scripts allow-modals"
               />
@@ -914,7 +1024,7 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
 
                         <div>
                           <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">
-                            Lines / Page
+                            Lines / Page (Dot Matrix Forms Only)
                           </label>
                           <select
                             value={printerProfile?.linesPerPage ?? 66}

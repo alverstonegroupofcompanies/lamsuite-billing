@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { X, Building2, Check, AlertCircle } from "lucide-react";
 import { supplierLedgerService, type SupplierMaster } from "../../lib/purchases/supplierLedgerService";
 import { isValidGstin, isValidIndianPhone } from "../../lib/masters/partiesStore";
+import { useModalEscape } from "../../lib/ui/modalEscapeManager";
 
 interface SupplierQuickAddModalProps {
   isOpen: boolean;
@@ -14,6 +15,8 @@ export const SupplierQuickAddModal: React.FC<SupplierQuickAddModalProps> = ({
   onClose,
   onSupplierCreated,
 }) => {
+  useModalEscape(isOpen, onClose);
+
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [gstin, setGstin] = useState("");

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { X, Layers, Check, Sparkles, Store, Pill, ShoppingBag } from "lucide-react";
 import type { PosCartLine } from "../lib/billing/posCartService";
+import { useModalEscape } from "../lib/ui/modalEscapeManager";
 
 interface ConversionModalProps {
   isOpen: boolean;
@@ -70,6 +71,8 @@ export const ConversionModal: React.FC<ConversionModalProps> = ({
   onClose,
   onSave,
 }) => {
+  useModalEscape(isOpen && Boolean(line), onClose);
+
   if (!isOpen || !line) return null;
 
   const currentUpp = line.product.units_per_pack || 1;

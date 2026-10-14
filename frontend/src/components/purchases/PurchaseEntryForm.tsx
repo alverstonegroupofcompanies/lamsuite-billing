@@ -32,6 +32,7 @@ import { SupplierQuickAddModal } from "./SupplierQuickAddModal";
 import { PurchaseDraftsModal } from "./PurchaseDraftsModal";
 import { BarcodePrintModal } from "./BarcodePrintModal";
 import { PrintPreviewModal } from "../PrintPreviewModal";
+import { useModalEscape } from "../../lib/ui/modalEscapeManager";
 
 interface PurchaseEntryFormProps {
   onClose: () => void;
@@ -86,10 +87,12 @@ export const PurchaseEntryForm: React.FC<PurchaseEntryFormProps> = ({
         ]
   );
 
-  // Physical Vendor Invoice Totals Check
+  // Physical Vendor Invoice Totals Check & Freight Auto-balancing
   const [vendorSubtotal, setVendorSubtotal] = useState<number | "">("");
   const [vendorTax, setVendorTax] = useState<number | "">("");
   const [vendorGrandTotal, setVendorGrandTotal] = useState<number | "">("");
+  const [freightCharges, setFreightCharges] = useState<number>(0);
+  const [manualRoundOff, setManualRoundOff] = useState<number | null>(null);
 
   // Product Autocomplete / Search Popover
   const [allProducts, setAllProducts] = useState<ProductItem[]>([]);
@@ -103,11 +106,16 @@ export const PurchaseEntryForm: React.FC<PurchaseEntryFormProps> = ({
   const [isQuickAddSupplierOpen, setIsQuickAddSupplierOpen] = useState(false);
   const [isDraftsModalOpen, setIsDraftsModalOpen] = useState(false);
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+  useModalEscape(isImportModalOpen, () => setIsImportModalOpen(false));
   const [importText, setImportText] = useState("");
   const [importMode, setImportMode] = useState<"csv" | "ocr">("csv");
 
   // Post Success Modal
   const [savedPurchaseData, setSavedPurchaseData] = useState<{ id: string; number: string; lines: PurchaseLineItemInput[] } | null>(null);
+  useModalEscape(Boolean(savedPurchaseData), () => {
+    setSavedPurchaseData(null);
+    onSuccess();
+  });
   const [isBarcodeModalOpen, setIsBarcodeModalOpen] = useState(false);
 
   // Feedback notifications
@@ -246,8 +254,9 @@ export const PurchaseEntryForm: React.FC<PurchaseEntryFormProps> = ({
       totalLinesAmount += calc.total_amount;
     }
 
-    const roundOff = Math.round(totalLinesAmount) - totalLinesAmount;
-    const grandTotal = totalLinesAmount + roundOff;
+    const netBeforeRound = totalLinesAmount + freightCharges;
+    const roundOff = manualRoundOff !== null ? manualRoundOff : (Math.round(netBeforeRound) - netBeforeRound);
+    const grandTotal = netBeforeRound + roundOff;
 
     return {
       subtotal: Math.round(subtotal * 100) / 100,
@@ -256,6 +265,7 @@ export const PurchaseEntryForm: React.FC<PurchaseEntryFormProps> = ({
       cgstTotal: Math.round(cgstTotal * 100) / 100,
       sgstTotal: Math.round(sgstTotal * 100) / 100,
       igstTotal: Math.round(igstTotal * 100) / 100,
+      freightCharges: Math.round(freightCharges * 100) / 100,
       roundOff: Math.round(roundOff * 100) / 100,
       grandTotal: Math.round(grandTotal * 100) / 100,
     };
@@ -369,6 +379,7 @@ export const PurchaseEntryForm: React.FC<PurchaseEntryFormProps> = ({
           ...l,
           product_id: l.product_id || `prod_${Date.now()}_${Math.random().toString(16).slice(2, 6)}`,
         })),
+        round_off: totals.roundOff,
         notes: notes.trim() || undefined,
         po_id: initialPoData?.po_id,
       };
@@ -916,17 +927,40 @@ export const PurchaseEntryForm: React.FC<PurchaseEntryFormProps> = ({
                 className="w-32 rounded border border-slate-300 px-2 py-1 text-xs font-bold focus:border-blue-600 focus:outline-none"
               />
               {vendorGrandTotal !== "" && (
-                <span
-                  className={`rounded px-2 py-0.5 font-bold text-[11px] ${
-                    Math.abs(Number(vendorGrandTotal) - totals.grandTotal) < 0.05
-                      ? "bg-emerald-100 text-emerald-800"
-                      : "bg-red-100 text-red-800"
-                  }`}
-                >
-                  {Math.abs(Number(vendorGrandTotal) - totals.grandTotal) < 0.05
-                    ? "✓ Matched"
-                    : `Diff: ₹ ${(Number(vendorGrandTotal) - totals.grandTotal).toFixed(2)}`}
-                </span>
+                <>
+                  <span
+                    className={`rounded px-2 py-0.5 font-bold text-[11px] ${
+                      Math.abs(Number(vendorGrandTotal) - totals.grandTotal) < 0.05
+                        ? "bg-emerald-100 text-emerald-800"
+                        : "bg-red-100 text-red-800"
+                    }`}
+                  >
+                    {Math.abs(Number(vendorGrandTotal) - totals.grandTotal) < 0.05
+                      ? "✓ Matched"
+                      : `Diff: ₹ ${(Number(vendorGrandTotal) - totals.grandTotal).toFixed(2)}`}
+                  </span>
+
+                  {Math.abs(Number(vendorGrandTotal) - totals.grandTotal) >= 0.05 && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const diff = Number(vendorGrandTotal) - totals.grandTotal;
+                        if (Math.abs(diff) < 5) {
+                          // Tiny discrepancy: auto-absorb into round-off
+                          const currentRo = totals.roundOff;
+                          setManualRoundOff(Math.round((currentRo + diff) * 100) / 100);
+                        } else {
+                          // Larger discrepancy: allocate to freight / delivery surcharge
+                          setFreightCharges((prev) => Math.round((prev + diff) * 100) / 100);
+                        }
+                      }}
+                      className="rounded bg-blue-100 hover:bg-blue-200 text-blue-800 font-bold px-2 py-0.5 text-[10px] cursor-pointer"
+                      title="Auto-balance difference to freight/round-off"
+                    >
+                      Auto-balance
+                    </button>
+                  )}
+                </>
               )}
             </div>
           </div>

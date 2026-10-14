@@ -527,8 +527,71 @@ export class PurchaseService {
     const doc = await sqliteStorage.findById<PurchaseDocumentRecord>("purchase_documents", purchaseId);
     if (!doc) return null;
 
+    if (!doc.payment_status) {
+      const paid = Number(doc.paid_amount || 0);
+      const total = Number(doc.grand_total || 0);
+      doc.payment_status = paid >= total && total > 0 ? "paid" : paid > 0 ? "partial" : "unpaid";
+    }
+
     const allItems = await sqliteStorage.findAll<PurchaseItemRecord>("purchase_items");
-    const items = allItems.filter((i) => i.purchase_id === purchaseId);
+    let items = allItems.filter((i) => i.purchase_id === purchaseId);
+
+    // Fallback: If legacy bill has no purchase_items rows, reconstruct them from stock_transactions or doc.lines
+    if (items.length === 0) {
+      if ((doc as any).lines && Array.isArray((doc as any).lines) && (doc as any).lines.length > 0) {
+        items = (doc as any).lines;
+      } else {
+        const stockTxs = await sqliteStorage.findAll<any>("stock_transactions");
+        const matchingTxs = stockTxs.filter(
+          (tx) => tx.reference_id === purchaseId && tx.event_type === "PURCHASE_RECEIPT"
+        );
+        if (matchingTxs.length > 0) {
+          const batches = await sqliteStorage.findAll<ProductBatch>("product_batches");
+          const products = await sqliteStorage.findAll<ProductItem>("products");
+
+          items = matchingTxs.map((tx, idx) => {
+            const batch = batches.find((b) => b.id === tx.batch_id);
+            const prod = products.find((p) => p.id === tx.product_id);
+            const rate = batch?.purchase_rate || tx.unit_cost || (doc.subtotal ? doc.subtotal / (tx.qty_delta || 1) : 0);
+            const gst = doc.subtotal && doc.tax_total ? Math.round((doc.tax_total / doc.subtotal) * 100) : 12;
+            const total = doc.grand_total || (tx.qty_delta * rate);
+
+            const reconstructedItem: PurchaseItemRecord = {
+              id: `pbi_rec_${doc.id}_${idx}`,
+              purchase_id: doc.id,
+              product_id: tx.product_id,
+              product_name: prod?.name || `Inward Item (${batch?.batch_no || tx.product_id})`,
+              hsn_code: prod?.hsn_sac_code || "30049099",
+              batch_id: tx.batch_id || "",
+              batch_no: batch?.batch_no || "BATCH-01",
+              expiry_date: batch?.expiry_date || "2027-12-31",
+              pack_qty: tx.qty_delta || 1,
+              loose_qty: 0,
+              free_qty: 0,
+              units_per_pack: prod?.units_per_pack || 1,
+              total_units: tx.qty_delta || 1,
+              purchase_rate: rate,
+              discount_percent: 0,
+              discount_amount: 0,
+              effective_unit_cost: tx.unit_cost || rate,
+              mrp: batch?.mrp || prod?.mrp || rate * 1.2,
+              selling_rate: batch?.selling_rate || prod?.sel_rate,
+              gst_percent: gst,
+              cgst_amount: doc.cgst_total || (doc.tax_total ? doc.tax_total / 2 : 0),
+              sgst_amount: doc.sgst_total || (doc.tax_total ? doc.tax_total / 2 : 0),
+              igst_amount: doc.igst_total || 0,
+              tax_amount: doc.tax_total || 0,
+              total_amount: total,
+            };
+
+            // Backfill to purchase_items so it's permanently stored in SQLite
+            sqliteStorage.insertRecord("purchase_items", reconstructedItem.id, reconstructedItem as unknown as Record<string, unknown>).catch(() => {});
+
+            return reconstructedItem;
+          });
+        }
+      }
+    }
 
     return { document: doc, items };
   }

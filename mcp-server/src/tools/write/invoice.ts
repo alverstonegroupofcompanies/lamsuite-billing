@@ -36,6 +36,7 @@ export const createInvoiceTool: ToolDefinition = {
       .enum(["Cash", "UPI", "Card", "Credit", "Split"])
       .default("Cash")
       .describe("Tender payment mode"),
+    counter_id: z.string().optional().describe("Counter identifier (e.g. C01, C02)"),
     patient_name: z.string().optional().describe("Patient name (for prescription records)"),
     doctor_name: z.string().optional().describe("Prescribing doctor name"),
     doctor_reg_no: z.string().optional().describe("Doctor registration number"),
@@ -243,6 +244,7 @@ export const createInvoiceTool: ToolDefinition = {
       grand_total: totals.grand_total,
       paid_amount: totals.grand_total,
       payment_mode: args.payment_mode,
+      counter_id: args.counter_id || "C01",
       patient_name: args.patient_name,
       doctor_name: args.doctor_name,
       doctor_reg_no: args.doctor_reg_no,

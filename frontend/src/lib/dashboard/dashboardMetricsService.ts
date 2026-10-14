@@ -1,6 +1,7 @@
 import { sqliteStorage } from "../db/sqliteStorage";
 import { companySettingsService } from "../settings/companySettingsService";
 import { billingTenderService } from "../billing/billingTenderService";
+import { salesMetricsService } from "../data-layer/financials/salesMetrics";
 import type { InvoiceRecord, InvoiceItemRecord } from "../billing/invoiceManagementService";
 import type { ProductBatch } from "../masters/productsStore";
 import type { SyncQueueItem } from "../sync/syncQueueService";
@@ -206,101 +207,34 @@ export class DashboardMetricsService {
         )
       : [];
 
-    // 2. Calculate Gross Sales, Returns, Net Sales & Bills count
-    let grossSales = 0;
-    let totalReturns = 0;
-    let billsIssuedCount = 0;
+    // 2. Calculate Gross Sales, Returns, Net Sales & Bills count via unified data layer
+    const metrics = await salesMetricsService.calculateFinancialMetrics({
+      startDate: range.startDate,
+      endDate: range.endDate,
+    });
 
-    let cashAmount = 0;
-    let upiAmount = 0;
-    let cardAmount = 0;
-    let bankTransferAmount = 0;
-    let creditAmount = 0;
-    let otherAmount = 0;
+    const grossSales = metrics.grossSales;
+    const totalReturns = metrics.totalReturns;
+    const netSales = metrics.netSales;
+    const billsIssuedCount = metrics.billsIssuedCount;
+    const averageTicket = metrics.averageTicket;
 
-    const slabMap = new Map<number, { taxable: number; cgst: number; sgst: number; igst: number }>();
-    let totalTaxableAccrued = 0;
-    let totalCgstAccrued = 0;
-    let totalSgstAccrued = 0;
-    let totalIgstAccrued = 0;
-
-    for (const inv of currentInvoices) {
-      const isReturn =
-        inv.module_key === "credit_note" ||
-        inv.module_key === "sales_return" ||
-        (inv.invoice_number && (inv.invoice_number.startsWith("SR-") || inv.invoice_number.startsWith("CN-") || inv.invoice_number.startsWith("CDN-")));
-
-      const invoiceTotal = Number(inv.grand_total) || 0;
-      const sign = isReturn ? -1 : 1;
-
-      if (!isReturn) {
-        billsIssuedCount += 1;
-        grossSales = Math.round((grossSales + invoiceTotal) * 100) / 100;
-      } else {
-        totalReturns = Math.round((totalReturns + invoiceTotal) * 100) / 100;
-      }
-
-      // Payments split
-      const mode = (inv.payment_mode || "Cash").toLowerCase().trim();
-      const amountWithSign = sign * invoiceTotal;
-
-      if (mode.includes("cash")) {
-        cashAmount = Math.round((cashAmount + amountWithSign) * 100) / 100;
-      } else if (mode.includes("upi")) {
-        upiAmount = Math.round((upiAmount + amountWithSign) * 100) / 100;
-      } else if (mode.includes("card")) {
-        cardAmount = Math.round((cardAmount + amountWithSign) * 100) / 100;
-      } else if (mode.includes("bank") || mode.includes("cheque") || mode.includes("neft")) {
-        bankTransferAmount = Math.round((bankTransferAmount + amountWithSign) * 100) / 100;
-      } else if (mode.includes("credit")) {
-        creditAmount = Math.round((creditAmount + amountWithSign) * 100) / 100;
-      } else {
-        otherAmount = Math.round((otherAmount + amountWithSign) * 100) / 100;
-      }
-
-      // Tax & GST Slabs calculation
-      const lineItems = itemsByInvoice.get(inv.id) || [];
-      for (const line of lineItems) {
-        const rate = Number(line.gst_percent) || 0;
-        const cgst = (Number(line.cgst_amount) || 0) * sign;
-        const sgst = (Number(line.sgst_amount) || 0) * sign;
-        const igst = (Number(line.igst_amount) || 0) * sign;
-        const lineTax = cgst + sgst + igst;
-        const lineTotal = (Number(line.total_amount) || 0) * sign;
-        const lineTaxable = lineTotal - lineTax;
-
-        if (!slabMap.has(rate)) {
-          slabMap.set(rate, { taxable: 0, cgst: 0, sgst: 0, igst: 0 });
-        }
-        const slab = slabMap.get(rate)!;
-        slab.taxable = Math.round((slab.taxable + lineTaxable) * 100) / 100;
-        slab.cgst = Math.round((slab.cgst + cgst) * 100) / 100;
-        slab.sgst = Math.round((slab.sgst + sgst) * 100) / 100;
-        slab.igst = Math.round((slab.igst + igst) * 100) / 100;
-
-        totalTaxableAccrued = Math.round((totalTaxableAccrued + lineTaxable) * 100) / 100;
-        totalCgstAccrued = Math.round((totalCgstAccrued + cgst) * 100) / 100;
-        totalSgstAccrued = Math.round((totalSgstAccrued + sgst) * 100) / 100;
-        totalIgstAccrued = Math.round((totalIgstAccrued + igst) * 100) / 100;
-      }
-    }
-
-    const netSales = Math.max(0, Math.round((grossSales - totalReturns) * 100) / 100);
-    const averageTicket = billsIssuedCount > 0 ? Math.round((netSales / billsIssuedCount) * 100) / 100 : 0;
+    const cashAmount = metrics.byTender.cash;
+    const upiAmount = metrics.byTender.upi;
+    const cardAmount = metrics.byTender.card;
+    const bankTransferAmount = metrics.byTender.bankTransfer;
+    const creditAmount = metrics.byTender.credit;
+    const otherAmount = metrics.byTender.other;
 
     // Previous period sales for delta calculation
-    let prevGross = 0;
-    let prevReturns = 0;
-    for (const inv of previousInvoices) {
-      const isReturn =
-        inv.module_key === "credit_note" ||
-        inv.module_key === "sales_return" ||
-        (inv.invoice_number && (inv.invoice_number.startsWith("SR-") || inv.invoice_number.startsWith("CN-") || inv.invoice_number.startsWith("CDN-")));
-      const val = Number(inv.grand_total) || 0;
-      if (!isReturn) prevGross += val;
-      else prevReturns += val;
+    let previousPeriodSales = 0;
+    if (range.prevStartDate) {
+      const prevMetrics = await salesMetricsService.calculateFinancialMetrics({
+        startDate: range.prevStartDate,
+        endDate: range.prevEndDate,
+      });
+      previousPeriodSales = prevMetrics.netSales;
     }
-    const previousPeriodSales = Math.max(0, Math.round((prevGross - prevReturns) * 100) / 100);
 
     let salesDeltaPercent: number | null = null;
     if (previousPeriodSales > 0) {
@@ -308,9 +242,8 @@ export class DashboardMetricsService {
     }
 
     // Digital percentage calculation
-    const digitalTotal = Math.max(0, Math.round((upiAmount + cardAmount + bankTransferAmount + otherAmount) * 100) / 100);
-    const totalCollected = Math.max(0, Math.round((cashAmount + digitalTotal) * 100) / 100);
-    const digitalPercent = totalCollected > 0 ? Math.round((digitalTotal / totalCollected) * 100) : 0;
+    const digitalTotal = metrics.byTender.digitalTotal;
+    const digitalPercent = metrics.byTender.digitalPercent;
 
     // 3. Batches near expiry
     const allBatches = await sqliteStorage.findAll<ProductBatch>("product_batches");
@@ -325,23 +258,17 @@ export class DashboardMetricsService {
         (Number(b.stock_qty) || 0) > 0
     ).length;
 
-    // 4. GST Slabs sorting & filtering
-    const slabs: GstSlabBreakdown[] = Array.from(slabMap.entries())
-      .filter(([_, data]) => Math.abs(data.taxable) > 0.001 || Math.abs(data.cgst + data.sgst + data.igst) > 0.001)
-      .map(([rate, data]) => {
-        const totalTax = Math.round((data.cgst + data.sgst + data.igst) * 100) / 100;
-        return {
-          rate,
-          taxableValue: Math.max(0, data.taxable),
-          cgstAmount: Math.max(0, data.cgst),
-          sgstAmount: Math.max(0, data.sgst),
-          igstAmount: Math.max(0, data.igst),
-          totalTax: Math.max(0, totalTax),
-        };
-      })
-      .sort((a, b) => a.rate - b.rate);
+    // 4. GST Slabs from unified metrics
+    const slabs: GstSlabBreakdown[] = metrics.gstSlabs.map((s) => ({
+      rate: s.rate,
+      taxableValue: s.taxableValue,
+      cgstAmount: s.cgstAmount,
+      sgstAmount: s.sgstAmount,
+      igstAmount: s.igstAmount,
+      totalTax: s.totalTax,
+    }));
 
-    const totalTaxAccrued = Math.max(0, Math.round((totalCgstAccrued + totalSgstAccrued + totalIgstAccrued) * 100) / 100);
+    const totalTaxAccrued = metrics.taxes.totalTax;
 
     // 5. Recent completed invoices list
     const sortedAll = [...allInvoices].sort((a, b) => {
@@ -434,11 +361,11 @@ export class DashboardMetricsService {
       },
       gst: {
         slabs,
-        totalTaxable: Math.max(0, totalTaxableAccrued),
-        totalCgst: Math.max(0, totalCgstAccrued),
-        totalSgst: Math.max(0, totalSgstAccrued),
-        totalIgst: Math.max(0, totalIgstAccrued),
-        totalTaxAccrued,
+        totalTaxable: Math.max(0, metrics.taxes.totalTaxable),
+        totalCgst: Math.max(0, metrics.taxes.totalCgst),
+        totalSgst: Math.max(0, metrics.taxes.totalSgst),
+        totalIgst: Math.max(0, metrics.taxes.totalIgst),
+        totalTaxAccrued: metrics.taxes.totalTax,
       },
       recentDocuments,
       heldBillsCount,

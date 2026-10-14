@@ -200,6 +200,8 @@ export const MIGRATIONS: Migration[] = [
       CREATE INDEX IF NOT EXISTS idx_purchase_docs_supplier ON purchase_documents(supplier_id);
       CREATE INDEX IF NOT EXISTS idx_purchase_docs_inv_no ON purchase_documents(supplier_invoice_no);
 
+      CREATE VIEW IF NOT EXISTS purchases AS SELECT * FROM purchase_documents;
+
       CREATE TABLE IF NOT EXISTS purchase_items (
         id TEXT PRIMARY KEY,
         purchase_id TEXT NOT NULL REFERENCES purchase_documents(id) ON DELETE CASCADE,
@@ -306,6 +308,254 @@ export const MIGRATIONS: Migration[] = [
       );
     `,
   },
+  {
+    version: 3,
+    name: "store_login_staff_and_multicounter",
+    sql: `
+      CREATE TABLE IF NOT EXISTS store_counters (
+        id TEXT PRIMARY KEY,
+        store_id TEXT NOT NULL,
+        counter_name TEXT NOT NULL,
+        counter_code TEXT NOT NULL,
+        device_uuid TEXT NOT NULL UNIQUE,
+        is_hub INTEGER DEFAULT 0,
+        ip_address TEXT,
+        port INTEGER DEFAULT 8089,
+        app_version TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'active',
+        pending_queue_count INTEGER DEFAULT 0,
+        last_sync_at INTEGER,
+        created_at INTEGER NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS counter_sequences (
+        id TEXT PRIMARY KEY,
+        counter_id TEXT NOT NULL,
+        doc_type TEXT NOT NULL,
+        financial_year TEXT NOT NULL,
+        prefix TEXT NOT NULL,
+        next_number INTEGER NOT NULL DEFAULT 1001,
+        range_start INTEGER,
+        range_end INTEGER,
+        updated_at INTEGER NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS staff_users (
+        id TEXT PRIMARY KEY,
+        store_id TEXT NOT NULL,
+        username TEXT NOT NULL UNIQUE,
+        full_name TEXT NOT NULL,
+        role TEXT NOT NULL,
+        password_hash TEXT NOT NULL,
+        pin_hash TEXT NOT NULL,
+        is_active INTEGER DEFAULT 1,
+        must_change_password INTEGER DEFAULT 0,
+        biometric_registered INTEGER DEFAULT 0,
+        failed_attempts INTEGER DEFAULT 0,
+        locked_until INTEGER,
+        permissions_json TEXT NOT NULL,
+        enabled_menus_json TEXT,
+        updated_at INTEGER NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS counter_sessions (
+        id TEXT PRIMARY KEY,
+        counter_id TEXT NOT NULL,
+        user_id TEXT NOT NULL,
+        user_name TEXT NOT NULL,
+        user_role TEXT NOT NULL,
+        started_at INTEGER NOT NULL,
+        ended_at INTEGER,
+        status TEXT NOT NULL,
+        opening_cash REAL DEFAULT 0,
+        closing_cash REAL DEFAULT 0,
+        notes TEXT
+      );
+
+      CREATE TABLE IF NOT EXISTS security_audit_logs (
+        id TEXT PRIMARY KEY,
+        event_type TEXT NOT NULL,
+        user_id TEXT,
+        user_name TEXT,
+        counter_id TEXT,
+        details TEXT,
+        ip_address TEXT,
+        created_at INTEGER NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS document_locks (
+        document_id TEXT PRIMARY KEY,
+        document_type TEXT NOT NULL,
+        locked_by_counter_id TEXT NOT NULL,
+        locked_by_user_id TEXT NOT NULL,
+        locked_by_user_name TEXT NOT NULL,
+        locked_at INTEGER NOT NULL,
+        expires_at INTEGER NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS distributed_held_bills (
+        id TEXT PRIMARY KEY,
+        held_by_counter_id TEXT NOT NULL,
+        held_by_counter_name TEXT NOT NULL,
+        held_by_user_name TEXT NOT NULL,
+        customer_name TEXT,
+        items_count INTEGER NOT NULL,
+        grand_total REAL NOT NULL,
+        held_at INTEGER NOT NULL,
+        cart_payload TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'held',
+        claimed_by_counter_id TEXT,
+        claimed_at INTEGER
+      );
+
+      CREATE TABLE IF NOT EXISTS cash_shifts (
+        id TEXT PRIMARY KEY,
+        counter_id TEXT NOT NULL,
+        counter_name TEXT NOT NULL,
+        user_id TEXT NOT NULL,
+        user_name TEXT NOT NULL,
+        shift_date TEXT NOT NULL,
+        opened_at INTEGER NOT NULL,
+        closed_at INTEGER,
+        opening_cash REAL NOT NULL DEFAULT 0,
+        cash_in REAL NOT NULL DEFAULT 0,
+        cash_out REAL NOT NULL DEFAULT 0,
+        closing_cash_counted REAL,
+        expected_cash REAL,
+        cash_variance REAL,
+        status TEXT NOT NULL DEFAULT 'open',
+        payment_totals_json TEXT,
+        notes TEXT,
+        sync_state TEXT NOT NULL DEFAULT 'pending'
+      );
+
+      CREATE TABLE IF NOT EXISTS store_day_closes (
+        id TEXT PRIMARY KEY,
+        store_id TEXT NOT NULL,
+        close_date TEXT NOT NULL,
+        closed_by_user_id TEXT NOT NULL,
+        closed_by_user_name TEXT NOT NULL,
+        counters_included_json TEXT NOT NULL,
+        consolidated_sales REAL NOT NULL,
+        consolidated_returns REAL NOT NULL,
+        consolidated_net REAL NOT NULL,
+        consolidated_by_tender_json TEXT NOT NULL,
+        total_cash_variance REAL NOT NULL,
+        closed_at INTEGER NOT NULL,
+        sync_state TEXT NOT NULL DEFAULT 'pending'
+      );
+
+      CREATE TABLE IF NOT EXISTS master_versions (
+        entity_type TEXT NOT NULL,
+        entity_id TEXT NOT NULL,
+        version INTEGER NOT NULL DEFAULT 1,
+        updated_at INTEGER NOT NULL,
+        updated_by_counter_id TEXT NOT NULL,
+        PRIMARY KEY (entity_type, entity_id)
+      );
+    `,
+  },
+  {
+    version: 6,
+    name: "data_exchange_and_extended_masters",
+    sql: `
+      CREATE TABLE IF NOT EXISTS import_history (
+        id TEXT PRIMARY KEY,
+        entity_type TEXT NOT NULL,
+        file_name TEXT NOT NULL,
+        file_size INTEGER DEFAULT 0,
+        total_rows INTEGER NOT NULL,
+        created_count INTEGER NOT NULL,
+        updated_count INTEGER NOT NULL,
+        skipped_count INTEGER NOT NULL,
+        failed_count INTEGER NOT NULL,
+        status TEXT NOT NULL DEFAULT 'completed',
+        imported_by TEXT NOT NULL,
+        undo_snapshot_json TEXT,
+        created_at INTEGER NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_import_history_date ON import_history(created_at);
+
+      CREATE TABLE IF NOT EXISTS import_drafts (
+        id TEXT PRIMARY KEY,
+        entity_type TEXT NOT NULL,
+        file_name TEXT NOT NULL,
+        raw_data_json TEXT NOT NULL,
+        mappings_json TEXT NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS master_lookups (
+        id TEXT PRIMARY KEY,
+        type TEXT NOT NULL,
+        name TEXT NOT NULL,
+        symbol TEXT,
+        parent_name TEXT,
+        address TEXT,
+        precision INTEGER DEFAULT 0,
+        is_active INTEGER DEFAULT 1
+      );
+
+      CREATE TABLE IF NOT EXISTS discount_rules (
+        id TEXT PRIMARY KEY,
+        rule_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        rule_type TEXT NOT NULL DEFAULT 'percentage',
+        discount_percent REAL DEFAULT 0,
+        min_quantity REAL DEFAULT 1,
+        is_active INTEGER DEFAULT 1
+      );
+
+      CREATE TABLE IF NOT EXISTS bank_accounts (
+        id TEXT PRIMARY KEY,
+        bank_name TEXT NOT NULL,
+        account_number TEXT NOT NULL,
+        ifsc_code TEXT,
+        branch TEXT,
+        upi_id TEXT,
+        is_active INTEGER DEFAULT 1
+      );
+
+      CREATE TABLE IF NOT EXISTS expense_heads (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        category TEXT NOT NULL DEFAULT 'operational',
+        is_active INTEGER DEFAULT 1
+      );
+
+      CREATE TABLE IF NOT EXISTS sales_returns (
+        id TEXT PRIMARY KEY,
+        return_number TEXT NOT NULL UNIQUE,
+        original_invoice_no TEXT,
+        return_date TEXT NOT NULL,
+        customer_name TEXT,
+        grand_total REAL NOT NULL DEFAULT 0,
+        reason TEXT,
+        created_at INTEGER NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS purchase_returns (
+        id TEXT PRIMARY KEY,
+        return_number TEXT NOT NULL UNIQUE,
+        supplier_name TEXT NOT NULL,
+        return_date TEXT NOT NULL,
+        grand_total REAL NOT NULL DEFAULT 0,
+        reason TEXT,
+        created_at INTEGER NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS quotations (
+        id TEXT PRIMARY KEY,
+        quotation_number TEXT NOT NULL UNIQUE,
+        quotation_date TEXT NOT NULL,
+        customer_name TEXT NOT NULL,
+        grand_total REAL NOT NULL DEFAULT 0,
+        valid_until TEXT,
+        created_at INTEGER NOT NULL
+      );
+    `,
+  },
 ];
 
 let mockDb: MockSqliteDatabase | null = null;
@@ -390,13 +640,37 @@ export class SqliteStorageService {
     await bridge.invoke("db:insert", { table, id, record: record as Record<string, unknown> });
   }
 
+  async updateRecord(table: string, id: string, partial: Record<string, unknown> | object): Promise<void> {
+    const existing = (await this.findById<Record<string, unknown>>(table, id)) || {};
+    await this.insertRecord(table, id, { ...existing, ...partial });
+  }
+
+  async findByField<T = Record<string, unknown>>(table: string, field: string, value: unknown): Promise<T | null> {
+    const all = await this.findAll<T>(table);
+    return (all as any[]).find((rec) => (rec as any)[field] === value) || null;
+  }
+
   async findById<T = Record<string, unknown>>(table: string, id: string): Promise<T | null> {
     const bridge = getIpcBridge();
+    if (table === "purchases" || table === "purchase_documents") {
+      const primary = await bridge.invoke<T | null>("db:findById", { table: "purchase_documents", id }).catch(() => null);
+      if (primary) return primary;
+      const alt = await bridge.invoke<T | null>("db:findById", { table: "purchases", id }).catch(() => null);
+      if (alt) return alt;
+      return null;
+    }
     return await bridge.invoke<T | null>("db:findById", { table, id });
   }
 
   async findAll<T = Record<string, unknown>>(table: string): Promise<T[]> {
     const bridge = getIpcBridge();
+    if (table === "purchases" || table === "purchase_documents") {
+      const primary = await bridge.invoke<T[]>("db:findAll", { table: "purchase_documents" }).catch(() => []);
+      if (Array.isArray(primary) && primary.length > 0) return primary;
+      const alt = await bridge.invoke<T[]>("db:findAll", { table: "purchases" }).catch(() => []);
+      if (Array.isArray(alt) && alt.length > 0) return alt;
+      return [];
+    }
     return await bridge.invoke<T[]>("db:findAll", { table });
   }
 

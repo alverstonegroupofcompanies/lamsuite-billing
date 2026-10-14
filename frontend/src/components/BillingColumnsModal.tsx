@@ -21,6 +21,7 @@ import {
   DEFAULT_COLUMNS,
   DEFAULT_HEADER_FIELDS,
 } from "../lib/settings/companySettingsService";
+import { useModalEscape } from "../lib/ui/modalEscapeManager";
 
 interface BillingColumnsModalProps {
   isOpen: boolean;
@@ -33,6 +34,8 @@ export const BillingColumnsModal: React.FC<BillingColumnsModalProps> = ({
   onClose,
   onLayoutChange,
 }) => {
+  useModalEscape(isOpen, onClose);
+
   const [activeTab, setActiveTab] = useState<"columns" | "header" | "presets">("columns");
   const [columns, setColumns] = useState<ColumnSetting[]>([]);
   const [headerFields, setHeaderFields] = useState<HeaderFieldSetting[]>([]);

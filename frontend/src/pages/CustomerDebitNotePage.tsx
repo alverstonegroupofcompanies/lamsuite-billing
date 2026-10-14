@@ -17,7 +17,9 @@ import {
 import { partiesStore, type Customer } from "../lib/masters/partiesStore";
 import { productsStore, type ProductItem } from "../lib/masters/productsStore";
 import { printingEngine, type CreditNotePrintData } from "../lib/printing/printingEngine";
+import { invoiceManagementService, type InvoiceRecord, type InvoiceItemRecord } from "../lib/billing/invoiceManagementService";
 import { PrintPreviewModal } from "../components/PrintPreviewModal";
+import { useModalEscape } from "../lib/ui/modalEscapeManager";
 import {
   Undo2,
   Search,
@@ -39,6 +41,7 @@ import {
   ChevronRight,
   AlertTriangle,
   RotateCcw,
+  ExternalLink,
 } from "lucide-react";
 
 export const CustomerDebitNotePage: React.FC = () => {
@@ -55,6 +58,7 @@ export const CustomerDebitNotePage: React.FC = () => {
 
   // --- Modal & Form State ---
   const [isFormOpen, setIsFormOpen] = useState(false);
+  useModalEscape(isFormOpen, () => setIsFormOpen(false));
   const [selectedDn, setSelectedDn] = useState<CustomerDebitNoteRecord | null>(null);
   const [activeLineIndex, setActiveLineIndex] = useState(0);
 
@@ -96,9 +100,19 @@ export const CustomerDebitNotePage: React.FC = () => {
 
   // Sub-Modals
   const [isApprovalModalOpen, setIsApprovalModalOpen] = useState(false);
+  useModalEscape(isApprovalModalOpen, () => setIsApprovalModalOpen(false));
   const [isIssueModalOpen, setIsIssueModalOpen] = useState(false);
+  useModalEscape(isIssueModalOpen, () => setIsIssueModalOpen(false));
   const [isReportModalOpen, setIsReportModalOpen] = useState(false);
+  useModalEscape(isReportModalOpen, () => setIsReportModalOpen(false));
   const [reportData, setReportData] = useState<any>(null);
+
+  // Matched Invoice Inspection Drawer State
+  const [inspectedInvoice, setInspectedInvoice] = useState<{
+    invoice: InvoiceRecord;
+    items: InvoiceItemRecord[];
+  } | null>(null);
+  useModalEscape(Boolean(inspectedInvoice), () => setInspectedInvoice(null));
 
   // Print Preview Modal State
   const [previewModalState, setPreviewModalState] = useState<{
@@ -109,6 +123,19 @@ export const CustomerDebitNotePage: React.FC = () => {
     isOpen: false,
     data: null,
   });
+
+  const handleInspectMatchedInvoice = async (invoiceId: string) => {
+    try {
+      const details = await invoiceManagementService.getInvoiceWithDetails(invoiceId);
+      if (details) {
+        setInspectedInvoice(details);
+      } else {
+        showToast("Invoice details not found", "error");
+      }
+    } catch (err: any) {
+      showToast(err.message || "Failed to load invoice details", "error");
+    }
+  };
 
   const showToast = (msg: string, type: "success" | "error" = "success") => {
     setToast({ msg, type });
@@ -904,7 +931,7 @@ export const CustomerDebitNotePage: React.FC = () => {
                         >
                           <div className="flex items-start justify-between">
                             <div>
-                              <div className="flex items-center gap-1.5">
+                              <div className="flex items-center gap-1.5 flex-wrap">
                                 <span className="font-mono font-bold text-blue-700">#{alloc.invoice_number}</span>
                                 <span className="text-[11px] text-slate-400">({alloc.invoice_date})</span>
                                 {alloc.suggestion_method && (
@@ -912,6 +939,15 @@ export const CustomerDebitNotePage: React.FC = () => {
                                     {alloc.suggestion_method === "exact_batch" ? "Exact Batch" : "FIFO"}
                                   </span>
                                 )}
+                                <button
+                                  type="button"
+                                  onClick={() => handleInspectMatchedInvoice(alloc.invoice_id)}
+                                  className="inline-flex items-center gap-1 rounded bg-slate-100 hover:bg-blue-50 px-1.5 py-0.5 text-[10px] font-semibold text-blue-700 border border-slate-200 transition-colors cursor-pointer"
+                                  title="Inspect original sales invoice items"
+                                >
+                                  <ExternalLink className="h-3 w-3" />
+                                  <span>View Bill</span>
+                                </button>
                               </div>
                               <div className="text-[11px] text-slate-500 mt-0.5">
                                 Batch: <strong>{alloc.batch_no || "-"}</strong> | Exp: {alloc.expiry_date || "-"}
@@ -1322,6 +1358,92 @@ export const CustomerDebitNotePage: React.FC = () => {
                 className="rounded-lg bg-slate-800 px-4 py-1.5 text-xs font-bold text-white hover:bg-slate-900"
               >
                 Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Matched Invoice Inspection Drawer/Modal */}
+      {inspectedInvoice && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm animate-fade-in">
+          <div className="flex max-h-[90vh] w-full max-w-4xl flex-col rounded-xl bg-white shadow-2xl border border-slate-200 overflow-hidden">
+            <div className="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-6 py-4">
+              <div>
+                <div className="flex items-center gap-2">
+                  <h3 className="text-base font-bold text-slate-800">
+                    Original Sales Invoice #{inspectedInvoice.invoice.invoice_number}
+                  </h3>
+                  <span className="rounded bg-indigo-100 px-2 py-0.5 text-xs font-semibold text-indigo-700">
+                    {inspectedInvoice.invoice.payment_mode?.toUpperCase() || "PAID"}
+                  </span>
+                </div>
+                <p className="text-xs text-slate-500">
+                  Date: {inspectedInvoice.invoice.invoice_date} • Customer: {inspectedInvoice.invoice.customer_name || "Cash Customer"}
+                </p>
+              </div>
+              <button
+                onClick={() => setInspectedInvoice(null)}
+                className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-200 hover:text-slate-600"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-6 space-y-4">
+              <div className="rounded-lg border border-slate-200 overflow-hidden">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-slate-100 font-semibold text-slate-600 border-b border-slate-200">
+                    <tr>
+                      <th className="px-3 py-2">Item Name</th>
+                      <th className="px-3 py-2">Batch</th>
+                      <th className="px-3 py-2">Expiry</th>
+                      <th className="px-3 py-2 text-right">Qty</th>
+                      <th className="px-3 py-2 text-right">Unit Rate</th>
+                      <th className="px-3 py-2 text-right">GST %</th>
+                      <th className="px-3 py-2 text-right">Tax (₹)</th>
+                      <th className="px-3 py-2 text-right">Total (₹)</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {inspectedInvoice.items.map((item, idx) => (
+                      <tr key={idx} className="hover:bg-slate-50">
+                        <td className="px-3 py-2 font-medium text-slate-800">{item.product_name}</td>
+                        <td className="px-3 py-2 font-mono text-slate-600">{item.batch_no || "-"}</td>
+                        <td className="px-3 py-2 text-slate-500">{item.expiry_date || "-"}</td>
+                        <td className="px-3 py-2 text-right font-bold text-slate-700">{item.qty}</td>
+                        <td className="px-3 py-2 text-right font-mono">₹{Number(item.unit_price).toFixed(2)}</td>
+                        <td className="px-3 py-2 text-right">{item.gst_percent}%</td>
+                        <td className="px-3 py-2 text-right font-mono">₹{(Number(item.cgst_amount || 0) + Number(item.sgst_amount || 0) + Number(item.igst_amount || 0)).toFixed(2)}</td>
+                        <td className="px-3 py-2 text-right font-mono font-bold text-slate-900">₹{Number(item.total_amount).toFixed(2)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="flex justify-end gap-6 bg-slate-50 p-4 rounded-lg border border-slate-200 text-xs">
+                <div>
+                  <span className="text-slate-500">Subtotal:</span>{" "}
+                  <span className="font-bold font-mono">₹{Number(inspectedInvoice.invoice.subtotal).toFixed(2)}</span>
+                </div>
+                <div>
+                  <span className="text-slate-500">Total Tax:</span>{" "}
+                  <span className="font-bold font-mono">₹{Number(inspectedInvoice.invoice.tax_total).toFixed(2)}</span>
+                </div>
+                <div>
+                  <span className="text-slate-500">Grand Total:</span>{" "}
+                  <span className="font-bold font-mono text-indigo-700 text-sm">₹{Number(inspectedInvoice.invoice.grand_total).toFixed(2)}</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex justify-end border-t border-slate-200 bg-slate-50 px-6 py-3">
+              <button
+                onClick={() => setInspectedInvoice(null)}
+                className="rounded-lg bg-slate-800 px-4 py-1.5 text-xs font-bold text-white hover:bg-slate-900"
+              >
+                Close (Esc)
               </button>
             </div>
           </div>

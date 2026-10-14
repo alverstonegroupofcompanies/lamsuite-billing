@@ -7,6 +7,7 @@ import {
   type LabelPrintConfig,
 } from "../../lib/purchases/barcodeLabelService";
 import { PrintPreviewModal } from "../PrintPreviewModal";
+import { useModalEscape } from "../../lib/ui/modalEscapeManager";
 
 interface BarcodePrintModalProps {
   isOpen: boolean;
@@ -27,6 +28,8 @@ export const BarcodePrintModal: React.FC<BarcodePrintModalProps> = ({
   onClose,
   items,
 }) => {
+  useModalEscape(isOpen, onClose);
+
   const [labelItems, setLabelItems] = useState<BarcodeLabelItem[]>(
     items.map((it) => ({
       product_id: it.product_id,

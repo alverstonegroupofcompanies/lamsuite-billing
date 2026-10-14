@@ -18,6 +18,7 @@ import { ReportsPage } from "./pages/ReportsPage";
 import { SyncCenterPage } from "./pages/SyncCenterPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { AuditLogsPage } from "./pages/AuditLogsPage";
+import { MigrationCenterPage } from "./pages/MigrationCenterPage";
 import { Building2, RefreshCw } from "lucide-react";
 
 const ProtectedRoutes: React.FC = () => {
@@ -62,6 +63,7 @@ const ProtectedRoutes: React.FC = () => {
         <Route path="/sync" element={<SyncCenterPage />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="/audit" element={<AuditLogsPage />} />
+        <Route path="/migrations" element={<MigrationCenterPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </Layout>

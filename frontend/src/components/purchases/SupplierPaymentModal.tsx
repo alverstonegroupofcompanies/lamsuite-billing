@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { X, CreditCard, Check, AlertCircle } from "lucide-react";
 import { supplierLedgerService, type SupplierMaster } from "../../lib/purchases/supplierLedgerService";
+import { useModalEscape } from "../../lib/ui/modalEscapeManager";
 
 interface SupplierPaymentModalProps {
   isOpen: boolean;
@@ -19,6 +20,8 @@ export const SupplierPaymentModal: React.FC<SupplierPaymentModalProps> = ({
   defaultAmount,
   onPaymentRecorded,
 }) => {
+  useModalEscape(isOpen, onClose);
+
   const [suppliers, setSuppliers] = useState<SupplierMaster[]>([]);
   const [supplierId, setSupplierId] = useState(defaultSupplierId || "");
   const [paymentDate, setPaymentDate] = useState(new Date().toISOString().slice(0, 10));
