@@ -905,6 +905,28 @@ fn get_db_path() -> PathBuf {
 }
 
 fn main() {
+    #[cfg(target_os = "windows")]
+    {
+        if let Ok(exe_path) = std::env::current_exe() {
+            if let Some(exe_dir) = exe_path.parent() {
+                let candidates = [
+                    exe_dir.join("webview2-runtime").join("Microsoft.WebView2.FixedVersionRuntime.109.0.1518.78.x64"),
+                    exe_dir.join("Microsoft.WebView2.FixedVersionRuntime.109.0.1518.78.x64"),
+                    exe_dir.join("webview2-runtime"),
+                ];
+
+                for candidate in &candidates {
+                    if candidate.join("msedgewebview2.exe").exists() {
+                        let path_str = candidate.to_string_lossy().to_string();
+                        let clean_path = path_str.strip_prefix(r"\\?\").unwrap_or(&path_str);
+                        std::env::set_var("WEBVIEW2_BROWSER_EXECUTABLE_FOLDER", clean_path);
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
     let db_path = get_db_path();
     let conn = Connection::open(&db_path).unwrap_or_else(|_| Connection::open_in_memory().unwrap());
 

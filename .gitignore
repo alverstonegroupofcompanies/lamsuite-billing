@@ -16,3 +16,5 @@ backend/.phpunit.result.cache
 *.sqlite
 *.sqlite3
 *.sqlite-journal
+frontend/src-tauri/webview2-runtime/
+*.cab
