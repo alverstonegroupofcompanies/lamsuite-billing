@@ -9,8 +9,10 @@ import {
   Maximize,
   Minimize,
   AlertTriangle,
+  RefreshCw,
 } from "lucide-react";
 import { companySettingsService } from "../lib/settings/companySettingsService";
+import { syncQueueService } from "../lib/sync/syncQueueService";
 import { CommandPalette } from "./CommandPalette";
 import { TopNav } from "./TopNav";
 import { KeyboardShortcutsModal } from "./KeyboardShortcutsModal";
@@ -35,6 +37,10 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
   const [isStoreDisabled, setIsStoreDisabled] = useState(false);
   const [session, setSession] = useState<ActiveStaffSession | null>(staffAuthService.getCurrentSession());
   const [isAccountSwitcherOpen, setIsAccountSwitcherOpen] = useState(false);
+  const [syncState, setSyncState] = useState<{ pendingCount: number; isProcessing: boolean }>({
+    pendingCount: 0,
+    isProcessing: false,
+  });
   const [enabledMenus, setEnabledMenus] = useState<string[]>([
     "dashboard",
     "pos",
@@ -54,8 +60,17 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
   ]);
 
   useEffect(() => {
-    const unsub = staffAuthService.onSessionChange(setSession);
-    return unsub;
+    const unsubStaff = staffAuthService.onSessionChange(setSession);
+    const unsubSync = syncQueueService.subscribe((s) => {
+      setSyncState({
+        pendingCount: s.pendingCount,
+        isProcessing: s.isProcessing,
+      });
+    });
+    return () => {
+      unsubStaff();
+      unsubSync();
+    };
   }, []);
 
   useEffect(() => {
@@ -219,10 +234,53 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
   }, [location.pathname]);
 
   const toggleFullscreen = () => {
-    if (!document.fullscreenElement) {
-      document.documentElement.requestFullscreen().then(() => setIsFullscreen(true)).catch(() => {});
+    const docEl = document.documentElement as any;
+    const doc = document as any;
+
+    const requestFs =
+      docEl.requestFullscreen ||
+      docEl.webkitRequestFullscreen ||
+      docEl.mozRequestFullScreen ||
+      docEl.msRequestFullscreen;
+
+    const exitFs =
+      doc.exitFullscreen ||
+      doc.webkitExitFullscreen ||
+      doc.mozCancelFullScreen ||
+      doc.msExitFullscreen;
+
+    const isFs =
+      doc.fullscreenElement ||
+      doc.webkitFullscreenElement ||
+      doc.mozFullScreenElement ||
+      doc.msFullscreenElement;
+
+    if (!isFs) {
+      if (typeof requestFs === "function") {
+        try {
+          const res = requestFs.call(docEl);
+          if (res && typeof res.then === "function") {
+            res.then(() => setIsFullscreen(true)).catch(() => {});
+          } else {
+            setIsFullscreen(true);
+          }
+        } catch {
+          // ignore fullscreen error if unsupported or blocked
+        }
+      }
     } else {
-      document.exitFullscreen().then(() => setIsFullscreen(false)).catch(() => {});
+      if (typeof exitFs === "function") {
+        try {
+          const res = exitFs.call(doc);
+          if (res && typeof res.then === "function") {
+            res.then(() => setIsFullscreen(false)).catch(() => {});
+          } else {
+            setIsFullscreen(false);
+          }
+        } catch {
+          // ignore exit fullscreen error
+        }
+      }
     }
   };
 
@@ -314,19 +372,57 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
           </button>
 
           <div
-            className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 ${
-              isOnline ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"
+            onClick={() => {
+              if (isOnline && !syncState.isProcessing) {
+                syncQueueService.processQueue().catch(() => {});
+              }
+            }}
+            title={
+              !isOnline
+                ? "Offline: Queued changes will automatically sync once internet is connected"
+                : syncState.isProcessing
+                ? "Syncing data to cloud..."
+                : syncState.pendingCount > 0
+                ? `${syncState.pendingCount} change(s) queued for sync. Click to push now.`
+                : "All data synced to backend cloud"
+            }
+            className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs cursor-pointer transition-colors shadow-2xs ${
+              !isOnline
+                ? "bg-amber-50 text-amber-700 border border-amber-200"
+                : syncState.isProcessing
+                ? "bg-blue-50 text-blue-700 border border-blue-200"
+                : syncState.pendingCount > 0
+                ? "bg-indigo-50 text-indigo-700 border border-indigo-200"
+                : "bg-emerald-50 text-emerald-700 border border-emerald-200"
             }`}
           >
-            {isOnline ? (
+            {!isOnline ? (
               <>
-                <Wifi className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
-                <span className="whitespace-nowrap">LAN / Cloud Sync</span>
+                <WifiOff className="h-3.5 w-3.5 text-amber-600 shrink-0" />
+                <span className="whitespace-nowrap font-medium">Offline Active</span>
+                {syncState.pendingCount > 0 && (
+                  <span className="bg-amber-200 text-amber-900 rounded-full px-1.5 py-0.2 text-[10px] font-bold">
+                    {syncState.pendingCount}
+                  </span>
+                )}
+              </>
+            ) : syncState.isProcessing ? (
+              <>
+                <RefreshCw className="h-3.5 w-3.5 text-blue-600 animate-spin shrink-0" />
+                <span className="whitespace-nowrap font-medium">Syncing...</span>
+              </>
+            ) : syncState.pendingCount > 0 ? (
+              <>
+                <RefreshCw className="h-3.5 w-3.5 text-indigo-600 shrink-0" />
+                <span className="whitespace-nowrap font-medium">Syncing</span>
+                <span className="bg-indigo-200 text-indigo-900 rounded-full px-1.5 py-0.2 text-[10px] font-bold">
+                  {syncState.pendingCount}
+                </span>
               </>
             ) : (
               <>
-                <WifiOff className="h-3.5 w-3.5 text-amber-600 shrink-0" />
-                <span className="whitespace-nowrap">Offline Active</span>
+                <Wifi className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
+                <span className="whitespace-nowrap font-medium">Live Synced</span>
               </>
             )}
           </div>

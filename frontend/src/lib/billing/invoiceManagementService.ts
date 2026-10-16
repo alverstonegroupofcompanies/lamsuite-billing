@@ -450,6 +450,7 @@ export class InvoiceManagementService {
     // 5. UPDATE INVOICE RECORD
     const updatedInvoiceRow: InvoiceRecord = {
       ...originalInvoice,
+      external_id: originalInvoice.external_id || originalInvoice.id,
       customer_name: payload.customerName || originalInvoice.customer_name,
       customer_phone: payload.customerPhone || originalInvoice.customer_phone,
       customer_gstin: payload.customerGstin ?? originalInvoice.customer_gstin,
@@ -469,8 +470,23 @@ export class InvoiceManagementService {
 
     await sqliteStorage.insertRecord("invoices", originalInvoice.id, updatedInvoiceRow as unknown as Record<string, unknown>);
 
-    // 6. ENQUEUE TO SYNC QUEUE
-    await syncQueueService.enqueue("invoice", originalInvoice.id, "update", updatedInvoiceRow as unknown as Record<string, unknown>);
+    // 6. ENQUEUE TO SYNC QUEUE WITH UPDATED LINE ITEMS
+    await syncQueueService.enqueue("invoice", originalInvoice.id, "update", {
+      ...updatedInvoiceRow,
+      items: payload.lines.map((line) => ({
+        product_id: line.product.id,
+        product_name: line.product.name,
+        batch_no: line.selectedBatch.batch_no,
+        expiry_date: line.selectedBatch.expiry_date,
+        qty: line.qty,
+        unit_price: line.unit_price,
+        discount_percent: line.discount_percent,
+        discount_amount: line.discount_amount,
+        gst_percent: line.product.gst_percent,
+        tax_amount: line.calculated.cgst_amount + line.calculated.sgst_amount + line.calculated.igst_amount,
+        total_amount: line.calculated.total_amount,
+      })),
+    });
 
     return { success: true, invoiceId: originalInvoice.id };
   }

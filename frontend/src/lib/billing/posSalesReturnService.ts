@@ -5,7 +5,9 @@ import type { InvoiceRecord, InvoiceItemRecord } from "../reports/reportEngine";
 
 export interface ReturnItemInput {
   product_id: string;
+  product_name?: string;
   batch_id: string;
+  batch_no?: string;
   qty: number;
   loose_qty?: number;
   units_per_pack?: number;
@@ -89,7 +91,19 @@ export class PosSalesReturnService {
     };
 
     await sqliteStorage.insertRecord("invoices", creditNoteId, creditNoteRow);
-    await syncQueueService.enqueue("invoice", creditNoteId, "create", creditNoteRow as unknown as Record<string, unknown>);
+    await syncQueueService.enqueue("invoice", creditNoteId, "create", {
+      ...creditNoteRow,
+      items: returnItems.map((item) => ({
+        product_id: item.product_id,
+        product_name: item.product_name,
+        batch_no: item.batch_no,
+        qty: item.qty,
+        unit_price: item.return_rate,
+        gst_percent: item.gst_percent,
+        tax_amount: Math.round(((item.qty * item.return_rate * item.gst_percent) / 100) * 100) / 100,
+        total_amount: Math.round(((item.qty * item.return_rate) * (1 + item.gst_percent / 100)) * 100) / 100,
+      })),
+    });
 
     return {
       success: true,

@@ -1,5 +1,6 @@
 import { sqliteStorage } from "../db/sqliteStorage";
 import { productsStore, type ProductBatch, type ProductItem } from "../masters/productsStore";
+import { syncQueueService } from "../sync/syncQueueService";
 
 export interface StockAdjustmentInput {
   product_id: string;
@@ -45,7 +46,7 @@ export class InventoryService {
 
     // Double-entry stock transaction
     const eventType = input.adjustment_qty >= 0 ? "ADJUSTMENT_IN" : "ADJUSTMENT_OUT";
-    await sqliteStorage.insertRecord("stock_transactions", adjustmentId, {
+    const stockEvent = {
       id: adjustmentId,
       product_id: input.product_id,
       batch_id: input.batch_id,
@@ -55,7 +56,12 @@ export class InventoryService {
       reference_id: adjustmentId,
       notes: `${input.reason}: ${input.notes || ""}`.trim(),
       created_at: now,
-    });
+    };
+    await sqliteStorage.insertRecord("stock_transactions", adjustmentId, stockEvent);
+
+    try {
+      await syncQueueService.enqueue("stock_adjustment", adjustmentId, "create", stockEvent);
+    } catch (_) {}
 
     return { success: true, adjustmentId };
   }

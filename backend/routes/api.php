@@ -38,6 +38,15 @@ Route::post('/auth/login', [AdminAuthController::class, 'login']);
 Route::post('/devices/register', [AuthController::class, 'registerDevice']);
 Route::get('/branches', [AuthController::class, 'branches']);
 Route::get('/license/check', [AuthController::class, 'checkLicense']);
+Route::post('/sync/push/batch', [SyncController::class, 'pushBatch']);
+Route::post('/sync/push/invoices', [SyncController::class, 'pushInvoices']);
+Route::post('/sync/push/stock-events', [SyncController::class, 'pushStockEvents']);
+Route::post('/sync/push/purchases', [SyncController::class, 'pushPurchases']);
+Route::post('/sync/push/parties', [SyncController::class, 'pushParties']);
+Route::post('/sync/push/products', [SyncController::class, 'pushProducts']);
+Route::post('/sync/push/adjustments', [SyncController::class, 'pushAdjustments']);
+Route::post('/sync/push/transfers', [SyncController::class, 'pushTransfers']);
+Route::get('/sync/pull/deltas', [SyncController::class, 'pullDeltas']);
 
 /*
 |--------------------------------------------------------------------------
@@ -77,9 +86,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/stock/batches/near-expiry', [StockController::class, 'nearExpiry']);
     Route::get('/stock/products/low-stock', [StockController::class, 'lowStock']);
 
-    Route::post('/sync/push/invoices', [SyncController::class, 'pushInvoices']);
-    Route::post('/sync/push/stock-events', [SyncController::class, 'pushStockEvents']);
-    Route::get('/sync/pull/deltas', [SyncController::class, 'pullDeltas']);
+
 
     Route::get('/reports/daily-collection', [ReportController::class, 'dailyCollection']);
     Route::get('/reports/gstr-1', [ReportController::class, 'gstr1']);

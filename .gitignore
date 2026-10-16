@@ -11,6 +11,9 @@ backend/storage/*.key
 backend/database/*.sqlite
 backend/bootstrap/cache/*
 !backend/bootstrap/cache/.gitignore
+backend/storage/framework/cache/*
+backend/storage/framework/sessions/*
+backend/storage/framework/views/*
 backend/.env
 backend/.phpunit.result.cache
 *.sqlite

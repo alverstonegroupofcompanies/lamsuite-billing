@@ -203,12 +203,7 @@ export const SettingsPage: React.FC = () => {
   const handleTriggerSyncNow = async () => {
     setIsSyncing(true);
     try {
-      const mockClient = {
-        pushInvoices: async () => ({ success: true, ingested_count: 1 }),
-        pushStockEvents: async () => ({ success: true, ingested_count: 1 }),
-      };
-
-      const result = await syncQueueService.processQueue(mockClient);
+      const result = await syncQueueService.processQueue();
       const queue = await sqliteStorage.findAll<SyncQueueItem>("sync_queue");
       setSyncQueue(queue);
       showNotification(`Sync complete: ${result.processed} pushed, ${result.failed} failed`);

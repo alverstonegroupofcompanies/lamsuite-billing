@@ -60,10 +60,41 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose 
   if (!isOpen) return null;
 
   const toggleFullscreen = () => {
-    if (!document.fullscreenElement) {
-      document.documentElement.requestFullscreen().catch(() => {});
+    const docEl = document.documentElement as any;
+    const doc = document as any;
+
+    const requestFs =
+      docEl.requestFullscreen ||
+      docEl.webkitRequestFullscreen ||
+      docEl.mozRequestFullScreen ||
+      docEl.msRequestFullscreen;
+
+    const exitFs =
+      doc.exitFullscreen ||
+      doc.webkitExitFullscreen ||
+      doc.mozCancelFullScreen ||
+      doc.msExitFullscreen;
+
+    const isFs =
+      doc.fullscreenElement ||
+      doc.webkitFullscreenElement ||
+      doc.mozFullScreenElement ||
+      doc.msFullscreenElement;
+
+    if (!isFs) {
+      if (typeof requestFs === "function") {
+        try {
+          const res = requestFs.call(docEl);
+          if (res && typeof res.catch === "function") res.catch(() => {});
+        } catch {}
+      }
     } else {
-      document.exitFullscreen().catch(() => {});
+      if (typeof exitFs === "function") {
+        try {
+          const res = exitFs.call(doc);
+          if (res && typeof res.catch === "function") res.catch(() => {});
+        } catch {}
+      }
     }
   };
 

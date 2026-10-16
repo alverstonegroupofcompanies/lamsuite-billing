@@ -207,7 +207,7 @@ export const MastersPage: React.FC = () => {
       is_active: prodForm.is_active ?? true,
     };
 
-    await productsStore.upsertProduct(item);
+    await productsStore.upsertProduct(item, true);
     showNotification(`Product "${item.name}" saved successfully`);
     setIsProductModalOpen(false);
     setEditingProduct(null);
@@ -235,7 +235,7 @@ export const MastersPage: React.FC = () => {
       shelf_location: batchForm.shelf_location || "",
     };
 
-    await productsStore.upsertBatch(batch);
+    await productsStore.upsertBatch(batch, true);
     showNotification(`Batch "${batch.batch_no}" saved successfully`);
     setIsBatchModalOpen(false);
     setEditingBatch(null);

@@ -5,6 +5,7 @@ import { companySettingsService } from "../settings/companySettingsService";
 import { round2 } from "../billing/billingCalculations";
 import { normalizePackLoose } from "../billing/unitConversion";
 import type { InvoicePrintData } from "../printing/printingEngine";
+import { syncQueueService } from "../sync/syncQueueService";
 
 export type TransferStatus =
   | "draft"
@@ -620,6 +621,9 @@ export class InterStoreTransferService {
     });
 
     await sqliteStorage.insertRecord("stock_transfers", id, transfer as unknown as Record<string, unknown>);
+    try {
+      await syncQueueService.enqueue("transfer", id, "create", transfer as unknown as Record<string, unknown>);
+    } catch (_) {}
     return transfer;
   }
 

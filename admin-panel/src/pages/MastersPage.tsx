@@ -60,15 +60,50 @@ export const MastersPage: React.FC = () => {
   const [importRows, setImportRows] = useState<any[]>([]);
   const [importPreview, setImportPreview] = useState<any>(null);
 
+  // Pagination state for products & parties
+  const [productPage, setProductPage] = useState(1);
+  const [productTotalPages, setProductTotalPages] = useState(1);
+  const [productTotalCount, setProductTotalCount] = useState(0);
+  const [productPerPage, setProductPerPage] = useState(50);
+
+  const [partyPage, setPartyPage] = useState(1);
+  const [partyTotalPages, setPartyTotalPages] = useState(1);
+  const [partyTotalCount, setPartyTotalCount] = useState(0);
+
   const fetchCatalog = async () => {
     setIsLoading(true);
     try {
       if (activeTab === "products") {
-        const res = await api.get<{ data: Product[] }>("/admin/products", { search, per_page: 100 });
+        const res = await api.get<{
+          data: Product[];
+          current_page: number;
+          last_page: number;
+          total: number;
+        }>("/admin/products", {
+          search,
+          page: productPage,
+          per_page: productPerPage,
+        });
         setProducts(res.data || []);
+        setProductPage(res.current_page || 1);
+        setProductTotalPages(res.last_page || 1);
+        setProductTotalCount(res.total || 0);
       } else if (activeTab === "parties") {
-        const res = await api.get<{ data: Party[] }>("/admin/parties", { type: partyType, search, per_page: 100 });
+        const res = await api.get<{
+          data: Party[];
+          current_page: number;
+          last_page: number;
+          total: number;
+        }>("/admin/parties", {
+          type: partyType,
+          search,
+          page: partyPage,
+          per_page: 50,
+        });
         setParties(res.data || []);
+        setPartyPage(res.current_page || 1);
+        setPartyTotalPages(res.last_page || 1);
+        setPartyTotalCount(res.total || 0);
       }
     } catch (err) {
       console.error("Failed to load catalog data:", err);
@@ -79,7 +114,7 @@ export const MastersPage: React.FC = () => {
 
   useEffect(() => {
     fetchCatalog();
-  }, [activeTab, partyType, search, activeStore]);
+  }, [activeTab, partyType, search, productPage, productPerPage, partyPage, activeStore]);
 
   const handleSaveProduct = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -304,7 +339,11 @@ export const MastersPage: React.FC = () => {
           <input
             type="text"
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={(e) => {
+              setSearch(e.target.value);
+              setProductPage(1);
+              setPartyPage(1);
+            }}
             placeholder={`Search ${activeTab}...`}
             className="w-full pl-9 pr-3 py-1.5 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/80 rounded-xl text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:outline-hidden focus:ring-2 focus:ring-brand-500"
           />
@@ -315,7 +354,10 @@ export const MastersPage: React.FC = () => {
             {(["customer", "supplier", "doctor", "patient"] as const).map((type) => (
               <button
                 key={type}
-                onClick={() => setPartyType(type)}
+                onClick={() => {
+                  setPartyType(type);
+                  setPartyPage(1);
+                }}
                 className={`px-3 py-1 rounded-lg capitalize font-medium transition-colors ${
                   partyType === type
                     ? "bg-brand-600 text-white shadow-xs font-bold"
@@ -425,6 +467,74 @@ export const MastersPage: React.FC = () => {
               </tbody>
             </table>
           </div>
+
+          {/* Product Pagination Footer */}
+          <div className="px-4 py-3 border-t border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/60 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-500 dark:text-slate-400">
+            <div className="flex items-center gap-2">
+              <span>
+                Showing page <strong className="text-slate-800 dark:text-slate-200 font-semibold">{productPage}</strong> of{" "}
+                <strong className="text-slate-800 dark:text-slate-200 font-semibold">{productTotalPages}</strong> ({productTotalCount.toLocaleString()} total products)
+              </span>
+              <span className="text-slate-300 dark:text-slate-700">|</span>
+              <div className="flex items-center gap-1.5">
+                <span>Per page:</span>
+                <select
+                  value={productPerPage}
+                  onChange={(e) => {
+                    setProductPerPage(Number(e.target.value));
+                    setProductPage(1);
+                  }}
+                  className="px-2 py-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-700 dark:text-slate-300 font-medium"
+                >
+                  <option value={25}>25</option>
+                  <option value={50}>50</option>
+                  <option value={100}>100</option>
+                  <option value={200}>200</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setProductPage((p) => Math.max(1, p - 1))}
+                disabled={productPage <= 1 || isLoading}
+                className="px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 disabled:opacity-50 text-slate-700 dark:text-slate-200 font-semibold hover:bg-slate-50 dark:hover:bg-slate-700/60 transition shadow-2xs"
+              >
+                Previous
+              </button>
+
+              <div className="flex items-center gap-1">
+                {Array.from({ length: Math.min(5, productTotalPages) }, (_, idx) => {
+                  let pNum = productPage - 2 + idx;
+                  if (productPage < 3) pNum = idx + 1;
+                  if (productPage > productTotalPages - 2) pNum = productTotalPages - 4 + idx;
+                  if (pNum < 1 || pNum > productTotalPages) return null;
+
+                  return (
+                    <button
+                      key={pNum}
+                      onClick={() => setProductPage(pNum)}
+                      className={`w-7 h-7 rounded-lg text-xs font-semibold transition ${
+                        productPage === pNum
+                          ? "bg-brand-600 text-white shadow-2xs"
+                          : "text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
+                      }`}
+                    >
+                      {pNum}
+                    </button>
+                  );
+                })}
+              </div>
+
+              <button
+                onClick={() => setProductPage((p) => Math.min(productTotalPages, p + 1))}
+                disabled={productPage >= productTotalPages || isLoading}
+                className="px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 disabled:opacity-50 text-slate-700 dark:text-slate-200 font-semibold hover:bg-slate-50 dark:hover:bg-slate-700/60 transition shadow-2xs"
+              >
+                Next
+              </button>
+            </div>
+          </div>
         </div>
       ) : (
         /* Parties Table */
@@ -482,6 +592,32 @@ export const MastersPage: React.FC = () => {
                 )}
               </tbody>
             </table>
+          </div>
+
+          {/* Party Pagination Footer */}
+          <div className="px-4 py-3 border-t border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/60 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-500 dark:text-slate-400">
+            <div>
+              Showing page <strong className="text-slate-800 dark:text-slate-200 font-semibold">{partyPage}</strong> of{" "}
+              <strong className="text-slate-800 dark:text-slate-200 font-semibold">{partyTotalPages}</strong> ({partyTotalCount.toLocaleString()} total {partyType}s)
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setPartyPage((p) => Math.max(1, p - 1))}
+                disabled={partyPage <= 1 || isLoading}
+                className="px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 disabled:opacity-50 text-slate-700 dark:text-slate-200 font-semibold hover:bg-slate-50 dark:hover:bg-slate-700/60 transition shadow-2xs"
+              >
+                Previous
+              </button>
+
+              <button
+                onClick={() => setPartyPage((p) => Math.min(partyTotalPages, p + 1))}
+                disabled={partyPage >= partyTotalPages || isLoading}
+                className="px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 disabled:opacity-50 text-slate-700 dark:text-slate-200 font-semibold hover:bg-slate-50 dark:hover:bg-slate-700/60 transition shadow-2xs"
+              >
+                Next
+              </button>
+            </div>
           </div>
         </div>
       )}

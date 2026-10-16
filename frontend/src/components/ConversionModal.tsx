@@ -73,16 +73,10 @@ export const ConversionModal: React.FC<ConversionModalProps> = ({
 }) => {
   useModalEscape(isOpen && Boolean(line), onClose);
 
-  if (!isOpen || !line) return null;
-
-  const currentUpp = line.product.units_per_pack || 1;
-  const currentPackName = line.product.unit_name || (currentUpp > 1 ? "pack" : "pc");
-  const currentLooseName = line.product.sub_unit_name || (currentUpp > 1 ? "pc" : "unit");
-
   const [activeCategory, setActiveCategory] = useState<string>("cosmetics_retail");
-  const [unitsPerPack, setUnitsPerPack] = useState<number>(currentUpp);
-  const [packName, setPackName] = useState<string>(currentPackName);
-  const [looseName, setLooseName] = useState<string>(currentLooseName);
+  const [unitsPerPack, setUnitsPerPack] = useState<number>(line?.product.units_per_pack || 1);
+  const [packName, setPackName] = useState<string>(line?.product.unit_name || ((line?.product.units_per_pack || 1) > 1 ? "pack" : "pc"));
+  const [looseName, setLooseName] = useState<string>(line?.product.sub_unit_name || ((line?.product.units_per_pack || 1) > 1 ? "pc" : "unit"));
   const [persistMaster, setPersistMaster] = useState<boolean>(false);
 
   useEffect(() => {
@@ -103,6 +97,8 @@ export const ConversionModal: React.FC<ConversionModalProps> = ({
       }
     }
   }, [line]);
+
+  if (!isOpen || !line) return null;
 
   const handleApplyPreset = (preset: PresetItem) => {
     setUnitsPerPack(preset.upp);

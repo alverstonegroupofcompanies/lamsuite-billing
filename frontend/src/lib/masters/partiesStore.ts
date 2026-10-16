@@ -422,6 +422,10 @@ export class PartiesStore {
         is_active: party.is_active ?? true,
       });
     }
+
+    try {
+      await syncQueueService.enqueue("customer", party.id, "update", party as unknown as Record<string, unknown>);
+    } catch (_) {}
   }
 
   async getAllParties(): Promise<PartyMaster[]> {

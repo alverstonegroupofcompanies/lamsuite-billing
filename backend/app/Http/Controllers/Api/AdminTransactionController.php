@@ -61,7 +61,8 @@ class AdminTransactionController
             return response()->json(['data' => $query->get()]);
         }
 
-        return response()->json($query->paginate(20));
+        $perPage = min((int) $request->query('per_page', 25), 500);
+        return response()->json($query->paginate($perPage));
     }
 
     /**
@@ -232,7 +233,8 @@ class AdminTransactionController
             return response()->json(['data' => $query->get()]);
         }
 
-        return response()->json($query->paginate(20));
+        $perPage = min((int) $request->query('per_page', 25), 500);
+        return response()->json($query->paginate($perPage));
     }
 
     public function showPurchase(string $id): JsonResponse

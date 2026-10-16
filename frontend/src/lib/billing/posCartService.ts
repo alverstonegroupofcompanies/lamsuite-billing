@@ -532,17 +532,17 @@ export class PosCartService {
           ...line.selectedBatch,
           stock_qty: -(deductedBaseUnits),
         };
-        await productsStore.upsertBatch(batch);
+        await productsStore.upsertBatch(batch, false);
       } else {
         batch.stock_qty = (batch.stock_qty || 0) - deductedBaseUnits;
-        await productsStore.upsertBatch(batch);
+        await productsStore.upsertBatch(batch, false);
       }
 
       // Update product current_stock
       const prod = await productsStore.getProductById(line.product.id);
       if (prod) {
         prod.current_stock = (prod.current_stock || 0) - deductedBaseUnits;
-        await productsStore.upsertProduct(prod);
+        await productsStore.upsertProduct(prod, false);
       }
 
       const stockTxId = `stk_tx_${Date.now()}_${Math.random().toString(16).slice(2, 6)}`;
@@ -566,8 +566,23 @@ export class PosCartService {
       });
     }
 
-    // 3. Enqueue for background sync
-    await syncQueueService.enqueue("invoice", invoiceId, "create", invoiceRow);
+    // 3. Enqueue for background sync with items
+    await syncQueueService.enqueue("invoice", invoiceId, "create", {
+      ...invoiceRow,
+      items: linesToFinalize.map((line) => ({
+        product_id: line.product.id,
+        product_name: line.product.name,
+        batch_no: line.selectedBatch.batch_no,
+        expiry_date: line.selectedBatch.expiry_date,
+        qty: line.qty,
+        unit_price: line.unit_price,
+        discount_percent: line.discount_percent,
+        discount_amount: line.discount_amount,
+        gst_percent: line.product.gst_percent,
+        tax_amount: (line.calculated.cgst_amount || 0) + (line.calculated.sgst_amount || 0) + (line.calculated.igst_amount || 0),
+        total_amount: line.calculated.total_amount,
+      })),
+    });
 
     // 4. Reset Cart only if autoClear is not explicitly disabled
     if (options?.autoClear !== false) {

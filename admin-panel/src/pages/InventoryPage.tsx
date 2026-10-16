@@ -29,6 +29,12 @@ export const InventoryPage: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [search, setSearch] = useState("");
 
+  // Pagination for Batches
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [totalCount, setTotalCount] = useState(0);
+  const [perPage, setPerPage] = useState(50);
+
   // Transfer Dispatch Modal
   const [isTransferModalOpen, setIsTransferModalOpen] = useState(false);
   const [toStoreId, setToStoreId] = useState<number | "">("");
@@ -46,8 +52,16 @@ export const InventoryPage: React.FC = () => {
     setIsLoading(true);
     try {
       if (activeTab === "batches") {
-        const res = await api.get<{ data: ProductBatch[] }>("/admin/inventory/batches", { search, per_page: 100 });
+        const res = await api.get<{
+          data: ProductBatch[];
+          current_page: number;
+          last_page: number;
+          total: number;
+        }>("/admin/inventory/batches", { search, page, per_page: perPage });
         setBatches(res.data || []);
+        setPage(res.current_page || 1);
+        setTotalPages(res.last_page || 1);
+        setTotalCount(res.total || 0);
       } else if (activeTab === "ledger") {
         const res = await api.get<{ data: any[] }>("/admin/inventory/ledger");
         setLedgerEntries(res.data || []);
@@ -67,7 +81,7 @@ export const InventoryPage: React.FC = () => {
 
   useEffect(() => {
     fetchInventory();
-  }, [activeTab, search, activeStore]);
+  }, [activeTab, search, page, perPage, activeStore]);
 
   const handleDispatchTransfer = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -169,18 +183,33 @@ export const InventoryPage: React.FC = () => {
         })}
       </div>
 
-      {/* Search Bar */}
+      {/* Search Bar & Toolbar */}
       {activeTab === "batches" && (
-        <div className="bg-white dark:bg-slate-900 p-3 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xs">
-          <div className="relative max-w-sm">
+        <div className="bg-white dark:bg-slate-900 p-3 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xs flex flex-col sm:flex-row items-center justify-between gap-3">
+          <div className="relative w-full sm:max-w-sm">
             <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
             <input
               type="text"
               value={search}
-              onChange={(e) => setSearch(e.target.value)}
+              onChange={(e) => {
+                setSearch(e.target.value);
+                setPage(1);
+              }}
               placeholder="Search batch number, SKU name..."
               className="w-full pl-9 pr-3 py-1.5 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/80 rounded-xl text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:outline-hidden focus:ring-2 focus:ring-brand-500"
             />
+          </div>
+
+          <div className="flex items-center gap-2 self-end sm:self-auto">
+            <button
+              onClick={() => fetchInventory()}
+              disabled={isLoading}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-xs font-semibold rounded-xl text-slate-700 dark:text-slate-200 transition-colors"
+              title="Refresh inventory"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? "animate-spin text-brand-600" : ""}`} />
+              <span>Refresh</span>
+            </button>
           </div>
         </div>
       )}
@@ -251,6 +280,74 @@ export const InventoryPage: React.FC = () => {
                 )}
               </tbody>
             </table>
+          </div>
+
+          {/* Pagination Footer */}
+          <div className="px-4 py-3 border-t border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/60 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-500 dark:text-slate-400">
+            <div className="flex items-center gap-2">
+              <span>
+                Showing page <strong className="text-slate-800 dark:text-slate-200 font-semibold">{page}</strong> of{" "}
+                <strong className="text-slate-800 dark:text-slate-200 font-semibold">{totalPages}</strong> ({totalCount.toLocaleString()} total batches)
+              </span>
+              <span className="text-slate-300 dark:text-slate-700">|</span>
+              <div className="flex items-center gap-1.5">
+                <span>Per page:</span>
+                <select
+                  value={perPage}
+                  onChange={(e) => {
+                    setPerPage(Number(e.target.value));
+                    setPage(1);
+                  }}
+                  className="px-2 py-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-700 dark:text-slate-300 font-medium"
+                >
+                  <option value={25}>25</option>
+                  <option value={50}>50</option>
+                  <option value={100}>100</option>
+                  <option value={200}>200</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                disabled={page <= 1 || isLoading}
+                className="px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 disabled:opacity-50 text-slate-700 dark:text-slate-200 font-semibold hover:bg-slate-50 dark:hover:bg-slate-700/60 transition shadow-2xs"
+              >
+                Previous
+              </button>
+
+              <div className="flex items-center gap-1">
+                {Array.from({ length: Math.min(5, totalPages) }, (_, idx) => {
+                  let pNum = page - 2 + idx;
+                  if (page < 3) pNum = idx + 1;
+                  if (page > totalPages - 2) pNum = totalPages - 4 + idx;
+                  if (pNum < 1 || pNum > totalPages) return null;
+
+                  return (
+                    <button
+                      key={pNum}
+                      onClick={() => setPage(pNum)}
+                      className={`w-7 h-7 rounded-lg text-xs font-semibold transition ${
+                        page === pNum
+                          ? "bg-brand-600 text-white shadow-2xs"
+                          : "text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
+                      }`}
+                    >
+                      {pNum}
+                    </button>
+                  );
+                })}
+              </div>
+
+              <button
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                disabled={page >= totalPages || isLoading}
+                className="px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 disabled:opacity-50 text-slate-700 dark:text-slate-200 font-semibold hover:bg-slate-50 dark:hover:bg-slate-700/60 transition shadow-2xs"
+              >
+                Next
+              </button>
+            </div>
           </div>
         </div>
       )}

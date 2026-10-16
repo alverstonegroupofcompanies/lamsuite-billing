@@ -1,4 +1,5 @@
 import { sqliteStorage } from "../db/sqliteStorage";
+import { syncQueueService } from "../sync/syncQueueService";
 
 export interface ProductBatch {
   id: string;
@@ -72,8 +73,13 @@ export interface ProductItem {
 }
 
 export class ProductsStore {
-  async upsertProduct(product: ProductItem): Promise<void> {
+  async upsertProduct(product: ProductItem, enqueueSync = false): Promise<void> {
     await sqliteStorage.insertRecord("products", product.id, product as unknown as Record<string, unknown>);
+    if (enqueueSync) {
+      try {
+        await syncQueueService.enqueue("product", product.id, "update", product as unknown as Record<string, unknown>);
+      } catch (_) {}
+    }
   }
 
   async getProductById(id: string): Promise<ProductItem | null> {
@@ -113,8 +119,16 @@ export class ProductsStore {
     });
   }
 
-  async upsertBatch(batch: ProductBatch): Promise<void> {
+  async upsertBatch(batch: ProductBatch, enqueueSync = false): Promise<void> {
     await sqliteStorage.insertRecord("product_batches", batch.id, batch as unknown as Record<string, unknown>);
+    if (enqueueSync) {
+      try {
+        await syncQueueService.enqueue("product", batch.product_id, "update", {
+          id: batch.product_id,
+          batches: [batch],
+        });
+      } catch (_) {}
+    }
   }
 
   async getBatchesForProduct(productId: string, onlyInStock = true): Promise<ProductBatch[]> {
