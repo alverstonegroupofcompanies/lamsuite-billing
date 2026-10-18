@@ -39,6 +39,10 @@ class Invoice extends Model
         'external_id',
         'synced_at',
         'version',
+        'counter_code',
+        'location_name',
+        'locked_by_counter_id',
+        'locked_until',
     ];
 
     protected $casts = [
@@ -52,6 +56,7 @@ class Invoice extends Model
         'due_date' => 'date',
         'cancelled_at' => 'datetime',
         'synced_at' => 'datetime',
+        'locked_until' => 'datetime',
         'version' => 'integer',
     ];
 

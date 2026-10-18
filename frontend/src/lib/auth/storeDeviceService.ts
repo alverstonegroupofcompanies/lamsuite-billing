@@ -16,7 +16,19 @@ export interface StoreDeviceProfile {
   counter_id: string;
   counter_name: string;
   counter_code: string;
+  location_name?: string;
+  is_remote?: boolean;
   is_hub: boolean;
+  is_digital_only?: boolean;
+  role_profile?: {
+    allow_cancel?: boolean;
+    allow_price_change?: boolean;
+    allow_stock_adj?: boolean;
+    require_manager_pin?: boolean;
+  };
+  manager_pin?: string;
+  printer_profile?: Record<string, unknown>;
+  receipt_customization?: Record<string, unknown>;
   license_plan: string;
   license_status: "active" | "trial" | "expired" | "grace_period" | "revoked";
   license_expires_at: string;
@@ -340,6 +352,87 @@ export class StoreDeviceService {
 
     this.activeProfile = null;
     this.isAccessRevoked = false;
+  }
+
+  async enrollRemoteCounter(
+    baseUrl: string,
+    counterName: string,
+    counterCode: string,
+    locationName = "Owner Residence",
+    isDigitalOnly = false
+  ): Promise<{ success: boolean; status: string; counter?: any; message: string }> {
+    const deviceUuid = `dev_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`;
+
+    try {
+      const res = await fetch(`${baseUrl}/api/counters/enroll`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({
+          store_id: 1,
+          device_uuid: deviceUuid,
+          counter_name: counterName,
+          counter_code: counterCode,
+          location_name: locationName,
+          is_remote: true,
+          is_digital_only: isDigitalOnly,
+        }),
+      });
+
+      const data = await res.json();
+      if (res.ok && data.success) {
+        // Save initial profile
+        const counter = data.counter;
+        const profile: StoreDeviceProfile = {
+          device_id: String(counter.id),
+          device_uuid: deviceUuid,
+          device_name: counterName,
+          store_id: String(counter.store_id),
+          store_name: "LamStone Pharmacy & Retail",
+          store_code: "STORE-01",
+          counter_id: String(counter.id),
+          counter_name: counterName,
+          counter_code: counterCode,
+          location_name: locationName,
+          is_remote: true,
+          is_hub: false,
+          is_digital_only: isDigitalOnly,
+          role_profile: counter.role_profile,
+          printer_profile: counter.printer_profile,
+          license_plan: "Retail & Pharmacy Chain Remote Pro",
+          license_status: "active",
+          license_expires_at: "2027-12-31",
+          registered_at: Date.now(),
+          is_active: counter.status === "active",
+          disabled_reason: counter.status === "pending_approval" ? "Awaiting Store Owner Approval" : undefined,
+        };
+
+        await invokeCommand("secure_store_set", {
+          key: "store_device_profile",
+          value: JSON.stringify(profile),
+        });
+        this.activeProfile = profile;
+        return { success: true, status: counter.status, counter, message: data.message };
+      }
+      return { success: false, status: "error", message: data.error || "Enrollment failed" };
+    } catch (err: any) {
+      return { success: false, status: "error", message: err?.message || "Failed to reach enrollment endpoint" };
+    }
+  }
+
+  canPerformAction(action: "cancel_bill" | "change_price" | "adjust_stock"): boolean {
+    if (!this.activeProfile || !this.activeProfile.role_profile) return true;
+    const rp = this.activeProfile.role_profile;
+
+    if (action === "cancel_bill" && rp.allow_cancel === false) return false;
+    if (action === "change_price" && rp.allow_price_change === false) return false;
+    if (action === "adjust_stock" && rp.allow_stock_adj === false) return false;
+
+    return true;
+  }
+
+  verifyManagerPin(inputPin: string): boolean {
+    if (!this.activeProfile?.manager_pin) return true; // No PIN configured
+    return this.activeProfile.manager_pin === inputPin;
   }
 }
 

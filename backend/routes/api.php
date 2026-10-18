@@ -27,6 +27,7 @@ use App\Http\Controllers\Api\ReportController;
 use App\Http\Controllers\Api\PrintController;
 use App\Http\Controllers\Api\DataExchangeController;
 use App\Http\Controllers\Api\MigrationController;
+use App\Http\Controllers\Api\CounterController;
 
 /*
 |--------------------------------------------------------------------------
@@ -36,6 +37,8 @@ use App\Http\Controllers\Api\MigrationController;
 Route::post('/login', [AdminAuthController::class, 'login']);
 Route::post('/auth/login', [AdminAuthController::class, 'login']);
 Route::post('/devices/register', [AuthController::class, 'registerDevice']);
+Route::post('/counters/enroll', [CounterController::class, 'enroll']);
+Route::get('/counters', [CounterController::class, 'index']);
 Route::get('/branches', [AuthController::class, 'branches']);
 Route::get('/license/check', [AuthController::class, 'checkLicense']);
 Route::post('/sync/push/batch', [SyncController::class, 'pushBatch']);
@@ -47,6 +50,13 @@ Route::post('/sync/push/products', [SyncController::class, 'pushProducts']);
 Route::post('/sync/push/adjustments', [SyncController::class, 'pushAdjustments']);
 Route::post('/sync/push/transfers', [SyncController::class, 'pushTransfers']);
 Route::get('/sync/pull/deltas', [SyncController::class, 'pullDeltas']);
+Route::get('/sync/stream', [SyncController::class, 'streamSSE']);
+Route::post('/invoices/{id}/lock', [SyncController::class, 'lockInvoice']);
+Route::post('/invoices/{id}/unlock', [SyncController::class, 'unlockInvoice']);
+Route::get('/inventory/negative-stock-report', [SyncController::class, 'getNegativeStockReport']);
+Route::post('/counters/{id}/shifts/close', [CounterController::class, 'closeShift']);
+Route::post('/counters/{id}/status', [CounterController::class, 'updateStatus']);
+Route::post('/stores/day-close', [CounterController::class, 'closeStoreDay']);
 
 /*
 |--------------------------------------------------------------------------
@@ -135,6 +145,10 @@ Route::middleware(['auth:sanctum', 'session.timeout', 'ip.allowlist', 'scope.sto
     Route::get('/devices', [AdminDeviceController::class, 'index'])->middleware('rbac:devices,view');
     Route::post('/devices/{id}/status', [AdminDeviceController::class, 'updateStatus'])->middleware('rbac:devices,edit');
     Route::post('/devices/{id}/force-resync', [AdminDeviceController::class, 'forceResync'])->middleware('rbac:devices,edit');
+    Route::get('/counters', [CounterController::class, 'index'])->middleware('rbac:devices,view');
+    Route::post('/counters/{id}/status', [CounterController::class, 'updateStatus'])->middleware('rbac:devices,edit');
+    Route::post('/counters/{id}/settings', [CounterController::class, 'updateSettings'])->middleware('rbac:devices,edit');
+    Route::post('/counters/{id}/lease-sequence', [CounterController::class, 'leaseSequence'])->middleware('rbac:devices,edit');
 
     // Module 4: Menu & Feature Control
     Route::get('/stores/{id}/features', [AdminFeatureController::class, 'show'])->middleware('rbac:features,view');

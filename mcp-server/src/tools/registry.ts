@@ -63,6 +63,8 @@ import {
   migrationRollbackTool,
   migrationCutoverTool,
 } from "./write/migrationTools.js";
+import { listCountersTool, getNegativeStockReportTool } from "./read/counters.js";
+import { approveCounterTool, leaseCounterSequenceTool } from "./write/counters.js";
 
 export const ALL_READ_TOOLS: ToolDefinition[] = [
   getImportTemplateTool,
@@ -92,6 +94,8 @@ export const ALL_READ_TOOLS: ToolDefinition[] = [
   stockBalanceTool,
   migrationPrecheckTool,
   migrationReconcileTool,
+  listCountersTool,
+  getNegativeStockReportTool,
 ];
 
 export const ALL_WRITE_TOOLS: ToolDefinition[] = [
@@ -110,6 +114,8 @@ export const ALL_WRITE_TOOLS: ToolDefinition[] = [
   migrationStartTool,
   migrationRollbackTool,
   migrationCutoverTool,
+  approveCounterTool,
+  leaseCounterSequenceTool,
 ];
 
 export class ToolRegistry {

@@ -189,6 +189,9 @@ class SyncController
 
         $invoiceData = [
             'store_id' => $storeId,
+            'counter_id' => !empty($inv['counter_id']) && is_numeric($inv['counter_id']) ? (int)$inv['counter_id'] : null,
+            'counter_code' => $inv['counter_code'] ?? null,
+            'location_name' => $inv['location_name'] ?? null,
             'module_key' => $inv['module_key'] ?? 'invoice',
             'invoice_number' => $inv['invoice_number'] ?? ('INV-' . time()),
             'invoice_date' => $invoiceDate,
@@ -488,14 +491,66 @@ class SyncController
             $productId = $p ? $p->id : null;
         }
 
-        if ($productId) {
+        $batchId = $event['batch_id'] ?? null;
+        if ($batchId && !is_numeric($batchId)) {
+            $b = ProductBatch::where('batch_no', $batchId)->first();
+            $batchId = $b ? $b->id : null;
+        }
+
+        $qtyDelta = (float)($event['qty_delta'] ?? 0);
+        $idempotencyKey = $event['idempotency_key'] ?? ($event['id'] ?? null);
+
+        // Deduplicate using idempotency key if present
+        $existingEntry = null;
+        if ($idempotencyKey) {
+            $existingEntry = \App\Models\StockLedgerEntry::where('idempotency_key', $idempotencyKey)->first();
+        }
+
+        if (!$existingEntry && $productId) {
+            // Find batch current balance
+            $currentStock = 0;
+            if ($batchId) {
+                $batch = ProductBatch::find($batchId);
+                $currentStock = $batch ? (float)$batch->stock_qty : 0;
+            }
+
+            $newBalance = $currentStock + $qtyDelta;
+            $isNegative = $newBalance < 0;
+
+            // Check store company setting for allow_negative_stock
+            $companySetting = \App\Models\CompanySetting::where('store_id', $storeId)->first();
+            $allowNegative = $companySetting ? ($companySetting->allow_negative_stock ?? true) : true;
+
+            \App\Models\StockLedgerEntry::create([
+                'store_id' => $storeId,
+                'product_id' => $productId,
+                'batch_id' => $batchId,
+                'counter_id' => !empty($event['counter_id']) && is_numeric($event['counter_id']) ? (int)$event['counter_id'] : null,
+                'counter_code' => $event['counter_code'] ?? null,
+                'location_name' => $event['location_name'] ?? null,
+                'event_type' => $event['event_type'] ?? ($qtyDelta < 0 ? 'SALE' : 'PURCHASE'),
+                'qty_delta' => $qtyDelta,
+                'reference_type' => $event['reference_type'] ?? 'counter_pos',
+                'reference_id' => $event['reference_id'] ?? null,
+                'is_reconciled_negative' => $isNegative,
+                'balance_after' => $newBalance,
+                'idempotency_key' => $idempotencyKey,
+                'staff_user_id' => $request->user()?->id,
+            ]);
+
+            // Update product batch stock quantity
+            if ($batchId && isset($batch) && $batch) {
+                $batch->update(['stock_qty' => $newBalance]);
+            }
+
+            // Also keep standard StockAdjustment record for legacy views
             StockAdjustment::create([
                 'store_id' => $storeId,
                 'product_id' => $productId,
-                'batch_no' => $event['batch_id'] ?? ($event['batch_no'] ?? null),
-                'adjustment_type' => ($event['qty_delta'] ?? 0) >= 0 ? 'increase' : 'decrease',
-                'qty' => abs($event['qty_delta'] ?? 0),
-                'reason' => $event['notes'] ?? ($event['event_type'] ?? 'Workstation Stock Event'),
+                'batch_no' => $event['batch_no'] ?? ($batch->batch_no ?? 'UNKNOWN'),
+                'adjustment_type' => $qtyDelta >= 0 ? 'increase' : 'decrease',
+                'qty' => abs($qtyDelta),
+                'reason' => ($event['notes'] ?? ($event['event_type'] ?? 'Counter Stock Delta')) . ($isNegative ? ' [RECONCILED NEGATIVE]' : ''),
                 'user_id' => 1,
             ]);
         }
@@ -612,9 +667,14 @@ class SyncController
     private function recordSyncEvent(Request $request, string $entityType, string $entityId, string $action, array $payload): void
     {
         $storeId = $this->resolveStoreId($request, $payload);
+        $deviceId = null;
+        if (!empty($payload['device_id']) && is_numeric($payload['device_id'])) {
+            $deviceId = \App\Models\Device::find($payload['device_id'])?->id;
+        }
+
         SyncEvent::create([
             'store_id' => $storeId,
-            'device_id' => 1,
+            'device_id' => $deviceId,
             'entity_type' => $entityType,
             'entity_id' => $entityId,
             'action' => $action,
@@ -647,4 +707,132 @@ class SyncController
             'parties' => $parties,
         ]);
     }
+
+    /**
+     * Near Real-Time Server-Sent Events (SSE) stream for instant delta propagation.
+     */
+    public function streamSSE(Request $request)
+    {
+        $storeId = $this->resolveStoreId($request);
+        $counterCode = $request->query('counter_code', 'unknown');
+
+        // Update counter's last seen status
+        \App\Models\Counter::where('store_id', $storeId)
+            ->where('counter_code', $counterCode)
+            ->update(['last_seen_at' => now(), 'ip_address' => $request->ip()]);
+
+        return response()->stream(function () use ($storeId, $counterCode) {
+            $latestEventId = (int)\App\Models\SyncEvent::where('store_id', $storeId)->max('id');
+
+            // Send initial connected packet
+            echo "event: connected\n";
+            echo 'data: ' . json_encode([
+                'status' => 'connected',
+                'counter' => $counterCode,
+                'server_time' => (int)(microtime(true) * 1000),
+                'latest_event_id' => $latestEventId,
+            ]) . "\n\n";
+            ob_flush();
+            flush();
+
+            // Stream any recent events
+            $events = \App\Models\SyncEvent::where('store_id', $storeId)
+                ->where('id', '>', max(0, $latestEventId - 5))
+                ->orderBy('id', 'asc')
+                ->get();
+
+            foreach ($events as $event) {
+                echo "event: sync_event\n";
+                echo 'data: ' . json_encode($event) . "\n\n";
+                ob_flush();
+                flush();
+            }
+
+            // Keep-alive ping
+            echo "event: ping\n";
+            echo 'data: ' . json_encode(['timestamp' => (int)(microtime(true) * 1000)]) . "\n\n";
+            ob_flush();
+            flush();
+        }, 200, [
+            'Content-Type' => 'text/event-stream',
+            'Cache-Control' => 'no-cache, no-transform',
+            'Connection' => 'keep-alive',
+            'X-Accel-Buffering' => 'no',
+        ]);
+    }
+
+    /**
+     * Acquire or renew a lock on an invoice before modifying/cancelling it.
+     */
+    public function lockInvoice(Request $request, string $id): JsonResponse
+    {
+        $invoice = Invoice::findOrFail($id);
+        $counterId = $request->input('counter_id');
+        $counterCode = $request->input('counter_code', 'C01');
+
+        // Check if currently locked by a DIFFERENT counter and not expired
+        if ($invoice->locked_by_counter_id && $invoice->locked_by_counter_id != $counterId && $invoice->locked_until && $invoice->locked_until->isFuture()) {
+            return response()->json([
+                'success' => false,
+                'locked' => true,
+                'message' => "Invoice is currently being edited on another counter (Counter ID: {$invoice->locked_by_counter_id}). Locked until " . $invoice->locked_until->toIso8601String(),
+                'locked_until' => $invoice->locked_until,
+            ], 423); // 423 Locked
+        }
+
+        // Acquire lock for 5 minutes
+        $lockedUntil = now()->addMinutes(5);
+        $invoice->update([
+            'locked_by_counter_id' => $counterId,
+            'locked_until' => $lockedUntil,
+        ]);
+
+        return response()->json([
+            'success' => true,
+            'message' => "Invoice lock acquired by counter {$counterCode}.",
+            'locked_until' => $lockedUntil,
+        ]);
+    }
+
+    /**
+     * Release lock on an invoice.
+     */
+    public function unlockInvoice(Request $request, string $id): JsonResponse
+    {
+        $invoice = Invoice::findOrFail($id);
+        $invoice->update([
+            'locked_by_counter_id' => null,
+            'locked_until' => null,
+        ]);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Invoice lock released.',
+        ]);
+    }
+
+    /**
+     * Negative stock reconciliation report across counters.
+     */
+    public function getNegativeStockReport(Request $request): JsonResponse
+    {
+        $storeId = $this->resolveStoreId($request);
+
+        $negativeBatches = ProductBatch::where('stock_qty', '<', 0)
+            ->with(['product'])
+            ->get();
+
+        $negativeEntries = \App\Models\StockLedgerEntry::where('store_id', $storeId)
+            ->where('is_reconciled_negative', true)
+            ->orderBy('created_at', 'desc')
+            ->get();
+
+        return response()->json([
+            'success' => true,
+            'negative_batches_count' => $negativeBatches->count(),
+            'negative_batches' => $negativeBatches,
+            'audit_entries' => $negativeEntries,
+        ]);
+    }
 }
+

@@ -94,6 +94,56 @@ export class MultiCounterStockService {
 
     return { applied, affectedBatches: Array.from(affectedBatches) };
   }
+
+  /**
+   * Cross-counter stock lookup showing stock across counters with last updated timestamp.
+   */
+  async getCrossCounterStockLookup(productId: string): Promise<{
+    product_id: string;
+    product_name: string;
+    total_store_stock: number;
+    batches: Array<{
+      batch_id: string;
+      batch_no: string;
+      expiry_date: string;
+      mrp: number;
+      reconciled_stock: number;
+      is_negative: boolean;
+      counter_breakdown: Record<string, number>;
+      last_updated_at: number;
+    }>;
+  }> {
+    const prod = await productsStore.getProductById(productId);
+    const allBatches = await sqliteStorage.findAll<ProductBatch>("product_batches");
+    const prodBatches = (allBatches || []).filter((b) => b.product_id === productId);
+
+    const batchResults = [];
+    let totalStock = 0;
+
+    for (const b of prodBatches) {
+      // batch.stock_qty already has deltas merged into it; reconciled stock is simply b.stock_qty
+      const recon = await this.computeBatchReconciledStock(b.id, 0);
+      const effectiveStock = b.stock_qty || 0;
+      totalStock += effectiveStock;
+      batchResults.push({
+        batch_id: b.id,
+        batch_no: b.batch_no,
+        expiry_date: b.expiry_date || "",
+        mrp: b.mrp || 0,
+        reconciled_stock: effectiveStock,
+        is_negative: effectiveStock < 0,
+        counter_breakdown: recon.counter_breakdown,
+        last_updated_at: Date.now(),
+      });
+    }
+
+    return {
+      product_id: productId,
+      product_name: prod?.name || "Unknown Product",
+      total_store_stock: totalStock,
+      batches: batchResults,
+    };
+  }
 }
 
 export const multiCounterStockService = new MultiCounterStockService();
