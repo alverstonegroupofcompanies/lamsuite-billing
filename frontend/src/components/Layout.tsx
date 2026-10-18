@@ -304,22 +304,22 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
   }
 
   return (
-    <div className="flex h-screen flex-col bg-slate-100 font-sans select-none overflow-hidden">
+    <div className="flex h-screen flex-col bg-[var(--color-canvas)] font-sans select-none overflow-hidden">
       {/* Top Header Bar */}
-      <header className="flex h-12 shrink-0 items-center justify-between border-b border-slate-200 bg-white px-4 shadow-xs">
+      <header className="flex h-12 shrink-0 items-center justify-between border-b border-[var(--color-border)] bg-[var(--color-surface)] px-4 shadow-xs">
         <Link
           to="/dashboard"
-          className="flex items-center gap-2.5 hover:opacity-85 transition-opacity cursor-pointer text-inherit no-underline shrink-0"
+          className="flex items-center gap-2.5 hover:opacity-90 transition-opacity cursor-pointer text-inherit no-underline shrink-0"
           title="Go to Dashboard (Home / Ctrl+D)"
         >
           <img
             src="/app-icon.png"
             alt="LamSuite Logo"
-            className="h-8 w-8 rounded-lg shadow-xs object-cover border border-slate-200/80 bg-white shrink-0"
+            className="h-8 w-8 rounded-[8px] object-cover border border-[var(--color-border)] bg-[var(--color-surface)] shrink-0"
           />
           <div>
-            <h1 className="text-sm font-bold text-slate-800 leading-tight whitespace-nowrap">LamSuite Billing</h1>
-            <p className="text-[10px] text-slate-500 font-medium whitespace-nowrap">Retail & Pharmacy POS</p>
+            <h1 className="text-sm font-bold text-[var(--color-text)] leading-tight whitespace-nowrap">LamSuite Billing</h1>
+            <p className="text-[11px] text-[var(--color-text-muted)] font-medium whitespace-nowrap">Retail & Pharmacy POS</p>
           </div>
         </Link>
 
@@ -327,24 +327,24 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
         <div className="flex-1 max-w-md mx-4">
           <button
             onClick={() => setIsCmdPaletteOpen(true)}
-            className="flex w-full items-center justify-between rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs text-slate-500 hover:border-slate-300 hover:bg-slate-100 transition-colors shadow-inner cursor-pointer"
+            className="flex w-full items-center justify-between rounded-[10px] border border-[var(--color-border)] bg-[var(--color-surface-subtle)] px-3 py-1.5 text-xs text-[var(--color-text-muted)] hover:border-[var(--color-accent)] hover:bg-[var(--color-surface)] transition-all cursor-pointer"
           >
             <div className="flex items-center gap-2">
-              <Search className="h-3.5 w-3.5 text-slate-400" />
+              <Search className="h-3.5 w-3.5 text-[var(--color-text-faint)]" />
               <span className="truncate">Search actions, modules, or tools...</span>
             </div>
-            <kbd className="rounded border border-slate-200 bg-white px-1.5 py-0.5 text-[10px] font-mono text-slate-500 shadow-xs shrink-0">
+            <kbd className="rounded-[6px] border border-[var(--color-border)] bg-[var(--color-surface)] px-1.5 py-0.5 text-[10px] font-mono text-[var(--color-text-muted)] shadow-2xs shrink-0">
               Ctrl+K
             </kbd>
           </button>
         </div>
 
         {/* Status Indicators */}
-        <div className="flex items-center gap-3 text-xs font-medium text-slate-600 shrink-0">
+        <div className="flex items-center gap-3 text-xs font-medium text-[var(--color-text-muted)] shrink-0">
           <button
             onClick={toggleFullscreen}
             title="Toggle Fullscreen (F11)"
-            className="rounded p-1.5 text-slate-500 hover:bg-slate-100 hover:text-slate-800 cursor-pointer"
+            className="rounded-[8px] p-1.5 text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)] cursor-pointer"
           >
             {isFullscreen ? <Minimize className="h-4 w-4" /> : <Maximize className="h-4 w-4" />}
           </button>
@@ -352,13 +352,13 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
           <div
             onClick={() => setIsAccountSwitcherOpen(true)}
             title="Click to Switch Cashier (F12)"
-            className="flex items-center gap-1.5 rounded-full bg-slate-100 hover:bg-slate-200 border border-slate-200 px-2.5 py-1 cursor-pointer transition-colors shadow-2xs"
+            className="flex items-center gap-1.5 rounded-full bg-[var(--color-surface-subtle)] hover:bg-[var(--color-surface-hover)] border border-[var(--color-border)] px-3 py-1 cursor-pointer transition-colors shadow-2xs"
           >
-            <User className="h-3.5 w-3.5 text-blue-600" />
-            <span className="whitespace-nowrap font-bold text-slate-800">
+            <User className="h-3.5 w-3.5 text-[var(--color-accent)]" />
+            <span className="whitespace-nowrap font-bold text-[var(--color-text)]">
               {session?.user.full_name || "Cashier"}
             </span>
-            <span className="text-[10px] bg-blue-100 text-blue-700 font-semibold px-1.5 py-0.2 rounded-full uppercase">
+            <span className="text-[10px] font-mono bg-[var(--color-accent-soft)] text-[var(--color-accent)] font-bold px-1.5 py-0.2 rounded-full uppercase">
               {session?.counterCode || "C01"}
             </span>
           </div>
@@ -366,9 +366,9 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
           <button
             onClick={() => staffAuthService.lockCurrentSession()}
             title="Lock Terminal (Ctrl+L)"
-            className="rounded p-1.5 text-slate-500 hover:bg-slate-100 hover:text-slate-800 cursor-pointer"
+            className="rounded-[8px] p-1.5 text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)] cursor-pointer"
           >
-            <Lock className="h-4 w-4 text-slate-500" />
+            <Lock className="h-4 w-4 text-[var(--color-text-muted)]" />
           </button>
 
           <div
@@ -386,49 +386,49 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
                 ? `${syncState.pendingCount} change(s) queued for sync. Click to push now.`
                 : "All data synced to backend cloud"
             }
-            className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs cursor-pointer transition-colors shadow-2xs ${
+            className={`flex items-center gap-1.5 rounded-full px-3 py-1 text-xs cursor-pointer transition-colors shadow-2xs ${
               !isOnline
-                ? "bg-amber-50 text-amber-700 border border-amber-200"
+                ? "bg-[var(--color-warning-bg)] text-[var(--color-warning-text)] border border-[var(--color-warning-border)]"
                 : syncState.isProcessing
-                ? "bg-blue-50 text-blue-700 border border-blue-200"
+                ? "bg-accent-soft text-accent border border-accent/30"
                 : syncState.pendingCount > 0
-                ? "bg-indigo-50 text-indigo-700 border border-indigo-200"
-                : "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                ? "bg-[var(--color-warning-bg)] text-[var(--color-warning-text)] border border-[var(--color-warning-border)]"
+                : "bg-accent-soft text-accent border border-accent/20"
             }`}
           >
             {!isOnline ? (
               <>
-                <WifiOff className="h-3.5 w-3.5 text-amber-600 shrink-0" />
-                <span className="whitespace-nowrap font-medium">Offline Active</span>
+                <WifiOff className="h-3.5 w-3.5 text-[var(--color-warning-text)] shrink-0" />
+                <span className="whitespace-nowrap font-semibold">Offline Active</span>
                 {syncState.pendingCount > 0 && (
-                  <span className="bg-amber-200 text-amber-900 rounded-full px-1.5 py-0.2 text-[10px] font-bold">
+                  <span className="bg-[var(--color-warning-border)] text-[var(--color-warning-text)] rounded-full px-1.5 py-0.2 text-[10px] font-bold font-mono">
                     {syncState.pendingCount}
                   </span>
                 )}
               </>
             ) : syncState.isProcessing ? (
               <>
-                <RefreshCw className="h-3.5 w-3.5 text-blue-600 animate-spin shrink-0" />
-                <span className="whitespace-nowrap font-medium">Syncing...</span>
+                <RefreshCw className="h-3.5 w-3.5 text-[var(--color-accent)] animate-spin shrink-0" />
+                <span className="whitespace-nowrap font-semibold">Syncing...</span>
               </>
             ) : syncState.pendingCount > 0 ? (
               <>
-                <RefreshCw className="h-3.5 w-3.5 text-indigo-600 shrink-0" />
-                <span className="whitespace-nowrap font-medium">Syncing</span>
-                <span className="bg-indigo-200 text-indigo-900 rounded-full px-1.5 py-0.2 text-[10px] font-bold">
+                <RefreshCw className="h-3.5 w-3.5 text-[var(--color-warning-text)] shrink-0" />
+                <span className="whitespace-nowrap font-semibold">Syncing</span>
+                <span className="bg-[var(--color-warning-border)] text-[var(--color-warning-text)] rounded-full px-1.5 py-0.2 text-[10px] font-bold font-mono">
                   {syncState.pendingCount}
                 </span>
               </>
             ) : (
               <>
-                <Wifi className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
-                <span className="whitespace-nowrap font-medium">Live Synced</span>
+                <Wifi className="h-3.5 w-3.5 text-[var(--color-accent)] shrink-0" />
+                <span className="whitespace-nowrap font-semibold">Live Synced</span>
               </>
             )}
           </div>
 
-          <div className="flex items-center gap-1.5 text-slate-500 font-mono text-[11px]">
-            <Clock className="h-3.5 w-3.5 shrink-0" />
+          <div className="flex items-center gap-1.5 text-[var(--color-text-muted)] font-mono text-[11px] tabular-nums">
+            <Clock className="h-3.5 w-3.5 shrink-0 text-[var(--color-text-faint)]" />
             <span className="whitespace-nowrap">{time}</span>
           </div>
         </div>

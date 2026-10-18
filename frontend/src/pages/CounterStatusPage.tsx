@@ -172,13 +172,13 @@ export const CounterStatusPage: React.FC = () => {
   return (
     <div className="space-y-6 select-none font-sans max-w-6xl mx-auto">
       {/* Top Banner */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-5 rounded-2xl border border-slate-200 shadow-xs">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-surface p-5 rounded-card border border-border-main shadow-xs">
         <div>
-          <h2 className="text-lg font-black text-slate-800 flex items-center gap-2">
-            <Monitor className="w-5 h-5 text-blue-600" />
+          <h2 className="text-[26px] font-bold text-text-main tracking-tight flex items-center gap-2">
+            <Monitor className="w-5 h-5 text-accent" />
             <span>Store Multi-Counter Workstation Monitor</span>
           </h2>
-          <p className="text-xs text-slate-500 mt-0.5">
+          <p className="text-xs text-text-muted mt-0.5">
             Real-time LAN sync heartbeat, active cashier tracking, cash drawer status & failover control.
           </p>
         </div>
@@ -186,10 +186,10 @@ export const CounterStatusPage: React.FC = () => {
         <div className="flex items-center gap-2.5">
           <button
             onClick={toggleFailover}
-            className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition-colors flex items-center gap-1.5 cursor-pointer ${
+            className={`px-3 py-2 rounded-btn text-xs font-semibold border transition-colors flex items-center gap-1.5 cursor-pointer ${
               hubFailoverActive
-                ? "bg-amber-50 text-amber-700 border-amber-300"
-                : "bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100"
+                ? "bg-status-warning/15 text-status-warning border-status-warning/30"
+                : "bg-surface text-text-main border-border-main hover:bg-canvas"
             }`}
           >
             <Server className="w-3.5 h-3.5" />
@@ -198,7 +198,7 @@ export const CounterStatusPage: React.FC = () => {
 
           <button
             onClick={loadCounters}
-            className="px-3 py-1.5 rounded-xl bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200 text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+            className="px-3.5 py-2 rounded-btn bg-accent-soft text-accent hover:bg-accent-soft/80 border border-accent/20 text-xs font-semibold flex items-center gap-1.5 cursor-pointer transition-colors"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? "animate-spin" : ""}`} />
             <span>Refresh</span>
@@ -207,8 +207,8 @@ export const CounterStatusPage: React.FC = () => {
       </div>
 
       {actionMsg && (
-        <div className="p-3 bg-blue-50 border border-blue-200 rounded-xl text-xs text-blue-800 font-semibold flex items-center gap-2">
-          <CheckCircle2 className="w-4 h-4 text-blue-600 shrink-0" />
+        <div className="p-3 bg-accent-soft border border-accent/20 rounded-btn text-xs text-accent font-semibold flex items-center gap-2">
+          <CheckCircle2 className="w-4 h-4 text-accent shrink-0" />
           <span>{actionMsg}</span>
         </div>
       )}
@@ -222,12 +222,12 @@ export const CounterStatusPage: React.FC = () => {
           return (
             <div
               key={c.id}
-              className={`bg-white rounded-2xl border p-5 shadow-xs transition-all flex flex-col justify-between ${
+              className={`bg-surface rounded-card border p-5 shadow-xs transition-all flex flex-col justify-between ${
                 isLocked
-                  ? "border-amber-300 ring-2 ring-amber-200 bg-amber-50/20"
+                  ? "border-status-warning/40 ring-1 ring-status-warning/30 bg-status-warning/5"
                   : c.is_hub
-                  ? "border-blue-300 ring-1 ring-blue-100"
-                  : "border-slate-200"
+                  ? "border-accent/40 ring-1 ring-accent/20"
+                  : "border-border-main"
               }`}
             >
               <div>
@@ -235,34 +235,34 @@ export const CounterStatusPage: React.FC = () => {
                 <div className="flex justify-between items-start mb-3">
                   <div className="flex items-center gap-2.5">
                     <div
-                      className={`w-10 h-10 rounded-xl flex items-center justify-center font-bold text-xs ${
+                      className={`w-10 h-10 rounded-btn flex items-center justify-center font-bold text-xs ${
                         c.is_hub
-                          ? "bg-blue-600 text-white shadow-md shadow-blue-500/20"
-                          : "bg-slate-100 text-slate-700 border border-slate-200"
+                          ? "bg-accent text-white shadow-xs font-mono tabular-nums"
+                          : "bg-canvas text-text-main border border-border-main font-mono tabular-nums"
                       }`}
                     >
                       {c.counter_code}
                     </div>
                     <div>
-                      <h4 className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                      <h4 className="text-xs font-semibold text-text-main flex items-center gap-1.5">
                         <span>{c.counter_name}</span>
                         {c.is_hub && (
-                          <span className="px-1.5 py-0.2 rounded bg-blue-100 text-blue-700 text-[10px] font-mono font-bold">
+                          <span className="px-2 py-0.5 rounded-full bg-accent-soft text-accent text-[10px] font-mono font-semibold">
                             HUB
                           </span>
                         )}
                       </h4>
-                      <p className="text-[11px] text-slate-400 font-mono">
+                      <p className="text-[11px] text-text-muted font-mono tabular-nums">
                         {c.ip_address}:{c.port}
                       </p>
                     </div>
                   </div>
 
                   <span
-                    className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider flex items-center gap-1 ${
+                    className={`px-2.5 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wider flex items-center gap-1 ${
                       isLocked
-                        ? "bg-amber-100 text-amber-800"
-                        : "bg-emerald-100 text-emerald-800"
+                        ? "bg-status-warning/15 text-status-warning"
+                        : "bg-accent-soft text-accent"
                     }`}
                   >
                     <CircleDot className="w-2.5 h-2.5" />
@@ -271,25 +271,25 @@ export const CounterStatusPage: React.FC = () => {
                 </div>
 
                 {/* Details */}
-                <div className="space-y-2 py-3 border-y border-slate-100 text-xs">
+                <div className="space-y-2 py-3 border-y border-border-main text-xs">
                   <div className="flex justify-between">
-                    <span className="text-slate-500">Active Operator:</span>
-                    <span className="font-bold text-slate-800">
-                      {c.current_user} <span className="text-slate-400 font-normal">({c.user_role})</span>
+                    <span className="text-text-muted">Active Operator:</span>
+                    <span className="font-semibold text-text-main">
+                      {c.current_user} <span className="text-text-muted font-normal">({c.user_role})</span>
                     </span>
                   </div>
 
                   <div className="flex justify-between items-center">
-                    <span className="text-slate-500">Shift & Drawer:</span>
-                    <div className="flex items-center gap-1.5 font-bold text-slate-800">
+                    <span className="text-text-muted">Shift & Drawer:</span>
+                    <div className="flex items-center gap-1.5 font-semibold text-text-main">
                       {c.active_shift_status === "open" ? (
                         <>
-                          <span className="text-emerald-700 font-mono font-bold">
+                          <span className="text-accent font-mono font-bold tabular-nums">
                             ₹{c.drawer_cash.toLocaleString()} (Open)
                           </span>
                           {c.shift_started_at && Date.now() - c.shift_started_at > 12 * 3600 * 1000 && (
                             <span
-                              className="rounded px-1.5 py-0.2 text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-300"
+                              className="rounded-full px-2 py-0.5 text-[10px] font-semibold bg-status-warning/15 text-status-warning"
                               title="Shift open for over 12 hours - handover overdue!"
                             >
                               Overdue &gt;12h ⚠️
@@ -297,21 +297,21 @@ export const CounterStatusPage: React.FC = () => {
                           )}
                         </>
                       ) : (
-                        <span className="text-slate-400">Closed</span>
+                        <span className="text-text-muted font-mono">Closed</span>
                       )}
                     </div>
                   </div>
 
                   <div className="flex justify-between">
-                    <span className="text-slate-500">Sync Queue:</span>
-                    <span className="font-mono text-slate-700">
+                    <span className="text-text-muted">Sync Queue:</span>
+                    <span className="font-mono text-text-main tabular-nums">
                       {c.pending_queue === 0 ? "Synced (0 pending)" : `${c.pending_queue} pending`}
                     </span>
                   </div>
 
-                  <div className="flex justify-between text-[11px] text-slate-400">
+                  <div className="flex justify-between text-[11px] text-text-muted">
                     <span>Heartbeat:</span>
-                    <span>{timeSinceSync}s ago</span>
+                    <span className="font-mono tabular-nums">{timeSinceSync}s ago</span>
                   </div>
                 </div>
               </div>
@@ -320,17 +320,17 @@ export const CounterStatusPage: React.FC = () => {
               <div className="pt-3 flex gap-2">
                 <button
                   onClick={() => handleRemoteLock(c.id, c.counter_name)}
-                  className="flex-1 py-1.5 px-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
+                  className="flex-1 py-1.5 px-2 bg-surface hover:bg-canvas text-text-main border border-border-main rounded-btn text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
                 >
-                  <Lock className="w-3 h-3 text-slate-500" />
+                  <Lock className="w-3 h-3 text-text-muted" />
                   <span>Lock</span>
                 </button>
 
                 <button
                   onClick={() => handleRemoteLogout(c.id, c.counter_name)}
-                  className="flex-1 py-1.5 px-2 bg-red-50 hover:bg-red-100 text-red-700 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
+                  className="flex-1 py-1.5 px-2 bg-status-danger/10 hover:bg-status-danger/20 text-status-danger border border-status-danger/20 rounded-btn text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
                 >
-                  <LogOut className="w-3 h-3 text-red-500" />
+                  <LogOut className="w-3 h-3 text-status-danger" />
                   <span>Logout</span>
                 </button>
               </div>

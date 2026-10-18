@@ -15,7 +15,7 @@ describe("Read-Only Mode Enforcement", () => {
       expect(writeToolNames).not.toContain(tool.name);
       expect(tool.annotations.readOnlyHint).toBe(true);
     }
-    expect(listed.length).toBe(25); // All 25 read tools
+    expect(listed.length).toBe(27); // All 27 read tools
   });
 
   it("in read-only mode, calling a write tool is safely rejected", async () => {
@@ -42,7 +42,7 @@ describe("Read-Only Mode Enforcement", () => {
     registry.init(false); // readOnly = false
 
     const listed = registry.listTools();
-    expect(listed.length).toBe(37); // 25 read + 12 write = 37 tools
+    expect(listed.length).toBe(42); // 27 read + 15 write = 42 tools
 
     const createInvoice = listed.find((t) => t.name === "lamsuite_create_invoice");
     expect(createInvoice).toBeDefined();

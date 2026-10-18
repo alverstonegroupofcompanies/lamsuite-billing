@@ -302,7 +302,7 @@ export const TopNav: React.FC<TopNavProps> = ({ enabledMenus, onOpenShortcutsHel
 
   return (
     <nav
-      className="flex h-11 items-center justify-between border-b border-slate-900 bg-slate-900 px-3 text-white select-none z-30"
+      className="flex h-11 items-center justify-between border-b border-[var(--color-nav-border)] bg-[var(--color-nav-bg)] px-3 text-[var(--color-nav-text)] select-none z-30"
       role="menubar"
       aria-label="Main Navigation"
     >
@@ -329,12 +329,12 @@ export const TopNav: React.FC<TopNavProps> = ({ enabledMenus, onOpenShortcutsHel
                   aria-haspopup="true"
                   aria-expanded={isOpen}
                   role="menuitem"
-                  className={`flex h-8 items-center gap-1.5 whitespace-nowrap rounded-md px-2.5 text-xs font-semibold tracking-tight transition-all duration-150 cursor-pointer ${
+                  className={`flex h-8 items-center gap-1.5 whitespace-nowrap rounded-[8px] px-2.5 text-xs font-semibold tracking-tight transition-all duration-150 cursor-pointer ${
                     isChildActive
-                      ? "bg-blue-600 text-white shadow-xs font-bold"
+                      ? "bg-[var(--color-accent)] text-white shadow-xs font-bold"
                       : isOpen
-                      ? "bg-slate-700 text-white"
-                      : "text-slate-300 hover:bg-slate-800 hover:text-white"
+                      ? "bg-[var(--color-nav-hover)] text-white"
+                      : "text-[var(--color-nav-text)] hover:bg-[var(--color-nav-hover)] hover:text-white"
                   }`}
                 >
                   <Icon className="h-3.5 w-3.5 shrink-0 opacity-90" />
@@ -361,16 +361,16 @@ export const TopNav: React.FC<TopNavProps> = ({ enabledMenus, onOpenShortcutsHel
               key={item.id}
               to={item.path}
               role="menuitem"
-              className={`flex h-8 items-center gap-1.5 whitespace-nowrap rounded-md px-2.5 text-xs font-semibold tracking-tight transition-all duration-150 ${
+              className={`flex h-8 items-center gap-1.5 whitespace-nowrap rounded-[8px] px-2.5 text-xs font-semibold tracking-tight transition-all duration-150 ${
                 isActive
-                  ? "bg-blue-600 text-white shadow-xs font-bold"
-                  : "text-slate-300 hover:bg-slate-800 hover:text-white"
+                  ? "bg-[var(--color-accent)] text-white shadow-xs font-bold"
+                  : "text-[var(--color-nav-text)] hover:bg-[var(--color-nav-hover)] hover:text-white"
               }`}
             >
               <Icon className="h-3.5 w-3.5 shrink-0 opacity-90" />
               <span>{item.name}</span>
               {item.key && (
-                <kbd className="ml-0.5 rounded bg-black/35 px-1.5 py-0.5 font-mono text-[10px] font-medium text-slate-300 shadow-inner">
+                <kbd className="ml-0.5 rounded-[5px] bg-black/40 px-1.5 py-0.5 font-mono text-[10px] font-medium text-[#C9D8D3] shadow-inner">
                   {item.key}
                 </kbd>
               )}
@@ -384,9 +384,9 @@ export const TopNav: React.FC<TopNavProps> = ({ enabledMenus, onOpenShortcutsHel
         <button
           onClick={onOpenShortcutsHelp}
           title="View Keyboard Shortcuts & Cheatsheet"
-          className="flex h-7 items-center gap-1.5 rounded bg-slate-800/80 px-2 text-[11px] font-medium text-slate-300 hover:bg-slate-700 hover:text-white transition-colors border border-slate-700/60"
+          className="flex h-7 items-center gap-1.5 rounded-[8px] bg-[var(--color-nav-hover)] px-2.5 text-[11px] font-medium text-[var(--color-nav-text)] hover:text-white transition-colors border border-[var(--color-nav-border)]"
         >
-          <Keyboard className="h-3.5 w-3.5 text-slate-400" />
+          <Keyboard className="h-3.5 w-3.5 text-[#C9D8D3]" />
           <span className="hidden sm:inline">Shortcuts</span>
         </button>
       </div>
@@ -402,11 +402,11 @@ export const TopNav: React.FC<TopNavProps> = ({ enabledMenus, onOpenShortcutsHel
               top: `${dropdownPos.top}px`,
               left: `${dropdownPos.left}px`,
             }}
-            className="fixed z-[9999] w-72 rounded-lg border border-slate-700 bg-slate-800 p-1.5 shadow-2xl ring-1 ring-black/20 outline-none animate-in fade-in zoom-in-95 duration-100"
+            className="fixed z-[9999] w-72 rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] p-1.5 shadow-dropdown ring-1 ring-black/5 outline-none animate-in fade-in zoom-in-95 duration-100"
             role="menu"
             aria-label={currentOpenGroup.name}
           >
-            <div className="px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-400 border-b border-slate-700/60 mb-1">
+            <div className="px-2.5 py-1 text-[11px] font-bold uppercase tracking-wider text-[var(--color-text-muted)] border-b border-[var(--color-border)] mb-1">
               {currentOpenGroup.name}
             </div>
             <div className="space-y-0.5">
@@ -422,27 +422,27 @@ export const TopNav: React.FC<TopNavProps> = ({ enabledMenus, onOpenShortcutsHel
                     role="menuitem"
                     onClick={() => setOpenDropdownId(null)}
                     onMouseEnter={() => setFocusedChildIndex(idx)}
-                    className={`flex items-center justify-between rounded-md px-2.5 py-2 text-xs transition-colors ${
+                    className={`flex items-center justify-between rounded-[8px] px-2.5 py-2 text-xs transition-colors ${
                       isChildActive
-                        ? "bg-blue-600 text-white font-medium shadow-xs"
+                        ? "bg-[var(--color-accent-soft)] text-[var(--color-accent)] font-semibold shadow-xs"
                         : isFocused
-                        ? "bg-slate-700 text-white"
-                        : "text-slate-200 hover:bg-slate-700/80 hover:text-white"
+                        ? "bg-[var(--color-surface-hover)] text-[var(--color-text)]"
+                        : "text-[var(--color-text)] hover:bg-[var(--color-surface-hover)]"
                     }`}
                   >
                     <div className="flex items-start gap-2.5 min-w-0 pr-2">
-                      <ChildIcon className={`mt-0.5 h-4 w-4 shrink-0 ${isChildActive ? "text-white" : "text-blue-400"}`} />
+                      <ChildIcon className={`mt-0.5 h-4 w-4 shrink-0 ${isChildActive ? "text-[var(--color-accent)]" : "text-[var(--color-text-muted)]"}`} />
                       <div className="flex flex-col min-w-0">
-                        <span className="truncate font-semibold text-slate-100">{child.name}</span>
+                        <span className="truncate font-semibold">{child.name}</span>
                         {child.description && (
-                          <span className={`text-[10px] leading-tight truncate ${isChildActive ? "text-blue-100" : "text-slate-400"}`}>
+                          <span className={`text-[10px] leading-tight truncate ${isChildActive ? "text-[var(--color-accent)]" : "text-[var(--color-text-muted)]"}`}>
                             {child.description}
                           </span>
                         )}
                       </div>
                     </div>
                     {child.key && (
-                      <kbd className="shrink-0 rounded bg-slate-900/80 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-slate-300 border border-slate-700/80 shadow-xs">
+                      <kbd className="shrink-0 rounded-[5px] bg-[var(--color-surface-subtle)] px-1.5 py-0.5 font-mono text-[10px] font-semibold text-[var(--color-text-muted)] border border-[var(--color-border)] shadow-xs">
                         {child.key}
                       </kbd>
                     )}

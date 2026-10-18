@@ -3,9 +3,42 @@
 @tailwind utilities;
 
 @layer base {
-  body {
-    @apply antialiased bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100;
+  :root {
+    --color-canvas: #F5F6F2;
+    --color-surface: #FFFFFF;
+    --color-surface-subtle: #F0F2ED;
+    --color-border: #E3E7E2;
+    --color-text: #14201D;
+    --color-text-muted: #5B6B66;
+    --color-accent: #0B6B5E;
+    --color-accent-soft: #E3F2EE;
+    --color-nav-bg: #0E1F1B;
+    --color-nav-text: #C9D8D3;
   }
+
+  .dark {
+    --color-canvas: #0C1715;
+    --color-surface: #132420;
+    --color-surface-subtle: #192F2A;
+    --color-border: #1F3B34;
+    --color-text: #EAF3EF;
+    --color-text-muted: #8AA49B;
+    --color-accent: #148877;
+    --color-accent-soft: #1A3A33;
+    --color-nav-bg: #070E0C;
+    --color-nav-text: #9FB8AF;
+  }
+
+  body {
+    @apply antialiased bg-canvas text-text-main font-sans;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+}
+
+.mono-amount {
+  font-family: 'IBM Plex Mono', monospace;
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
 }
 
 @keyframes fadeIn {

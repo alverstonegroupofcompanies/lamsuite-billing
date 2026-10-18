@@ -363,10 +363,10 @@ export const PurchaseReturnPage: React.FC = () => {
 
   const statusBadge = (status: string) => {
     if (status === "completed")
-      return <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-700">Completed</span>;
+      return <span className="rounded-full bg-accent-soft px-2.5 py-0.5 text-[10px] font-semibold text-accent">Completed</span>;
     if (status === "cancelled")
-      return <span className="rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-bold text-red-700">Cancelled</span>;
-    return <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-700">Draft</span>;
+      return <span className="rounded-full bg-status-danger/10 text-status-danger px-2.5 py-0.5 text-[10px] font-semibold">Cancelled</span>;
+    return <span className="rounded-full bg-status-warning/15 px-2.5 py-0.5 text-[10px] font-semibold text-status-warning">Draft</span>;
   };
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -375,8 +375,10 @@ export const PurchaseReturnPage: React.FC = () => {
       {/* Toast */}
       {toast && (
         <div
-          className={`fixed top-4 right-4 z-[60] flex items-center gap-2 rounded-lg px-4 py-3 text-xs font-semibold text-white shadow-lg ${
-            toast.type === "success" ? "bg-emerald-600" : "bg-red-600"
+          className={`fixed top-4 right-4 z-[60] flex items-center gap-2 rounded-btn px-4 py-3 text-xs font-semibold shadow-modal transition-all ${
+            toast.type === "success"
+              ? "bg-accent-soft text-accent border border-accent/20"
+              : "bg-status-danger/10 text-status-danger border border-status-danger/20"
           }`}
         >
           {toast.type === "success" ? <CheckCircle className="h-4 w-4" /> : <AlertCircle className="h-4 w-4" />}
@@ -387,15 +389,15 @@ export const PurchaseReturnPage: React.FC = () => {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="flex items-center gap-2 text-xl font-bold text-slate-800">
-            <ArrowUpFromLine className="h-5 w-5 text-orange-500" />
+          <h2 className="flex items-center gap-2 text-[26px] font-bold text-text-main tracking-tight">
+            <ArrowUpFromLine className="h-5 w-5 text-accent" />
             Purchase Returns (Debit Notes)
           </h2>
-          <p className="text-xs text-slate-500">Return stock to supplier, issue debit notes, reverse input GST.</p>
+          <p className="text-xs text-text-muted mt-0.5">Return stock to supplier, issue debit notes, reverse input GST.</p>
         </div>
         <button
           onClick={openForm}
-          className="flex items-center gap-2 rounded-lg bg-orange-600 px-4 py-2 text-xs font-bold text-white shadow-sm hover:bg-orange-700"
+          className="flex items-center gap-2 rounded-btn bg-accent px-4 py-2 text-xs font-semibold text-white shadow-xs hover:bg-accent/90 transition-colors"
         >
           <Plus className="h-4 w-4" />
           New Purchase Return
@@ -405,19 +407,19 @@ export const PurchaseReturnPage: React.FC = () => {
       {/* Filters */}
       <div className="flex items-center gap-2">
         <div className="relative flex-1 max-w-sm">
-          <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
+          <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-text-muted" />
           <input
             type="text"
             value={listSearch}
             onChange={(e) => setListSearch(e.target.value)}
             placeholder="Search return no, purchase no, supplier..."
-            className="w-full rounded-lg border border-slate-200 bg-white pl-8 pr-3 py-2 text-xs text-slate-800 placeholder-slate-400 focus:border-blue-500 focus:outline-none"
+            className="w-full rounded-btn border border-border-main bg-surface pl-8 pr-3 py-2 text-xs text-text-main placeholder-text-muted/60 focus:border-accent focus:outline-none"
           />
         </div>
         <select
           value={statusFilter}
           onChange={(e) => setStatusFilter(e.target.value)}
-          className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-700 focus:outline-none"
+          className="rounded-btn border border-border-main bg-surface px-3 py-2 text-xs font-medium text-text-main focus:border-accent focus:outline-none"
         >
           <option value="all">All Statuses</option>
           <option value="completed">Completed</option>
@@ -427,57 +429,57 @@ export const PurchaseReturnPage: React.FC = () => {
       </div>
 
       {/* List */}
-      <div className="rounded-lg border border-slate-200 bg-white shadow-sm overflow-hidden">
-        <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3 bg-slate-50">
-          <h3 className="text-xs font-bold text-slate-800">Debit Note Register</h3>
-          <span className="text-[11px] text-slate-500">{filteredReturns.length} Records</span>
+      <div className="rounded-card border border-border-main bg-surface shadow-xs overflow-hidden">
+        <div className="flex items-center justify-between border-b border-border-main px-4 py-3 bg-canvas">
+          <h3 className="text-xs font-semibold uppercase tracking-wider text-text-muted">Debit Note Register</h3>
+          <span className="text-[11px] text-text-muted font-mono tabular-nums">{filteredReturns.length} Records</span>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs">
-            <thead className="border-b border-slate-200 bg-slate-100/70 text-slate-600">
+            <thead className="border-b border-border-main bg-canvas text-[11px] font-semibold uppercase tracking-wider text-text-muted">
               <tr>
-                <th className="px-4 py-2.5 font-semibold">Return No</th>
-                <th className="px-4 py-2.5 font-semibold">Date</th>
-                <th className="px-4 py-2.5 font-semibold">Purchase Bill</th>
-                <th className="px-4 py-2.5 font-semibold">Supplier</th>
-                <th className="px-4 py-2.5 font-semibold text-right">Debit Amt</th>
-                <th className="px-4 py-2.5 font-semibold">Settlement</th>
-                <th className="px-4 py-2.5 font-semibold text-center">Status</th>
-                <th className="px-4 py-2.5 font-semibold text-right">Actions</th>
+                <th className="px-4 py-3">Return No</th>
+                <th className="px-4 py-3">Date</th>
+                <th className="px-4 py-3">Purchase Bill</th>
+                <th className="px-4 py-3">Supplier</th>
+                <th className="px-4 py-3 text-right">Debit Amt</th>
+                <th className="px-4 py-3">Settlement</th>
+                <th className="px-4 py-3 text-center">Status</th>
+                <th className="px-4 py-3 text-right">Actions</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100">
+            <tbody className="divide-y divide-border-main">
               {listLoading ? (
                 <tr>
-                  <td colSpan={8} className="py-10 text-center text-slate-400">
-                    <RefreshCw className="mx-auto h-6 w-6 animate-spin text-slate-300 mb-1" />
+                  <td colSpan={8} className="py-10 text-center text-text-muted">
+                    <RefreshCw className="mx-auto h-6 w-6 animate-spin text-accent mb-1" />
                     Loading...
                   </td>
                 </tr>
               ) : filteredReturns.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="py-12 text-center text-slate-400">
-                    <ArrowUpFromLine className="mx-auto h-8 w-8 text-slate-300 mb-1" />
-                    <p className="font-medium">No purchase returns yet</p>
-                    <p className="text-[11px]">Click "New Purchase Return" to return stock to supplier</p>
+                  <td colSpan={8} className="py-12 text-center text-text-muted">
+                    <ArrowUpFromLine className="mx-auto h-8 w-8 text-text-muted/40 mb-1" />
+                    <p className="font-semibold text-text-main">No purchase returns yet</p>
+                    <p className="text-[11px] text-text-muted">Click "New Purchase Return" to return stock to supplier</p>
                   </td>
                 </tr>
               ) : (
                 filteredReturns.map((r) => (
-                  <tr key={r.id} className="hover:bg-slate-50">
-                    <td className="px-4 py-2.5 font-mono font-bold text-orange-700">{r.return_number}</td>
-                    <td className="px-4 py-2.5 text-slate-600">{r.return_date}</td>
-                    <td className="px-4 py-2.5 font-mono text-blue-700">{r.original_purchase_number || "—"}</td>
-                    <td className="px-4 py-2.5 font-medium text-slate-800">{r.supplier_name}</td>
-                    <td className="px-4 py-2.5 text-right font-mono font-bold text-slate-900">
+                  <tr key={r.id} className="hover:bg-canvas/50 transition-colors">
+                    <td className="px-4 py-3 font-mono font-bold text-accent tabular-nums">{r.return_number}</td>
+                    <td className="px-4 py-3 text-text-muted font-mono tabular-nums">{r.return_date}</td>
+                    <td className="px-4 py-3 font-mono font-semibold text-accent tabular-nums">{r.original_purchase_number || "—"}</td>
+                    <td className="px-4 py-3 font-semibold text-text-main">{r.supplier_name}</td>
+                    <td className="px-4 py-3 text-right font-mono font-bold text-text-main tabular-nums">
                       ₹ {r.grand_total.toFixed(2)}
                     </td>
-                    <td className="px-4 py-2.5 text-slate-600">
-                      <span className="rounded bg-slate-100 px-2 py-0.5 text-[10px] font-semibold">
+                    <td className="px-4 py-3 text-text-muted">
+                      <span className="rounded-full bg-canvas border border-border-main px-2.5 py-0.5 text-[10px] font-medium text-text-muted">
                         {r.settlement_type === "credit_adjust" ? "Credit Adjust" : `Refund (${r.refund_mode || ""})`}
                       </span>
                     </td>
-                    <td className="px-4 py-2.5 text-center">{statusBadge(r.status)}</td>
+                    <td className="px-4 py-3 text-center">{statusBadge(r.status)}</td>
                     <td className="px-4 py-2.5 text-right">
                       <button
                         onClick={() => handlePrintDebitNote(r)}
@@ -498,15 +500,15 @@ export const PurchaseReturnPage: React.FC = () => {
 
       {/* ── New Purchase Return Modal ─────────────────────────────────────────── */}
       {isFormOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-xs p-4">
-          <div className="flex max-h-[92vh] w-full max-w-4xl flex-col rounded-xl border border-slate-200 bg-white shadow-2xl overflow-hidden">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 font-sans">
+          <div className="flex max-h-[92vh] w-full max-w-4xl flex-col rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-modal overflow-hidden">
             {/* Header */}
-            <div className="flex items-center justify-between border-b border-slate-200 bg-orange-50 px-5 py-3">
+            <div className="flex items-center justify-between border-b border-[var(--color-border)] bg-[var(--color-surface)] px-5 py-3">
               <div className="flex items-center gap-3">
-                <ArrowUpFromLine className="h-5 w-5 text-orange-600" />
+                <ArrowUpFromLine className="h-5 w-5 text-[var(--color-accent)]" />
                 <div>
-                  <h3 className="text-sm font-bold text-slate-800">New Purchase Return / Debit Note</h3>
-                  <p className="text-[11px] text-slate-500">
+                  <h3 className="text-sm font-bold text-[var(--color-text)]">New Purchase Return / Debit Note</h3>
+                  <p className="text-[11px] text-[var(--color-text-muted)]">
                     {formStep === "purchase_search"
                       ? "Step 1: Select the original purchase bill"
                       : formStep === "line_selection"
@@ -515,13 +517,13 @@ export const PurchaseReturnPage: React.FC = () => {
                   </p>
                 </div>
               </div>
-              <button onClick={() => setIsFormOpen(false)} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-200">
+              <button onClick={() => setIsFormOpen(false)} className="rounded-[6px] p-1.5 text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)] cursor-pointer">
                 <XCircle className="h-5 w-5" />
               </button>
             </div>
 
             {/* Steps */}
-            <div className="flex items-center gap-0 border-b border-slate-200 bg-white px-5 py-2">
+            <div className="flex items-center gap-0 border-b border-[var(--color-border)] bg-[var(--color-canvas)] px-5 py-2">
               {["Purchase", "Items", "Settlement"].map((step, idx) => {
                 const stepKeys = ["purchase_search", "line_selection", "settlement"];
                 const isActive = stepKeys[idx] === formStep;
@@ -530,19 +532,23 @@ export const PurchaseReturnPage: React.FC = () => {
                   <React.Fragment key={step}>
                     <div
                       className={`flex items-center gap-1.5 rounded-full px-3 py-1 text-[11px] font-semibold transition-colors ${
-                        isActive ? "bg-orange-100 text-orange-700" : isPast ? "bg-emerald-100 text-emerald-700" : "text-slate-400"
+                        isActive
+                          ? "bg-[var(--color-accent-soft)] text-[var(--color-accent)] border border-[var(--color-accent-soft)]"
+                          : isPast
+                          ? "bg-[var(--color-surface)] text-[var(--color-text)] border border-[var(--color-border)]"
+                          : "text-[var(--color-text-muted)]"
                       }`}
                     >
                       <span
                         className={`h-4 w-4 rounded-full text-center text-[10px] leading-4 font-bold ${
-                          isActive ? "bg-orange-600 text-white" : isPast ? "bg-emerald-600 text-white" : "bg-slate-200 text-slate-500"
+                          isActive ? "bg-[var(--color-accent)] text-white" : isPast ? "bg-[var(--color-text)] text-white" : "bg-[var(--color-border)] text-[var(--color-text-muted)]"
                         }`}
                       >
                         {idx + 1}
                       </span>
                       {step}
                     </div>
-                    {idx < 2 && <ChevronDown className="h-3 w-3 -rotate-90 text-slate-300 mx-1" />}
+                    {idx < 2 && <ChevronDown className="h-3 w-3 -rotate-90 text-[var(--color-border)] mx-1" />}
                   </React.Fragment>
                 );
               })}

@@ -459,31 +459,31 @@ export const PurchaseEntryForm: React.FC<PurchaseEntryFormProps> = ({
     .slice(0, 10);
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col bg-slate-50 overflow-hidden font-sans">
+    <div className="fixed inset-0 z-50 flex flex-col bg-[var(--color-canvas)] overflow-hidden font-sans">
       {/* Top Header Bar */}
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-white px-5 py-3 shadow-xs">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--color-border)] bg-[var(--color-surface)] px-5 py-3 shadow-2xs">
         <div className="flex items-center gap-3">
           <button
             onClick={onClose}
-            className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 shadow-xs"
+            className="flex items-center gap-1.5 rounded-[10px] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1.5 text-xs font-semibold text-[var(--color-text)] hover:bg-[var(--color-surface-hover)] shadow-2xs cursor-pointer transition-colors"
             title="Back to Purchases (Esc)"
           >
-            <X className="h-4 w-4 text-slate-500" />
+            <X className="h-4 w-4 text-[var(--color-text-muted)]" />
             <span>Close (Esc)</span>
           </button>
-          <div className="h-6 w-px bg-slate-200" />
+          <div className="h-6 w-px bg-[var(--color-border)]" />
           <div className="flex items-center gap-2.5">
-            <div className="rounded-lg bg-blue-50 p-2 text-blue-600 border border-blue-100">
+            <div className="rounded-[10px] bg-[var(--color-accent-soft)] p-2 text-[var(--color-accent)] border border-[var(--color-accent-soft)]">
               <Building2 className="h-4 w-4" />
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h2 className="text-sm font-bold text-slate-800">New Inward Purchase Entry</h2>
-                <span className="rounded-md bg-blue-50 border border-blue-200 px-2 py-0.5 text-[10px] font-bold text-blue-700">
+                <h2 className="text-sm font-bold text-[var(--color-text)]">New Inward Purchase Entry</h2>
+                <span className="rounded-full bg-[var(--color-accent-soft)] border border-[var(--color-accent-soft)] px-2 py-0.5 text-[10px] font-bold text-[var(--color-accent)]">
                   F9 / Alt+S to Post
                 </span>
               </div>
-              <p className="text-[11px] text-slate-500">
+              <p className="text-[11px] text-[var(--color-text-muted)]">
                 F2 Product Search | F3 Supplier Select | F4 Drafts | Enter / Tab Next Cell
               </p>
             </div>
@@ -493,25 +493,25 @@ export const PurchaseEntryForm: React.FC<PurchaseEntryFormProps> = ({
         <div className="flex items-center gap-2 text-xs">
           <button
             onClick={() => setIsDraftsModalOpen(true)}
-            className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 font-semibold text-slate-700 shadow-xs hover:bg-slate-50"
+            className="flex items-center gap-1.5 rounded-[10px] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1.5 font-semibold text-[var(--color-text)] shadow-2xs hover:bg-[var(--color-surface-hover)] cursor-pointer transition-colors"
           >
-            <FileClock className="h-3.5 w-3.5 text-amber-500" />
+            <FileClock className="h-3.5 w-3.5 text-[var(--color-warning-text)]" />
             <span>Drafts (F4)</span>
           </button>
 
           <button
             onClick={handleSaveDraft}
-            className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 font-semibold text-slate-700 shadow-xs hover:bg-slate-50"
+            className="flex items-center gap-1.5 rounded-[10px] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1.5 font-semibold text-[var(--color-text)] shadow-2xs hover:bg-[var(--color-surface-hover)] cursor-pointer transition-colors"
           >
-            <Save className="h-3.5 w-3.5 text-blue-600" />
+            <Save className="h-3.5 w-3.5 text-[var(--color-accent)]" />
             <span>Save Draft</span>
           </button>
 
           <button
             onClick={() => setIsImportModalOpen(true)}
-            className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 font-semibold text-slate-700 shadow-xs hover:bg-slate-50"
+            className="flex items-center gap-1.5 rounded-[10px] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1.5 font-semibold text-[var(--color-text)] shadow-2xs hover:bg-[var(--color-surface-hover)] cursor-pointer transition-colors"
           >
-            <FileSpreadsheet className="h-3.5 w-3.5 text-emerald-600" />
+            <FileSpreadsheet className="h-3.5 w-3.5 text-[var(--color-accent)]" />
             <span>Import CSV/OCR</span>
           </button>
         </div>
@@ -519,16 +519,16 @@ export const PurchaseEntryForm: React.FC<PurchaseEntryFormProps> = ({
 
       {/* Duplicate Warning Banner */}
       {duplicateWarning && (
-        <div className="mx-4 mt-3 flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2.5 text-xs font-semibold text-amber-800 shadow-xs">
-          <AlertTriangle className="h-4 w-4 shrink-0 text-amber-600" />
+        <div className="mx-4 mt-3 flex items-center gap-2 rounded-[10px] border border-[var(--color-warning-border)] bg-[var(--color-warning-bg)] px-4 py-2.5 text-xs font-semibold text-[var(--color-warning-text)] shadow-2xs">
+          <AlertTriangle className="h-4 w-4 shrink-0 text-[var(--color-warning-text)]" />
           <span>{duplicateWarning}</span>
         </div>
       )}
 
       {/* Error Alert */}
       {errorMsg && (
-        <div className="mx-4 mt-3 flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-2.5 text-xs font-semibold text-red-700 shadow-xs">
-          <AlertCircle className="h-4 w-4 shrink-0 text-red-600" />
+        <div className="mx-4 mt-3 flex items-center gap-2 rounded-[10px] border border-[var(--color-danger-border)] bg-[var(--color-danger-bg)] px-4 py-2.5 text-xs font-semibold text-[var(--color-danger-text)] shadow-2xs">
+          <AlertCircle className="h-4 w-4 shrink-0 text-[var(--color-danger-text)]" />
           <span>{errorMsg}</span>
         </div>
       )}
@@ -536,18 +536,18 @@ export const PurchaseEntryForm: React.FC<PurchaseEntryFormProps> = ({
       {/* Main Container */}
       <div className="flex-1 flex flex-col overflow-hidden p-4 space-y-3">
         {/* Header Configuration Panel */}
-        <div className="rounded-xl border border-slate-200 bg-white p-3.5 shadow-sm">
+        <div className="rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] p-3.5 shadow-2xs">
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-6 items-end text-xs">
             {/* Supplier Selector */}
             <div className="sm:col-span-2">
               <div className="flex items-center justify-between mb-1">
-                <label className="font-bold text-slate-700 flex items-center gap-1">
+                <label className="font-bold text-[var(--color-text)] flex items-center gap-1">
                   <span>Supplier * (F3)</span>
                 </label>
                 <button
                   type="button"
                   onClick={() => setIsQuickAddSupplierOpen(true)}
-                  className="text-[11px] font-bold text-blue-600 hover:underline flex items-center gap-0.5"
+                  className="text-[11px] font-bold text-[var(--color-accent)] hover:underline flex items-center gap-0.5 cursor-pointer"
                 >
                   <Plus className="h-3 w-3" /> Add Supplier
                 </button>
@@ -556,7 +556,7 @@ export const PurchaseEntryForm: React.FC<PurchaseEntryFormProps> = ({
                 id="supplier-select-field"
                 value={selectedSupplierId}
                 onChange={(e) => handleSupplierChange(e.target.value)}
-                className="w-full rounded-lg border border-slate-300 px-2.5 py-1.5 font-medium text-slate-900 focus:border-blue-600 focus:outline-none bg-white"
+                className="w-full rounded-[10px] border border-[var(--color-border)] px-2.5 py-1.5 font-medium text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none bg-[var(--color-surface)]"
               >
                 <option value="">-- Select Supplier --</option>
                 {suppliers.map((s) => (
@@ -570,59 +570,59 @@ export const PurchaseEntryForm: React.FC<PurchaseEntryFormProps> = ({
 
             {/* Supplier Physical Invoice Number */}
             <div>
-              <label className="font-bold text-slate-700 block mb-1">Vendor Inv No *</label>
+              <label className="font-bold text-[var(--color-text)] block mb-1">Vendor Inv No *</label>
               <input
                 type="text"
                 value={supplierInvoiceNo}
                 onChange={(e) => setSupplierInvoiceNo(e.target.value)}
                 placeholder="e.g. INV-8899"
-                className="w-full rounded-lg border border-slate-300 px-2.5 py-1.5 font-mono text-xs font-semibold focus:border-blue-600 focus:outline-none"
+                className="w-full rounded-[10px] border border-[var(--color-border)] px-2.5 py-1.5 font-mono text-xs font-semibold text-[var(--color-text)] placeholder:text-[var(--color-text-muted)] focus:border-[var(--color-accent)] focus:outline-none bg-[var(--color-surface)]"
               />
             </div>
 
             {/* Invoice Date */}
             <div>
-              <label className="font-bold text-slate-700 block mb-1">Invoice Date</label>
+              <label className="font-bold text-[var(--color-text)] block mb-1">Invoice Date</label>
               <input
                 type="date"
                 value={purchaseDate}
                 onChange={(e) => setPurchaseDate(e.target.value)}
-                className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs focus:border-blue-600 focus:outline-none"
+                className="w-full rounded-[10px] border border-[var(--color-border)] px-2 py-1.5 text-xs text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none bg-[var(--color-surface)] font-mono"
               />
             </div>
 
             {/* Due Date */}
             <div>
-              <label className="font-bold text-slate-700 block mb-1">Due Date</label>
+              <label className="font-bold text-[var(--color-text)] block mb-1">Due Date</label>
               <input
                 type="date"
                 value={dueDate}
                 onChange={(e) => setDueDate(e.target.value)}
-                className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs focus:border-blue-600 focus:outline-none"
+                className="w-full rounded-[10px] border border-[var(--color-border)] px-2 py-1.5 text-xs text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none bg-[var(--color-surface)] font-mono"
               />
             </div>
 
             {/* Tax & GST Type */}
             <div>
-              <label className="font-bold text-slate-700 block mb-1">Tax Mode</label>
+              <label className="font-bold text-[var(--color-text)] block mb-1">Tax Mode</label>
               <div className="flex items-center gap-3 pt-1">
                 <label className="flex items-center gap-1 cursor-pointer">
                   <input
                     type="checkbox"
                     checked={isInterstate}
                     onChange={(e) => setIsInterstate(e.target.checked)}
-                    className="rounded text-blue-600"
+                    className="rounded text-[var(--color-accent)]"
                   />
-                  <span className="font-semibold text-purple-700">IGST</span>
+                  <span className="font-semibold text-[var(--color-accent)]">IGST</span>
                 </label>
                 <label className="flex items-center gap-1 cursor-pointer">
                   <input
                     type="checkbox"
                     checked={isRcm}
                     onChange={(e) => setIsRcm(e.target.checked)}
-                    className="rounded text-blue-600"
+                    className="rounded text-[var(--color-accent)]"
                   />
-                  <span className="font-semibold text-slate-700">RCM</span>
+                  <span className="font-semibold text-[var(--color-text-muted)]">RCM</span>
                 </label>
               </div>
             </div>
@@ -630,10 +630,10 @@ export const PurchaseEntryForm: React.FC<PurchaseEntryFormProps> = ({
         </div>
 
         {/* Inward Grid Table */}
-        <div className="flex-1 rounded-xl border border-slate-300 bg-white shadow-sm flex flex-col overflow-hidden">
+        <div className="flex-1 rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-2xs flex flex-col overflow-hidden">
           <div className="flex-1 overflow-auto">
             <table className="w-full text-left text-xs border-collapse">
-              <thead className="sticky top-0 z-10 bg-slate-100 text-slate-700 font-bold border-b border-slate-300 shadow-xs">
+              <thead className="sticky top-0 z-10 bg-[var(--color-canvas)] text-[var(--color-text-muted)] font-bold uppercase tracking-wider text-[11px] border-b border-[var(--color-border)] shadow-2xs">
                 <tr>
                   <th className="px-2 py-2.5 w-8 text-center">#</th>
                   <th className="px-2 py-2.5 min-w-[200px]">Product / Item Description (F2)</th>
@@ -654,15 +654,15 @@ export const PurchaseEntryForm: React.FC<PurchaseEntryFormProps> = ({
                   <th className="px-2 py-2.5 w-8"></th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-200">
+              <tbody className="divide-y divide-[var(--color-border)]">
                 {lines.map((line, idx) => {
                   const calc = purchaseService.calculateLineTotals(line, isInterstate);
                   const isMarginNegative = calc.margin_percent < 0;
                   const isMarginLow = calc.margin_percent >= 0 && calc.margin_percent < 10;
 
                   return (
-                    <tr key={idx} className="hover:bg-blue-50/40">
-                      <td className="px-2 py-1.5 text-center text-slate-400 font-medium">{idx + 1}</td>
+                    <tr key={idx} className="hover:bg-[var(--color-surface-hover)]">
+                      <td className="px-2 py-1.5 text-center text-[var(--color-text-muted)] font-mono">{idx + 1}</td>
 
                       {/* Product Name & Search */}
                       <td className="px-2 py-1.5 relative">
@@ -679,24 +679,24 @@ export const PurchaseEntryForm: React.FC<PurchaseEntryFormProps> = ({
                             setActiveSearchIndex(idx);
                           }}
                           placeholder="Type or scan product (F2)..."
-                          className="w-full rounded border border-slate-300 px-2 py-1 font-semibold text-slate-900 focus:border-blue-600 focus:outline-none"
+                          className="w-full rounded-[6px] border border-[var(--color-border)] px-2 py-1 font-semibold text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none bg-[var(--color-surface)]"
                         />
 
                         {/* Search Dropdown */}
                         {activeSearchIndex === idx && (
-                          <div className="absolute left-2 top-10 z-30 w-80 rounded-lg border border-slate-300 bg-white p-2 shadow-2xl">
-                            <div className="flex items-center justify-between border-b border-slate-200 pb-1.5 mb-1.5">
-                              <span className="text-[11px] font-bold text-slate-700">Select Existing Master Item</span>
+                          <div className="absolute left-2 top-10 z-30 w-80 rounded-[10px] border border-[var(--color-border)] bg-[var(--color-surface)] p-2 shadow-modal">
+                            <div className="flex items-center justify-between border-b border-[var(--color-border)] pb-1.5 mb-1.5">
+                              <span className="text-[11px] font-bold text-[var(--color-text)]">Select Existing Master Item</span>
                               <button
                                 onClick={() => setActiveSearchIndex(null)}
-                                className="text-slate-400 hover:text-slate-600 text-xs"
+                                className="text-[var(--color-text-muted)] hover:text-[var(--color-text)] text-xs cursor-pointer"
                               >
                                 <X className="h-3.5 w-3.5" />
                               </button>
                             </div>
                             <div className="max-h-48 overflow-y-auto space-y-1">
                               {filteredSearchProducts.length === 0 ? (
-                                <div className="p-2 text-[11px] text-slate-400 text-center">
+                                <div className="p-2 text-[11px] text-[var(--color-text-muted)] text-center">
                                   No matching items found. (Will create new product on save)
                                 </div>
                               ) : (
@@ -704,10 +704,10 @@ export const PurchaseEntryForm: React.FC<PurchaseEntryFormProps> = ({
                                   <div
                                     key={p.id}
                                     onClick={() => handleSelectProduct(idx, p)}
-                                    className="rounded p-1.5 hover:bg-blue-50 cursor-pointer text-left"
+                                    className="rounded-[6px] p-1.5 hover:bg-[var(--color-accent-soft)] cursor-pointer text-left"
                                   >
-                                    <div className="font-bold text-slate-800">{p.name}</div>
-                                    <div className="text-[10px] text-slate-500 flex justify-between">
+                                    <div className="font-bold text-[var(--color-text)]">{p.name}</div>
+                                    <div className="text-[10px] text-[var(--color-text-muted)] flex justify-between font-mono">
                                       <span>MRP: ₹{p.mrp?.toFixed(2)} | PTR: ₹{p.ptr?.toFixed(2) || 0}</span>
                                       <span>Stock: {p.current_stock || 0}</span>
                                     </div>
@@ -726,7 +726,7 @@ export const PurchaseEntryForm: React.FC<PurchaseEntryFormProps> = ({
                           value={line.hsn_code || ""}
                           onChange={(e) => updateLine(idx, { hsn_code: e.target.value })}
                           placeholder="HSN"
-                          className="w-full rounded border border-slate-200 px-1.5 py-1 text-center font-mono"
+                          className="w-full rounded-[6px] border border-[var(--color-border)] px-1.5 py-1 text-center font-mono text-[var(--color-text)] bg-[var(--color-surface)]"
                         />
                       </td>
 
@@ -737,7 +737,7 @@ export const PurchaseEntryForm: React.FC<PurchaseEntryFormProps> = ({
                           value={line.batch_no}
                           onChange={(e) => updateLine(idx, { batch_no: e.target.value.toUpperCase() })}
                           placeholder="Batch #"
-                          className="w-full rounded border border-slate-300 px-1.5 py-1 font-mono font-bold uppercase focus:border-blue-600 focus:outline-none"
+                          className="w-full rounded-[6px] border border-[var(--color-border)] px-1.5 py-1 font-mono font-bold uppercase text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none bg-[var(--color-surface)]"
                         />
                       </td>
 
@@ -748,7 +748,7 @@ export const PurchaseEntryForm: React.FC<PurchaseEntryFormProps> = ({
                           value={line.expiry_date}
                           onChange={(e) => updateLine(idx, { expiry_date: e.target.value })}
                           placeholder="YYYY-MM"
-                          className="w-full rounded border border-slate-300 px-1.5 py-1 font-mono text-center focus:border-blue-600 focus:outline-none"
+                          className="w-full rounded-[6px] border border-[var(--color-border)] px-1.5 py-1 font-mono text-center text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none bg-[var(--color-surface)]"
                         />
                       </td>
 
@@ -759,7 +759,7 @@ export const PurchaseEntryForm: React.FC<PurchaseEntryFormProps> = ({
                           min="0"
                           value={line.pack_qty}
                           onChange={(e) => updateLine(idx, { pack_qty: Number(e.target.value) || 0 })}
-                          className="w-14 rounded border border-slate-300 px-1 py-1 text-center font-bold focus:border-blue-600 focus:outline-none"
+                          className="w-14 rounded-[6px] border border-[var(--color-border)] px-1 py-1 text-center font-bold font-mono text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none bg-[var(--color-surface)]"
                         />
                       </td>
 
@@ -770,7 +770,7 @@ export const PurchaseEntryForm: React.FC<PurchaseEntryFormProps> = ({
                           min="0"
                           value={line.loose_qty || 0}
                           onChange={(e) => updateLine(idx, { loose_qty: Number(e.target.value) || 0 })}
-                          className="w-12 rounded border border-slate-200 px-1 py-1 text-center"
+                          className="w-12 rounded-[6px] border border-[var(--color-border)] px-1 py-1 text-center font-mono text-[var(--color-text)] bg-[var(--color-surface)]"
                         />
                       </td>
 
@@ -781,7 +781,7 @@ export const PurchaseEntryForm: React.FC<PurchaseEntryFormProps> = ({
                           min="0"
                           value={line.free_qty || 0}
                           onChange={(e) => updateLine(idx, { free_qty: Number(e.target.value) || 0 })}
-                          className="w-12 rounded border border-slate-200 px-1 py-1 text-center text-emerald-700 font-semibold"
+                          className="w-12 rounded-[6px] border border-[var(--color-border)] px-1 py-1 text-center text-[var(--color-accent)] font-semibold font-mono bg-[var(--color-surface)]"
                         />
                       </td>
 
@@ -792,7 +792,7 @@ export const PurchaseEntryForm: React.FC<PurchaseEntryFormProps> = ({
                           min="1"
                           value={line.units_per_pack || 1}
                           onChange={(e) => updateLine(idx, { units_per_pack: Math.max(1, Number(e.target.value) || 1) })}
-                          className="w-10 rounded border border-slate-200 px-1 py-1 text-center text-slate-500"
+                          className="w-10 rounded-[6px] border border-[var(--color-border)] px-1 py-1 text-center text-[var(--color-text-muted)] font-mono bg-[var(--color-surface)]"
                         />
                       </td>
 
@@ -804,7 +804,7 @@ export const PurchaseEntryForm: React.FC<PurchaseEntryFormProps> = ({
                           min="0"
                           value={line.purchase_rate}
                           onChange={(e) => updateLine(idx, { purchase_rate: Number(e.target.value) || 0 })}
-                          className="w-18 rounded border border-slate-300 px-1.5 py-1 text-right font-bold focus:border-blue-600 focus:outline-none"
+                          className="w-18 rounded-[6px] border border-[var(--color-border)] px-1.5 py-1 text-right font-bold font-mono text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none bg-[var(--color-surface)]"
                         />
                       </td>
 
@@ -817,7 +817,7 @@ export const PurchaseEntryForm: React.FC<PurchaseEntryFormProps> = ({
                           max="100"
                           value={line.discount_percent || 0}
                           onChange={(e) => updateLine(idx, { discount_percent: Number(e.target.value) || 0 })}
-                          className="w-12 rounded border border-slate-200 px-1 py-1 text-center"
+                          className="w-12 rounded-[6px] border border-[var(--color-border)] px-1 py-1 text-center font-mono text-[var(--color-text)] bg-[var(--color-surface)]"
                         />
                       </td>
 
@@ -826,7 +826,7 @@ export const PurchaseEntryForm: React.FC<PurchaseEntryFormProps> = ({
                         <select
                           value={line.gst_percent}
                           onChange={(e) => updateLine(idx, { gst_percent: Number(e.target.value) || 0 })}
-                          className="rounded border border-slate-200 px-1 py-1 text-center font-medium bg-white"
+                          className="rounded-[6px] border border-[var(--color-border)] px-1 py-1 text-center font-medium bg-[var(--color-surface)] text-[var(--color-text)] font-mono"
                         >
                           <option value={0}>0%</option>
                           <option value={5}>5%</option>
@@ -837,7 +837,7 @@ export const PurchaseEntryForm: React.FC<PurchaseEntryFormProps> = ({
                       </td>
 
                       {/* Line Total */}
-                      <td className="px-2 py-1.5 text-right font-bold text-slate-900">
+                      <td className="px-2 py-1.5 text-right font-bold font-mono text-[var(--color-text)] tabular-nums">
                         ₹{calc.total_amount.toFixed(2)}
                       </td>
 
@@ -849,7 +849,7 @@ export const PurchaseEntryForm: React.FC<PurchaseEntryFormProps> = ({
                           min="0"
                           value={line.mrp || 0}
                           onChange={(e) => updateLine(idx, { mrp: Number(e.target.value) || 0 })}
-                          className="w-16 rounded border border-slate-200 px-1 py-1 text-right text-slate-700"
+                          className="w-16 rounded-[6px] border border-[var(--color-border)] px-1 py-1 text-right text-[var(--color-text-muted)] font-mono bg-[var(--color-surface)]"
                         />
                       </td>
 
@@ -861,19 +861,19 @@ export const PurchaseEntryForm: React.FC<PurchaseEntryFormProps> = ({
                           min="0"
                           value={line.selling_rate || 0}
                           onChange={(e) => updateLine(idx, { selling_rate: Number(e.target.value) || 0 })}
-                          className="w-16 rounded border border-slate-300 px-1 py-1 text-right font-semibold text-emerald-800"
+                          className="w-16 rounded-[6px] border border-[var(--color-border)] px-1 py-1 text-right font-semibold text-[var(--color-accent)] font-mono bg-[var(--color-surface)]"
                         />
                       </td>
 
                       {/* Margin % */}
                       <td className="px-2 py-1.5 text-center">
                         <span
-                          className={`rounded px-1.5 py-0.5 text-[10px] font-bold ${
+                          className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold font-mono ${
                             isMarginNegative
-                              ? "bg-red-100 text-red-700"
+                              ? "bg-[var(--color-danger-bg)] text-[var(--color-danger-text)] border border-[var(--color-danger-border)]"
                               : isMarginLow
-                              ? "bg-amber-100 text-amber-800"
-                              : "bg-emerald-50 text-emerald-700"
+                              ? "bg-[var(--color-warning-bg)] text-[var(--color-warning-text)] border border-[var(--color-warning-border)]"
+                              : "bg-[var(--color-accent-soft)] text-[var(--color-accent)] border border-[var(--color-accent-soft)]"
                           }`}
                         >
                           {calc.margin_percent.toFixed(0)}%
@@ -884,7 +884,7 @@ export const PurchaseEntryForm: React.FC<PurchaseEntryFormProps> = ({
                       <td className="px-2 py-1.5 text-center">
                         <button
                           onClick={() => removeLine(idx)}
-                          className="p-1 text-slate-300 hover:text-red-600 rounded"
+                          className="p-1 text-[var(--color-text-muted)] hover:text-[var(--color-danger-text)] rounded-[6px] cursor-pointer"
                         >
                           <Trash2 className="h-3.5 w-3.5" />
                         </button>
@@ -897,26 +897,26 @@ export const PurchaseEntryForm: React.FC<PurchaseEntryFormProps> = ({
           </div>
 
           {/* Add Line Button Bar */}
-          <div className="border-t border-slate-200 bg-slate-50 px-4 py-2 flex items-center justify-between">
+          <div className="border-t border-[var(--color-border)] bg-[var(--color-canvas)] px-4 py-2 flex items-center justify-between">
             <button
               onClick={addLine}
-              className="flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-bold text-slate-700 shadow-xs hover:bg-slate-50"
+              className="flex items-center gap-1.5 rounded-[10px] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1.5 text-xs font-bold text-[var(--color-text)] shadow-2xs hover:bg-[var(--color-surface-hover)] cursor-pointer transition-colors"
             >
-              <Plus className="h-3.5 w-3.5 text-blue-600" />
+              <Plus className="h-3.5 w-3.5 text-[var(--color-accent)]" />
               <span>Add Line Item</span>
             </button>
 
-            <span className="text-[11px] text-slate-500 font-medium">
+            <span className="text-[11px] text-[var(--color-text-muted)] font-medium font-mono">
               {lines.length} Line items ({lines.reduce((a, l) => a + (l.pack_qty || 0), 0)} packs)
             </span>
           </div>
         </div>
 
         {/* Bottom Reconciliation Bar & Posting Controls */}
-        <div className="rounded-xl border border-slate-200 bg-white p-3.5 shadow-md flex flex-col md:flex-row items-center justify-between gap-4 text-xs">
+        <div className="rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] p-3.5 shadow-2xs flex flex-col md:flex-row items-center justify-between gap-4 text-xs">
           {/* Vendor Physical Invoice Reconciliation Check */}
-          <div className="flex items-center gap-3 bg-slate-50 p-2.5 rounded-lg border border-slate-200">
-            <span className="font-bold text-slate-700">Vendor Inv Check:</span>
+          <div className="flex items-center gap-3 bg-[var(--color-canvas)] p-2.5 rounded-[10px] border border-[var(--color-border)]">
+            <span className="font-bold text-[var(--color-text)]">Vendor Inv Check:</span>
             <div className="flex items-center gap-2">
               <input
                 type="number"
@@ -924,15 +924,15 @@ export const PurchaseEntryForm: React.FC<PurchaseEntryFormProps> = ({
                 placeholder="Physical Total (₹)"
                 value={vendorGrandTotal}
                 onChange={(e) => setVendorGrandTotal(e.target.value === "" ? "" : Number(e.target.value))}
-                className="w-32 rounded border border-slate-300 px-2 py-1 text-xs font-bold focus:border-blue-600 focus:outline-none"
+                className="w-32 rounded-[8px] border border-[var(--color-border)] px-2 py-1 text-xs font-bold font-mono text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none bg-[var(--color-surface)]"
               />
               {vendorGrandTotal !== "" && (
                 <>
                   <span
-                    className={`rounded px-2 py-0.5 font-bold text-[11px] ${
+                    className={`rounded-full px-2 py-0.5 font-bold font-mono text-[11px] ${
                       Math.abs(Number(vendorGrandTotal) - totals.grandTotal) < 0.05
-                        ? "bg-emerald-100 text-emerald-800"
-                        : "bg-red-100 text-red-800"
+                        ? "bg-[var(--color-accent-soft)] text-[var(--color-accent)] border border-[var(--color-accent-soft)]"
+                        : "bg-[var(--color-danger-bg)] text-[var(--color-danger-text)] border border-[var(--color-danger-border)]"
                     }`}
                   >
                     {Math.abs(Number(vendorGrandTotal) - totals.grandTotal) < 0.05
@@ -954,7 +954,7 @@ export const PurchaseEntryForm: React.FC<PurchaseEntryFormProps> = ({
                           setFreightCharges((prev) => Math.round((prev + diff) * 100) / 100);
                         }
                       }}
-                      className="rounded bg-blue-100 hover:bg-blue-200 text-blue-800 font-bold px-2 py-0.5 text-[10px] cursor-pointer"
+                      className="rounded-[6px] bg-[var(--color-accent-soft)] hover:bg-[var(--color-border)] text-[var(--color-accent)] font-bold px-2 py-0.5 text-[10px] cursor-pointer transition-colors"
                       title="Auto-balance difference to freight/round-off"
                     >
                       Auto-balance
@@ -966,28 +966,28 @@ export const PurchaseEntryForm: React.FC<PurchaseEntryFormProps> = ({
           </div>
 
           {/* Totals Summary */}
-          <div className="flex items-center gap-5 text-slate-600 font-medium">
+          <div className="flex items-center gap-5 text-[var(--color-text-muted)] font-medium">
             <div>
               <span>Taxable: </span>
-              <span className="font-bold text-slate-900">₹ {totals.subtotal.toFixed(2)}</span>
+              <span className="font-bold font-mono text-[var(--color-text)] tabular-nums">₹ {totals.subtotal.toFixed(2)}</span>
             </div>
             {totals.discountTotal > 0 && (
               <div>
                 <span>Disc: </span>
-                <span className="font-bold text-emerald-600">-₹ {totals.discountTotal.toFixed(2)}</span>
+                <span className="font-bold font-mono text-[var(--color-accent)] tabular-nums">-₹ {totals.discountTotal.toFixed(2)}</span>
               </div>
             )}
             <div>
               <span>Tax: </span>
-              <span className="font-bold text-slate-900">₹ {totals.taxTotal.toFixed(2)}</span>
+              <span className="font-bold font-mono text-[var(--color-text)] tabular-nums">₹ {totals.taxTotal.toFixed(2)}</span>
             </div>
             <div>
               <span>Round Off: </span>
-              <span className="font-semibold text-slate-700">₹ {totals.roundOff.toFixed(2)}</span>
+              <span className="font-semibold font-mono text-[var(--color-text)] tabular-nums">₹ {totals.roundOff.toFixed(2)}</span>
             </div>
-            <div className="border-l border-slate-300 pl-4">
-              <span className="text-slate-500">Net Payable: </span>
-              <span className="text-base font-black text-blue-700">₹ {totals.grandTotal.toFixed(2)}</span>
+            <div className="border-l border-[var(--color-border)] pl-4">
+              <span className="text-[var(--color-text-muted)]">Net Payable: </span>
+              <span className="text-base font-black font-mono text-[var(--color-accent)] tabular-nums">₹ {totals.grandTotal.toFixed(2)}</span>
             </div>
           </div>
 
@@ -995,14 +995,14 @@ export const PurchaseEntryForm: React.FC<PurchaseEntryFormProps> = ({
           <div className="flex items-center gap-2">
             <button
               onClick={onClose}
-              className="rounded-lg border border-slate-300 bg-white px-4 py-2 font-semibold text-slate-700 hover:bg-slate-100"
+              className="rounded-[10px] border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-2 font-semibold text-[var(--color-text)] hover:bg-[var(--color-surface-hover)] cursor-pointer transition-colors"
             >
               Cancel
             </button>
             <button
               onClick={handleSavePurchase}
               disabled={isSaving}
-              className="flex items-center gap-2 rounded-lg bg-blue-600 px-6 py-2 font-black text-white shadow-md hover:bg-blue-700 disabled:opacity-50"
+              className="flex items-center gap-2 rounded-[10px] bg-[var(--color-accent)] px-6 py-2 font-bold text-white shadow-2xs hover:bg-[var(--color-accent-hover)] disabled:opacity-50 cursor-pointer transition-colors"
             >
               <CheckCircle className="h-4 w-4" />
               <span>Post Inward Bill (F9)</span>

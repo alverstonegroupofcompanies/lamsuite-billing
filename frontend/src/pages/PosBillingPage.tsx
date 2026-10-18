@@ -56,6 +56,7 @@ import { BillingColumnsModal } from "../components/BillingColumnsModal";
 import { ConversionModal } from "../components/ConversionModal";
 import { PosShortcutHintBar, type PosFocusContext } from "../components/PosShortcutHintBar";
 import { QuickLineEditModal } from "../components/QuickLineEditModal";
+import { QuickProductBatchEditModal } from "../components/QuickProductBatchEditModal";
 import { KeyboardShortcutsModal } from "../components/KeyboardShortcutsModal";
 import { BillDiscountModal } from "../components/BillDiscountModal";
 import { RoundOffModal } from "../components/RoundOffModal";
@@ -119,6 +120,7 @@ export const PosBillingPage: React.FC = () => {
   const [posHeaders, setPosHeaders] = useState<HeaderFieldSetting[]>(() => companySettingsService.getHeaderFields());
   const [isColumnsModalOpen, setIsColumnsModalOpen] = useState(false);
   const [selectedLineForConversion, setSelectedLineForConversion] = useState<PosCartLine | null>(null);
+  const [selectedLineForProductBatchEdit, setSelectedLineForProductBatchEdit] = useState<PosCartLine | null>(null);
 
   // Modals & Popups
   const [isTenderModalOpen, setIsTenderModalOpen] = useState(false);
@@ -270,6 +272,27 @@ export const PosBillingPage: React.FC = () => {
       persistMaster
         ? `Updated conversion: 1 ${packName} = ${unitsPerPack} ${looseName} (Saved to Master)`
         : `Updated conversion: 1 ${packName} = ${unitsPerPack} ${looseName} (This Bill)`,
+      "success"
+    );
+  };
+
+  const handleSaveProductBatchEdit = async (
+    lineId: string,
+    productUpdates: Partial<ProductItem>,
+    batchUpdates: Partial<ProductBatch>,
+    persistToMaster: boolean
+  ) => {
+    await posCartService.updateLineProductAndBatch(
+      lineId,
+      productUpdates,
+      batchUpdates,
+      persistToMaster
+    );
+    refreshCartState();
+    showNotification(
+      persistToMaster
+        ? `Updated "${productUpdates.name || "Product"}" (Batch ${batchUpdates.batch_no || ""}) & saved to master database.`
+        : `Updated "${productUpdates.name || "Product"}" for this bill.`,
       "success"
     );
   };
@@ -563,6 +586,15 @@ export const PosBillingPage: React.FC = () => {
         return;
       }
 
+      // If product & batch edit modal is open
+      if (selectedLineForProductBatchEdit) {
+        if (e.key === "Escape") {
+          e.preventDefault();
+          setSelectedLineForProductBatchEdit(null);
+        }
+        return;
+      }
+
       // If diff modal is open, handle diff modal hotkeys (F12, Enter, Escape)
       if (isDiffModalOpen) {
         if (e.key === "Escape") {
@@ -819,6 +851,20 @@ export const PosBillingPage: React.FC = () => {
           : 0;
         handleSelectRow(targetIdx);
         handleQuickRate(lines[targetIdx]);
+        return;
+      }
+
+      const isItemProductBatchEditKey =
+        (e.key === "F4" && !e.ctrlKey && !e.metaKey && !e.shiftKey) ||
+        (isCmdOrCtrl && (keyLower === "m" || code === "KeyM"));
+
+      if (isItemProductBatchEditKey && lines.length > 0) {
+        e.preventDefault();
+        const targetIdx = selectedRowIndex !== null && selectedRowIndex >= 0 && selectedRowIndex < lines.length
+          ? selectedRowIndex
+          : 0;
+        handleSelectRow(targetIdx);
+        setSelectedLineForProductBatchEdit(lines[targetIdx]);
         return;
       }
 
@@ -1783,20 +1829,20 @@ export const PosBillingPage: React.FC = () => {
       )}
 
       {/* Header Strip: Customer & Bill Meta */}
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-200 bg-white px-4 py-2.5 shadow-sm">
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-2.5 shadow-2xs">
         <div className="flex flex-wrap items-center gap-4">
           {posHeaders.find((h) => h.id === "invoice_no")?.visible !== false && (
             <div>
-              <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">Invoice No</span>
-              <p className="text-xs font-bold text-blue-700">{invoiceNumber}</p>
+              <span className="text-[11px] font-bold text-[var(--color-text-muted)] uppercase tracking-wider">Invoice No</span>
+              <p className="text-xs font-bold font-mono text-[var(--color-accent)]">{invoiceNumber}</p>
             </div>
           )}
 
           {posHeaders.find((h) => h.id === "customer_name")?.visible !== false && (
             <>
-              <div className="h-6 w-px bg-slate-200 hidden sm:block" />
+              <div className="h-6 w-px bg-[var(--color-border)] hidden sm:block" />
               <div className="flex items-center gap-2">
-                <UserCheck className="h-4 w-4 text-slate-400" />
+                <UserCheck className="h-4 w-4 text-[var(--color-text-muted)]" />
                 <CustomerCombobox
                   value={customerName}
                   phone={customerPhone}
@@ -1841,7 +1887,7 @@ export const PosBillingPage: React.FC = () => {
               value={customerPhone}
               onChange={(e) => handleCustomerPhoneChange(e.target.value)}
               placeholder="Mobile (+91)"
-              className="w-28 rounded border border-slate-200 px-2 py-1 text-xs font-medium text-slate-700 focus:border-blue-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
+              className="w-28 rounded-[10px] border border-[var(--color-border)] bg-[var(--color-surface)] px-2.5 py-1 text-xs font-mono font-medium text-[var(--color-text)] placeholder-[var(--color-text-muted)] focus:border-[var(--color-accent)] focus:outline-none"
             />
           )}
 
@@ -1851,7 +1897,7 @@ export const PosBillingPage: React.FC = () => {
               value={customerGstin}
               onChange={(e) => setCustomerGstin(e.target.value)}
               placeholder="GSTIN"
-              className="w-32 rounded border border-slate-200 px-2 py-1 text-xs font-mono text-slate-700 focus:border-blue-500 focus:outline-none uppercase"
+              className="w-32 rounded-[10px] border border-[var(--color-border)] bg-[var(--color-surface)] px-2.5 py-1 text-xs font-mono text-[var(--color-text)] placeholder-[var(--color-text-muted)] focus:border-[var(--color-accent)] focus:outline-none uppercase"
             />
           )}
 
@@ -1864,7 +1910,7 @@ export const PosBillingPage: React.FC = () => {
                 posCartService.setPrescriptionMeta({ doctor_name: e.target.value });
               }}
               placeholder="Dr. Name"
-              className="w-28 rounded border border-slate-200 px-2 py-1 text-xs text-slate-700 focus:border-blue-500 focus:outline-none"
+              className="w-28 rounded-[10px] border border-[var(--color-border)] bg-[var(--color-surface)] px-2.5 py-1 text-xs font-medium text-[var(--color-text)] placeholder-[var(--color-text-muted)] focus:border-[var(--color-accent)] focus:outline-none"
             />
           )}
 
@@ -1877,7 +1923,7 @@ export const PosBillingPage: React.FC = () => {
                 posCartService.setPrescriptionMeta({ patient_name: e.target.value });
               }}
               placeholder="Patient Name"
-              className="w-28 rounded border border-slate-200 px-2 py-1 text-xs text-slate-700 focus:border-blue-500 focus:outline-none"
+              className="w-28 rounded-[10px] border border-[var(--color-border)] bg-[var(--color-surface)] px-2.5 py-1 text-xs font-medium text-[var(--color-text)] placeholder-[var(--color-text-muted)] focus:border-[var(--color-accent)] focus:outline-none"
             />
           )}
 
@@ -1887,7 +1933,7 @@ export const PosBillingPage: React.FC = () => {
               value={billNotes}
               onChange={(e) => setBillNotes(e.target.value)}
               placeholder="Bill Remarks"
-              className="w-32 rounded border border-slate-200 px-2 py-1 text-xs text-slate-700 focus:border-blue-500 focus:outline-none"
+              className="w-32 rounded-[10px] border border-[var(--color-border)] bg-[var(--color-surface)] px-2.5 py-1 text-xs font-medium text-[var(--color-text)] placeholder-[var(--color-text-muted)] focus:border-[var(--color-accent)] focus:outline-none"
             />
           )}
         </div>
@@ -1897,25 +1943,25 @@ export const PosBillingPage: React.FC = () => {
           <button
             type="button"
             onClick={() => setIsColumnsModalOpen(true)}
-            className="flex items-center gap-1.5 rounded border border-slate-300 bg-white hover:bg-slate-50 px-2.5 py-1.5 text-xs font-semibold text-slate-700 shadow-2xs transition-colors"
+            className="flex items-center gap-1.5 rounded-[10px] border border-[var(--color-border)] bg-[var(--color-surface)] hover:bg-[var(--color-surface-hover)] px-2.5 py-1.5 text-xs font-semibold text-[var(--color-text)] shadow-2xs transition-colors cursor-pointer"
             title="Configure POS Columns & Presets (Ctrl+Shift+C)"
           >
-            <Sliders className="h-3.5 w-3.5 text-blue-600" />
+            <Sliders className="h-3.5 w-3.5 text-[var(--color-accent)]" />
             <span className="hidden sm:inline">Columns (Ctrl+Shift+C)</span>
           </button>
 
           <button
             onClick={() => navigate("/bills")}
-            className="flex items-center gap-1.5 rounded bg-blue-50 px-3 py-1.5 text-xs font-semibold text-blue-700 hover:bg-blue-100"
+            className="flex items-center gap-1.5 rounded-[10px] bg-[var(--color-surface-subtle)] border border-[var(--color-border)] px-3 py-1.5 text-xs font-semibold text-[var(--color-text)] hover:bg-[var(--color-surface-hover)] cursor-pointer"
             title="Recall / Find Past Bills (F6)"
           >
-            <FileText className="h-3.5 w-3.5" />
+            <FileText className="h-3.5 w-3.5 text-[var(--color-accent)]" />
             <span className="hidden md:inline">Find Bill (F6)</span>
           </button>
 
           <button
             onClick={handleHoldBill}
-            className="flex items-center gap-1.5 rounded bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-700 hover:bg-amber-100"
+            className="flex items-center gap-1.5 rounded-[10px] bg-[var(--color-warning-bg)] border border-[var(--color-warning-border)] px-3 py-1.5 text-xs font-semibold text-[var(--color-warning-text)] hover:opacity-90 cursor-pointer"
           >
             <PauseCircle className="h-3.5 w-3.5" />
             <span>Hold (F8)</span>
@@ -1923,12 +1969,12 @@ export const PosBillingPage: React.FC = () => {
 
           <button
             onClick={() => setIsRecallModalOpen(true)}
-            className="relative flex items-center gap-1.5 rounded bg-indigo-50 px-3 py-1.5 text-xs font-semibold text-indigo-700 hover:bg-indigo-100"
+            className="relative flex items-center gap-1.5 rounded-[10px] bg-[var(--color-accent-soft)] border border-[var(--color-accent-soft)] px-3 py-1.5 text-xs font-semibold text-[var(--color-accent)] hover:opacity-90 cursor-pointer"
           >
             <PlayCircle className="h-3.5 w-3.5" />
             <span>Recall (F9)</span>
             {heldBillsCount > 0 && (
-              <span className="ml-1 rounded-full bg-indigo-600 px-1.5 py-0.2 text-[10px] font-bold text-white">
+              <span className="ml-1 rounded-full bg-[var(--color-accent)] px-1.5 py-0.2 text-[10px] font-bold font-mono text-white">
                 {heldBillsCount}
               </span>
             )}
@@ -1964,11 +2010,11 @@ export const PosBillingPage: React.FC = () => {
       )}
 
       {/* Main Billing Workspace: Search & High-Speed Items Grid */}
-      <div className="flex flex-1 flex-col rounded-lg border border-slate-200 bg-white shadow-sm overflow-hidden">
+      <div className="flex flex-1 flex-col rounded-card border border-border-main bg-surface shadow-2xs overflow-hidden">
         {/* Product / Barcode Search Bar */}
-        <div className="relative border-b border-slate-200 p-3 bg-slate-50/70">
+        <div className="relative border-b border-border-main p-3 bg-canvas">
           <div className="relative flex items-center">
-            <Search className="absolute left-3.5 h-4 w-4 text-slate-400" />
+            <Search className="absolute left-3.5 h-4 w-4 text-[var(--color-text-faint)]" />
             <input
               ref={searchInputRef}
               type="text"
@@ -1998,10 +2044,10 @@ export const PosBillingPage: React.FC = () => {
                 }, 180);
               }}
               placeholder="Scan barcode or type medicine / product name (Press Enter)... [F1]"
-              className="w-full rounded-md border border-slate-300 bg-white pl-10 pr-24 py-2 text-xs font-medium text-slate-800 placeholder-slate-400 focus:border-blue-600 focus:outline-none focus:ring-1 focus:ring-blue-600 shadow-sm"
+              className="w-full rounded-[10px] border border-[var(--color-border)] bg-[var(--color-surface)] pl-10 pr-24 py-2 text-xs font-medium text-[var(--color-text)] placeholder-[var(--color-text-muted)] focus:border-[var(--color-accent)] focus:outline-none shadow-2xs transition-colors"
             />
-            <div className="absolute right-3 flex items-center gap-1.5 text-[11px] text-slate-400">
-              <Barcode className="h-4 w-4 text-slate-500" />
+            <div className="absolute right-3 flex items-center gap-1.5 text-[11px] text-[var(--color-text-muted)]">
+              <Barcode className="h-4 w-4 text-[var(--color-text-faint)]" />
               <span>Scanner Ready</span>
             </div>
           </div>
@@ -2017,7 +2063,7 @@ export const PosBillingPage: React.FC = () => {
                 width: `${dropdownPosition.width}px`,
                 zIndex: 9999,
               }}
-              className="max-h-72 overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-2xl divide-y divide-slate-100"
+              className="max-h-72 overflow-y-auto rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-dropdown divide-y divide-[var(--color-border-subtle)]"
             >
               {searchResults.map((prod, index) => {
                 const isSelected = index === selectedSearchIndex;
@@ -2032,31 +2078,31 @@ export const PosBillingPage: React.FC = () => {
                     }}
                     className={`flex cursor-pointer items-center justify-between px-4 py-2.5 text-xs transition-colors ${
                       isSelected
-                        ? "bg-blue-50/90 text-blue-900 border-l-4 border-l-blue-600 pl-3"
-                        : "hover:bg-slate-50 text-slate-800"
+                        ? "bg-[var(--color-accent-soft)] text-[var(--color-text)] border-l-4 border-l-[var(--color-accent)] pl-3"
+                        : "hover:bg-[var(--color-surface-hover)] text-[var(--color-text)]"
                     }`}
                   >
                     <div>
                       <div className="flex items-center gap-2">
-                        <p className={`font-semibold ${isSelected ? "text-blue-950 font-bold" : "text-slate-800"}`}>
+                        <p className={`font-semibold ${isSelected ? "text-[var(--color-accent)] font-bold" : "text-[var(--color-text)]"}`}>
                           {prod.name}
                         </p>
                         {prod.generic_name && (
-                          <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-500 font-normal">
+                          <span className="rounded-[4px] bg-[var(--color-surface-subtle)] px-1.5 py-0.5 text-[10px] text-[var(--color-text-muted)] font-normal border border-[var(--color-border)]">
                             {prod.generic_name}
                           </span>
                         )}
                       </div>
-                      <p className="text-[11px] text-slate-500 mt-0.5">
-                        Barcode: <span className="font-mono text-slate-600">{prod.barcode}</span>{" "}
+                      <p className="text-[11px] text-[var(--color-text-muted)] mt-0.5 font-mono">
+                        Barcode: <span>{prod.barcode}</span>{" "}
                         {prod.hsn_sac_code ? `| HSN: ${prod.hsn_sac_code}` : ""} | GST: {prod.gst_percent}%
                       </p>
                     </div>
                     <div className="text-right shrink-0 ml-4">
-                      <p className="font-bold text-slate-900 text-sm">₹ {(prod.sel_rate || prod.mrp).toFixed(2)}</p>
+                      <p className="font-bold text-[var(--color-text)] text-sm font-mono tabular-nums">₹ {(prod.sel_rate || prod.mrp).toFixed(2)}</p>
                       <p
-                        className={`text-[10px] font-medium ${
-                          (prod.current_stock || 0) > 0 ? "text-emerald-600" : "text-rose-500"
+                        className={`text-[10px] font-mono font-medium ${
+                          (prod.current_stock || 0) > 0 ? "text-[var(--color-success-text)]" : "text-[var(--color-danger-text)] font-bold"
                         }`}
                       >
                         Stock: {prod.current_stock || 0}
@@ -2079,7 +2125,7 @@ export const PosBillingPage: React.FC = () => {
           return (
             <div className="flex-1 overflow-auto">
               <table role="grid" aria-label="POS Billing Items" className="w-full text-left text-xs">
-                <thead className="sticky top-0 bg-slate-100/90 backdrop-blur-sm border-b border-slate-200 text-slate-700">
+                <thead className="sticky top-0 bg-[var(--color-surface-subtle)] border-b border-[var(--color-border)] text-[var(--color-text-muted)]">
                   <tr>
                     {visibleCols.map((col: ColumnSetting) => {
                       let alignClass = "text-left";
@@ -2092,7 +2138,7 @@ export const PosBillingPage: React.FC = () => {
                         <th
                           key={col.id}
                           style={col.width ? { width: `${col.width}px` } : undefined}
-                          className={`px-3 py-2 ${alignClass} font-semibold`}
+                          className={`px-3 py-2.5 ${alignClass} text-[11px] font-bold uppercase tracking-wider text-[var(--color-text-muted)]`}
                         >
                           {col.id === "gst" && (totals.igst_total > 0 || posCartService.getIsInterState())
                             ? "IGST %"
@@ -2102,18 +2148,19 @@ export const PosBillingPage: React.FC = () => {
                     })}
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-100">
+                <tbody className="divide-y divide-[var(--color-border-subtle)]">
                   {lines.length === 0 ? (
                     <tr>
-                      <td colSpan={visibleCols.length} className="py-16 text-center text-slate-400">
-                        <Barcode className="mx-auto h-8 w-8 text-slate-300 mb-2" />
-                        <p className="font-medium">Billing cart is empty</p>
-                        <p className="text-[11px] text-slate-400 mt-0.5">Scan a barcode or type a product name to begin billing</p>
+                      <td colSpan={visibleCols.length} className="py-16 text-center text-[var(--color-text-muted)]">
+                        <Barcode className="mx-auto h-8 w-8 text-[var(--color-text-faint)] mb-2" />
+                        <p className="font-semibold text-sm text-[var(--color-text)]">Billing cart is empty</p>
+                        <p className="text-[11px] text-[var(--color-text-muted)] mt-0.5">Scan a barcode or type a product name to begin billing</p>
                       </td>
                     </tr>
                   ) : (
                     lines.map((line, idx) => {
                       const isRowSelected = selectedRowIndex === idx;
+                      const isWarningRow = (line.selectedBatch.stock_qty || 0) <= 0;
                       return (
                         <tr
                           key={line.id}
@@ -2123,22 +2170,24 @@ export const PosBillingPage: React.FC = () => {
                           onClick={() => handleSelectRow(idx)}
                           className={`transition-all cursor-pointer ${
                             isRowSelected
-                              ? "bg-blue-100/90 ring-2 ring-inset ring-blue-500 font-semibold shadow-xs"
-                              : "hover:bg-slate-50"
+                              ? "bg-[var(--color-accent-soft)] ring-2 ring-inset ring-[var(--color-accent)] font-semibold shadow-2xs"
+                              : isWarningRow
+                              ? "bg-[var(--color-warning-bg)]/40 hover:bg-[var(--color-warning-bg)]/70 text-[var(--color-text)]"
+                              : "hover:bg-[var(--color-surface-hover)] text-[var(--color-text)]"
                           }`}
                         >
                         {visibleCols.map((col: ColumnSetting) => {
                           switch (col.id) {
                             case "idx":
                               return (
-                                <td key="idx" className="px-3 py-2 text-center text-slate-400 font-mono text-[11px]">
+                                <td key="idx" className="px-3 py-2 text-center text-text-muted font-mono text-[11px]">
                                   {idx + 1}
                                 </td>
                               );
 
                             case "product_name":
                               return (
-                                <td key="product_name" className="px-3 py-2 font-semibold text-slate-800">
+                                <td key="product_name" className="px-3 py-2 font-semibold text-text-main">
                                   <div className="flex flex-col">
                                     <div className="flex items-center gap-1.5 flex-wrap">
                                       <span className="font-bold">{line.product.name}</span>
@@ -2148,10 +2197,10 @@ export const PosBillingPage: React.FC = () => {
                                           e.stopPropagation();
                                           setSelectedLineForConversion(line);
                                         }}
-                                        className={`inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[10px] font-medium transition-colors cursor-pointer ${
+                                        className={`inline-flex items-center gap-1 rounded-[6px] border px-1.5 py-0.5 text-[10px] font-medium transition-colors cursor-pointer ${
                                           line.product.units_per_pack > 1
-                                            ? "border-blue-200 bg-blue-50/70 text-blue-700 hover:bg-blue-100"
-                                            : "border-slate-200 bg-slate-100/80 text-slate-600 hover:bg-slate-200"
+                                            ? "border-accent-soft bg-accent-soft text-accent hover:opacity-90"
+                                            : "border-border-main bg-canvas text-text-muted hover:bg-surface"
                                         }`}
                                         title="Click or press Ctrl+E to adjust packaging & unit conversion"
                                       >
@@ -2160,19 +2209,31 @@ export const PosBillingPage: React.FC = () => {
                                             ? `1 ${line.product.unit_name || "pack"} = ${line.product.units_per_pack} ${line.product.sub_unit_name || "pcs"}`
                                             : (line.product.unit_name || "pc")}
                                         </span>
-                                        <span className="text-[9px] text-slate-400">✏️</span>
+                                        <span className="text-[9px] text-text-muted">✏️</span>
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          setSelectedRowIndex(idx);
+                                          setSelectedLineForProductBatchEdit(line);
+                                        }}
+                                        className="inline-flex items-center gap-1 rounded-[6px] border border-border-main bg-canvas hover:bg-surface px-1.5 py-0.5 text-[10px] font-medium text-text-muted hover:text-accent transition-colors cursor-pointer"
+                                        title="Click or press F4 to edit product, batch, expiry & rate"
+                                      >
+                                        <span>Edit F4</span>
                                       </button>
                                       {line.isAdhocBatch && (
-                                        <span className="rounded bg-purple-100 text-purple-700 border border-purple-200 px-1.5 py-0.2 text-[10px] font-bold">
+                                        <span className="rounded-btn bg-accent-soft text-accent border border-accent/20 px-1.5 py-0.2 text-[10px] font-bold">
                                           Ad-hoc
                                         </span>
                                       )}
                                       {(line.product.schedule_type === "H" || line.product.schedule_type === "H1" || line.product.schedule_type === "X") && (
                                         <span
-                                          className={`rounded px-1.5 py-0.2 text-[10px] font-black border ${
+                                          className={`rounded-btn px-1.5 py-0.2 text-[10px] font-black border ${
                                             doctorName.trim()
-                                              ? "bg-emerald-50 text-emerald-700 border-emerald-300"
-                                              : "bg-red-100 text-red-700 border-red-300 animate-pulse"
+                                              ? "bg-accent-soft text-accent border-accent/30"
+                                              : "bg-[var(--color-danger-bg)] text-[var(--color-danger-text)] border-[var(--color-danger-border)] animate-pulse"
                                           }`}
                                           title={
                                             doctorName.trim()
@@ -2186,15 +2247,15 @@ export const PosBillingPage: React.FC = () => {
                                     </div>
                                     {(line.product.generic_name || line.product.strength) && (
                                       <div
-                                        className="text-[11px] font-normal text-slate-500 truncate max-w-[280px]"
+                                        className="text-[11px] font-normal text-text-muted truncate max-w-[280px]"
                                         title={`${line.product.generic_name || ""} ${line.product.strength || ""}`.trim()}
                                       >
                                         {[line.product.generic_name, line.product.strength].filter(Boolean).join(" • ")}
                                       </div>
                                     )}
                                     {line.isNegativeStock && (
-                                      <div className="mt-0.5 flex items-center gap-1 text-[11px] font-medium text-amber-700">
-                                        <span className="inline-block w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
+                                      <div className="mt-0.5 flex items-center gap-1 text-[11px] font-medium text-[var(--color-warning-text)]">
+                                        <span className="inline-block w-1.5 h-1.5 rounded-full bg-[var(--color-warning-text)] animate-pulse" />
                                         {(line.availableStockSnapshot ?? 0) <= 0
                                           ? "Stock 0 (Selling beyond available)"
                                           : `Short by ${line.shortageQty || Math.max(1, line.qty - (line.availableStockSnapshot ?? 0))}`}
@@ -2206,15 +2267,45 @@ export const PosBillingPage: React.FC = () => {
 
                             case "batch_no":
                               return (
-                                <td key="batch_no" className="px-3 py-2 font-mono text-[11px] text-slate-600">
-                                  {line.selectedBatch.batch_no}
+                                <td
+                                  key="batch_no"
+                                  className="px-3 py-2 font-mono text-[11px] text-text-muted"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setSelectedRowIndex(idx);
+                                    setSelectedLineForProductBatchEdit(line);
+                                  }}
+                                >
+                                  <button
+                                    type="button"
+                                    className="hover:underline hover:text-accent font-semibold flex items-center gap-1 cursor-pointer"
+                                    title="Click or press F4 to edit product & batch details"
+                                  >
+                                    <span>{line.selectedBatch.batch_no}</span>
+                                    <span className="text-[9px] text-text-muted opacity-70">✏️</span>
+                                  </button>
                                 </td>
                               );
 
                             case "expiry_date":
                               return (
-                                <td key="expiry_date" className="px-3 py-2 font-mono text-[11px] text-slate-500">
-                                  {line.selectedBatch.expiry_date}
+                                <td
+                                  key="expiry_date"
+                                  className="px-3 py-2 font-mono text-[11px] text-text-muted"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setSelectedRowIndex(idx);
+                                    setSelectedLineForProductBatchEdit(line);
+                                  }}
+                                >
+                                  <button
+                                    type="button"
+                                    className="hover:underline hover:text-accent font-semibold flex items-center gap-1 cursor-pointer"
+                                    title="Click or press F4 to edit product & batch details"
+                                  >
+                                    <span>{line.selectedBatch.expiry_date}</span>
+                                    <span className="text-[9px] text-text-muted opacity-70">✏️</span>
+                                  </button>
                                 </td>
                               );
 
@@ -2246,7 +2337,7 @@ export const PosBillingPage: React.FC = () => {
 
                             case "mrp":
                               return (
-                                <td key="mrp" className="px-3 py-2 text-right text-slate-500">
+                                <td key="mrp" className="px-3 py-2 text-right font-mono text-text-muted">
                                   ₹ {line.product.mrp.toFixed(2)}
                                 </td>
                               );
@@ -2255,9 +2346,9 @@ export const PosBillingPage: React.FC = () => {
                               return (
                                 <td key="rate" className="px-3 py-2 text-right">
                                   <div className="flex flex-col items-end">
-                                    <span className="font-medium text-slate-700">
+                                    <span className="font-mono font-medium text-text-main">
                                       ₹ {line.unit_price.toFixed(2)}
-                                      <span className="text-[10px] text-slate-400 ml-0.5 font-normal">
+                                      <span className="text-[10px] text-text-muted ml-0.5 font-normal">
                                         /{line.rate_basis === "loose_rate"
                                           ? (line.product.sub_unit_name || "pc")
                                           : (line.product.unit_name || (line.product.units_per_pack > 1 ? "pack" : "pc"))}
@@ -2275,7 +2366,7 @@ export const PosBillingPage: React.FC = () => {
                                           posCartService.updateLinePrice(line.id, newPrice, nextBasis);
                                           refreshCartState();
                                         }}
-                                        className="text-[9px] text-blue-600 hover:text-blue-800 underline mt-0.5 cursor-pointer"
+                                        className="text-[9px] text-accent hover:underline mt-0.5 cursor-pointer font-medium"
                                       >
                                         {line.rate_basis === "loose_rate" ? "switch to pack rate" : "switch to unit rate"}
                                       </button>
@@ -2298,10 +2389,10 @@ export const PosBillingPage: React.FC = () => {
                                   <button
                                     type="button"
                                     tabIndex={-1}
-                                    className={`group inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-semibold cursor-pointer transition-colors ${
+                                    className={`group inline-flex items-center gap-1 px-2 py-0.5 rounded-[6px] text-xs font-mono font-semibold cursor-pointer transition-colors ${
                                       line.discount_percent > 0 || line.discount_amount > 0
-                                        ? "bg-amber-100 text-amber-800 hover:bg-amber-200 border border-amber-200"
-                                        : "text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                                        ? "bg-[var(--color-warning-bg)] text-[var(--color-warning-text)] hover:opacity-90 border border-[var(--color-warning-border)]"
+                                        : "text-text-muted hover:bg-canvas hover:text-text-main"
                                     }`}
                                     title="Click or press F2 to edit item discount"
                                   >
@@ -2318,42 +2409,42 @@ export const PosBillingPage: React.FC = () => {
 
                             case "gst":
                               return (
-                                <td key="gst" className="px-3 py-2 text-center text-slate-600">
+                                <td key="gst" className="px-3 py-2 text-center font-mono text-text-muted">
                                   {line.product.gst_percent}%
                                 </td>
                               );
 
                             case "hsn":
                               return (
-                                <td key="hsn" className="px-3 py-2 text-center font-mono text-[11px] text-slate-500">
+                                <td key="hsn" className="px-3 py-2 text-center font-mono text-[11px] text-text-muted">
                                   {line.product.hsn_sac_code || "-"}
                                 </td>
                               );
 
                             case "free_qty":
                               return (
-                                <td key="free_qty" className="px-3 py-2 text-center text-slate-500">
+                                <td key="free_qty" className="px-3 py-2 text-center font-mono text-text-muted">
                                   -
                                 </td>
                               );
 
                             case "rack_shelf":
                               return (
-                                <td key="rack_shelf" className="px-3 py-2 text-center text-slate-500">
+                                <td key="rack_shelf" className="px-3 py-2 text-center text-text-muted">
                                   {line.selectedBatch.rack_location || line.product.rack_location || "-"}
                                 </td>
                               );
 
                             case "current_stock":
                               return (
-                                <td key="current_stock" className="px-3 py-2 text-right font-semibold text-slate-700">
+                                <td key="current_stock" className="px-3 py-2 text-right font-mono font-semibold text-text-main">
                                   {line.selectedBatch.stock_qty ?? line.product.current_stock ?? 0}
                                 </td>
                               );
 
                             case "total":
                               return (
-                                <td key="total" className="px-3 py-2 text-right font-bold text-slate-900">
+                                <td key="total" className="px-3 py-2 text-right font-bold font-mono text-text-main">
                                   ₹ {line.calculated.total_amount.toFixed(2)}
                                 </td>
                               );
@@ -2363,7 +2454,7 @@ export const PosBillingPage: React.FC = () => {
                                 <td key="actions" className="px-3 py-2 text-center">
                                   <button
                                     onClick={() => removeLine(line.id)}
-                                    className="rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-600 cursor-pointer"
+                                    className="rounded-[6px] p-1 text-text-muted hover:bg-[var(--color-danger-bg)] hover:text-[var(--color-danger-text)] cursor-pointer transition-colors"
                                     title="Delete line"
                                   >
                                     <Trash2 className="h-3.5 w-3.5" />
@@ -2386,20 +2477,20 @@ export const PosBillingPage: React.FC = () => {
         })()}
 
         {/* Bottom Totals & Settlement Bar */}
-        <div className="flex flex-wrap items-center justify-between border-t border-slate-200 bg-slate-50 px-4 py-3 gap-3">
-          <div className="flex flex-wrap items-center gap-4 sm:gap-6 text-xs text-slate-600">
+        <div className="flex flex-wrap items-center justify-between border-t border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-3 gap-3">
+          <div className="flex flex-wrap items-center gap-4 sm:gap-6 text-xs text-[var(--color-text-muted)]">
             <div>
-              <span className="text-slate-400">Items: </span>
-              <span className="font-bold text-slate-800">{lines.length}</span>
+              <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--color-text-muted)]">Items: </span>
+              <span className="font-bold font-mono text-[var(--color-text)]">{lines.length}</span>
             </div>
             <div>
-              <span className="text-slate-400">Subtotal: </span>
-              <span className="font-bold text-slate-800">₹ {totals.taxable_subtotal.toFixed(2)}</span>
+              <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--color-text-muted)]">Subtotal: </span>
+              <span className="font-bold font-mono text-[var(--color-text)]">₹ {totals.taxable_subtotal.toFixed(2)}</span>
             </div>
             {totals.line_discount_total > 0 && (
-              <div className="text-amber-700">
-                <span className="text-amber-600">Line Disc: </span>
-                <span className="font-bold">-₹ {totals.line_discount_total.toFixed(2)}</span>
+              <div className="text-[var(--color-warning-text)]">
+                <span className="text-[11px] font-bold uppercase tracking-wider">Line Disc: </span>
+                <span className="font-bold font-mono">-₹ {totals.line_discount_total.toFixed(2)}</span>
               </div>
             )}
             <div>
@@ -2408,67 +2499,69 @@ export const PosBillingPage: React.FC = () => {
                   type="button"
                   tabIndex={-1}
                   onClick={() => setIsBillDiscountModalOpen(true)}
-                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-amber-100 hover:bg-amber-200 text-amber-800 font-bold border border-amber-300 shadow-2xs transition-colors cursor-pointer"
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-[8px] bg-[var(--color-warning-bg)] hover:opacity-90 text-[var(--color-warning-text)] font-bold border border-[var(--color-warning-border)] shadow-2xs transition-colors cursor-pointer"
                   title="Edit Overall Bill Discount (Ctrl+F2)"
                 >
-                  <span>Bill Disc: -₹{totals.bill_discount_amount.toFixed(2)}</span>
-                  <span className="text-[10px] text-amber-600 font-normal">Ctrl+F2</span>
+                  <span className="font-mono">Bill Disc: -₹{totals.bill_discount_amount.toFixed(2)}</span>
+                  <span className="text-[10px] text-[var(--color-warning-text)] font-mono opacity-80">Ctrl+F2</span>
                 </button>
               ) : (
                 <button
                   type="button"
                   tabIndex={-1}
                   onClick={() => setIsBillDiscountModalOpen(true)}
-                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-slate-200/70 hover:bg-amber-100 hover:text-amber-800 text-slate-600 font-semibold text-[11px] border border-slate-300 transition-colors cursor-pointer"
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-[8px] bg-[var(--color-surface-subtle)] hover:bg-[var(--color-surface-hover)] text-[var(--color-text-muted)] font-semibold text-[11px] border border-[var(--color-border)] transition-colors cursor-pointer"
                   title="Add Overall Bill Discount (Ctrl+F2)"
                 >
                   <span>+ Bill Disc</span>
-                  <span className="text-[9px] text-slate-400">Ctrl+F2</span>
+                  <span className="text-[10px] font-mono text-[var(--color-text-muted)]">Ctrl+F2</span>
                 </button>
               )}
             </div>
             <div>
-              <span className="text-slate-400">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--color-text-muted)]">
                 {totals.igst_total > 0 || posCartService.getIsInterState() ? "IGST Tax: " : "GST Tax: "}
               </span>
-              <span className="font-bold text-slate-800">₹ {totals.total_tax.toFixed(2)}</span>
+              <span className="font-bold font-mono text-[var(--color-text)]">₹ {totals.total_tax.toFixed(2)}</span>
             </div>
             <div>
               <button
                 type="button"
                 tabIndex={-1}
                 onClick={() => setIsRoundOffModalOpen(true)}
-                className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-lg font-semibold text-[11px] border transition-colors cursor-pointer ${
+                className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-[8px] font-semibold text-[11px] border transition-colors cursor-pointer ${
                   posCartService.getManualRoundOff() !== null
-                    ? "bg-blue-100 text-blue-800 border-blue-300 hover:bg-blue-200 shadow-2xs font-bold"
-                    : "bg-slate-200/70 text-slate-700 border-slate-300 hover:bg-slate-300"
+                    ? "bg-[var(--color-accent-soft)] text-[var(--color-accent)] border-[var(--color-accent-soft)] font-bold shadow-2xs"
+                    : "bg-[var(--color-surface-subtle)] text-[var(--color-text)] border-[var(--color-border)] hover:bg-[var(--color-surface-hover)]"
                 }`}
                 title="Adjust Round-Off / Net Payable (Alt+R)"
               >
-                <span>
+                <span className="font-mono">
                   Round-off: {totals.round_off >= 0 ? `+₹${totals.round_off.toFixed(2)}` : `-₹${Math.abs(totals.round_off).toFixed(2)}`}
                 </span>
-                <span className="text-[9px] text-slate-400 font-normal">Alt+R</span>
+                <span className="text-[10px] font-mono text-[var(--color-text-muted)]">Alt+R</span>
               </button>
             </div>
           </div>
 
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-5">
             <div
               className="text-right cursor-pointer group"
               onClick={() => setIsRoundOffModalOpen(true)}
               title="Click to adjust round-off / net payable (Alt+R)"
             >
-              <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wide group-hover:text-blue-600 transition-colors">
+              <span className="text-[11px] font-bold text-[var(--color-text-muted)] uppercase tracking-wider group-hover:text-[var(--color-accent)] transition-colors">
                 Net Payable
               </span>
-              <p className="text-xl font-black text-blue-700 group-hover:underline">₹ {totals.grand_total.toFixed(2)}</p>
+              <p className="text-[38px] lg:text-[44px] font-bold font-mono leading-none tracking-tight text-[var(--color-accent)] tabular-nums">
+                ₹ {totals.grand_total.toFixed(2)}
+              </p>
             </div>
 
             <button
               onClick={openTenderModal}
               disabled={lines.length === 0}
-              className="flex items-center gap-2 rounded-lg bg-blue-600 px-5 py-2.5 text-xs font-bold text-white shadow-md hover:bg-blue-700 disabled:opacity-50 transition-all cursor-pointer"
+              className="flex items-center gap-2 rounded-[10px] bg-[var(--color-accent)] px-6 py-3 text-sm font-bold text-white shadow-xs hover:bg-[var(--color-accent-hover)] disabled:opacity-40 transition-all cursor-pointer h-[48px]"
             >
               <CreditCard className="h-4 w-4" />
               <span>Checkout & Pay (F12)</span>
@@ -2500,12 +2593,12 @@ export const PosBillingPage: React.FC = () => {
             role="dialog"
             aria-modal="true"
             aria-labelledby="batch-modal-title"
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-xs p-4"
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 select-none font-sans animate-in fade-in duration-100"
           >
-            <div className="w-full max-w-lg rounded-lg bg-white shadow-2xl overflow-hidden border border-slate-200">
-              <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3 bg-slate-50">
+            <div className="w-full max-w-lg rounded-card bg-surface shadow-modal overflow-hidden border border-border-main">
+              <div className="flex items-center justify-between border-b border-border-main px-4 py-3 bg-canvas">
                 <div>
-                  <h3 id="batch-modal-title" className="text-xs font-bold text-slate-800">
+                  <h3 id="batch-modal-title" className="text-xs font-bold text-text-main">
                     Select Batch (FEFO Order): {selectedProductForBatch.name}
                   </h3>
                   <p className="text-[11px] text-slate-500 mt-0.5">
@@ -2699,14 +2792,17 @@ export const PosBillingPage: React.FC = () => {
 
       {/* Tender / Settlement Modal (F12) */}
       {isTenderModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-xs p-4">
-          <div className="w-full max-w-md rounded-xl bg-white shadow-2xl overflow-hidden border border-slate-200">
-            <div className="flex items-center justify-between border-b border-slate-200 px-5 py-3.5 bg-slate-50">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 select-none font-sans animate-in fade-in duration-100">
+          <div className="w-full max-w-md rounded-card bg-surface shadow-modal overflow-hidden border border-border-main">
+            <div className="flex items-center justify-between border-b border-border-main px-5 py-3.5 bg-canvas">
               <div>
-                <h3 className="text-sm font-bold text-slate-800">Bill Settlement</h3>
-                <p className="text-[11px] text-slate-500">Invoice: {invoiceNumber}</p>
+                <h3 className="text-sm font-bold text-text-main">Bill Settlement</h3>
+                <p className="text-[11px] text-text-muted font-mono">Invoice: {invoiceNumber}</p>
               </div>
-              <button onClick={() => setIsTenderModalOpen(false)} className="text-slate-400 hover:text-slate-600">
+              <button
+                onClick={() => setIsTenderModalOpen(false)}
+                className="text-text-muted hover:text-text-main p-1 rounded-btn hover:bg-surface transition-colors cursor-pointer"
+              >
                 <X className="h-4 w-4" />
               </button>
             </div>
@@ -2860,31 +2956,34 @@ export const PosBillingPage: React.FC = () => {
 
       {/* Recall Held Bills Modal (F9) */}
       {isRecallModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-xs p-4">
-          <div className="w-full max-w-md rounded-xl bg-white shadow-2xl overflow-hidden border border-slate-200">
-            <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3 bg-slate-50">
-              <h3 className="text-xs font-bold text-slate-800">Recall Held Bills</h3>
-              <button onClick={() => setIsRecallModalOpen(false)} className="text-slate-400 hover:text-slate-600">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 select-none font-sans animate-in fade-in duration-100">
+          <div className="w-full max-w-md rounded-card bg-surface shadow-modal overflow-hidden border border-border-main">
+            <div className="flex items-center justify-between border-b border-border-main px-4 py-3 bg-canvas">
+              <h3 className="text-xs font-bold text-text-main">Recall Held Bills</h3>
+              <button
+                onClick={() => setIsRecallModalOpen(false)}
+                className="text-text-muted hover:text-text-main p-1 rounded-btn hover:bg-surface transition-colors cursor-pointer"
+              >
                 <X className="h-4 w-4" />
               </button>
             </div>
-            <div className="max-h-72 overflow-y-auto divide-y divide-slate-100">
+            <div className="max-h-72 overflow-y-auto divide-y divide-border-main">
               {billingTenderService.listHeldBills().length === 0 ? (
-                <div className="py-8 text-center text-slate-400 text-xs">No bills are currently on hold.</div>
+                <div className="py-8 text-center text-text-muted text-xs">No bills are currently on hold.</div>
               ) : (
                 billingTenderService.listHeldBills().map((b) => (
                   <div
                     key={b.id}
                     onClick={() => handleRecallBill(b.id)}
-                    className="flex cursor-pointer items-center justify-between px-4 py-3 hover:bg-blue-50 text-xs transition-colors"
+                    className="flex cursor-pointer items-center justify-between px-4 py-3 hover:bg-surface-hover text-xs transition-colors"
                   >
                     <div>
-                      <p className="font-semibold text-slate-800">{b.customer_name}</p>
-                      <p className="text-[11px] text-slate-400">
+                      <p className="font-semibold text-text-main">{b.customer_name}</p>
+                      <p className="text-[11px] text-text-muted">
                         {b.items_count} items | Held: {new Date(b.held_at).toLocaleTimeString()}
                       </p>
                     </div>
-                    <span className="rounded bg-blue-100 px-2.5 py-1 text-[11px] font-bold text-blue-700">
+                    <span className="rounded-btn bg-accent-soft px-2.5 py-1 text-[11px] font-bold text-accent">
                       Recall →
                     </span>
                   </div>
@@ -2897,24 +2996,24 @@ export const PosBillingPage: React.FC = () => {
 
       {/* Invoice Revision Diff Confirmation Modal */}
       {isDiffModalOpen && editingInvoice && editDiff && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-xs p-4">
-          <div className="flex max-h-[90vh] w-full max-w-2xl flex-col rounded-xl border border-slate-200 bg-white shadow-2xl overflow-hidden">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 select-none font-sans animate-in fade-in duration-100">
+          <div className="flex max-h-[90vh] w-full max-w-2xl flex-col rounded-card border border-border-main bg-surface shadow-modal overflow-hidden">
             {/* Header */}
-            <div className="flex items-center justify-between border-b border-slate-200 bg-amber-50/70 px-5 py-3.5">
+            <div className="flex items-center justify-between border-b border-border-main bg-canvas px-5 py-3.5">
               <div className="flex items-center gap-2.5">
-                <History className="h-5 w-5 text-amber-600" />
+                <History className="h-5 w-5 text-accent" />
                 <div>
-                  <h3 className="text-sm font-bold text-slate-800">
+                  <h3 className="text-sm font-bold text-text-main">
                     Confirm Revision: {editingInvoice.invoice_number}
                   </h3>
-                  <p className="text-[11px] text-slate-500">
+                  <p className="text-[11px] text-text-muted">
                     Review item differences before reversing stock and saving changes.
                   </p>
                 </div>
               </div>
               <button
                 onClick={() => setIsDiffModalOpen(false)}
-                className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-200 hover:text-slate-700"
+                className="rounded-btn p-1.5 text-text-muted hover:bg-surface hover:text-text-main transition-colors cursor-pointer"
               >
                 <X className="h-5 w-5" />
               </button>
@@ -3096,6 +3195,14 @@ export const PosBillingPage: React.FC = () => {
         line={selectedLineForConversion}
         onClose={() => setSelectedLineForConversion(null)}
         onSave={handleSaveLineConversion}
+      />
+
+      {/* Quick Product & Batch Editor (F4) Modal */}
+      <QuickProductBatchEditModal
+        isOpen={Boolean(selectedLineForProductBatchEdit)}
+        line={selectedLineForProductBatchEdit}
+        onClose={() => setSelectedLineForProductBatchEdit(null)}
+        onSave={handleSaveProductBatchEdit}
       />
 
       {/* Quick Line Edit (F2 / F3) Modal */}

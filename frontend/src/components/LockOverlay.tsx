@@ -43,25 +43,25 @@ export const LockOverlay: React.FC<LockOverlayProps> = ({ session, onSwitchUser 
   return (
     <div
       data-lock-overlay="true"
-      className="fixed inset-0 z-50 bg-slate-950/90 backdrop-blur-md flex flex-col items-center justify-center p-4 font-sans text-white select-none"
+      className="fixed inset-0 z-50 bg-black/50 flex flex-col items-center justify-center p-4 font-sans text-[var(--color-text)] select-none"
     >
-      <div className="max-w-sm w-full bg-slate-900 border border-slate-700/80 rounded-2xl p-6 sm:p-8 shadow-2xl text-center space-y-5">
-        <div className="relative mx-auto w-16 h-16 rounded-2xl bg-slate-800 border border-slate-700 flex items-center justify-center text-blue-400">
+      <div className="max-w-sm w-full bg-[var(--color-surface)] border border-[var(--color-border)] rounded-[14px] p-6 sm:p-8 shadow-modal text-center space-y-5">
+        <div className="relative mx-auto w-16 h-16 rounded-[12px] bg-[var(--color-surface-subtle)] border border-[var(--color-border)] flex items-center justify-center text-[var(--color-accent)]">
           <User className="w-8 h-8" />
-          <div className="absolute -bottom-1 -right-1 w-6 h-6 rounded-full bg-amber-500 text-slate-950 flex items-center justify-center shadow-md">
+          <div className="absolute -bottom-1 -right-1 w-6 h-6 rounded-full bg-[var(--color-warning-bg)] text-[var(--color-warning-text)] border border-[var(--color-warning-border)] flex items-center justify-center shadow-xs">
             <Lock className="w-3.5 h-3.5" />
           </div>
         </div>
 
         <div>
-          <h2 className="text-base font-bold text-white">{session.user.full_name}</h2>
-          <p className="text-xs text-slate-400">
+          <h2 className="text-base font-bold text-[var(--color-text)]">{session.user.full_name}</h2>
+          <p className="text-xs text-[var(--color-text-muted)]">
             {session.counterName} • Locked for security
           </p>
         </div>
 
         {errorMsg && (
-          <div className="p-2.5 rounded-xl bg-red-500/10 border border-red-500/30 text-xs text-red-400 flex items-center justify-center gap-2">
+          <div className="p-2.5 rounded-[10px] bg-[var(--color-danger-bg)] border border-[var(--color-danger-border)] text-xs text-[var(--color-danger-text)] flex items-center justify-center gap-2">
             <AlertCircle className="w-4 h-4 shrink-0" />
             <span>{errorMsg}</span>
           </div>
@@ -69,7 +69,7 @@ export const LockOverlay: React.FC<LockOverlayProps> = ({ session, onSwitchUser 
 
         <form onSubmit={handleUnlock} className="space-y-4">
           <div>
-            <label className="block text-[11px] text-slate-400 mb-1.5 font-medium">
+            <label className="block text-[11px] text-[var(--color-text-muted)] mb-1.5 font-medium uppercase tracking-wider">
               Enter Quick PIN to Resume
             </label>
             <input
@@ -80,14 +80,14 @@ export const LockOverlay: React.FC<LockOverlayProps> = ({ session, onSwitchUser 
               value={pin}
               onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))}
               placeholder="••••"
-              className="w-full tracking-widest text-center text-xl font-mono py-2.5 bg-slate-950 border border-slate-700 rounded-xl text-white focus:ring-2 focus:ring-blue-500 focus:outline-none"
+              className="w-full tracking-widest text-center text-xl font-mono py-2.5 bg-[var(--color-surface)] border border-[var(--color-border)] rounded-[10px] text-[var(--color-text)] focus:border-[var(--color-accent)] focus:ring-1 focus:ring-[var(--color-accent)] focus:outline-none"
             />
           </div>
 
           <button
             type="submit"
             disabled={isUnlocking}
-            className="w-full py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs rounded-xl shadow-lg shadow-blue-500/25 flex items-center justify-center gap-2 cursor-pointer transition-all"
+            className="w-full py-2.5 bg-[var(--color-accent)] hover:bg-[var(--color-accent-hover)] text-white font-bold text-xs rounded-[10px] shadow-xs flex items-center justify-center gap-2 cursor-pointer transition-all"
           >
             {isUnlocking ? (
               <RefreshCw className="w-4 h-4 animate-spin" />
@@ -100,11 +100,11 @@ export const LockOverlay: React.FC<LockOverlayProps> = ({ session, onSwitchUser 
           </button>
         </form>
 
-        <div className="pt-2 border-t border-slate-800 flex justify-between text-xs text-slate-400">
+        <div className="pt-2 border-t border-[var(--color-border)] flex justify-between text-xs text-[var(--color-text-muted)]">
           <button
             type="button"
             onClick={onSwitchUser}
-            className="hover:text-blue-400 flex items-center gap-1.5 cursor-pointer"
+            className="hover:text-[var(--color-text)] flex items-center gap-1.5 cursor-pointer transition-colors"
           >
             <Users className="w-3.5 h-3.5" />
             <span>Switch Cashier</span>
@@ -113,7 +113,7 @@ export const LockOverlay: React.FC<LockOverlayProps> = ({ session, onSwitchUser 
           <button
             type="button"
             onClick={() => staffAuthService.logout()}
-            className="hover:text-red-400 flex items-center gap-1.5 cursor-pointer"
+            className="text-[var(--color-danger-text)] hover:opacity-80 flex items-center gap-1.5 cursor-pointer font-medium transition-opacity"
           >
             <LogOut className="w-3.5 h-3.5" />
             <span>Sign Out</span>

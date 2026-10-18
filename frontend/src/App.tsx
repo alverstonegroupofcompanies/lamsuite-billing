@@ -59,6 +59,11 @@ export const App: React.FC = () => {
   useEffect(() => {
     initWorkspaceSettings();
 
+    // Trigger daily auto-backup check
+    import("./lib/backup/dailyAutoBackup").then(({ dailyAutoBackupService }) => {
+      dailyAutoBackupService.runDailyBackupCheck().catch(() => {});
+    });
+
     // Check device onboarding
     storeDeviceService.isDeviceRegistered().then((registered) => {
       if (!registered) {

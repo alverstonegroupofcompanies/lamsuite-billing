@@ -20,16 +20,14 @@ export const QuickLineEditModal: React.FC<QuickLineEditModalProps> = ({
   onSaveDiscount,
   onSaveRate,
 }) => {
-  useModalEscape(isOpen && Boolean(line), onClose);
-
-  if (!isOpen || !line) return null;
-
   const [value, setValue] = useState<string>("");
   const [discMode, setDiscMode] = useState<"percent" | "amount">("percent");
   const inputRef = useRef<HTMLInputElement>(null);
 
+  useModalEscape(isOpen && Boolean(line), onClose);
+
   useEffect(() => {
-    if (line) {
+    if (isOpen && line) {
       if (type === "discount") {
         if (line.discount_amount > 0) {
           setDiscMode("amount");
@@ -47,6 +45,8 @@ export const QuickLineEditModal: React.FC<QuickLineEditModalProps> = ({
       }, 30);
     }
   }, [line, type, isOpen]);
+
+  if (!isOpen || !line) return null;
 
   const handleSave = () => {
     const num = Math.max(0, parseFloat(value) || 0);
@@ -75,19 +75,19 @@ export const QuickLineEditModal: React.FC<QuickLineEditModalProps> = ({
   const isDiscount = type === "discount";
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 backdrop-blur-xs p-4 select-none animate-in fade-in duration-100">
-      <div className="w-full max-w-xs bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 select-none font-sans animate-in fade-in duration-100">
+      <div className="w-full max-w-xs rounded-card bg-surface shadow-modal border border-border-main overflow-hidden flex flex-col">
         {/* Header */}
-        <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between bg-slate-50">
+        <div className="px-4 py-3 border-b border-border-main flex items-center justify-between bg-canvas">
           <div className="flex items-center gap-2">
-            <div className={`p-1.5 rounded-lg ${isDiscount ? "bg-amber-100 text-amber-700" : "bg-blue-100 text-blue-700"}`}>
+            <div className={`p-1.5 rounded-btn ${isDiscount ? "bg-[var(--color-warning-bg,#FDF1DC)] text-[var(--color-warning-text,#8A5200)]" : "bg-accent-soft text-accent"}`}>
               {isDiscount ? <Percent className="h-4 w-4" /> : <Tag className="h-4 w-4" />}
             </div>
             <div>
-              <h3 className="text-xs font-bold text-slate-800">
+              <h3 className="text-xs font-bold text-text-main">
                 {isDiscount ? "Quick Edit Discount (F2)" : "Quick Edit Rate (F3)"}
               </h3>
-              <p className="text-[11px] text-slate-500 font-medium truncate max-w-[180px]">
+              <p className="text-[11px] text-text-muted font-medium truncate max-w-[180px]">
                 {line.product.name}
               </p>
             </div>
@@ -95,21 +95,21 @@ export const QuickLineEditModal: React.FC<QuickLineEditModalProps> = ({
           <button
             type="button"
             onClick={onClose}
-            className="p-1 text-slate-400 hover:text-slate-600 rounded hover:bg-slate-200 transition-colors"
+            className="p-1 text-text-muted hover:text-text-main rounded-btn hover:bg-surface transition-colors cursor-pointer"
           >
             <X className="h-3.5 w-3.5" />
           </button>
         </div>
 
         {/* Body */}
-        <div className="p-4 space-y-3">
+        <div className="p-4 space-y-3 bg-surface">
           {isDiscount && (
-            <div className="flex rounded-lg bg-slate-100 p-0.5 text-xs font-semibold">
+            <div className="flex rounded-btn bg-canvas p-0.5 text-xs font-semibold border border-border-main">
               <button
                 type="button"
                 onClick={() => setDiscMode("percent")}
-                className={`flex-1 py-1 rounded-md transition-all ${
-                  discMode === "percent" ? "bg-white text-slate-800 shadow-2xs" : "text-slate-500 hover:text-slate-700"
+                className={`flex-1 py-1 rounded-[6px] transition-all cursor-pointer ${
+                  discMode === "percent" ? "bg-surface text-text-main shadow-2xs font-bold" : "text-text-muted hover:text-text-main"
                 }`}
               >
                 Percentage (%)
@@ -117,8 +117,8 @@ export const QuickLineEditModal: React.FC<QuickLineEditModalProps> = ({
               <button
                 type="button"
                 onClick={() => setDiscMode("amount")}
-                className={`flex-1 py-1 rounded-md transition-all ${
-                  discMode === "amount" ? "bg-white text-slate-800 shadow-2xs" : "text-slate-500 hover:text-slate-700"
+                className={`flex-1 py-1 rounded-[6px] transition-all cursor-pointer ${
+                  discMode === "amount" ? "bg-surface text-text-main shadow-2xs font-bold" : "text-text-muted hover:text-text-main"
                 }`}
               >
                 Amount (₹)
@@ -127,7 +127,7 @@ export const QuickLineEditModal: React.FC<QuickLineEditModalProps> = ({
           )}
 
           <div>
-            <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+            <label className="block text-[11px] font-bold uppercase tracking-wider text-text-muted mb-1">
               {isDiscount
                 ? (discMode === "percent" ? "Discount Percentage (%)" : "Flat Discount (₹)")
                 : "Unit Selling Rate (₹)"}
@@ -141,9 +141,9 @@ export const QuickLineEditModal: React.FC<QuickLineEditModalProps> = ({
                 value={value}
                 onChange={(e) => setValue(e.target.value)}
                 onKeyDown={handleKeyDown}
-                className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm font-bold text-slate-800 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none"
+                className="w-full rounded-btn border border-border-main bg-surface px-3 py-2 text-sm font-bold font-mono text-text-main focus:border-accent focus:ring-1 focus:ring-accent outline-none"
               />
-              <span className="absolute right-3 top-2.5 text-xs font-semibold text-slate-400">
+              <span className="absolute right-3 top-2.5 text-xs font-bold font-mono text-text-muted">
                 {isDiscount ? (discMode === "percent" ? "%" : "₹") : "₹"}
               </span>
             </div>
@@ -151,18 +151,18 @@ export const QuickLineEditModal: React.FC<QuickLineEditModalProps> = ({
         </div>
 
         {/* Footer */}
-        <div className="px-4 py-2.5 border-t border-slate-100 bg-slate-50 flex items-center justify-end gap-2">
+        <div className="px-4 py-2.5 border-t border-border-main bg-canvas flex items-center justify-end gap-2">
           <button
             type="button"
             onClick={onClose}
-            className="px-3 py-1.5 rounded-lg border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-slate-100"
+            className="px-3 py-1.5 rounded-btn border border-border-main text-xs font-semibold text-text-muted hover:text-text-main hover:bg-surface transition-colors cursor-pointer"
           >
             Cancel (Esc)
           </button>
           <button
             type="button"
             onClick={handleSave}
-            className="flex items-center gap-1 px-3.5 py-1.5 rounded-lg bg-blue-600 text-xs font-bold text-white hover:bg-blue-700 shadow-2xs"
+            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-btn bg-accent text-xs font-bold text-white hover:opacity-90 shadow-2xs transition-opacity cursor-pointer"
           >
             <Check className="h-3.5 w-3.5" />
             Apply (Enter)

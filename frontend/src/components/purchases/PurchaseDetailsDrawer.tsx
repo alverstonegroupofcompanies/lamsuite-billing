@@ -179,18 +179,18 @@ export const PurchaseDetailsDrawer: React.FC<PurchaseDetailsDrawerProps> = ({
 
   return (
     <>
-      <div className="fixed inset-0 z-50 flex justify-end bg-black/40 backdrop-blur-xs">
-        <div className="w-full max-w-2xl bg-white shadow-2xl flex flex-col h-full overflow-hidden border-l border-slate-200">
+      <div className="fixed inset-0 z-50 flex justify-end bg-black/40">
+        <div className="w-full max-w-2xl bg-[var(--color-surface)] shadow-modal flex flex-col h-full overflow-hidden border-l border-[var(--color-border)] font-sans">
           {/* Header */}
-          <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4 bg-slate-50">
+          <div className="flex items-center justify-between border-b border-[var(--color-border)] px-5 py-4 bg-[var(--color-surface)]">
             <div>
               <div className="flex items-center gap-2">
-                <h3 className="text-base font-bold text-slate-800">{doc.purchase_number}</h3>
+                <h3 className="text-base font-bold font-mono text-[var(--color-text)]">{doc.purchase_number}</h3>
                 <span
                   className={`rounded-full px-2.5 py-0.5 text-[10px] font-bold ${
                     doc.status === "received"
-                      ? "bg-emerald-100 text-emerald-800"
-                      : "bg-red-100 text-red-800"
+                      ? "bg-[var(--color-accent-soft)] text-[var(--color-accent)] border border-[var(--color-accent-soft)]"
+                      : "bg-[var(--color-danger-bg)] text-[var(--color-danger-text)] border border-[var(--color-danger-border)]"
                   }`}
                 >
                   {(doc.status || "received").toUpperCase()}
@@ -198,45 +198,45 @@ export const PurchaseDetailsDrawer: React.FC<PurchaseDetailsDrawerProps> = ({
                 <span
                   className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
                     (doc.payment_status || "unpaid") === "paid"
-                      ? "bg-blue-100 text-blue-800"
+                      ? "bg-[var(--color-accent-soft)] text-[var(--color-accent)] border border-[var(--color-accent-soft)]"
                       : (doc.payment_status || "unpaid") === "partial"
-                      ? "bg-amber-100 text-amber-800"
-                      : "bg-slate-100 text-slate-700"
+                      ? "bg-[var(--color-warning-bg)] text-[var(--color-warning-text)] border border-[var(--color-warning-border)]"
+                      : "bg-[var(--color-canvas)] text-[var(--color-text-muted)] border border-[var(--color-border)]"
                   }`}
                 >
                   {(doc.payment_status || "unpaid").toUpperCase()}
                 </span>
               </div>
-              <p className="text-xs text-slate-500 mt-0.5">Supplier Inv #: {doc.supplier_invoice_no}</p>
+              <p className="text-xs text-[var(--color-text-muted)] mt-0.5 font-mono">Supplier Inv #: {doc.supplier_invoice_no}</p>
             </div>
 
-            <button onClick={onClose} className="p-1 text-slate-400 hover:text-slate-600 rounded">
+            <button onClick={onClose} className="p-1 text-[var(--color-text-muted)] hover:text-[var(--color-text)] rounded-[6px] cursor-pointer">
               <X className="h-5 w-5" />
             </button>
           </div>
 
           {/* Action Toolbar */}
-          <div className="flex items-center gap-2 border-b border-slate-200 px-5 py-2.5 bg-slate-100/60 overflow-x-auto">
+          <div className="flex items-center gap-2 border-b border-[var(--color-border)] px-5 py-2.5 bg-[var(--color-canvas)] overflow-x-auto">
             <button
               onClick={() => setIsPrintOpen(true)}
-              className="flex items-center gap-1.5 rounded bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 border border-slate-300 shadow-xs hover:bg-slate-50"
+              className="flex items-center gap-1.5 rounded-[10px] bg-[var(--color-surface)] px-3 py-1.5 text-xs font-semibold text-[var(--color-text)] border border-[var(--color-border)] shadow-2xs hover:bg-[var(--color-surface-hover)] cursor-pointer transition-colors"
             >
-              <Printer className="h-3.5 w-3.5 text-blue-600" />
+              <Printer className="h-3.5 w-3.5 text-[var(--color-accent)]" />
               <span>Print GRN</span>
             </button>
 
             <button
               onClick={() => setIsBarcodeOpen(true)}
-              className="flex items-center gap-1.5 rounded bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 border border-slate-300 shadow-xs hover:bg-slate-50"
+              className="flex items-center gap-1.5 rounded-[10px] bg-[var(--color-surface)] px-3 py-1.5 text-xs font-semibold text-[var(--color-text)] border border-[var(--color-border)] shadow-2xs hover:bg-[var(--color-surface-hover)] cursor-pointer transition-colors"
             >
-              <Barcode className="h-3.5 w-3.5 text-purple-600" />
+              <Barcode className="h-3.5 w-3.5 text-[var(--color-accent)]" />
               <span>Barcodes</span>
             </button>
 
             {doc.status !== "cancelled" && (doc.payment_status || "unpaid") !== "paid" && (
               <button
                 onClick={() => setIsPaymentOpen(true)}
-                className="flex items-center gap-1.5 rounded bg-emerald-600 px-3 py-1.5 text-xs font-bold text-white shadow-xs hover:bg-emerald-700"
+                className="flex items-center gap-1.5 rounded-[10px] bg-[var(--color-accent)] px-3 py-1.5 text-xs font-bold text-white shadow-2xs hover:bg-[var(--color-accent-hover)] cursor-pointer transition-colors"
               >
                 <CreditCard className="h-3.5 w-3.5" />
                 <span>Pay Supplier</span>
@@ -246,9 +246,9 @@ export const PurchaseDetailsDrawer: React.FC<PurchaseDetailsDrawerProps> = ({
             {doc.status !== "cancelled" && (
               <button
                 onClick={() => navigate(`/returns/purchases?purchaseId=${doc.id}`)}
-                className="flex items-center gap-1.5 rounded bg-white px-3 py-1.5 text-xs font-semibold text-orange-700 border border-orange-200 shadow-xs hover:bg-orange-50"
+                className="flex items-center gap-1.5 rounded-[10px] bg-[var(--color-surface)] px-3 py-1.5 text-xs font-semibold text-[var(--color-warning-text)] border border-[var(--color-warning-border)] shadow-2xs hover:bg-[var(--color-warning-bg)] cursor-pointer transition-colors"
               >
-                <RotateCcw className="h-3.5 w-3.5 text-orange-600" />
+                <RotateCcw className="h-3.5 w-3.5 text-[var(--color-warning-text)]" />
                 <span>Return / Debit Note</span>
               </button>
             )}
@@ -256,7 +256,7 @@ export const PurchaseDetailsDrawer: React.FC<PurchaseDetailsDrawerProps> = ({
             {doc.status !== "cancelled" && (
               <button
                 onClick={() => setIsCancelConfirmOpen(true)}
-                className="flex items-center gap-1.5 rounded bg-white px-3 py-1.5 text-xs font-semibold text-red-600 border border-red-200 shadow-xs hover:bg-red-50 ml-auto"
+                className="flex items-center gap-1.5 rounded-[10px] bg-[var(--color-surface)] px-3 py-1.5 text-xs font-semibold text-[var(--color-danger-text)] border border-[var(--color-danger-border)] shadow-2xs hover:bg-[var(--color-danger-bg)] ml-auto cursor-pointer transition-colors"
               >
                 <Ban className="h-3.5 w-3.5" />
                 <span>Cancel Bill</span>
@@ -267,32 +267,32 @@ export const PurchaseDetailsDrawer: React.FC<PurchaseDetailsDrawerProps> = ({
           {/* Body Content */}
           <div className="flex-1 overflow-y-auto p-5 space-y-4 text-xs">
             {/* Metadata Box */}
-            <div className="grid grid-cols-2 gap-3 rounded-lg border border-slate-200 bg-slate-50/70 p-3.5">
+            <div className="grid grid-cols-2 gap-3 rounded-[10px] border border-[var(--color-border)] bg-[var(--color-canvas)] p-3.5">
               <div>
-                <div className="text-[11px] text-slate-500 font-medium">Supplier Details</div>
-                <div className="font-bold text-slate-800 text-sm mt-0.5">{doc.supplier_name}</div>
-                {doc.supplier_gstin && <div className="font-mono text-slate-600">GSTIN: {doc.supplier_gstin}</div>}
-                <div className="text-slate-500">POS: {doc.place_of_supply || "State"}</div>
+                <div className="text-[11px] text-[var(--color-text-muted)] font-medium uppercase tracking-wider">Supplier Details</div>
+                <div className="font-bold text-[var(--color-text)] text-sm mt-0.5">{doc.supplier_name}</div>
+                {doc.supplier_gstin && <div className="font-mono text-[var(--color-text-muted)]">GSTIN: {doc.supplier_gstin}</div>}
+                <div className="text-[var(--color-text-muted)]">POS: {doc.place_of_supply || "State"}</div>
               </div>
 
               <div>
-                <div className="text-[11px] text-slate-500 font-medium">Dates & Status</div>
-                <div className="mt-0.5"><b>Invoice Date:</b> {doc.purchase_date}</div>
-                {doc.due_date && <div><b>Due Date:</b> {doc.due_date}</div>}
-                <div><b>ITC:</b> {doc.itc_eligibility?.toUpperCase() || "ELIGIBLE"}</div>
-                {doc.is_interstate === 1 && <div className="font-semibold text-purple-700">Interstate IGST</div>}
+                <div className="text-[11px] text-[var(--color-text-muted)] font-medium uppercase tracking-wider">Dates & Status</div>
+                <div className="mt-0.5 text-[var(--color-text)]"><b>Invoice Date:</b> <span className="font-mono">{doc.purchase_date}</span></div>
+                {doc.due_date && <div className="text-[var(--color-text)]"><b>Due Date:</b> <span className="font-mono">{doc.due_date}</span></div>}
+                <div className="text-[var(--color-text)]"><b>ITC:</b> {doc.itc_eligibility?.toUpperCase() || "ELIGIBLE"}</div>
+                {doc.is_interstate === 1 && <div className="font-semibold text-[var(--color-accent)]">Interstate IGST</div>}
               </div>
             </div>
 
             {/* Line Items Table */}
             <div>
               <div className="flex items-center justify-between mb-2">
-                <h4 className="font-bold text-slate-800">Item Inward Grid ({items.length} Lines)</h4>
+                <h4 className="font-bold text-[var(--color-text)]">Item Inward Grid ({items.length} Lines)</h4>
               </div>
 
-              <div className="rounded-lg border border-slate-200 overflow-hidden">
+              <div className="rounded-[10px] border border-[var(--color-border)] overflow-hidden">
                 <table className="w-full text-left text-xs">
-                  <thead className="bg-slate-100 text-slate-700 border-b border-slate-200">
+                  <thead className="bg-[var(--color-canvas)] text-[var(--color-text-muted)] font-bold uppercase tracking-wider text-[11px] border-b border-[var(--color-border)]">
                     <tr>
                       <th className="px-3 py-2">Item / Batch</th>
                       <th className="px-2 py-2 text-center">Packs</th>
@@ -303,21 +303,21 @@ export const PurchaseDetailsDrawer: React.FC<PurchaseDetailsDrawerProps> = ({
                       <th className="px-3 py-2 text-right">Total</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-100">
+                  <tbody className="divide-y divide-[var(--color-border)]">
                     {items.map((it, idx) => (
-                      <tr key={idx} className="hover:bg-slate-50">
+                      <tr key={idx} className="hover:bg-[var(--color-surface-hover)]">
                         <td className="px-3 py-2">
-                          <div className="font-bold text-slate-800">{it.product_name}</div>
-                          <div className="text-[11px] text-slate-500 font-mono">
+                          <div className="font-bold text-[var(--color-text)]">{it.product_name}</div>
+                          <div className="text-[11px] text-[var(--color-text-muted)] font-mono">
                             Batch: {it.batch_no} | Exp: {it.expiry_date?.slice(0, 7) || "-"}
                           </div>
                         </td>
-                        <td className="px-2 py-2 text-center font-medium">{it.pack_qty}</td>
-                        <td className="px-2 py-2 text-center text-slate-500">{it.free_qty || 0}</td>
-                        <td className="px-2 py-2 text-center font-bold text-blue-700">{it.total_units}</td>
-                        <td className="px-2 py-2 text-right">₹{it.purchase_rate.toFixed(2)}</td>
-                        <td className="px-2 py-2 text-center">{it.gst_percent}%</td>
-                        <td className="px-3 py-2 text-right font-bold text-slate-900">
+                        <td className="px-2 py-2 text-center font-mono font-medium">{it.pack_qty}</td>
+                        <td className="px-2 py-2 text-center text-[var(--color-text-muted)] font-mono">{it.free_qty || 0}</td>
+                        <td className="px-2 py-2 text-center font-bold font-mono text-[var(--color-accent)]">{it.total_units}</td>
+                        <td className="px-2 py-2 text-right font-mono tabular-nums">₹{it.purchase_rate.toFixed(2)}</td>
+                        <td className="px-2 py-2 text-center font-mono">{it.gst_percent}%</td>
+                        <td className="px-3 py-2 text-right font-bold font-mono text-[var(--color-text)] tabular-nums">
                           ₹{it.total_amount.toFixed(2)}
                         </td>
                       </tr>
@@ -328,51 +328,51 @@ export const PurchaseDetailsDrawer: React.FC<PurchaseDetailsDrawerProps> = ({
             </div>
 
             {/* Financial Summary */}
-            <div className="rounded-lg border border-slate-200 bg-slate-50 p-3.5 space-y-1.5 ml-auto w-72 text-xs">
-              <div className="flex justify-between text-slate-600">
+            <div className="rounded-[10px] border border-[var(--color-border)] bg-[var(--color-canvas)] p-3.5 space-y-1.5 ml-auto w-72 text-xs">
+              <div className="flex justify-between text-[var(--color-text-muted)]">
                 <span>Taxable Subtotal:</span>
-                <span>₹ {Number(doc.subtotal || 0).toFixed(2)}</span>
+                <span className="font-mono tabular-nums text-[var(--color-text)]">₹ {Number(doc.subtotal || 0).toFixed(2)}</span>
               </div>
               {Number(doc.discount_total || 0) > 0 && (
-                <div className="flex justify-between text-emerald-600">
+                <div className="flex justify-between text-[var(--color-accent)]">
                   <span>Discounts:</span>
-                  <span>- ₹ {Number(doc.discount_total || 0).toFixed(2)}</span>
+                  <span className="font-mono tabular-nums">- ₹ {Number(doc.discount_total || 0).toFixed(2)}</span>
                 </div>
               )}
               {doc.is_interstate === 1 ? (
-                <div className="flex justify-between text-slate-600">
+                <div className="flex justify-between text-[var(--color-text-muted)]">
                   <span>IGST Tax:</span>
-                  <span>₹ {Number(doc.igst_total || 0).toFixed(2)}</span>
+                  <span className="font-mono tabular-nums text-[var(--color-text)]">₹ {Number(doc.igst_total || 0).toFixed(2)}</span>
                 </div>
               ) : (
                 <>
-                  <div className="flex justify-between text-slate-600">
+                  <div className="flex justify-between text-[var(--color-text-muted)]">
                     <span>CGST:</span>
-                    <span>₹ {Number(doc.cgst_total || 0).toFixed(2)}</span>
+                    <span className="font-mono tabular-nums text-[var(--color-text)]">₹ {Number(doc.cgst_total || 0).toFixed(2)}</span>
                   </div>
-                  <div className="flex justify-between text-slate-600">
+                  <div className="flex justify-between text-[var(--color-text-muted)]">
                     <span>SGST:</span>
-                    <span>₹ {Number(doc.sgst_total || 0).toFixed(2)}</span>
+                    <span className="font-mono tabular-nums text-[var(--color-text)]">₹ {Number(doc.sgst_total || 0).toFixed(2)}</span>
                   </div>
                 </>
               )}
               {Number(doc.round_off || 0) !== 0 && (
-                <div className="flex justify-between text-slate-600">
+                <div className="flex justify-between text-[var(--color-text-muted)]">
                   <span>Round Off:</span>
-                  <span>₹ {Number(doc.round_off || 0).toFixed(2)}</span>
+                  <span className="font-mono tabular-nums text-[var(--color-text)]">₹ {Number(doc.round_off || 0).toFixed(2)}</span>
                 </div>
               )}
-              <div className="flex justify-between font-black text-slate-900 text-sm border-t border-slate-200 pt-1.5">
+              <div className="flex justify-between font-black text-[var(--color-text)] text-sm border-t border-[var(--color-border)] pt-1.5">
                 <span>Grand Total:</span>
-                <span className="text-blue-700">₹ {Number(doc.grand_total || 0).toFixed(2)}</span>
+                <span className="text-[var(--color-accent)] font-mono tabular-nums">₹ {Number(doc.grand_total || 0).toFixed(2)}</span>
               </div>
-              <div className="flex justify-between text-slate-600 border-t border-slate-200 pt-1">
+              <div className="flex justify-between text-[var(--color-text-muted)] border-t border-[var(--color-border)] pt-1">
                 <span>Paid Amount:</span>
-                <span className="font-semibold text-emerald-700">₹ {Number(doc.paid_amount || 0).toFixed(2)}</span>
+                <span className="font-semibold font-mono text-[var(--color-accent)] tabular-nums">₹ {Number(doc.paid_amount || 0).toFixed(2)}</span>
               </div>
-              <div className="flex justify-between font-bold text-slate-800">
+              <div className="flex justify-between font-bold text-[var(--color-text)]">
                 <span>Balance Due:</span>
-                <span className="text-red-600">
+                <span className="text-[var(--color-danger-text)] font-mono tabular-nums">
                   ₹ {Math.max(0, Number(doc.grand_total || 0) - Number(doc.paid_amount || 0)).toFixed(2)}
                 </span>
               </div>
@@ -383,44 +383,44 @@ export const PurchaseDetailsDrawer: React.FC<PurchaseDetailsDrawerProps> = ({
 
       {/* Cancel Confirmation Modal */}
       {isCancelConfirmOpen && (
-        <div className="fixed inset-0 z-60 flex items-center justify-center bg-black/50 p-4">
-          <div className="w-full max-w-md rounded-xl bg-white p-5 shadow-2xl border border-slate-200 space-y-3">
-            <div className="flex items-center gap-2 text-red-600 font-bold text-sm">
+        <div className="fixed inset-0 z-60 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-md rounded-[14px] bg-[var(--color-surface)] p-5 shadow-modal border border-[var(--color-border)] space-y-3 font-sans">
+            <div className="flex items-center gap-2 text-[var(--color-danger-text)] font-bold text-sm">
               <AlertTriangle className="h-5 w-5 shrink-0" />
               <span>Cancel Purchase Bill {doc.purchase_number}?</span>
             </div>
-            <p className="text-xs text-slate-600">
+            <p className="text-xs text-[var(--color-text-muted)]">
               Cancelling will revert batch stock and deduct the invoice credit from the supplier ledger. Stock cannot be reverted if units have already been sold.
             </p>
 
             {cancelError && (
-              <div className="rounded bg-red-50 p-2 text-xs text-red-700 border border-red-200">
+              <div className="rounded-[10px] bg-[var(--color-danger-bg)] p-2 text-xs text-[var(--color-danger-text)] border border-[var(--color-danger-border)]">
                 {cancelError}
               </div>
             )}
 
             <div>
-              <label className="text-xs font-semibold text-slate-700 block mb-1">Reason for cancellation *</label>
+              <label className="text-xs font-semibold text-[var(--color-text)] block mb-1">Reason for cancellation *</label>
               <input
                 type="text"
                 value={cancelReason}
                 onChange={(e) => setCancelReason(e.target.value)}
                 placeholder="e.g. Inward data entry error / Supplier invoice revised"
-                className="w-full rounded border border-slate-300 p-2 text-xs focus:border-red-600 focus:outline-none"
+                className="w-full rounded-[10px] border border-[var(--color-border)] p-2 text-xs text-[var(--color-text)] focus:border-[var(--color-danger-text)] focus:outline-none bg-[var(--color-surface)]"
               />
             </div>
 
             <div className="flex justify-end gap-2 pt-2">
               <button
                 onClick={() => setIsCancelConfirmOpen(false)}
-                className="rounded border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-700"
+                className="rounded-[10px] border border-[var(--color-border)] px-3 py-1.5 text-xs font-semibold text-[var(--color-text)] hover:bg-[var(--color-surface-hover)] cursor-pointer"
               >
                 Back
               </button>
               <button
                 onClick={handleCancel}
                 disabled={isCancelling}
-                className="rounded bg-red-600 px-4 py-1.5 text-xs font-bold text-white shadow-sm hover:bg-red-700 disabled:opacity-50"
+                className="rounded-[10px] bg-[var(--color-danger-bg)] border border-[var(--color-danger-border)] px-4 py-1.5 text-xs font-bold text-[var(--color-danger-text)] shadow-2xs hover:bg-red-700 hover:text-white disabled:opacity-50 cursor-pointer transition-colors"
               >
                 Confirm Cancel
               </button>

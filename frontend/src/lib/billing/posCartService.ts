@@ -369,6 +369,48 @@ export class PosCartService {
     }
   }
 
+  async updateLineProductAndBatch(
+    lineId: string,
+    productUpdates: Partial<ProductItem>,
+    batchUpdates: Partial<ProductBatch>,
+    persistToMaster = true
+  ): Promise<void> {
+    const index = this.lines.findIndex((l) => l.id === lineId);
+    if (index >= 0) {
+      const line = this.lines[index];
+
+      // Merge product updates
+      const updatedProduct: ProductItem = {
+        ...line.product,
+        ...productUpdates,
+      };
+
+      // Merge batch updates
+      const updatedBatch: ProductBatch = {
+        ...line.selectedBatch,
+        ...batchUpdates,
+      };
+
+      line.product = updatedProduct;
+      line.selectedBatch = updatedBatch;
+
+      // Update unit_price if selling_rate or sel_rate was updated
+      if (batchUpdates.selling_rate !== undefined) {
+        line.unit_price = Math.max(0, Number(batchUpdates.selling_rate) || 0);
+      } else if (productUpdates.sel_rate !== undefined) {
+        line.unit_price = Math.max(0, Number(productUpdates.sel_rate) || 0);
+      }
+
+      // Recalculate line with new rate/taxes
+      line.calculated = this.calculateLine(line);
+
+      if (persistToMaster) {
+        await productsStore.upsertProduct(updatedProduct, true);
+        await productsStore.upsertBatch(updatedBatch, true);
+      }
+    }
+  }
+
   removeLine(lineId: string): { removedLine?: PosCartLine; index: number } {
     const idx = this.lines.findIndex((l) => l.id === lineId);
     if (idx >= 0) {

@@ -487,23 +487,23 @@ export const BillsPage: React.FC = () => {
       )}
 
       {/* Top Header & Search Bar */}
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] p-3 shadow-2xs">
         <div className="flex items-center gap-3">
           <button
             onClick={() => navigate("/pos")}
-            className="flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+            className="flex items-center gap-1.5 rounded-[10px] border border-[var(--color-border)] px-3 py-1.5 text-xs font-semibold text-[var(--color-text)] hover:bg-[var(--color-surface-hover)] cursor-pointer transition-colors"
             title="Return to POS Billing (Esc)"
           >
-            <ArrowLeft className="h-4 w-4 text-slate-500" />
+            <ArrowLeft className="h-4 w-4 text-[var(--color-text-muted)]" />
             <span>Back to POS (Esc)</span>
           </button>
-          <div className="h-6 w-px bg-slate-200" />
+          <div className="h-6 w-px bg-[var(--color-border)]" />
           <div>
-            <h1 className="text-sm font-bold text-slate-800 flex items-center gap-2">
-              <Receipt className="h-4 w-4 text-blue-600" />
+            <h1 className="text-sm font-bold text-[var(--color-text)] flex items-center gap-2">
+              <Receipt className="h-4 w-4 text-[var(--color-accent)]" />
               <span>Invoices & Past Bills Register</span>
             </h1>
-            <p className="text-[11px] text-slate-500">
+            <p className="text-[11px] text-[var(--color-text-muted)]">
               Search, reprint, audit, edit, or cancel customer tax invoices offline.
             </p>
           </div>
@@ -511,23 +511,23 @@ export const BillsPage: React.FC = () => {
 
         {/* Global Search Input */}
         <div className="relative w-80">
-          <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+          <Search className="absolute left-3 top-2.5 h-4 w-4 text-[var(--color-text-faint)]" />
           <input
             ref={searchInputRef}
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Search invoice no, customer, mobile, product..."
-            className="w-full rounded-lg border border-slate-300 py-1.5 pl-9 pr-3 text-xs text-slate-800 placeholder-slate-400 focus:border-blue-500 focus:outline-none"
+            className="w-full rounded-[10px] border border-[var(--color-border)] bg-[var(--color-surface)] py-1.5 pl-9 pr-3 text-xs text-[var(--color-text)] placeholder-[var(--color-text-muted)] focus:border-[var(--color-accent)] focus:outline-none"
           />
         </div>
       </div>
 
       {/* Filters Toolbar */}
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-200 bg-white px-4 py-2 shadow-sm">
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-2 shadow-2xs">
         {/* Date Range Chips */}
         <div className="flex items-center gap-1.5">
-          <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wide mr-1">Period:</span>
+          <span className="text-[11px] font-bold text-[var(--color-text-muted)] uppercase tracking-wider mr-1">Period:</span>
           {(
             [
               { id: "today", label: "Today" },
@@ -540,10 +540,10 @@ export const BillsPage: React.FC = () => {
             <button
               key={chip.id}
               onClick={() => setDateRange(chip.id)}
-              className={`rounded-md px-2.5 py-1 text-xs font-semibold transition-colors ${
+              className={`rounded-[8px] px-2.5 py-1 text-xs font-semibold transition-colors cursor-pointer ${
                 dateRange === chip.id
-                  ? "bg-blue-600 text-white shadow-sm"
-                  : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                  ? "bg-[var(--color-accent)] text-white shadow-2xs"
+                  : "bg-[var(--color-surface-subtle)] text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
               }`}
             >
               {chip.label}
@@ -553,12 +553,12 @@ export const BillsPage: React.FC = () => {
 
         {/* Mode & Status Filters */}
         <div className="flex items-center gap-3">
-          <div className="flex items-center gap-1.5 text-xs text-slate-600">
-            <span className="text-[11px] font-semibold text-slate-400 uppercase">Payment:</span>
+          <div className="flex items-center gap-1.5 text-xs text-[var(--color-text-muted)]">
+            <span className="text-[11px] font-bold uppercase tracking-wider">Payment:</span>
             <select
               value={paymentModeFilter}
               onChange={(e) => setPaymentModeFilter(e.target.value)}
-              className="rounded border border-slate-200 bg-white px-2 py-1 text-xs font-medium text-slate-700 focus:outline-none"
+              className="rounded-[8px] border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1 text-xs font-medium text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none"
             >
               <option value="all">All Modes</option>
               <option value="Cash">Cash</option>
@@ -568,12 +568,12 @@ export const BillsPage: React.FC = () => {
             </select>
           </div>
 
-          <div className="flex items-center gap-1.5 text-xs text-slate-600">
-            <span className="text-[11px] font-semibold text-slate-400 uppercase">Status:</span>
+          <div className="flex items-center gap-1.5 text-xs text-[var(--color-text-muted)]">
+            <span className="text-[11px] font-bold uppercase tracking-wider">Status:</span>
             <select
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value)}
-              className="rounded border border-slate-200 bg-white px-2 py-1 text-xs font-medium text-slate-700 focus:outline-none"
+              className="rounded-[8px] border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1 text-xs font-medium text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none"
             >
               <option value="all">All Status</option>
               <option value="issued">Issued</option>
@@ -583,7 +583,7 @@ export const BillsPage: React.FC = () => {
 
           <button
             onClick={loadInvoices}
-            className="flex items-center gap-1 rounded border border-slate-200 p-1.5 text-slate-600 hover:bg-slate-100"
+            className="flex items-center gap-1 rounded-[8px] border border-[var(--color-border)] p-1.5 text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)] cursor-pointer"
             title="Refresh Invoices"
           >
             <RefreshCw className="h-3.5 w-3.5" />
@@ -592,36 +592,36 @@ export const BillsPage: React.FC = () => {
       </div>
 
       {/* Invoices List Table */}
-      <div className="flex-1 rounded-lg border border-slate-200 bg-white shadow-sm overflow-hidden flex flex-col">
+      <div className="flex-1 rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-2xs overflow-hidden flex flex-col">
         <div className="overflow-y-auto flex-1">
           <table className="w-full text-left text-xs">
-            <thead className="sticky top-0 bg-slate-50 text-slate-600 border-b border-slate-200 z-10">
+            <thead className="sticky top-0 bg-[var(--color-surface-subtle)] text-[var(--color-text-muted)] border-b border-[var(--color-border)] z-10">
               <tr>
-                <th className="px-4 py-2.5 font-semibold">Invoice No</th>
-                <th className="px-4 py-2.5 font-semibold">Date & Time</th>
-                <th className="px-4 py-2.5 font-semibold">Customer</th>
-                <th className="px-4 py-2.5 font-semibold">Mobile</th>
-                <th className="px-4 py-2.5 font-semibold text-right">Net Amount</th>
-                <th className="px-4 py-2.5 font-semibold">Tender</th>
-                <th className="px-4 py-2.5 font-semibold text-center">Status</th>
-                <th className="px-4 py-2.5 font-semibold text-center">Sync</th>
-                <th className="px-4 py-2.5 font-semibold text-center">Action</th>
+                <th className="px-4 py-2.5 text-[11px] font-bold uppercase tracking-wider text-[var(--color-text-muted)]">Invoice No</th>
+                <th className="px-4 py-2.5 text-[11px] font-bold uppercase tracking-wider text-[var(--color-text-muted)]">Date & Time</th>
+                <th className="px-4 py-2.5 text-[11px] font-bold uppercase tracking-wider text-[var(--color-text-muted)]">Customer</th>
+                <th className="px-4 py-2.5 text-[11px] font-bold uppercase tracking-wider text-[var(--color-text-muted)]">Mobile</th>
+                <th className="px-4 py-2.5 text-[11px] font-bold uppercase tracking-wider text-[var(--color-text-muted)] text-right">Net Amount</th>
+                <th className="px-4 py-2.5 text-[11px] font-bold uppercase tracking-wider text-[var(--color-text-muted)]">Tender</th>
+                <th className="px-4 py-2.5 text-[11px] font-bold uppercase tracking-wider text-[var(--color-text-muted)] text-center">Status</th>
+                <th className="px-4 py-2.5 text-[11px] font-bold uppercase tracking-wider text-[var(--color-text-muted)] text-center">Sync</th>
+                <th className="px-4 py-2.5 text-[11px] font-bold uppercase tracking-wider text-[var(--color-text-muted)] text-center">Action</th>
               </tr>
             </thead>
-            <tbody ref={tableRef} className="divide-y divide-slate-100">
+            <tbody ref={tableRef} className="divide-y divide-[var(--color-border-subtle)]">
               {loading ? (
                 <tr>
-                  <td colSpan={9} className="py-12 text-center text-slate-400">
-                    <RefreshCw className="mx-auto h-6 w-6 animate-spin text-blue-500 mb-2" />
+                  <td colSpan={9} className="py-12 text-center text-[var(--color-text-muted)]">
+                    <RefreshCw className="mx-auto h-6 w-6 animate-spin text-[var(--color-accent)] mb-2" />
                     <span>Loading invoices...</span>
                   </td>
                 </tr>
               ) : invoices.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="py-12 text-center text-slate-400">
-                    <Receipt className="mx-auto h-8 w-8 text-slate-300 mb-2" />
-                    <p className="font-semibold text-slate-600">No invoices found matching criteria</p>
-                    <p className="text-[11px] text-slate-400">Try adjusting date range or clearing search query</p>
+                  <td colSpan={9} className="py-12 text-center text-[var(--color-text-muted)]">
+                    <Receipt className="mx-auto h-8 w-8 text-[var(--color-text-faint)] mb-2" />
+                    <p className="font-semibold text-[var(--color-text)]">No invoices found matching criteria</p>
+                    <p className="text-[11px] text-[var(--color-text-muted)] mt-0.5">Try adjusting date range or clearing search query</p>
                   </td>
                 </tr>
               ) : (
@@ -637,9 +637,9 @@ export const BillsPage: React.FC = () => {
                       }}
                       className={`cursor-pointer transition-colors ${
                         isHighlighted
-                          ? "bg-blue-50/80 ring-1 ring-inset ring-blue-500 font-medium"
-                          : "hover:bg-slate-50"
-                      } ${isCancelled ? "opacity-75" : ""}`}
+                          ? "bg-[var(--color-accent-soft)] ring-1 ring-inset ring-[var(--color-accent)] font-medium text-[var(--color-text)]"
+                          : "hover:bg-[var(--color-surface-hover)] text-[var(--color-text)]"
+                      } ${isCancelled ? "opacity-75 bg-[var(--color-danger-bg)]/20" : ""}`}
                     >
                       <td className="px-4 py-2.5 font-mono font-bold text-slate-900">
                         <div className="flex items-center gap-1.5">
@@ -679,24 +679,24 @@ export const BillsPage: React.FC = () => {
                       </td>
                       <td className="px-4 py-2.5 text-center">
                         {isCancelled ? (
-                          <span className="rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-bold text-red-700">
+                          <span className="rounded-full bg-[var(--color-danger-bg)] px-2 py-0.5 text-[10px] font-bold text-[var(--color-danger-text)] border border-[var(--color-danger-border)]">
                             Cancelled
                           </span>
                         ) : (
-                          <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-700">
+                          <span className="rounded-full bg-[var(--color-success-bg)] px-2 py-0.5 text-[10px] font-bold text-[var(--color-success-text)] border border-[var(--color-success-border)]">
                             Issued
                           </span>
                         )}
                       </td>
                       <td className="px-4 py-2.5 text-center">
                         {inv.sync_state === "pending" ? (
-                          <span className="inline-flex items-center gap-1 rounded bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-700">
+                          <span className="inline-flex items-center gap-1 rounded-full bg-[var(--color-warning-bg)] px-2 py-0.5 text-[10px] font-medium text-[var(--color-warning-text)] border border-[var(--color-warning-border)]">
                             <Clock className="h-3 w-3" />
                             <span>Local</span>
                           </span>
                         ) : (
-                          <span className="inline-flex items-center gap-1 rounded bg-emerald-50 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700">
-                            <CheckCircle className="h-3 w-3" />
+                          <span className="inline-flex items-center gap-1 rounded-full bg-[var(--color-success-bg)] px-2 py-0.5 text-[10px] font-medium text-[var(--color-success-text)] border border-[var(--color-success-border)]">
+                            <CheckCircle className="h-3 w-3 text-[var(--color-accent)]" />
                             <span>Synced</span>
                           </span>
                         )}
@@ -707,7 +707,7 @@ export const BillsPage: React.FC = () => {
                             e.stopPropagation();
                             openDetailModal(inv);
                           }}
-                          className="rounded bg-blue-50 px-2.5 py-1 text-[11px] font-semibold text-blue-700 hover:bg-blue-100"
+                          className="rounded-[8px] bg-[var(--color-surface-subtle)] border border-[var(--color-border)] px-2.5 py-1 text-[11px] font-semibold text-[var(--color-text)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-accent)] transition-colors cursor-pointer"
                         >
                           View / Actions
                         </button>
@@ -721,45 +721,45 @@ export const BillsPage: React.FC = () => {
         </div>
 
         {/* Footer shortcuts hint */}
-        <div className="flex items-center justify-between border-t border-slate-200 bg-slate-50 px-4 py-2 text-[11px] text-slate-500 font-medium">
+        <div className="flex items-center justify-between border-t border-[var(--color-border)] bg-[var(--color-canvas)] px-4 py-2 text-[11px] text-[var(--color-text-muted)] font-medium">
           <div className="flex items-center gap-4">
-            <span><kbd className="rounded border bg-white px-1.5 py-0.5 shadow-xs">↑/↓</kbd> Select Invoice</span>
-            <span><kbd className="rounded border bg-white px-1.5 py-0.5 shadow-xs">Enter</kbd> Open Details</span>
-            <span><kbd className="rounded border bg-white px-1.5 py-0.5 shadow-xs">Esc</kbd> Return to POS</span>
+            <span><kbd className="rounded-[6px] border border-[var(--color-border)] bg-[var(--color-surface)] px-1.5 py-0.5 shadow-2xs font-mono">↑/↓</kbd> Select Invoice</span>
+            <span><kbd className="rounded-[6px] border border-[var(--color-border)] bg-[var(--color-surface)] px-1.5 py-0.5 shadow-2xs font-mono">Enter</kbd> Open Details</span>
+            <span><kbd className="rounded-[6px] border border-[var(--color-border)] bg-[var(--color-surface)] px-1.5 py-0.5 shadow-2xs font-mono">Esc</kbd> Return to POS</span>
           </div>
           <div>
-            <span>Total Invoices: <strong>{invoices.length}</strong></span>
+            <span>Total Invoices: <strong className="font-mono text-[var(--color-text)]">{invoices.length}</strong></span>
           </div>
         </div>
       </div>
 
       {/* Invoice Detail Modal */}
       {isDetailModalOpen && selectedInvoice && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-xs p-4">
-          <div className="flex max-h-[90vh] w-full max-w-4xl flex-col rounded-xl border border-slate-200 bg-white shadow-2xl overflow-hidden">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 font-sans">
+          <div className="flex max-h-[90vh] w-full max-w-4xl flex-col rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-modal overflow-hidden">
             {/* Modal Header */}
-            <div className="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-5 py-3">
+            <div className="flex items-center justify-between border-b border-[var(--color-border)] bg-[var(--color-surface)] px-5 py-3">
               <div className="flex items-center gap-3">
-                <Receipt className="h-5 w-5 text-blue-600" />
+                <Receipt className="h-5 w-5 text-[var(--color-accent)]" />
                 <div>
-                  <h3 className="text-sm font-bold text-slate-800 flex items-center gap-2">
-                    <span>Tax Invoice: {selectedInvoice.invoice_number}</span>
+                  <h3 className="text-sm font-bold text-[var(--color-text)] flex items-center gap-2">
+                    <span className="font-mono">Tax Invoice: {selectedInvoice.invoice_number}</span>
                     {selectedInvoice.status === "cancelled" ? (
-                      <span className="rounded bg-red-100 px-2 py-0.5 text-[10px] font-bold text-red-700">
+                      <span className="rounded-full bg-[var(--color-danger-bg)] border border-[var(--color-danger-border)] px-2 py-0.5 text-[10px] font-bold text-[var(--color-danger-text)]">
                         Cancelled
                       </span>
                     ) : (
-                      <span className="rounded bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-700">
+                      <span className="rounded-full bg-[var(--color-accent-soft)] border border-[var(--color-accent-soft)] px-2 py-0.5 text-[10px] font-bold text-[var(--color-accent)]">
                         Issued
                       </span>
                     )}
                     {selectedInvoice.is_revised ? (
-                      <span className="rounded bg-purple-100 px-2 py-0.5 text-[10px] font-bold text-purple-700">
+                      <span className="rounded-full bg-[var(--color-warning-bg)] border border-[var(--color-warning-border)] px-2 py-0.5 text-[10px] font-bold text-[var(--color-warning-text)]">
                         Revised Bill
                       </span>
                     ) : null}
                   </h3>
-                  <p className="text-[11px] text-slate-500">
+                  <p className="text-[11px] text-[var(--color-text-muted)] font-mono">
                     Billed on {selectedInvoice.invoice_date} • Counter: {selectedInvoice.user_counter || "Counter 01"}
                   </p>
                 </div>
@@ -767,7 +767,7 @@ export const BillsPage: React.FC = () => {
 
               <button
                 onClick={() => setIsDetailModalOpen(false)}
-                className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-200 hover:text-slate-700"
+                className="rounded-[6px] p-1.5 text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)] cursor-pointer"
               >
                 <XCircle className="h-5 w-5" />
               </button>
@@ -776,60 +776,60 @@ export const BillsPage: React.FC = () => {
             {/* Modal Body */}
             <div className="flex-1 overflow-y-auto p-5 space-y-4 text-xs">
               {/* Customer & Bill Meta */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 rounded-lg border border-slate-200 bg-slate-50/50 p-3">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 rounded-[10px] border border-[var(--color-border)] bg-[var(--color-canvas)] p-3">
                 <div>
-                  <span className="text-[10px] font-semibold text-slate-400 uppercase">Customer Name</span>
-                  <p className="font-bold text-slate-800">{selectedInvoice.customer_name || "Walk-in Customer"}</p>
+                  <span className="text-[10px] font-bold text-[var(--color-text-muted)] uppercase tracking-wider">Customer Name</span>
+                  <p className="font-bold text-[var(--color-text)] mt-0.5">{selectedInvoice.customer_name || "Walk-in Customer"}</p>
                 </div>
                 <div>
-                  <span className="text-[10px] font-semibold text-slate-400 uppercase">Mobile Number</span>
-                  <p className="font-mono font-medium text-slate-700">{selectedInvoice.customer_phone || "Not specified"}</p>
+                  <span className="text-[10px] font-bold text-[var(--color-text-muted)] uppercase tracking-wider">Mobile Number</span>
+                  <p className="font-mono font-medium text-[var(--color-text)] mt-0.5">{selectedInvoice.customer_phone || "Not specified"}</p>
                 </div>
                 <div>
-                  <span className="text-[10px] font-semibold text-slate-400 uppercase">Payment Mode</span>
-                  <p className="font-semibold text-blue-600">{selectedInvoice.payment_mode || "Cash"}</p>
+                  <span className="text-[10px] font-bold text-[var(--color-text-muted)] uppercase tracking-wider">Payment Mode</span>
+                  <p className="font-semibold text-[var(--color-accent)] mt-0.5">{selectedInvoice.payment_mode || "Cash"}</p>
                 </div>
                 <div>
-                  <span className="text-[10px] font-semibold text-slate-400 uppercase">GSTIN / Place of Supply</span>
-                  <p className="font-mono text-slate-600">
+                  <span className="text-[10px] font-bold text-[var(--color-text-muted)] uppercase tracking-wider">GSTIN / Place of Supply</span>
+                  <p className="font-mono text-[var(--color-text-muted)] mt-0.5">
                     {selectedInvoice.customer_gstin || "Unregistered"} ({selectedInvoice.place_of_supply || "32-Kerala"})
                   </p>
                 </div>
               </div>
 
               {selectedInvoice.status === "cancelled" && (
-                <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-red-800">
-                  <span className="font-bold uppercase tracking-wide text-[10px]">Cancellation Reason:</span>
+                <div className="rounded-[10px] border border-[var(--color-danger-border)] bg-[var(--color-danger-bg)] p-3 text-[var(--color-danger-text)]">
+                  <span className="font-bold uppercase tracking-wider text-[10px]">Cancellation Reason:</span>
                   <p className="font-medium text-xs mt-0.5">{selectedInvoice.cancel_reason || "No reason specified"}</p>
                 </div>
               )}
 
               {/* Items Table */}
-              <div className="rounded-lg border border-slate-200 overflow-hidden">
+              <div className="rounded-[10px] border border-[var(--color-border)] overflow-hidden">
                 <table className="w-full text-left">
-                  <thead className="bg-slate-100 text-slate-600 border-b border-slate-200">
+                  <thead className="bg-[var(--color-canvas)] text-[var(--color-text-muted)] border-b border-[var(--color-border)] uppercase tracking-wider text-[11px] font-bold">
                     <tr>
-                      <th className="px-3 py-2 font-semibold">Item & Description</th>
-                      <th className="px-3 py-2 font-semibold">Batch</th>
-                      <th className="px-3 py-2 font-semibold">Expiry</th>
-                      <th className="px-3 py-2 font-semibold text-right">Qty</th>
-                      <th className="px-3 py-2 font-semibold text-right">Unit Rate</th>
-                      <th className="px-3 py-2 font-semibold text-right">GST %</th>
-                      <th className="px-3 py-2 font-semibold text-right">Total (₹)</th>
+                      <th className="px-3 py-2">Item & Description</th>
+                      <th className="px-3 py-2">Batch</th>
+                      <th className="px-3 py-2">Expiry</th>
+                      <th className="px-3 py-2 text-right">Qty</th>
+                      <th className="px-3 py-2 text-right">Unit Rate</th>
+                      <th className="px-3 py-2 text-right">GST %</th>
+                      <th className="px-3 py-2 text-right">Total (₹)</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-100">
+                  <tbody className="divide-y divide-[var(--color-border)]">
                     {selectedInvoiceItems.map((item, idx) => (
-                      <tr key={item.id || idx} className="hover:bg-slate-50">
-                        <td className="px-3 py-2 font-bold text-slate-800">{item.product_name}</td>
-                        <td className="px-3 py-2 font-mono text-slate-600">{item.batch_no}</td>
-                        <td className="px-3 py-2 font-mono text-slate-500">{item.expiry_date}</td>
-                        <td className="px-3 py-2 text-right font-mono font-semibold">
+                      <tr key={item.id || idx} className="hover:bg-[var(--color-surface-hover)]">
+                        <td className="px-3 py-2 font-bold text-[var(--color-text)]">{item.product_name}</td>
+                        <td className="px-3 py-2 font-mono text-[var(--color-text-muted)]">{item.batch_no}</td>
+                        <td className="px-3 py-2 font-mono text-[var(--color-text-muted)]">{item.expiry_date}</td>
+                        <td className="px-3 py-2 text-right font-mono font-semibold tabular-nums">
                           {item.qty} {item.loose_qty ? `+ ${item.loose_qty}L` : ""}
                         </td>
-                        <td className="px-3 py-2 text-right font-mono">₹ {item.unit_price.toFixed(2)}</td>
+                        <td className="px-3 py-2 text-right font-mono tabular-nums">₹ {item.unit_price.toFixed(2)}</td>
                         <td className="px-3 py-2 text-right font-mono">{item.gst_percent}%</td>
-                        <td className="px-3 py-2 text-right font-mono font-bold text-slate-900">
+                        <td className="px-3 py-2 text-right font-mono font-bold text-[var(--color-text)] tabular-nums">
                           ₹ {item.total_amount.toFixed(2)}
                         </td>
                       </tr>
@@ -840,46 +840,46 @@ export const BillsPage: React.FC = () => {
 
               {/* Totals Breakdown */}
               <div className="flex justify-end">
-                <div className="w-64 space-y-1 rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs">
-                  <div className="flex justify-between text-slate-600">
+                <div className="w-64 space-y-1 rounded-[10px] border border-[var(--color-border)] bg-[var(--color-canvas)] p-3 text-xs">
+                  <div className="flex justify-between text-[var(--color-text-muted)]">
                     <span>Taxable Subtotal:</span>
-                    <span className="font-mono">₹ {selectedInvoice.subtotal.toFixed(2)}</span>
+                    <span className="font-mono tabular-nums text-[var(--color-text)]">₹ {selectedInvoice.subtotal.toFixed(2)}</span>
                   </div>
-                  <div className="flex justify-between text-slate-600">
+                  <div className="flex justify-between text-[var(--color-text-muted)]">
                     <span>GST Tax Total:</span>
-                    <span className="font-mono">₹ {selectedInvoice.tax_total.toFixed(2)}</span>
+                    <span className="font-mono tabular-nums text-[var(--color-text)]">₹ {selectedInvoice.tax_total.toFixed(2)}</span>
                   </div>
                   {selectedInvoice.round_off !== 0 && (
-                    <div className="flex justify-between text-slate-600">
+                    <div className="flex justify-between text-[var(--color-text-muted)]">
                       <span>Round-Off:</span>
-                      <span className="font-mono">
+                      <span className="font-mono tabular-nums">
                         {selectedInvoice.round_off > 0 ? "+" : ""}
                         {selectedInvoice.round_off.toFixed(2)}
                       </span>
                     </div>
                   )}
-                  <div className="border-t border-slate-200 pt-1 flex justify-between font-bold text-sm text-slate-900">
+                  <div className="border-t border-[var(--color-border)] pt-1 flex justify-between font-bold text-sm text-[var(--color-text)]">
                     <span>Grand Total:</span>
-                    <span className="font-mono text-blue-700">₹ {selectedInvoice.grand_total.toFixed(2)}</span>
+                    <span className="font-mono text-[var(--color-accent)] tabular-nums">₹ {selectedInvoice.grand_total.toFixed(2)}</span>
                   </div>
                 </div>
               </div>
 
               {/* Audit History Log */}
               {selectedInvoiceAudit.length > 0 && (
-                <div className="rounded-lg border border-slate-200 bg-white p-3">
-                  <h4 className="font-bold text-slate-700 text-xs mb-2">Audit & Revision Trail</h4>
+                <div className="rounded-[10px] border border-[var(--color-border)] bg-[var(--color-surface)] p-3">
+                  <h4 className="font-bold text-[var(--color-text)] text-xs mb-2 uppercase tracking-wider">Audit & Revision Trail</h4>
                   <div className="space-y-1.5">
                     {selectedInvoiceAudit.map((entry, idx) => (
-                      <div key={idx} className="flex items-start gap-2 text-[11px] text-slate-600">
-                        <span className="rounded bg-slate-100 px-1.5 py-0.5 font-bold uppercase text-[9px]">
+                      <div key={idx} className="flex items-start gap-2 text-[11px] text-[var(--color-text-muted)]">
+                        <span className="rounded-full bg-[var(--color-canvas)] border border-[var(--color-border)] px-2 py-0.5 font-bold uppercase text-[9px] text-[var(--color-text)]">
                           {entry.action}
                         </span>
-                        <span className="font-semibold text-slate-700">{entry.user}</span>
-                        <span className="text-slate-400">
+                        <span className="font-semibold text-[var(--color-text)]">{entry.user}</span>
+                        <span className="font-mono text-[var(--color-text-muted)]">
                           ({new Date(entry.timestamp).toLocaleString()})
                         </span>
-                        <span className="text-slate-600">— {entry.diffSummary || entry.reason}</span>
+                        <span>— {entry.diffSummary || entry.reason}</span>
                       </div>
                     ))}
                   </div>
@@ -888,33 +888,33 @@ export const BillsPage: React.FC = () => {
             </div>
 
             {/* Modal Actions Footer */}
-            <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-200 bg-slate-50 px-5 py-3">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-t border-[var(--color-border)] bg-[var(--color-surface)] px-5 py-3">
               {/* Reprints */}
               <div className="flex items-center gap-2">
                 <button
                   onClick={() => handleReprint("a4")}
-                  className="flex items-center gap-1 rounded bg-blue-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-blue-700"
+                  className="flex items-center gap-1 rounded-[10px] bg-[var(--color-accent)] px-3 py-1.5 text-xs font-bold text-white hover:bg-[var(--color-accent-hover)] cursor-pointer transition-colors"
                 >
                   <Printer className="h-3.5 w-3.5" />
                   <span>Reprint A4</span>
                 </button>
                 <button
                   onClick={() => handleReprint("thermal")}
-                  className="flex items-center gap-1 rounded bg-slate-800 px-3 py-1.5 text-xs font-bold text-white hover:bg-slate-900"
+                  className="flex items-center gap-1 rounded-[10px] bg-[var(--color-text)] px-3 py-1.5 text-xs font-bold text-white hover:bg-black cursor-pointer transition-colors"
                 >
                   <Printer className="h-3.5 w-3.5" />
                   <span>Reprint Thermal</span>
                 </button>
                 <button
                   onClick={() => handleReprint("pdf")}
-                  className="flex items-center gap-1 rounded border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100"
+                  className="flex items-center gap-1 rounded-[10px] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1.5 text-xs font-semibold text-[var(--color-text)] hover:bg-[var(--color-surface-hover)] cursor-pointer transition-colors"
                 >
                   <Download className="h-3.5 w-3.5" />
                   <span>Save PDF</span>
                 </button>
                 <button
                   onClick={handleWhatsAppShare}
-                  className="flex items-center gap-1 rounded bg-emerald-50 px-2.5 py-1.5 text-xs font-semibold text-emerald-700 hover:bg-emerald-100"
+                  className="flex items-center gap-1 rounded-[10px] bg-[var(--color-accent-soft)] px-2.5 py-1.5 text-xs font-semibold text-[var(--color-accent)] hover:bg-[var(--color-border)] cursor-pointer transition-colors"
                   title="Share via WhatsApp"
                 >
                   <Share2 className="h-3.5 w-3.5" />
@@ -926,7 +926,7 @@ export const BillsPage: React.FC = () => {
               <div className="flex items-center gap-2">
                 <button
                   onClick={handleDuplicateAsNewBill}
-                  className="flex items-center gap-1 rounded bg-indigo-50 px-3 py-1.5 text-xs font-semibold text-indigo-700 hover:bg-indigo-100"
+                  className="flex items-center gap-1 rounded-[10px] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1.5 text-xs font-semibold text-[var(--color-text)] hover:bg-[var(--color-surface-hover)] cursor-pointer transition-colors"
                   title="Load into POS cart as a new bill"
                 >
                   <Copy className="h-3.5 w-3.5" />
@@ -940,7 +940,7 @@ export const BillsPage: React.FC = () => {
                         setIsDetailModalOpen(false);
                         navigate(`/returns/sales?invoiceId=${selectedInvoice.id}`);
                       }}
-                      className="flex items-center gap-1 rounded bg-rose-50 px-3 py-1.5 text-xs font-semibold text-rose-700 hover:bg-rose-100"
+                      className="flex items-center gap-1 rounded-[10px] bg-[var(--color-surface)] border border-[var(--color-warning-border)] px-3 py-1.5 text-xs font-semibold text-[var(--color-warning-text)] hover:bg-[var(--color-warning-bg)] cursor-pointer transition-colors"
                       title="Issue credit note / process customer return"
                     >
                       <RefreshCw className="h-3.5 w-3.5" />
@@ -948,14 +948,14 @@ export const BillsPage: React.FC = () => {
                     </button>
                     <button
                       onClick={handlePromptEdit}
-                      className="flex items-center gap-1 rounded bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-700 hover:bg-amber-100"
+                      className="flex items-center gap-1 rounded-[10px] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1.5 text-xs font-semibold text-[var(--color-text)] hover:bg-[var(--color-surface-hover)] cursor-pointer transition-colors"
                     >
                       <Edit className="h-3.5 w-3.5" />
                       <span>Edit Bill</span>
                     </button>
                     <button
                       onClick={handlePromptCancel}
-                      className="flex items-center gap-1 rounded bg-red-50 px-3 py-1.5 text-xs font-semibold text-red-700 hover:bg-red-100"
+                      className="flex items-center gap-1 rounded-[10px] bg-[var(--color-danger-bg)] border border-[var(--color-danger-border)] px-3 py-1.5 text-xs font-semibold text-[var(--color-danger-text)] hover:bg-red-700 hover:text-white cursor-pointer transition-colors"
                     >
                       <XCircle className="h-3.5 w-3.5" />
                       <span>Cancel Bill</span>
@@ -970,13 +970,13 @@ export const BillsPage: React.FC = () => {
 
       {/* Edit PIN Prompt Modal */}
       {isEditPinModalOpen && (
-        <div className="fixed inset-0 z-60 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
-          <div className="w-full max-w-sm rounded-xl border border-slate-200 bg-white p-5 shadow-2xl">
-            <div className="flex items-center gap-2 text-amber-600 mb-3">
+        <div className="fixed inset-0 z-60 flex items-center justify-center bg-black/40 p-4 font-sans">
+          <div className="w-full max-w-sm rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] p-5 shadow-modal">
+            <div className="flex items-center gap-2 text-[var(--color-warning-text)] mb-3">
               <Lock className="h-5 w-5" />
-              <h3 className="font-bold text-slate-800 text-sm">Manager Authorization Required</h3>
+              <h3 className="font-bold text-[var(--color-text)] text-sm">Manager Authorization Required</h3>
             </div>
-            <p className="text-xs text-slate-500 mb-3">
+            <p className="text-xs text-[var(--color-text-muted)] mb-3">
               Editing a saved invoice requires manager verification. Please enter Manager PIN.
             </p>
             <input
@@ -985,19 +985,19 @@ export const BillsPage: React.FC = () => {
               onChange={(e) => setEditPin(e.target.value)}
               placeholder="Enter PIN (Default: 1234)"
               autoFocus
-              className="w-full rounded border border-slate-300 px-3 py-2 text-center text-sm font-mono tracking-widest focus:border-blue-500 focus:outline-none"
+              className="w-full rounded-[10px] border border-[var(--color-border)] px-3 py-2 text-center text-sm font-mono tracking-widest text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none bg-[var(--color-surface)]"
             />
-            {editPinError && <p className="mt-1.5 text-[11px] font-bold text-red-600">{editPinError}</p>}
+            {editPinError && <p className="mt-1.5 text-[11px] font-bold text-[var(--color-danger-text)]">{editPinError}</p>}
             <div className="mt-4 flex justify-end gap-2">
               <button
                 onClick={() => setIsEditPinModalOpen(false)}
-                className="rounded px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-100"
+                className="rounded-[10px] border border-[var(--color-border)] px-3 py-1.5 text-xs font-medium text-[var(--color-text)] hover:bg-[var(--color-surface-hover)] cursor-pointer"
               >
                 Cancel
               </button>
               <button
                 onClick={handleConfirmEditPin}
-                className="rounded bg-blue-600 px-4 py-1.5 text-xs font-bold text-white hover:bg-blue-700"
+                className="rounded-[10px] bg-[var(--color-accent)] px-4 py-1.5 text-xs font-bold text-white hover:bg-[var(--color-accent-hover)] cursor-pointer transition-colors"
               >
                 Authorize & Edit
               </button>
@@ -1008,51 +1008,51 @@ export const BillsPage: React.FC = () => {
 
       {/* Cancel Invoice Modal */}
       {isCancelModalOpen && (
-        <div className="fixed inset-0 z-60 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
-          <div className="w-full max-w-md rounded-xl border border-red-200 bg-white p-5 shadow-2xl space-y-4">
-            <div className="flex items-center gap-2 text-red-600">
+        <div className="fixed inset-0 z-60 flex items-center justify-center bg-black/40 p-4 font-sans">
+          <div className="w-full max-w-md rounded-[14px] border border-[var(--color-danger-border)] bg-[var(--color-surface)] p-5 shadow-modal space-y-4">
+            <div className="flex items-center gap-2 text-[var(--color-danger-text)]">
               <AlertCircle className="h-5 w-5" />
-              <h3 className="font-bold text-slate-800 text-sm">Cancel Invoice {selectedInvoice?.invoice_number}</h3>
+              <h3 className="font-bold text-[var(--color-text)] text-sm">Cancel Invoice {selectedInvoice?.invoice_number}</h3>
             </div>
-            <p className="text-xs text-slate-600">
+            <p className="text-xs text-[var(--color-text-muted)]">
               Cancelling will restore all items to batch inventory, update reports, and retain this invoice number marked as <strong>Cancelled</strong>.
             </p>
 
             <div>
-              <label className="text-xs font-bold text-slate-700">Mandatory Cancellation Reason:</label>
+              <label className="text-xs font-bold text-[var(--color-text)]">Mandatory Cancellation Reason:</label>
               <input
                 type="text"
                 value={cancelReason}
                 onChange={(e) => setCancelReason(e.target.value)}
                 placeholder="e.g., Customer returned items, Billing mistake..."
-                className="w-full rounded border border-slate-300 p-2 text-xs focus:border-red-500 focus:outline-none mt-1"
+                className="w-full rounded-[10px] border border-[var(--color-border)] p-2 text-xs text-[var(--color-text)] focus:border-[var(--color-danger-text)] focus:outline-none mt-1 bg-[var(--color-surface)]"
                 autoFocus
               />
             </div>
 
             <div>
-              <label className="text-xs font-bold text-slate-700">Manager PIN:</label>
+              <label className="text-xs font-bold text-[var(--color-text)]">Manager PIN:</label>
               <input
                 type="password"
                 value={managerPin}
                 onChange={(e) => setManagerPin(e.target.value)}
                 placeholder="Default: 1234"
-                className="w-full rounded border border-slate-300 p-2 text-xs font-mono tracking-widest focus:border-red-500 focus:outline-none mt-1"
+                className="w-full rounded-[10px] border border-[var(--color-border)] p-2 text-xs font-mono tracking-widest text-[var(--color-text)] focus:border-[var(--color-danger-text)] focus:outline-none mt-1 bg-[var(--color-surface)]"
               />
             </div>
 
-            {pinError && <p className="text-xs font-bold text-red-600">{pinError}</p>}
+            {pinError && <p className="text-xs font-bold text-[var(--color-danger-text)]">{pinError}</p>}
 
             <div className="flex justify-end gap-2 pt-2">
               <button
                 onClick={() => setIsCancelModalOpen(false)}
-                className="rounded px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-100"
+                className="rounded-[10px] border border-[var(--color-border)] px-3 py-1.5 text-xs font-medium text-[var(--color-text)] hover:bg-[var(--color-surface-hover)] cursor-pointer"
               >
                 Keep Invoice
               </button>
               <button
                 onClick={handleConfirmCancel}
-                className="rounded bg-red-600 px-4 py-1.5 text-xs font-bold text-white hover:bg-red-700"
+                className="rounded-[10px] bg-[var(--color-danger-bg)] border border-[var(--color-danger-border)] px-4 py-1.5 text-xs font-bold text-[var(--color-danger-text)] hover:bg-red-700 hover:text-white cursor-pointer transition-colors"
               >
                 Confirm Cancellation
               </button>

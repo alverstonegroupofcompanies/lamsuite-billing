@@ -189,21 +189,21 @@ export const StaffLoginPage: React.FC<StaffLoginPageProps> = ({ onLoginSuccess }
   const isUserLocked = selectedUser?.locked_until && Date.now() < selectedUser.locked_until;
 
   return (
-    <div className="min-h-screen bg-slate-900 flex flex-col justify-between p-6 font-sans text-slate-100 select-none">
+    <div className="min-h-screen bg-canvas flex flex-col justify-between p-6 font-sans text-text-main select-none">
       {/* Top Store Info Bar */}
       <header className="flex justify-between items-center max-w-5xl mx-auto w-full">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-blue-600 flex items-center justify-center text-white shadow-md">
+          <div className="w-10 h-10 rounded-btn bg-accent flex items-center justify-center text-white shadow-xs">
             <Building2 className="w-5 h-5" />
           </div>
           <div>
-            <h2 className="text-sm font-bold text-white leading-tight">
+            <h2 className="text-sm font-bold text-text-main leading-tight">
               {deviceProfile?.store_name || "LamStone Pharmacy & Clinic"}
             </h2>
-            <div className="flex items-center gap-2 text-[11px] text-slate-400">
-              <span>{deviceProfile?.store_code || "STORE-01"}</span>
+            <div className="flex items-center gap-2 text-[11px] text-text-muted">
+              <span className="font-mono tabular-nums">{deviceProfile?.store_code || "STORE-01"}</span>
               <span>•</span>
-              <span className="flex items-center gap-1 text-emerald-400">
+              <span className="flex items-center gap-1 text-accent font-medium">
                 <CheckCircle2 className="w-3 h-3" />
                 Offline Ready
               </span>
@@ -212,8 +212,8 @@ export const StaffLoginPage: React.FC<StaffLoginPageProps> = ({ onLoginSuccess }
         </div>
 
         <div className="flex items-center gap-3">
-          <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-800 border border-slate-700 text-xs font-semibold text-blue-400">
-            <Monitor className="w-4 h-4 text-slate-400" />
+          <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-btn bg-surface border border-border-main text-xs font-semibold text-accent shadow-xs">
+            <Monitor className="w-4 h-4 text-text-muted" />
             <span>{deviceProfile?.counter_name || "Counter 01"}</span>
           </div>
         </div>
@@ -224,10 +224,10 @@ export const StaffLoginPage: React.FC<StaffLoginPageProps> = ({ onLoginSuccess }
         {/* Left Column: Staff Accounts List */}
         <div className="md:col-span-5 space-y-3">
           <div className="flex justify-between items-center mb-1">
-            <span className="text-xs font-bold text-slate-300 uppercase tracking-wider">
+            <span className="text-[11px] font-semibold text-text-muted uppercase tracking-wider">
               Select Operator
             </span>
-            <span className="text-[10px] text-slate-500 font-mono">Press 1-9 to select</span>
+            <span className="text-[10px] text-text-muted font-mono">Press 1-9 to select</span>
           </div>
 
           <div className="space-y-2 max-h-[340px] overflow-y-auto pr-1">
@@ -240,16 +240,16 @@ export const StaffLoginPage: React.FC<StaffLoginPageProps> = ({ onLoginSuccess }
                   key={user.id}
                   type="button"
                   onClick={() => setSelectedUser(user)}
-                  className={`w-full text-left p-3 rounded-xl border transition-all cursor-pointer flex items-center justify-between ${
+                  className={`w-full text-left p-3 rounded-card border transition-all cursor-pointer flex items-center justify-between ${
                     isSelected
-                      ? "bg-blue-600/15 border-blue-500 shadow-md ring-1 ring-blue-500/50"
-                      : "bg-slate-800/80 border-slate-700/80 hover:bg-slate-800 hover:border-slate-600"
+                      ? "bg-accent-soft text-accent border-accent/40 shadow-xs ring-1 ring-accent/30 font-semibold"
+                      : "bg-surface border-border-main hover:bg-canvas text-text-main"
                   }`}
                 >
                   <div className="flex items-center gap-3">
                     <div
-                      className={`w-9 h-9 rounded-lg flex items-center justify-center font-bold text-xs ${
-                        isSelected ? "bg-blue-600 text-white" : "bg-slate-700 text-slate-300"
+                      className={`w-9 h-9 rounded-btn flex items-center justify-center font-bold text-xs ${
+                        isSelected ? "bg-accent text-white" : "bg-canvas text-text-muted border border-border-main"
                       }`}
                     >
                       {user.full_name
@@ -260,16 +260,16 @@ export const StaffLoginPage: React.FC<StaffLoginPageProps> = ({ onLoginSuccess }
                         .toUpperCase()}
                     </div>
                     <div>
-                      <div className="text-xs font-bold text-white flex items-center gap-1.5">
+                      <div className="text-xs font-semibold text-text-main flex items-center gap-1.5">
                         <span>{user.full_name}</span>
-                        {isLocked && <Lock className="w-3 h-3 text-red-400" />}
+                        {isLocked && <Lock className="w-3 h-3 text-status-danger" />}
                       </div>
-                      <div className="text-[11px] text-slate-400 capitalize">
+                      <div className="text-[11px] text-text-muted capitalize">
                         {user.role} • @{user.username}
                       </div>
                     </div>
                   </div>
-                  <kbd className="px-1.5 py-0.5 rounded bg-slate-900 border border-slate-700 text-[10px] font-mono text-slate-400">
+                  <kbd className="px-2 py-0.5 rounded-btn bg-canvas border border-border-main text-[10px] font-mono text-text-muted tabular-nums">
                     {idx + 1}
                   </kbd>
                 </button>
@@ -279,18 +279,18 @@ export const StaffLoginPage: React.FC<StaffLoginPageProps> = ({ onLoginSuccess }
         </div>
 
         {/* Right Column: Keypad & Auth Form */}
-        <div className="md:col-span-7 bg-slate-800/90 border border-slate-700/80 rounded-2xl p-6 sm:p-8 shadow-2xl backdrop-blur-md flex flex-col justify-center">
+        <div className="md:col-span-7 bg-surface border border-border-main rounded-card p-6 sm:p-8 shadow-xs flex flex-col justify-center">
           <div className="mb-4">
-            <h3 className="text-lg font-black text-white">
+            <h3 className="text-lg font-bold text-text-main">
               Welcome, {selectedUser?.full_name || "Operator"}
             </h3>
-            <p className="text-xs text-slate-400">
+            <p className="text-xs text-text-muted mt-0.5">
               Enter your {isPasswordMode ? "account password" : "quick 4-digit PIN"} to open the terminal.
             </p>
           </div>
 
           {errorMsg && (
-            <div className="mb-4 bg-red-500/10 border border-red-500/30 rounded-xl p-3 text-xs text-red-400 flex items-start gap-2.5">
+            <div className="mb-4 bg-status-danger/10 border border-status-danger/20 rounded-btn p-3 text-xs text-status-danger flex items-start gap-2.5">
               <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
               <div className="flex-1">
                 <span>{errorMsg}</span>
@@ -298,7 +298,7 @@ export const StaffLoginPage: React.FC<StaffLoginPageProps> = ({ onLoginSuccess }
                   <button
                     type="button"
                     onClick={() => setShowAdminUnlockModal(true)}
-                    className="block mt-1 text-xs text-blue-400 hover:underline font-bold"
+                    className="block mt-1 text-xs text-accent hover:underline font-bold"
                   >
                     Request Administrator Unlock
                   </button>
@@ -311,7 +311,7 @@ export const StaffLoginPage: React.FC<StaffLoginPageProps> = ({ onLoginSuccess }
             {!isPasswordMode ? (
               /* Quick PIN Field */
               <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                <label className="block text-[11px] font-semibold text-text-muted uppercase tracking-wider mb-1.5">
                   Quick PIN (Numpad Friendly)
                 </label>
                 <input
@@ -322,13 +322,13 @@ export const StaffLoginPage: React.FC<StaffLoginPageProps> = ({ onLoginSuccess }
                   value={pin}
                   onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))}
                   placeholder="••••"
-                  className="w-full tracking-widest text-center text-xl font-mono py-2.5 bg-slate-900 border border-slate-700 rounded-xl text-white focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                  className="w-full tracking-widest text-center text-xl font-mono py-2.5 bg-canvas border border-border-main rounded-btn text-text-main focus:border-accent focus:outline-none tabular-nums"
                 />
               </div>
             ) : (
               /* Password Field */
               <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                <label className="block text-[11px] font-semibold text-text-muted uppercase tracking-wider mb-1.5">
                   Account Password
                 </label>
                 <input
@@ -338,7 +338,7 @@ export const StaffLoginPage: React.FC<StaffLoginPageProps> = ({ onLoginSuccess }
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="••••••••••••"
-                  className="w-full text-xs py-2.5 px-3 bg-slate-900 border border-slate-700 rounded-xl text-white focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                  className="w-full text-xs py-2.5 px-3 bg-canvas border border-border-main rounded-btn text-text-main focus:border-accent focus:outline-none"
                 />
               </div>
             )}
@@ -351,7 +351,7 @@ export const StaffLoginPage: React.FC<StaffLoginPageProps> = ({ onLoginSuccess }
                     key={digit}
                     type="button"
                     onClick={() => setPin((prev) => (prev.length < 6 ? prev + digit : prev))}
-                    className="py-2.5 rounded-xl bg-slate-900 hover:bg-slate-700 border border-slate-700/80 text-sm font-bold text-white transition-colors"
+                    className="py-2.5 rounded-btn bg-surface hover:bg-canvas border border-border-main text-sm font-mono font-bold text-text-main transition-colors tabular-nums"
                   >
                     {digit}
                   </button>
@@ -359,21 +359,21 @@ export const StaffLoginPage: React.FC<StaffLoginPageProps> = ({ onLoginSuccess }
                 <button
                   type="button"
                   onClick={() => setPin("")}
-                  className="py-2.5 rounded-xl bg-slate-900 hover:bg-slate-700 border border-slate-700/80 text-xs font-semibold text-slate-400"
+                  className="py-2.5 rounded-btn bg-surface hover:bg-canvas border border-border-main text-xs font-semibold text-text-muted transition-colors"
                 >
                   Clear
                 </button>
                 <button
                   type="button"
                   onClick={() => setPin((prev) => (prev.length < 6 ? prev + "0" : prev))}
-                  className="py-2.5 rounded-xl bg-slate-900 hover:bg-slate-700 border border-slate-700/80 text-sm font-bold text-white"
+                  className="py-2.5 rounded-btn bg-surface hover:bg-canvas border border-border-main text-sm font-mono font-bold text-text-main transition-colors tabular-nums"
                 >
                   0
                 </button>
                 <button
                   type="button"
                   onClick={() => setPin((prev) => prev.slice(0, -1))}
-                  className="py-2.5 rounded-xl bg-slate-900 hover:bg-slate-700 border border-slate-700/80 text-xs font-semibold text-slate-400"
+                  className="py-2.5 rounded-btn bg-surface hover:bg-canvas border border-border-main text-xs font-semibold text-text-muted transition-colors"
                 >
                   ⌫
                 </button>
@@ -385,7 +385,7 @@ export const StaffLoginPage: React.FC<StaffLoginPageProps> = ({ onLoginSuccess }
               <button
                 type="submit"
                 disabled={isLoading}
-                className="w-full py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs rounded-xl shadow-lg shadow-blue-500/25 flex items-center justify-center gap-2 cursor-pointer transition-all"
+                className="w-full py-2.5 bg-accent hover:bg-accent/90 text-white font-semibold text-xs rounded-btn shadow-xs flex items-center justify-center gap-2 cursor-pointer transition-all"
               >
                 {isLoading ? (
                   <RefreshCw className="w-4 h-4 animate-spin" />
@@ -402,9 +402,9 @@ export const StaffLoginPage: React.FC<StaffLoginPageProps> = ({ onLoginSuccess }
                 <button
                   type="button"
                   onClick={handleBiometricAuth}
-                  className="w-full py-2 bg-slate-700 hover:bg-slate-600 text-slate-200 text-xs font-semibold rounded-xl flex items-center justify-center gap-2 cursor-pointer transition-colors"
+                  className="w-full py-2 bg-accent-soft hover:bg-accent-soft/80 text-accent text-xs font-semibold rounded-btn border border-accent/20 flex items-center justify-center gap-2 cursor-pointer transition-colors"
                 >
-                  <Fingerprint className="w-4 h-4 text-emerald-400" />
+                  <Fingerprint className="w-4 h-4 text-accent" />
                   <span>Sign in with Windows Hello</span>
                 </button>
               )}
@@ -413,7 +413,7 @@ export const StaffLoginPage: React.FC<StaffLoginPageProps> = ({ onLoginSuccess }
                 <button
                   type="button"
                   onClick={() => setIsPasswordMode(!isPasswordMode)}
-                  className="text-blue-400 hover:underline cursor-pointer"
+                  className="text-accent hover:underline cursor-pointer font-medium"
                 >
                   {isPasswordMode ? "Switch to Quick PIN (Alt+P)" : "Switch to Password (Alt+P)"}
                 </button>
@@ -421,7 +421,7 @@ export const StaffLoginPage: React.FC<StaffLoginPageProps> = ({ onLoginSuccess }
                 <button
                   type="button"
                   onClick={() => setShowAdminUnlockModal(true)}
-                  className="text-slate-400 hover:text-white"
+                  className="text-text-muted hover:text-text-main transition-colors"
                 >
                   Forgot / Reset PIN?
                 </button>
@@ -432,50 +432,50 @@ export const StaffLoginPage: React.FC<StaffLoginPageProps> = ({ onLoginSuccess }
       </div>
 
       {/* Footer Info */}
-      <footer className="text-center text-[11px] text-slate-500 max-w-5xl mx-auto w-full flex justify-between items-center">
+      <footer className="text-center text-[11px] text-text-muted max-w-5xl mx-auto w-full flex justify-between items-center">
         <span>LamSuite Billing v2.0 • Offline-First Retail POS</span>
         <span>Keyboard shortcuts active (1-9 Operator, Enter Submit, Alt+P Mode)</span>
       </footer>
 
       {/* Admin Unlock Modal */}
       {showAdminUnlockModal && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-xs flex items-center justify-center p-4 z-50">
-          <div className="bg-slate-800 border border-slate-700 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
-            <h4 className="text-sm font-bold text-white flex items-center gap-2">
-              <Shield className="w-4 h-4 text-blue-400" />
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
+          <div className="bg-surface border border-border-main rounded-card max-w-md w-full p-6 shadow-modal space-y-4">
+            <h4 className="text-sm font-bold text-text-main flex items-center gap-2">
+              <Shield className="w-4 h-4 text-accent" />
               Administrator Authorization & Unlock
             </h4>
-            <p className="text-xs text-slate-300">
+            <p className="text-xs text-text-muted">
               Enter store administrator credentials to clear the lockout for{" "}
-              <strong>@{selectedUser?.username}</strong>.
+              <strong className="text-text-main">@{selectedUser?.username}</strong>.
             </p>
 
             {adminUnlockMsg && (
-              <div className="p-2 bg-red-500/10 border border-red-500/30 text-red-400 text-xs rounded-lg">
+              <div className="p-2 bg-status-danger/10 border border-status-danger/20 text-status-danger text-xs rounded-btn">
                 {adminUnlockMsg}
               </div>
             )}
 
             <form onSubmit={handleAdminUnlockSubmit} className="space-y-3">
               <div>
-                <label className="block text-[11px] text-slate-400 mb-1">Admin Username</label>
+                <label className="block text-[11px] font-semibold text-text-muted mb-1 uppercase tracking-wider">Admin Username</label>
                 <input
                   type="text"
                   required
                   value={adminUsername}
                   onChange={(e) => setAdminUsername(e.target.value)}
-                  className="w-full px-3 py-1.5 bg-slate-900 border border-slate-700 rounded-lg text-white text-xs"
+                  className="w-full px-3 py-1.5 bg-surface border border-border-main rounded-btn text-text-main text-xs focus:border-accent focus:outline-none"
                 />
               </div>
 
               <div>
-                <label className="block text-[11px] text-slate-400 mb-1">Admin Password or PIN</label>
+                <label className="block text-[11px] font-semibold text-text-muted mb-1 uppercase tracking-wider">Admin Password or PIN</label>
                 <input
                   type="password"
                   required
                   value={adminCredentials}
                   onChange={(e) => setAdminCredentials(e.target.value)}
-                  className="w-full px-3 py-1.5 bg-slate-900 border border-slate-700 rounded-lg text-white text-xs"
+                  className="w-full px-3 py-1.5 bg-surface border border-border-main rounded-btn text-text-main text-xs focus:border-accent focus:outline-none"
                 />
               </div>
 

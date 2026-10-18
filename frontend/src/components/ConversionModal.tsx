@@ -123,17 +123,17 @@ export const ConversionModal: React.FC<ConversionModalProps> = ({
   const activePresetCategory = CATEGORY_PRESETS.find((c) => c.id === activeCategory) || CATEGORY_PRESETS[0];
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-xs p-4 animate-in fade-in duration-150">
-      <div className="w-full max-w-lg bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 select-none font-sans animate-in fade-in duration-100">
+      <div className="w-full max-w-lg rounded-card bg-surface shadow-modal border border-border-main overflow-hidden flex flex-col">
         {/* Modal Header */}
-        <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/80">
+        <div className="px-5 py-4 border-b border-border-main flex items-center justify-between bg-canvas">
           <div className="flex items-center gap-2.5">
-            <div className="p-2 bg-blue-50 text-blue-600 rounded-xl">
+            <div className="p-2 bg-accent-soft text-accent rounded-btn">
               <Layers className="h-5 w-5" />
             </div>
             <div>
-              <h2 className="text-sm font-bold text-slate-800">Adjust Product Unit & Packaging</h2>
-              <p className="text-xs text-slate-500 truncate max-w-[320px] font-medium">
+              <h2 className="text-sm font-bold text-text-main">Adjust Product Unit & Packaging</h2>
+              <p className="text-xs text-text-muted truncate max-w-[320px] font-medium">
                 {line.product.name}
               </p>
             </div>
@@ -141,22 +141,22 @@ export const ConversionModal: React.FC<ConversionModalProps> = ({
           <button
             type="button"
             onClick={onClose}
-            className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100 transition-colors"
+            className="p-1.5 text-text-muted hover:text-text-main rounded-btn hover:bg-surface transition-colors cursor-pointer"
           >
             <X className="h-4 w-4" />
           </button>
         </div>
 
         {/* Modal Body */}
-        <div className="p-5 space-y-4 text-xs">
+        <div className="p-5 space-y-4 text-xs bg-surface">
           {/* Industry Preset Category Tabs */}
           <div>
             <div className="flex items-center justify-between mb-2">
-              <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
+              <label className="text-[11px] font-bold text-text-muted uppercase tracking-wider">
                 Packaging Presets by Store Type
               </label>
             </div>
-            <div className="flex gap-1.5 p-1 bg-slate-100/80 rounded-xl mb-3">
+            <div className="flex gap-1.5 p-1 bg-canvas border border-border-main rounded-btn mb-3">
               {CATEGORY_PRESETS.map((cat) => {
                 const Icon = cat.icon;
                 const isActive = activeCategory === cat.id;
@@ -165,10 +165,10 @@ export const ConversionModal: React.FC<ConversionModalProps> = ({
                     key={cat.id}
                     type="button"
                     onClick={() => setActiveCategory(cat.id)}
-                    className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg text-xs font-semibold transition-all ${
+                    className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-[8px] text-xs font-semibold transition-all cursor-pointer ${
                       isActive
-                        ? "bg-white text-blue-700 shadow-xs border border-slate-200/60"
-                        : "text-slate-600 hover:text-slate-900"
+                        ? "bg-surface text-accent shadow-2xs border border-border-main font-bold"
+                        : "text-text-muted hover:text-text-main"
                     }`}
                   >
                     <Icon className="h-3.5 w-3.5" />
@@ -187,10 +187,10 @@ export const ConversionModal: React.FC<ConversionModalProps> = ({
                     key={preset.label}
                     type="button"
                     onClick={() => handleApplyPreset(preset)}
-                    className={`py-2 px-2 rounded-lg text-xs font-medium border text-center transition-all ${
+                    className={`py-2 px-2 rounded-btn text-xs font-medium border text-center transition-all cursor-pointer ${
                       isSelected
-                        ? "bg-blue-50 border-blue-500 text-blue-700 shadow-2xs font-bold"
-                        : "bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100"
+                        ? "bg-accent-soft border-accent text-accent shadow-2xs font-bold"
+                        : "bg-canvas border-border-main text-text-main hover:bg-surface"
                     }`}
                   >
                     {preset.label}
@@ -201,53 +201,53 @@ export const ConversionModal: React.FC<ConversionModalProps> = ({
           </div>
 
           {/* Conversion Equation Input */}
-          <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl">
-            <label className="block text-[11px] font-bold text-slate-800 mb-2">
+          <div className="p-4 bg-canvas border border-border-main rounded-card">
+            <label className="block text-[11px] font-bold text-text-main mb-2 uppercase tracking-wider">
               Custom Packaging Ratio & Names:
             </label>
             <div className="flex items-center gap-2">
               <div className="flex-1">
-                <span className="text-[10px] text-slate-500 font-semibold block mb-0.5">1 Parent Unit (Pack / Box)</span>
+                <span className="text-[10px] text-text-muted font-semibold block mb-0.5">1 Parent Unit (Pack / Box)</span>
                 <input
                   type="text"
                   value={packName}
                   onChange={(e) => setPackName(e.target.value)}
                   placeholder="e.g. box, bottle, pc, jar"
-                  className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white font-semibold text-slate-800 text-xs focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none"
+                  className="w-full px-2.5 py-1.5 rounded-btn border border-border-main bg-surface font-semibold text-text-main text-xs focus:border-accent focus:ring-1 focus:ring-accent outline-none"
                 />
               </div>
-              <span className="text-base font-black text-slate-400 mt-4">=</span>
+              <span className="text-base font-black text-text-muted mt-4">=</span>
               <div className="w-24">
-                <span className="text-[10px] text-blue-700 font-bold block mb-0.5">Contains Qty</span>
+                <span className="text-[10px] text-accent font-bold block mb-0.5">Contains Qty</span>
                 <input
                   type="number"
                   min="1"
                   max="10000"
                   value={unitsPerPack}
                   onChange={(e) => setUnitsPerPack(Math.max(1, parseInt(e.target.value) || 1))}
-                  className="w-full px-2.5 py-1.5 rounded-lg border border-blue-400 bg-white font-bold text-blue-700 text-center text-xs focus:ring-2 focus:ring-blue-500/30 outline-none"
+                  className="w-full px-2.5 py-1.5 rounded-btn border border-accent bg-surface font-bold font-mono text-accent text-center text-xs focus:ring-1 focus:ring-accent outline-none"
                 />
               </div>
               <div className="flex-1">
-                <span className="text-[10px] text-slate-500 font-semibold block mb-0.5">Base Unit (Loose / Sub-unit)</span>
+                <span className="text-[10px] text-text-muted font-semibold block mb-0.5">Base Unit (Loose / Sub-unit)</span>
                 <input
                   type="text"
                   value={looseName}
                   onChange={(e) => setLooseName(e.target.value)}
                   placeholder="e.g. pc, unit, ml, g"
-                  className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white font-semibold text-slate-800 text-xs focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none"
+                  className="w-full px-2.5 py-1.5 rounded-btn border border-border-main bg-surface font-semibold text-text-main text-xs focus:border-accent focus:ring-1 focus:ring-accent outline-none"
                 />
               </div>
             </div>
 
             {/* Calculated Rates Summary */}
-            <div className="mt-3 pt-2.5 border-t border-slate-200 flex items-center justify-between text-[11px]">
-              <span className="text-slate-600">
-                Pack Rate: <strong className="text-slate-800">₹{effectivePrice.toFixed(2)}</strong> /{packName || "pack"}
+            <div className="mt-3 pt-2.5 border-t border-border-main flex items-center justify-between text-[11px]">
+              <span className="text-text-muted">
+                Pack Rate: <strong className="text-text-main font-mono">₹{effectivePrice.toFixed(2)}</strong> /{packName || "pack"}
               </span>
-              <span className="text-blue-700 font-semibold">
+              <span className="text-accent font-semibold">
                 {unitsPerPack > 1 ? (
-                  <>Derived Base Rate: <strong>₹{derivedLooseRate}</strong> /{looseName || "pc"}</>
+                  <>Derived Base Rate: <strong className="font-mono">₹{derivedLooseRate}</strong> /{looseName || "pc"}</>
                 ) : (
                   <>Single Unit Item (1 {packName || "pc"} = 1 {looseName || "pc"})</>
                 )}
@@ -256,16 +256,16 @@ export const ConversionModal: React.FC<ConversionModalProps> = ({
           </div>
 
           {/* Persist to Master Checkbox */}
-          <label className="flex items-start gap-2.5 p-3 rounded-xl border border-slate-200 bg-slate-50 hover:bg-slate-100/80 cursor-pointer transition-colors">
+          <label className="flex items-start gap-2.5 p-3 rounded-card border border-border-main bg-canvas hover:bg-surface cursor-pointer transition-colors">
             <input
               type="checkbox"
               checked={persistMaster}
               onChange={(e) => setPersistMaster(e.target.checked)}
-              className="mt-0.5 h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+              className="mt-0.5 h-4 w-4 rounded-btn border-border-main text-accent focus:ring-accent"
             />
             <div>
-              <p className="font-semibold text-slate-800 text-xs">Update Product Master permanently</p>
-              <p className="text-[11px] text-slate-500 mt-0.5">
+              <p className="font-semibold text-text-main text-xs">Update Product Master permanently</p>
+              <p className="text-[11px] text-text-muted mt-0.5">
                 Save this unit configuration (1 {packName || "pack"} = {unitsPerPack} {looseName || "pcs"}) to the product master for future bills and stock ledger.
               </p>
             </div>
@@ -273,18 +273,18 @@ export const ConversionModal: React.FC<ConversionModalProps> = ({
         </div>
 
         {/* Modal Footer */}
-        <div className="px-5 py-3 border-t border-slate-100 bg-slate-50 flex items-center justify-end gap-2">
+        <div className="px-5 py-3 border-t border-border-main bg-canvas flex items-center justify-end gap-2">
           <button
             type="button"
             onClick={onClose}
-            className="px-3.5 py-1.5 rounded-lg border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-slate-100 transition-colors"
+            className="px-3.5 py-1.5 rounded-btn border border-border-main text-xs font-semibold text-text-muted hover:text-text-main hover:bg-surface transition-colors cursor-pointer"
           >
             Cancel (Esc)
           </button>
           <button
             type="button"
             onClick={handleSave}
-            className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg bg-blue-600 text-xs font-bold text-white shadow-md hover:bg-blue-700 transition-colors"
+            className="flex items-center gap-1.5 px-4 py-1.5 rounded-btn bg-accent text-xs font-bold text-white shadow-xs hover:opacity-90 transition-opacity cursor-pointer"
           >
             <Check className="h-3.5 w-3.5" />
             Apply Unit & Conversion (Enter)

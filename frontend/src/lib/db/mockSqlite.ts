@@ -34,6 +34,8 @@ export class MockSqliteDatabase {
     this.ensureTable("expense_heads");
     this.ensureTable("party_ledger_entries");
     this.ensureTable("supplier_payments");
+    this.ensureTable("expenses");
+    this.ensureTable("customer_payments");
   }
 
   ensureTable(tableName: string): Map<string, Record<string, unknown>> {

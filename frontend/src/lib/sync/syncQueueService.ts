@@ -12,6 +12,8 @@ export interface SyncQueueItem {
     | "purchase"
     | "purchase_order"
     | "payment"
+    | "customer_payment"
+    | "expense"
     | "purchase_return"
     | "transfer";
   entity_id: string;

@@ -373,10 +373,10 @@ export const SalesReturnPage: React.FC = () => {
 
   const statusBadge = (status: string) => {
     if (status === "completed")
-      return <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-700">Completed</span>;
+      return <span className="rounded-full bg-[var(--color-accent-soft)] border border-[var(--color-accent-soft)] px-2 py-0.5 text-[10px] font-bold text-[var(--color-accent)]">Completed</span>;
     if (status === "cancelled")
-      return <span className="rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-bold text-red-700">Cancelled</span>;
-    return <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-700">Draft</span>;
+      return <span className="rounded-full bg-[var(--color-danger-bg)] border border-[var(--color-danger-border)] px-2 py-0.5 text-[10px] font-bold text-[var(--color-danger-text)]">Cancelled</span>;
+    return <span className="rounded-full bg-[var(--color-warning-bg)] border border-[var(--color-warning-border)] px-2 py-0.5 text-[10px] font-bold text-[var(--color-warning-text)]">Draft</span>;
   };
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -385,8 +385,8 @@ export const SalesReturnPage: React.FC = () => {
       {/* Toast */}
       {toast && (
         <div
-          className={`fixed top-4 right-4 z-[60] flex items-center gap-2 rounded-lg px-4 py-3 text-xs font-semibold text-white shadow-lg ${
-            toast.type === "success" ? "bg-emerald-600" : "bg-red-600"
+          className={`fixed top-4 right-4 z-[60] flex items-center gap-2 rounded-[10px] px-4 py-3 text-xs font-semibold text-white shadow-modal ${
+            toast.type === "success" ? "bg-[var(--color-accent)]" : "bg-red-700"
           }`}
         >
           {toast.type === "success" ? <CheckCircle className="h-4 w-4" /> : <AlertCircle className="h-4 w-4" />}
@@ -397,63 +397,63 @@ export const SalesReturnPage: React.FC = () => {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="flex items-center gap-2 text-xl font-bold text-slate-800">
-            <Undo2 className="h-5 w-5 text-rose-500" />
-            Sales Returns (Credit Notes)
+          <h2 className="flex items-center gap-2 text-xl font-bold text-[var(--color-text)]">
+            <Undo2 className="h-5 w-5 text-[var(--color-danger-text)]" />
+            <span>Sales Returns (Credit Notes)</span>
           </h2>
-          <p className="text-xs text-slate-500">Process customer returns, issue credit notes, manage stock restocking.</p>
+          <p className="text-xs text-[var(--color-text-muted)] mt-0.5">Process customer returns, issue credit notes, manage stock restocking.</p>
         </div>
         <div className="flex items-center gap-2">
           <button
             onClick={() => navigate("/returns/debit-notes")}
-            className="flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50 shadow-xs"
+            className="flex items-center gap-1.5 rounded-[10px] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-xs font-bold text-[var(--color-text)] hover:bg-[var(--color-surface-hover)] shadow-2xs transition-colors cursor-pointer"
           >
-            <Building2 className="h-4 w-4 text-indigo-600" />
-            B2B Debit Notes
+            <Building2 className="h-4 w-4 text-[var(--color-accent)]" />
+            <span>B2B Debit Notes</span>
           </button>
           <button
             onClick={openForm}
-            className="flex items-center gap-2 rounded-lg bg-rose-600 px-4 py-2 text-xs font-bold text-white shadow-sm hover:bg-rose-700"
+            className="flex items-center gap-2 rounded-[10px] bg-[var(--color-danger-text)] px-4 py-2 text-xs font-bold text-white shadow-2xs hover:opacity-90 transition-opacity cursor-pointer"
           >
             <Plus className="h-4 w-4" />
-            New Return (F7)
+            <span>New Return (F7)</span>
           </button>
         </div>
       </div>
 
       {/* Module Switcher Tabs */}
-      <div className="flex items-center gap-2 border-b border-slate-200">
+      <div className="flex items-center gap-2 border-b border-[var(--color-border)]">
         <button
-          className="flex items-center gap-2 border-b-2 border-rose-600 pb-2 px-3 text-xs font-bold text-rose-700"
+          className="flex items-center gap-2 border-b-2 border-[var(--color-danger-text)] pb-2 px-3 text-xs font-bold text-[var(--color-danger-text)] cursor-pointer"
         >
           <Undo2 className="h-4 w-4" />
-          Counter Returns (Walk-in)
+          <span>Counter Returns (Walk-in)</span>
         </button>
         <button
           onClick={() => navigate("/returns/debit-notes")}
-          className="flex items-center gap-2 border-b-2 border-transparent pb-2 px-3 text-xs font-bold text-slate-500 hover:text-slate-800"
+          className="flex items-center gap-2 border-b-2 border-transparent pb-2 px-3 text-xs font-bold text-[var(--color-text-muted)] hover:text-[var(--color-text)] cursor-pointer transition-colors"
         >
-          <Building2 className="h-4 w-4 text-indigo-600" />
-          Customer Debit Notes (B2B Multi-Invoice)
+          <Building2 className="h-4 w-4 text-[var(--color-accent)]" />
+          <span>Customer Debit Notes (B2B Multi-Invoice)</span>
         </button>
       </div>
 
       {/* Filters */}
       <div className="flex items-center gap-2">
         <div className="relative flex-1 max-w-sm">
-          <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
+          <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[var(--color-text-muted)]" />
           <input
             type="text"
             value={listSearch}
             onChange={(e) => setListSearch(e.target.value)}
             placeholder="Search return no, invoice no, customer..."
-            className="w-full rounded-lg border border-slate-200 bg-white pl-8 pr-3 py-2 text-xs text-slate-800 placeholder-slate-400 focus:border-blue-500 focus:outline-none"
+            className="w-full rounded-[10px] border border-[var(--color-border)] bg-[var(--color-surface)] pl-8 pr-3 py-2 text-xs text-[var(--color-text)] placeholder-[var(--color-text-muted)] focus:border-[var(--color-accent)] focus:outline-none"
           />
         </div>
         <select
           value={statusFilter}
           onChange={(e) => setStatusFilter(e.target.value)}
-          className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-700 focus:outline-none"
+          className="rounded-[10px] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-xs font-medium text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none"
         >
           <option value="all">All Statuses</option>
           <option value="completed">Completed</option>
@@ -463,59 +463,59 @@ export const SalesReturnPage: React.FC = () => {
       </div>
 
       {/* List */}
-      <div className="rounded-lg border border-slate-200 bg-white shadow-sm overflow-hidden">
-        <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3 bg-slate-50">
-          <h3 className="text-xs font-bold text-slate-800">Credit Note Register</h3>
-          <span className="text-[11px] text-slate-500">{filteredReturns.length} Records</span>
+      <div className="rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-2xs overflow-hidden">
+        <div className="flex items-center justify-between border-b border-[var(--color-border)] px-4 py-3 bg-[var(--color-canvas)]">
+          <h3 className="text-xs font-bold text-[var(--color-text)] uppercase tracking-wider">Credit Note Register</h3>
+          <span className="text-[11px] text-[var(--color-text-muted)] font-mono">{filteredReturns.length} Records</span>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs">
-            <thead className="border-b border-slate-200 bg-slate-100/70 text-slate-600">
+            <thead className="border-b border-[var(--color-border)] bg-[var(--color-canvas)] text-[var(--color-text-muted)] font-bold uppercase tracking-wider text-[11px]">
               <tr>
-                <th className="px-4 py-2.5 font-semibold">Return No</th>
-                <th className="px-4 py-2.5 font-semibold">Date</th>
-                <th className="px-4 py-2.5 font-semibold">Original Invoice</th>
-                <th className="px-4 py-2.5 font-semibold">Customer</th>
-                <th className="px-4 py-2.5 font-semibold text-right">Refund Amt</th>
-                <th className="px-4 py-2.5 font-semibold">Refund Mode</th>
-                <th className="px-4 py-2.5 font-semibold text-center">Status</th>
-                <th className="px-4 py-2.5 font-semibold text-right">Actions</th>
+                <th className="px-4 py-2.5">Return No</th>
+                <th className="px-4 py-2.5">Date</th>
+                <th className="px-4 py-2.5">Original Invoice</th>
+                <th className="px-4 py-2.5">Customer</th>
+                <th className="px-4 py-2.5 text-right">Refund Amt</th>
+                <th className="px-4 py-2.5">Refund Mode</th>
+                <th className="px-4 py-2.5 text-center">Status</th>
+                <th className="px-4 py-2.5 text-right">Actions</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100">
+            <tbody className="divide-y divide-[var(--color-border)]">
               {listLoading ? (
                 <tr>
-                  <td colSpan={8} className="py-10 text-center text-slate-400">
-                    <RefreshCw className="mx-auto h-6 w-6 animate-spin text-slate-300 mb-1" />
-                    Loading...
+                  <td colSpan={8} className="py-10 text-center text-[var(--color-text-muted)]">
+                    <RefreshCw className="mx-auto h-6 w-6 animate-spin text-[var(--color-text-muted)] mb-1" />
+                    <span>Loading...</span>
                   </td>
                 </tr>
               ) : filteredReturns.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="py-12 text-center text-slate-400">
-                    <Undo2 className="mx-auto h-8 w-8 text-slate-300 mb-1" />
-                    <p className="font-medium">No sales returns yet</p>
-                    <p className="text-[11px]">Click "New Return" to process a customer return</p>
+                  <td colSpan={8} className="py-12 text-center text-[var(--color-text-muted)]">
+                    <Undo2 className="mx-auto h-8 w-8 text-[var(--color-text-muted)] opacity-40 mb-1" />
+                    <p className="font-semibold text-xs text-[var(--color-text)]">No sales returns yet</p>
+                    <p className="text-[11px] text-[var(--color-text-muted)]">Click "New Return" to process a customer return</p>
                   </td>
                 </tr>
               ) : (
                 filteredReturns.map((r) => (
-                  <tr key={r.id} className="hover:bg-slate-50">
-                    <td className="px-4 py-2.5 font-mono font-bold text-rose-700">{r.return_number}</td>
-                    <td className="px-4 py-2.5 text-slate-600">{r.return_date}</td>
-                    <td className="px-4 py-2.5 font-mono text-blue-700">{r.original_invoice_number || "—"}</td>
-                    <td className="px-4 py-2.5 font-medium text-slate-800">{r.customer_name || "Walk-in"}</td>
-                    <td className="px-4 py-2.5 text-right font-mono font-bold text-slate-900">
+                  <tr key={r.id} className="hover:bg-[var(--color-surface-hover)] transition-colors">
+                    <td className="px-4 py-2.5 font-mono font-bold text-[var(--color-danger-text)]">{r.return_number}</td>
+                    <td className="px-4 py-2.5 font-mono text-[var(--color-text-muted)]">{r.return_date}</td>
+                    <td className="px-4 py-2.5 font-mono text-[var(--color-accent)]">{r.original_invoice_number || "—"}</td>
+                    <td className="px-4 py-2.5 font-semibold text-[var(--color-text)]">{r.customer_name || "Walk-in"}</td>
+                    <td className="px-4 py-2.5 text-right font-mono font-bold text-[var(--color-text)] tabular-nums">
                       ₹ {r.grand_total.toFixed(2)}
                     </td>
-                    <td className="px-4 py-2.5 text-slate-600">
-                      <span className="rounded bg-slate-100 px-2 py-0.5 text-[10px] font-semibold">{r.refund_mode}</span>
+                    <td className="px-4 py-2.5">
+                      <span className="rounded-full bg-[var(--color-canvas)] border border-[var(--color-border)] px-2 py-0.5 text-[10px] font-semibold text-[var(--color-text)]">{r.refund_mode}</span>
                     </td>
                     <td className="px-4 py-2.5 text-center">{statusBadge(r.status)}</td>
                     <td className="px-4 py-2.5 text-right">
                       <button
                         onClick={() => handlePrintCreditNote(r)}
-                        className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold text-rose-700 hover:text-white bg-rose-50 hover:bg-rose-600 border border-rose-200 rounded-lg transition"
+                        className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold text-[var(--color-text)] hover:text-[var(--color-accent)] bg-[var(--color-surface)] border border-[var(--color-border)] rounded-[8px] hover:bg-[var(--color-surface-hover)] shadow-2xs transition cursor-pointer"
                         title="Print Credit Note"
                       >
                         <Printer className="w-3.5 h-3.5" />
@@ -532,15 +532,15 @@ export const SalesReturnPage: React.FC = () => {
 
       {/* ── New Return Form Modal ──────────────────────────────────────────────── */}
       {isFormOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-xs p-4">
-          <div className="flex max-h-[92vh] w-full max-w-4xl flex-col rounded-xl border border-slate-200 bg-white shadow-2xl overflow-hidden">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 font-sans">
+          <div className="flex max-h-[92vh] w-full max-w-4xl flex-col rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-modal overflow-hidden">
             {/* Modal Header */}
-            <div className="flex items-center justify-between border-b border-slate-200 bg-rose-50 px-5 py-3">
+            <div className="flex items-center justify-between border-b border-[var(--color-border)] bg-[var(--color-surface)] px-5 py-3">
               <div className="flex items-center gap-3">
-                <Undo2 className="h-5 w-5 text-rose-600" />
+                <Undo2 className="h-5 w-5 text-[var(--color-danger-text)]" />
                 <div>
-                  <h3 className="text-sm font-bold text-slate-800">New Sales Return / Credit Note</h3>
-                  <p className="text-[11px] text-slate-500">
+                  <h3 className="text-sm font-bold text-[var(--color-text)]">New Sales Return / Credit Note</h3>
+                  <p className="text-[11px] text-[var(--color-text-muted)]">
                     {formStep === "invoice_search"
                       ? "Step 1: Search and select the original invoice"
                       : formStep === "line_selection"
@@ -549,13 +549,13 @@ export const SalesReturnPage: React.FC = () => {
                   </p>
                 </div>
               </div>
-              <button onClick={() => setIsFormOpen(false)} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-200">
+              <button onClick={() => setIsFormOpen(false)} className="rounded-[6px] p-1.5 text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)] cursor-pointer">
                 <XCircle className="h-5 w-5" />
               </button>
             </div>
 
             {/* Step progress */}
-            <div className="flex items-center gap-0 border-b border-slate-200 bg-white px-5 py-2">
+            <div className="flex items-center gap-0 border-b border-[var(--color-border)] bg-[var(--color-canvas)] px-5 py-2">
               {["Invoice", "Items", "Payment"].map((step, idx) => {
                 const stepKeys = ["invoice_search", "line_selection", "payment"];
                 const isActive = stepKeys[idx] === formStep;
@@ -565,18 +565,18 @@ export const SalesReturnPage: React.FC = () => {
                     <div
                       className={`flex items-center gap-1.5 rounded-full px-3 py-1 text-[11px] font-semibold transition-colors ${
                         isActive
-                          ? "bg-rose-100 text-rose-700"
+                          ? "bg-[var(--color-danger-bg)] text-[var(--color-danger-text)] border border-[var(--color-danger-border)]"
                           : isPast
-                          ? "bg-emerald-100 text-emerald-700"
-                          : "text-slate-400"
+                          ? "bg-[var(--color-accent-soft)] text-[var(--color-accent)] border border-[var(--color-accent-soft)]"
+                          : "text-[var(--color-text-muted)]"
                       }`}
                     >
-                      <span className={`h-4 w-4 rounded-full text-center text-[10px] leading-4 font-bold ${isActive ? "bg-rose-600 text-white" : isPast ? "bg-emerald-600 text-white" : "bg-slate-200 text-slate-500"}`}>
+                      <span className={`h-4 w-4 rounded-full text-center text-[10px] leading-4 font-bold ${isActive ? "bg-[var(--color-danger-text)] text-white" : isPast ? "bg-[var(--color-accent)] text-white" : "bg-[var(--color-border)] text-[var(--color-text-muted)]"}`}>
                         {idx + 1}
                       </span>
                       {step}
                     </div>
-                    {idx < 2 && <ChevronDown className="h-3 w-3 -rotate-90 text-slate-300 mx-1" />}
+                    {idx < 2 && <ChevronDown className="h-3 w-3 -rotate-90 text-[var(--color-border)] mx-1" />}
                   </React.Fragment>
                 );
               })}
@@ -616,17 +616,17 @@ export const SalesReturnPage: React.FC = () => {
                           setIsFormOpen(false);
                           navigate("/returns/debit-notes");
                         }}
-                        className={`cursor-pointer rounded-xl border p-3 transition-all ${
+                        className={`cursor-pointer rounded-card border p-3 transition-all ${
                           returnSource === "customer_debit_note"
-                            ? "border-indigo-500 bg-indigo-50/70 shadow-xs"
-                            : "border-slate-200 bg-white hover:bg-slate-50"
+                            ? "border-accent bg-accent-soft shadow-xs"
+                            : "border-border-main bg-surface hover:bg-canvas"
                         }`}
                       >
                         <div className="flex items-center gap-2">
-                          <Building2 className="h-4 w-4 text-indigo-600" />
-                          <span className="text-xs font-bold text-slate-800">Customer Debit Note (B2B)</span>
+                          <Building2 className="h-4 w-4 text-accent" />
+                          <span className="text-xs font-bold text-text-main">Customer Debit Note (B2B)</span>
                         </div>
-                        <p className="mt-1 text-[11px] text-slate-500">
+                        <p className="mt-1 text-[11px] text-text-muted">
                           Customer sent a debit note covering products across 1 or more invoices.
                         </p>
                       </div>

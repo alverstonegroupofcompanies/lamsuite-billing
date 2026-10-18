@@ -75,19 +75,19 @@ export const BillDiscountModal: React.FC<BillDiscountModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 backdrop-blur-xs p-4 select-none animate-in fade-in duration-100">
-      <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 select-none font-sans animate-in fade-in duration-100">
+      <div className="w-full max-w-md rounded-card bg-surface shadow-modal border border-border-main overflow-hidden flex flex-col">
         {/* Header */}
-        <div className="px-5 py-3.5 border-b border-slate-100 flex items-center justify-between bg-gradient-to-r from-amber-50 to-orange-50">
+        <div className="px-5 py-3.5 border-b border-border-main flex items-center justify-between bg-canvas">
           <div className="flex items-center gap-2.5">
-            <div className="p-2 rounded-xl bg-amber-500 text-white shadow-xs">
+            <div className="p-2 rounded-btn bg-[var(--color-warning-bg,#FDF1DC)] text-[var(--color-warning-text,#8A5200)] shadow-2xs">
               <Percent className="h-4 w-4" />
             </div>
             <div>
-              <h3 className="text-sm font-bold text-slate-800">
-                Overall Bill Discount <span className="text-xs text-amber-600 font-medium">(Ctrl+F2)</span>
+              <h3 className="text-sm font-bold text-text-main">
+                Overall Bill Discount <span className="text-xs text-[var(--color-warning-text,#8A5200)] font-mono font-medium">(Ctrl+F2)</span>
               </h3>
-              <p className="text-[11px] text-slate-500 font-medium">
+              <p className="text-[11px] text-text-muted font-medium">
                 Apply special discount across entire invoice
               </p>
             </div>
@@ -95,26 +95,26 @@ export const BillDiscountModal: React.FC<BillDiscountModalProps> = ({
           <button
             type="button"
             onClick={onClose}
-            className="p-1 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-200 transition-colors"
+            className="p-1 text-text-muted hover:text-text-main rounded-btn hover:bg-surface transition-colors cursor-pointer"
           >
             <X className="h-4 w-4" />
           </button>
         </div>
 
         {/* Body */}
-        <div className="p-5 space-y-4">
+        <div className="p-5 space-y-4 bg-surface">
           {/* Toggle Type */}
-          <div className="flex rounded-xl bg-slate-100 p-1 text-xs font-bold">
+          <div className="flex rounded-btn bg-canvas p-1 text-xs font-bold border border-border-main">
             <button
               type="button"
               onClick={() => {
                 setDiscType("percent");
                 inputRef.current?.focus();
               }}
-              className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg transition-all cursor-pointer ${
+              className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-[8px] transition-all cursor-pointer ${
                 discType === "percent"
-                  ? "bg-white text-amber-700 shadow-xs"
-                  : "text-slate-500 hover:text-slate-800"
+                  ? "bg-surface text-[var(--color-warning-text,#8A5200)] shadow-2xs font-bold"
+                  : "text-text-muted hover:text-text-main"
               }`}
             >
               <Percent className="h-3.5 w-3.5" />
@@ -126,10 +126,10 @@ export const BillDiscountModal: React.FC<BillDiscountModalProps> = ({
                 setDiscType("amount");
                 inputRef.current?.focus();
               }}
-              className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg transition-all cursor-pointer ${
+              className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-[8px] transition-all cursor-pointer ${
                 discType === "amount"
-                  ? "bg-white text-amber-700 shadow-xs"
-                  : "text-slate-500 hover:text-slate-800"
+                  ? "bg-surface text-[var(--color-warning-text,#8A5200)] shadow-2xs font-bold"
+                  : "text-text-muted hover:text-text-main"
               }`}
             >
               <Tag className="h-3.5 w-3.5" />
@@ -139,7 +139,7 @@ export const BillDiscountModal: React.FC<BillDiscountModalProps> = ({
 
           {/* Value Input */}
           <div>
-            <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+            <label className="block text-xs font-bold uppercase tracking-wider text-text-muted mb-1.5">
               {discType === "percent" ? "Discount Percentage" : "Discount Amount"}
             </label>
             <div className="relative">
@@ -153,9 +153,9 @@ export const BillDiscountModal: React.FC<BillDiscountModalProps> = ({
                 onChange={(e) => setValue(e.target.value)}
                 onKeyDown={handleKeyDown}
                 placeholder={discType === "percent" ? "e.g. 5 or 10" : "e.g. 50 or 100"}
-                className="w-full rounded-xl border border-slate-300 px-3.5 py-2.5 text-base font-bold text-slate-900 focus:border-amber-500 focus:ring-2 focus:ring-amber-500/20 outline-none"
+                className="w-full rounded-btn border border-border-main bg-surface px-3.5 py-2.5 text-base font-bold font-mono text-text-main focus:border-accent focus:ring-1 focus:ring-accent outline-none"
               />
-              <span className="absolute right-3.5 top-3 text-sm font-bold text-slate-400">
+              <span className="absolute right-3.5 top-3 text-sm font-bold font-mono text-text-muted">
                 {discType === "percent" ? "%" : "₹"}
               </span>
             </div>
@@ -163,7 +163,7 @@ export const BillDiscountModal: React.FC<BillDiscountModalProps> = ({
 
           {/* Quick Presets */}
           <div>
-            <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wide block mb-1.5">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-text-muted block mb-1.5">
               Quick Presets
             </span>
             <div className="flex flex-wrap gap-1.5">
@@ -175,7 +175,7 @@ export const BillDiscountModal: React.FC<BillDiscountModalProps> = ({
                     setValue(preset.toString());
                     inputRef.current?.focus();
                   }}
-                  className="px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-amber-100 hover:text-amber-800 text-xs font-semibold text-slate-600 border border-slate-200 transition-colors cursor-pointer"
+                  className="px-2.5 py-1 rounded-[6px] bg-canvas hover:bg-surface text-xs font-mono font-semibold text-text-main border border-border-main transition-colors cursor-pointer"
                 >
                   {discType === "percent" ? `${preset}%` : `₹${preset}`}
                 </button>
@@ -184,37 +184,37 @@ export const BillDiscountModal: React.FC<BillDiscountModalProps> = ({
           </div>
 
           {/* Live Preview Summary Card */}
-          <div className="rounded-xl border border-slate-200 bg-slate-50 p-3.5 space-y-1.5 text-xs">
-            <div className="flex justify-between text-slate-500">
+          <div className="rounded-card border border-border-main bg-canvas p-3.5 space-y-1.5 text-xs">
+            <div className="flex justify-between text-text-muted">
               <span>Taxable Subtotal</span>
-              <span className="font-semibold text-slate-700">₹ {taxableSubtotal.toFixed(2)}</span>
+              <span className="font-mono font-semibold text-text-main">₹ {taxableSubtotal.toFixed(2)}</span>
             </div>
-            <div className="flex justify-between text-amber-700 font-semibold">
+            <div className="flex justify-between text-[var(--color-warning-text,#8A5200)] font-semibold">
               <span className="flex items-center gap-1">
                 <Sparkles className="h-3 w-3" />
                 Bill Discount {discType === "percent" && numVal > 0 ? `(${numVal}%)` : ""}
               </span>
-              <span>- ₹ {discountAmount.toFixed(2)}</span>
+              <span className="font-mono">- ₹ {discountAmount.toFixed(2)}</span>
             </div>
-            <div className="flex justify-between text-slate-500">
+            <div className="flex justify-between text-text-muted text-[11px]">
               <span>GST Tax (Pro-rated)</span>
-              <span className="font-semibold text-slate-700">₹ {scaledTax.toFixed(2)}</span>
+              <span className="font-mono">₹ {scaledTax.toFixed(2)}</span>
             </div>
-            <div className="pt-2 border-t border-slate-200 flex justify-between items-center text-sm font-bold text-slate-900">
+            <div className="pt-2 border-t border-border-main flex justify-between items-center text-sm font-bold text-text-main">
               <span>New Payable (approx)</span>
-              <span className="text-base text-blue-700 font-black">₹ {Math.round(estimatedPayable).toFixed(2)}</span>
+              <span className="text-base text-accent font-bold font-mono">₹ {Math.round(estimatedPayable).toFixed(2)}</span>
             </div>
           </div>
         </div>
 
         {/* Footer */}
-        <div className="px-5 py-3 border-t border-slate-100 bg-slate-50 flex items-center justify-between">
+        <div className="px-5 py-3 border-t border-border-main bg-canvas flex items-center justify-between">
           <div>
             {currentDiscount.value > 0 && (
               <button
                 type="button"
                 onClick={handleClear}
-                className="flex items-center gap-1 text-xs font-semibold text-red-600 hover:text-red-700 hover:underline cursor-pointer"
+                className="flex items-center gap-1 text-xs font-semibold text-[var(--color-danger-text,#B42318)] hover:underline cursor-pointer"
               >
                 <Trash2 className="h-3.5 w-3.5" />
                 Remove Discount
@@ -225,14 +225,14 @@ export const BillDiscountModal: React.FC<BillDiscountModalProps> = ({
             <button
               type="button"
               onClick={onClose}
-              className="px-3.5 py-1.5 rounded-lg border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-slate-100 cursor-pointer"
+              className="px-3.5 py-1.5 rounded-btn border border-border-main text-xs font-semibold text-text-muted hover:text-text-main hover:bg-surface cursor-pointer transition-colors"
             >
               Cancel (Esc)
             </button>
             <button
               type="button"
               onClick={handleApply}
-              className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-xs font-bold text-white shadow-sm transition-colors cursor-pointer"
+              className="flex items-center gap-1.5 px-4 py-1.5 rounded-btn bg-accent text-xs font-bold text-white shadow-xs hover:opacity-90 transition-opacity cursor-pointer"
             >
               <Check className="h-4 w-4" />
               Apply Discount (Enter)

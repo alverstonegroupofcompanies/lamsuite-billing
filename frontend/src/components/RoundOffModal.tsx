@@ -82,32 +82,32 @@ export const RoundOffModal: React.FC<RoundOffModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 backdrop-blur-xs p-4 select-none animate-in fade-in duration-100">
-      <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 select-none font-sans animate-in fade-in duration-100">
+      <div className="w-full max-w-md rounded-card bg-surface shadow-modal border border-border-main overflow-hidden flex flex-col">
         {/* Header */}
-        <div className="px-5 py-3.5 border-b border-slate-100 flex items-center justify-between bg-gradient-to-r from-blue-50 to-indigo-50">
+        <div className="px-5 py-3.5 border-b border-border-main flex items-center justify-between bg-canvas">
           <div className="flex items-center gap-2.5">
-            <div className="p-2 rounded-xl bg-blue-600 text-white shadow-xs">
+            <div className="p-2 rounded-btn bg-accent-soft text-accent shadow-2xs">
               <Calculator className="h-4 w-4" />
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h3 className="text-sm font-bold text-slate-800">
-                  Adjust Round-Off / Net Payable <span className="text-xs text-blue-600 font-medium">(Alt+R)</span>
+                <h3 className="text-sm font-bold text-text-main">
+                  Adjust Round-Off / Net Payable <span className="text-xs text-accent font-mono font-medium">(Alt+R)</span>
                 </h3>
                 <span
-                  className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
+                  className={`rounded-full px-2 py-0.5 text-[10px] font-mono font-bold ${
                     effectiveRoundOff < 0
-                      ? "bg-amber-100 text-amber-800 border border-amber-200"
+                      ? "bg-[var(--color-warning-bg,#FDF1DC)] text-[var(--color-warning-text,#8A5200)] border border-[var(--color-warning-border,#F5C070)]"
                       : effectiveRoundOff > 0
-                      ? "bg-emerald-100 text-emerald-800 border border-emerald-200"
-                      : "bg-slate-100 text-slate-600 border border-slate-200"
+                      ? "bg-accent-soft text-accent border border-accent/30"
+                      : "bg-canvas text-text-muted border border-border-main"
                   }`}
                 >
                   Delta: {effectiveRoundOff >= 0 ? `+₹${effectiveRoundOff.toFixed(2)}` : `-₹${Math.abs(effectiveRoundOff).toFixed(2)}`}
                 </span>
               </div>
-              <p className="text-[11px] text-slate-500 font-medium">
+              <p className="text-[11px] text-text-muted font-medium">
                 Customize statutory rounding or override final invoice amount
               </p>
             </div>
@@ -115,26 +115,26 @@ export const RoundOffModal: React.FC<RoundOffModalProps> = ({
           <button
             type="button"
             onClick={onClose}
-            className="p-1 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-200 transition-colors"
+            className="p-1 text-text-muted hover:text-text-main rounded-btn hover:bg-surface transition-colors cursor-pointer"
           >
             <X className="h-4 w-4" />
           </button>
         </div>
 
         {/* Body */}
-        <div className="p-5 space-y-4">
+        <div className="p-5 space-y-4 bg-surface">
           {/* Mode Switcher */}
-          <div className="flex rounded-xl bg-slate-100 p-1 text-xs font-bold">
+          <div className="flex rounded-btn bg-canvas p-1 text-xs font-bold border border-border-main">
             <button
               type="button"
               onClick={() => {
                 setEntryMode("final_total");
                 setTimeout(() => inputRef.current?.focus(), 20);
               }}
-              className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg transition-all cursor-pointer ${
+              className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-[8px] transition-all cursor-pointer ${
                 entryMode === "final_total"
-                  ? "bg-white text-blue-700 shadow-xs"
-                  : "text-slate-500 hover:text-slate-800"
+                  ? "bg-surface text-accent shadow-2xs font-bold"
+                  : "text-text-muted hover:text-text-main"
               }`}
             >
               <span>Desired Final Payable (₹)</span>
@@ -145,10 +145,10 @@ export const RoundOffModal: React.FC<RoundOffModalProps> = ({
                 setEntryMode("round_off");
                 setTimeout(() => inputRef.current?.focus(), 20);
               }}
-              className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg transition-all cursor-pointer ${
+              className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-[8px] transition-all cursor-pointer ${
                 entryMode === "round_off"
-                  ? "bg-white text-blue-700 shadow-xs"
-                  : "text-slate-500 hover:text-slate-800"
+                  ? "bg-surface text-accent shadow-2xs font-bold"
+                  : "text-text-muted hover:text-text-main"
               }`}
             >
               <span>Round-off Delta (+/− ₹)</span>
@@ -157,7 +157,7 @@ export const RoundOffModal: React.FC<RoundOffModalProps> = ({
 
           {/* Primary Input */}
           <div>
-            <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+            <label className="block text-xs font-bold uppercase tracking-wider text-text-muted mb-1.5">
               {entryMode === "final_total"
                 ? "Enter Target Net Payable Amount (₹)"
                 : "Enter Round-off Delta (+ or - ₹)"}
@@ -173,7 +173,7 @@ export const RoundOffModal: React.FC<RoundOffModalProps> = ({
                   onChange={(e) => handleFinalTotalChange(e.target.value)}
                   onKeyDown={handleKeyDown}
                   placeholder="e.g. 150.00"
-                  className="w-full rounded-xl border border-slate-300 px-3.5 py-2.5 text-base font-bold text-slate-900 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none"
+                  className="w-full rounded-btn border border-border-main bg-surface px-3.5 py-2.5 text-base font-bold font-mono text-text-main focus:border-accent focus:ring-1 focus:ring-accent outline-none"
                 />
               ) : (
                 <input
@@ -184,46 +184,46 @@ export const RoundOffModal: React.FC<RoundOffModalProps> = ({
                   onChange={(e) => handleRoundOffChange(e.target.value)}
                   onKeyDown={handleKeyDown}
                   placeholder="e.g. -0.40 or +0.60"
-                  className="w-full rounded-xl border border-slate-300 px-3.5 py-2.5 text-base font-bold text-slate-900 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none"
+                  className="w-full rounded-btn border border-border-main bg-surface px-3.5 py-2.5 text-base font-bold font-mono text-text-main focus:border-accent focus:ring-1 focus:ring-accent outline-none"
                 />
               )}
-              <span className="absolute right-3.5 top-3 text-sm font-bold text-slate-400">₹</span>
+              <span className="absolute right-3.5 top-3 text-sm font-bold font-mono text-text-muted">₹</span>
             </div>
           </div>
 
           {/* Live Calculation Preview */}
-          <div className="rounded-xl border border-slate-200 bg-slate-50 p-3.5 space-y-2 text-xs">
-            <div className="flex justify-between text-slate-500">
+          <div className="rounded-card border border-border-main bg-canvas p-3.5 space-y-2 text-xs">
+            <div className="flex justify-between text-text-muted">
               <span>Amount Before Round-Off</span>
-              <span className="font-semibold text-slate-700">₹ {netBeforeRound.toFixed(2)}</span>
+              <span className="font-mono font-semibold text-text-main">₹ {netBeforeRound.toFixed(2)}</span>
             </div>
-            <div className="flex justify-between items-center text-slate-700">
-              <span className="flex items-center gap-1 font-semibold">
-                <ArrowRightLeft className="h-3.5 w-3.5 text-blue-600" />
+            <div className="flex justify-between items-center text-text-main">
+              <span className="flex items-center gap-1 font-semibold text-text-muted">
+                <ArrowRightLeft className="h-3.5 w-3.5 text-accent" />
                 Round-off Adjustment
               </span>
-              <span className={`font-bold ${effectiveRoundOff < 0 ? "text-amber-600" : effectiveRoundOff > 0 ? "text-emerald-600" : "text-slate-600"}`}>
+              <span className={`font-mono font-bold ${effectiveRoundOff < 0 ? "text-[var(--color-warning-text,#8A5200)]" : effectiveRoundOff > 0 ? "text-accent" : "text-text-muted"}`}>
                 {effectiveRoundOff > 0 ? `+ ₹ ${effectiveRoundOff.toFixed(2)}` : effectiveRoundOff < 0 ? `- ₹ ${Math.abs(effectiveRoundOff).toFixed(2)}` : `₹ 0.00`}
               </span>
             </div>
-            <div className="pt-2 border-t border-slate-200 flex justify-between items-center text-sm font-bold text-slate-900">
+            <div className="pt-2 border-t border-border-main flex justify-between items-center text-sm font-bold text-text-main">
               <span>Final Grand Total</span>
-              <span className="text-lg text-blue-700 font-black">₹ {effectiveFinal.toFixed(2)}</span>
+              <span className="text-lg text-accent font-black font-mono">₹ {effectiveFinal.toFixed(2)}</span>
             </div>
           </div>
 
           {/* Statutory Auto-Roundoff Recommendation */}
-          <div className="flex items-center justify-between rounded-xl bg-blue-50/70 border border-blue-100 p-2.5 text-xs">
+          <div className="flex items-center justify-between rounded-card bg-canvas border border-border-main p-2.5 text-xs">
             <div>
-              <span className="text-[10px] font-bold text-blue-600 uppercase tracking-wide block">Statutory Auto Round</span>
-              <span className="text-slate-700 font-medium">
-                Nearest ₹ : <strong className="text-blue-900">₹ {autoRo.grandTotal.toFixed(2)}</strong> ({autoRo.roundOff >= 0 ? `+₹${autoRo.roundOff.toFixed(2)}` : `-₹${Math.abs(autoRo.roundOff).toFixed(2)}`})
+              <span className="text-[10px] font-bold text-accent uppercase tracking-wider block">Statutory Auto Round</span>
+              <span className="text-text-muted font-medium">
+                Nearest ₹ : <strong className="text-text-main font-mono">₹ {autoRo.grandTotal.toFixed(2)}</strong> ({autoRo.roundOff >= 0 ? `+₹${autoRo.roundOff.toFixed(2)}` : `-₹${Math.abs(autoRo.roundOff).toFixed(2)}`})
               </span>
             </div>
             <button
               type="button"
               onClick={handleResetAuto}
-              className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white border border-blue-200 text-blue-700 hover:bg-blue-600 hover:text-white text-xs font-semibold shadow-2xs transition-colors cursor-pointer"
+              className="flex items-center gap-1 px-2.5 py-1 rounded-btn bg-surface border border-border-main text-accent hover:bg-accent-soft text-xs font-semibold shadow-2xs transition-colors cursor-pointer"
             >
               <RotateCcw className="h-3 w-3" />
               Use Auto
@@ -232,18 +232,18 @@ export const RoundOffModal: React.FC<RoundOffModalProps> = ({
         </div>
 
         {/* Footer */}
-        <div className="px-5 py-3 border-t border-slate-100 bg-slate-50 flex items-center justify-end gap-2">
+        <div className="px-5 py-3 border-t border-border-main bg-canvas flex items-center justify-end gap-2">
           <button
             type="button"
             onClick={onClose}
-            className="px-3.5 py-1.5 rounded-lg border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-slate-100 cursor-pointer"
+            className="px-3.5 py-1.5 rounded-btn border border-border-main text-xs font-semibold text-text-muted hover:text-text-main hover:bg-surface cursor-pointer transition-colors"
           >
             Cancel (Esc)
           </button>
           <button
             type="button"
             onClick={handleApply}
-            className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-xs font-bold text-white shadow-sm transition-colors cursor-pointer"
+            className="flex items-center gap-1.5 px-4 py-1.5 rounded-btn bg-accent hover:opacity-90 text-xs font-bold text-white shadow-xs transition-opacity cursor-pointer"
           >
             <Check className="h-4 w-4" />
             Apply Round-Off (Enter)

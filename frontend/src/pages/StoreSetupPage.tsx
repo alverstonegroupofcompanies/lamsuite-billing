@@ -122,23 +122,23 @@ export const StoreSetupPage: React.FC<StoreSetupPageProps> = ({ onSetupComplete 
   };
 
   return (
-    <div className="min-h-screen bg-slate-900 flex flex-col justify-center items-center p-4 font-sans text-slate-100 select-none">
+    <div className="min-h-screen bg-canvas flex flex-col justify-center items-center p-4 font-sans text-text-main select-none">
       <div className="w-full max-w-xl">
         {/* Header */}
         <div className="text-center mb-6">
-          <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-blue-600 to-indigo-600 flex items-center justify-center text-white mx-auto shadow-lg shadow-blue-500/20 mb-3">
+          <div className="w-14 h-14 rounded-card bg-accent flex items-center justify-center text-white mx-auto shadow-xs mb-3">
             <Building2 className="w-7 h-7" />
           </div>
-          <h1 className="text-2xl font-black tracking-tight text-white">LamSuite Billing Setup</h1>
-          <p className="text-xs text-slate-400 mt-1">
+          <h1 className="text-[26px] font-bold tracking-tight text-text-main">LamSuite Billing Setup</h1>
+          <p className="text-xs text-text-muted mt-1">
             Workstation Device Registration & Offline Master Data Ingestion
           </p>
         </div>
 
         {/* Main Card */}
-        <div className="bg-slate-800/90 border border-slate-700/80 rounded-2xl p-6 sm:p-8 shadow-2xl backdrop-blur-md">
+        <div className="bg-surface border border-border-main rounded-card p-6 sm:p-8 shadow-xs">
           {errorMsg && (
-            <div className="mb-4 bg-red-500/10 border border-red-500/30 rounded-xl p-3 text-xs text-red-400 flex items-start gap-2.5">
+            <div className="mb-4 bg-status-danger/10 border border-status-danger/20 rounded-btn p-3 text-xs text-status-danger flex items-start gap-2.5">
               <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
               <span>{errorMsg}</span>
             </div>
@@ -148,37 +148,37 @@ export const StoreSetupPage: React.FC<StoreSetupPageProps> = ({ onSetupComplete 
             /* Progress Screen */
             <div className="py-6 space-y-6 text-center">
               <div className="relative w-20 h-20 mx-auto flex items-center justify-center">
-                <RefreshCw className="w-12 h-12 text-blue-500 animate-spin" />
+                <RefreshCw className="w-12 h-12 text-accent animate-spin" />
               </div>
               <div className="space-y-2">
-                <h3 className="text-base font-bold text-white">Synchronizing Store Environment</h3>
-                <p className="text-xs text-blue-400 font-mono animate-pulse">{progressStep}</p>
+                <h3 className="text-base font-bold text-text-main">Synchronizing Store Environment</h3>
+                <p className="text-xs text-accent font-mono animate-pulse">{progressStep}</p>
               </div>
 
               {/* Progress Bar */}
-              <div className="w-full bg-slate-700 rounded-full h-2.5 overflow-hidden">
+              <div className="w-full bg-canvas rounded-full h-2.5 overflow-hidden border border-border-main">
                 <div
-                  className="bg-blue-500 h-2.5 rounded-full transition-all duration-300"
+                  className="bg-accent h-2.5 rounded-full transition-all duration-300"
                   style={{ width: `${progressPercent}%` }}
                 />
               </div>
 
-              <div className="flex justify-between text-[11px] text-slate-400">
+              <div className="flex justify-between text-[11px] text-text-muted">
                 <span>OS Secure Token Vault</span>
-                <span className="font-mono font-bold text-white">{progressPercent}%</span>
+                <span className="font-mono font-bold text-text-main tabular-nums">{progressPercent}%</span>
               </div>
             </div>
           ) : (
             <form onSubmit={handleStartSetup} className="space-y-4">
               {/* Setup Mode Navigation */}
-              <div className="grid grid-cols-3 gap-2 p-1 bg-slate-900 rounded-xl border border-slate-700/70 text-xs">
+              <div className="grid grid-cols-3 gap-2 p-1 bg-canvas rounded-btn border border-border-main text-xs">
                 <button
                   type="button"
                   onClick={() => setSetupMode("activation_key")}
-                  className={`py-2 rounded-lg font-medium transition-colors ${
+                  className={`py-2 rounded-btn font-medium transition-colors ${
                     setupMode === "activation_key"
-                      ? "bg-blue-600 text-white shadow-sm"
-                      : "text-slate-400 hover:text-white"
+                      ? "bg-surface text-accent shadow-xs font-semibold"
+                      : "text-text-muted hover:text-text-main"
                   }`}
                 >
                   Store Key
@@ -186,10 +186,10 @@ export const StoreSetupPage: React.FC<StoreSetupPageProps> = ({ onSetupComplete 
                 <button
                   type="button"
                   onClick={() => setSetupMode("owner_login")}
-                  className={`py-2 rounded-lg font-medium transition-colors ${
+                  className={`py-2 rounded-btn font-medium transition-colors ${
                     setupMode === "owner_login"
-                      ? "bg-blue-600 text-white shadow-sm"
-                      : "text-slate-400 hover:text-white"
+                      ? "bg-surface text-accent shadow-xs font-semibold"
+                      : "text-text-muted hover:text-text-main"
                   }`}
                 >
                   Owner Login
@@ -197,10 +197,10 @@ export const StoreSetupPage: React.FC<StoreSetupPageProps> = ({ onSetupComplete 
                 <button
                   type="button"
                   onClick={() => setSetupMode("lan_secondary")}
-                  className={`py-2 rounded-lg font-medium transition-colors ${
+                  className={`py-2 rounded-btn font-medium transition-colors ${
                     setupMode === "lan_secondary"
-                      ? "bg-blue-600 text-white shadow-sm"
-                      : "text-slate-400 hover:text-white"
+                      ? "bg-surface text-accent shadow-xs font-semibold"
+                      : "text-text-muted hover:text-text-main"
                   }`}
                 >
                   LAN Counter
@@ -211,21 +211,21 @@ export const StoreSetupPage: React.FC<StoreSetupPageProps> = ({ onSetupComplete 
               {setupMode === "activation_key" && (
                 <div className="space-y-3">
                   <div>
-                    <label className="block text-xs font-semibold text-slate-300 mb-1">
+                    <label className="block text-[11px] font-semibold uppercase tracking-wider text-text-muted mb-1">
                       Store Activation Key / License Token
                     </label>
                     <div className="relative">
-                      <KeyRound className="w-4 h-4 text-slate-500 absolute left-3 top-3" />
+                      <KeyRound className="w-4 h-4 text-text-muted absolute left-3 top-3" />
                       <input
                         type="text"
                         required
                         value={activationKey}
                         onChange={(e) => setActivationKey(e.target.value.toUpperCase())}
                         placeholder="LAM-STORE-XXXX-YYYY"
-                        className="w-full pl-9 pr-3.5 py-2.5 bg-slate-900 border border-slate-700 rounded-xl text-white font-mono text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                        className="w-full pl-9 pr-3.5 py-2.5 bg-surface border border-border-main rounded-btn text-text-main font-mono text-xs focus:border-accent focus:outline-none"
                       />
                     </div>
-                    <p className="text-[11px] text-slate-400 mt-1">
+                    <p className="text-[11px] text-text-muted mt-1">
                       Provided on store creation in Central Admin or license dispatch letter.
                     </p>
                   </div>
@@ -236,35 +236,35 @@ export const StoreSetupPage: React.FC<StoreSetupPageProps> = ({ onSetupComplete 
               {setupMode === "owner_login" && (
                 <div className="space-y-3">
                   <div>
-                    <label className="block text-xs font-semibold text-slate-300 mb-1">Owner Email</label>
+                    <label className="block text-[11px] font-semibold uppercase tracking-wider text-text-muted mb-1">Owner Email</label>
                     <input
                       type="email"
                       required
                       value={ownerEmail}
                       onChange={(e) => setOwnerEmail(e.target.value)}
-                      className="w-full px-3.5 py-2 bg-slate-900 border border-slate-700 rounded-xl text-white text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                      className="w-full px-3.5 py-2 bg-surface border border-border-main rounded-btn text-text-main text-xs focus:border-accent focus:outline-none"
                     />
                   </div>
 
                   <div>
-                    <label className="block text-xs font-semibold text-slate-300 mb-1">Password</label>
+                    <label className="block text-[11px] font-semibold uppercase tracking-wider text-text-muted mb-1">Password</label>
                     <input
                       type="password"
                       required
                       value={ownerPassword}
                       onChange={(e) => setOwnerPassword(e.target.value)}
-                      className="w-full px-3.5 py-2 bg-slate-900 border border-slate-700 rounded-xl text-white text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                      className="w-full px-3.5 py-2 bg-surface border border-border-main rounded-btn text-text-main text-xs focus:border-accent focus:outline-none"
                     />
                   </div>
 
                   <div>
-                    <label className="block text-xs font-semibold text-slate-300 mb-1">
+                    <label className="block text-[11px] font-semibold uppercase tracking-wider text-text-muted mb-1">
                       Select Store / Branch (Multi-Store Ownership)
                     </label>
                     <select
                       value={selectedBranchId}
                       onChange={(e) => setSelectedBranchId(e.target.value)}
-                      className="w-full px-3.5 py-2 bg-slate-900 border border-slate-700 rounded-xl text-white text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                      className="w-full px-3.5 py-2 bg-surface border border-border-main rounded-btn text-text-main text-xs focus:border-accent focus:outline-none"
                     >
                       {branches.map((b) => (
                         <option key={b.id} value={b.id}>
@@ -279,18 +279,18 @@ export const StoreSetupPage: React.FC<StoreSetupPageProps> = ({ onSetupComplete 
               {/* Mode 3: LAN Secondary Counter */}
               {setupMode === "lan_secondary" && (
                 <div className="space-y-3">
-                  <div className="bg-blue-950/40 p-3 rounded-xl border border-blue-800/40 text-xs text-blue-300">
+                  <div className="bg-accent-soft p-3 rounded-card border border-accent/20 text-xs text-accent">
                     <p className="flex items-center gap-1.5 font-bold mb-1">
-                      <Network className="w-4 h-4 shrink-0" />
+                      <Network className="w-4 h-4 shrink-0 text-accent" />
                       Connecting as a Secondary Terminal
                     </p>
-                    <p className="text-[11px] text-slate-400">
+                    <p className="text-[11px] text-text-muted">
                       This terminal will synchronize catalog, pricing and shifts from your Main Counter Server over LAN.
                     </p>
                   </div>
 
                   <div>
-                    <label className="block text-xs font-semibold text-slate-300 mb-1">
+                    <label className="block text-[11px] font-semibold uppercase tracking-wider text-text-muted mb-1">
                       Store Main Hub IP Address
                     </label>
                     <div className="flex gap-2">
@@ -300,13 +300,13 @@ export const StoreSetupPage: React.FC<StoreSetupPageProps> = ({ onSetupComplete 
                         value={hubIp}
                         onChange={(e) => setHubIp(e.target.value)}
                         placeholder="192.168.1.100"
-                        className="flex-1 px-3.5 py-2 bg-slate-900 border border-slate-700 rounded-xl text-white font-mono text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                        className="flex-1 px-3.5 py-2 bg-surface border border-border-main rounded-btn text-text-main font-mono text-xs focus:border-accent focus:outline-none tabular-nums"
                       />
                       <button
                         type="button"
                         onClick={handleLanDiscovery}
                         disabled={isDiscoveringLan}
-                        className="px-3 py-2 bg-slate-700 hover:bg-slate-600 rounded-xl text-xs font-medium text-white flex items-center gap-1.5 shrink-0"
+                        className="px-3 py-2 bg-accent-soft hover:bg-accent-soft/80 text-accent border border-accent/20 rounded-btn text-xs font-semibold flex items-center gap-1.5 shrink-0 transition-colors"
                       >
                         <RefreshCw className={`w-3.5 h-3.5 ${isDiscoveringLan ? "animate-spin" : ""}`} />
                         Scan LAN
@@ -317,16 +317,16 @@ export const StoreSetupPage: React.FC<StoreSetupPageProps> = ({ onSetupComplete 
               )}
 
               {/* Counter Designation */}
-              <div className="grid grid-cols-2 gap-3 pt-2 border-t border-slate-700/60">
+              <div className="grid grid-cols-2 gap-3 pt-2 border-t border-border-main">
                 <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">Counter Name</label>
+                  <label className="block text-[11px] font-semibold uppercase tracking-wider text-text-muted mb-1">Counter Name</label>
                   <input
                     type="text"
                     required
                     value={counterName}
                     onChange={(e) => setCounterName(e.target.value)}
                     placeholder="Counter 01"
-                    className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-white text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                    className="w-full px-3 py-2 bg-surface border border-border-main rounded-btn text-text-main text-xs focus:border-accent focus:outline-none"
                   />
                 </div>
 
@@ -337,9 +337,9 @@ export const StoreSetupPage: React.FC<StoreSetupPageProps> = ({ onSetupComplete 
                       checked={setupMode === "lan_secondary" ? false : isHub}
                       disabled={setupMode === "lan_secondary"}
                       onChange={(e) => setIsHub(e.target.checked)}
-                      className="rounded border-slate-700 text-blue-600 focus:ring-blue-500 h-4 w-4"
+                      className="rounded border-border-main text-accent focus:ring-accent h-4 w-4"
                     />
-                    <span className="text-xs text-slate-300 font-medium">Designate as Store Hub</span>
+                    <span className="text-xs text-text-main font-medium">Designate as Store Hub</span>
                   </label>
                 </div>
               </div>
@@ -349,54 +349,54 @@ export const StoreSetupPage: React.FC<StoreSetupPageProps> = ({ onSetupComplete 
                 <button
                   type="button"
                   onClick={() => setNeedsFirstAdmin(!needsFirstAdmin)}
-                  className="text-xs text-blue-400 hover:text-blue-300 font-medium flex items-center gap-1"
+                  className="text-xs text-accent hover:underline font-semibold flex items-center gap-1"
                 >
                   {needsFirstAdmin ? "− Hide First-Admin Setup" : "+ Initialize First Store Admin (New Store)"}
                 </button>
               </div>
 
               {needsFirstAdmin && (
-                <div className="bg-slate-900/80 p-4 rounded-xl border border-slate-700 space-y-3">
-                  <h4 className="text-xs font-bold text-white flex items-center gap-1.5">
-                    <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                <div className="bg-canvas p-4 rounded-card border border-border-main space-y-3">
+                  <h4 className="text-xs font-bold text-text-main flex items-center gap-1.5">
+                    <ShieldCheck className="w-4 h-4 text-accent" />
                     First Administrator Account
                   </h4>
                   <div className="grid grid-cols-2 gap-2 text-xs">
                     <div>
-                      <label className="block text-[11px] text-slate-400 mb-1">Full Name</label>
+                      <label className="block text-[11px] font-semibold text-text-muted mb-1 uppercase tracking-wider">Full Name</label>
                       <input
                         type="text"
                         value={firstAdminName}
                         onChange={(e) => setFirstAdminName(e.target.value)}
-                        className="w-full px-2.5 py-1.5 bg-slate-950 border border-slate-700 rounded-lg text-white"
+                        className="w-full px-2.5 py-1.5 bg-surface border border-border-main rounded-btn text-text-main focus:border-accent focus:outline-none"
                       />
                     </div>
                     <div>
-                      <label className="block text-[11px] text-slate-400 mb-1">Username</label>
+                      <label className="block text-[11px] font-semibold text-text-muted mb-1 uppercase tracking-wider">Username</label>
                       <input
                         type="text"
                         value={firstAdminUsername}
                         onChange={(e) => setFirstAdminUsername(e.target.value)}
-                        className="w-full px-2.5 py-1.5 bg-slate-950 border border-slate-700 rounded-lg text-white"
+                        className="w-full px-2.5 py-1.5 bg-surface border border-border-main rounded-btn text-text-main focus:border-accent focus:outline-none"
                       />
                     </div>
                     <div>
-                      <label className="block text-[11px] text-slate-400 mb-1">Password</label>
+                      <label className="block text-[11px] font-semibold text-text-muted mb-1 uppercase tracking-wider">Password</label>
                       <input
                         type="password"
                         value={firstAdminPassword}
                         onChange={(e) => setFirstAdminPassword(e.target.value)}
-                        className="w-full px-2.5 py-1.5 bg-slate-950 border border-slate-700 rounded-lg text-white"
+                        className="w-full px-2.5 py-1.5 bg-surface border border-border-main rounded-btn text-text-main focus:border-accent focus:outline-none"
                       />
                     </div>
                     <div>
-                      <label className="block text-[11px] text-slate-400 mb-1">Quick PIN (4 digits)</label>
+                      <label className="block text-[11px] font-semibold text-text-muted mb-1 uppercase tracking-wider">Quick PIN (4 digits)</label>
                       <input
                         type="password"
                         maxLength={6}
                         value={firstAdminPin}
                         onChange={(e) => setFirstAdminPin(e.target.value)}
-                        className="w-full px-2.5 py-1.5 bg-slate-950 border border-slate-700 rounded-lg text-white font-mono"
+                        className="w-full px-2.5 py-1.5 bg-surface border border-border-main rounded-btn text-text-main font-mono focus:border-accent focus:outline-none tabular-nums"
                       />
                     </div>
                   </div>
@@ -406,7 +406,7 @@ export const StoreSetupPage: React.FC<StoreSetupPageProps> = ({ onSetupComplete 
               {/* Submit Button */}
               <button
                 type="submit"
-                className="w-full mt-4 py-2.5 px-4 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white text-xs font-bold rounded-xl shadow-lg shadow-blue-500/25 flex items-center justify-center gap-2 cursor-pointer transition-all"
+                className="w-full mt-4 py-2.5 px-4 bg-accent hover:bg-accent/90 text-white text-xs font-semibold rounded-btn shadow-xs flex items-center justify-center gap-2 cursor-pointer transition-all"
               >
                 <span>Complete Store Onboarding</span>
                 <ArrowRight className="w-4 h-4" />

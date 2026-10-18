@@ -12,6 +12,8 @@
     "tauri": "DEVELOPER_DIR=/Library/Developer/CommandLineTools tauri"
   },
   "dependencies": {
+    "@fontsource/ibm-plex-mono": "^5.3.0",
+    "@fontsource/manrope": "^5.3.0",
     "@tauri-apps/api": "^1.6.0",
     "@types/qrcode": "^1.5.6",
     "clsx": "^2.1.1",

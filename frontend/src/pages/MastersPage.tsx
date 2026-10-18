@@ -325,14 +325,14 @@ export const MastersPage: React.FC = () => {
       )}
 
       {/* Header bar */}
-      <div className="flex items-center justify-between rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+      <div className="flex items-center justify-between rounded-card border border-border-main bg-surface p-4 shadow-xs">
         <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-indigo-50 text-indigo-600">
+          <div className="flex h-10 w-10 items-center justify-center rounded-btn bg-accent-soft text-accent">
             <Database className="h-5 w-5" />
           </div>
           <div>
-            <h1 className="text-lg font-bold text-slate-800">Master Data Management</h1>
-            <p className="text-xs text-slate-500">Products, barcodes, batches, parties, and discount schemas</p>
+            <h1 className="text-[26px] font-bold text-text-main tracking-tight">Master Data Management</h1>
+            <p className="text-xs text-text-muted mt-0.5">Products, barcodes, batches, parties, and discount schemas</p>
           </div>
         </div>
 
@@ -350,7 +350,7 @@ export const MastersPage: React.FC = () => {
                     : "discount_schemas";
                 setImportEntityId(entity);
               }}
-              className="flex items-center gap-1.5 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-bold text-indigo-700 hover:bg-indigo-100 transition-colors shadow-2xs cursor-pointer"
+              className="flex items-center gap-1.5 rounded-btn border border-accent/20 bg-accent-soft px-3.5 py-2 text-xs font-semibold text-accent hover:bg-accent-soft/80 transition-colors shadow-xs cursor-pointer"
             >
               <Upload className="h-3.5 w-3.5" />
               <span>Import Wizard (Excel/CSV)</span>
@@ -367,19 +367,19 @@ export const MastersPage: React.FC = () => {
                     : "discount_schemas";
                 setExportEntityId(entity);
               }}
-              className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition-colors shadow-2xs cursor-pointer"
+              className="flex items-center gap-1.5 rounded-btn border border-border-main bg-surface px-3.5 py-2 text-xs font-medium text-text-main hover:bg-canvas transition-colors shadow-xs cursor-pointer"
             >
-              <Download className="h-3.5 w-3.5 text-slate-500" />
+              <Download className="h-3.5 w-3.5 text-text-muted" />
               <span>Export</span>
             </button>
           </div>
 
           {/* Tab Switcher */}
-          <div className="flex rounded-lg bg-slate-100 p-1 border border-slate-200">
+          <div className="flex rounded-btn bg-canvas p-1 border border-border-main">
           <button
             onClick={() => { setActiveTab("products"); setSearchQuery(""); }}
-            className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
-              activeTab === "products" ? "bg-white text-indigo-700 shadow-sm" : "text-slate-600 hover:text-slate-900"
+            className={`flex items-center gap-1.5 rounded-btn px-3 py-1.5 text-xs font-semibold transition-colors ${
+              activeTab === "products" ? "bg-surface text-accent shadow-xs border border-border-main/50" : "text-text-muted hover:text-text-main"
             }`}
           >
             <Package className="h-3.5 w-3.5" />
@@ -387,8 +387,8 @@ export const MastersPage: React.FC = () => {
           </button>
           <button
             onClick={() => { setActiveTab("batches"); setSearchQuery(""); }}
-            className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
-              activeTab === "batches" ? "bg-white text-indigo-700 shadow-sm" : "text-slate-600 hover:text-slate-900"
+            className={`flex items-center gap-1.5 rounded-btn px-3 py-1.5 text-xs font-semibold transition-colors ${
+              activeTab === "batches" ? "bg-surface text-accent shadow-xs border border-border-main/50" : "text-text-muted hover:text-text-main"
             }`}
           >
             <Layers className="h-3.5 w-3.5" />
@@ -396,8 +396,8 @@ export const MastersPage: React.FC = () => {
           </button>
           <button
             onClick={() => { setActiveTab("parties"); setSearchQuery(""); }}
-            className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
-              activeTab === "parties" ? "bg-white text-indigo-700 shadow-sm" : "text-slate-600 hover:text-slate-900"
+            className={`flex items-center gap-1.5 rounded-btn px-3 py-1.5 text-xs font-semibold transition-colors ${
+              activeTab === "parties" ? "bg-surface text-accent shadow-xs border border-border-main/50" : "text-text-muted hover:text-text-main"
             }`}
           >
             <Users className="h-3.5 w-3.5" />
@@ -405,8 +405,8 @@ export const MastersPage: React.FC = () => {
           </button>
           <button
             onClick={() => { setActiveTab("discounts"); setSearchQuery(""); }}
-            className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
-              activeTab === "discounts" ? "bg-white text-indigo-700 shadow-sm" : "text-slate-600 hover:text-slate-900"
+            className={`flex items-center gap-1.5 rounded-btn px-3 py-1.5 text-xs font-semibold transition-colors ${
+              activeTab === "discounts" ? "bg-surface text-accent shadow-xs border border-border-main/50" : "text-text-muted hover:text-text-main"
             }`}
           >
             <Percent className="h-3.5 w-3.5" />
@@ -420,13 +420,13 @@ export const MastersPage: React.FC = () => {
       <div className="flex items-center justify-between gap-4">
         <div className="flex flex-1 items-center gap-3">
           <div className="relative flex-1 max-w-md">
-            <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+            <Search className="absolute left-3 top-2.5 h-4 w-4 text-text-muted" />
             <input
               type="text"
               placeholder={`Search ${activeTab}...`}
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full rounded-md border border-slate-200 bg-white py-2 pl-9 pr-3 text-xs text-slate-800 placeholder-slate-400 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+              className="w-full rounded-input border border-border-main bg-surface py-2 pl-9 pr-3 text-xs text-text-main placeholder-text-muted shadow-2xs focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
             />
           </div>
 
@@ -434,7 +434,7 @@ export const MastersPage: React.FC = () => {
             <select
               value={selectedProductIdForBatches}
               onChange={(e) => setSelectedProductIdForBatches(e.target.value)}
-              className="rounded-md border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700 shadow-sm focus:border-indigo-500 focus:outline-none"
+              className="rounded-input border border-border-main bg-surface px-3 py-2 text-xs text-text-main shadow-2xs focus:border-accent focus:outline-none"
             >
               <option value="">All Products</option>
               {products.map((p) => (
@@ -444,13 +444,13 @@ export const MastersPage: React.FC = () => {
           )}
 
           {activeTab === "parties" && (
-            <div className="flex rounded-md border border-slate-200 bg-white p-0.5 text-xs">
+            <div className="flex rounded-btn border border-border-main bg-canvas p-0.5 text-xs">
               {(["all", "customer", "supplier", "doctor", "patient"] as const).map((t) => (
                 <button
                   key={t}
                   onClick={() => setPartyTypeFilter(t)}
-                  className={`rounded px-2.5 py-1 capitalize ${
-                    partyTypeFilter === t ? "bg-indigo-600 text-white font-medium" : "text-slate-600 hover:bg-slate-50"
+                  className={`rounded-btn px-2.5 py-1 capitalize transition-colors font-semibold ${
+                    partyTypeFilter === t ? "bg-surface text-accent shadow-xs border border-border-main/50" : "text-text-muted hover:text-text-main"
                   }`}
                 >
                   {t}
@@ -466,9 +466,9 @@ export const MastersPage: React.FC = () => {
             <>
               <button
                 onClick={() => setImportEntityId("items")}
-                className="flex items-center gap-1.5 rounded-md border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 shadow-2xs hover:bg-slate-50 cursor-pointer"
+                className="flex items-center gap-1.5 rounded-btn border border-border-main bg-surface px-3 py-2 text-xs font-semibold text-text-main shadow-xs hover:bg-canvas cursor-pointer transition-colors"
               >
-                <Upload className="h-3.5 w-3.5 text-indigo-600" />
+                <Upload className="h-3.5 w-3.5 text-accent" />
                 <span>Import Products</span>
               </button>
               <button
@@ -493,7 +493,7 @@ export const MastersPage: React.FC = () => {
                   });
                   setIsProductModalOpen(true);
                 }}
-                className="flex items-center gap-1.5 rounded-md bg-indigo-600 px-3 py-2 text-xs font-semibold text-white shadow-sm hover:bg-indigo-700 cursor-pointer"
+                className="flex items-center gap-1.5 rounded-btn bg-accent px-3 py-2 text-xs font-semibold text-white shadow-xs hover:bg-accent/90 cursor-pointer transition-colors"
               >
                 <Plus className="h-4 w-4" />
                 <span>Add Product</span>
@@ -504,9 +504,9 @@ export const MastersPage: React.FC = () => {
             <>
               <button
                 onClick={() => setImportEntityId("batches")}
-                className="flex items-center gap-1.5 rounded-md border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 shadow-2xs hover:bg-slate-50 cursor-pointer"
+                className="flex items-center gap-1.5 rounded-btn border border-border-main bg-surface px-3 py-2 text-xs font-semibold text-text-main shadow-xs hover:bg-canvas cursor-pointer transition-colors"
               >
-                <Upload className="h-3.5 w-3.5 text-indigo-600" />
+                <Upload className="h-3.5 w-3.5 text-accent" />
                 <span>Import Batches</span>
               </button>
               <button
@@ -525,7 +525,7 @@ export const MastersPage: React.FC = () => {
                   });
                   setIsBatchModalOpen(true);
                 }}
-                className="flex items-center gap-1.5 rounded-md bg-indigo-600 px-3 py-2 text-xs font-semibold text-white shadow-sm hover:bg-indigo-700 cursor-pointer"
+                className="flex items-center gap-1.5 rounded-btn bg-accent px-3 py-2 text-xs font-semibold text-white shadow-xs hover:bg-accent/90 cursor-pointer transition-colors"
               >
                 <Plus className="h-4 w-4" />
                 <span>Add Batch</span>
@@ -546,9 +546,9 @@ export const MastersPage: React.FC = () => {
                       : "customers"
                   )
                 }
-                className="flex items-center gap-1.5 rounded-md border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 shadow-2xs hover:bg-slate-50 cursor-pointer"
+                className="flex items-center gap-1.5 rounded-btn border border-border-main bg-surface px-3 py-2 text-xs font-semibold text-text-main shadow-xs hover:bg-canvas cursor-pointer transition-colors"
               >
-                <Upload className="h-3.5 w-3.5 text-indigo-600" />
+                <Upload className="h-3.5 w-3.5 text-accent" />
                 <span>Import Parties</span>
               </button>
               <button
@@ -566,7 +566,7 @@ export const MastersPage: React.FC = () => {
                   });
                   setIsPartyModalOpen(true);
                 }}
-                className="flex items-center gap-1.5 rounded-md bg-indigo-600 px-3 py-2 text-xs font-semibold text-white shadow-sm hover:bg-indigo-700 cursor-pointer"
+                className="flex items-center gap-1.5 rounded-btn bg-accent px-3 py-2 text-xs font-semibold text-white shadow-xs hover:bg-accent/90 cursor-pointer transition-colors"
               >
                 <Plus className="h-4 w-4" />
                 <span>Add Party</span>
@@ -585,7 +585,7 @@ export const MastersPage: React.FC = () => {
                 });
                 setIsDiscountModalOpen(true);
               }}
-              className="flex items-center gap-1.5 rounded-md bg-indigo-600 px-3 py-2 text-xs font-semibold text-white shadow-sm hover:bg-indigo-700 cursor-pointer"
+              className="flex items-center gap-1.5 rounded-btn bg-accent px-3 py-2 text-xs font-semibold text-white shadow-xs hover:bg-accent/90 cursor-pointer transition-colors"
             >
               <Plus className="h-4 w-4" />
               <span>Add Schema</span>
@@ -595,10 +595,10 @@ export const MastersPage: React.FC = () => {
       </div>
 
       {/* Main Content Tables */}
-      <div className="flex-1 overflow-auto rounded-lg border border-slate-200 bg-white shadow-sm">
+      <div className="flex-1 overflow-auto rounded-card border border-border-main bg-surface shadow-xs">
         {activeTab === "products" && (
-          <table className="w-full text-left text-xs text-slate-600">
-            <thead className="sticky top-0 bg-slate-50 text-[11px] font-semibold uppercase tracking-wider text-slate-500 border-b border-slate-200">
+          <table className="w-full text-left text-xs text-text-muted">
+            <thead className="sticky top-0 bg-canvas text-[11px] font-semibold uppercase tracking-wider text-text-muted border-b border-border-main">
               <tr>
                 <th className="px-4 py-3">Product Name</th>
                 <th className="px-4 py-3">Barcode</th>
@@ -611,34 +611,34 @@ export const MastersPage: React.FC = () => {
                 <th className="px-4 py-3 text-center">Actions</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100 font-sans">
+            <tbody className="divide-y divide-border-main/50 font-sans">
               {filteredProducts.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="py-8 text-center text-slate-400">
+                  <td colSpan={9} className="py-8 text-center text-text-muted">
                     No products found. Click "Add Product" to create your first item.
                   </td>
                 </tr>
               ) : (
                 filteredProducts.map((p) => (
-                  <tr key={p.id} className="hover:bg-slate-50 transition-colors">
-                    <td className="px-4 py-2.5 font-medium text-slate-800">
+                  <tr key={p.id} className="hover:bg-canvas/50 transition-colors">
+                    <td className="px-4 py-2.5 font-medium text-text-main">
                       <div>{p.name}</div>
                       {p.generic_name && (
-                        <div className="text-[10px] text-slate-400 italic">{p.generic_name}</div>
+                        <div className="text-[10px] text-text-muted italic">{p.generic_name}</div>
                       )}
                     </td>
-                    <td className="px-4 py-2.5 font-mono text-slate-500">{p.barcode}</td>
-                    <td className="px-4 py-2.5 font-mono text-slate-500">{p.hsn_sac_code || "—"}</td>
-                    <td className="px-4 py-2.5 text-right font-medium text-slate-700">₹{p.mrp.toFixed(2)}</td>
-                    <td className="px-4 py-2.5 text-right font-semibold text-indigo-600">₹{p.sel_rate.toFixed(2)}</td>
-                    <td className="px-4 py-2.5 text-right text-slate-600">{p.gst_percent}%</td>
-                    <td className="px-4 py-2.5 text-slate-500">
+                    <td className="px-4 py-2.5 font-mono tabular-nums text-text-muted">{p.barcode}</td>
+                    <td className="px-4 py-2.5 font-mono tabular-nums text-text-muted">{p.hsn_sac_code || "—"}</td>
+                    <td className="px-4 py-2.5 text-right font-mono tabular-nums font-medium text-text-main">₹{p.mrp.toFixed(2)}</td>
+                    <td className="px-4 py-2.5 text-right font-mono tabular-nums font-semibold text-accent">₹{p.sel_rate.toFixed(2)}</td>
+                    <td className="px-4 py-2.5 text-right font-mono tabular-nums text-text-muted">{p.gst_percent}%</td>
+                    <td className="px-4 py-2.5 text-text-muted">
                       {p.rack_location ? `${p.rack_location} / ${p.shelf_location || ""}` : "—"}
                     </td>
                     <td className="px-4 py-2.5 text-center">
                       <span
                         className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${
-                          p.is_active ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-600"
+                          p.is_active ? "bg-accent-soft text-accent" : "bg-canvas text-text-muted"
                         }`}
                       >
                         {p.is_active ? "Active" : "Inactive"}
@@ -651,7 +651,7 @@ export const MastersPage: React.FC = () => {
                           setProdForm({ ...p });
                           setIsProductModalOpen(true);
                         }}
-                        className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-indigo-600"
+                        className="rounded-btn p-1 text-text-muted hover:bg-canvas hover:text-accent transition-colors"
                         title="Edit Product"
                       >
                         <Edit2 className="h-4 w-4" />
@@ -665,8 +665,8 @@ export const MastersPage: React.FC = () => {
         )}
 
         {activeTab === "batches" && (
-          <table className="w-full text-left text-xs text-slate-600">
-            <thead className="sticky top-0 bg-slate-50 text-[11px] font-semibold uppercase tracking-wider text-slate-500 border-b border-slate-200">
+          <table className="w-full text-left text-xs text-text-muted">
+            <thead className="sticky top-0 bg-canvas text-[11px] font-semibold uppercase tracking-wider text-text-muted border-b border-border-main">
               <tr>
                 <th className="px-4 py-3">Product</th>
                 <th className="px-4 py-3">Batch No</th>
@@ -678,10 +678,10 @@ export const MastersPage: React.FC = () => {
                 <th className="px-4 py-3 text-center">Actions</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100 font-sans">
+            <tbody className="divide-y divide-border-main/50 font-sans">
               {filteredBatches.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="py-8 text-center text-slate-400">
+                  <td colSpan={8} className="py-8 text-center text-text-muted">
                     No batches found.
                   </td>
                 </tr>
@@ -690,28 +690,28 @@ export const MastersPage: React.FC = () => {
                   const product = products.find((p) => p.id === b.product_id);
                   const isExpiringSoon = b.expiry_date.localeCompare("2026-12") <= 0;
                   return (
-                    <tr key={b.id} className="hover:bg-slate-50 transition-colors">
-                      <td className="px-4 py-2.5 font-medium text-slate-800">
+                    <tr key={b.id} className="hover:bg-canvas/50 transition-colors">
+                      <td className="px-4 py-2.5 font-medium text-text-main">
                         {product ? product.name : b.product_id}
                       </td>
-                      <td className="px-4 py-2.5 font-mono font-bold text-slate-700">{b.batch_no}</td>
-                      <td className="px-4 py-2.5 font-mono">
+                      <td className="px-4 py-2.5 font-mono font-bold text-text-main">{b.batch_no}</td>
+                      <td className="px-4 py-2.5 font-mono tabular-nums">
                         <span
-                          className={`inline-block rounded px-2 py-0.5 text-[10px] font-semibold ${
-                            isExpiringSoon ? "bg-amber-100 text-amber-800" : "bg-slate-100 text-slate-700"
+                          className={`inline-block rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                            isExpiringSoon ? "bg-amber-100 text-amber-800" : "bg-canvas text-text-muted"
                           }`}
                         >
                           {b.expiry_date}
                         </span>
                       </td>
-                      <td className="px-4 py-2.5 text-right font-bold text-slate-800">{b.stock_qty}</td>
-                      <td className="px-4 py-2.5 text-right text-slate-500">
+                      <td className="px-4 py-2.5 text-right font-mono tabular-nums font-bold text-text-main">{b.stock_qty}</td>
+                      <td className="px-4 py-2.5 text-right font-mono tabular-nums text-text-muted">
                         {b.purchase_rate ? `₹${b.purchase_rate.toFixed(2)}` : "—"}
                       </td>
-                      <td className="px-4 py-2.5 text-right font-medium text-indigo-600">
+                      <td className="px-4 py-2.5 text-right font-mono tabular-nums font-medium text-accent">
                         {b.selling_rate ? `₹${b.selling_rate.toFixed(2)}` : "—"}
                       </td>
-                      <td className="px-4 py-2.5 text-right text-slate-700">
+                      <td className="px-4 py-2.5 text-right font-mono tabular-nums text-text-main">
                         {b.mrp ? `₹${b.mrp.toFixed(2)}` : "—"}
                       </td>
                       <td className="px-4 py-2.5 text-center">
@@ -721,7 +721,7 @@ export const MastersPage: React.FC = () => {
                             setBatchForm({ ...b });
                             setIsBatchModalOpen(true);
                           }}
-                          className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-indigo-600"
+                          className="rounded-btn p-1 text-text-muted hover:bg-canvas hover:text-accent transition-colors"
                         >
                           <Edit2 className="h-4 w-4" />
                         </button>
@@ -735,8 +735,8 @@ export const MastersPage: React.FC = () => {
         )}
 
         {activeTab === "parties" && (
-          <table className="w-full text-left text-xs text-slate-600">
-            <thead className="sticky top-0 bg-slate-50 text-[11px] font-semibold uppercase tracking-wider text-slate-500 border-b border-slate-200">
+          <table className="w-full text-left text-xs text-text-muted">
+            <thead className="sticky top-0 bg-canvas text-[11px] font-semibold uppercase tracking-wider text-text-muted border-b border-border-main">
               <tr>
                 <th className="px-4 py-3">Party Name</th>
                 <th className="px-4 py-3">Type</th>
@@ -748,39 +748,39 @@ export const MastersPage: React.FC = () => {
                 <th className="px-4 py-3 text-center">Actions</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100 font-sans">
+            <tbody className="divide-y divide-border-main/50 font-sans">
               {filteredParties.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="py-8 text-center text-slate-400">
+                  <td colSpan={8} className="py-8 text-center text-text-muted">
                     No parties found.
                   </td>
                 </tr>
               ) : (
                 filteredParties.map((pty) => (
-                  <tr key={pty.id} className="hover:bg-slate-50 transition-colors">
-                    <td className="px-4 py-2.5 font-medium text-slate-800">
+                  <tr key={pty.id} className="hover:bg-canvas/50 transition-colors">
+                    <td className="px-4 py-2.5 font-medium text-text-main">
                       <div>{pty.name}</div>
-                      {pty.address && <div className="text-[10px] text-slate-400 truncate max-w-xs">{pty.address}</div>}
+                      {pty.address && <div className="text-[10px] text-text-muted truncate max-w-xs">{pty.address}</div>}
                     </td>
                     <td className="px-4 py-2.5">
-                      <span className="inline-block rounded bg-indigo-50 px-2 py-0.5 text-[10px] font-semibold uppercase text-indigo-700">
+                      <span className="inline-block rounded-full bg-accent-soft px-2 py-0.5 text-[10px] font-semibold uppercase text-accent">
                         {pty.type}
                       </span>
                     </td>
-                    <td className="px-4 py-2.5 font-mono text-slate-600">{pty.phone || "—"}</td>
-                    <td className="px-4 py-2.5 font-mono text-slate-500">
+                    <td className="px-4 py-2.5 font-mono tabular-nums text-text-muted">{pty.phone || "—"}</td>
+                    <td className="px-4 py-2.5 font-mono tabular-nums text-text-muted">
                       {pty.gstin || pty.medical_reg_no || "—"}
                     </td>
-                    <td className="px-4 py-2.5 text-right font-semibold text-rose-600">
+                    <td className="px-4 py-2.5 text-right font-mono tabular-nums font-semibold text-danger">
                       {pty.outstanding_balance ? `₹${pty.outstanding_balance.toFixed(2)}` : "₹0.00"}
                     </td>
-                    <td className="px-4 py-2.5 text-right text-slate-600">
+                    <td className="px-4 py-2.5 text-right font-mono tabular-nums text-text-muted">
                       {pty.credit_limit ? `₹${pty.credit_limit.toFixed(2)}` : "—"}
                     </td>
                     <td className="px-4 py-2.5 text-center">
                       <span
                         className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${
-                          pty.is_active !== false ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-600"
+                          pty.is_active !== false ? "bg-accent-soft text-accent" : "bg-canvas text-text-muted"
                         }`}
                       >
                         {pty.is_active !== false ? "Active" : "Inactive"}
@@ -793,7 +793,7 @@ export const MastersPage: React.FC = () => {
                           setPartyForm({ ...pty });
                           setIsPartyModalOpen(true);
                         }}
-                        className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-indigo-600"
+                        className="rounded-btn p-1 text-text-muted hover:bg-canvas hover:text-accent transition-colors"
                       >
                         <Edit2 className="h-4 w-4" />
                       </button>
@@ -806,8 +806,8 @@ export const MastersPage: React.FC = () => {
         )}
 
         {activeTab === "discounts" && (
-          <table className="w-full text-left text-xs text-slate-600">
-            <thead className="sticky top-0 bg-slate-50 text-[11px] font-semibold uppercase tracking-wider text-slate-500 border-b border-slate-200">
+          <table className="w-full text-left text-xs text-text-muted">
+            <thead className="sticky top-0 bg-canvas text-[11px] font-semibold uppercase tracking-wider text-text-muted border-b border-border-main">
               <tr>
                 <th className="px-4 py-3">Rule Name</th>
                 <th className="px-4 py-3">Rule Type</th>
@@ -817,23 +817,23 @@ export const MastersPage: React.FC = () => {
                 <th className="px-4 py-3 text-center">Status</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100 font-sans">
+            <tbody className="divide-y divide-border-main/50 font-sans">
               {discountRules.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="py-8 text-center text-slate-400">
+                  <td colSpan={6} className="py-8 text-center text-text-muted">
                     No discount schemas active. Click "Add Schema" to configure automated discounts.
                   </td>
                 </tr>
               ) : (
                 discountRules.map((rule) => (
-                  <tr key={rule.rule_id} className="hover:bg-slate-50 transition-colors">
-                    <td className="px-4 py-2.5 font-medium text-slate-800">{rule.name}</td>
-                    <td className="px-4 py-2.5 capitalize">{rule.rule_type.replace(/_/g, " ")}</td>
-                    <td className="px-4 py-2.5 text-right font-bold text-emerald-600">{rule.discount_percent}%</td>
-                    <td className="px-4 py-2.5 text-right text-slate-600">{rule.min_quantity || "1"}</td>
-                    <td className="px-4 py-2.5 text-right text-slate-600">{rule.free_quantity || "—"}</td>
+                  <tr key={rule.rule_id} className="hover:bg-canvas/50 transition-colors">
+                    <td className="px-4 py-2.5 font-medium text-text-main">{rule.name}</td>
+                    <td className="px-4 py-2.5 capitalize text-text-muted">{rule.rule_type.replace(/_/g, " ")}</td>
+                    <td className="px-4 py-2.5 text-right font-mono tabular-nums font-bold text-accent">{rule.discount_percent}%</td>
+                    <td className="px-4 py-2.5 text-right font-mono tabular-nums text-text-muted">{rule.min_quantity || "1"}</td>
+                    <td className="px-4 py-2.5 text-right font-mono tabular-nums text-text-muted">{rule.free_quantity || "—"}</td>
                     <td className="px-4 py-2.5 text-center">
-                      <span className="inline-flex rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">
+                      <span className="inline-flex rounded-full bg-accent-soft px-2 py-0.5 text-[10px] font-semibold text-accent">
                         {rule.is_active ? "Active" : "Disabled"}
                       </span>
                     </td>
@@ -847,15 +847,15 @@ export const MastersPage: React.FC = () => {
 
       {/* Product Modal */}
       {isProductModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="w-full max-w-2xl rounded-lg bg-white p-6 shadow-xl max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between border-b border-slate-200 pb-3">
-              <h2 className="text-base font-bold text-slate-800">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-2xl rounded-card bg-surface p-6 shadow-2xl border border-border-main max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between border-b border-border-main pb-3">
+              <h2 className="text-base font-bold text-text-main">
                 {editingProduct ? "Edit Product" : "Add New Product"}
               </h2>
               <button
                 onClick={() => setIsProductModalOpen(false)}
-                className="text-slate-400 hover:text-slate-600"
+                className="text-text-muted hover:text-text-main transition-colors"
               >
                 <X className="h-5 w-5" />
               </button>
@@ -864,24 +864,24 @@ export const MastersPage: React.FC = () => {
             <form onSubmit={handleSaveProduct} className="mt-4 space-y-4">
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-[11px] font-semibold uppercase text-slate-600">Product Name *</label>
+                  <label className="block text-[11px] font-semibold uppercase tracking-wider text-text-muted">Product Name *</label>
                   <input
                     type="text"
                     required
                     value={prodForm.name || ""}
                     onChange={(e) => setProdForm({ ...prodForm, name: e.target.value })}
-                    className="mt-1 w-full rounded border border-slate-300 p-2 text-xs focus:border-indigo-500 focus:outline-none"
+                    className="mt-1 w-full rounded-input border border-border-main bg-surface p-2 text-xs text-text-main shadow-2xs focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
                     placeholder="e.g. Paracetamol 650mg"
                   />
                 </div>
                 <div>
-                  <label className="block text-[11px] font-semibold uppercase text-slate-600">Barcode *</label>
+                  <label className="block text-[11px] font-semibold uppercase tracking-wider text-text-muted">Barcode *</label>
                   <input
                     type="text"
                     required
                     value={prodForm.barcode || ""}
                     onChange={(e) => setProdForm({ ...prodForm, barcode: e.target.value })}
-                    className="mt-1 w-full rounded border border-slate-300 p-2 text-xs font-mono focus:border-indigo-500 focus:outline-none"
+                    className="mt-1 w-full rounded-input border border-border-main bg-surface p-2 text-xs font-mono tabular-nums text-text-main shadow-2xs focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
                     placeholder="8901234567890"
                   />
                 </div>
@@ -889,21 +889,21 @@ export const MastersPage: React.FC = () => {
 
               <div className="grid grid-cols-3 gap-4">
                 <div>
-                  <label className="block text-[11px] font-semibold uppercase text-slate-600">HSN / SAC Code</label>
+                  <label className="block text-[11px] font-semibold uppercase tracking-wider text-text-muted">HSN / SAC Code</label>
                   <input
                     type="text"
                     value={prodForm.hsn_sac_code || ""}
                     onChange={(e) => setProdForm({ ...prodForm, hsn_sac_code: e.target.value })}
-                    className="mt-1 w-full rounded border border-slate-300 p-2 text-xs font-mono focus:border-indigo-500 focus:outline-none"
+                    className="mt-1 w-full rounded-input border border-border-main bg-surface p-2 text-xs font-mono tabular-nums text-text-main shadow-2xs focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
                     placeholder="30049099"
                   />
                 </div>
                 <div>
-                  <label className="block text-[11px] font-semibold uppercase text-slate-600">GST Rate (%)</label>
+                  <label className="block text-[11px] font-semibold uppercase tracking-wider text-text-muted">GST Rate (%)</label>
                   <select
                     value={prodForm.gst_percent ?? 12}
                     onChange={(e) => setProdForm({ ...prodForm, gst_percent: Number(e.target.value) })}
-                    className="mt-1 w-full rounded border border-slate-300 p-2 text-xs focus:border-indigo-500 focus:outline-none"
+                    className="mt-1 w-full rounded-input border border-border-main bg-surface p-2 text-xs text-text-main shadow-2xs focus:border-accent focus:outline-none"
                   >
                     <option value={0}>0% (Exempt)</option>
                     <option value={5}>5%</option>
@@ -913,112 +913,112 @@ export const MastersPage: React.FC = () => {
                   </select>
                 </div>
                 <div>
-                  <label className="block text-[11px] font-semibold uppercase text-slate-600">Units Per Pack</label>
+                  <label className="block text-[11px] font-semibold uppercase tracking-wider text-text-muted">Units Per Pack</label>
                   <input
                     type="number"
                     min="1"
                     value={prodForm.units_per_pack || 1}
                     onChange={(e) => setProdForm({ ...prodForm, units_per_pack: Number(e.target.value) })}
-                    className="mt-1 w-full rounded border border-slate-300 p-2 text-xs focus:border-indigo-500 focus:outline-none"
+                    className="mt-1 w-full rounded-input border border-border-main bg-surface p-2 text-xs font-mono tabular-nums text-text-main shadow-2xs focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
                   />
                 </div>
               </div>
 
               <div className="grid grid-cols-4 gap-4">
                 <div>
-                  <label className="block text-[11px] font-semibold uppercase text-slate-600">MRP (₹)</label>
+                  <label className="block text-[11px] font-semibold uppercase tracking-wider text-text-muted">MRP (₹)</label>
                   <input
                     type="number"
                     step="0.01"
                     value={prodForm.mrp || ""}
                     onChange={(e) => setProdForm({ ...prodForm, mrp: Number(e.target.value) })}
-                    className="mt-1 w-full rounded border border-slate-300 p-2 text-xs font-medium focus:border-indigo-500 focus:outline-none"
+                    className="mt-1 w-full rounded-input border border-border-main bg-surface p-2 text-xs font-mono tabular-nums font-medium text-text-main shadow-2xs focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
                   />
                 </div>
                 <div>
-                  <label className="block text-[11px] font-semibold uppercase text-slate-600">Selling Rate (₹)</label>
+                  <label className="block text-[11px] font-semibold uppercase tracking-wider text-text-muted">Selling Rate (₹)</label>
                   <input
                     type="number"
                     step="0.01"
                     value={prodForm.sel_rate || ""}
                     onChange={(e) => setProdForm({ ...prodForm, sel_rate: Number(e.target.value) })}
-                    className="mt-1 w-full rounded border border-slate-300 p-2 text-xs font-medium text-indigo-600 focus:border-indigo-500 focus:outline-none"
+                    className="mt-1 w-full rounded-input border border-border-main bg-surface p-2 text-xs font-mono tabular-nums font-semibold text-accent shadow-2xs focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
                   />
                 </div>
                 <div>
-                  <label className="block text-[11px] font-semibold uppercase text-slate-600">PTR (₹)</label>
+                  <label className="block text-[11px] font-semibold uppercase tracking-wider text-text-muted">PTR (₹)</label>
                   <input
                     type="number"
                     step="0.01"
                     value={prodForm.ptr || ""}
                     onChange={(e) => setProdForm({ ...prodForm, ptr: Number(e.target.value) })}
-                    className="mt-1 w-full rounded border border-slate-300 p-2 text-xs focus:border-indigo-500 focus:outline-none"
+                    className="mt-1 w-full rounded-input border border-border-main bg-surface p-2 text-xs font-mono tabular-nums text-text-muted shadow-2xs focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
                   />
                 </div>
                 <div>
-                  <label className="block text-[11px] font-semibold uppercase text-slate-600">PTS (₹)</label>
+                  <label className="block text-[11px] font-semibold uppercase tracking-wider text-text-muted">PTS (₹)</label>
                   <input
                     type="number"
                     step="0.01"
                     value={prodForm.pts || ""}
                     onChange={(e) => setProdForm({ ...prodForm, pts: Number(e.target.value) })}
-                    className="mt-1 w-full rounded border border-slate-300 p-2 text-xs focus:border-indigo-500 focus:outline-none"
+                    className="mt-1 w-full rounded-input border border-border-main bg-surface p-2 text-xs font-mono tabular-nums text-text-muted shadow-2xs focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
                   />
                 </div>
               </div>
 
               <div className="grid grid-cols-3 gap-4">
                 <div>
-                  <label className="block text-[11px] font-semibold uppercase text-slate-600">Generic Composition</label>
+                  <label className="block text-[11px] font-semibold uppercase tracking-wider text-text-muted">Generic Composition</label>
                   <input
                     type="text"
                     value={prodForm.generic_name || ""}
                     onChange={(e) => setProdForm({ ...prodForm, generic_name: e.target.value })}
-                    className="mt-1 w-full rounded border border-slate-300 p-2 text-xs focus:border-indigo-500 focus:outline-none"
+                    className="mt-1 w-full rounded-input border border-border-main bg-surface p-2 text-xs text-text-main shadow-2xs focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
                     placeholder="e.g. Paracetamol IP"
                   />
                 </div>
                 <div>
-                  <label className="block text-[11px] font-semibold uppercase text-slate-600">Rack / Shelf</label>
+                  <label className="block text-[11px] font-semibold uppercase tracking-wider text-text-muted">Rack / Shelf</label>
                   <div className="flex gap-2 mt-1">
                     <input
                       type="text"
                       placeholder="Rack"
                       value={prodForm.rack_location || ""}
                       onChange={(e) => setProdForm({ ...prodForm, rack_location: e.target.value })}
-                      className="w-1/2 rounded border border-slate-300 p-2 text-xs"
+                      className="w-1/2 rounded-input border border-border-main bg-surface p-2 text-xs text-text-main shadow-2xs focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
                     />
                     <input
                       type="text"
                       placeholder="Shelf"
                       value={prodForm.shelf_location || ""}
                       onChange={(e) => setProdForm({ ...prodForm, shelf_location: e.target.value })}
-                      className="w-1/2 rounded border border-slate-300 p-2 text-xs"
+                      className="w-1/2 rounded-input border border-border-main bg-surface p-2 text-xs text-text-main shadow-2xs focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
                     />
                   </div>
                 </div>
                 <div>
-                  <label className="block text-[11px] font-semibold uppercase text-slate-600">Reorder Level</label>
+                  <label className="block text-[11px] font-semibold uppercase tracking-wider text-text-muted">Reorder Level</label>
                   <input
                     type="number"
                     value={prodForm.reorder_level || 10}
                     onChange={(e) => setProdForm({ ...prodForm, reorder_level: Number(e.target.value) })}
-                    className="mt-1 w-full rounded border border-slate-300 p-2 text-xs focus:border-indigo-500 focus:outline-none"
+                    className="mt-1 w-full rounded-input border border-border-main bg-surface p-2 text-xs font-mono tabular-nums text-text-main shadow-2xs focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
                   />
                 </div>
               </div>
 
-              <div className="flex justify-end gap-3 pt-3 border-t border-slate-200">
+              <div className="flex justify-end gap-3 pt-3 border-t border-border-main">
                 <button
                   type="button"
                   onClick={() => setIsProductModalOpen(false)}
-                  className="rounded px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100"
+                  className="rounded-btn px-4 py-2 text-xs font-semibold text-text-muted hover:bg-canvas transition-colors"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="rounded bg-indigo-600 px-4 py-2 text-xs font-semibold text-white hover:bg-indigo-700"
+                  className="rounded-btn bg-accent px-4 py-2 text-xs font-semibold text-white hover:bg-accent/90 shadow-xs cursor-pointer transition-colors"
                 >
                   Save Product
                 </button>
@@ -1030,15 +1030,15 @@ export const MastersPage: React.FC = () => {
 
       {/* Batch Modal */}
       {isBatchModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="w-full max-w-lg rounded-lg bg-white p-6 shadow-xl">
-            <div className="flex items-center justify-between border-b border-slate-200 pb-3">
-              <h2 className="text-base font-bold text-slate-800">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-lg rounded-card bg-surface p-6 shadow-2xl border border-border-main">
+            <div className="flex items-center justify-between border-b border-border-main pb-3">
+              <h2 className="text-base font-bold text-text-main">
                 {editingBatch ? "Edit Batch" : "Add Product Batch"}
               </h2>
               <button
                 onClick={() => setIsBatchModalOpen(false)}
-                className="text-slate-400 hover:text-slate-600"
+                className="text-text-muted hover:text-text-main transition-colors"
               >
                 <X className="h-5 w-5" />
               </button>
@@ -1046,12 +1046,12 @@ export const MastersPage: React.FC = () => {
 
             <form onSubmit={handleSaveBatch} className="mt-4 space-y-4">
               <div>
-                <label className="block text-[11px] font-semibold uppercase text-slate-600">Product *</label>
+                <label className="block text-[11px] font-semibold uppercase tracking-wider text-text-muted">Product *</label>
                 <select
                   required
                   value={batchForm.product_id || ""}
                   onChange={(e) => setBatchForm({ ...batchForm, product_id: e.target.value })}
-                  className="mt-1 w-full rounded border border-slate-300 p-2 text-xs focus:border-indigo-500 focus:outline-none"
+                  className="mt-1 w-full rounded-input border border-border-main bg-surface p-2 text-xs text-text-main shadow-2xs focus:border-accent focus:outline-none"
                 >
                   <option value="">Select Product...</option>
                   {products.map((p) => (
@@ -1062,25 +1062,25 @@ export const MastersPage: React.FC = () => {
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-[11px] font-semibold uppercase text-slate-600">Batch No *</label>
+                  <label className="block text-[11px] font-semibold uppercase tracking-wider text-text-muted">Batch No *</label>
                   <input
                     type="text"
                     required
                     value={batchForm.batch_no || ""}
                     onChange={(e) => setBatchForm({ ...batchForm, batch_no: e.target.value })}
-                    className="mt-1 w-full rounded border border-slate-300 p-2 text-xs font-mono font-bold uppercase focus:border-indigo-500 focus:outline-none"
+                    className="mt-1 w-full rounded-input border border-border-main bg-surface p-2 text-xs font-mono tabular-nums font-bold uppercase text-text-main shadow-2xs focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
                     placeholder="BATCH-123"
                   />
                 </div>
                 <div>
-                  <label className="block text-[11px] font-semibold uppercase text-slate-600">Expiry Date (YYYY-MM) *</label>
+                  <label className="block text-[11px] font-semibold uppercase tracking-wider text-text-muted">Expiry Date (YYYY-MM) *</label>
                   <input
                     type="text"
                     required
                     pattern="^\d{4}-(0[1-9]|1[0-2])$"
                     value={batchForm.expiry_date || ""}
                     onChange={(e) => setBatchForm({ ...batchForm, expiry_date: e.target.value })}
-                    className="mt-1 w-full rounded border border-slate-300 p-2 text-xs font-mono focus:border-indigo-500 focus:outline-none"
+                    className="mt-1 w-full rounded-input border border-border-main bg-surface p-2 text-xs font-mono tabular-nums text-text-main shadow-2xs focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
                     placeholder="2027-12"
                   />
                 </div>
@@ -1088,48 +1088,48 @@ export const MastersPage: React.FC = () => {
 
               <div className="grid grid-cols-3 gap-4">
                 <div>
-                  <label className="block text-[11px] font-semibold uppercase text-slate-600">Initial Stock Qty</label>
+                  <label className="block text-[11px] font-semibold uppercase tracking-wider text-text-muted">Initial Stock Qty</label>
                   <input
                     type="number"
                     min="0"
                     value={batchForm.stock_qty || 0}
                     onChange={(e) => setBatchForm({ ...batchForm, stock_qty: Number(e.target.value) })}
-                    className="mt-1 w-full rounded border border-slate-300 p-2 text-xs font-bold focus:border-indigo-500 focus:outline-none"
+                    className="mt-1 w-full rounded-input border border-border-main bg-surface p-2 text-xs font-mono tabular-nums font-bold text-text-main shadow-2xs focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
                   />
                 </div>
                 <div>
-                  <label className="block text-[11px] font-semibold uppercase text-slate-600">Purchase Rate (₹)</label>
+                  <label className="block text-[11px] font-semibold uppercase tracking-wider text-text-muted">Purchase Rate (₹)</label>
                   <input
                     type="number"
                     step="0.01"
                     value={batchForm.purchase_rate || 0}
                     onChange={(e) => setBatchForm({ ...batchForm, purchase_rate: Number(e.target.value) })}
-                    className="mt-1 w-full rounded border border-slate-300 p-2 text-xs focus:border-indigo-500 focus:outline-none"
+                    className="mt-1 w-full rounded-input border border-border-main bg-surface p-2 text-xs font-mono tabular-nums text-text-muted shadow-2xs focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
                   />
                 </div>
                 <div>
-                  <label className="block text-[11px] font-semibold uppercase text-slate-600">Selling Rate (₹)</label>
+                  <label className="block text-[11px] font-semibold uppercase tracking-wider text-text-muted">Selling Rate (₹)</label>
                   <input
                     type="number"
                     step="0.01"
                     value={batchForm.selling_rate || 0}
                     onChange={(e) => setBatchForm({ ...batchForm, selling_rate: Number(e.target.value) })}
-                    className="mt-1 w-full rounded border border-slate-300 p-2 text-xs font-bold text-indigo-600 focus:border-indigo-500 focus:outline-none"
+                    className="mt-1 w-full rounded-input border border-border-main bg-surface p-2 text-xs font-mono tabular-nums font-bold text-accent shadow-2xs focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
                   />
                 </div>
               </div>
 
-              <div className="flex justify-end gap-3 pt-3 border-t border-slate-200">
+              <div className="flex justify-end gap-3 pt-3 border-t border-border-main">
                 <button
                   type="button"
                   onClick={() => setIsBatchModalOpen(false)}
-                  className="rounded px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100"
+                  className="rounded-btn px-4 py-2 text-xs font-semibold text-text-muted hover:bg-canvas transition-colors"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="rounded bg-indigo-600 px-4 py-2 text-xs font-semibold text-white hover:bg-indigo-700"
+                  className="rounded-btn bg-accent px-4 py-2 text-xs font-semibold text-white hover:bg-accent/90 shadow-xs cursor-pointer transition-colors"
                 >
                   Save Batch
                 </button>
@@ -1141,15 +1141,15 @@ export const MastersPage: React.FC = () => {
 
       {/* Party Modal */}
       {isPartyModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="w-full max-w-lg rounded-lg bg-white p-6 shadow-xl">
-            <div className="flex items-center justify-between border-b border-slate-200 pb-3">
-              <h2 className="text-base font-bold text-slate-800">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-lg rounded-card bg-surface p-6 shadow-2xl border border-border-main">
+            <div className="flex items-center justify-between border-b border-border-main pb-3">
+              <h2 className="text-base font-bold text-text-main">
                 {editingParty ? "Edit Party" : "Add Master Party"}
               </h2>
               <button
                 onClick={() => setIsPartyModalOpen(false)}
-                className="text-slate-400 hover:text-slate-600"
+                className="text-text-muted hover:text-text-main transition-colors"
               >
                 <X className="h-5 w-5" />
               </button>
@@ -1158,11 +1158,11 @@ export const MastersPage: React.FC = () => {
             <form onSubmit={handleSaveParty} className="mt-4 space-y-4">
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-[11px] font-semibold uppercase text-slate-600">Party Type *</label>
+                  <label className="block text-[11px] font-semibold uppercase tracking-wider text-text-muted">Party Type *</label>
                   <select
                     value={partyForm.type || "customer"}
                     onChange={(e) => setPartyForm({ ...partyForm, type: e.target.value as any })}
-                    className="mt-1 w-full rounded border border-slate-300 p-2 text-xs focus:border-indigo-500 focus:outline-none"
+                    className="mt-1 w-full rounded-input border border-border-main bg-surface p-2 text-xs text-text-main shadow-2xs focus:border-accent focus:outline-none"
                   >
                     <option value="customer">Customer</option>
                     <option value="supplier">Supplier</option>
@@ -1171,13 +1171,13 @@ export const MastersPage: React.FC = () => {
                   </select>
                 </div>
                 <div>
-                  <label className="block text-[11px] font-semibold uppercase text-slate-600">Name *</label>
+                  <label className="block text-[11px] font-semibold uppercase tracking-wider text-text-muted">Name *</label>
                   <input
                     type="text"
                     required
                     value={partyForm.name || ""}
                     onChange={(e) => setPartyForm({ ...partyForm, name: e.target.value })}
-                    className="mt-1 w-full rounded border border-slate-300 p-2 text-xs font-medium focus:border-indigo-500 focus:outline-none"
+                    className="mt-1 w-full rounded-input border border-border-main bg-surface p-2 text-xs font-medium text-text-main shadow-2xs focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
                     placeholder="Party Name"
                   />
                 </div>
@@ -1185,22 +1185,22 @@ export const MastersPage: React.FC = () => {
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-[11px] font-semibold uppercase text-slate-600">Mobile Phone (10 digits)</label>
+                  <label className="block text-[11px] font-semibold uppercase tracking-wider text-text-muted">Mobile Phone (10 digits)</label>
                   <input
                     type="text"
                     value={partyForm.phone || ""}
                     onChange={(e) => setPartyForm({ ...partyForm, phone: e.target.value })}
-                    className="mt-1 w-full rounded border border-slate-300 p-2 text-xs font-mono focus:border-indigo-500 focus:outline-none"
+                    className="mt-1 w-full rounded-input border border-border-main bg-surface p-2 text-xs font-mono tabular-nums text-text-main shadow-2xs focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
                     placeholder="9876543210"
                   />
                 </div>
                 <div>
-                  <label className="block text-[11px] font-semibold uppercase text-slate-600">GSTIN (15 characters)</label>
+                  <label className="block text-[11px] font-semibold uppercase tracking-wider text-text-muted">GSTIN (15 characters)</label>
                   <input
                     type="text"
                     value={partyForm.gstin || ""}
                     onChange={(e) => setPartyForm({ ...partyForm, gstin: e.target.value.toUpperCase() })}
-                    className="mt-1 w-full rounded border border-slate-300 p-2 text-xs font-mono uppercase focus:border-indigo-500 focus:outline-none"
+                    className="mt-1 w-full rounded-input border border-border-main bg-surface p-2 text-xs font-mono tabular-nums uppercase text-text-main shadow-2xs focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
                     placeholder="32AAAAA0000A1Z5"
                   />
                 </div>
@@ -1208,24 +1208,24 @@ export const MastersPage: React.FC = () => {
 
               {partyForm.type === "doctor" && (
                 <div>
-                  <label className="block text-[11px] font-semibold uppercase text-slate-600">Medical Reg No</label>
+                  <label className="block text-[11px] font-semibold uppercase tracking-wider text-text-muted">Medical Reg No</label>
                   <input
                     type="text"
                     value={partyForm.medical_reg_no || ""}
                     onChange={(e) => setPartyForm({ ...partyForm, medical_reg_no: e.target.value })}
-                    className="mt-1 w-full rounded border border-slate-300 p-2 text-xs font-mono focus:border-indigo-500 focus:outline-none"
+                    className="mt-1 w-full rounded-input border border-border-main bg-surface p-2 text-xs font-mono tabular-nums text-text-main shadow-2xs focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
                     placeholder="KMC-98765"
                   />
                 </div>
               )}
 
               <div>
-                <label className="block text-[11px] font-semibold uppercase text-slate-600">Address / City</label>
+                <label className="block text-[11px] font-semibold uppercase tracking-wider text-text-muted">Address / City</label>
                 <textarea
                   rows={2}
                   value={partyForm.address || ""}
                   onChange={(e) => setPartyForm({ ...partyForm, address: e.target.value })}
-                  className="mt-1 w-full rounded border border-slate-300 p-2 text-xs focus:border-indigo-500 focus:outline-none"
+                  className="mt-1 w-full rounded-input border border-border-main bg-surface p-2 text-xs text-text-main shadow-2xs focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
                   placeholder="Street address, City, PIN"
                 />
               </div>
@@ -1233,37 +1233,37 @@ export const MastersPage: React.FC = () => {
               {partyForm.type === "customer" && (
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-[11px] font-semibold uppercase text-slate-600">Credit Limit (₹)</label>
+                    <label className="block text-[11px] font-semibold uppercase tracking-wider text-text-muted">Credit Limit (₹)</label>
                     <input
                       type="number"
                       value={partyForm.credit_limit || 0}
                       onChange={(e) => setPartyForm({ ...partyForm, credit_limit: Number(e.target.value) })}
-                      className="mt-1 w-full rounded border border-slate-300 p-2 text-xs focus:border-indigo-500 focus:outline-none"
+                      className="mt-1 w-full rounded-input border border-border-main bg-surface p-2 text-xs font-mono tabular-nums text-text-main shadow-2xs focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
                     />
                   </div>
                   <div>
-                    <label className="block text-[11px] font-semibold uppercase text-slate-600">Opening Balance (₹)</label>
+                    <label className="block text-[11px] font-semibold uppercase tracking-wider text-text-muted">Opening Balance (₹)</label>
                     <input
                       type="number"
                       value={partyForm.outstanding_balance || 0}
                       onChange={(e) => setPartyForm({ ...partyForm, outstanding_balance: Number(e.target.value) })}
-                      className="mt-1 w-full rounded border border-slate-300 p-2 text-xs focus:border-indigo-500 focus:outline-none"
+                      className="mt-1 w-full rounded-input border border-border-main bg-surface p-2 text-xs font-mono tabular-nums text-text-main shadow-2xs focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
                     />
                   </div>
                 </div>
               )}
 
-              <div className="flex justify-end gap-3 pt-3 border-t border-slate-200">
+              <div className="flex justify-end gap-3 pt-3 border-t border-border-main">
                 <button
                   type="button"
                   onClick={() => setIsPartyModalOpen(false)}
-                  className="rounded px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100"
+                  className="rounded-btn px-4 py-2 text-xs font-semibold text-text-muted hover:bg-canvas transition-colors"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="rounded bg-indigo-600 px-4 py-2 text-xs font-semibold text-white hover:bg-indigo-700"
+                  className="rounded-btn bg-accent px-4 py-2 text-xs font-semibold text-white hover:bg-accent/90 shadow-xs cursor-pointer transition-colors"
                 >
                   Save Party
                 </button>
@@ -1275,13 +1275,13 @@ export const MastersPage: React.FC = () => {
 
       {/* Discount Modal */}
       {isDiscountModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="w-full max-w-md rounded-lg bg-white p-6 shadow-xl">
-            <div className="flex items-center justify-between border-b border-slate-200 pb-3">
-              <h2 className="text-base font-bold text-slate-800">Add Discount Schema</h2>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-md rounded-card bg-surface p-6 shadow-2xl border border-border-main">
+            <div className="flex items-center justify-between border-b border-border-main pb-3">
+              <h2 className="text-base font-bold text-text-main">Add Discount Schema</h2>
               <button
                 onClick={() => setIsDiscountModalOpen(false)}
-                className="text-slate-400 hover:text-slate-600"
+                className="text-text-muted hover:text-text-main transition-colors"
               >
                 <X className="h-5 w-5" />
               </button>
@@ -1289,23 +1289,23 @@ export const MastersPage: React.FC = () => {
 
             <form onSubmit={handleSaveDiscountRule} className="mt-4 space-y-4">
               <div>
-                <label className="block text-[11px] font-semibold uppercase text-slate-600">Rule Name *</label>
+                <label className="block text-[11px] font-semibold uppercase tracking-wider text-text-muted">Rule Name *</label>
                 <input
                   type="text"
                   required
                   value={discForm.name || ""}
                   onChange={(e) => setDiscForm({ ...discForm, name: e.target.value })}
-                  className="mt-1 w-full rounded border border-slate-300 p-2 text-xs focus:border-indigo-500 focus:outline-none"
+                  className="mt-1 w-full rounded-input border border-border-main bg-surface p-2 text-xs text-text-main shadow-2xs focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
                   placeholder="e.g. Festival 5% Off"
                 />
               </div>
 
               <div>
-                <label className="block text-[11px] font-semibold uppercase text-slate-600">Rule Type</label>
+                <label className="block text-[11px] font-semibold uppercase tracking-wider text-text-muted">Rule Type</label>
                 <select
                   value={discForm.rule_type || "percentage"}
                   onChange={(e) => setDiscForm({ ...discForm, rule_type: e.target.value as any })}
-                  className="mt-1 w-full rounded border border-slate-300 p-2 text-xs focus:border-indigo-500 focus:outline-none"
+                  className="mt-1 w-full rounded-input border border-border-main bg-surface p-2 text-xs text-text-main shadow-2xs focus:border-accent focus:outline-none"
                 >
                   <option value="percentage">Percentage Discount</option>
                   <option value="buy_x_get_y">Buy X Get Y Free</option>
@@ -1313,41 +1313,89 @@ export const MastersPage: React.FC = () => {
                 </select>
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-[11px] font-semibold uppercase text-slate-600">Discount %</label>
-                  <input
-                    type="number"
-                    min="0"
-                    max="100"
-                    value={discForm.discount_percent || 0}
-                    onChange={(e) => setDiscForm({ ...discForm, discount_percent: Number(e.target.value) })}
-                    className="mt-1 w-full rounded border border-slate-300 p-2 text-xs font-bold text-emerald-600 focus:border-indigo-500 focus:outline-none"
-                  />
+              {discForm.rule_type === "percentage" && (
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-[11px] font-semibold uppercase tracking-wider text-text-muted">Discount %</label>
+                    <input
+                      type="number"
+                      min="0"
+                      max="100"
+                      value={discForm.discount_percent ?? 0}
+                      onChange={(e) => setDiscForm({ ...discForm, discount_percent: Number(e.target.value) })}
+                      className="mt-1 w-full rounded-input border border-border-main bg-surface p-2 text-xs font-mono tabular-nums font-bold text-accent shadow-2xs focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-semibold uppercase tracking-wider text-text-muted">Min Quantity</label>
+                    <input
+                      type="number"
+                      min="1"
+                      value={discForm.min_quantity ?? 1}
+                      onChange={(e) => setDiscForm({ ...discForm, min_quantity: Number(e.target.value) })}
+                      className="mt-1 w-full rounded-input border border-border-main bg-surface p-2 text-xs font-mono tabular-nums text-text-main shadow-2xs focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
+                    />
+                  </div>
                 </div>
-                <div>
-                  <label className="block text-[11px] font-semibold uppercase text-slate-600">Min Quantity</label>
-                  <input
-                    type="number"
-                    min="1"
-                    value={discForm.min_quantity || 1}
-                    onChange={(e) => setDiscForm({ ...discForm, min_quantity: Number(e.target.value) })}
-                    className="mt-1 w-full rounded border border-slate-300 p-2 text-xs focus:border-indigo-500 focus:outline-none"
-                  />
-                </div>
-              </div>
+              )}
 
-              <div className="flex justify-end gap-3 pt-3 border-t border-slate-200">
+              {discForm.rule_type === "buy_x_get_y" && (
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-[11px] font-semibold uppercase tracking-wider text-text-muted">Buy Qty (X) *</label>
+                    <input
+                      type="number"
+                      min="1"
+                      required
+                      value={discForm.min_quantity ?? 1}
+                      onChange={(e) => setDiscForm({ ...discForm, min_quantity: Number(e.target.value) })}
+                      className="mt-1 w-full rounded-input border border-border-main bg-surface p-2 text-xs font-mono tabular-nums font-bold text-text-main shadow-2xs focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
+                      placeholder="e.g. 3"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-semibold uppercase tracking-wider text-text-muted">Get Free Qty (Y) *</label>
+                    <input
+                      type="number"
+                      min="1"
+                      required
+                      value={discForm.free_quantity ?? 1}
+                      onChange={(e) => setDiscForm({ ...discForm, free_quantity: Number(e.target.value) })}
+                      className="mt-1 w-full rounded-input border border-border-main bg-surface p-2 text-xs font-mono tabular-nums font-bold text-accent shadow-2xs focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
+                      placeholder="e.g. 1"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {discForm.rule_type === "customer_type" && (
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-[11px] font-semibold uppercase tracking-wider text-text-muted">Tier Discount %</label>
+                    <input
+                      type="number"
+                      min="0"
+                      max="100"
+                      value={discForm.discount_percent ?? 0}
+                      onChange={(e) => setDiscForm({ ...discForm, discount_percent: Number(e.target.value) })}
+                      className="mt-1 w-full rounded-input border border-border-main bg-surface p-2 text-xs font-mono tabular-nums font-bold text-accent shadow-2xs focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
+                      placeholder="e.g. 10"
+                    />
+                  </div>
+                </div>
+              )}
+
+              <div className="flex justify-end gap-3 pt-3 border-t border-border-main">
                 <button
                   type="button"
                   onClick={() => setIsDiscountModalOpen(false)}
-                  className="rounded px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100"
+                  className="rounded-btn px-4 py-2 text-xs font-semibold text-text-muted hover:bg-canvas transition-colors"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="rounded bg-indigo-600 px-4 py-2 text-xs font-semibold text-white hover:bg-indigo-700"
+                  className="rounded-btn bg-accent px-4 py-2 text-xs font-semibold text-white hover:bg-accent/90 shadow-xs cursor-pointer transition-colors"
                 >
                   Save Rule
                 </button>

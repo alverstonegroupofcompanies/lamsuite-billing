@@ -194,27 +194,27 @@ export const ReportsHub: React.FC = () => {
   };
 
   return (
-    <div className="flex h-[calc(100vh-4rem)] bg-gray-100 overflow-hidden select-none font-sans">
+    <div className="flex h-[calc(100vh-4rem)] bg-canvas overflow-hidden select-none font-sans">
       {/* Left Sidebar: Categories & Navigation */}
-      <div className="w-64 bg-white border-r border-gray-200 flex flex-col shrink-0">
-        <div className="p-4 border-b border-gray-200 bg-gray-50/60">
+      <div className="w-64 bg-surface border-r border-border-main flex flex-col shrink-0">
+        <div className="p-4 border-b border-border-main bg-canvas">
           <div className="flex items-center gap-2">
-            <FileBarChart className="w-5 h-5 text-blue-600" />
+            <FileBarChart className="w-5 h-5 text-accent" />
             <div>
-              <h1 className="font-bold text-gray-900 text-sm">Reports & Analytics</h1>
-              <p className="text-[11px] text-gray-500">LamSuite Pluggable Intelligence</p>
+              <h1 className="font-bold text-text-main text-sm">Reports & Analytics</h1>
+              <p className="text-[11px] text-text-muted">LamSuite Pluggable Intelligence</p>
             </div>
           </div>
 
           {/* Quick Search */}
           <div className="mt-3 relative">
-            <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
+            <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-text-muted" />
             <input
               type="text"
               placeholder="Search reports (Ctrl+K)..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full text-xs pl-8 pr-2.5 py-1.5 border border-gray-300 rounded-md bg-white focus:ring-1 focus:ring-blue-500 text-gray-900"
+              className="w-full text-xs pl-8 pr-2.5 py-1.5 border border-border-main rounded-btn bg-surface focus:border-accent focus:outline-none text-text-main placeholder-text-muted/60"
             />
           </div>
         </div>
@@ -224,22 +224,22 @@ export const ReportsHub: React.FC = () => {
           <button
             type="button"
             onClick={() => setSelectedCategory("all")}
-            className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-medium transition-colors ${
+            className={`w-full flex items-center justify-between px-3 py-2 rounded-btn text-xs font-medium transition-colors ${
               selectedCategory === "all"
-                ? "bg-blue-50 text-blue-700 font-semibold"
-                : "text-gray-700 hover:bg-gray-100"
+                ? "bg-accent-soft text-accent font-semibold"
+                : "text-text-muted hover:bg-canvas hover:text-text-main"
             }`}
           >
             <div className="flex items-center gap-2.5">
-              <Layers className="w-4 h-4 text-gray-500" />
+              <Layers className="w-4 h-4 text-text-muted" />
               <span>All Reports</span>
             </div>
-            <span className="text-[10px] bg-gray-100 px-1.5 py-0.5 rounded text-gray-500">
+            <span className="text-[10px] bg-canvas border border-border-main px-1.5 py-0.5 rounded text-text-muted font-mono tabular-nums">
               {accessibleReports.length}
             </span>
           </button>
 
-          <div className="pt-2 pb-1 px-3 text-[10px] font-bold text-gray-400 uppercase tracking-wider">
+          <div className="pt-2 pb-1 px-3 text-[10px] font-semibold text-text-muted uppercase tracking-wider">
             Categories
           </div>
 
@@ -252,17 +252,17 @@ export const ReportsHub: React.FC = () => {
                 key={cat.id}
                 type="button"
                 onClick={() => setSelectedCategory(cat.id)}
-                className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-medium transition-colors ${
+                className={`w-full flex items-center justify-between px-3 py-2 rounded-btn text-xs font-medium transition-colors ${
                   selectedCategory === cat.id
-                    ? "bg-blue-50 text-blue-700 font-semibold"
-                    : "text-gray-700 hover:bg-gray-100"
+                    ? "bg-accent-soft text-accent font-semibold"
+                    : "text-text-muted hover:bg-canvas hover:text-text-main"
                 }`}
               >
                 <div className="flex items-center gap-2.5">
                   {getCategoryIcon(cat.id)}
                   <span>{cat.label}</span>
                 </div>
-                <span className="text-[10px] bg-gray-100 px-1.5 py-0.5 rounded text-gray-500">
+                <span className="text-[10px] bg-canvas border border-border-main px-1.5 py-0.5 rounded text-text-muted font-mono tabular-nums">
                   {count}
                 </span>
               </button>
@@ -271,12 +271,12 @@ export const ReportsHub: React.FC = () => {
         </div>
 
         {/* Security / RBAC Badge */}
-        <div className="p-3 border-t border-gray-200 bg-gray-50 flex items-center justify-between text-[11px] text-gray-500">
+        <div className="p-3 border-t border-border-main bg-canvas flex items-center justify-between text-[11px] text-text-muted">
           <div className="flex items-center gap-1.5">
-            <Shield className="w-3.5 h-3.5 text-blue-600" />
-            <span>Role: <strong className="text-gray-800 uppercase">{userRole}</strong></span>
+            <Shield className="w-3.5 h-3.5 text-accent" />
+            <span>Role: <strong className="text-text-main uppercase font-semibold">{userRole}</strong></span>
           </div>
-          <span className="text-[10px] text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200 font-medium">
+          <span className="text-[10px] text-accent bg-accent-soft px-2 py-0.5 rounded-full border border-accent/20 font-semibold">
             Zero Drift
           </span>
         </div>
@@ -285,7 +285,7 @@ export const ReportsHub: React.FC = () => {
       {/* Main Workspace Area */}
       <div className="flex-1 flex flex-col overflow-hidden">
         {/* Tab Header Bar */}
-        <div className="bg-white border-b border-gray-200 flex items-center justify-between px-2 pt-1.5 shrink-0 shadow-2xs">
+        <div className="bg-surface border-b border-border-main flex items-center justify-between px-2 pt-1.5 shrink-0 shadow-2xs">
           <div className="flex items-center gap-1 overflow-x-auto flex-1 no-scrollbar">
             {openTabIds.map((tabId) => {
               const rep = reportRegistry.get(tabId);
@@ -299,10 +299,10 @@ export const ReportsHub: React.FC = () => {
                     setActiveTabId(tabId);
                     setSearchParams({ report: tabId });
                   }}
-                  className={`group flex items-center gap-2 px-3 py-2 rounded-t-lg text-xs font-medium cursor-pointer border-t-2 transition-all ${
+                  className={`group flex items-center gap-2 px-3 py-2 rounded-t-btn text-xs font-medium cursor-pointer border-t-2 transition-all ${
                     isActive
-                      ? "bg-gray-50 border-blue-600 text-blue-900 shadow-xs"
-                      : "bg-transparent border-transparent text-gray-500 hover:bg-gray-100 hover:text-gray-700"
+                      ? "bg-canvas border-accent text-accent font-semibold shadow-xs"
+                      : "bg-transparent border-transparent text-text-muted hover:bg-canvas/50 hover:text-text-main"
                   }`}
                 >
                   {getCategoryIcon(rep.category)}
@@ -310,7 +310,7 @@ export const ReportsHub: React.FC = () => {
                   <button
                     type="button"
                     onClick={(e) => closeTab(tabId, e)}
-                    className="p-0.5 rounded hover:bg-gray-200 text-gray-400 group-hover:text-gray-600 transition-colors"
+                    className="p-0.5 rounded-btn hover:bg-border-main text-text-muted hover:text-text-main transition-colors"
                   >
                     <X className="w-3 h-3" />
                   </button>
@@ -326,8 +326,8 @@ export const ReportsHub: React.FC = () => {
                 setSearchParams({});
               }}
               title="Browse all available reports"
-              className={`p-1.5 rounded-md hover:bg-gray-100 text-gray-400 hover:text-gray-700 transition-colors ml-1 ${
-                activeTabId === "" ? "bg-blue-50 text-blue-600" : ""
+              className={`p-1.5 rounded-btn hover:bg-canvas text-text-muted hover:text-text-main transition-colors ml-1 ${
+                activeTabId === "" ? "bg-accent-soft text-accent" : ""
               }`}
             >
               <Plus className="w-4 h-4" />
@@ -336,8 +336,8 @@ export const ReportsHub: React.FC = () => {
 
           {/* Quick Recents / Favorites Chips */}
           <div className="hidden lg:flex items-center gap-2 px-3 py-1">
-            <span className="text-[11px] text-gray-400 font-medium flex items-center gap-1">
-              <Star className="w-3 h-3 text-amber-500 fill-amber-500" /> Pinned:
+            <span className="text-[11px] text-text-muted font-medium flex items-center gap-1">
+              <Star className="w-3 h-3 text-status-warning fill-status-warning" /> Pinned:
             </span>
             {favorites.slice(0, 3).map((fId) => {
               const rep = reportRegistry.get(fId);
@@ -347,7 +347,7 @@ export const ReportsHub: React.FC = () => {
                   key={fId}
                   type="button"
                   onClick={() => openReport(fId)}
-                  className="text-[11px] bg-gray-100 hover:bg-gray-200 text-gray-700 px-2 py-0.5 rounded transition-colors truncate max-w-[120px]"
+                  className="text-[11px] bg-canvas border border-border-main hover:bg-border-main text-text-main px-2 py-0.5 rounded-btn transition-colors truncate max-w-[120px]"
                 >
                   {rep.title.split("(")[0].trim()}
                 </button>
@@ -357,15 +357,15 @@ export const ReportsHub: React.FC = () => {
         </div>
 
         {/* Workspace Content: Active Report OR Report Browser Catalog */}
-        <div className="flex-1 overflow-hidden bg-gray-50 flex flex-col">
+        <div className="flex-1 overflow-hidden bg-canvas flex flex-col">
           {activeReport ? (
             <ReportViewContainer key={activeReport.id} report={activeReport} />
           ) : (
             /* Catalog / Reports Directory when no tab or '+' clicked */
             <div className="flex-1 overflow-y-auto p-6 max-w-6xl mx-auto w-full">
               <div className="mb-6">
-                <h2 className="text-xl font-bold text-gray-900">Reports Directory</h2>
-                <p className="text-xs text-gray-500 mt-1">
+                <h2 className="text-[26px] font-bold text-text-main tracking-tight">Reports Directory</h2>
+                <p className="text-xs text-text-muted mt-1">
                   Select a report to open it in a dedicated tab. All calculations are synchronized with your store dashboard.
                 </p>
               </div>
@@ -378,39 +378,39 @@ export const ReportsHub: React.FC = () => {
                     <div
                       key={rep.id}
                       onClick={() => openReport(rep.id)}
-                      className="bg-white border border-gray-200 rounded-xl p-4 shadow-xs hover:shadow-md hover:border-blue-400 cursor-pointer transition-all flex flex-col justify-between group"
+                      className="bg-surface border border-border-main rounded-card p-4 shadow-xs hover:border-accent cursor-pointer transition-all flex flex-col justify-between group"
                     >
                       <div>
                         <div className="flex items-center justify-between mb-2">
-                          <div className="p-2 bg-gray-50 rounded-lg group-hover:bg-blue-50 transition-colors">
+                          <div className="p-2 bg-canvas rounded-btn group-hover:bg-accent-soft transition-colors">
                             {getCategoryIcon(rep.category)}
                           </div>
                           <button
                             type="button"
                             onClick={(e) => toggleFavorite(rep.id, e)}
-                            className="p-1 rounded hover:bg-gray-100 text-gray-400 transition-colors"
+                            className="p-1 rounded-btn hover:bg-canvas text-text-muted transition-colors"
                           >
                             <Star
                               className={`w-4 h-4 ${
-                                isFav ? "text-amber-500 fill-amber-500" : "text-gray-300 hover:text-amber-400"
+                                isFav ? "text-status-warning fill-status-warning" : "text-border-main hover:text-status-warning"
                               }`}
                             />
                           </button>
                         </div>
 
-                        <h3 className="font-semibold text-gray-900 text-sm group-hover:text-blue-600 transition-colors">
+                        <h3 className="font-semibold text-text-main text-sm group-hover:text-accent transition-colors">
                           {rep.title}
                         </h3>
-                        <p className="text-xs text-gray-500 mt-1 line-clamp-2">
+                        <p className="text-xs text-text-muted mt-1 line-clamp-2">
                           {rep.description}
                         </p>
                       </div>
 
-                      <div className="mt-4 pt-3 border-t border-gray-100 flex items-center justify-between text-xs text-gray-400">
-                        <span className="capitalize text-[11px] font-medium bg-gray-100 px-2 py-0.5 rounded text-gray-600">
+                      <div className="mt-4 pt-3 border-t border-border-main flex items-center justify-between text-xs text-text-muted">
+                        <span className="capitalize text-[11px] font-medium bg-canvas border border-border-main px-2 py-0.5 rounded-full text-text-muted">
                           {rep.category}
                         </span>
-                        <span className="flex items-center gap-1 text-blue-600 font-semibold group-hover:translate-x-1 transition-transform">
+                        <span className="flex items-center gap-1 text-accent font-semibold group-hover:translate-x-1 transition-transform">
                           Open <ArrowRight className="w-3.5 h-3.5" />
                         </span>
                       </div>

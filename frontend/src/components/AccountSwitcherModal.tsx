@@ -66,27 +66,27 @@ export const AccountSwitcherModal: React.FC<AccountSwitcherModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4 font-sans select-none">
-      <div className="bg-slate-900 border border-slate-700 max-w-md w-full rounded-2xl p-6 shadow-2xl space-y-4">
-        <div className="flex justify-between items-center pb-2 border-b border-slate-800">
-          <div className="flex items-center gap-2 text-sm font-bold text-white">
-            <Users className="w-4 h-4 text-blue-400" />
+    <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4 font-sans select-none animate-in fade-in duration-100">
+      <div className="bg-surface border border-border-main max-w-md w-full rounded-card p-6 shadow-modal space-y-4">
+        <div className="flex justify-between items-center pb-2 border-b border-border-main">
+          <div className="flex items-center gap-2 text-sm font-bold text-text-main">
+            <Users className="w-4 h-4 text-accent" />
             <span>Switch Counter Cashier</span>
           </div>
           <button
             onClick={onClose}
-            className="text-slate-400 hover:text-white p-1 rounded-lg"
+            className="text-text-muted hover:text-text-main p-1 rounded-btn hover:bg-canvas transition-colors cursor-pointer"
           >
             <X className="w-4 h-4" />
           </button>
         </div>
 
-        <p className="text-xs text-slate-400">
+        <p className="text-xs text-text-muted">
           Changing cashiers preserves all active cart lines and held bills without interruption.
         </p>
 
         {errorMsg && (
-          <div className="p-2.5 rounded-xl bg-red-500/10 border border-red-500/30 text-xs text-red-400 flex items-center gap-2">
+          <div className="p-2.5 rounded-btn bg-status-danger/10 border border-status-danger/30 text-xs text-status-danger flex items-center gap-2">
             <AlertCircle className="w-4 h-4 shrink-0" />
             <span>{errorMsg}</span>
           </div>
@@ -94,7 +94,7 @@ export const AccountSwitcherModal: React.FC<AccountSwitcherModalProps> = ({
 
         <form onSubmit={handleSwitchSubmit} className="space-y-4">
           <div>
-            <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+            <label className="block text-xs font-semibold text-text-muted mb-1.5 uppercase tracking-wider">
               Select Incoming Operator
             </label>
             <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
@@ -107,21 +107,21 @@ export const AccountSwitcherModal: React.FC<AccountSwitcherModalProps> = ({
                     setPin("");
                     pinInputRef.current?.focus();
                   }}
-                  className={`w-full text-left p-2.5 rounded-xl border flex items-center justify-between text-xs transition-colors cursor-pointer ${
+                  className={`w-full text-left p-2.5 rounded-btn border flex items-center justify-between text-xs transition-colors cursor-pointer ${
                     selectedUser?.id === user.id
-                      ? "bg-blue-600/20 border-blue-500 text-white"
-                      : "bg-slate-800/60 border-slate-700/60 text-slate-300 hover:bg-slate-800"
+                      ? "bg-accent-soft border-accent text-accent font-bold"
+                      : "bg-surface border-border-main text-text-main hover:bg-canvas"
                   }`}
                 >
                   <div className="font-bold">{user.full_name}</div>
-                  <div className="text-[11px] text-slate-400 capitalize">{user.role}</div>
+                  <div className="text-[11px] text-text-muted capitalize">{user.role}</div>
                 </button>
               ))}
             </div>
           </div>
 
           <div>
-            <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+            <label className="block text-xs font-semibold text-text-muted mb-1.5 uppercase tracking-wider">
               Enter Quick PIN for {selectedUser?.full_name || "Operator"}
             </label>
             <input
@@ -132,22 +132,22 @@ export const AccountSwitcherModal: React.FC<AccountSwitcherModalProps> = ({
               value={pin}
               onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))}
               placeholder="••••"
-              className="w-full tracking-widest text-center text-lg font-mono py-2 bg-slate-950 border border-slate-700 rounded-xl text-white focus:ring-2 focus:ring-blue-500 focus:outline-none"
+              className="w-full tracking-widest text-center text-lg font-mono py-2 bg-surface border border-border-main rounded-btn text-text-main focus:border-accent focus:ring-2 focus:ring-accent/20 outline-none"
             />
           </div>
 
-          <div className="flex justify-end gap-2 pt-2">
+          <div className="flex justify-end gap-2 pt-2 border-t border-border-main">
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 rounded-xl bg-slate-800 text-slate-300 text-xs font-semibold hover:bg-slate-700"
+              className="px-4 py-2 rounded-btn border border-border-main text-text-muted text-xs font-semibold hover:bg-canvas hover:text-text-main cursor-pointer"
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={isLoading}
-              className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold shadow-md flex items-center gap-1.5 cursor-pointer"
+              className="px-4 py-2 rounded-btn bg-accent hover:opacity-90 text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
             >
               {isLoading && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
               <span>Switch Cashier</span>

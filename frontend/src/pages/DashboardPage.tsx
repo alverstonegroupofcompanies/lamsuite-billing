@@ -88,16 +88,16 @@ export const DashboardPage: React.FC = () => {
   return (
     <div className="space-y-4">
       {/* Top Action & Period Control Ribbon */}
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-200 bg-white p-4 shadow-xs">
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] p-4 shadow-2xs">
         <div className="flex flex-col sm:flex-row sm:items-center gap-3">
           <div>
             <div className="flex items-center gap-2">
-              <h2 className="text-lg font-bold text-slate-800">Store Dashboard</h2>
-              <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-bold text-emerald-700 uppercase tracking-wider border border-emerald-200">
+              <h2 className="text-xl font-bold text-[var(--color-text)]">Store Dashboard</h2>
+              <span className="rounded-full bg-[var(--color-accent-soft)] px-2.5 py-0.5 text-[10px] font-bold text-[var(--color-accent)] uppercase tracking-wider border border-[var(--color-accent-soft)]">
                 SQLite Offline Engine
               </span>
             </div>
-            <p className="text-xs text-slate-500">
+            <p className="text-xs text-[var(--color-text-muted)] mt-0.5">
               Live counter sales, payment tenders, statutory GST, and inventory metrics.
             </p>
           </div>
@@ -107,16 +107,16 @@ export const DashboardPage: React.FC = () => {
             <div
               className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium border ${
                 metrics.syncStatus.isOnline
-                  ? "bg-blue-50 text-blue-700 border-blue-200"
-                  : "bg-amber-50 text-amber-700 border-amber-200"
+                  ? "bg-[var(--color-accent-soft)] text-[var(--color-accent)] border-[var(--color-accent-soft)]"
+                  : "bg-[var(--color-warning-bg)] text-[var(--color-warning-text)] border-[var(--color-warning-border)]"
               }`}
             >
               {metrics.syncStatus.isOnline ? (
-                <Wifi className="h-3 w-3 text-blue-600" />
+                <Wifi className="h-3 w-3 text-[var(--color-accent)]" />
               ) : (
-                <WifiOff className="h-3 w-3 text-amber-600" />
+                <WifiOff className="h-3 w-3 text-[var(--color-warning-text)]" />
               )}
-              <span className="text-[11px] font-medium">{metrics.syncStatus.lastSyncedText}</span>
+              <span className="text-[11px] font-mono font-medium">{metrics.syncStatus.lastSyncedText}</span>
             </div>
           )}
         </div>
@@ -124,7 +124,7 @@ export const DashboardPage: React.FC = () => {
         {/* Period Selector & Action Buttons */}
         <div className="flex flex-wrap items-center gap-2">
           {/* Period Selector */}
-          <div className="flex items-center rounded-lg border border-slate-200 bg-slate-50 p-0.5 text-xs font-semibold text-slate-600">
+          <div className="flex items-center rounded-[10px] border border-[var(--color-border)] bg-[var(--color-surface-subtle)] p-0.5 text-xs font-semibold text-[var(--color-text-muted)]">
             {(
               [
                 { id: "today", label: "Today" },
@@ -137,10 +137,10 @@ export const DashboardPage: React.FC = () => {
               <button
                 key={p.id}
                 onClick={() => setPeriodType(p.id)}
-                className={`rounded-md px-2.5 py-1 transition-colors cursor-pointer ${
+                className={`rounded-[8px] px-2.5 py-1 transition-colors cursor-pointer ${
                   periodType === p.id
-                    ? "bg-white text-blue-600 shadow-xs font-bold"
-                    : "text-slate-600 hover:text-slate-900"
+                    ? "bg-[var(--color-accent)] text-white shadow-xs font-bold"
+                    : "text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
                 }`}
               >
                 {p.label}
@@ -155,14 +155,14 @@ export const DashboardPage: React.FC = () => {
                 type="date"
                 value={customStart}
                 onChange={(e) => setCustomStart(e.target.value)}
-                className="h-8 rounded border border-slate-200 bg-white px-2 text-xs font-medium text-slate-700"
+                className="h-8 rounded-[8px] border border-[var(--color-border)] bg-[var(--color-surface)] px-2 text-xs font-medium text-[var(--color-text)]"
               />
-              <span className="text-slate-400">to</span>
+              <span className="text-[var(--color-text-muted)]">to</span>
               <input
                 type="date"
                 value={customEnd}
                 onChange={(e) => setCustomEnd(e.target.value)}
-                className="h-8 rounded border border-slate-200 bg-white px-2 text-xs font-medium text-slate-700"
+                className="h-8 rounded-[8px] border border-[var(--color-border)] bg-[var(--color-surface)] px-2 text-xs font-medium text-[var(--color-text)]"
               />
             </div>
           )}
@@ -171,17 +171,17 @@ export const DashboardPage: React.FC = () => {
           <button
             onClick={loadData}
             disabled={isLoading}
-            className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition-colors shadow-xs disabled:opacity-50 cursor-pointer"
+            className="flex items-center gap-1.5 rounded-[10px] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1.5 text-xs font-semibold text-[var(--color-text)] hover:bg-[var(--color-surface-hover)] transition-colors shadow-2xs disabled:opacity-50 cursor-pointer"
             title="Refresh live metrics from SQLite database"
           >
-            <RefreshCw className={`h-3.5 w-3.5 ${isLoading ? "animate-spin text-blue-600" : "text-slate-500"}`} />
+            <RefreshCw className={`h-3.5 w-3.5 ${isLoading ? "animate-spin text-[var(--color-accent)]" : "text-[var(--color-text-muted)]"}`} />
             <span>{isLoading ? "Refreshing..." : "Refresh"}</span>
           </button>
 
           {/* Quick Sale / Purchase Buttons */}
           <Link
             to="/pos"
-            className="flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white shadow-xs hover:bg-blue-700 transition-colors"
+            className="flex items-center gap-1.5 rounded-[10px] bg-[var(--color-accent)] px-3.5 py-1.5 text-xs font-bold text-white shadow-xs hover:bg-[var(--color-accent-hover)] transition-colors"
           >
             <PlusCircle className="h-3.5 w-3.5" />
             <span>New Sale (F1)</span>
@@ -189,9 +189,9 @@ export const DashboardPage: React.FC = () => {
 
           <Link
             to="/purchases"
-            className="flex items-center gap-1.5 rounded-lg bg-slate-800 px-3 py-1.5 text-xs font-semibold text-white shadow-xs hover:bg-slate-900 transition-colors"
+            className="flex items-center gap-1.5 rounded-[10px] bg-[var(--color-surface-subtle)] border border-[var(--color-border)] px-3.5 py-1.5 text-xs font-semibold text-[var(--color-text)] shadow-xs hover:bg-[var(--color-surface-hover)] transition-colors"
           >
-            <PackagePlus className="h-3.5 w-3.5" />
+            <PackagePlus className="h-3.5 w-3.5 text-[var(--color-accent)]" />
             <span>Inward (F2)</span>
           </Link>
         </div>
@@ -218,30 +218,30 @@ export const DashboardPage: React.FC = () => {
       {isLoading && !metrics ? (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4 animate-pulse">
           {[1, 2, 3, 4].map((i) => (
-            <div key={i} className="h-28 rounded-lg bg-slate-200" />
+            <div key={i} className="h-28 rounded-[14px] bg-[var(--color-surface-subtle)]" />
           ))}
         </div>
       ) : (
         /* KPI Stats Cards */
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {/* Card 1: Net Sales */}
-          <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-xs hover:shadow-md transition-shadow">
+          <div className="rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] p-4 shadow-2xs hover:border-[var(--color-accent)]/50 transition-all">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-bold text-slate-500 uppercase tracking-wide">
+              <span className="text-[11px] font-bold text-[var(--color-text-muted)] uppercase tracking-wider">
                 {metrics?.period.label} Net Sales
               </span>
-              <div className="rounded-lg bg-blue-50 p-2 text-blue-600">
+              <div className="rounded-[8px] bg-[var(--color-accent-soft)] p-2 text-[var(--color-accent)]">
                 <TrendingUp className="h-4 w-4" />
               </div>
             </div>
-            <p className="mt-2 text-2xl font-extrabold text-slate-800">
+            <p className="mt-2 text-[30px] font-bold font-mono text-[var(--color-text)] tabular-nums leading-tight">
               {canViewFinancials ? formatMoney(metrics?.netSales || 0) : "••••••"}
             </p>
             <div className="mt-1 flex items-center justify-between text-xs">
               {metrics?.salesDeltaPercent !== null ? (
                 <span
-                  className={`flex items-center gap-0.5 font-bold ${
-                    (metrics?.salesDeltaPercent || 0) >= 0 ? "text-emerald-600" : "text-rose-600"
+                  className={`flex items-center gap-0.5 font-bold font-mono ${
+                    (metrics?.salesDeltaPercent || 0) >= 0 ? "text-[var(--color-success-text)]" : "text-[var(--color-danger-text)]"
                   }`}
                 >
                   {(metrics?.salesDeltaPercent || 0) >= 0 ? (
@@ -252,11 +252,11 @@ export const DashboardPage: React.FC = () => {
                   {Math.abs(metrics?.salesDeltaPercent || 0)}% vs previous
                 </span>
               ) : (
-                <span className="text-slate-400 font-medium">No previous data</span>
+                <span className="text-[var(--color-text-muted)] font-medium">No previous data</span>
               )}
 
               {(metrics?.totalReturns || 0) > 0 && (
-                <span className="text-rose-500 text-[11px] font-medium">
+                <span className="text-[var(--color-danger-text)] text-[11px] font-mono font-medium">
                   Returns: {formatMoney(metrics?.totalReturns || 0)}
                 </span>
               )}
@@ -264,64 +264,64 @@ export const DashboardPage: React.FC = () => {
           </div>
 
           {/* Card 2: Bills Issued */}
-          <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-xs hover:shadow-md transition-shadow">
+          <div className="rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] p-4 shadow-2xs hover:border-[var(--color-accent)]/50 transition-all">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-bold text-slate-500 uppercase tracking-wide">Bills Issued</span>
-              <div className="rounded-lg bg-emerald-50 p-2 text-emerald-600">
+              <span className="text-[11px] font-bold text-[var(--color-text-muted)] uppercase tracking-wider">Bills Issued</span>
+              <div className="rounded-[8px] bg-[var(--color-accent-soft)] p-2 text-[var(--color-accent)]">
                 <Receipt className="h-4 w-4" />
               </div>
             </div>
-            <p className="mt-2 text-2xl font-extrabold text-slate-800">{metrics?.billsIssuedCount || 0}</p>
-            <p className="text-xs text-slate-500 mt-1 font-medium">
-              Average ticket {canViewFinancials ? formatMoney(metrics?.averageTicket || 0) : "••••"}
+            <p className="mt-2 text-[30px] font-bold font-mono text-[var(--color-text)] tabular-nums leading-tight">{metrics?.billsIssuedCount || 0}</p>
+            <p className="text-xs text-[var(--color-text-muted)] mt-1 font-medium">
+              Average ticket <span className="font-mono font-bold text-[var(--color-text)]">{canViewFinancials ? formatMoney(metrics?.averageTicket || 0) : "••••"}</span>
             </p>
           </div>
 
           {/* Card 3: Digital / Cash Split */}
-          <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-xs hover:shadow-md transition-shadow">
+          <div className="rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] p-4 shadow-2xs hover:border-[var(--color-accent)]/50 transition-all">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-bold text-slate-500 uppercase tracking-wide">Digital / Cash Split</span>
-              <div className="rounded-lg bg-indigo-50 p-2 text-indigo-600">
+              <span className="text-[11px] font-bold text-[var(--color-text-muted)] uppercase tracking-wider">Digital / Cash Split</span>
+              <div className="rounded-[8px] bg-[var(--color-surface-subtle)] p-2 text-[var(--color-accent)]">
                 <CreditCard className="h-4 w-4" />
               </div>
             </div>
-            <p className="mt-2 text-xl font-bold text-slate-800">
+            <p className="mt-2 text-[26px] font-bold font-mono text-[var(--color-text)] tabular-nums leading-tight">
               {canViewFinancials
                 ? `${formatCompact(metrics?.payments.digitalTotal || 0)} / ${formatCompact(metrics?.payments.cash || 0)}`
                 : "••••"}
             </p>
-            <div className="mt-1 flex items-center justify-between text-xs text-slate-500">
-              <span className="font-medium">{metrics?.payments.digitalPercent || 0}% Digital Collections</span>
+            <div className="mt-1 flex items-center justify-between text-xs text-[var(--color-text-muted)]">
+              <span className="font-medium font-mono">{metrics?.payments.digitalPercent || 0}% Digital Collections</span>
               {(metrics?.payments.credit || 0) > 0 && (
-                <span className="text-amber-600 font-semibold">Credit: {formatCompact(metrics?.payments.credit || 0)}</span>
+                <span className="text-[var(--color-warning-text)] font-semibold font-mono">Credit: {formatCompact(metrics?.payments.credit || 0)}</span>
               )}
             </div>
           </div>
 
           {/* Card 4: Near Expiry Batches */}
-          <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-xs hover:shadow-md transition-shadow">
+          <div className="rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] p-4 shadow-2xs hover:border-[var(--color-accent)]/50 transition-all">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-bold text-slate-500 uppercase tracking-wide">
+              <span className="text-[11px] font-bold text-[var(--color-text-muted)] uppercase tracking-wider">
                 Near Expiry ({metrics?.nearExpiry.thresholdDays || 60}D)
               </span>
               <div
-                className={`rounded-lg p-2 ${
-                  (metrics?.nearExpiry.count || 0) > 0 ? "bg-amber-50 text-amber-600" : "bg-slate-50 text-slate-400"
+                className={`rounded-[8px] p-2 ${
+                  (metrics?.nearExpiry.count || 0) > 0 ? "bg-[var(--color-warning-bg)] text-[var(--color-warning-text)]" : "bg-[var(--color-surface-subtle)] text-[var(--color-text-muted)]"
                 }`}
               >
                 <AlertTriangle className="h-4 w-4" />
               </div>
             </div>
             <p
-              className={`mt-2 text-2xl font-extrabold ${
-                (metrics?.nearExpiry.count || 0) > 0 ? "text-amber-600" : "text-slate-700"
+              className={`mt-2 text-[30px] font-bold font-mono tabular-nums leading-tight ${
+                (metrics?.nearExpiry.count || 0) > 0 ? "text-[var(--color-warning-text)]" : "text-[var(--color-text)]"
               }`}
             >
-              {metrics?.nearExpiry.count || 0} <span className="text-sm font-semibold text-slate-500">Batches</span>
+              {metrics?.nearExpiry.count || 0} <span className="text-sm font-sans font-semibold text-[var(--color-text-muted)]">Batches</span>
             </p>
             <Link
               to="/stock"
-              className="text-xs font-semibold text-blue-600 hover:text-blue-700 hover:underline mt-1 inline-block"
+              className="text-xs font-semibold text-[var(--color-accent)] hover:underline mt-1 inline-block"
             >
               View expiry ledger (F3) →
             </Link>
@@ -332,27 +332,27 @@ export const DashboardPage: React.FC = () => {
       {/* Main Grid: Recent Transactions & Statutory Summary */}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
         {/* Recent Completed Invoices & Returns (2 cols) */}
-        <div className="lg:col-span-2 rounded-lg border border-slate-200 bg-white shadow-xs overflow-hidden flex flex-col">
-          <div className="flex flex-wrap items-center justify-between border-b border-slate-200 px-4 py-3 gap-2 bg-slate-50/50">
+        <div className="lg:col-span-2 rounded-card border border-border-main bg-surface shadow-2xs overflow-hidden flex flex-col">
+          <div className="flex flex-wrap items-center justify-between border-b border-border-main px-4 py-3 gap-2 bg-canvas">
             <div className="flex items-center gap-2">
-              <FileText className="h-4 w-4 text-blue-600" />
-              <h3 className="text-sm font-bold text-slate-800">Recent Completed Invoices & Returns</h3>
+              <FileText className="h-4 w-4 text-accent" />
+              <h3 className="text-sm font-bold text-text-main">Recent Completed Invoices & Returns</h3>
             </div>
 
             <div className="flex items-center gap-2">
               <div className="relative">
-                <Search className="absolute left-2.5 top-2 h-3.5 w-3.5 text-slate-400" />
+                <Search className="absolute left-2.5 top-2 h-3.5 w-3.5 text-text-muted" />
                 <input
                   type="text"
                   value={filterQuery}
                   onChange={(e) => setFilterQuery(e.target.value)}
                   placeholder="Filter bills, customers..."
-                  className="h-7.5 w-44 rounded-md border border-slate-200 bg-white pl-8 pr-2 text-xs font-medium text-slate-700 placeholder-slate-400 focus:border-blue-500 focus:outline-none"
+                  className="h-7.5 w-48 rounded-btn border border-border-main bg-surface pl-8 pr-2.5 text-xs font-medium text-text-main placeholder-text-muted focus:border-accent focus:outline-none"
                 />
               </div>
               <Link
                 to="/bills"
-                className="text-xs font-semibold text-blue-600 hover:text-blue-700 whitespace-nowrap"
+                className="text-xs font-bold text-accent hover:underline whitespace-nowrap"
               >
                 All Bills (F6) →
               </Link>
@@ -361,20 +361,20 @@ export const DashboardPage: React.FC = () => {
 
           <div className="flex-1 overflow-x-auto max-h-[380px]">
             <table className="w-full text-left text-xs">
-              <thead className="sticky top-0 bg-slate-50 text-slate-600 border-b border-slate-200 z-10">
+              <thead className="sticky top-0 bg-canvas text-text-muted border-b border-border-main z-10">
                 <tr>
-                  <th className="px-4 py-2.5 font-semibold">Document No</th>
-                  <th className="px-4 py-2.5 font-semibold">Date / Time</th>
-                  <th className="px-4 py-2.5 font-semibold">Customer</th>
-                  <th className="px-4 py-2.5 font-semibold text-right">Amount</th>
-                  <th className="px-4 py-2.5 font-semibold">Tender</th>
-                  <th className="px-4 py-2.5 font-semibold text-center">Status</th>
+                  <th className="px-4 py-2.5 text-[11px] font-bold uppercase tracking-wider">Document No</th>
+                  <th className="px-4 py-2.5 text-[11px] font-bold uppercase tracking-wider">Date / Time</th>
+                  <th className="px-4 py-2.5 text-[11px] font-bold uppercase tracking-wider">Customer</th>
+                  <th className="px-4 py-2.5 text-[11px] font-bold uppercase tracking-wider text-right">Amount</th>
+                  <th className="px-4 py-2.5 text-[11px] font-bold uppercase tracking-wider">Tender</th>
+                  <th className="px-4 py-2.5 text-[11px] font-bold uppercase tracking-wider text-center">Status</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100">
+              <tbody className="divide-y divide-border-subtle">
                 {filteredDocuments.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="p-8 text-center text-slate-400">
+                    <td colSpan={6} className="p-8 text-center text-text-muted">
                       {filterQuery ? "No records matching filter." : "No transactions recorded yet in the database."}
                     </td>
                   </tr>
@@ -385,40 +385,40 @@ export const DashboardPage: React.FC = () => {
                       <tr
                         key={doc.id}
                         onClick={() => navigate("/bills")}
-                        className="hover:bg-slate-50/80 transition-colors cursor-pointer"
+                        className="hover:bg-surface-hover transition-colors cursor-pointer"
                       >
-                        <td className="px-4 py-2.5 font-bold">
+                        <td className="px-4 py-2.5 font-bold font-mono">
                           <div className="flex items-center gap-1.5">
-                            <span className={isReturn ? "text-rose-600" : "text-blue-600"}>{doc.documentNumber}</span>
+                            <span className={isReturn ? "text-[var(--color-danger-text)]" : "text-accent"}>{doc.documentNumber}</span>
                             {isReturn && (
-                              <span className="rounded bg-rose-50 px-1 py-0.5 text-[9px] font-bold text-rose-700 border border-rose-200">
+                              <span className="rounded-btn bg-[var(--color-danger-bg)] px-1.5 py-0.2 text-[9px] font-bold text-[var(--color-danger-text)] border border-[var(--color-danger-border)]">
                                 RETURN
                               </span>
                             )}
                           </div>
                         </td>
-                        <td className="px-4 py-2.5 text-slate-500">
+                        <td className="px-4 py-2.5 text-text-muted font-mono text-[11px]">
                           {doc.time ? `${doc.date} ${doc.time}` : doc.date}
                         </td>
-                        <td className="px-4 py-2.5 text-slate-700 font-medium truncate max-w-[150px]">
+                        <td className="px-4 py-2.5 text-text-main font-semibold truncate max-w-[150px]">
                           {doc.customerName}
                         </td>
                         <td
-                          className={`px-4 py-2.5 font-bold text-right ${
-                            isReturn ? "text-rose-600" : "text-slate-800"
+                          className={`px-4 py-2.5 font-bold font-mono text-right tabular-nums ${
+                            isReturn ? "text-[var(--color-danger-text)]" : "text-text-main"
                           }`}
                         >
                           {isReturn ? `- ${formatMoney(Math.abs(doc.amount))}` : formatMoney(doc.amount)}
                         </td>
-                        <td className="px-4 py-2.5 text-slate-600 capitalize">{doc.paymentMode}</td>
+                        <td className="px-4 py-2.5 text-text-muted capitalize">{doc.paymentMode}</td>
                         <td className="px-4 py-2.5 text-center">
                           <span
-                            className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase ${
+                            className={`rounded-full px-2.5 py-0.5 text-[10px] font-mono font-bold uppercase ${
                               doc.paymentStatus === "cancelled"
-                                ? "bg-red-50 text-red-700 border border-red-200"
+                                ? "bg-[var(--color-danger-bg)] text-[var(--color-danger-text)] border border-[var(--color-danger-border)]"
                                 : doc.paymentStatus === "unpaid"
-                                ? "bg-amber-50 text-amber-700 border border-amber-200"
-                                : "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                                ? "bg-[var(--color-warning-bg)] text-[var(--color-warning-text)] border border-[var(--color-warning-border)]"
+                                : "bg-accent-soft text-accent border border-accent/20"
                             }`}
                           >
                             {doc.paymentStatus}
@@ -436,35 +436,35 @@ export const DashboardPage: React.FC = () => {
         {/* Quick Reports & Statutory Tax View (1 col) */}
         <div className="space-y-4">
           {/* Statutory GST Widget */}
-          <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-xs">
-            <div className="flex items-center justify-between mb-3 border-b border-slate-100 pb-2">
-              <h3 className="text-sm font-bold text-slate-800">Statutory GST Quick View</h3>
-              <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-mono font-semibold text-slate-600">
+          <div className="rounded-card border border-border-main bg-surface p-4 shadow-2xs">
+            <div className="flex items-center justify-between mb-3 border-b border-border-main pb-2">
+              <h3 className="text-sm font-bold text-text-main">Statutory GST Quick View</h3>
+              <span className="rounded-full bg-canvas border border-border-main px-2 py-0.5 text-[10px] font-mono font-semibold text-text-muted">
                 {metrics?.period.label}
               </span>
             </div>
 
             <div className="space-y-2 text-xs">
               {metrics?.gst.slabs.length === 0 ? (
-                <div className="py-4 text-center text-slate-400">
+                <div className="py-4 text-center text-text-muted">
                   <p>No taxable sales recorded in this period.</p>
-                  <p className="text-[11px] text-slate-300 mt-1">₹ 0.00 Tax Accrued</p>
+                  <p className="text-[11px] text-text-faint font-mono mt-1">₹ 0.00 Tax Accrued</p>
                 </div>
               ) : (
                 metrics?.gst.slabs.map((slab) => (
-                  <div key={slab.rate} className="flex items-center justify-between py-1 border-b border-slate-50">
+                  <div key={slab.rate} className="flex items-center justify-between py-1 border-b border-border-subtle">
                     <div className="flex items-center gap-1.5">
-                      <span className="font-semibold text-slate-700">GST {slab.rate}%:</span>
-                      <span className="text-slate-400 text-[11px]">
+                      <span className="font-semibold text-text-main">GST {slab.rate}%:</span>
+                      <span className="text-text-muted font-mono text-[11px]">
                         (Taxable: {formatCompact(slab.taxableValue)})
                       </span>
                     </div>
-                    <span className="font-bold text-slate-800">{formatMoney(slab.totalTax)}</span>
+                    <span className="font-bold font-mono text-text-main">{formatMoney(slab.totalTax)}</span>
                   </div>
                 ))
               )}
 
-              <div className="flex justify-between py-2 font-bold text-blue-700 pt-2 border-t border-slate-200">
+              <div className="flex justify-between py-2 font-bold font-mono text-accent pt-2 border-t border-border-main text-sm">
                 <span>Total Tax Accrued:</span>
                 <span>{formatMoney(metrics?.gst.totalTaxAccrued || 0)}</span>
               </div>
@@ -472,50 +472,50 @@ export const DashboardPage: React.FC = () => {
 
             <Link
               to="/reports"
-              className="mt-3 block text-center rounded-lg bg-slate-50 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-100 transition-colors border border-slate-200"
+              className="mt-3 block text-center rounded-btn bg-canvas py-2 text-xs font-semibold text-text-main hover:bg-surface-hover transition-colors border border-border-main"
             >
               Generate GSTR-1 & HSN Summary (F4) →
             </Link>
           </div>
 
           {/* Quick Operational Actions & Held Bills */}
-          <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-xs space-y-3">
-            <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider">Quick Operational Actions</h3>
+          <div className="rounded-card border border-border-main bg-surface p-4 shadow-2xs space-y-3">
+            <h3 className="text-[11px] font-bold text-text-muted uppercase tracking-wider">Quick Operational Actions</h3>
             <div className="grid grid-cols-2 gap-2 text-xs">
               <Link
                 to="/returns/sales"
-                className="flex items-center gap-1.5 rounded-md border border-slate-200 p-2 font-medium text-slate-700 hover:bg-slate-50 transition-colors"
+                className="flex items-center gap-1.5 rounded-btn border border-border-main bg-surface p-2 font-semibold text-text-main hover:bg-surface-hover transition-colors"
               >
-                <DollarSign className="h-3.5 w-3.5 text-amber-600 shrink-0" />
+                <DollarSign className="h-3.5 w-3.5 text-accent shrink-0" />
                 <span>Sales Return</span>
               </Link>
 
               <Link
                 to="/returns/debit-notes"
-                className="flex items-center gap-1.5 rounded-md border border-slate-200 p-2 font-medium text-slate-700 hover:bg-slate-50 transition-colors"
+                className="flex items-center gap-1.5 rounded-btn border border-border-main bg-surface p-2 font-semibold text-text-main hover:bg-surface-hover transition-colors"
               >
-                <Building2 className="h-3.5 w-3.5 text-indigo-600 shrink-0" />
+                <Building2 className="h-3.5 w-3.5 text-accent shrink-0" />
                 <span>B2B Returns</span>
               </Link>
 
               <Link
                 to="/stock"
-                className="flex items-center gap-1.5 rounded-md border border-slate-200 p-2 font-medium text-slate-700 hover:bg-slate-50 transition-colors"
+                className="flex items-center gap-1.5 rounded-btn border border-border-main bg-surface p-2 font-semibold text-text-main hover:bg-surface-hover transition-colors"
               >
-                <Layers className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
+                <Layers className="h-3.5 w-3.5 text-accent shrink-0" />
                 <span>Stock Ledger</span>
               </Link>
 
               <Link
                 to="/pos"
-                className="flex items-center justify-between rounded-md border border-slate-200 p-2 font-medium text-slate-700 hover:bg-slate-50 transition-colors"
+                className="flex items-center justify-between rounded-btn border border-border-main bg-surface p-2 font-semibold text-text-main hover:bg-surface-hover transition-colors"
               >
                 <div className="flex items-center gap-1.5">
-                  <PauseCircle className="h-3.5 w-3.5 text-orange-600 shrink-0" />
+                  <PauseCircle className="h-3.5 w-3.5 text-[var(--color-warning-text)] shrink-0" />
                   <span>Held Bills</span>
                 </div>
                 {(metrics?.heldBillsCount || 0) > 0 && (
-                  <span className="rounded-full bg-orange-100 px-1.5 py-0.2 text-[10px] font-bold text-orange-700">
+                  <span className="rounded-full bg-[var(--color-warning-bg)] text-[var(--color-warning-text)] border border-[var(--color-warning-border)] px-1.5 py-0.2 text-[10px] font-bold font-mono">
                     {metrics?.heldBillsCount}
                   </span>
                 )}

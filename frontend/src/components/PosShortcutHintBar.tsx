@@ -62,7 +62,7 @@ export const PosShortcutHintBar: React.FC<PosShortcutHintBarProps> = ({
         { key: "Ctrl+Z", label: "Undo Delete" },
         { key: "Ctrl+B", label: "Batch" },
         { key: "Ctrl+U", label: "Toggle Rate" },
-        { key: "F3", label: "Price" },
+        { key: "F4", label: "Edit Product/Batch" },
         { key: "Ctrl+E", label: "Packaging" },
         { key: "Alt+↑/↓", label: "Reorder" },
         { key: "F1", label: "Back to Search", onClick: onFocusSearch },
@@ -91,13 +91,13 @@ export const PosShortcutHintBar: React.FC<PosShortcutHintBarProps> = ({
 
   return (
     <div
-      className={`flex items-center justify-between gap-2 border-t border-slate-200/80 bg-slate-900 text-slate-200 px-3 py-1.5 text-xs select-none shadow-inner ${className}`}
+      className={`flex items-center justify-between gap-2 border-t border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-text)] px-3 py-1.5 text-xs select-none shadow-2xs ${className}`}
       role="region"
       aria-label="Keyboard Shortcuts Bar"
     >
       <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-none py-0.5">
-        <div className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-slate-400 mr-1.5 shrink-0">
-          <Keyboard className="h-3.5 w-3.5 text-blue-400" />
+        <div className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-[var(--color-text-muted)] mr-1.5 shrink-0">
+          <Keyboard className="h-3.5 w-3.5 text-[var(--color-accent)]" />
           <span className="hidden sm:inline">Keys:</span>
         </div>
 
@@ -107,16 +107,16 @@ export const PosShortcutHintBar: React.FC<PosShortcutHintBarProps> = ({
             type="button"
             tabIndex={-1}
             onClick={hint.onClick}
-            className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-medium whitespace-nowrap transition-colors shrink-0 ${
+            className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-[8px] text-[11px] font-medium whitespace-nowrap transition-colors shrink-0 ${
               hint.highlight
-                ? "bg-blue-600 text-white font-bold hover:bg-blue-500 shadow-2xs"
+                ? "bg-[var(--color-accent)] text-white font-bold hover:bg-[var(--color-accent-hover)] shadow-2xs"
                 : hint.onClick
-                ? "bg-slate-800 text-slate-200 hover:bg-slate-700 hover:text-white border border-slate-700/60"
-                : "bg-slate-800/80 text-slate-300 border border-slate-700/40"
+                ? "bg-[var(--color-surface-subtle)] text-[var(--color-text)] hover:bg-[var(--color-surface-hover)] border border-[var(--color-border)] cursor-pointer"
+                : "bg-[var(--color-surface-subtle)] text-[var(--color-text-muted)] border border-[var(--color-border)]"
             }`}
           >
-            <kbd className={`font-mono text-[10px] font-bold px-1 py-0.2 rounded shadow-2xs ${
-              hint.highlight ? "bg-blue-700 text-white" : "bg-slate-950 text-amber-400"
+            <kbd className={`font-mono text-[10px] font-bold px-1.5 py-0.2 rounded-[4px] shadow-2xs ${
+              hint.highlight ? "bg-black/30 text-white" : "bg-[var(--color-surface)] text-[var(--color-accent)] border border-[var(--color-border)]"
             }`}>
               {hint.key}
             </kbd>
@@ -129,12 +129,12 @@ export const PosShortcutHintBar: React.FC<PosShortcutHintBarProps> = ({
         type="button"
         tabIndex={-1}
         onClick={onOpenShortcutsModal}
-        className="flex items-center gap-1 rounded bg-slate-800 hover:bg-slate-700 border border-slate-700 px-2 py-0.5 text-[11px] font-bold text-slate-300 hover:text-white shrink-0 transition-colors cursor-pointer"
+        className="flex items-center gap-1.5 rounded-[8px] bg-[var(--color-surface-subtle)] hover:bg-[var(--color-surface-hover)] border border-[var(--color-border)] px-2 py-0.5 text-[11px] font-bold text-[var(--color-text-muted)] hover:text-[var(--color-text)] shrink-0 transition-colors cursor-pointer"
         title="View All Keyboard Shortcuts (?)"
       >
-        <HelpCircle className="h-3.5 w-3.5 text-amber-400" />
+        <HelpCircle className="h-3.5 w-3.5 text-[var(--color-accent)]" />
         <span className="hidden md:inline">Shortcuts</span>
-        <kbd className="font-mono text-[10px] bg-slate-950 text-amber-400 px-1 py-0.2 rounded font-bold">?</kbd>
+        <kbd className="font-mono text-[10px] bg-[var(--color-surface)] text-[var(--color-accent)] px-1 py-0.2 rounded-[4px] font-bold border border-[var(--color-border)]">?</kbd>
       </button>
     </div>
   );

@@ -76,17 +76,17 @@ export const BarcodePrintModal: React.FC<BarcodePrintModalProps> = ({
 
   return (
     <>
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-xs p-4">
-        <div className="w-full max-w-2xl rounded-xl bg-white shadow-2xl border border-slate-200 overflow-hidden">
-          <div className="flex items-center justify-between border-b border-slate-200 px-5 py-3.5 bg-slate-50">
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+        <div className="w-full max-w-2xl rounded-card bg-surface shadow-2xl border border-border-main overflow-hidden">
+          <div className="flex items-center justify-between border-b border-border-main px-5 py-3.5 bg-canvas">
             <div className="flex items-center gap-2">
-              <Barcode className="h-5 w-5 text-blue-600" />
+              <Barcode className="h-5 w-5 text-accent" />
               <div>
-                <h3 className="text-sm font-bold text-slate-800">Print Barcode & Price Labels</h3>
-                <p className="text-[11px] text-slate-500">{totalLabels} Total Labels to generate</p>
+                <h3 className="text-sm font-bold text-text-main">Print Barcode & Price Labels</h3>
+                <p className="text-[11px] text-text-muted">{totalLabels} Total Labels to generate</p>
               </div>
             </div>
-            <button onClick={onClose} className="text-slate-400 hover:text-slate-600">
+            <button onClick={onClose} className="text-text-muted hover:text-text-main transition-colors">
               <X className="h-4 w-4" />
             </button>
           </div>

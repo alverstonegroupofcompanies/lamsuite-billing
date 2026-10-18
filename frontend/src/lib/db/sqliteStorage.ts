@@ -556,6 +556,37 @@ export const MIGRATIONS: Migration[] = [
       );
     `,
   },
+  {
+    version: 7,
+    name: "create_expenses_and_customer_payments",
+    sql: `
+      CREATE TABLE IF NOT EXISTS expenses (
+        id TEXT PRIMARY KEY,
+        expense_number TEXT NOT NULL UNIQUE,
+        expense_head TEXT NOT NULL,
+        amount REAL NOT NULL DEFAULT 0,
+        payment_mode TEXT NOT NULL DEFAULT 'Cash',
+        reference_no TEXT,
+        notes TEXT,
+        expense_date TEXT NOT NULL,
+        created_by TEXT,
+        created_at INTEGER NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS customer_payments (
+        id TEXT PRIMARY KEY,
+        payment_number TEXT NOT NULL UNIQUE,
+        customer_id TEXT NOT NULL,
+        customer_name TEXT NOT NULL,
+        amount REAL NOT NULL DEFAULT 0,
+        payment_mode TEXT NOT NULL DEFAULT 'Cash',
+        reference_no TEXT,
+        notes TEXT,
+        payment_date TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+      );
+    `,
+  },
 ];
 
 let mockDb: MockSqliteDatabase | null = null;
@@ -672,6 +703,11 @@ export class SqliteStorageService {
       return [];
     }
     return await bridge.invoke<T[]>("db:findAll", { table });
+  }
+
+  async count(table: string): Promise<number> {
+    const records = await this.findAll(table);
+    return Array.isArray(records) ? records.length : 0;
   }
 
   async deleteRecord(table: string, id: string): Promise<boolean> {

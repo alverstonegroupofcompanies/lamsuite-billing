@@ -400,16 +400,16 @@ export const CustomerDebitNotePage: React.FC = () => {
       case "approved":
       case "credit_note_issued":
       case "settled":
-        return <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-700">{status.replace("_", " ")}</span>;
+        return <span className="rounded-full bg-accent-soft px-2.5 py-0.5 text-[10px] font-semibold text-accent">{status.replace("_", " ")}</span>;
       case "partially_approved":
-        return <span className="rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-bold text-blue-700">Partially Approved</span>;
+        return <span className="rounded-full bg-accent-soft px-2.5 py-0.5 text-[10px] font-semibold text-accent">Partially Approved</span>;
       case "disputed":
-        return <span className="rounded-full bg-purple-100 px-2 py-0.5 text-[10px] font-bold text-purple-700">Disputed</span>;
+        return <span className="rounded-full bg-status-warning/15 px-2.5 py-0.5 text-[10px] font-semibold text-status-warning">Disputed</span>;
       case "rejected":
       case "cancelled":
-        return <span className="rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-bold text-red-700">{status}</span>;
+        return <span className="rounded-full bg-status-danger/10 text-status-danger px-2.5 py-0.5 text-[10px] font-semibold">{status}</span>;
       default:
-        return <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-700">{status.replace("_", " ")}</span>;
+        return <span className="rounded-full bg-status-warning/15 px-2.5 py-0.5 text-[10px] font-semibold text-status-warning">{status.replace("_", " ")}</span>;
     }
   };
 
@@ -427,8 +427,10 @@ export const CustomerDebitNotePage: React.FC = () => {
       {/* Toast Notification */}
       {toast && (
         <div
-          className={`fixed top-4 right-4 z-[60] flex items-center gap-2 rounded-lg px-4 py-3 text-xs font-semibold text-white shadow-lg ${
-            toast.type === "success" ? "bg-emerald-600" : "bg-red-600"
+          className={`fixed top-4 right-4 z-[60] flex items-center gap-2 rounded-btn px-4 py-3 text-xs font-semibold shadow-modal transition-all ${
+            toast.type === "success"
+              ? "bg-accent-soft text-accent border border-accent/20"
+              : "bg-status-danger/10 text-status-danger border border-status-danger/20"
           }`}
         >
           {toast.type === "success" ? <CheckCircle className="h-4 w-4" /> : <AlertCircle className="h-4 w-4" />}
@@ -439,11 +441,11 @@ export const CustomerDebitNotePage: React.FC = () => {
       {/* Page Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="flex items-center gap-2 text-xl font-bold text-slate-800">
-            <Building2 className="h-5 w-5 text-indigo-600" />
+          <h2 className="flex items-center gap-2 text-[26px] font-bold text-text-main tracking-tight">
+            <Building2 className="h-5 w-5 text-accent" />
             Customer Debit Notes (B2B Multi-Invoice Returns)
           </h2>
-          <p className="text-xs text-slate-500">
+          <p className="text-xs text-text-muted mt-0.5">
             Reconcile debit notes received from customers, auto-match invoices across batches, and issue GST Credit Notes (Sec 34).
           </p>
         </div>
@@ -454,14 +456,14 @@ export const CustomerDebitNotePage: React.FC = () => {
               setReportData(rep);
               setIsReportModalOpen(true);
             }}
-            className="flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50 shadow-xs"
+            className="flex items-center gap-1.5 rounded-btn border border-border-main bg-surface px-3 py-2 text-xs font-medium text-text-main hover:bg-canvas shadow-xs transition-colors"
           >
-            <FileSpreadsheet className="h-4 w-4 text-emerald-600" />
+            <FileSpreadsheet className="h-4 w-4 text-accent" />
             Debit Notes Report
           </button>
           <button
             onClick={openNewForm}
-            className="flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-xs font-bold text-white shadow-sm hover:bg-indigo-700"
+            className="flex items-center gap-2 rounded-btn bg-accent px-4 py-2 text-xs font-semibold text-white shadow-xs hover:bg-accent/90 transition-colors"
           >
             <Plus className="h-4 w-4" />
             New Customer Debit Note
@@ -470,16 +472,16 @@ export const CustomerDebitNotePage: React.FC = () => {
       </div>
 
       {/* Module Switcher Tabs */}
-      <div className="flex items-center gap-2 border-b border-slate-200">
+      <div className="flex items-center gap-2 border-b border-border-main">
         <button
           onClick={() => navigate("/returns/sales")}
-          className="flex items-center gap-2 border-b-2 border-transparent pb-2 px-3 text-xs font-bold text-slate-500 hover:text-slate-800"
+          className="flex items-center gap-2 border-b-2 border-transparent pb-2 px-3 text-xs font-semibold text-text-muted hover:text-text-main transition-colors"
         >
           <Undo2 className="h-4 w-4" />
           Counter Returns (Walk-in)
         </button>
         <button
-          className="flex items-center gap-2 border-b-2 border-indigo-600 pb-2 px-3 text-xs font-bold text-indigo-700"
+          className="flex items-center gap-2 border-b-2 border-accent pb-2 px-3 text-xs font-semibold text-accent"
         >
           <Building2 className="h-4 w-4" />
           Customer Debit Notes (B2B Multi-Invoice)
@@ -489,19 +491,19 @@ export const CustomerDebitNotePage: React.FC = () => {
       {/* Filters Bar */}
       <div className="flex items-center gap-2">
         <div className="relative flex-1 max-w-sm">
-          <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
+          <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-text-muted" />
           <input
             type="text"
             value={listSearch}
             onChange={(e) => setListSearch(e.target.value)}
             placeholder="Search DN no, customer, GSTIN, phone..."
-            className="w-full rounded-lg border border-slate-200 bg-white pl-8 pr-3 py-2 text-xs text-slate-800 placeholder-slate-400 focus:border-blue-500 focus:outline-none"
+            className="w-full rounded-btn border border-border-main bg-surface pl-8 pr-3 py-2 text-xs text-text-main placeholder-text-muted/60 focus:border-accent focus:outline-none"
           />
         </div>
         <select
           value={statusFilter}
           onChange={(e) => setStatusFilter(e.target.value)}
-          className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-700 focus:outline-none"
+          className="rounded-btn border border-border-main bg-surface px-3 py-2 text-xs font-medium text-text-main focus:border-accent focus:outline-none"
         >
           <option value="all">All Statuses</option>
           <option value="received">Received</option>
@@ -514,48 +516,48 @@ export const CustomerDebitNotePage: React.FC = () => {
           <option value="cancelled">Cancelled</option>
         </select>
 
-        <label className="flex items-center gap-1.5 text-xs text-slate-700 cursor-pointer select-none rounded-lg border border-slate-200 bg-white px-3 py-2 font-medium">
+        <label className="flex items-center gap-1.5 text-xs text-text-main cursor-pointer select-none rounded-btn border border-border-main bg-surface px-3 py-2 font-medium">
           <input
             type="checkbox"
             checked={varianceOnly}
             onChange={(e) => setVarianceOnly(e.target.checked)}
-            className="rounded text-indigo-600"
+            className="rounded text-accent focus:ring-accent"
           />
           <span>Variance Only</span>
         </label>
       </div>
 
       {/* Debit Notes Table Card */}
-      <div className="rounded-lg border border-slate-200 bg-white shadow-sm overflow-hidden">
-        <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3 bg-slate-50">
-          <h3 className="text-xs font-bold text-slate-800">Customer Debit Note Register</h3>
-          <span className="text-[11px] text-slate-500">{debitNotes.length} Records</span>
+      <div className="rounded-card border border-border-main bg-surface shadow-xs overflow-hidden">
+        <div className="flex items-center justify-between border-b border-border-main px-4 py-3 bg-canvas">
+          <h3 className="text-xs font-semibold uppercase tracking-wider text-text-muted">Customer Debit Note Register</h3>
+          <span className="text-[11px] text-text-muted font-mono tabular-nums">{debitNotes.length} Records</span>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs">
-            <thead className="border-b border-slate-200 bg-slate-100/70 text-slate-600">
+            <thead className="border-b border-border-main bg-canvas text-[11px] font-semibold uppercase tracking-wider text-text-muted">
               <tr>
-                <th className="px-4 py-2.5 font-semibold">Debit Note No</th>
-                <th className="px-4 py-2.5 font-semibold">Date</th>
-                <th className="px-4 py-2.5 font-semibold">Customer</th>
-                <th className="px-4 py-2.5 font-semibold text-right">Customer Stated</th>
-                <th className="px-4 py-2.5 font-semibold text-right">Our Calc</th>
-                <th className="px-4 py-2.5 font-semibold text-right">Variance</th>
-                <th className="px-4 py-2.5 font-semibold text-center">Strategy</th>
-                <th className="px-4 py-2.5 font-semibold text-center">Status</th>
-                <th className="px-4 py-2.5 font-semibold text-right">Actions</th>
+                <th className="px-4 py-3">Debit Note No</th>
+                <th className="px-4 py-3">Date</th>
+                <th className="px-4 py-3">Customer</th>
+                <th className="px-4 py-3 text-right">Customer Stated</th>
+                <th className="px-4 py-3 text-right">Our Calc</th>
+                <th className="px-4 py-3 text-right">Variance</th>
+                <th className="px-4 py-3 text-center">Strategy</th>
+                <th className="px-4 py-3 text-center">Status</th>
+                <th className="px-4 py-3 text-right">Actions</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100">
+            <tbody className="divide-y divide-border-main">
               {listLoading ? (
                 <tr>
-                  <td colSpan={9} className="px-4 py-8 text-center text-slate-400">
+                  <td colSpan={9} className="px-4 py-8 text-center text-text-muted">
                     Loading customer debit notes...
                   </td>
                 </tr>
               ) : debitNotes.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="px-4 py-8 text-center text-slate-400">
+                  <td colSpan={9} className="px-4 py-8 text-center text-text-muted">
                     No customer debit notes found. Click "New Customer Debit Note" to create one.
                   </td>
                 </tr>
@@ -563,38 +565,38 @@ export const CustomerDebitNotePage: React.FC = () => {
                 debitNotes.map((dn) => {
                   const hasVariance = Math.abs(dn.variance) > 0.01;
                   return (
-                    <tr key={dn.id} className="hover:bg-slate-50 transition-colors">
-                      <td className="px-4 py-2.5 font-mono font-bold text-indigo-700">
+                    <tr key={dn.id} className="hover:bg-canvas/50 transition-colors">
+                      <td className="px-4 py-3 font-mono font-bold text-accent tabular-nums">
                         #{dn.debit_note_number}
                       </td>
-                      <td className="px-4 py-2.5 text-slate-600">{dn.debit_note_date}</td>
-                      <td className="px-4 py-2.5">
-                        <div className="font-semibold text-slate-800">{dn.customer_name}</div>
+                      <td className="px-4 py-3 text-text-muted font-mono tabular-nums">{dn.debit_note_date}</td>
+                      <td className="px-4 py-3">
+                        <div className="font-semibold text-text-main">{dn.customer_name}</div>
                         {dn.customer_gstin && (
-                          <div className="text-[10px] text-slate-400 font-mono">GSTIN: {dn.customer_gstin}</div>
+                          <div className="text-[10px] text-text-muted font-mono">GSTIN: {dn.customer_gstin}</div>
                         )}
                       </td>
-                      <td className="px-4 py-2.5 text-right font-mono font-semibold text-slate-700">
+                      <td className="px-4 py-3 text-right font-mono font-medium text-text-main tabular-nums">
                         ₹{dn.customer_dn_amount.toFixed(2)}
                       </td>
-                      <td className="px-4 py-2.5 text-right font-mono font-bold text-indigo-700">
+                      <td className="px-4 py-3 text-right font-mono font-bold text-accent tabular-nums">
                         ₹{dn.our_calculated_amount.toFixed(2)}
                       </td>
-                      <td className="px-4 py-2.5 text-right">
+                      <td className="px-4 py-3 text-right">
                         <span
-                          className={`font-mono font-bold px-1.5 py-0.5 rounded text-[11px] ${
+                          className={`font-mono font-bold px-2 py-0.5 rounded-full text-[10px] tabular-nums ${
                             hasVariance
                               ? dn.variance > 0
-                                ? "bg-red-50 text-red-700"
-                                : "bg-amber-50 text-amber-700"
-                              : "bg-emerald-50 text-emerald-700"
+                                ? "bg-status-danger/10 text-status-danger"
+                                : "bg-status-warning/15 text-status-warning"
+                              : "bg-accent-soft text-accent"
                           }`}
                         >
                           {dn.variance > 0 ? "+" : ""}₹{dn.variance.toFixed(2)}
                         </span>
                       </td>
-                      <td className="px-4 py-2.5 text-center">
-                        <span className="rounded bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-700">
+                      <td className="px-4 py-3 text-center">
+                        <span className="rounded-full bg-canvas border border-border-main px-2.5 py-0.5 text-[10px] font-medium text-text-muted">
                           Option {dn.credit_note_option}
                         </span>
                       </td>
@@ -602,7 +604,7 @@ export const CustomerDebitNotePage: React.FC = () => {
                       <td className="px-4 py-2.5 text-right">
                         <button
                           onClick={() => openDetail(dn)}
-                          className="rounded bg-indigo-50 px-2.5 py-1 text-xs font-semibold text-indigo-700 hover:bg-indigo-100 border border-indigo-200 transition-colors"
+                          className="rounded-btn bg-accent-soft px-2.5 py-1 text-xs font-semibold text-accent hover:bg-accent/15 border border-accent/20 transition-colors"
                         >
                           View / Reconcile
                         </button>
@@ -618,24 +620,24 @@ export const CustomerDebitNotePage: React.FC = () => {
 
       {/* ── New / Reconcile Form Modal ────────────────────────────────────────── */}
       {isFormOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-xs p-4">
-          <div className="flex max-h-[92vh] w-full max-w-5xl flex-col rounded-xl border border-slate-200 bg-white shadow-2xl overflow-hidden">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="flex max-h-[92vh] w-full max-w-5xl flex-col rounded-card border border-border-main bg-surface shadow-2xl overflow-hidden">
             {/* Modal Header */}
-            <div className="flex items-center justify-between border-b border-slate-200 bg-indigo-50 px-5 py-3">
+            <div className="flex items-center justify-between border-b border-border-main bg-canvas px-5 py-3">
               <div className="flex items-center gap-3">
-                <Building2 className="h-5 w-5 text-indigo-600" />
+                <Building2 className="h-5 w-5 text-accent" />
                 <div>
-                  <h3 className="text-sm font-bold text-slate-800">
+                  <h3 className="text-sm font-bold text-text-main">
                     {selectedDn ? `Customer Debit Note #${selectedDn.debit_note_number}` : "New Customer Debit Note"}
                   </h3>
-                  <p className="text-[11px] text-slate-500">
+                  <p className="text-[11px] text-text-muted">
                     Reconcile products against past invoices with batch-level FIFO matching.
                   </p>
                 </div>
               </div>
               <button
                 onClick={() => setIsFormOpen(false)}
-                className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-200 transition-colors"
+                className="rounded-btn p-1.5 text-text-muted hover:text-text-main transition-colors"
               >
                 <XCircle className="h-5 w-5" />
               </button>
@@ -696,15 +698,15 @@ export const CustomerDebitNotePage: React.FC = () => {
               </div>
 
               <div>
-                <label className="mb-1 block font-bold text-slate-700">Credit Note Strategy</label>
+                <label className="mb-1 block font-bold text-text-main">Credit Note Strategy</label>
                 <div className="flex items-center gap-1 mt-0.5">
                   <button
                     type="button"
                     onClick={() => setCreditNoteOption("B")}
-                    className={`flex-1 rounded py-1 text-[11px] font-bold border transition-colors ${
+                    className={`flex-1 rounded-btn py-1 text-[11px] font-bold border transition-colors ${
                       creditNoteOption === "B"
-                        ? "bg-indigo-600 text-white border-indigo-600"
-                        : "bg-white text-slate-700 border-slate-300 hover:bg-slate-50"
+                        ? "bg-accent text-white border-accent"
+                        : "bg-surface text-text-main border-border-main hover:bg-canvas"
                     }`}
                   >
                     Opt B (Per Inv)
@@ -712,10 +714,10 @@ export const CustomerDebitNotePage: React.FC = () => {
                   <button
                     type="button"
                     onClick={() => setCreditNoteOption("A")}
-                    className={`flex-1 rounded py-1 text-[11px] font-bold border transition-colors ${
+                    className={`flex-1 rounded-btn py-1 text-[11px] font-bold border transition-colors ${
                       creditNoteOption === "A"
-                        ? "bg-indigo-600 text-white border-indigo-600"
-                        : "bg-white text-slate-700 border-slate-300 hover:bg-slate-50"
+                        ? "bg-accent text-white border-accent"
+                        : "bg-surface text-text-main border-border-main hover:bg-canvas"
                     }`}
                   >
                     Opt A (Consol)
@@ -727,24 +729,24 @@ export const CustomerDebitNotePage: React.FC = () => {
             {/* Modal Body: Two-Pane Reconciler */}
             <div className="flex-1 flex overflow-hidden min-h-[380px]">
               {/* Left Pane: Customer Note Items */}
-              <div className="w-[45%] border-r border-slate-200 flex flex-col bg-white overflow-hidden">
-                <div className="p-2.5 bg-slate-50 border-b border-slate-200 flex items-center justify-between text-xs">
-                  <span className="font-bold text-slate-700">
+              <div className="w-[45%] border-r border-border-main flex flex-col bg-surface overflow-hidden">
+                <div className="p-2.5 bg-canvas border-b border-border-main flex items-center justify-between text-xs">
+                  <span className="font-bold text-text-main">
                     Debit Note Items ({formLines.length})
                   </span>
 
                   {/* Product Search Picker */}
                   <div className="relative w-48">
-                    <Search className="w-3 h-3 absolute left-2 top-1/2 -translate-y-1/2 text-slate-400" />
+                    <Search className="w-3 h-3 absolute left-2 top-1/2 -translate-y-1/2 text-text-muted" />
                     <input
                       type="text"
                       placeholder="Add product line..."
                       value={productQuery}
                       onChange={(e) => setProductQuery(e.target.value)}
-                      className="w-full pl-6 pr-2 py-1 border border-slate-200 rounded text-xs bg-white focus:outline-none focus:border-indigo-500"
+                      className="w-full pl-6 pr-2 py-1 border border-border-main rounded-input text-xs bg-surface text-text-main focus:outline-none focus:border-accent"
                     />
                     {productQuery.trim() && (
-                      <div className="absolute left-0 right-0 top-full mt-1 bg-white border border-slate-200 rounded-lg shadow-xl max-h-48 overflow-y-auto z-30 divide-y divide-slate-100">
+                      <div className="absolute left-0 right-0 top-full mt-1 bg-surface border border-border-main rounded-card shadow-xl max-h-48 overflow-y-auto z-30 divide-y divide-border-main/50">
                         {allProducts
                           .filter((p) => p.name.toLowerCase().includes(productQuery.toLowerCase()))
                           .slice(0, 6)
@@ -752,10 +754,10 @@ export const CustomerDebitNotePage: React.FC = () => {
                             <div
                               key={prod.id}
                               onClick={() => handleAddProductLine(prod)}
-                              className="p-2 hover:bg-indigo-50 cursor-pointer text-xs"
+                              className="p-2 hover:bg-canvas cursor-pointer text-xs"
                             >
-                              <div className="font-semibold text-slate-800">{prod.name}</div>
-                              <div className="text-[10px] text-slate-400">
+                              <div className="font-semibold text-text-main">{prod.name}</div>
+                              <div className="text-[10px] text-text-muted font-mono tabular-nums">
                                 Rate: ₹{prod.sel_rate || 0} | GST: {prod.gst_percent || 12}%
                               </div>
                             </div>
@@ -781,32 +783,32 @@ export const CustomerDebitNotePage: React.FC = () => {
                         <div
                           key={idx}
                           onClick={() => setActiveLineIndex(idx)}
-                          className={`p-2.5 rounded-lg cursor-pointer border transition-all ${
+                          className={`p-2.5 rounded-card cursor-pointer border transition-all ${
                             isActive
-                              ? "bg-indigo-50/70 border-indigo-400 shadow-xs"
-                              : "hover:bg-slate-50 border-slate-200"
+                              ? "bg-accent-soft/70 border-accent shadow-xs"
+                              : "hover:bg-canvas border-border-main"
                           }`}
                         >
                           <div className="flex items-start justify-between gap-2 text-xs">
                             <div className="flex-1 min-w-0">
                               <div className="flex items-center gap-1.5">
-                                <span className="font-bold text-slate-800 truncate">{line.product_name}</span>
+                                <span className="font-bold text-text-main truncate">{line.product_name}</span>
                                 {allocatedQty === line.customer_qty ? (
-                                  <span className="px-1.5 py-0.2 rounded text-[10px] font-bold bg-emerald-100 text-emerald-700">
+                                  <span className="px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-accent-soft text-accent">
                                     Full ({allocatedQty})
                                   </span>
                                 ) : allocatedQty === 0 ? (
-                                  <span className="px-1.5 py-0.2 rounded text-[10px] font-bold bg-slate-100 text-slate-600">
+                                  <span className="px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-canvas text-text-muted">
                                     Unmatched
                                   </span>
                                 ) : (
-                                  <span className="px-1.5 py-0.2 rounded text-[10px] font-bold bg-amber-100 text-amber-700">
+                                  <span className="px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800">
                                     Part ({allocatedQty}/{line.customer_qty})
                                   </span>
                                 )}
                               </div>
 
-                              <div className="flex items-center gap-3 text-[11px] text-slate-500 mt-1">
+                              <div className="flex items-center gap-3 text-[11px] text-text-muted mt-1 font-mono tabular-nums">
                                 <span>
                                   Qty:{" "}
                                   <input
@@ -824,7 +826,7 @@ export const CustomerDebitNotePage: React.FC = () => {
                                         return u;
                                       });
                                     }}
-                                    className="w-12 px-1 py-0.2 border border-slate-300 rounded font-bold text-center"
+                                    className="w-12 px-1 py-0.2 border border-border-main rounded font-bold text-center bg-surface text-text-main"
                                   />
                                 </span>
                                 <span>Rate: ₹{line.customer_unit_price}</span>
@@ -832,25 +834,25 @@ export const CustomerDebitNotePage: React.FC = () => {
                               </div>
                             </div>
 
-                            <div className="text-right shrink-0">
-                              <div className="text-slate-600">DN: ₹{line.customer_line_total.toFixed(2)}</div>
-                              <div className="font-bold text-indigo-700">Our: ₹{lineOurTotal.toFixed(2)}</div>
+                            <div className="text-right shrink-0 font-mono tabular-nums">
+                              <div className="text-text-muted">DN: ₹{line.customer_line_total.toFixed(2)}</div>
+                              <div className="font-bold text-accent">Our: ₹{lineOurTotal.toFixed(2)}</div>
                               {Math.abs(varAmt) > 0.01 && (
-                                <div className={`text-[10px] font-mono font-bold ${varAmt > 0 ? "text-red-600" : "text-amber-600"}`}>
+                                <div className={`text-[10px] font-bold ${varAmt > 0 ? "text-danger" : "text-status-warning"}`}>
                                   {varAmt > 0 ? "+" : ""}₹{varAmt.toFixed(2)}
                                 </div>
                               )}
                             </div>
                           </div>
 
-                          <div className="mt-2 flex items-center justify-between pt-1 border-t border-slate-100">
+                          <div className="mt-2 flex items-center justify-between pt-1 border-t border-border-main/50">
                             <button
                               type="button"
                               onClick={(e) => {
                                 e.stopPropagation();
                                 triggerAutoSuggest(idx, line.product_id, line.batch_no, line.customer_qty);
                               }}
-                              className="px-2 py-0.5 rounded text-[11px] font-semibold bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border border-indigo-200 flex items-center gap-1"
+                              className="px-2 py-0.5 rounded-btn text-[11px] font-semibold bg-accent-soft text-accent hover:bg-accent/15 border border-accent/20 flex items-center gap-1 transition-colors"
                             >
                               <Sparkles className="w-3 h-3" />
                               Auto-Match (FIFO)
@@ -886,7 +888,7 @@ export const CustomerDebitNotePage: React.FC = () => {
                   {activeLine && (
                     <span className="text-[11px] text-slate-500">
                       Req: <strong>{activeLine.customer_qty}</strong> | Matched:{" "}
-                      <strong className="text-indigo-700">
+                      <strong className="text-accent">
                         {activeLine.allocations.reduce((s, a) => s + a.return_qty, 0)}
                       </strong>
                     </span>
@@ -895,14 +897,14 @@ export const CustomerDebitNotePage: React.FC = () => {
 
                 <div className="flex-1 overflow-y-auto p-3 space-y-2.5">
                   {!activeLine ? (
-                    <div className="py-12 text-center text-xs text-slate-400">
+                    <div className="py-12 text-center text-xs text-text-muted">
                       Select a product line on the left to inspect invoice allocations.
                     </div>
                   ) : activeLine.allocations.length === 0 ? (
-                    <div className="rounded-lg border border-dashed border-slate-300 bg-white p-6 text-center space-y-2">
-                      <AlertCircle className="w-6 h-6 text-amber-500 mx-auto" />
-                      <div className="text-xs font-bold text-slate-700">No Invoices Matched Yet</div>
-                      <p className="text-[11px] text-slate-500">
+                    <div className="rounded-card border border-dashed border-border-main bg-surface p-6 text-center space-y-2">
+                      <AlertCircle className="w-6 h-6 text-status-warning mx-auto" />
+                      <div className="text-xs font-bold text-text-main">No Invoices Matched Yet</div>
+                      <p className="text-[11px] text-text-muted">
                         Click "Auto-Match (FIFO)" to automatically match against past sales invoices.
                       </p>
                       <button
@@ -915,7 +917,7 @@ export const CustomerDebitNotePage: React.FC = () => {
                             activeLine.customer_qty
                           )
                         }
-                        className="px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-xs font-semibold inline-flex items-center gap-1.5 hover:bg-indigo-700"
+                        className="px-3 py-1.5 rounded-btn bg-accent text-white text-xs font-semibold inline-flex items-center gap-1.5 hover:bg-accent/90 transition-colors shadow-xs"
                       >
                         <Sparkles className="w-3.5 h-3.5" />
                         Auto-Match Now
@@ -927,37 +929,37 @@ export const CustomerDebitNotePage: React.FC = () => {
                       return (
                         <div
                           key={alloc.id || aIdx}
-                          className="rounded-lg border border-slate-200 bg-white p-3 shadow-xs space-y-2 text-xs"
+                          className="rounded-card border border-border-main bg-surface p-3 shadow-xs space-y-2 text-xs"
                         >
                           <div className="flex items-start justify-between">
                             <div>
                               <div className="flex items-center gap-1.5 flex-wrap">
-                                <span className="font-mono font-bold text-blue-700">#{alloc.invoice_number}</span>
-                                <span className="text-[11px] text-slate-400">({alloc.invoice_date})</span>
+                                <span className="font-mono tabular-nums font-bold text-accent">#{alloc.invoice_number}</span>
+                                <span className="text-[11px] text-text-muted font-mono tabular-nums">({alloc.invoice_date})</span>
                                 {alloc.suggestion_method && (
-                                  <span className="rounded bg-indigo-50 px-1.5 py-0.2 text-[10px] font-bold text-indigo-700 border border-indigo-200">
+                                  <span className="rounded-full bg-accent-soft px-1.5 py-0.2 text-[10px] font-bold text-accent">
                                     {alloc.suggestion_method === "exact_batch" ? "Exact Batch" : "FIFO"}
                                   </span>
                                 )}
                                 <button
                                   type="button"
                                   onClick={() => handleInspectMatchedInvoice(alloc.invoice_id)}
-                                  className="inline-flex items-center gap-1 rounded bg-slate-100 hover:bg-blue-50 px-1.5 py-0.5 text-[10px] font-semibold text-blue-700 border border-slate-200 transition-colors cursor-pointer"
+                                  className="inline-flex items-center gap-1 rounded-btn bg-canvas hover:bg-accent-soft px-1.5 py-0.5 text-[10px] font-semibold text-accent border border-border-main transition-colors cursor-pointer"
                                   title="Inspect original sales invoice items"
                                 >
                                   <ExternalLink className="h-3 w-3" />
                                   <span>View Bill</span>
                                 </button>
                               </div>
-                              <div className="text-[11px] text-slate-500 mt-0.5">
-                                Batch: <strong>{alloc.batch_no || "-"}</strong> | Exp: {alloc.expiry_date || "-"}
+                              <div className="text-[11px] text-text-muted mt-0.5">
+                                Batch: <strong className="text-text-main font-mono">{alloc.batch_no || "-"}</strong> | Exp: <span className="font-mono tabular-nums">{alloc.expiry_date || "-"}</span>
                               </div>
                             </div>
                             <div className="text-right">
-                              <div className="font-bold font-mono text-indigo-700">
+                              <div className="font-bold font-mono tabular-nums text-accent">
                                 ₹{alloc.total_amount.toFixed(2)}
                               </div>
-                              <div className="text-[10px] text-slate-400">
+                              <div className="text-[10px] text-text-muted font-mono tabular-nums">
                                 Rate: ₹{alloc.unit_price} + {alloc.gst_percent}% GST
                               </div>
                             </div>
@@ -1055,27 +1057,27 @@ export const CustomerDebitNotePage: React.FC = () => {
             </div>
 
             {/* Modal Footer / Summary Bar */}
-            <div className="border-t border-slate-200 bg-slate-50 px-5 py-3 flex items-center justify-between text-xs">
+            <div className="border-t border-border-main bg-canvas px-5 py-3 flex items-center justify-between text-xs">
               <div className="flex items-center gap-4">
                 <div>
-                  <span className="text-slate-500 block text-[10px] font-bold uppercase">Customer DN</span>
-                  <span className="font-mono font-bold text-slate-800">₹{totalCustomerAmount.toFixed(2)}</span>
+                  <span className="text-text-muted block text-[10px] font-bold uppercase tracking-wider">Customer DN</span>
+                  <span className="font-mono tabular-nums font-bold text-text-main">₹{totalCustomerAmount.toFixed(2)}</span>
                 </div>
-                <div className="h-6 w-px bg-slate-200" />
+                <div className="h-6 w-px bg-border-main" />
                 <div>
-                  <span className="text-slate-500 block text-[10px] font-bold uppercase">Our Credit</span>
-                  <span className="font-mono font-bold text-indigo-700">₹{ourCalculatedTotal.toFixed(2)}</span>
+                  <span className="text-text-muted block text-[10px] font-bold uppercase tracking-wider">Our Credit</span>
+                  <span className="font-mono tabular-nums font-bold text-accent">₹{ourCalculatedTotal.toFixed(2)}</span>
                 </div>
-                <div className="h-6 w-px bg-slate-200" />
+                <div className="h-6 w-px bg-border-main" />
                 <div>
-                  <span className="text-slate-500 block text-[10px] font-bold uppercase">Variance</span>
+                  <span className="text-text-muted block text-[10px] font-bold uppercase tracking-wider">Variance</span>
                   <span
-                    className={`font-mono font-bold ${
+                    className={`font-mono tabular-nums font-bold ${
                       Math.abs(totalVariance) > 0.01
                         ? totalVariance > 0
-                          ? "text-red-600"
-                          : "text-amber-600"
-                        : "text-emerald-700"
+                          ? "text-danger"
+                          : "text-status-warning"
+                        : "text-accent"
                     }`}
                   >
                     {totalVariance > 0 ? "+" : ""}₹{totalVariance.toFixed(2)}
@@ -1088,7 +1090,7 @@ export const CustomerDebitNotePage: React.FC = () => {
                   <button
                     type="button"
                     onClick={() => setIsApprovalModalOpen(true)}
-                    className="flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-emerald-700"
+                    className="flex items-center gap-1.5 rounded-btn bg-accent px-3 py-1.5 text-xs font-bold text-white hover:bg-accent/90 shadow-xs transition-colors"
                   >
                     <ShieldCheck className="h-3.5 w-3.5" />
                     Verify & Approve
@@ -1099,7 +1101,7 @@ export const CustomerDebitNotePage: React.FC = () => {
                   <button
                     type="button"
                     onClick={() => setIsIssueModalOpen(true)}
-                    className="flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-indigo-700"
+                    className="flex items-center gap-1.5 rounded-btn bg-accent px-3 py-1.5 text-xs font-bold text-white hover:bg-accent/90 shadow-xs transition-colors"
                   >
                     <Split className="h-3.5 w-3.5" />
                     Issue Credit Note(s)
@@ -1109,7 +1111,7 @@ export const CustomerDebitNotePage: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => setIsFormOpen(false)}
-                  className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                  className="rounded-btn border border-border-main bg-surface px-3 py-1.5 text-xs font-semibold text-text-main hover:bg-canvas transition-colors"
                 >
                   Close
                 </button>
@@ -1118,7 +1120,7 @@ export const CustomerDebitNotePage: React.FC = () => {
                   type="button"
                   onClick={handleSaveDebitNote}
                   disabled={saving}
-                  className="flex items-center gap-1.5 rounded-lg bg-slate-800 px-4 py-1.5 text-xs font-bold text-white hover:bg-slate-900 disabled:opacity-50"
+                  className="flex items-center gap-1.5 rounded-btn bg-accent px-4 py-1.5 text-xs font-bold text-white hover:bg-accent/90 disabled:opacity-50 shadow-xs transition-colors"
                 >
                   <Check className="h-3.5 w-3.5" />
                   {saving ? "Saving..." : "Save Note"}
@@ -1130,53 +1132,54 @@ export const CustomerDebitNotePage: React.FC = () => {
       )}
 
       {/* ── Verify & Approve Sub-Modal ────────────────────────────────────────── */}
+      {/* ── Verify & Approve Sub-Modal ────────────────────────────────────────── */}
       {isApprovalModalOpen && selectedDn && (
-        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 backdrop-blur-xs p-4">
-          <div className="w-full max-w-md rounded-xl border border-slate-200 bg-white p-5 shadow-2xl space-y-3">
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-md rounded-card border border-border-main bg-surface p-5 shadow-2xl space-y-3">
             <div className="flex items-center justify-between">
-              <h4 className="text-sm font-bold text-slate-800 flex items-center gap-2">
-                <ShieldCheck className="h-4 w-4 text-emerald-600" />
+              <h4 className="text-sm font-bold text-text-main flex items-center gap-2">
+                <ShieldCheck className="h-4 w-4 text-accent" />
                 Verify & Approve Debit Note
               </h4>
-              <button onClick={() => setIsApprovalModalOpen(false)} className="text-slate-400 hover:text-slate-600">
+              <button onClick={() => setIsApprovalModalOpen(false)} className="text-text-muted hover:text-text-main transition-colors">
                 <X className="h-4 w-4" />
               </button>
             </div>
 
-            <div className="rounded-lg bg-slate-50 p-3 text-xs space-y-1.5 border border-slate-200">
+            <div className="rounded-card bg-canvas p-3 text-xs space-y-1.5 border border-border-main font-mono tabular-nums">
               <div className="flex justify-between">
-                <span className="text-slate-600">Customer Stated:</span>
-                <span className="font-mono font-bold">₹{selectedDn.customer_dn_amount.toFixed(2)}</span>
+                <span className="text-text-muted font-sans">Customer Stated:</span>
+                <span className="font-bold text-text-main">₹{selectedDn.customer_dn_amount.toFixed(2)}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-slate-600">Our Verified Amount:</span>
-                <span className="font-mono font-bold text-indigo-700">
+                <span className="text-text-muted font-sans">Our Verified Amount:</span>
+                <span className="font-bold text-accent">
                   ₹{selectedDn.our_calculated_amount.toFixed(2)}
                 </span>
               </div>
-              <div className="flex justify-between border-t border-slate-200 pt-1.5">
-                <span className="font-bold text-slate-800">Net Variance:</span>
-                <span className="font-mono font-bold text-red-600">
+              <div className="flex justify-between border-t border-border-main pt-1.5 font-bold">
+                <span className="text-text-muted font-sans">Net Variance:</span>
+                <span className={selectedDn.variance > 0 ? "text-danger" : "text-status-warning"}>
                   {selectedDn.variance > 0 ? "+" : ""}₹{selectedDn.variance.toFixed(2)}
                 </span>
               </div>
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">Approval Notes</label>
+              <label className="block text-xs font-semibold text-text-main mb-1">Approval Notes</label>
               <textarea
                 placeholder="Remarks regarding rate verification or variance resolution..."
                 rows={2}
                 value={notes}
                 onChange={(e) => setNotes(e.target.value)}
-                className="w-full rounded-lg border border-slate-200 p-2 text-xs focus:outline-none focus:border-blue-500"
+                className="w-full rounded-input border border-border-main bg-surface p-2 text-xs text-text-main focus:outline-none focus:border-accent"
               />
             </div>
 
-            <div className="flex items-center justify-end gap-2 pt-2">
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-border-main">
               <button
                 onClick={() => setIsApprovalModalOpen(false)}
-                className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                className="rounded-btn border border-border-main bg-surface px-3 py-1.5 text-xs font-semibold text-text-main hover:bg-canvas transition-colors"
               >
                 Cancel
               </button>
@@ -1195,7 +1198,7 @@ export const CustomerDebitNotePage: React.FC = () => {
                     showToast(err.message || "Failed to approve", "error");
                   }
                 }}
-                className="rounded-lg bg-emerald-600 px-4 py-1.5 text-xs font-bold text-white hover:bg-emerald-700"
+                className="rounded-btn bg-accent px-4 py-1.5 text-xs font-bold text-white hover:bg-accent/90 shadow-xs transition-colors"
               >
                 Confirm Approval
               </button>
@@ -1206,56 +1209,56 @@ export const CustomerDebitNotePage: React.FC = () => {
 
       {/* ── Issue Credit Note Sub-Modal ──────────────────────────────────────── */}
       {isIssueModalOpen && selectedDn && (
-        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 backdrop-blur-xs p-4">
-          <div className="w-full max-w-md rounded-xl border border-slate-200 bg-white p-5 shadow-2xl space-y-3">
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-md rounded-card border border-border-main bg-surface p-5 shadow-2xl space-y-3">
             <div className="flex items-center justify-between">
-              <h4 className="text-sm font-bold text-slate-800 flex items-center gap-2">
-                <Split className="h-4 w-4 text-indigo-600" />
+              <h4 className="text-sm font-bold text-text-main flex items-center gap-2">
+                <Split className="h-4 w-4 text-accent" />
                 Issue Credit Note(s)
               </h4>
-              <button onClick={() => setIsIssueModalOpen(false)} className="text-slate-400 hover:text-slate-600">
+              <button onClick={() => setIsIssueModalOpen(false)} className="text-text-muted hover:text-text-main transition-colors">
                 <X className="h-4 w-4" />
               </button>
             </div>
 
-            <p className="text-xs text-slate-600">
+            <p className="text-xs text-text-muted">
               Generates official GST Credit Note(s) (CN-26-27-XXXX), restores inventory to batch records, and updates customer balance.
             </p>
 
-            <div className="rounded-lg bg-indigo-50/70 p-3 text-xs space-y-2 border border-indigo-200">
-              <div className="font-bold text-indigo-900">Credit Note Strategy:</div>
-              <label className="flex items-center gap-2 cursor-pointer">
+            <div className="rounded-card bg-accent-soft p-3 text-xs space-y-2 border border-accent/20">
+              <div className="font-bold text-text-main">Credit Note Strategy:</div>
+              <label className="flex items-center gap-2 cursor-pointer text-text-main">
                 <input
                   type="radio"
                   name="opt-modal"
                   checked={creditNoteOption === "B"}
                   onChange={() => setCreditNoteOption("B")}
-                  className="text-indigo-600"
+                  className="text-accent focus:ring-accent"
                 />
                 <span>Option B: 1 Credit Note per Invoice (Portal Clean)</span>
               </label>
-              <label className="flex items-center gap-2 cursor-pointer">
+              <label className="flex items-center gap-2 cursor-pointer text-text-main">
                 <input
                   type="radio"
                   name="opt-modal"
                   checked={creditNoteOption === "A"}
                   onChange={() => setCreditNoteOption("A")}
-                  className="text-indigo-600"
+                  className="text-accent focus:ring-accent"
                 />
                 <span>Option A: Consolidated Credit Note</span>
               </label>
             </div>
 
-            <div className="flex items-center justify-end gap-2 pt-2">
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-border-main">
               <button
                 onClick={() => setIsIssueModalOpen(false)}
-                className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                className="rounded-btn border border-border-main bg-surface px-3 py-1.5 text-xs font-semibold text-text-main hover:bg-canvas transition-colors"
               >
                 Cancel
               </button>
               <button
                 onClick={handleIssueCreditNotes}
-                className="rounded-lg bg-indigo-600 px-4 py-1.5 text-xs font-bold text-white hover:bg-indigo-700"
+                className="rounded-btn bg-accent px-4 py-1.5 text-xs font-bold text-white hover:bg-accent/90 shadow-xs transition-colors"
               >
                 Issue & Print
               </button>
@@ -1266,50 +1269,50 @@ export const CustomerDebitNotePage: React.FC = () => {
 
       {/* ── Debit Notes Report Sub-Modal ─────────────────────────────────────── */}
       {isReportModalOpen && reportData && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-xs p-4">
-          <div className="flex max-h-[90vh] w-full max-w-4xl flex-col rounded-xl border border-slate-200 bg-white p-5 shadow-2xl space-y-3">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="flex max-h-[90vh] w-full max-w-4xl flex-col rounded-card border border-border-main bg-surface p-5 shadow-2xl space-y-3">
             <div className="flex items-center justify-between">
-              <h3 className="text-sm font-bold text-slate-800 flex items-center gap-2">
-                <FileSpreadsheet className="h-4 w-4 text-emerald-600" />
+              <h3 className="text-sm font-bold text-text-main flex items-center gap-2">
+                <FileSpreadsheet className="h-4 w-4 text-accent" />
                 Debit Notes Received & Ageing Report
               </h3>
-              <button onClick={() => setIsReportModalOpen(false)} className="text-slate-400 hover:text-slate-600">
+              <button onClick={() => setIsReportModalOpen(false)} className="text-text-muted hover:text-text-main transition-colors">
                 <X className="h-4 w-4" />
               </button>
             </div>
 
             {/* Metrics */}
             <div className="grid grid-cols-4 gap-3 text-xs">
-              <div className="rounded-lg border border-slate-200 bg-slate-50 p-2.5">
-                <div className="text-[10px] text-slate-500 font-bold uppercase">Total Stated Value</div>
-                <div className="text-sm font-bold font-mono text-slate-800">
+              <div className="rounded-card border border-border-main bg-canvas p-2.5">
+                <div className="text-[10px] text-text-muted font-bold uppercase tracking-wider">Total Stated Value</div>
+                <div className="text-sm font-bold font-mono tabular-nums text-text-main">
                   ₹{reportData.totals.total_dn_amount.toFixed(2)}
                 </div>
               </div>
-              <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-2.5">
-                <div className="text-[10px] text-emerald-700 font-bold uppercase">Verified Credit</div>
-                <div className="text-sm font-bold font-mono text-emerald-800">
+              <div className="rounded-card border border-accent/20 bg-accent-soft p-2.5">
+                <div className="text-[10px] text-accent font-bold uppercase tracking-wider">Verified Credit</div>
+                <div className="text-sm font-bold font-mono tabular-nums text-accent">
                   ₹{reportData.totals.total_our_amount.toFixed(2)}
                 </div>
               </div>
-              <div className="rounded-lg border border-amber-200 bg-amber-50 p-2.5">
-                <div className="text-[10px] text-amber-700 font-bold uppercase">Net Variance</div>
-                <div className="text-sm font-bold font-mono text-amber-800">
+              <div className="rounded-card border border-amber-200 bg-amber-50 p-2.5">
+                <div className="text-[10px] text-amber-800 font-bold uppercase tracking-wider">Net Variance</div>
+                <div className="text-sm font-bold font-mono tabular-nums text-amber-800">
                   ₹{reportData.totals.total_variance.toFixed(2)}
                 </div>
               </div>
-              <div className="rounded-lg border border-indigo-200 bg-indigo-50 p-2.5">
-                <div className="text-[10px] text-indigo-700 font-bold uppercase">Pending Verification</div>
-                <div className="text-sm font-bold text-indigo-800">
+              <div className="rounded-card border border-border-main bg-canvas p-2.5">
+                <div className="text-[10px] text-text-muted font-bold uppercase tracking-wider">Pending Verification</div>
+                <div className="text-sm font-bold font-mono tabular-nums text-text-main">
                   {reportData.totals.pending_count} note(s)
                 </div>
               </div>
             </div>
 
             {/* Report Table */}
-            <div className="flex-1 overflow-y-auto rounded-lg border border-slate-200">
+            <div className="flex-1 overflow-y-auto rounded-card border border-border-main">
               <table className="w-full text-left text-xs">
-                <thead className="bg-slate-100 font-semibold text-slate-600 sticky top-0 border-b border-slate-200">
+                <thead className="bg-canvas font-semibold text-text-muted sticky top-0 border-b border-border-main">
                   <tr>
                     <th className="px-3 py-2">DN No</th>
                     <th className="px-3 py-2">Date</th>
@@ -1321,17 +1324,17 @@ export const CustomerDebitNotePage: React.FC = () => {
                     <th className="px-3 py-2 text-center">Status</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-100">
+                <tbody className="divide-y divide-border-main/50">
                   {reportData.entries.map((e: any, idx: number) => (
-                    <tr key={idx} className="hover:bg-slate-50">
-                      <td className="px-3 py-2 font-mono font-bold text-indigo-700">#{e.debit_note_number}</td>
-                      <td className="px-3 py-2 text-slate-500">{e.debit_note_date}</td>
-                      <td className="px-3 py-2 font-medium text-slate-800">{e.customer_name}</td>
-                      <td className="px-3 py-2 text-right font-mono">₹{e.customer_dn_amount.toFixed(2)}</td>
-                      <td className="px-3 py-2 text-right font-mono font-bold text-indigo-700">
+                    <tr key={idx} className="hover:bg-canvas/50">
+                      <td className="px-3 py-2 font-mono tabular-nums font-bold text-accent">#{e.debit_note_number}</td>
+                      <td className="px-3 py-2 text-text-muted font-mono tabular-nums">{e.debit_note_date}</td>
+                      <td className="px-3 py-2 font-medium text-text-main">{e.customer_name}</td>
+                      <td className="px-3 py-2 text-right font-mono tabular-nums text-text-main">₹{e.customer_dn_amount.toFixed(2)}</td>
+                      <td className="px-3 py-2 text-right font-mono tabular-nums font-bold text-accent">
                         ₹{e.our_calculated_amount.toFixed(2)}
                       </td>
-                      <td className="px-3 py-2 text-right font-mono font-bold">
+                      <td className="px-3 py-2 text-right font-mono tabular-nums font-bold">
                         {e.variance > 0 ? "+" : ""}₹{e.variance.toFixed(2)}
                       </td>
                       <td className="px-3 py-2 text-center">
@@ -1366,34 +1369,34 @@ export const CustomerDebitNotePage: React.FC = () => {
 
       {/* Matched Invoice Inspection Drawer/Modal */}
       {inspectedInvoice && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm animate-fade-in">
-          <div className="flex max-h-[90vh] w-full max-w-4xl flex-col rounded-xl bg-white shadow-2xl border border-slate-200 overflow-hidden">
-            <div className="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-6 py-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="flex max-h-[90vh] w-full max-w-4xl flex-col rounded-card bg-surface shadow-2xl border border-border-main overflow-hidden">
+            <div className="flex items-center justify-between border-b border-border-main bg-canvas px-6 py-4">
               <div>
                 <div className="flex items-center gap-2">
-                  <h3 className="text-base font-bold text-slate-800">
+                  <h3 className="text-base font-bold text-text-main">
                     Original Sales Invoice #{inspectedInvoice.invoice.invoice_number}
                   </h3>
-                  <span className="rounded bg-indigo-100 px-2 py-0.5 text-xs font-semibold text-indigo-700">
+                  <span className="rounded-full bg-accent-soft px-2 py-0.5 text-xs font-semibold text-accent">
                     {inspectedInvoice.invoice.payment_mode?.toUpperCase() || "PAID"}
                   </span>
                 </div>
-                <p className="text-xs text-slate-500">
-                  Date: {inspectedInvoice.invoice.invoice_date} • Customer: {inspectedInvoice.invoice.customer_name || "Cash Customer"}
+                <p className="text-xs text-text-muted">
+                  Date: <span className="font-mono tabular-nums">{inspectedInvoice.invoice.invoice_date}</span> • Customer: {inspectedInvoice.invoice.customer_name || "Cash Customer"}
                 </p>
               </div>
               <button
                 onClick={() => setInspectedInvoice(null)}
-                className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-200 hover:text-slate-600"
+                className="rounded-btn p-1.5 text-text-muted hover:text-text-main transition-colors"
               >
                 ✕
               </button>
             </div>
 
             <div className="flex-1 overflow-y-auto p-6 space-y-4">
-              <div className="rounded-lg border border-slate-200 overflow-hidden">
+              <div className="rounded-card border border-border-main overflow-hidden">
                 <table className="w-full text-left text-xs">
-                  <thead className="bg-slate-100 font-semibold text-slate-600 border-b border-slate-200">
+                  <thead className="bg-canvas font-semibold text-text-muted border-b border-border-main">
                     <tr>
                       <th className="px-3 py-2">Item Name</th>
                       <th className="px-3 py-2">Batch</th>
@@ -1405,43 +1408,43 @@ export const CustomerDebitNotePage: React.FC = () => {
                       <th className="px-3 py-2 text-right">Total (₹)</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-100">
+                  <tbody className="divide-y divide-border-main/50">
                     {inspectedInvoice.items.map((item, idx) => (
-                      <tr key={idx} className="hover:bg-slate-50">
-                        <td className="px-3 py-2 font-medium text-slate-800">{item.product_name}</td>
-                        <td className="px-3 py-2 font-mono text-slate-600">{item.batch_no || "-"}</td>
-                        <td className="px-3 py-2 text-slate-500">{item.expiry_date || "-"}</td>
-                        <td className="px-3 py-2 text-right font-bold text-slate-700">{item.qty}</td>
-                        <td className="px-3 py-2 text-right font-mono">₹{Number(item.unit_price).toFixed(2)}</td>
-                        <td className="px-3 py-2 text-right">{item.gst_percent}%</td>
-                        <td className="px-3 py-2 text-right font-mono">₹{(Number(item.cgst_amount || 0) + Number(item.sgst_amount || 0) + Number(item.igst_amount || 0)).toFixed(2)}</td>
-                        <td className="px-3 py-2 text-right font-mono font-bold text-slate-900">₹{Number(item.total_amount).toFixed(2)}</td>
+                      <tr key={idx} className="hover:bg-canvas/50">
+                        <td className="px-3 py-2 font-medium text-text-main">{item.product_name}</td>
+                        <td className="px-3 py-2 font-mono text-text-muted">{item.batch_no || "-"}</td>
+                        <td className="px-3 py-2 text-text-muted font-mono tabular-nums">{item.expiry_date || "-"}</td>
+                        <td className="px-3 py-2 text-right font-mono tabular-nums font-bold text-text-main">{item.qty}</td>
+                        <td className="px-3 py-2 text-right font-mono tabular-nums">₹{Number(item.unit_price).toFixed(2)}</td>
+                        <td className="px-3 py-2 text-right font-mono tabular-nums">{item.gst_percent}%</td>
+                        <td className="px-3 py-2 text-right font-mono tabular-nums">₹{(Number(item.cgst_amount || 0) + Number(item.sgst_amount || 0) + Number(item.igst_amount || 0)).toFixed(2)}</td>
+                        <td className="px-3 py-2 text-right font-mono tabular-nums font-bold text-text-main">₹{Number(item.total_amount).toFixed(2)}</td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
 
-              <div className="flex justify-end gap-6 bg-slate-50 p-4 rounded-lg border border-slate-200 text-xs">
+              <div className="flex justify-end gap-6 bg-canvas p-4 rounded-card border border-border-main text-xs font-mono tabular-nums">
                 <div>
-                  <span className="text-slate-500">Subtotal:</span>{" "}
-                  <span className="font-bold font-mono">₹{Number(inspectedInvoice.invoice.subtotal).toFixed(2)}</span>
+                  <span className="text-text-muted font-sans">Subtotal:</span>{" "}
+                  <span className="font-bold text-text-main">₹{Number(inspectedInvoice.invoice.subtotal).toFixed(2)}</span>
                 </div>
                 <div>
-                  <span className="text-slate-500">Total Tax:</span>{" "}
-                  <span className="font-bold font-mono">₹{Number(inspectedInvoice.invoice.tax_total).toFixed(2)}</span>
+                  <span className="text-text-muted font-sans">Total Tax:</span>{" "}
+                  <span className="font-bold text-text-main">₹{Number(inspectedInvoice.invoice.tax_total).toFixed(2)}</span>
                 </div>
                 <div>
-                  <span className="text-slate-500">Grand Total:</span>{" "}
-                  <span className="font-bold font-mono text-indigo-700 text-sm">₹{Number(inspectedInvoice.invoice.grand_total).toFixed(2)}</span>
+                  <span className="text-text-muted font-sans">Grand Total:</span>{" "}
+                  <span className="font-bold text-accent text-sm">₹{Number(inspectedInvoice.invoice.grand_total).toFixed(2)}</span>
                 </div>
               </div>
             </div>
 
-            <div className="flex justify-end border-t border-slate-200 bg-slate-50 px-6 py-3">
+            <div className="flex justify-end border-t border-border-main bg-canvas px-6 py-3">
               <button
                 onClick={() => setInspectedInvoice(null)}
-                className="rounded-lg bg-slate-800 px-4 py-1.5 text-xs font-bold text-white hover:bg-slate-900"
+                className="rounded-btn bg-accent px-4 py-1.5 text-xs font-bold text-white hover:bg-accent/90 shadow-xs transition-colors"
               >
                 Close (Esc)
               </button>

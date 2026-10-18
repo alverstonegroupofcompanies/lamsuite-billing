@@ -139,8 +139,10 @@ export const StockLedgerPage: React.FC = () => {
       {/* Toast Notification */}
       {notification && (
         <div
-          className={`fixed top-4 right-4 z-50 flex items-center gap-2 rounded-lg px-4 py-3 text-xs font-semibold text-white shadow-lg ${
-            notification.type === "success" ? "bg-emerald-600" : "bg-red-600"
+          className={`fixed top-4 right-4 z-50 flex items-center gap-2 rounded-btn px-4 py-3 text-xs font-semibold shadow-modal transition-all ${
+            notification.type === "success"
+              ? "bg-accent-soft text-accent border border-accent/20"
+              : "bg-status-danger/10 text-status-danger border border-status-danger/20"
           }`}
         >
           {notification.type === "success" ? <CheckCircle className="h-4 w-4" /> : <AlertCircle className="h-4 w-4" />}
@@ -151,22 +153,22 @@ export const StockLedgerPage: React.FC = () => {
       {/* Header Actions */}
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-xl font-bold text-slate-800">Stock & Inventory Ledger</h2>
-          <p className="text-xs text-slate-500">
+          <h2 className="text-[26px] font-bold text-text-main tracking-tight">Stock & Inventory Ledger</h2>
+          <p className="text-xs text-text-muted mt-0.5">
             Double-entry stock movements, write-off adjustments, inter-store transfers, and FEFO expiry tracking.
           </p>
         </div>
         <div className="flex gap-2">
           <button
             onClick={() => setIsAdjustmentModalOpen(true)}
-            className="flex items-center gap-2 rounded border border-slate-300 bg-white px-3.5 py-2 text-xs font-semibold text-slate-700 shadow-sm hover:bg-slate-50"
+            className="flex items-center gap-2 rounded-btn border border-border-main bg-surface px-3.5 py-2 text-xs font-medium text-text-main shadow-xs hover:bg-canvas transition-colors"
           >
-            <RotateCcw className="h-4 w-4 text-amber-600" />
+            <RotateCcw className="h-4 w-4 text-status-warning" />
             <span>Stock Adjustment</span>
           </button>
           <button
             onClick={() => navigate("/stock/transfers")}
-            className="flex items-center gap-2 rounded-xl bg-blue-600 px-3.5 py-2 text-xs font-semibold text-white shadow-sm hover:bg-blue-700 transition-colors"
+            className="flex items-center gap-2 rounded-btn bg-accent px-3.5 py-2 text-xs font-medium text-white shadow-xs hover:bg-accent/90 transition-colors"
           >
             <ArrowRightLeft className="h-4 w-4" />
             <span>Inter-Store Transfers</span>
@@ -175,23 +177,23 @@ export const StockLedgerPage: React.FC = () => {
       </div>
 
       {/* Tab Navigation */}
-      <div className="flex border-b border-slate-200 gap-2">
+      <div className="flex border-b border-border-main gap-2">
         <button
           onClick={() => setActiveTab("ledger")}
-          className={`border-b-2 px-4 py-2 text-xs font-bold transition-colors ${
+          className={`border-b-2 px-4 py-2 text-xs font-semibold transition-colors ${
             activeTab === "ledger"
-              ? "border-blue-600 text-blue-600"
-              : "border-transparent text-slate-500 hover:text-slate-800"
+              ? "border-accent text-accent"
+              : "border-transparent text-text-muted hover:text-text-main"
           }`}
         >
           Audit Ledger ({transactions.length})
         </button>
         <button
           onClick={() => setActiveTab("expiry")}
-          className={`flex items-center gap-1.5 border-b-2 px-4 py-2 text-xs font-bold transition-colors ${
+          className={`flex items-center gap-1.5 border-b-2 px-4 py-2 text-xs font-semibold transition-colors ${
             activeTab === "expiry"
-              ? "border-amber-600 text-amber-600"
-              : "border-transparent text-slate-500 hover:text-slate-800"
+              ? "border-status-warning text-status-warning"
+              : "border-transparent text-text-muted hover:text-text-main"
           }`}
         >
           <Calendar className="h-3.5 w-3.5" />
@@ -199,10 +201,10 @@ export const StockLedgerPage: React.FC = () => {
         </button>
         <button
           onClick={() => setActiveTab("low_stock")}
-          className={`flex items-center gap-1.5 border-b-2 px-4 py-2 text-xs font-bold transition-colors ${
+          className={`flex items-center gap-1.5 border-b-2 px-4 py-2 text-xs font-semibold transition-colors ${
             activeTab === "low_stock"
-              ? "border-red-600 text-red-600"
-              : "border-transparent text-slate-500 hover:text-slate-800"
+              ? "border-status-danger text-status-danger"
+              : "border-transparent text-text-muted hover:text-text-main"
           }`}
         >
           <AlertTriangle className="h-3.5 w-3.5" />
@@ -210,65 +212,65 @@ export const StockLedgerPage: React.FC = () => {
         </button>
         <button
           onClick={() => setActiveTab("negative_stock")}
-          className={`flex items-center gap-1.5 border-b-2 px-4 py-2 text-xs font-bold transition-colors ${
+          className={`flex items-center gap-1.5 border-b-2 px-4 py-2 text-xs font-semibold transition-colors ${
             activeTab === "negative_stock"
-              ? "border-amber-600 text-amber-600"
-              : "border-transparent text-slate-500 hover:text-slate-800"
+              ? "border-status-warning text-status-warning"
+              : "border-transparent text-text-muted hover:text-text-main"
           }`}
         >
-          <span className="inline-block w-2 h-2 rounded-full bg-amber-500" />
+          <span className="inline-block w-2 h-2 rounded-full bg-status-warning" />
           <span>Negative Stock ({negativeStockBatches.length})</span>
         </button>
       </div>
 
       {/* Tab 1: Double-Entry Transactions Audit Ledger */}
       {activeTab === "ledger" && (
-        <div className="rounded-lg border border-slate-200 bg-white shadow-sm overflow-hidden">
+        <div className="rounded-card border border-border-main bg-surface shadow-xs overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs">
-              <thead className="bg-slate-50 text-slate-600 border-b border-slate-200">
+              <thead className="bg-canvas border-b border-border-main text-[11px] font-semibold uppercase tracking-wider text-text-muted">
                 <tr>
-                  <th className="px-4 py-2.5 font-semibold">Time</th>
-                  <th className="px-4 py-2.5 font-semibold">Event Type</th>
-                  <th className="px-4 py-2.5 font-semibold">Batch</th>
-                  <th className="px-4 py-2.5 font-semibold">Reference</th>
-                  <th className="px-4 py-2.5 font-semibold text-right">Delta Units</th>
-                  <th className="px-4 py-2.5 font-semibold">Notes</th>
+                  <th className="px-4 py-3">Time</th>
+                  <th className="px-4 py-3">Event Type</th>
+                  <th className="px-4 py-3">Batch</th>
+                  <th className="px-4 py-3">Reference</th>
+                  <th className="px-4 py-3 text-right">Delta Units</th>
+                  <th className="px-4 py-3">Notes</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100">
+              <tbody className="divide-y divide-border-main">
                 {transactions.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="py-12 text-center text-slate-400">
-                      <Package className="mx-auto h-8 w-8 text-slate-300 mb-1" />
+                    <td colSpan={6} className="py-12 text-center text-text-muted">
+                      <Package className="mx-auto h-8 w-8 text-text-muted/40 mb-1" />
                       <p className="font-medium">No stock transactions recorded yet</p>
                     </td>
                   </tr>
                 ) : (
                   transactions.map((tx) => (
-                    <tr key={tx.id} className="hover:bg-slate-50">
-                      <td className="px-4 py-2.5 text-slate-500 font-mono text-[11px]">
+                    <tr key={tx.id} className="hover:bg-canvas/50 transition-colors">
+                      <td className="px-4 py-3 text-text-muted font-mono text-[11px] tabular-nums">
                         {new Date(tx.created_at || Date.now()).toLocaleTimeString()}
                       </td>
-                      <td className="px-4 py-2.5">
+                      <td className="px-4 py-3">
                         <span
-                          className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                          className={`rounded-full px-2.5 py-0.5 text-[10px] font-semibold ${
                             tx.qty_delta >= 0
-                              ? "bg-emerald-50 text-emerald-700"
-                              : "bg-red-50 text-red-700"
+                              ? "bg-accent-soft text-accent"
+                              : "bg-status-danger/10 text-status-danger"
                           }`}
                         >
                           {tx.event_type}
                         </span>
                       </td>
-                      <td className="px-4 py-2.5 font-mono text-slate-600">{tx.batch_id || "-"}</td>
-                      <td className="px-4 py-2.5 text-slate-700 font-medium">{tx.reference_id || tx.reference_type || "-"}</td>
-                      <td className="px-4 py-2.5 text-right font-bold">
-                        <span className={tx.qty_delta >= 0 ? "text-emerald-600" : "text-red-600"}>
+                      <td className="px-4 py-3 font-mono text-text-main tabular-nums">{tx.batch_id || "-"}</td>
+                      <td className="px-4 py-3 text-text-main font-medium">{tx.reference_id || tx.reference_type || "-"}</td>
+                      <td className="px-4 py-3 text-right font-mono font-bold tabular-nums">
+                        <span className={tx.qty_delta >= 0 ? "text-accent" : "text-status-danger"}>
                           {tx.qty_delta >= 0 ? `+${tx.qty_delta}` : tx.qty_delta}
                         </span>
                       </td>
-                      <td className="px-4 py-2.5 text-slate-500 text-[11px]">{tx.notes || "-"}</td>
+                      <td className="px-4 py-3 text-text-muted text-[11px]">{tx.notes || "-"}</td>
                     </tr>
                   ))
                 )}
@@ -280,34 +282,34 @@ export const StockLedgerPage: React.FC = () => {
 
       {/* Tab 2: Near Expiry Batches */}
       {activeTab === "expiry" && (
-        <div className="rounded-lg border border-slate-200 bg-white shadow-sm overflow-hidden">
+        <div className="rounded-card border border-border-main bg-surface shadow-xs overflow-hidden">
           <table className="w-full text-left text-xs">
-            <thead className="bg-slate-50 text-slate-600 border-b border-slate-200">
+            <thead className="bg-canvas border-b border-border-main text-[11px] font-semibold uppercase tracking-wider text-text-muted">
               <tr>
-                <th className="px-4 py-2.5 font-semibold">Batch No</th>
-                <th className="px-4 py-2.5 font-semibold">Expiry Date</th>
-                <th className="px-4 py-2.5 font-semibold text-right">Available Stock</th>
-                <th className="px-4 py-2.5 font-semibold text-right">MRP (₹)</th>
-                <th className="px-4 py-2.5 font-semibold text-center">Urgency</th>
+                <th className="px-4 py-3">Batch No</th>
+                <th className="px-4 py-3">Expiry Date</th>
+                <th className="px-4 py-3 text-right">Available Stock</th>
+                <th className="px-4 py-3 text-right">MRP (₹)</th>
+                <th className="px-4 py-3 text-center">Urgency</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100">
+            <tbody className="divide-y divide-border-main">
               {nearExpiryBatches.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="py-12 text-center text-slate-400">
-                    <CheckCircle className="mx-auto h-8 w-8 text-emerald-300 mb-1" />
+                  <td colSpan={5} className="py-12 text-center text-text-muted">
+                    <CheckCircle className="mx-auto h-8 w-8 text-accent mb-1" />
                     <p className="font-medium">No batches expiring within 60 days</p>
                   </td>
                 </tr>
               ) : (
                 nearExpiryBatches.map((b) => (
-                  <tr key={b.id} className="hover:bg-slate-50">
-                    <td className="px-4 py-2.5 font-mono font-bold text-slate-800">{b.batch_no}</td>
-                    <td className="px-4 py-2.5 font-mono font-bold text-amber-600">{b.expiry_date}</td>
-                    <td className="px-4 py-2.5 text-right font-bold text-slate-800">{b.stock_qty}</td>
-                    <td className="px-4 py-2.5 text-right text-slate-600">₹ {Number(b.mrp || 0).toFixed(2)}</td>
-                    <td className="px-4 py-2.5 text-center">
-                      <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700">
+                  <tr key={b.id} className="hover:bg-status-warning/5 transition-colors bg-status-warning/5">
+                    <td className="px-4 py-3 font-mono font-semibold text-text-main tabular-nums">{b.batch_no}</td>
+                    <td className="px-4 py-3 font-mono font-semibold text-status-warning tabular-nums">{b.expiry_date}</td>
+                    <td className="px-4 py-3 text-right font-mono font-semibold text-text-main tabular-nums">{b.stock_qty}</td>
+                    <td className="px-4 py-3 text-right font-mono text-text-main tabular-nums">₹ {Number(b.mrp || 0).toFixed(2)}</td>
+                    <td className="px-4 py-3 text-center">
+                      <span className="rounded-full bg-status-warning/15 px-2.5 py-0.5 text-[10px] font-semibold text-status-warning">
                         EXPIRING SOON
                       </span>
                     </td>
@@ -321,34 +323,34 @@ export const StockLedgerPage: React.FC = () => {
 
       {/* Tab 3: Low Stock Reorder Alerts */}
       {activeTab === "low_stock" && (
-        <div className="rounded-lg border border-slate-200 bg-white shadow-sm overflow-hidden">
+        <div className="rounded-card border border-border-main bg-surface shadow-xs overflow-hidden">
           <table className="w-full text-left text-xs">
-            <thead className="bg-slate-50 text-slate-600 border-b border-slate-200">
+            <thead className="bg-canvas border-b border-border-main text-[11px] font-semibold uppercase tracking-wider text-text-muted">
               <tr>
-                <th className="px-4 py-2.5 font-semibold">Product Name</th>
-                <th className="px-4 py-2.5 font-semibold">Barcode</th>
-                <th className="px-4 py-2.5 font-semibold text-right">Current Stock</th>
-                <th className="px-4 py-2.5 font-semibold text-right">Reorder Level</th>
-                <th className="px-4 py-2.5 font-semibold text-center">Action</th>
+                <th className="px-4 py-3">Product Name</th>
+                <th className="px-4 py-3">Barcode</th>
+                <th className="px-4 py-3 text-right">Current Stock</th>
+                <th className="px-4 py-3 text-right">Reorder Level</th>
+                <th className="px-4 py-3 text-center">Action</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100">
+            <tbody className="divide-y divide-border-main">
               {lowStockProducts.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="py-12 text-center text-slate-400">
-                    <CheckCircle className="mx-auto h-8 w-8 text-emerald-300 mb-1" />
+                  <td colSpan={5} className="py-12 text-center text-text-muted">
+                    <CheckCircle className="mx-auto h-8 w-8 text-accent mb-1" />
                     <p className="font-medium">All items are sufficiently stocked</p>
                   </td>
                 </tr>
               ) : (
                 lowStockProducts.map((p) => (
-                  <tr key={p.id} className="hover:bg-slate-50">
-                    <td className="px-4 py-2.5 font-bold text-slate-800">{p.name}</td>
-                    <td className="px-4 py-2.5 font-mono text-slate-500">{p.barcode}</td>
-                    <td className="px-4 py-2.5 text-right font-black text-red-600">{p.current_stock || 0}</td>
-                    <td className="px-4 py-2.5 text-right text-slate-600">{p.reorder_level}</td>
-                    <td className="px-4 py-2.5 text-center">
-                      <span className="rounded-full bg-red-50 px-2 py-0.5 text-[10px] font-semibold text-red-700">
+                  <tr key={p.id} className="hover:bg-status-warning/5 transition-colors bg-status-warning/5">
+                    <td className="px-4 py-3 font-semibold text-text-main">{p.name}</td>
+                    <td className="px-4 py-3 font-mono text-text-muted tabular-nums">{p.barcode}</td>
+                    <td className="px-4 py-3 text-right font-mono font-bold text-status-warning tabular-nums">{p.current_stock || 0}</td>
+                    <td className="px-4 py-3 text-right font-mono text-text-main tabular-nums">{p.reorder_level}</td>
+                    <td className="px-4 py-3 text-center">
+                      <span className="rounded-full bg-status-warning/15 px-2.5 py-0.5 text-[10px] font-semibold text-status-warning">
                         REORDER
                       </span>
                     </td>
@@ -362,41 +364,41 @@ export const StockLedgerPage: React.FC = () => {
 
       {/* Tab 4: Negative Stock (Shortages / Oversold Batches) */}
       {activeTab === "negative_stock" && (
-        <div className="rounded-lg border border-slate-200 bg-white shadow-sm overflow-hidden">
+        <div className="rounded-card border border-border-main bg-surface shadow-xs overflow-hidden">
           <table className="w-full text-left text-xs">
-            <thead className="bg-slate-50 text-slate-600 border-b border-slate-200">
+            <thead className="bg-canvas border-b border-border-main text-[11px] font-semibold uppercase tracking-wider text-text-muted">
               <tr>
-                <th className="px-4 py-2.5 font-semibold">Batch No</th>
-                <th className="px-4 py-2.5 font-semibold">Expiry Date</th>
-                <th className="px-4 py-2.5 font-semibold text-right">Stock on Hand</th>
-                <th className="px-4 py-2.5 font-semibold text-right">Deficit (Shortage)</th>
-                <th className="px-4 py-2.5 font-semibold text-right">Selling Rate (₹)</th>
-                <th className="px-4 py-2.5 font-semibold text-center">Status</th>
+                <th className="px-4 py-3">Batch No</th>
+                <th className="px-4 py-3">Expiry Date</th>
+                <th className="px-4 py-3 text-right">Stock on Hand</th>
+                <th className="px-4 py-3 text-right">Deficit (Shortage)</th>
+                <th className="px-4 py-3 text-right">Selling Rate (₹)</th>
+                <th className="px-4 py-3 text-center">Status</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100">
+            <tbody className="divide-y divide-border-main">
               {negativeStockBatches.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="py-12 text-center text-slate-400">
-                    <CheckCircle className="mx-auto h-8 w-8 text-emerald-300 mb-1" />
+                  <td colSpan={6} className="py-12 text-center text-text-muted">
+                    <CheckCircle className="mx-auto h-8 w-8 text-accent mb-1" />
                     <p className="font-medium">No negative stock batches found</p>
-                    <p className="text-[11px] text-slate-400 mt-0.5">All batches have non-negative balances on hand</p>
+                    <p className="text-[11px] text-text-muted mt-0.5">All batches have non-negative balances on hand</p>
                   </td>
                 </tr>
               ) : (
                 negativeStockBatches.map((b) => (
-                  <tr key={b.id} className="hover:bg-slate-50">
-                    <td className="px-4 py-2.5 font-mono font-bold text-slate-800">{b.batch_no}</td>
-                    <td className="px-4 py-2.5 font-mono text-slate-600">{b.expiry_date}</td>
-                    <td className="px-4 py-2.5 text-right font-black text-rose-600">{b.stock_qty}</td>
-                    <td className="px-4 py-2.5 text-right font-bold text-amber-700">
+                  <tr key={b.id} className="hover:bg-status-danger/5 transition-colors bg-status-danger/5">
+                    <td className="px-4 py-3 font-mono font-semibold text-text-main tabular-nums">{b.batch_no}</td>
+                    <td className="px-4 py-3 font-mono text-text-muted tabular-nums">{b.expiry_date}</td>
+                    <td className="px-4 py-3 text-right font-mono font-bold text-status-danger tabular-nums">{b.stock_qty}</td>
+                    <td className="px-4 py-3 text-right font-mono font-semibold text-status-danger tabular-nums">
                       {Math.abs(b.stock_qty || 0)} units short
                     </td>
-                    <td className="px-4 py-2.5 text-right text-slate-700">
+                    <td className="px-4 py-3 text-right font-mono text-text-main tabular-nums">
                       ₹ {Number(b.selling_rate || b.mrp || 0).toFixed(2)}
                     </td>
-                    <td className="px-4 py-2.5 text-center">
-                      <span className="rounded-full bg-rose-50 border border-rose-200 px-2 py-0.5 text-[10px] font-bold text-rose-700">
+                    <td className="px-4 py-3 text-center">
+                      <span className="rounded-full bg-status-danger/10 border border-status-danger/20 px-2.5 py-0.5 text-[10px] font-bold text-status-danger">
                         OVERSOLD
                       </span>
                     </td>
@@ -410,22 +412,22 @@ export const StockLedgerPage: React.FC = () => {
 
       {/* Stock Adjustment Modal */}
       {isAdjustmentModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-xs p-4">
-          <div className="w-full max-w-md rounded-xl bg-white shadow-2xl overflow-hidden border border-slate-200">
-            <div className="flex items-center justify-between border-b border-slate-200 px-5 py-3.5 bg-slate-50">
-              <h3 className="text-sm font-bold text-slate-800">Record Stock Adjustment</h3>
-              <button onClick={() => setIsAdjustmentModalOpen(false)} className="text-slate-400 hover:text-slate-600">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-md rounded-card bg-surface shadow-modal overflow-hidden border border-border-main">
+            <div className="flex items-center justify-between border-b border-border-main px-5 py-3.5 bg-canvas">
+              <h3 className="text-sm font-bold text-text-main">Record Stock Adjustment</h3>
+              <button onClick={() => setIsAdjustmentModalOpen(false)} className="text-text-muted hover:text-text-main">
                 <X className="h-4 w-4" />
               </button>
             </div>
 
             <div className="p-5 space-y-3">
               <div>
-                <label className="text-xs font-semibold text-slate-700 block mb-1">Select Batch *</label>
+                <label className="text-xs font-medium text-text-main block mb-1">Select Batch *</label>
                 <select
                   value={adjBatchId}
                   onChange={(e) => setAdjBatchId(e.target.value)}
-                  className="w-full rounded border border-slate-300 px-2.5 py-1.5 text-xs text-slate-800 focus:border-blue-600 focus:outline-none"
+                  className="w-full rounded-btn border border-border-main bg-surface px-2.5 py-2 text-xs text-text-main focus:border-accent focus:outline-none"
                 >
                   <option value="">-- Choose Batch --</option>
                   {allBatches.map((b) => (
@@ -437,23 +439,23 @@ export const StockLedgerPage: React.FC = () => {
               </div>
 
               <div>
-                <label className="text-xs font-semibold text-slate-700 block mb-1">
+                <label className="text-xs font-medium text-text-main block mb-1">
                   Quantity Delta (Negative for write-off, Positive for found) *
                 </label>
                 <input
                   type="number"
                   value={adjQty}
                   onChange={(e) => setAdjQty(Number(e.target.value) || 0)}
-                  className="w-full rounded border border-slate-300 px-2.5 py-1.5 text-xs text-slate-800 focus:border-blue-600 focus:outline-none font-bold"
+                  className="w-full rounded-btn border border-border-main bg-surface px-2.5 py-2 text-xs text-text-main focus:border-accent focus:outline-none font-mono font-bold tabular-nums"
                 />
               </div>
 
               <div>
-                <label className="text-xs font-semibold text-slate-700 block mb-1">Adjustment Reason *</label>
+                <label className="text-xs font-medium text-text-main block mb-1">Adjustment Reason *</label>
                 <select
                   value={adjReason}
                   onChange={(e) => setAdjReason(e.target.value as any)}
-                  className="w-full rounded border border-slate-300 px-2.5 py-1.5 text-xs text-slate-800 focus:border-blue-600 focus:outline-none"
+                  className="w-full rounded-btn border border-border-main bg-surface px-2.5 py-2 text-xs text-text-main focus:border-accent focus:outline-none"
                 >
                   <option value="Damaged">Damaged Goods</option>
                   <option value="Expired">Expired</option>
@@ -465,27 +467,27 @@ export const StockLedgerPage: React.FC = () => {
               </div>
 
               <div>
-                <label className="text-xs font-semibold text-slate-700 block mb-1">Notes / Explanation</label>
+                <label className="text-xs font-medium text-text-main block mb-1">Notes / Explanation</label>
                 <input
                   type="text"
                   value={adjNotes}
                   onChange={(e) => setAdjNotes(e.target.value)}
                   placeholder="e.g. Broken during shelf reorganization"
-                  className="w-full rounded border border-slate-300 px-2.5 py-1.5 text-xs text-slate-800 focus:border-blue-600 focus:outline-none"
+                  className="w-full rounded-btn border border-border-main bg-surface px-2.5 py-2 text-xs text-text-main focus:border-accent focus:outline-none"
                 />
               </div>
             </div>
 
-            <div className="border-t border-slate-200 bg-slate-50 px-5 py-3.5 flex justify-end gap-2">
+            <div className="border-t border-border-main bg-canvas px-5 py-3.5 flex justify-end gap-2">
               <button
                 onClick={() => setIsAdjustmentModalOpen(false)}
-                className="rounded border border-slate-200 bg-white px-3.5 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100"
+                className="rounded-btn border border-border-main bg-surface px-3.5 py-2 text-xs font-medium text-text-main hover:bg-canvas transition-colors"
               >
                 Cancel
               </button>
               <button
                 onClick={handleRecordAdjustment}
-                className="rounded bg-amber-600 px-4 py-1.5 text-xs font-bold text-white shadow-sm hover:bg-amber-700"
+                className="rounded-btn bg-status-warning px-4 py-2 text-xs font-semibold text-white shadow-xs hover:opacity-90 transition-opacity"
               >
                 Post Adjustment
               </button>
@@ -496,32 +498,32 @@ export const StockLedgerPage: React.FC = () => {
 
       {/* Inter-Store Transfer Modal */}
       {isTransferModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-xs p-4">
-          <div className="w-full max-w-md rounded-xl bg-white shadow-2xl overflow-hidden border border-slate-200">
-            <div className="flex items-center justify-between border-b border-slate-200 px-5 py-3.5 bg-slate-50">
-              <h3 className="text-sm font-bold text-slate-800">Dispatch Inter-Store Transfer</h3>
-              <button onClick={() => setIsTransferModalOpen(false)} className="text-slate-400 hover:text-slate-600">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-md rounded-card bg-surface shadow-modal overflow-hidden border border-border-main">
+            <div className="flex items-center justify-between border-b border-border-main px-5 py-3.5 bg-canvas">
+              <h3 className="text-sm font-bold text-text-main">Dispatch Inter-Store Transfer</h3>
+              <button onClick={() => setIsTransferModalOpen(false)} className="text-text-muted hover:text-text-main">
                 <X className="h-4 w-4" />
               </button>
             </div>
 
             <div className="p-5 space-y-3">
               <div>
-                <label className="text-xs font-semibold text-slate-700 block mb-1">Destination Branch Store *</label>
+                <label className="text-xs font-medium text-text-main block mb-1">Destination Branch Store *</label>
                 <input
                   type="text"
                   value={trDestStore}
                   onChange={(e) => setTrDestStore(e.target.value)}
-                  className="w-full rounded border border-slate-300 px-2.5 py-1.5 text-xs text-slate-800 focus:border-blue-600 focus:outline-none"
+                  className="w-full rounded-btn border border-border-main bg-surface px-2.5 py-2 text-xs text-text-main focus:border-accent focus:outline-none"
                 />
               </div>
 
               <div>
-                <label className="text-xs font-semibold text-slate-700 block mb-1">Batch to Transfer *</label>
+                <label className="text-xs font-medium text-text-main block mb-1">Batch to Transfer *</label>
                 <select
                   value={trBatchId}
                   onChange={(e) => setTrBatchId(e.target.value)}
-                  className="w-full rounded border border-slate-300 px-2.5 py-1.5 text-xs text-slate-800 focus:border-blue-600 focus:outline-none"
+                  className="w-full rounded-btn border border-border-main bg-surface px-2.5 py-2 text-xs text-text-main focus:border-accent focus:outline-none"
                 >
                   <option value="">-- Choose Batch --</option>
                   {allBatches.map((b) => (
@@ -533,26 +535,26 @@ export const StockLedgerPage: React.FC = () => {
               </div>
 
               <div>
-                <label className="text-xs font-semibold text-slate-700 block mb-1">Transfer Quantity *</label>
+                <label className="text-xs font-medium text-text-main block mb-1">Transfer Quantity *</label>
                 <input
                   type="number"
                   value={trQty}
                   onChange={(e) => setTrQty(Number(e.target.value) || 1)}
-                  className="w-full rounded border border-slate-300 px-2.5 py-1.5 text-xs text-slate-800 focus:border-blue-600 focus:outline-none font-bold"
+                  className="w-full rounded-btn border border-border-main bg-surface px-2.5 py-2 text-xs text-text-main focus:border-accent focus:outline-none font-mono font-bold tabular-nums"
                 />
               </div>
             </div>
 
-            <div className="border-t border-slate-200 bg-slate-50 px-5 py-3.5 flex justify-end gap-2">
+            <div className="border-t border-border-main bg-canvas px-5 py-3.5 flex justify-end gap-2">
               <button
                 onClick={() => setIsTransferModalOpen(false)}
-                className="rounded border border-slate-200 bg-white px-3.5 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100"
+                className="rounded-btn border border-border-main bg-surface px-3.5 py-2 text-xs font-medium text-text-main hover:bg-canvas transition-colors"
               >
                 Cancel
               </button>
               <button
                 onClick={handleDispatchTransfer}
-                className="rounded bg-blue-600 px-4 py-1.5 text-xs font-bold text-white shadow-sm hover:bg-blue-700"
+                className="rounded-btn bg-accent px-4 py-2 text-xs font-semibold text-white shadow-xs hover:bg-accent/90 transition-opacity"
               >
                 Dispatch Transfer
               </button>

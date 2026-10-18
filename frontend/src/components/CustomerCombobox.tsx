@@ -456,7 +456,7 @@ export const CustomerCombobox: React.FC<CustomerComboboxProps> = ({
             updatePosition();
           }}
           onKeyDown={handleKeyDown}
-          className={`h-7 w-48 rounded border border-slate-200 bg-white pr-6 pl-2 text-xs font-medium text-slate-800 placeholder-slate-400 transition-colors hover:border-slate-300 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 ${className}`}
+          className={`h-8 w-52 rounded-[10px] border border-[var(--color-border)] bg-[var(--color-surface)] pr-6 pl-2.5 text-xs font-medium text-[var(--color-text)] placeholder-[var(--color-text-muted)] transition-colors hover:border-[var(--color-accent)] focus:border-[var(--color-accent)] focus:outline-none ${className}`}
         />
 
         {/* Clear Button */}
@@ -499,14 +499,14 @@ export const CustomerCombobox: React.FC<CustomerComboboxProps> = ({
               width: `${dropdownCoords.width}px`,
               zIndex: 9999,
             }}
-            className="max-h-80 overflow-y-auto rounded-lg border border-slate-200 bg-white py-1 shadow-2xl ring-1 ring-black/5 dark:border-slate-700 dark:bg-slate-900 dark:ring-white/10"
+            className="max-h-80 overflow-y-auto rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] py-1 shadow-dropdown ring-1 ring-black/5"
           >
             {/* Header hint */}
-            <div className="flex items-center justify-between border-b border-slate-100 px-3 py-1.5 text-[10px] font-semibold text-slate-400 dark:border-slate-800 dark:text-slate-500">
+            <div className="flex items-center justify-between border-b border-[var(--color-border)] px-3 py-1.5 text-[10px] font-semibold text-[var(--color-text-muted)]">
               <span className="uppercase tracking-wider">
                 {searchTerm.trim() ? "Search Results" : "Recent / Top Customers"}
               </span>
-              <span className="text-[9px] text-slate-400">↑↓ to navigate • Enter to select</span>
+              <span className="text-[9px] text-[var(--color-text-muted)]">↑↓ to navigate • Enter to select</span>
             </div>
 
             {/* Option 0: Walk-in Customer */}
@@ -518,8 +518,8 @@ export const CustomerCombobox: React.FC<CustomerComboboxProps> = ({
               onClick={selectWalkIn}
               className={`flex cursor-pointer items-center justify-between px-3 py-2 text-xs transition-colors ${
                 highlightedIndex === 0
-                  ? "bg-blue-50 text-blue-900 dark:bg-blue-950/70 dark:text-blue-100 font-semibold"
-                  : "text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-800/60"
+                  ? "bg-[var(--color-accent-soft)] text-[var(--color-accent)] font-semibold"
+                  : "text-[var(--color-text)] hover:bg-[var(--color-surface-hover)]"
               }`}
             >
               <div className="flex items-center gap-2">
@@ -555,28 +555,28 @@ export const CustomerCombobox: React.FC<CustomerComboboxProps> = ({
                   aria-selected={isHighlighted}
                   onMouseEnter={() => setHighlightedIndex(itemIndex)}
                   onClick={() => selectCustomer(cust)}
-                  className={`flex cursor-pointer items-center justify-between border-t border-slate-50 px-3 py-2 text-xs transition-colors dark:border-slate-800/40 ${
+                  className={`flex cursor-pointer items-center justify-between border-t border-[var(--color-border-subtle)] px-3 py-2 text-xs transition-colors ${
                     isHighlighted
-                      ? "bg-blue-50 text-blue-900 dark:bg-blue-950/70 dark:text-blue-100 font-semibold"
-                      : "text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-800/60"
+                      ? "bg-[var(--color-accent-soft)] text-[var(--color-accent)] font-semibold"
+                      : "text-[var(--color-text)] hover:bg-[var(--color-surface-hover)]"
                   }`}
                 >
                   <div className="flex items-center gap-2">
-                    <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-emerald-50 text-emerald-600 dark:bg-emerald-950/80 dark:text-emerald-300 font-bold text-[10px]">
+                    <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[var(--color-accent-soft)] text-[var(--color-accent)] font-bold text-[10px]">
                       {cust.name.charAt(0).toUpperCase()}
                     </div>
                     <div>
                       <div className="flex items-center gap-1.5">
-                        <span className="font-medium text-slate-900 dark:text-slate-100">
+                        <span className="font-medium text-[var(--color-text)]">
                           <HighlightMatch text={cust.name} query={searchTerm} />
                         </span>
                         {cust.customer_code && (
-                          <span className="rounded bg-slate-100 px-1 py-0.2 text-[9px] font-mono text-slate-600 dark:bg-slate-800 dark:text-slate-400">
+                          <span className="rounded-[4px] bg-[var(--color-surface-subtle)] px-1 py-0.2 text-[9px] font-mono text-[var(--color-text-muted)] border border-[var(--color-border)]">
                             <HighlightMatch text={cust.customer_code} query={searchTerm} />
                           </span>
                         )}
                         {cust.default_discount_percent ? (
-                          <span className="rounded bg-amber-100 px-1 py-0.2 text-[9px] font-semibold text-amber-800 dark:bg-amber-950/80 dark:text-amber-300">
+                          <span className="rounded-full bg-[var(--color-warning-bg)] px-1.5 py-0.2 text-[9px] font-semibold text-[var(--color-warning-text)] border border-[var(--color-warning-border)]">
                             {cust.default_discount_percent}% Off
                           </span>
                         ) : null}

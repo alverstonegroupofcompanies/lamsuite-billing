@@ -52,7 +52,7 @@ export const ReportFilterBar: React.FC<ReportFilterBarProps> = ({
   };
 
   return (
-    <div className="bg-white border-b border-gray-200 px-4 py-3 flex flex-wrap items-center justify-between gap-3 shadow-xs">
+    <div className="bg-surface border-b border-border-main px-4 py-3 flex flex-wrap items-center justify-between gap-3 shadow-xs">
       <div className="flex flex-wrap items-center gap-3">
         {filterDefs.map((def) => {
           if (def.type === "date-range") {
@@ -63,11 +63,11 @@ export const ReportFilterBar: React.FC<ReportFilterBarProps> = ({
 
             return (
               <div key={def.id} className="flex items-center gap-2">
-                <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider flex items-center gap-1">
-                  <Calendar className="w-3.5 h-3.5 text-gray-400" />
+                <span className="text-[11px] font-semibold text-text-muted uppercase tracking-wider flex items-center gap-1">
+                  <Calendar className="w-3.5 h-3.5 text-text-muted" />
                   {def.label}:
                 </span>
-                <div className="flex items-center gap-1.5 bg-gray-50 border border-gray-300 rounded-md p-1 shadow-2xs">
+                <div className="flex items-center gap-1.5 bg-canvas border border-border-main rounded-btn p-1 shadow-2xs">
                   <input
                     type="date"
                     value={range.startDate || ""}
@@ -76,9 +76,9 @@ export const ReportFilterBar: React.FC<ReportFilterBarProps> = ({
                       onChange(def.id, newRange);
                       onChange("startDate", e.target.value);
                     }}
-                    className="text-xs bg-transparent border-0 text-gray-800 font-medium focus:ring-0 px-1 py-0.5"
+                    className="text-xs bg-transparent border-0 text-text-main font-mono font-medium focus:ring-0 px-1 py-0.5 tabular-nums"
                   />
-                  <span className="text-xs text-gray-400">to</span>
+                  <span className="text-xs text-text-muted">to</span>
                   <input
                     type="date"
                     value={range.endDate || ""}
@@ -87,37 +87,37 @@ export const ReportFilterBar: React.FC<ReportFilterBarProps> = ({
                       onChange(def.id, newRange);
                       onChange("endDate", e.target.value);
                     }}
-                    className="text-xs bg-transparent border-0 text-gray-800 font-medium focus:ring-0 px-1 py-0.5"
+                    className="text-xs bg-transparent border-0 text-text-main font-mono font-medium focus:ring-0 px-1 py-0.5 tabular-nums"
                   />
                 </div>
 
                 {/* Quick Presets */}
-                <div className="hidden sm:flex items-center gap-1 bg-gray-100 rounded-md p-0.5">
+                <div className="hidden sm:flex items-center gap-1 bg-canvas border border-border-main rounded-btn p-0.5">
                   <button
                     type="button"
                     onClick={() => handleDatePreset("today")}
-                    className="text-[11px] px-2 py-0.5 font-medium rounded text-gray-600 hover:text-gray-900 hover:bg-white transition-colors"
+                    className="text-[11px] px-2 py-0.5 font-medium rounded-btn text-text-muted hover:text-text-main hover:bg-surface transition-colors"
                   >
                     Today
                   </button>
                   <button
                     type="button"
                     onClick={() => handleDatePreset("yesterday")}
-                    className="text-[11px] px-2 py-0.5 font-medium rounded text-gray-600 hover:text-gray-900 hover:bg-white transition-colors"
+                    className="text-[11px] px-2 py-0.5 font-medium rounded-btn text-text-muted hover:text-text-main hover:bg-surface transition-colors"
                   >
                     Yesterday
                   </button>
                   <button
                     type="button"
                     onClick={() => handleDatePreset("this_week")}
-                    className="text-[11px] px-2 py-0.5 font-medium rounded text-gray-600 hover:text-gray-900 hover:bg-white transition-colors"
+                    className="text-[11px] px-2 py-0.5 font-medium rounded-btn text-text-muted hover:text-text-main hover:bg-surface transition-colors"
                   >
                     Week
                   </button>
                   <button
                     type="button"
                     onClick={() => handleDatePreset("this_month")}
-                    className="text-[11px] px-2 py-0.5 font-medium rounded text-gray-600 hover:text-gray-900 hover:bg-white transition-colors"
+                    className="text-[11px] px-2 py-0.5 font-medium rounded-btn text-text-muted hover:text-text-main hover:bg-surface transition-colors"
                   >
                     This Month
                   </button>
@@ -130,14 +130,14 @@ export const ReportFilterBar: React.FC<ReportFilterBarProps> = ({
             const dateVal = values[def.id] || def.defaultValue || "";
             return (
               <div key={def.id} className="flex items-center gap-1.5">
-                <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                <span className="text-[11px] font-semibold text-text-muted uppercase tracking-wider">
                   {def.label}:
                 </span>
                 <input
                   type="date"
                   value={dateVal}
                   onChange={(e) => onChange(def.id, e.target.value)}
-                  className="text-xs border border-gray-300 rounded-md px-2 py-1 bg-white text-gray-800 shadow-2xs font-medium"
+                  className="text-xs border border-border-main rounded-btn px-2 py-1 bg-surface text-text-main shadow-xs font-mono font-medium tabular-nums"
                 />
               </div>
             );
@@ -147,13 +147,13 @@ export const ReportFilterBar: React.FC<ReportFilterBarProps> = ({
             const currentVal = values[def.id] ?? def.defaultValue;
             return (
               <div key={def.id} className="flex items-center gap-1.5">
-                <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                <span className="text-[11px] font-semibold text-text-muted uppercase tracking-wider">
                   {def.label}:
                 </span>
                 <select
                   value={currentVal}
                   onChange={(e) => onChange(def.id, e.target.value)}
-                  className="text-xs border border-gray-300 rounded-md px-2.5 py-1 bg-white text-gray-800 shadow-2xs font-medium cursor-pointer"
+                  className="text-xs border border-border-main rounded-btn px-2.5 py-1 bg-surface text-text-main shadow-xs font-medium cursor-pointer focus:border-accent focus:outline-none"
                 >
                   {def.options.map((opt) => (
                     <option key={opt.value} value={opt.value}>
@@ -174,7 +174,7 @@ export const ReportFilterBar: React.FC<ReportFilterBarProps> = ({
           type="button"
           onClick={onRefresh}
           disabled={isLoading}
-          className="flex items-center gap-1.5 px-3 py-1 bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200 text-xs font-medium rounded-md shadow-2xs transition-colors disabled:opacity-50"
+          className="flex items-center gap-1.5 px-3.5 py-1.5 bg-accent-soft text-accent hover:bg-accent-soft/80 border border-accent/20 text-xs font-semibold rounded-btn shadow-xs transition-colors disabled:opacity-50 cursor-pointer"
         >
           <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? "animate-spin" : ""}`} />
           Run / Refresh

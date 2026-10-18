@@ -40,6 +40,7 @@ export const KeyboardShortcutsModal: React.FC<KeyboardShortcutsModalProps> = ({ 
         { key: "Enter (in Qty)", description: "Confirm line & jump back to Search" },
         { key: "F2", description: "Quick Edit Item Discount (% or ₹)" },
         { key: "F3", description: "Quick Edit Selling Price" },
+        { key: "F4 or Ctrl+M", description: "Quick Edit Product Name, Batch, Expiry & Tax" },
         { key: "Ctrl+B / Ctrl+U", description: "Change Batch / Toggle Unit Rate" },
         { key: "Ctrl+E", description: "Edit Packaging & Unit Conversion" },
         { key: "Delete or Ctrl+D", description: "Delete selected line (Ctrl+Z to Undo)" },
@@ -62,22 +63,22 @@ export const KeyboardShortcutsModal: React.FC<KeyboardShortcutsModalProps> = ({ 
   ];
 
   return (
-    <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-slate-950/70 p-4 backdrop-blur-xs select-none">
-      <div className="flex w-full max-w-2xl flex-col rounded-xl border border-slate-700 bg-slate-900 text-white shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/40 p-4 select-none font-sans">
+      <div className="flex w-full max-w-2xl flex-col rounded-card border border-border-main bg-surface text-text-main shadow-modal overflow-hidden animate-in fade-in duration-100">
         {/* Modal Header */}
-        <div className="flex items-center justify-between border-b border-slate-800 px-6 py-4 bg-slate-950/50">
+        <div className="flex items-center justify-between border-b border-border-main px-6 py-4 bg-canvas">
           <div className="flex items-center gap-2.5">
-            <div className="rounded-lg bg-blue-500/20 p-2 text-blue-400">
+            <div className="rounded-btn bg-accent-soft p-2 text-accent">
               <Keyboard className="h-5 w-5" />
             </div>
             <div>
-              <h2 className="text-base font-bold text-white">Keyboard Shortcuts & Cheatsheet</h2>
-              <p className="text-xs text-slate-400">Keyboard-first workflow for rapid retail counter billing</p>
+              <h2 className="text-base font-bold text-text-main">Keyboard Shortcuts & Cheatsheet</h2>
+              <p className="text-xs text-text-muted">Keyboard-first workflow for rapid retail counter billing</p>
             </div>
           </div>
           <button
             onClick={onClose}
-            className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-800 hover:text-white transition-colors"
+            className="rounded-btn p-1.5 text-text-muted hover:bg-canvas hover:text-text-main transition-colors cursor-pointer"
           >
             <X className="h-5 w-5" />
           </button>
@@ -86,15 +87,15 @@ export const KeyboardShortcutsModal: React.FC<KeyboardShortcutsModalProps> = ({ 
         {/* Modal Body */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 p-6 max-h-[70vh] overflow-y-auto">
           {shortcutGroups.map((group) => (
-            <div key={group.category} className="space-y-2 rounded-lg border border-slate-800 bg-slate-950/40 p-3.5">
-              <h3 className="text-xs font-bold uppercase tracking-wider text-blue-400 border-b border-slate-800/80 pb-1.5">
+            <div key={group.category} className="space-y-2 rounded-card border border-border-main bg-canvas p-3.5">
+              <h3 className="text-xs font-bold uppercase tracking-wider text-accent border-b border-border-main pb-1.5">
                 {group.category}
               </h3>
               <div className="space-y-1.5">
                 {group.shortcuts.map((s) => (
                   <div key={s.key} className="flex items-center justify-between text-xs py-0.5">
-                    <span className="text-slate-300 pr-2">{s.description}</span>
-                    <kbd className="shrink-0 rounded bg-slate-800 px-2 py-0.5 font-mono text-[11px] font-semibold text-slate-200 border border-slate-700 shadow-xs">
+                    <span className="text-text-main pr-2">{s.description}</span>
+                    <kbd className="shrink-0 rounded-md bg-surface px-2 py-0.5 font-mono text-[11px] font-semibold text-text-main border border-border-main shadow-xs">
                       {s.key}
                     </kbd>
                   </div>
@@ -105,14 +106,14 @@ export const KeyboardShortcutsModal: React.FC<KeyboardShortcutsModalProps> = ({ 
         </div>
 
         {/* Modal Footer */}
-        <div className="flex items-center justify-between border-t border-slate-800 bg-slate-950/60 px-6 py-3 text-xs text-slate-400">
+        <div className="flex items-center justify-between border-t border-border-main bg-canvas px-6 py-3 text-xs text-text-muted">
           <div className="flex items-center gap-1.5">
-            <Command className="h-3.5 w-3.5 text-slate-500" />
-            <span>Press <strong className="text-slate-300">Esc</strong> to exit anytime</span>
+            <Command className="h-3.5 w-3.5 text-text-muted" />
+            <span>Press <strong className="text-text-main font-mono">Esc</strong> to exit anytime</span>
           </div>
           <button
             onClick={onClose}
-            className="rounded-md bg-blue-600 px-4 py-1.5 text-xs font-semibold text-white hover:bg-blue-500 transition-colors"
+            className="rounded-btn bg-accent px-4 py-1.5 text-xs font-semibold text-white hover:opacity-90 transition-colors cursor-pointer"
           >
             Done
           </button>

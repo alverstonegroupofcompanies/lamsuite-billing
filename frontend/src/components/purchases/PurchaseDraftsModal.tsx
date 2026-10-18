@@ -41,14 +41,14 @@ export const PurchaseDraftsModal: React.FC<PurchaseDraftsModalProps> = ({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-xs p-4">
-      <div className="w-full max-w-lg rounded-xl bg-white shadow-2xl border border-slate-200 overflow-hidden">
-        <div className="flex items-center justify-between border-b border-slate-200 px-5 py-3.5 bg-slate-50">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="w-full max-w-lg rounded-card bg-surface shadow-2xl border border-border-main overflow-hidden">
+        <div className="flex items-center justify-between border-b border-border-main px-5 py-3.5 bg-canvas">
           <div className="flex items-center gap-2">
-            <FileClock className="h-5 w-5 text-indigo-600" />
-            <h3 className="text-sm font-bold text-slate-800">Saved Purchase Drafts</h3>
+            <FileClock className="h-5 w-5 text-accent" />
+            <h3 className="text-sm font-bold text-text-main">Saved Purchase Drafts</h3>
           </div>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-600">
+          <button onClick={onClose} className="text-text-muted hover:text-text-main transition-colors">
             <X className="h-4 w-4" />
           </button>
         </div>

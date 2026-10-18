@@ -220,25 +220,25 @@ export const PurchasesPage: React.FC = () => {
       )}
 
       {/* Top Action & Navigation Header */}
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-200 bg-white p-3 shadow-xs">
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] p-3 shadow-2xs">
         <div className="flex items-center gap-3">
           <button
             onClick={() => navigate("/pos")}
-            className="flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+            className="flex items-center gap-1.5 rounded-[10px] border border-[var(--color-border)] px-3 py-1.5 text-xs font-semibold text-[var(--color-text)] hover:bg-[var(--color-surface-hover)] cursor-pointer transition-colors"
             title="Return to POS Billing"
           >
             <span>Back to POS</span>
           </button>
-          <div className="h-6 w-px bg-slate-200" />
+          <div className="h-6 w-px bg-[var(--color-border)]" />
           <div className="flex items-center gap-2.5">
-            <div className="rounded-lg bg-blue-50 p-2 text-blue-600 border border-blue-100">
+            <div className="rounded-[10px] bg-[var(--color-accent-soft)] p-2 text-[var(--color-accent)] border border-[var(--color-accent-soft)]">
               <Truck className="h-4 w-4" />
             </div>
             <div>
-              <h1 className="text-sm font-bold text-slate-800 flex items-center gap-2">
+              <h1 className="text-sm font-bold text-[var(--color-text)] flex items-center gap-2">
                 <span>Purchase Operations & Inward Stock</span>
               </h1>
-              <p className="text-[11px] text-slate-500">
+              <p className="text-[11px] text-[var(--color-text-muted)]">
                 Inward bills, batch stocks, supplier double-entry ledger, POs, and ITC tracking.
               </p>
             </div>
@@ -248,9 +248,9 @@ export const PurchasesPage: React.FC = () => {
         <div className="flex items-center gap-2">
           <button
             onClick={() => setIsImportModalOpen(true)}
-            className="flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3.5 py-2 text-xs font-bold text-slate-700 shadow-2xs hover:bg-slate-50 transition-colors cursor-pointer"
+            className="flex items-center gap-1.5 rounded-[10px] border border-[var(--color-border)] bg-[var(--color-surface)] px-3.5 py-2 text-xs font-bold text-[var(--color-text)] shadow-2xs hover:bg-[var(--color-surface-hover)] transition-colors cursor-pointer"
           >
-            <Upload className="h-4 w-4 text-blue-600" />
+            <Upload className="h-4 w-4 text-[var(--color-accent)]" />
             <span>Import Invoices (Excel/CSV)</span>
           </button>
           <button
@@ -258,7 +258,7 @@ export const PurchasesPage: React.FC = () => {
               setPoToConvert(null);
               setIsEntryFormOpen(true);
             }}
-            className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-xs font-bold text-white shadow-xs hover:bg-blue-700 cursor-pointer"
+            className="flex items-center gap-2 rounded-[10px] bg-[var(--color-accent)] px-4 py-2 text-xs font-bold text-white shadow-xs hover:bg-[var(--color-accent-hover)] cursor-pointer transition-colors"
           >
             <Plus className="h-4 w-4" />
             <span>New Inward Bill (F2)</span>
@@ -268,61 +268,61 @@ export const PurchasesPage: React.FC = () => {
 
       {/* KPI Overview Cards */}
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-xs">
+        <div className="rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] p-4 shadow-2xs">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-slate-500 uppercase">Total Inward Purchases</span>
-            <div className="rounded-lg bg-blue-50 p-2 text-blue-600">
+            <span className="text-[11px] font-bold text-[var(--color-text-muted)] uppercase tracking-wider">Total Inward Purchases</span>
+            <div className="rounded-[8px] bg-[var(--color-accent-soft)] p-2 text-[var(--color-accent)]">
               <Truck className="h-4 w-4" />
             </div>
           </div>
-          <div className="mt-2 text-lg font-black text-slate-900">₹ {totalPurchasesAmount.toFixed(2)}</div>
-          <div className="text-[11px] text-slate-500 mt-0.5">{purchasesList.length} Inward bills recorded</div>
+          <div className="mt-2 text-[26px] font-bold font-mono text-[var(--color-text)] tabular-nums leading-tight">₹ {totalPurchasesAmount.toFixed(2)}</div>
+          <div className="text-[11px] text-[var(--color-text-muted)] mt-1 font-mono">{purchasesList.length} Inward bills recorded</div>
         </div>
 
-        <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-xs">
+        <div className="rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] p-4 shadow-2xs">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-slate-500 uppercase">Outstanding Payables</span>
-            <div className="rounded-lg bg-amber-50 p-2 text-amber-600">
+            <span className="text-[11px] font-bold text-[var(--color-text-muted)] uppercase tracking-wider">Outstanding Payables</span>
+            <div className="rounded-[8px] bg-[var(--color-warning-bg)] p-2 text-[var(--color-warning-text)]">
               <CreditCard className="h-4 w-4" />
             </div>
           </div>
-          <div className="mt-2 text-lg font-black text-amber-700">₹ {totalOutstanding.toFixed(2)}</div>
-          <div className="text-[11px] text-slate-500 mt-0.5">Across {suppliers.length} active suppliers</div>
+          <div className="mt-2 text-[26px] font-bold font-mono text-[var(--color-warning-text)] tabular-nums leading-tight">₹ {totalOutstanding.toFixed(2)}</div>
+          <div className="text-[11px] text-[var(--color-text-muted)] mt-1 font-mono">Across {suppliers.length} active suppliers</div>
         </div>
 
-        <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-xs">
+        <div className="rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] p-4 shadow-2xs">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-slate-500 uppercase">Input Tax Credit (ITC)</span>
-            <div className="rounded-lg bg-emerald-50 p-2 text-emerald-600">
+            <span className="text-[11px] font-bold text-[var(--color-text-muted)] uppercase tracking-wider">Input Tax Credit (ITC)</span>
+            <div className="rounded-[8px] bg-[var(--color-success-bg)] p-2 text-[var(--color-success-text)]">
               <TrendingUp className="h-4 w-4" />
             </div>
           </div>
-          <div className="mt-2 text-lg font-black text-emerald-700">₹ {totalItc.toFixed(2)}</div>
-          <div className="text-[11px] text-slate-500 mt-0.5">Available for GSTR-3B offset</div>
+          <div className="mt-2 text-[26px] font-bold font-mono text-[var(--color-success-text)] tabular-nums leading-tight">₹ {totalItc.toFixed(2)}</div>
+          <div className="text-[11px] text-[var(--color-text-muted)] mt-1">Available for GSTR-3B offset</div>
         </div>
 
-        <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-xs">
+        <div className="rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] p-4 shadow-2xs">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-slate-500 uppercase">Pending POs</span>
-            <div className="rounded-lg bg-purple-50 p-2 text-purple-600">
+            <span className="text-[11px] font-bold text-[var(--color-text-muted)] uppercase tracking-wider">Pending POs</span>
+            <div className="rounded-[8px] bg-[var(--color-surface-subtle)] p-2 text-[var(--color-text-muted)]">
               <ShoppingBag className="h-4 w-4" />
             </div>
           </div>
-          <div className="mt-2 text-lg font-black text-purple-700">
+          <div className="mt-2 text-[26px] font-bold font-mono text-[var(--color-text)] tabular-nums leading-tight">
             {ordersList.filter((o) => o.status === "pending" || o.status === "partially_received").length} Active
           </div>
-          <div className="text-[11px] text-slate-500 mt-0.5">Purchase Orders awaiting inward receipt</div>
+          <div className="text-[11px] text-[var(--color-text-muted)] mt-1">Purchase Orders awaiting inward receipt</div>
         </div>
       </div>
 
       {/* Main Tabs Navigation */}
-      <div className="flex items-center gap-1 border-b border-slate-200 text-xs font-bold bg-white px-2 rounded-t-lg">
+      <div className="flex items-center gap-1 border-b border-[var(--color-border)] text-xs font-bold bg-[var(--color-surface)] px-2 rounded-t-[14px]">
         <button
           onClick={() => setActiveTab("bills")}
-          className={`flex items-center gap-1.5 border-b-2 px-4 py-2.5 transition-all ${
+          className={`flex items-center gap-1.5 border-b-2 px-4 py-2.5 transition-all cursor-pointer ${
             activeTab === "bills"
-              ? "border-blue-600 text-blue-600 bg-blue-50/50 rounded-t-md"
-              : "border-transparent text-slate-500 hover:text-slate-800"
+              ? "border-[var(--color-accent)] text-[var(--color-accent)] bg-[var(--color-accent-soft)] rounded-t-[10px]"
+              : "border-transparent text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
           }`}
         >
           <Receipt className="h-4 w-4" />
@@ -331,10 +331,10 @@ export const PurchasesPage: React.FC = () => {
 
         <button
           onClick={() => setActiveTab("orders")}
-          className={`flex items-center gap-1.5 border-b-2 px-4 py-2.5 transition-all ${
+          className={`flex items-center gap-1.5 border-b-2 px-4 py-2.5 transition-all cursor-pointer ${
             activeTab === "orders"
-              ? "border-blue-600 text-blue-600 bg-blue-50/50 rounded-t-md"
-              : "border-transparent text-slate-500 hover:text-slate-800"
+              ? "border-[var(--color-accent)] text-[var(--color-accent)] bg-[var(--color-accent-soft)] rounded-t-[10px]"
+              : "border-transparent text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
           }`}
         >
           <ShoppingBag className="h-4 w-4" />
@@ -343,10 +343,10 @@ export const PurchasesPage: React.FC = () => {
 
         <button
           onClick={() => setActiveTab("ledger")}
-          className={`flex items-center gap-1.5 border-b-2 px-4 py-2.5 transition-all ${
+          className={`flex items-center gap-1.5 border-b-2 px-4 py-2.5 transition-all cursor-pointer ${
             activeTab === "ledger"
-              ? "border-blue-600 text-blue-600 bg-blue-50/50 rounded-t-md"
-              : "border-transparent text-slate-500 hover:text-slate-800"
+              ? "border-[var(--color-accent)] text-[var(--color-accent)] bg-[var(--color-accent-soft)] rounded-t-[10px]"
+              : "border-transparent text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
           }`}
         >
           <Building2 className="h-4 w-4" />
@@ -355,10 +355,10 @@ export const PurchasesPage: React.FC = () => {
 
         <button
           onClick={() => setActiveTab("reports")}
-          className={`flex items-center gap-1.5 border-b-2 px-4 py-2.5 transition-all ${
+          className={`flex items-center gap-1.5 border-b-2 px-4 py-2.5 transition-all cursor-pointer ${
             activeTab === "reports"
-              ? "border-blue-600 text-blue-600 bg-blue-50/50 rounded-t-md"
-              : "border-transparent text-slate-500 hover:text-slate-800"
+              ? "border-[var(--color-accent)] text-[var(--color-accent)] bg-[var(--color-accent-soft)] rounded-t-[10px]"
+              : "border-transparent text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
           }`}
         >
           <FileText className="h-4 w-4" />
@@ -370,23 +370,23 @@ export const PurchasesPage: React.FC = () => {
       {activeTab === "bills" && (
         <div className="space-y-3">
           {/* Filters Bar */}
-          <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-200 bg-white p-3 shadow-xs text-xs">
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] p-3 shadow-2xs text-xs">
             <div className="flex flex-wrap items-center gap-2">
               <div className="relative">
-                <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-slate-400" />
+                <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-[var(--color-text-muted)]" />
                 <input
                   type="text"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   placeholder="Search Bill #, Supplier, Inv #..."
-                  className="w-56 rounded-lg border border-slate-300 pl-8 pr-3 py-1.5 text-xs focus:border-blue-600 focus:outline-none"
+                  className="w-56 rounded-[10px] border border-[var(--color-border)] pl-8 pr-3 py-1.5 text-xs text-[var(--color-text)] placeholder:text-[var(--color-text-muted)] focus:border-[var(--color-accent)] focus:outline-none bg-[var(--color-surface)]"
                 />
               </div>
 
               <select
                 value={selectedSupplierFilter}
                 onChange={(e) => setSelectedSupplierFilter(e.target.value)}
-                className="rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs bg-white focus:border-blue-600 focus:outline-none"
+                className="rounded-[10px] border border-[var(--color-border)] px-2.5 py-1.5 text-xs bg-[var(--color-surface)] text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none"
               >
                 <option value="all">All Suppliers</option>
                 {suppliers.map((s) => (
@@ -399,7 +399,7 @@ export const PurchasesPage: React.FC = () => {
               <select
                 value={paymentStatusFilter}
                 onChange={(e) => setPaymentStatusFilter(e.target.value)}
-                className="rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs bg-white focus:border-blue-600 focus:outline-none"
+                className="rounded-[10px] border border-[var(--color-border)] px-2.5 py-1.5 text-xs bg-[var(--color-surface)] text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none"
               >
                 <option value="all">All Payment Statuses</option>
                 <option value="paid">Paid</option>
@@ -410,7 +410,7 @@ export const PurchasesPage: React.FC = () => {
 
             {/* Date Range Chips */}
             <div className="flex items-center gap-1.5">
-              <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wide mr-1">Period:</span>
+              <span className="text-[11px] font-semibold text-[var(--color-text-muted)] uppercase tracking-wide mr-1">Period:</span>
               {(
                 [
                   { id: "today", label: "Today" },
@@ -422,10 +422,10 @@ export const PurchasesPage: React.FC = () => {
                 <button
                   key={chip.id}
                   onClick={() => setDateFilterPreset(chip.id)}
-                  className={`rounded-md px-2.5 py-1 text-xs font-semibold transition-colors ${
+                  className={`rounded-[8px] px-2.5 py-1 text-xs font-semibold transition-colors cursor-pointer ${
                     dateFilterPreset === chip.id
-                      ? "bg-blue-600 text-white shadow-xs"
-                      : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                      ? "bg-[var(--color-accent)] text-white shadow-2xs"
+                      : "bg-[var(--color-canvas)] text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)] border border-[var(--color-border)]"
                   }`}
                 >
                   {chip.label}
@@ -435,10 +435,10 @@ export const PurchasesPage: React.FC = () => {
           </div>
 
           {/* Table */}
-          <div className="rounded-xl border border-slate-200 bg-white shadow-xs overflow-hidden">
+          <div className="rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-2xs overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs">
-                <thead className="border-b border-slate-200 bg-slate-100/80 text-slate-700 font-bold">
+                <thead className="border-b border-[var(--color-border)] bg-[var(--color-canvas)] text-[var(--color-text-muted)] font-bold uppercase tracking-wider text-[11px]">
                   <tr>
                     <th className="px-4 py-3">Bill Number</th>
                     <th className="px-4 py-3">Supplier Name</th>
@@ -452,40 +452,40 @@ export const PurchasesPage: React.FC = () => {
                     <th className="px-4 py-3 text-center">Actions</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-100">
+                <tbody className="divide-y divide-[var(--color-border)]">
                   {filteredPurchases.length === 0 ? (
                     <tr>
-                      <td colSpan={10} className="py-12 text-center text-slate-400">
-                        <Truck className="mx-auto h-8 w-8 text-slate-300 mb-1" />
+                      <td colSpan={10} className="py-12 text-center text-[var(--color-text-muted)]">
+                        <Truck className="mx-auto h-8 w-8 text-[var(--color-text-muted)] opacity-40 mb-1" />
                         <p className="font-semibold text-xs">No purchase bills match the selected filters</p>
-                        <p className="text-[11px] text-slate-400">Press "New Inward Bill" to record an invoice</p>
+                        <p className="text-[11px] text-[var(--color-text-muted)]">Press "New Inward Bill" to record an invoice</p>
                       </td>
                     </tr>
                   ) : (
                     filteredPurchases.map((p) => (
-                      <tr key={p.id} className="hover:bg-slate-50/80 transition-colors">
+                      <tr key={p.id} className="hover:bg-[var(--color-surface-hover)] transition-colors">
                         <td
                           onClick={() => setSelectedPurchaseId(p.id)}
-                          className="px-4 py-3 font-bold text-blue-600 cursor-pointer hover:underline"
+                          className="px-4 py-3 font-bold font-mono text-[var(--color-accent)] cursor-pointer hover:underline"
                         >
                           {p.purchase_number}
                         </td>
-                        <td className="px-4 py-3 font-semibold text-slate-800">{p.supplier_name}</td>
-                        <td className="px-4 py-3 font-mono text-slate-600">{p.supplier_invoice_no}</td>
-                        <td className="px-4 py-3 text-slate-500">{p.purchase_date}</td>
-                        <td className="px-4 py-3 text-right text-slate-600">₹ {Number(p.subtotal || 0).toFixed(2)}</td>
-                        <td className="px-4 py-3 text-right text-slate-600">₹ {Number(p.tax_total || 0).toFixed(2)}</td>
-                        <td className="px-4 py-3 text-right font-black text-slate-900">
+                        <td className="px-4 py-3 font-semibold text-[var(--color-text)]">{p.supplier_name}</td>
+                        <td className="px-4 py-3 font-mono text-[var(--color-text-muted)]">{p.supplier_invoice_no}</td>
+                        <td className="px-4 py-3 text-[var(--color-text-muted)] font-mono">{p.purchase_date}</td>
+                        <td className="px-4 py-3 text-right font-mono text-[var(--color-text-muted)] tabular-nums">₹ {Number(p.subtotal || 0).toFixed(2)}</td>
+                        <td className="px-4 py-3 text-right font-mono text-[var(--color-text-muted)] tabular-nums">₹ {Number(p.tax_total || 0).toFixed(2)}</td>
+                        <td className="px-4 py-3 text-right font-black font-mono text-[var(--color-text)] tabular-nums">
                           ₹ {Number(p.grand_total || 0).toFixed(2)}
                         </td>
                         <td className="px-4 py-3 text-center">
                           <span
                             className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
                               (p.payment_status || "unpaid") === "paid"
-                                ? "bg-emerald-100 text-emerald-800"
+                                ? "bg-[var(--color-accent-soft)] text-[var(--color-accent)] border border-[var(--color-accent-soft)]"
                                 : (p.payment_status || "unpaid") === "partial"
-                                ? "bg-amber-100 text-amber-800"
-                                : "bg-slate-100 text-slate-600"
+                                ? "bg-[var(--color-warning-bg)] text-[var(--color-warning-text)] border border-[var(--color-warning-border)]"
+                                : "bg-[var(--color-canvas)] text-[var(--color-text-muted)] border border-[var(--color-border)]"
                             }`}
                           >
                             {(p.payment_status || "unpaid").toUpperCase()}
@@ -495,8 +495,8 @@ export const PurchasesPage: React.FC = () => {
                           <span
                             className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
                               p.status === "received"
-                                ? "bg-blue-100 text-blue-800"
-                                : "bg-red-100 text-red-800"
+                                ? "bg-[var(--color-accent-soft)] text-[var(--color-accent)] border border-[var(--color-accent-soft)]"
+                                : "bg-[var(--color-danger-bg)] text-[var(--color-danger-text)] border border-[var(--color-danger-border)]"
                             }`}
                           >
                             {(p.status || "received").toUpperCase()}
@@ -506,14 +506,14 @@ export const PurchasesPage: React.FC = () => {
                           <div className="flex items-center justify-center gap-1.5">
                             <button
                               onClick={() => setSelectedPurchaseId(p.id)}
-                              className="p-1 text-slate-500 hover:text-blue-600 rounded hover:bg-blue-50"
+                              className="p-1 text-[var(--color-text-muted)] hover:text-[var(--color-accent)] rounded-[6px] hover:bg-[var(--color-accent-soft)] transition-colors cursor-pointer"
                               title="View full purchase details"
                             >
                               <Eye className="h-4 w-4" />
                             </button>
                             <button
                               onClick={() => navigate(`/returns/purchases?purchaseId=${p.id}`)}
-                              className="p-1 text-orange-600 hover:text-orange-800 rounded hover:bg-orange-50"
+                              className="p-1 text-[var(--color-warning-text)] hover:text-[var(--color-text)] rounded-[6px] hover:bg-[var(--color-warning-bg)] transition-colors cursor-pointer"
                               title="Return items / Debit Note"
                             >
                               <RotateCcw className="h-4 w-4" />
@@ -533,8 +533,8 @@ export const PurchasesPage: React.FC = () => {
       {/* TAB 2: Purchase Orders & Requisitions */}
       {activeTab === "orders" && (
         <div className="space-y-3">
-          <div className="flex items-center justify-between rounded-lg border border-slate-200 bg-white p-3 shadow-xs">
-            <div className="text-xs text-slate-500">
+          <div className="flex items-center justify-between rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] p-3 shadow-2xs">
+            <div className="text-xs text-[var(--color-text-muted)]">
               Track purchase requisitions (PR) and purchase orders (PO). Convert directly to inward bills when delivered.
             </div>
             <div className="flex items-center gap-2">
@@ -543,7 +543,7 @@ export const PurchasesPage: React.FC = () => {
                   setPoModalMode("pr");
                   setIsPoModalOpen(true);
                 }}
-                className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                className="rounded-[10px] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1.5 text-xs font-semibold text-[var(--color-text)] hover:bg-[var(--color-surface-hover)] cursor-pointer transition-colors"
               >
                 + New Request (PR)
               </button>
@@ -552,16 +552,16 @@ export const PurchasesPage: React.FC = () => {
                   setPoModalMode("po");
                   setIsPoModalOpen(true);
                 }}
-                className="rounded-lg bg-blue-600 px-3.5 py-1.5 text-xs font-bold text-white shadow-xs hover:bg-blue-700"
+                className="rounded-[10px] bg-[var(--color-accent)] px-3.5 py-1.5 text-xs font-bold text-white shadow-xs hover:bg-[var(--color-accent-hover)] cursor-pointer transition-colors"
               >
                 + New Purchase Order (PO)
               </button>
             </div>
           </div>
 
-          <div className="rounded-xl border border-slate-200 bg-white shadow-xs overflow-hidden">
+          <div className="rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-2xs overflow-hidden">
             <table className="w-full text-left text-xs">
-              <thead className="bg-slate-100 text-slate-700 font-bold border-b border-slate-200">
+              <thead className="bg-[var(--color-canvas)] text-[var(--color-text-muted)] font-bold uppercase tracking-wider text-[11px] border-b border-[var(--color-border)]">
                 <tr>
                   <th className="px-4 py-3">PO Number</th>
                   <th className="px-4 py-3">Supplier</th>
@@ -573,33 +573,33 @@ export const PurchasesPage: React.FC = () => {
                   <th className="px-4 py-3 text-center">Action</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100">
+              <tbody className="divide-y divide-[var(--color-border)]">
                 {ordersList.length === 0 ? (
                   <tr>
-                    <td colSpan={8} className="py-12 text-center text-slate-400">
-                      <ShoppingBag className="mx-auto h-8 w-8 text-slate-300 mb-1" />
+                    <td colSpan={8} className="py-12 text-center text-[var(--color-text-muted)]">
+                      <ShoppingBag className="mx-auto h-8 w-8 text-[var(--color-text-muted)] opacity-40 mb-1" />
                       <p className="font-semibold text-xs">No purchase orders created yet</p>
                     </td>
                   </tr>
                 ) : (
                   ordersList.map((po) => (
-                    <tr key={po.id} className="hover:bg-slate-50">
-                      <td className="px-4 py-3 font-bold text-blue-600">{po.po_number}</td>
-                      <td className="px-4 py-3 font-semibold text-slate-800">{po.supplier_name}</td>
-                      <td className="px-4 py-3 text-slate-500">{po.po_date}</td>
-                      <td className="px-4 py-3 text-slate-500">{po.expected_delivery_date || "-"}</td>
-                      <td className="px-4 py-3 text-center font-medium">{po.items?.length || 0}</td>
-                      <td className="px-4 py-3 text-right font-bold text-slate-900">
+                    <tr key={po.id} className="hover:bg-[var(--color-surface-hover)] transition-colors">
+                      <td className="px-4 py-3 font-bold font-mono text-[var(--color-accent)]">{po.po_number}</td>
+                      <td className="px-4 py-3 font-semibold text-[var(--color-text)]">{po.supplier_name}</td>
+                      <td className="px-4 py-3 text-[var(--color-text-muted)] font-mono">{po.po_date}</td>
+                      <td className="px-4 py-3 text-[var(--color-text-muted)] font-mono">{po.expected_delivery_date || "-"}</td>
+                      <td className="px-4 py-3 text-center font-mono">{po.items?.length || 0}</td>
+                      <td className="px-4 py-3 text-right font-bold font-mono text-[var(--color-text)] tabular-nums">
                         ₹ {Number(po.total_amount || 0).toFixed(2)}
                       </td>
                       <td className="px-4 py-3 text-center">
                         <span
                           className={`rounded-full px-2.5 py-0.5 text-[10px] font-bold ${
                             po.status === "completed"
-                              ? "bg-emerald-100 text-emerald-800"
+                              ? "bg-[var(--color-accent-soft)] text-[var(--color-accent)] border border-[var(--color-accent-soft)]"
                               : po.status === "partially_received"
-                              ? "bg-amber-100 text-amber-800"
-                              : "bg-blue-100 text-blue-800"
+                              ? "bg-[var(--color-warning-bg)] text-[var(--color-warning-text)] border border-[var(--color-warning-border)]"
+                              : "bg-[var(--color-canvas)] text-[var(--color-text)] border border-[var(--color-border)]"
                           }`}
                         >
                           {po.status.toUpperCase()}
@@ -609,12 +609,12 @@ export const PurchasesPage: React.FC = () => {
                         {po.status !== "completed" && po.status !== "cancelled" ? (
                           <button
                             onClick={() => handleConvertPO(po)}
-                            className="rounded bg-emerald-600 px-2.5 py-1 text-[11px] font-bold text-white shadow-xs hover:bg-emerald-700"
+                            className="rounded-[6px] bg-[var(--color-accent)] px-2.5 py-1 text-[11px] font-bold text-white shadow-2xs hover:bg-[var(--color-accent-hover)] cursor-pointer transition-colors"
                           >
                             Inward Bill
                           </button>
                         ) : (
-                          <span className="text-slate-400 text-[11px]">Fulfilled</span>
+                          <span className="text-[var(--color-text-muted)] text-[11px]">Fulfilled</span>
                         )}
                       </td>
                     </tr>
@@ -631,12 +631,12 @@ export const PurchasesPage: React.FC = () => {
         <div className="space-y-4">
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
             {/* Supplier Picker & Balance Overview */}
-            <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-xs space-y-3">
+            <div className="rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] p-4 shadow-2xs space-y-3">
               <div className="flex items-center justify-between">
-                <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wide">Select Supplier</h3>
+                <h3 className="text-xs font-bold text-[var(--color-text)] uppercase tracking-wide">Select Supplier</h3>
                 <button
                   onClick={() => setIsQuickAddSupplierOpen(true)}
-                  className="text-[11px] font-bold text-blue-600 hover:underline"
+                  className="text-[11px] font-bold text-[var(--color-accent)] hover:underline cursor-pointer"
                 >
                   + Add New
                 </button>
@@ -645,7 +645,7 @@ export const PurchasesPage: React.FC = () => {
               <select
                 value={selectedLedgerSupplierId}
                 onChange={(e) => setSelectedLedgerSupplierId(e.target.value)}
-                className="w-full rounded-lg border border-slate-300 p-2 text-xs font-medium bg-white focus:border-blue-600 focus:outline-none"
+                className="w-full rounded-[10px] border border-[var(--color-border)] p-2 text-xs font-medium bg-[var(--color-surface)] text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none"
               >
                 {suppliers.map((s) => (
                   <option key={s.id} value={s.id}>
@@ -655,21 +655,21 @@ export const PurchasesPage: React.FC = () => {
               </select>
 
               {supplierStatement?.supplier && (
-                <div className="rounded-lg bg-slate-50 p-3 text-xs space-y-2 border border-slate-200">
-                  <div className="font-bold text-slate-800 text-sm">{supplierStatement.supplier.name}</div>
+                <div className="rounded-[10px] bg-[var(--color-canvas)] p-3 text-xs space-y-2 border border-[var(--color-border)]">
+                  <div className="font-bold text-[var(--color-text)] text-sm">{supplierStatement.supplier.name}</div>
                   {supplierStatement.supplier.phone && <div>Phone: {supplierStatement.supplier.phone}</div>}
-                  {supplierStatement.supplier.gstin && <div>GSTIN: {supplierStatement.supplier.gstin}</div>}
+                  {supplierStatement.supplier.gstin && <div className="font-mono">GSTIN: {supplierStatement.supplier.gstin}</div>}
                   <div>Credit Period: {supplierStatement.supplier.credit_period_days || 30} Days</div>
-                  <div className="border-t border-slate-200 pt-2 flex justify-between font-black text-sm">
+                  <div className="border-t border-[var(--color-border)] pt-2 flex justify-between font-black text-sm">
                     <span>Closing Balance:</span>
-                    <span className="text-blue-700">₹ {supplierStatement.summary.closingBalance.toFixed(2)}</span>
+                    <span className="text-[var(--color-accent)] font-mono tabular-nums">₹ {supplierStatement.summary.closingBalance.toFixed(2)}</span>
                   </div>
                 </div>
               )}
 
               <button
                 onClick={() => setIsPaymentModalOpen(true)}
-                className="w-full flex items-center justify-center gap-2 rounded-lg bg-emerald-600 py-2 text-xs font-bold text-white shadow-sm hover:bg-emerald-700"
+                className="w-full flex items-center justify-center gap-2 rounded-[10px] bg-[var(--color-accent)] py-2 text-xs font-bold text-white shadow-2xs hover:bg-[var(--color-accent-hover)] cursor-pointer transition-colors"
               >
                 <CreditCard className="h-4 w-4" />
                 <span>Record Supplier Payment</span>
@@ -677,19 +677,19 @@ export const PurchasesPage: React.FC = () => {
             </div>
 
             {/* Statement Ledger History */}
-            <div className="lg:col-span-2 rounded-xl border border-slate-200 bg-white p-4 shadow-xs flex flex-col">
-              <div className="flex items-center justify-between border-b border-slate-200 pb-3 mb-3">
-                <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wide">
+            <div className="lg:col-span-2 rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] p-4 shadow-2xs flex flex-col">
+              <div className="flex items-center justify-between border-b border-[var(--color-border)] pb-3 mb-3">
+                <h3 className="text-xs font-bold text-[var(--color-text)] uppercase tracking-wide">
                   Ledger Statement Entries
                 </h3>
-                <span className="text-[11px] text-slate-500">
+                <span className="text-[11px] text-[var(--color-text-muted)] font-mono">
                   {supplierStatement?.entries.length || 0} Transactions
                 </span>
               </div>
 
               <div className="flex-1 overflow-x-auto max-h-80 overflow-y-auto">
                 <table className="w-full text-left text-xs">
-                  <thead className="bg-slate-100 text-slate-700 font-bold border-b border-slate-200 sticky top-0">
+                  <thead className="bg-[var(--color-canvas)] text-[var(--color-text-muted)] font-bold uppercase tracking-wider text-[11px] border-b border-[var(--color-border)] sticky top-0">
                     <tr>
                       <th className="px-3 py-2">Date</th>
                       <th className="px-3 py-2">Type / Ref</th>
@@ -698,28 +698,28 @@ export const PurchasesPage: React.FC = () => {
                       <th className="px-3 py-2 text-right font-bold">Balance (₹)</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-100">
+                  <tbody className="divide-y divide-[var(--color-border)]">
                     {supplierStatement?.entries.length === 0 ? (
                       <tr>
-                        <td colSpan={5} className="py-8 text-center text-slate-400">
+                        <td colSpan={5} className="py-8 text-center text-[var(--color-text-muted)]">
                           No transactions recorded for this supplier
                         </td>
                       </tr>
                     ) : (
                       supplierStatement?.entries.map((e, idx) => (
-                        <tr key={idx} className="hover:bg-slate-50">
-                          <td className="px-3 py-2 text-slate-600">{e.entry_date}</td>
+                        <tr key={idx} className="hover:bg-[var(--color-surface-hover)] transition-colors">
+                          <td className="px-3 py-2 text-[var(--color-text-muted)] font-mono">{e.entry_date}</td>
                           <td className="px-3 py-2">
-                            <span className="font-bold text-slate-800">{e.reference_number}</span>
-                            <div className="text-[10px] text-slate-400">{e.notes}</div>
+                            <span className="font-bold font-mono text-[var(--color-text)]">{e.reference_number}</span>
+                            <div className="text-[10px] text-[var(--color-text-muted)]">{e.notes}</div>
                           </td>
-                          <td className="px-3 py-2 text-right text-emerald-700 font-medium">
+                          <td className="px-3 py-2 text-right text-[var(--color-accent)] font-medium font-mono tabular-nums">
                             {e.debit_amount > 0 ? `₹${e.debit_amount.toFixed(2)}` : "-"}
                           </td>
-                          <td className="px-3 py-2 text-right text-red-700 font-medium">
+                          <td className="px-3 py-2 text-right text-[var(--color-danger-text)] font-medium font-mono tabular-nums">
                             {e.credit_amount > 0 ? `₹${e.credit_amount.toFixed(2)}` : "-"}
                           </td>
-                          <td className="px-3 py-2 text-right font-bold text-slate-900">
+                          <td className="px-3 py-2 text-right font-bold text-[var(--color-text)] font-mono tabular-nums">
                             ₹{e.running_balance.toFixed(2)}
                           </td>
                         </tr>
@@ -732,13 +732,13 @@ export const PurchasesPage: React.FC = () => {
           </div>
 
           {/* Ageing Analysis Table */}
-          <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-xs">
-            <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wide mb-3">
+          <div className="rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] p-4 shadow-2xs">
+            <h3 className="text-xs font-bold text-[var(--color-text)] uppercase tracking-wide mb-3">
               Supplier Payables Ageing Analysis (Days Overdue)
             </h3>
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs">
-                <thead className="bg-slate-100 text-slate-700 font-bold border-b border-slate-200">
+                <thead className="bg-[var(--color-canvas)] text-[var(--color-text-muted)] font-bold uppercase tracking-wider text-[11px] border-b border-[var(--color-border)]">
                   <tr>
                     <th className="px-3 py-2.5">Supplier Name</th>
                     <th className="px-3 py-2.5 text-center">Credit Days</th>
@@ -746,21 +746,21 @@ export const PurchasesPage: React.FC = () => {
                     <th className="px-3 py-2.5 text-right">1 - 30 Days</th>
                     <th className="px-3 py-2.5 text-right">31 - 60 Days</th>
                     <th className="px-3 py-2.5 text-right">61 - 90 Days</th>
-                    <th className="px-3 py-2.5 text-right text-red-700 font-bold">90+ Days</th>
+                    <th className="px-3 py-2.5 text-right text-[var(--color-danger-text)] font-bold">90+ Days</th>
                     <th className="px-3 py-2.5 text-right font-black">Total Outstanding</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-100">
+                <tbody className="divide-y divide-[var(--color-border)]">
                   {ageingList.map((a, idx) => (
-                    <tr key={idx} className="hover:bg-slate-50">
-                      <td className="px-3 py-2 font-bold text-slate-800">{a.supplier_name}</td>
-                      <td className="px-3 py-2 text-center text-slate-500">{a.credit_period_days}d</td>
-                      <td className="px-3 py-2 text-right text-slate-600">₹{a.current.toFixed(2)}</td>
-                      <td className="px-3 py-2 text-right text-slate-600">₹{a.days_1_30.toFixed(2)}</td>
-                      <td className="px-3 py-2 text-right text-amber-700 font-medium">₹{a.days_31_60.toFixed(2)}</td>
-                      <td className="px-3 py-2 text-right text-orange-700 font-medium">₹{a.days_61_90.toFixed(2)}</td>
-                      <td className="px-3 py-2 text-right text-red-700 font-bold">₹{a.days_90_plus.toFixed(2)}</td>
-                      <td className="px-3 py-2 text-right font-black text-slate-900">
+                    <tr key={idx} className="hover:bg-[var(--color-surface-hover)] transition-colors">
+                      <td className="px-3 py-2 font-bold text-[var(--color-text)]">{a.supplier_name}</td>
+                      <td className="px-3 py-2 text-center text-[var(--color-text-muted)] font-mono">{a.credit_period_days}d</td>
+                      <td className="px-3 py-2 text-right text-[var(--color-text-muted)] font-mono tabular-nums">₹{a.current.toFixed(2)}</td>
+                      <td className="px-3 py-2 text-right text-[var(--color-text-muted)] font-mono tabular-nums">₹{a.days_1_30.toFixed(2)}</td>
+                      <td className="px-3 py-2 text-right text-[var(--color-warning-text)] font-medium font-mono tabular-nums">₹{a.days_31_60.toFixed(2)}</td>
+                      <td className="px-3 py-2 text-right text-[var(--color-warning-text)] font-medium font-mono tabular-nums">₹{a.days_61_90.toFixed(2)}</td>
+                      <td className="px-3 py-2 text-right text-[var(--color-danger-text)] font-bold font-mono tabular-nums">₹{a.days_90_plus.toFixed(2)}</td>
+                      <td className="px-3 py-2 text-right font-black text-[var(--color-text)] font-mono tabular-nums">
                         ₹{a.total_outstanding.toFixed(2)}
                       </td>
                     </tr>
@@ -774,32 +774,32 @@ export const PurchasesPage: React.FC = () => {
 
       {/* TAB 4: Reports View */}
       {activeTab === "reports" && (
-        <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-xs space-y-4 text-xs">
-          <div className="flex items-center justify-between border-b border-slate-200 pb-3">
+        <div className="rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] p-5 shadow-2xs space-y-4 text-xs">
+          <div className="flex items-center justify-between border-b border-[var(--color-border)] pb-3">
             <div>
-              <h3 className="text-sm font-bold text-slate-800">Inward Tax Credit (ITC / GSTR-2) Summary</h3>
-              <p className="text-[11px] text-slate-500">
+              <h3 className="text-sm font-bold text-[var(--color-text)]">Inward Tax Credit (ITC / GSTR-2) Summary</h3>
+              <p className="text-[11px] text-[var(--color-text-muted)]">
                 Breakdown of Input Tax Credit eligible for GST return filing
               </p>
             </div>
           </div>
 
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-            <div className="rounded-lg bg-blue-50 p-3.5 border border-blue-200">
-              <span className="text-[11px] font-bold text-blue-700 uppercase">CGST Input Credit</span>
-              <div className="text-lg font-black text-blue-900 mt-1">
+            <div className="rounded-[10px] bg-[var(--color-canvas)] p-3.5 border border-[var(--color-border)]">
+              <span className="text-[11px] font-bold text-[var(--color-text-muted)] uppercase tracking-wider">CGST Input Credit</span>
+              <div className="text-lg font-bold font-mono text-[var(--color-text)] tabular-nums mt-1">
                 ₹ {purchasesList.reduce((a, b) => a + (b.cgst_total || 0), 0).toFixed(2)}
               </div>
             </div>
-            <div className="rounded-lg bg-blue-50 p-3.5 border border-blue-200">
-              <span className="text-[11px] font-bold text-blue-700 uppercase">SGST Input Credit</span>
-              <div className="text-lg font-black text-blue-900 mt-1">
+            <div className="rounded-[10px] bg-[var(--color-canvas)] p-3.5 border border-[var(--color-border)]">
+              <span className="text-[11px] font-bold text-[var(--color-text-muted)] uppercase tracking-wider">SGST Input Credit</span>
+              <div className="text-lg font-bold font-mono text-[var(--color-text)] tabular-nums mt-1">
                 ₹ {purchasesList.reduce((a, b) => a + (b.sgst_total || 0), 0).toFixed(2)}
               </div>
             </div>
-            <div className="rounded-lg bg-purple-50 p-3.5 border border-purple-200">
-              <span className="text-[11px] font-bold text-purple-700 uppercase">IGST Input Credit</span>
-              <div className="text-lg font-black text-purple-900 mt-1">
+            <div className="rounded-[10px] bg-[var(--color-canvas)] p-3.5 border border-[var(--color-border)]">
+              <span className="text-[11px] font-bold text-[var(--color-text-muted)] uppercase tracking-wider">IGST Input Credit</span>
+              <div className="text-lg font-bold font-mono text-[var(--color-accent)] tabular-nums mt-1">
                 ₹ {purchasesList.reduce((a, b) => a + (b.igst_total || 0), 0).toFixed(2)}
               </div>
             </div>

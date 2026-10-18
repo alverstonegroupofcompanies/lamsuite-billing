@@ -351,11 +351,11 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose 
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/60 pt-20 p-4 backdrop-blur-sm">
-      <div className="w-full max-w-xl rounded-xl border border-slate-700 bg-slate-900 text-white shadow-2xl overflow-hidden animate-in fade-in-50 zoom-in-95 duration-100">
+    <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 pt-20 p-4">
+      <div className="w-full max-w-xl rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-text)] shadow-modal overflow-hidden animate-in fade-in-50 zoom-in-95 duration-100">
         {/* Search Input Bar */}
-        <div className="flex items-center border-b border-slate-800 px-4 py-3">
-          <Search className="h-5 w-5 text-slate-400 mr-3" />
+        <div className="flex items-center border-b border-[var(--color-border)] px-4 py-3 bg-[var(--color-surface)]">
+          <Search className="h-5 w-5 text-[var(--color-text-faint)] mr-3" />
           <input
             type="text"
             autoFocus
@@ -363,20 +363,20 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose 
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={handleKeyDownInInput}
-            className="w-full bg-transparent text-sm text-white placeholder-slate-500 focus:outline-none"
+            className="w-full bg-transparent text-sm text-[var(--color-text)] placeholder-[var(--color-text-muted)] focus:outline-none"
           />
           <button
             onClick={onClose}
-            className="rounded p-1 text-slate-400 hover:bg-slate-800 hover:text-white"
+            className="rounded-[8px] p-1 text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)] cursor-pointer"
           >
             <X className="h-4 w-4" />
           </button>
         </div>
 
         {/* Command Results */}
-        <div className="max-h-80 overflow-y-auto p-2 divide-y divide-slate-800/50">
+        <div className="max-h-80 overflow-y-auto p-2 divide-y divide-[var(--color-border-subtle)]">
           {filtered.length === 0 ? (
-            <div className="py-8 text-center text-xs text-slate-500">
+            <div className="py-8 text-center text-xs text-[var(--color-text-muted)]">
               No matching commands found for "{query}"
             </div>
           ) : (
@@ -388,14 +388,14 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose 
                   key={cmd.id}
                   onClick={cmd.action}
                   onMouseEnter={() => setSelectedIndex(idx)}
-                  className={`flex cursor-pointer items-center justify-between rounded-lg p-2.5 transition-colors ${
-                    isSelected ? "bg-blue-600 text-white" : "text-slate-300 hover:bg-slate-800/70"
+                  className={`flex cursor-pointer items-center justify-between rounded-[10px] p-2.5 transition-colors ${
+                    isSelected ? "bg-[var(--color-accent)] text-white" : "text-[var(--color-text)] hover:bg-[var(--color-surface-hover)]"
                   }`}
                 >
                   <div className="flex items-center gap-3">
                     <div
-                      className={`flex h-8 w-8 items-center justify-center rounded-md ${
-                        isSelected ? "bg-white/20 text-white" : "bg-slate-800 text-slate-400"
+                      className={`flex h-8 w-8 items-center justify-center rounded-[8px] ${
+                        isSelected ? "bg-white/20 text-white" : "bg-[var(--color-surface-subtle)] text-[var(--color-accent)]"
                       }`}
                     >
                       <Icon className="h-4 w-4" />
@@ -404,7 +404,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose 
                       <div className="text-xs font-semibold">{cmd.title}</div>
                       <div
                         className={`text-[11px] ${
-                          isSelected ? "text-blue-100" : "text-slate-500"
+                          isSelected ? "text-white/80" : "text-[var(--color-text-muted)]"
                         }`}
                       >
                         {cmd.subtitle}
@@ -415,14 +415,14 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose 
                   <div className="flex items-center gap-2">
                     {cmd.shortcut && (
                       <kbd
-                        className={`rounded px-1.5 py-0.5 text-[10px] font-mono font-medium ${
-                          isSelected ? "bg-white/25 text-white" : "bg-slate-800 text-slate-400 border border-slate-700"
+                        className={`rounded-[6px] px-1.5 py-0.5 text-[10px] font-mono font-medium ${
+                          isSelected ? "bg-white/25 text-white" : "bg-[var(--color-surface-subtle)] text-[var(--color-text-muted)] border border-[var(--color-border)]"
                         }`}
                       >
                         {cmd.shortcut}
                       </kbd>
                     )}
-                    <ArrowRight className={`h-3.5 w-3.5 opacity-60 ${isSelected ? "text-white" : "text-slate-500"}`} />
+                    <ArrowRight className={`h-3.5 w-3.5 opacity-60 ${isSelected ? "text-white" : "text-[var(--color-text-muted)]"}`} />
                   </div>
                 </div>
               );
@@ -431,13 +431,13 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose 
         </div>
 
         {/* Bottom Shortcut Helper */}
-        <div className="flex items-center justify-between border-t border-slate-800 bg-slate-950/70 px-4 py-2 text-[11px] text-slate-500">
+        <div className="flex items-center justify-between border-t border-[var(--color-border)] bg-[var(--color-surface-subtle)] px-4 py-2 text-[11px] text-[var(--color-text-muted)]">
           <div className="flex gap-3">
-            <span><kbd className="font-mono text-slate-400">↑↓</kbd> Navigate</span>
-            <span><kbd className="font-mono text-slate-400">Enter</kbd> Select</span>
-            <span><kbd className="font-mono text-slate-400">Esc</kbd> Close</span>
+            <span><kbd className="font-mono text-[var(--color-text)]">↑↓</kbd> Navigate</span>
+            <span><kbd className="font-mono text-[var(--color-text)]">Enter</kbd> Select</span>
+            <span><kbd className="font-mono text-[var(--color-text)]">Esc</kbd> Close</span>
           </div>
-          <span className="font-semibold text-slate-400">MARG Command Palette</span>
+          <span className="font-semibold text-[var(--color-text-muted)]">LamSuite Quick Jump</span>
         </div>
       </div>
     </div>

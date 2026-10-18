@@ -832,12 +832,12 @@ export const InterStoreTransferPage: React.FC = () => {
       {/* Toast Notification */}
       {notification && (
         <div
-          className={`fixed top-4 right-4 z-50 flex items-center gap-2 rounded-xl px-4 py-3 text-xs font-bold text-white shadow-2xl animate-in slide-in-from-top duration-150 ${
+          className={`fixed top-4 right-4 z-50 flex items-center gap-2 rounded-btn px-4 py-3 text-xs font-semibold shadow-modal transition-all ${
             notification.type === "success"
-              ? "bg-emerald-600 border border-emerald-500"
+              ? "bg-accent-soft text-accent border border-accent/20"
               : notification.type === "error"
-              ? "bg-red-600 border border-red-500"
-              : "bg-slate-800 border border-slate-700"
+              ? "bg-status-danger/10 text-status-danger border border-status-danger/20"
+              : "bg-surface text-text-main border border-border-main"
           }`}
         >
           {notification.type === "success" ? (
@@ -850,33 +850,33 @@ export const InterStoreTransferPage: React.FC = () => {
       )}
 
       {/* Main Header & Tab Navigation */}
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 pb-3">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border-main pb-3">
         <div className="flex items-center gap-3">
-          <div className="p-2.5 rounded-xl bg-blue-600 text-white shadow-xs">
+          <div className="p-2.5 rounded-btn bg-accent text-white shadow-xs">
             <ArrowRightLeft className="h-5 w-5" />
           </div>
           <div>
-            <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2">
+            <h2 className="text-[26px] font-bold text-text-main tracking-tight flex items-center gap-2">
               <span>Inter-Store Stock Transfers</span>
-              <span className="text-xs px-2 py-0.5 rounded-md bg-blue-100 text-blue-800 font-mono font-semibold">
+              <span className="text-xs px-2.5 py-0.5 rounded-full bg-accent-soft text-accent font-mono font-semibold">
                 Multi-Product
               </span>
             </h2>
-            <p className="text-xs text-slate-500">
+            <p className="text-xs text-text-muted mt-0.5">
               Bulk branch dispatch, FEFO auto-split, in-transit tracking, Rule 55 delivery challan, and line variance reconciler.
             </p>
           </div>
         </div>
 
         {/* Tabs */}
-        <div className="flex items-center gap-1.5 rounded-xl bg-slate-100 p-1 border border-slate-200 text-xs font-bold">
+        <div className="flex items-center gap-1.5 rounded-btn bg-canvas p-1 border border-border-main text-xs font-semibold">
           <button
             type="button"
             onClick={() => setActiveTab("new_transfer")}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-all cursor-pointer ${
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-btn transition-all cursor-pointer ${
               activeTab === "new_transfer"
-                ? "bg-white text-blue-700 shadow-xs"
-                : "text-slate-600 hover:text-slate-900"
+                ? "bg-surface text-accent shadow-xs border border-border-main/50"
+                : "text-text-muted hover:text-text-main"
             }`}
           >
             <Plus className="h-3.5 w-3.5" />
@@ -885,10 +885,10 @@ export const InterStoreTransferPage: React.FC = () => {
           <button
             type="button"
             onClick={() => setActiveTab("outgoing")}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-all cursor-pointer ${
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-btn transition-all cursor-pointer ${
               activeTab === "outgoing"
-                ? "bg-white text-blue-700 shadow-xs"
-                : "text-slate-600 hover:text-slate-900"
+                ? "bg-surface text-accent shadow-xs border border-border-main/50"
+                : "text-text-muted hover:text-text-main"
             }`}
           >
             <Truck className="h-3.5 w-3.5" />
@@ -897,22 +897,22 @@ export const InterStoreTransferPage: React.FC = () => {
           <button
             type="button"
             onClick={() => setActiveTab("incoming")}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-all cursor-pointer ${
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-btn transition-all cursor-pointer ${
               activeTab === "incoming"
-                ? "bg-white text-emerald-700 shadow-xs"
-                : "text-slate-600 hover:text-slate-900"
+                ? "bg-surface text-accent shadow-xs border border-border-main/50"
+                : "text-text-muted hover:text-text-main"
             }`}
           >
-            <Inbox className="h-3.5 w-3.5 text-emerald-600" />
+            <Inbox className="h-3.5 w-3.5 text-accent" />
             <span>Incoming Receipts ({incomingTransfers.length})</span>
           </button>
           <button
             type="button"
             onClick={() => setActiveTab("history")}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-all cursor-pointer ${
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-btn transition-all cursor-pointer ${
               activeTab === "history"
-                ? "bg-white text-blue-700 shadow-xs"
-                : "text-slate-600 hover:text-slate-900"
+                ? "bg-surface text-accent shadow-xs border border-border-main/50"
+                : "text-text-muted hover:text-text-main"
             }`}
           >
             <History className="h-3.5 w-3.5" />
@@ -925,31 +925,31 @@ export const InterStoreTransferPage: React.FC = () => {
       {activeTab === "new_transfer" && (
         <div className="space-y-4">
           {/* Header Card: Store Routing & Transfer Meta */}
-          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-xs space-y-4">
+          <div className="rounded-card border border-border-main bg-surface p-5 shadow-xs space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
               {/* Source Store */}
               <div>
-                <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">
+                <label className="block text-[11px] font-semibold text-text-muted uppercase tracking-wider mb-1">
                   Source Store (From)
                 </label>
-                <div className="flex items-center gap-2 p-2.5 rounded-xl bg-slate-50 border border-slate-200 text-xs">
-                  <Building2 className="h-4 w-4 text-blue-600 shrink-0" />
+                <div className="flex items-center gap-2 p-2.5 rounded-btn bg-canvas border border-border-main text-xs">
+                  <Building2 className="h-4 w-4 text-accent shrink-0" />
                   <div className="truncate">
-                    <p className="font-bold text-slate-800 truncate">{sourceStore?.name || "Main Store"}</p>
-                    <p className="text-[10px] text-slate-500 font-mono">{sourceStore?.gstin || "GSTIN: N/A"}</p>
+                    <p className="font-semibold text-text-main truncate">{sourceStore?.name || "Main Store"}</p>
+                    <p className="text-[10px] text-text-muted font-mono">{sourceStore?.gstin || "GSTIN: N/A"}</p>
                   </div>
                 </div>
               </div>
 
               {/* Destination Branch Store */}
               <div>
-                <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">
+                <label className="block text-[11px] font-semibold text-text-muted uppercase tracking-wider mb-1">
                   Destination Branch (To) *
                 </label>
                 <select
                   value={destStoreId}
                   onChange={(e) => setDestStoreId(e.target.value)}
-                  className="w-full rounded-xl border border-blue-300 bg-blue-50/40 p-2.5 text-xs font-bold text-blue-950 focus:border-blue-600 focus:outline-none shadow-2xs"
+                  className="w-full rounded-btn border border-border-main bg-surface p-2.5 text-xs font-semibold text-text-main focus:border-accent focus:outline-none"
                 >
                   {stores
                     .filter((s) => !sourceStore || s.id !== sourceStore.id)
@@ -960,14 +960,14 @@ export const InterStoreTransferPage: React.FC = () => {
                     ))}
                 </select>
                 <div className="mt-1 flex items-center justify-between text-[10px]">
-                  <span className="font-semibold text-blue-700">{gstTreatmentInfo.label}</span>
-                  <span className="text-slate-400 font-mono">{destinationStore?.gstin || ""}</span>
+                  <span className="font-semibold text-accent">{gstTreatmentInfo.label}</span>
+                  <span className="text-text-muted font-mono">{destinationStore?.gstin || ""}</span>
                 </div>
               </div>
 
               {/* Transfer No & Date */}
               <div>
-                <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">
+                <label className="block text-[11px] font-semibold text-text-muted uppercase tracking-wider mb-1">
                   Transfer No & Date
                 </label>
                 <div className="flex gap-2">
@@ -976,27 +976,27 @@ export const InterStoreTransferPage: React.FC = () => {
                     value={transferNo}
                     onChange={(e) => setTransferNo(e.target.value)}
                     placeholder="TRF-001"
-                    className="w-1/2 rounded-xl border border-slate-300 p-2 text-xs font-mono font-bold text-slate-800 focus:border-blue-600 focus:outline-none"
+                    className="w-1/2 rounded-btn border border-border-main bg-surface p-2 text-xs font-mono font-bold text-text-main focus:border-accent focus:outline-none tabular-nums"
                   />
                   <input
                     type="date"
                     value={transferDate}
                     onChange={(e) => setTransferDate(e.target.value)}
-                    className="w-1/2 rounded-xl border border-slate-300 p-2 text-xs font-medium text-slate-800 focus:border-blue-600 focus:outline-none"
+                    className="w-1/2 rounded-btn border border-border-main bg-surface p-2 text-xs font-medium text-text-main focus:border-accent focus:outline-none font-mono tabular-nums"
                   />
                 </div>
               </div>
 
               {/* Rate Basis & Transport toggle */}
               <div>
-                <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">
+                <label className="block text-[11px] font-semibold text-text-muted uppercase tracking-wider mb-1">
                   Valuation Rate Basis
                 </label>
                 <div className="flex items-center gap-2">
                   <select
                     value={rateBasis}
                     onChange={(e) => handleRateBasisChange(e.target.value as any)}
-                    className="flex-1 rounded-xl border border-slate-300 p-2 text-xs font-bold text-slate-800 focus:border-blue-600 focus:outline-none"
+                    className="flex-1 rounded-btn border border-border-main bg-surface p-2 text-xs font-semibold text-text-main focus:border-accent focus:outline-none"
                   >
                     <option value="sel_rate">Selling Rate (MRP/Sel)</option>
                     <option value="mrp">Maximum Retail Price (MRP)</option>
@@ -1007,10 +1007,10 @@ export const InterStoreTransferPage: React.FC = () => {
                   <button
                     type="button"
                     onClick={() => setIsTransportOpen((prev) => !prev)}
-                    className={`px-3 py-2 rounded-xl border text-xs font-bold flex items-center gap-1 transition-colors ${
+                    className={`px-3 py-2 rounded-btn border text-xs font-medium flex items-center gap-1 transition-colors ${
                       isTransportOpen || transport.vehicle_number
-                        ? "bg-blue-100 text-blue-800 border-blue-300"
-                        : "bg-slate-100 text-slate-700 border-slate-300 hover:bg-slate-200"
+                        ? "bg-accent-soft text-accent border-accent/20"
+                        : "bg-surface text-text-main border-border-main hover:bg-canvas"
                     }`}
                   >
                     <Truck className="h-3.5 w-3.5" />
@@ -1023,72 +1023,72 @@ export const InterStoreTransferPage: React.FC = () => {
 
             {/* Transport Details Collapsible Accordion */}
             {isTransportOpen && (
-              <div className="rounded-xl border border-blue-100 bg-blue-50/50 p-4 space-y-3 animate-in fade-in duration-150">
+              <div className="rounded-card border border-border-main bg-canvas p-4 space-y-3">
                 <div className="flex items-center justify-between">
-                  <h4 className="text-xs font-bold text-blue-900 flex items-center gap-1.5">
-                    <Truck className="h-4 w-4 text-blue-600" />
+                  <h4 className="text-xs font-semibold text-text-main flex items-center gap-1.5">
+                    <Truck className="h-4 w-4 text-accent" />
                     <span>Logistics & Vehicle Details (Printed on Delivery Challan)</span>
                   </h4>
-                  <span className="text-[11px] text-blue-700 font-medium">Optional for internal dispatch</span>
+                  <span className="text-[11px] text-text-muted font-medium">Optional for internal dispatch</span>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-3 md:grid-cols-6 gap-3">
                   <div>
-                    <label className="block text-[10px] font-bold text-slate-600 mb-0.5">Vehicle Number</label>
+                    <label className="block text-[10px] font-semibold text-text-muted mb-0.5">Vehicle Number</label>
                     <input
                       type="text"
                       placeholder="e.g. KL-09-AB-1234"
                       value={transport.vehicle_number || ""}
                       onChange={(e) => setTransport({ ...transport, vehicle_number: e.target.value })}
-                      className="w-full rounded-lg border border-slate-300 bg-white p-1.5 text-xs font-mono font-bold text-slate-800 focus:outline-none"
+                      className="w-full rounded-btn border border-border-main bg-surface p-1.5 text-xs font-mono font-bold text-text-main focus:border-accent focus:outline-none tabular-nums"
                     />
                   </div>
                   <div>
-                    <label className="block text-[10px] font-bold text-slate-600 mb-0.5">Transporter Name</label>
+                    <label className="block text-[10px] font-semibold text-text-muted mb-0.5">Transporter Name</label>
                     <input
                       type="text"
                       placeholder="e.g. Swift Roadways"
                       value={transport.transporter_name || ""}
                       onChange={(e) => setTransport({ ...transport, transporter_name: e.target.value })}
-                      className="w-full rounded-lg border border-slate-300 bg-white p-1.5 text-xs text-slate-800 focus:outline-none"
+                      className="w-full rounded-btn border border-border-main bg-surface p-1.5 text-xs text-text-main focus:border-accent focus:outline-none"
                     />
                   </div>
                   <div>
-                    <label className="block text-[10px] font-bold text-slate-600 mb-0.5">LR / Bilty No</label>
+                    <label className="block text-[10px] font-semibold text-text-muted mb-0.5">LR / Bilty No</label>
                     <input
                       type="text"
                       placeholder="LR-9821"
                       value={transport.lr_number || ""}
                       onChange={(e) => setTransport({ ...transport, lr_number: e.target.value })}
-                      className="w-full rounded-lg border border-slate-300 bg-white p-1.5 text-xs font-mono text-slate-800 focus:outline-none"
+                      className="w-full rounded-btn border border-border-main bg-surface p-1.5 text-xs font-mono text-text-main focus:border-accent focus:outline-none tabular-nums"
                     />
                   </div>
                   <div>
-                    <label className="block text-[10px] font-bold text-slate-600 mb-0.5">E-Way Bill No</label>
+                    <label className="block text-[10px] font-semibold text-text-muted mb-0.5">E-Way Bill No</label>
                     <input
                       type="text"
                       placeholder="12-digit E-Way Bill"
                       value={transport.eway_bill_number || ""}
                       onChange={(e) => setTransport({ ...transport, eway_bill_number: e.target.value })}
-                      className="w-full rounded-lg border border-slate-300 bg-white p-1.5 text-xs font-mono text-slate-800 focus:outline-none"
+                      className="w-full rounded-btn border border-border-main bg-surface p-1.5 text-xs font-mono text-text-main focus:border-accent focus:outline-none tabular-nums"
                     />
                   </div>
                   <div>
-                    <label className="block text-[10px] font-bold text-slate-600 mb-0.5">Driver Name</label>
+                    <label className="block text-[10px] font-semibold text-text-muted mb-0.5">Driver Name</label>
                     <input
                       type="text"
                       placeholder="Driver name"
                       value={transport.driver_name || ""}
                       onChange={(e) => setTransport({ ...transport, driver_name: e.target.value })}
-                      className="w-full rounded-lg border border-slate-300 bg-white p-1.5 text-xs text-slate-800 focus:outline-none"
+                      className="w-full rounded-btn border border-border-main bg-surface p-1.5 text-xs text-text-main focus:border-accent focus:outline-none"
                     />
                   </div>
                   <div>
-                    <label className="block text-[10px] font-bold text-slate-600 mb-0.5">Expected Delivery</label>
+                    <label className="block text-[10px] font-semibold text-text-muted mb-0.5">Expected Delivery</label>
                     <input
                       type="date"
                       value={expectedDeliveryDate}
                       onChange={(e) => setExpectedDeliveryDate(e.target.value)}
-                      className="w-full rounded-lg border border-slate-300 bg-white p-1.5 text-xs text-slate-800 focus:outline-none"
+                      className="w-full rounded-btn border border-border-main bg-surface p-1.5 text-xs text-text-main focus:border-accent focus:outline-none font-mono tabular-nums"
                     />
                   </div>
                 </div>
@@ -1100,16 +1100,16 @@ export const InterStoreTransferPage: React.FC = () => {
           <div className="relative">
             <div className="flex items-center gap-2">
               <div className="relative flex-1">
-                <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+                <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-text-muted" />
                 <input
                   ref={searchInputRef}
                   type="text"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   placeholder="Scan Barcode or Search Products to Transfer (Press F1 / Type name)..."
-                  className="w-full rounded-xl border border-slate-300 bg-white py-3 pl-10 pr-24 text-xs font-medium text-slate-800 shadow-xs focus:border-blue-600 focus:ring-1 focus:ring-blue-600 focus:outline-none"
+                  className="w-full rounded-btn border border-border-main bg-surface py-2.5 pl-10 pr-24 text-xs font-medium text-text-main shadow-xs focus:border-accent focus:ring-1 focus:ring-accent focus:outline-none"
                 />
-                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-bold text-slate-400 bg-slate-100 px-2 py-0.5 rounded border border-slate-200">
+                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-mono font-medium text-text-muted bg-canvas px-2 py-0.5 rounded border border-border-main">
                   F1 / Scan
                 </span>
               </div>
@@ -1119,28 +1119,28 @@ export const InterStoreTransferPage: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => setIsCsvModalOpen(true)}
-                  className="inline-flex items-center gap-1.5 px-3 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold border border-slate-300 shadow-2xs transition-colors"
+                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-btn bg-surface hover:bg-canvas text-text-main text-xs font-medium border border-border-main shadow-xs transition-colors"
                   title="Import products and quantities from CSV / Excel"
                 >
-                  <FileSpreadsheet className="h-4 w-4 text-emerald-600" />
+                  <FileSpreadsheet className="h-4 w-4 text-accent" />
                   <span>Import Excel</span>
                 </button>
                 <button
                   type="button"
                   onClick={handleAddLowStockAtDest}
-                  className="inline-flex items-center gap-1.5 px-3 py-2.5 rounded-xl bg-slate-100 hover:bg-blue-50 hover:text-blue-700 text-slate-700 text-xs font-bold border border-slate-300 shadow-2xs transition-colors"
+                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-btn bg-surface hover:bg-accent-soft hover:text-accent text-text-main text-xs font-medium border border-border-main shadow-xs transition-colors"
                   title="Auto-load products below reorder level at destination store"
                 >
-                  <Sparkles className="h-4 w-4 text-blue-600" />
+                  <Sparkles className="h-4 w-4 text-accent" />
                   <span>Low Stock at Dest</span>
                 </button>
                 <button
                   type="button"
                   onClick={handleAddNearExpiryStock}
-                  className="inline-flex items-center gap-1.5 px-3 py-2.5 rounded-xl bg-slate-100 hover:bg-amber-50 hover:text-amber-700 text-slate-700 text-xs font-bold border border-slate-300 shadow-2xs transition-colors"
+                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-btn bg-surface hover:bg-status-warning/10 hover:text-status-warning text-text-main text-xs font-medium border border-border-main shadow-xs transition-colors"
                   title="Transfer source batches expiring within 60 days"
                 >
-                  <Calendar className="h-4 w-4 text-amber-600" />
+                  <Calendar className="h-4 w-4 text-status-warning" />
                   <span>Near Expiry</span>
                 </button>
               </div>
@@ -1148,26 +1148,26 @@ export const InterStoreTransferPage: React.FC = () => {
 
             {/* Product Auto-Complete Dropdown */}
             {searchResults.length > 0 && (
-              <div className="absolute left-0 right-0 top-full mt-1 z-40 rounded-xl bg-white shadow-2xl border border-slate-200 overflow-hidden divide-y divide-slate-100 max-h-64 overflow-y-auto">
+              <div className="absolute left-0 right-0 top-full mt-1 z-40 rounded-card bg-surface shadow-dropdown border border-border-main overflow-hidden divide-y divide-border-main max-h-64 overflow-y-auto">
                 {searchResults.map((prod, idx) => (
                   <div
                     key={prod.id}
                     onClick={() => handleSelectProductForBatch(prod)}
                     className={`flex items-center justify-between px-4 py-2.5 text-xs cursor-pointer transition-colors ${
-                      idx === selectedSearchIndex ? "bg-blue-50 text-blue-900 font-bold" : "hover:bg-slate-50 text-slate-800"
+                      idx === selectedSearchIndex ? "bg-accent-soft text-accent font-semibold" : "hover:bg-canvas text-text-main"
                     }`}
                   >
                     <div>
-                      <div className="font-bold">{prod.name}</div>
-                      <div className="text-[11px] text-slate-500 flex items-center gap-2">
-                        <span>Barcode: {prod.barcode}</span>
+                      <div className="font-semibold">{prod.name}</div>
+                      <div className="text-[11px] text-text-muted flex items-center gap-2">
+                        <span className="font-mono tabular-nums">Barcode: {prod.barcode}</span>
                         <span>•</span>
                         <span>Pack: {prod.units_per_pack || 1} units</span>
                       </div>
                     </div>
-                    <div className="text-right">
-                      <div className="font-bold text-slate-900">₹{prod.sel_rate}</div>
-                      <div className="text-[10px] text-emerald-600 font-medium">Stock: {prod.current_stock || 0}</div>
+                    <div className="text-right font-mono tabular-nums">
+                      <div className="font-bold text-text-main">₹{prod.sel_rate}</div>
+                      <div className="text-[10px] text-accent font-medium">Stock: {prod.current_stock || 0}</div>
                     </div>
                   </div>
                 ))}
@@ -1176,32 +1176,32 @@ export const InterStoreTransferPage: React.FC = () => {
           </div>
 
           {/* Lines Table Grid */}
-          <div className="rounded-2xl border border-slate-200 bg-white overflow-hidden shadow-xs">
+          <div className="rounded-card border border-border-main bg-surface overflow-hidden shadow-xs">
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs">
-                <thead className="bg-slate-100 text-slate-700 font-bold border-b border-slate-200">
+                <thead className="bg-canvas border-b border-border-main text-[11px] font-semibold uppercase tracking-wider text-text-muted">
                   <tr>
-                    <th className="p-3 w-10 text-center">#</th>
-                    <th className="p-3">Product Name & HSN</th>
-                    <th className="p-3">Batch & Expiry</th>
-                    <th className="p-3 text-center">Available Stock</th>
-                    <th className="p-3 text-center bg-blue-50/70 text-blue-950 border-x border-blue-100">
+                    <th className="px-4 py-3 w-10 text-center">#</th>
+                    <th className="px-4 py-3">Product Name & HSN</th>
+                    <th className="px-4 py-3">Batch & Expiry</th>
+                    <th className="px-4 py-3 text-center">Available Stock</th>
+                    <th className="px-4 py-3 text-center bg-accent-soft/40 text-accent border-x border-border-main">
                       Transfer Qty (Pack + Loose)
                     </th>
-                    <th className="p-3 text-center">Remaining Stock</th>
-                    <th className="p-3 text-right">Rate (₹)</th>
-                    <th className="p-3 text-right">GST %</th>
-                    <th className="p-3 text-right">Total (₹)</th>
-                    <th className="p-3 text-center w-24">Actions</th>
+                    <th className="px-4 py-3 text-center">Remaining Stock</th>
+                    <th className="px-4 py-3 text-right">Rate (₹)</th>
+                    <th className="px-4 py-3 text-right">GST %</th>
+                    <th className="px-4 py-3 text-right">Total (₹)</th>
+                    <th className="px-4 py-3 text-center w-24">Actions</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-100">
+                <tbody className="divide-y divide-border-main">
                   {lines.length === 0 ? (
                     <tr>
-                      <td colSpan={10} className="p-12 text-center text-slate-400">
-                        <Layers className="h-8 w-8 mx-auto mb-2 text-slate-300" />
-                        <p className="font-bold text-slate-600">No transfer lines added yet</p>
-                        <p className="text-xs text-slate-400 mt-0.5">
+                      <td colSpan={10} className="p-12 text-center text-text-muted">
+                        <Layers className="h-8 w-8 mx-auto mb-2 text-text-muted/40" />
+                        <p className="font-semibold text-text-main">No transfer lines added yet</p>
+                        <p className="text-xs text-text-muted mt-0.5">
                           Search a product above (F1), scan a barcode, or import from Excel to start building this transfer.
                         </p>
                       </td>
@@ -1216,14 +1216,14 @@ export const InterStoreTransferPage: React.FC = () => {
                           key={line.id}
                           id={`transfer-row-${line.id}`}
                           onClick={() => setSelectedRowIndex(idx)}
-                          className={`hover:bg-slate-50 transition-colors ${
-                            isSelected ? "bg-blue-50/60 ring-1 ring-blue-500/20 font-medium" : ""
-                          } ${hasStockError ? "bg-red-50/40" : ""}`}
+                          className={`hover:bg-canvas/50 transition-colors ${
+                            isSelected ? "bg-accent-soft/30 ring-1 ring-accent/30 font-medium" : ""
+                          } ${hasStockError ? "bg-status-danger/5" : ""}`}
                         >
-                          <td className="p-3 text-center text-slate-400 font-mono">{idx + 1}</td>
-                          <td className="p-3">
-                            <div className="font-bold text-slate-800">{line.product_name}</div>
-                            <div className="text-[11px] text-slate-500 flex items-center gap-2">
+                          <td className="px-4 py-3 text-center text-text-muted font-mono tabular-nums">{idx + 1}</td>
+                          <td className="px-4 py-3">
+                            <div className="font-semibold text-text-main">{line.product_name}</div>
+                            <div className="text-[11px] text-text-muted flex items-center gap-2">
                               <span>HSN: {line.hsn_code}</span>
                               {line.barcode && <span>• Barcode: {line.barcode}</span>}
                             </div>
@@ -1232,7 +1232,7 @@ export const InterStoreTransferPage: React.FC = () => {
                                 {line.warnings.map((w, wIdx) => (
                                   <span
                                     key={wIdx}
-                                    className="inline-flex items-center gap-1 text-[10px] font-bold text-red-700 bg-red-100 px-1.5 py-0.2 rounded"
+                                    className="inline-flex items-center gap-1 text-[10px] font-semibold text-status-danger bg-status-danger/10 px-2 py-0.5 rounded-full"
                                   >
                                     <AlertTriangle className="h-3 w-3" />
                                     {w}
@@ -1241,18 +1241,18 @@ export const InterStoreTransferPage: React.FC = () => {
                               </div>
                             )}
                           </td>
-                          <td className="p-3">
-                            <div className="font-mono font-bold text-slate-700">{line.batch_no}</div>
-                            <div className="text-[11px] text-slate-500">Exp: {line.expiry_date}</div>
+                          <td className="px-4 py-3">
+                            <div className="font-mono font-semibold text-text-main tabular-nums">{line.batch_no}</div>
+                            <div className="text-[11px] text-text-muted font-mono tabular-nums">Exp: {line.expiry_date}</div>
                           </td>
-                          <td className="p-3 text-center font-semibold text-slate-600">
+                          <td className="px-4 py-3 text-center font-mono font-medium text-text-main tabular-nums">
                             {line.available_stock_packs > 0 && <span>{line.available_stock_packs} pk </span>}
                             {line.available_stock_loose > 0 && <span>{line.available_stock_loose} pc</span>}
                             {line.available_stock_packs === 0 && line.available_stock_loose === 0 && <span>0</span>}
                           </td>
 
                           {/* Smart Qty Input */}
-                          <td className="p-2 text-center bg-blue-50/30 border-x border-blue-100">
+                          <td className="p-2 text-center bg-accent-soft/20 border-x border-border-main">
                             <div className="inline-block">
                               <SmartQtyInput
                                 inputId={`transfer-qty-${line.id}`}
@@ -1267,19 +1267,19 @@ export const InterStoreTransferPage: React.FC = () => {
                             </div>
                           </td>
 
-                          <td className="p-3 text-center">
+                          <td className="px-4 py-3 text-center">
                             <span
-                              className={`font-mono font-bold ${
-                                line.remaining_stock_total < 0 ? "text-red-600" : "text-slate-700"
+                              className={`font-mono font-bold tabular-nums ${
+                                line.remaining_stock_total < 0 ? "text-status-danger" : "text-text-main"
                               }`}
                             >
                               {line.remaining_stock_total} pc
                             </span>
                           </td>
 
-                          <td className="p-3 text-right font-mono text-slate-700">₹{line.unit_rate.toFixed(2)}</td>
-                          <td className="p-3 text-right font-mono text-slate-600">{line.gst_percent}%</td>
-                          <td className="p-3 text-right font-mono font-bold text-slate-900">
+                          <td className="px-4 py-3 text-right font-mono text-text-main tabular-nums">₹{line.unit_rate.toFixed(2)}</td>
+                          <td className="px-4 py-3 text-right font-mono text-text-muted tabular-nums">{line.gst_percent}%</td>
+                          <td className="px-4 py-3 text-right font-mono font-bold text-text-main tabular-nums">
                             ₹{line.total_amount.toFixed(2)}
                           </td>
 
@@ -1290,7 +1290,7 @@ export const InterStoreTransferPage: React.FC = () => {
                                 <button
                                   type="button"
                                   onClick={() => handleAutoSplitLine(line)}
-                                  className="p-1 rounded text-amber-700 hover:bg-amber-100 transition-colors"
+                                  className="p-1 rounded text-status-warning hover:bg-status-warning/10 transition-colors"
                                   title="Auto-split excess quantity across other FEFO batches"
                                 >
                                   <Split className="h-4 w-4" />
@@ -1299,7 +1299,7 @@ export const InterStoreTransferPage: React.FC = () => {
                               <button
                                 type="button"
                                 onClick={() => handleDuplicateLine(idx)}
-                                className="p-1 rounded text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition-colors"
+                                className="p-1 rounded text-text-muted hover:text-accent hover:bg-accent-soft transition-colors"
                                 title="Duplicate Line (Alt+D)"
                               >
                                 <Copy className="h-3.5 w-3.5" />
@@ -1307,7 +1307,7 @@ export const InterStoreTransferPage: React.FC = () => {
                               <button
                                 type="button"
                                 onClick={() => handleDeleteLine(idx)}
-                                className="p-1 rounded text-slate-400 hover:text-red-600 hover:bg-red-50 transition-colors"
+                                className="p-1 rounded text-text-muted hover:text-status-danger hover:bg-status-danger/10 transition-colors"
                                 title="Delete Line (Ctrl+D)"
                               >
                                 <Trash2 className="h-3.5 w-3.5" />
@@ -1323,34 +1323,34 @@ export const InterStoreTransferPage: React.FC = () => {
             </div>
 
             {/* Bottom Totals Bar */}
-            <div className="border-t border-slate-200 bg-slate-50 px-6 py-4 flex flex-wrap items-center justify-between gap-4">
-              <div className="flex flex-wrap items-center gap-6 text-xs text-slate-600">
+            <div className="border-t border-border-main bg-canvas px-6 py-4 flex flex-wrap items-center justify-between gap-4">
+              <div className="flex flex-wrap items-center gap-6 text-xs text-text-muted">
                 <div>
-                  <span className="text-slate-400">Total Items: </span>
-                  <span className="font-bold text-slate-800">{totals.item_count}</span>
+                  <span className="text-text-muted">Total Items: </span>
+                  <span className="font-mono font-bold text-text-main tabular-nums">{totals.item_count}</span>
                 </div>
                 <div>
-                  <span className="text-slate-400">Total Units: </span>
-                  <span className="font-bold text-slate-800">{totals.total_transfer_qty} units</span>
+                  <span className="text-text-muted">Total Units: </span>
+                  <span className="font-mono font-bold text-text-main tabular-nums">{totals.total_transfer_qty} units</span>
                 </div>
                 <div>
-                  <span className="text-slate-400">Taxable Value: </span>
-                  <span className="font-bold text-slate-800">₹{totals.taxable_subtotal.toFixed(2)}</span>
+                  <span className="text-text-muted">Taxable Value: </span>
+                  <span className="font-mono font-bold text-text-main tabular-nums">₹{totals.taxable_subtotal.toFixed(2)}</span>
                 </div>
                 {gstTreatment === "inter_state" ? (
                   <div>
-                    <span className="text-slate-400">IGST Tax: </span>
-                    <span className="font-bold text-slate-800">₹{totals.igst_total.toFixed(2)}</span>
+                    <span className="text-text-muted">IGST Tax: </span>
+                    <span className="font-mono font-bold text-text-main tabular-nums">₹{totals.igst_total.toFixed(2)}</span>
                   </div>
                 ) : (
                   <div>
-                    <span className="text-slate-400">CGST + SGST: </span>
-                    <span className="font-bold text-slate-800">₹{totals.total_tax.toFixed(2)}</span>
+                    <span className="text-text-muted">CGST + SGST: </span>
+                    <span className="font-mono font-bold text-text-main tabular-nums">₹{totals.total_tax.toFixed(2)}</span>
                   </div>
                 )}
                 <div>
-                  <span className="text-slate-400">Grand Total: </span>
-                  <span className="text-base font-black text-blue-700">₹{totals.grand_total.toFixed(2)}</span>
+                  <span className="text-text-muted">Grand Total: </span>
+                  <span className="text-xl font-mono font-bold text-accent tabular-nums">₹{totals.grand_total.toFixed(2)}</span>
                 </div>
               </div>
 
@@ -1359,7 +1359,7 @@ export const InterStoreTransferPage: React.FC = () => {
                 <button
                   type="button"
                   onClick={resetForm}
-                  className="px-3.5 py-2 rounded-xl border border-slate-300 bg-white hover:bg-slate-100 text-xs font-semibold text-slate-700 transition-colors"
+                  className="px-3.5 py-2 rounded-btn border border-border-main bg-surface hover:bg-canvas text-xs font-medium text-text-main transition-colors"
                 >
                   Clear Form
                 </button>
@@ -1367,17 +1367,17 @@ export const InterStoreTransferPage: React.FC = () => {
                   type="button"
                   onClick={handlePrintPreview}
                   disabled={lines.length === 0}
-                  className="px-3.5 py-2 rounded-xl border border-slate-300 bg-white hover:bg-slate-100 text-xs font-bold text-slate-700 transition-colors inline-flex items-center gap-1.5 disabled:opacity-50"
+                  className="px-3.5 py-2 rounded-btn border border-border-main bg-surface hover:bg-canvas text-xs font-semibold text-text-main transition-colors inline-flex items-center gap-1.5 disabled:opacity-50"
                   title="Print Delivery Challan (Ctrl+P)"
                 >
-                  <Printer className="h-4 w-4 text-slate-600" />
+                  <Printer className="h-4 w-4 text-text-muted" />
                   <span>Challan Preview (Ctrl+P)</span>
                 </button>
                 <button
                   type="button"
                   onClick={handleSaveDraft}
                   disabled={lines.length === 0}
-                  className="px-4 py-2 rounded-xl border border-blue-300 bg-blue-50 hover:bg-blue-100 text-xs font-bold text-blue-800 transition-colors inline-flex items-center gap-1.5 disabled:opacity-50"
+                  className="px-4 py-2 rounded-btn border border-accent/20 bg-accent-soft hover:bg-accent-soft/80 text-xs font-semibold text-accent transition-colors inline-flex items-center gap-1.5 disabled:opacity-50"
                   title="Save Draft (Ctrl+S)"
                 >
                   <Save className="h-4 w-4" />
@@ -1387,7 +1387,7 @@ export const InterStoreTransferPage: React.FC = () => {
                   type="button"
                   onClick={handleDispatch}
                   disabled={lines.length === 0}
-                  className="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-xs font-bold text-white shadow-md transition-colors inline-flex items-center gap-1.5 disabled:opacity-50 cursor-pointer"
+                  className="px-5 py-2 rounded-btn bg-accent hover:bg-accent/90 text-xs font-semibold text-white shadow-xs transition-colors inline-flex items-center gap-1.5 disabled:opacity-50 cursor-pointer"
                   title="Dispatch Transfer (F12)"
                 >
                   <Send className="h-4 w-4" />
@@ -1401,46 +1401,46 @@ export const InterStoreTransferPage: React.FC = () => {
 
       {/* TAB 2: OUTGOING TRANSFERS LIST */}
       {activeTab === "outgoing" && (
-        <div className="rounded-2xl border border-slate-200 bg-white overflow-hidden shadow-xs">
-          <div className="p-4 border-b border-slate-200 bg-slate-50 flex items-center justify-between">
-            <h3 className="text-sm font-bold text-slate-800 flex items-center gap-2">
-              <Truck className="h-4 w-4 text-blue-600" />
+        <div className="rounded-card border border-border-main bg-surface overflow-hidden shadow-xs">
+          <div className="p-4 border-b border-border-main bg-canvas flex items-center justify-between">
+            <h3 className="text-sm font-semibold text-text-main flex items-center gap-2">
+              <Truck className="h-4 w-4 text-accent" />
               <span>Outgoing Store Transfers from {sourceStore?.name}</span>
             </h3>
-            <span className="text-xs text-slate-500 font-medium">Total: {outgoingTransfers.length} records</span>
+            <span className="text-xs text-text-muted font-medium font-mono tabular-nums">Total: {outgoingTransfers.length} records</span>
           </div>
 
-          <div className="divide-y divide-slate-100">
+          <div className="divide-y divide-border-main">
             {outgoingTransfers.length === 0 ? (
-              <div className="p-12 text-center text-slate-400">
-                <Truck className="h-8 w-8 mx-auto mb-2 text-slate-300" />
-                <p className="font-bold text-slate-600">No outgoing transfers found</p>
-                <p className="text-xs text-slate-400 mt-0.5">Click 'New Transfer' above to dispatch stock to other branches.</p>
+              <div className="p-12 text-center text-text-muted">
+                <Truck className="h-8 w-8 mx-auto mb-2 text-text-muted/40" />
+                <p className="font-semibold text-text-main">No outgoing transfers found</p>
+                <p className="text-xs text-text-muted mt-0.5">Click 'New Transfer' above to dispatch stock to other branches.</p>
               </div>
             ) : (
               outgoingTransfers.map((tr) => (
-                <div key={tr.id} className="p-4 hover:bg-slate-50 flex flex-wrap items-center justify-between gap-4 text-xs">
+                <div key={tr.id} className="p-4 hover:bg-canvas/50 flex flex-wrap items-center justify-between gap-4 text-xs transition-colors">
                   <div className="space-y-1">
                     <div className="flex items-center gap-2">
-                      <span className="font-mono font-bold text-slate-900 text-sm">{tr.transfer_no}</span>
+                      <span className="font-mono font-bold text-text-main text-sm tabular-nums">{tr.transfer_no}</span>
                       <span
-                        className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${
+                        className={`px-2.5 py-0.5 rounded-full text-[10px] font-semibold uppercase ${
                           tr.status === "dispatched" || tr.status === "in_transit"
-                            ? "bg-blue-100 text-blue-800"
+                            ? "bg-accent-soft text-accent"
                             : tr.status === "received"
-                            ? "bg-emerald-100 text-emerald-800"
+                            ? "bg-accent-soft text-accent"
                             : tr.status === "draft"
-                            ? "bg-slate-200 text-slate-700"
-                            : "bg-red-100 text-red-800"
+                            ? "bg-canvas text-text-muted border border-border-main"
+                            : "bg-status-danger/10 text-status-danger"
                         }`}
                       >
                         {tr.status.replace("_", " ")}
                       </span>
                     </div>
-                    <p className="text-slate-600">
-                      Destination: <strong className="text-slate-800">{tr.destination_store_name}</strong> • Date: {tr.transfer_date}
+                    <p className="text-text-muted">
+                      Destination: <strong className="text-text-main font-semibold">{tr.destination_store_name}</strong> • Date: <span className="font-mono tabular-nums">{tr.transfer_date}</span>
                     </p>
-                    <p className="text-[11px] text-slate-400">
+                    <p className="text-[11px] text-text-muted font-mono tabular-nums">
                       {tr.item_count} items ({tr.total_transfer_qty} units) • Total: ₹{tr.grand_total.toFixed(2)}
                       {tr.transport_details.vehicle_number ? ` • Vehicle: ${tr.transport_details.vehicle_number}` : ""}
                     </p>
@@ -1451,7 +1451,7 @@ export const InterStoreTransferPage: React.FC = () => {
                       <button
                         type="button"
                         onClick={() => handleResumeDraft(tr)}
-                        className="px-3 py-1.5 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-800 font-bold transition-colors"
+                        className="px-3 py-1.5 rounded-btn bg-accent-soft hover:bg-accent-soft/80 text-accent font-semibold transition-colors"
                       >
                         Resume Draft
                       </button>
@@ -1466,16 +1466,16 @@ export const InterStoreTransferPage: React.FC = () => {
                           title: `Delivery Challan - ${tr.transfer_no}`,
                         });
                       }}
-                      className="px-3 py-1.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 font-bold transition-colors inline-flex items-center gap-1"
+                      className="px-3 py-1.5 rounded-btn border border-border-main bg-surface hover:bg-canvas text-text-main font-semibold transition-colors inline-flex items-center gap-1"
                     >
-                      <Printer className="h-3.5 w-3.5 text-slate-500" />
+                      <Printer className="h-3.5 w-3.5 text-text-muted" />
                       <span>Print Challan</span>
                     </button>
                     {(tr.status === "dispatched" || tr.status === "in_transit") && (
                       <button
                         type="button"
                         onClick={() => handleCancelDispatchedTransfer(tr)}
-                        className="px-3 py-1.5 rounded-lg border border-red-200 bg-red-50 hover:bg-red-100 text-red-700 font-bold transition-colors"
+                        className="px-3 py-1.5 rounded-btn border border-status-danger/20 bg-status-danger/10 hover:bg-status-danger/20 text-status-danger font-semibold transition-colors"
                       >
                         Cancel & Restore Stock
                       </button>
@@ -1490,36 +1490,36 @@ export const InterStoreTransferPage: React.FC = () => {
 
       {/* TAB 3: INCOMING RECEIPTS */}
       {activeTab === "incoming" && (
-        <div className="rounded-2xl border border-slate-200 bg-white overflow-hidden shadow-xs">
-          <div className="p-4 border-b border-slate-200 bg-emerald-50/50 flex items-center justify-between">
-            <h3 className="text-sm font-bold text-emerald-950 flex items-center gap-2">
-              <Inbox className="h-4 w-4 text-emerald-600" />
+        <div className="rounded-card border border-border-main bg-surface overflow-hidden shadow-xs">
+          <div className="p-4 border-b border-border-main bg-canvas flex items-center justify-between">
+            <h3 className="text-sm font-semibold text-text-main flex items-center gap-2">
+              <Inbox className="h-4 w-4 text-accent" />
               <span>Incoming Stock Transfers Arriving at {sourceStore?.name}</span>
             </h3>
-            <span className="text-xs text-emerald-800 font-bold">{incomingTransfers.length} Pending Receipts</span>
+            <span className="text-xs text-accent font-semibold font-mono tabular-nums">{incomingTransfers.length} Pending Receipts</span>
           </div>
 
-          <div className="divide-y divide-slate-100">
+          <div className="divide-y divide-border-main">
             {incomingTransfers.length === 0 ? (
-              <div className="p-12 text-center text-slate-400">
-                <CheckCircle className="h-8 w-8 mx-auto mb-2 text-emerald-400" />
-                <p className="font-bold text-slate-700">All incoming transfers received and up to date!</p>
-                <p className="text-xs text-slate-400 mt-0.5">No pending store transfers awaiting receipt at this branch.</p>
+              <div className="p-12 text-center text-text-muted">
+                <CheckCircle className="h-8 w-8 mx-auto mb-2 text-accent" />
+                <p className="font-semibold text-text-main">All incoming transfers received and up to date!</p>
+                <p className="text-xs text-text-muted mt-0.5">No pending store transfers awaiting receipt at this branch.</p>
               </div>
             ) : (
               incomingTransfers.map((tr) => (
-                <div key={tr.id} className="p-5 hover:bg-slate-50 flex flex-wrap items-center justify-between gap-4 text-xs">
+                <div key={tr.id} className="p-5 hover:bg-canvas/50 flex flex-wrap items-center justify-between gap-4 text-xs transition-colors">
                   <div className="space-y-1">
                     <div className="flex items-center gap-2">
-                      <span className="font-mono font-bold text-slate-900 text-sm">{tr.transfer_no}</span>
-                      <span className="bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase">
+                      <span className="font-mono font-bold text-text-main text-sm tabular-nums">{tr.transfer_no}</span>
+                      <span className="bg-status-warning/15 text-status-warning px-2.5 py-0.5 rounded-full text-[10px] font-semibold uppercase">
                         {tr.status.replace("_", " ")}
                       </span>
                     </div>
-                    <p className="text-slate-600">
-                      Dispatched from: <strong className="text-slate-800">{tr.source_store_name}</strong> • Date: {tr.transfer_date}
+                    <p className="text-text-muted">
+                      Dispatched from: <strong className="text-text-main font-semibold">{tr.source_store_name}</strong> • Date: <span className="font-mono tabular-nums">{tr.transfer_date}</span>
                     </p>
-                    <p className="text-[11px] text-slate-400">
+                    <p className="text-[11px] text-text-muted font-mono tabular-nums">
                       {tr.item_count} products ({tr.total_transfer_qty} units) • Total Value: ₹{tr.grand_total.toFixed(2)}
                       {tr.transport_details.vehicle_number ? ` • Vehicle: ${tr.transport_details.vehicle_number}` : ""}
                     </p>
@@ -1531,7 +1531,7 @@ export const InterStoreTransferPage: React.FC = () => {
                       setTransferToReceive(tr);
                       setIsReceiptModalOpen(true);
                     }}
-                    className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold transition-all shadow-sm inline-flex items-center gap-2"
+                    className="px-5 py-2.5 rounded-btn bg-accent hover:bg-accent/90 text-white font-semibold transition-all shadow-xs inline-flex items-center gap-2"
                   >
                     <PackageCheck className="h-4 w-4" />
                     <span>Receive & Verify Stock</span>
@@ -1545,39 +1545,39 @@ export const InterStoreTransferPage: React.FC = () => {
 
       {/* TAB 4: AUDIT HISTORY */}
       {activeTab === "history" && (
-        <div className="rounded-2xl border border-slate-200 bg-white overflow-hidden shadow-xs">
-          <div className="p-4 border-b border-slate-200 bg-slate-50 flex items-center justify-between">
-            <h3 className="text-sm font-bold text-slate-800 flex items-center gap-2">
-              <History className="h-4 w-4 text-slate-600" />
+        <div className="rounded-card border border-border-main bg-surface overflow-hidden shadow-xs">
+          <div className="p-4 border-b border-border-main bg-canvas flex items-center justify-between">
+            <h3 className="text-sm font-semibold text-text-main flex items-center gap-2">
+              <History className="h-4 w-4 text-text-muted" />
               <span>Full Transfer Audit Ledger & History</span>
             </h3>
-            <span className="text-xs text-slate-500 font-medium">{allTransfers.length} Total Records</span>
+            <span className="text-xs text-text-muted font-medium font-mono tabular-nums">{allTransfers.length} Total Records</span>
           </div>
 
-          <div className="divide-y divide-slate-100">
+          <div className="divide-y divide-border-main">
             {allTransfers.map((tr) => (
-              <div key={tr.id} className="p-4 hover:bg-slate-50 flex flex-wrap items-center justify-between gap-4 text-xs">
+              <div key={tr.id} className="p-4 hover:bg-canvas/50 flex flex-wrap items-center justify-between gap-4 text-xs transition-colors">
                 <div className="space-y-1">
                   <div className="flex items-center gap-2">
-                    <span className="font-mono font-bold text-slate-900">{tr.transfer_no}</span>
+                    <span className="font-mono font-bold text-text-main tabular-nums">{tr.transfer_no}</span>
                     <span
-                      className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${
+                      className={`px-2.5 py-0.5 rounded-full text-[10px] font-semibold uppercase ${
                         tr.status === "received"
-                          ? "bg-emerald-100 text-emerald-800"
+                          ? "bg-accent-soft text-accent"
                           : tr.status === "cancelled"
-                          ? "bg-red-100 text-red-800"
-                          : "bg-blue-100 text-blue-800"
+                          ? "bg-status-danger/10 text-status-danger"
+                          : "bg-accent-soft text-accent"
                       }`}
                     >
                       {tr.status.replace("_", " ")}
                     </span>
-                    <span className="text-slate-400 font-mono">{tr.transfer_date}</span>
+                    <span className="text-text-muted font-mono tabular-nums">{tr.transfer_date}</span>
                   </div>
-                  <p className="text-slate-600">
-                    <strong className="text-slate-700">{tr.source_store_name}</strong> →{" "}
-                    <strong className="text-slate-700">{tr.destination_store_name}</strong>
+                  <p className="text-text-muted">
+                    <strong className="text-text-main font-semibold">{tr.source_store_name}</strong> →{" "}
+                    <strong className="text-text-main font-semibold">{tr.destination_store_name}</strong>
                   </p>
-                  <p className="text-[11px] text-slate-400">
+                  <p className="text-[11px] text-text-muted font-mono tabular-nums">
                     {tr.item_count} items ({tr.total_transfer_qty} units) • ₹{tr.grand_total.toFixed(2)}
                   </p>
                 </div>
@@ -1593,9 +1593,9 @@ export const InterStoreTransferPage: React.FC = () => {
                         title: `Challan - ${tr.transfer_no}`,
                       });
                     }}
-                    className="px-3 py-1.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 font-bold transition-colors inline-flex items-center gap-1"
+                    className="px-3 py-1.5 rounded-btn border border-border-main bg-surface hover:bg-canvas text-text-main font-semibold transition-colors inline-flex items-center gap-1"
                   >
-                    <Printer className="h-3.5 w-3.5 text-slate-500" />
+                    <Printer className="h-3.5 w-3.5 text-text-muted" />
                     <span>Print Challan</span>
                   </button>
                 </div>
@@ -1610,22 +1610,22 @@ export const InterStoreTransferPage: React.FC = () => {
         <div
           role="dialog"
           aria-modal="true"
-          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 backdrop-blur-xs p-4 select-none"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 select-none"
         >
-          <div className="w-full max-w-lg rounded-2xl bg-white shadow-2xl overflow-hidden border border-slate-200">
-            <div className="flex items-center justify-between border-b border-slate-100 px-5 py-3.5 bg-slate-50">
+          <div className="w-full max-w-lg rounded-card bg-surface shadow-modal overflow-hidden border border-border-main">
+            <div className="flex items-center justify-between border-b border-border-main px-5 py-3.5 bg-canvas">
               <div>
-                <h3 className="text-sm font-bold text-slate-800">
+                <h3 className="text-sm font-semibold text-text-main">
                   Select Batch (FEFO Order): {batchModalProduct.name}
                 </h3>
-                <p className="text-[11px] text-slate-500 mt-0.5">Use ↑/↓ arrows to choose, Enter to select, Esc to cancel</p>
+                <p className="text-[11px] text-text-muted mt-0.5">Use ↑/↓ arrows to choose, Enter to select, Esc to cancel</p>
               </div>
-              <button onClick={() => setBatchModalProduct(null)} className="text-slate-400 hover:text-slate-600">
+              <button onClick={() => setBatchModalProduct(null)} className="text-text-muted hover:text-text-main">
                 <X className="h-4 w-4" />
               </button>
             </div>
 
-            <div ref={batchListRef} className="max-h-64 overflow-y-auto divide-y divide-slate-100 outline-none">
+            <div ref={batchListRef} className="max-h-64 overflow-y-auto divide-y divide-border-main outline-none">
               {availableBatches.map((b, idx) => {
                 const isSelected = idx === selectedBatchIndex;
                 const isExpired = isBatchExpired(b.expiry_date);
@@ -1642,17 +1642,17 @@ export const InterStoreTransferPage: React.FC = () => {
                     }}
                     className={`flex items-center justify-between px-5 py-3 text-xs transition-colors cursor-pointer ${
                       isSelected
-                        ? "bg-blue-50 text-blue-950 font-bold border-l-4 border-l-blue-600 pl-4"
-                        : "hover:bg-slate-50 text-slate-800"
+                        ? "bg-accent-soft text-accent font-semibold border-l-4 border-l-accent pl-4"
+                        : "hover:bg-canvas text-text-main"
                     }`}
                   >
                     <div>
-                      <div className="font-mono font-bold text-slate-900">{b.batch_no}</div>
-                      <div className="text-[11px] text-slate-500">Exp: {b.expiry_date}</div>
+                      <div className="font-mono font-semibold text-text-main tabular-nums">{b.batch_no}</div>
+                      <div className="text-[11px] text-text-muted font-mono tabular-nums">Exp: {b.expiry_date}</div>
                     </div>
-                    <div className="text-right">
-                      <div className="font-bold text-emerald-700">Stock: {b.stock_qty} units</div>
-                      <div className="text-[11px] text-slate-400">MRP: ₹{b.mrp}</div>
+                    <div className="text-right font-mono tabular-nums">
+                      <div className="font-semibold text-accent">Stock: {b.stock_qty} units</div>
+                      <div className="text-[11px] text-text-muted">MRP: ₹{b.mrp}</div>
                     </div>
                   </div>
                 );
