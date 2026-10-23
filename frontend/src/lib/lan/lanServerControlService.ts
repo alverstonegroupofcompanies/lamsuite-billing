@@ -29,8 +29,10 @@ export interface LanServerStatus {
   lastSnapshotAt: number | null;
   availableAdapters: NetworkInterfaceInfo[];
   hubId: string;
-  hubName: string;
-  storeName: string;
+  hubLabel: string;
+  announceEnabled: boolean;
+  pairingMode: boolean;
+  pairingExpiresIn: number;
   pairingCode: string;
 }
 
@@ -48,9 +50,14 @@ class LanServerControlService {
   private startedAt: number | null = null;
   private activeClients: ConnectedCounterClient[] = [];
   private lastSnapshotAt: number | null = null;
+  private hubId = "hub_main";
+  private hubLabel = "Main Counter Hub";
+  private announceEnabled = true;
+  private pairingMode = false;
+  private pairingExpiresIn = 0;
+  private pairingCode = "729481";
   private listeners: Set<(status: LanServerStatus) => void> = new Set();
   private pollClientsTimer: any = null;
-  private pairingCode = "729481";
 
   constructor() {
     this.initAdapters().then(() => {
@@ -130,9 +137,11 @@ class LanServerControlService {
       activeClients: this.activeClients,
       lastSnapshotAt: this.lastSnapshotAt,
       availableAdapters: this.availableAdapters,
-      hubId: "hub_STORE-01_main",
-      hubName: "Counter 01 (Store Hub)",
-      storeName: "LamStone Pharmacy & Retail",
+      hubId: this.hubId,
+      hubLabel: this.hubLabel,
+      announceEnabled: this.announceEnabled,
+      pairingMode: this.pairingMode,
+      pairingExpiresIn: this.pairingExpiresIn,
       pairingCode: this.pairingCode,
     };
   }
@@ -170,7 +179,62 @@ class LanServerControlService {
     this.notify();
   }
 
+  async setHubLabel(label: string): Promise<boolean> {
+    this.hubLabel = label;
+    try {
+      await fetch(`http://127.0.0.1:${this.apiPort}/api/lan/v1/hub/config`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ display_label: label }),
+      });
+    } catch (_) {}
+    this.notify();
+    return true;
+  }
+
+  async setAnnounceEnabled(enabled: boolean): Promise<boolean> {
+    this.announceEnabled = enabled;
+    try {
+      await fetch(`http://127.0.0.1:${this.apiPort}/api/lan/v1/hub/config`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ announce_enabled: enabled }),
+      });
+    } catch (_) {}
+    this.notify();
+    return true;
+  }
+
+  async setPairingMode(durationMinutes: number): Promise<boolean> {
+    this.pairingMode = durationMinutes > 0;
+    this.pairingExpiresIn = durationMinutes * 60;
+    try {
+      await fetch(`http://127.0.0.1:${this.apiPort}/api/lan/v1/hub/config`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pairing_mode_duration_minutes: durationMinutes }),
+      });
+    } catch (_) {}
+    this.notify();
+    return true;
+  }
+
+  async fetchHubStatus(): Promise<void> {
+    try {
+      const res = await fetch(`http://127.0.0.1:${this.apiPort}/lan/v1/health`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.hub_id) this.hubId = data.hub_id;
+        if (data.hub_label) this.hubLabel = data.hub_label;
+        if (typeof data.pairing_mode === "boolean") this.pairingMode = data.pairing_mode;
+        if (typeof data.pairing_expires_in === "number") this.pairingExpiresIn = data.pairing_expires_in;
+        this.notify();
+      }
+    } catch (_) {}
+  }
+
   async refreshActiveClients(): Promise<ConnectedCounterClient[]> {
+    await this.fetchHubStatus();
     try {
       const res = await fetch(`http://127.0.0.1:${this.apiPort}/api/lan/v1/clients`);
       if (res.ok) {

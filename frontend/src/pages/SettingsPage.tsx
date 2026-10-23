@@ -1842,6 +1842,10 @@ export const SettingsPage: React.FC = () => {
                 <div className="grid grid-cols-2 gap-4 pt-1">
                   <div className="rounded-md border border-slate-100 bg-slate-50/80 p-3 text-xs space-y-2">
                     <div className="flex justify-between items-center text-slate-600">
+                      <span className="text-slate-500">Hub Identity Label:</span>
+                      <span className="font-semibold text-slate-800">{lanServerStatus.hubLabel || "Main Counter Hub"}</span>
+                    </div>
+                    <div className="flex justify-between items-center text-slate-600">
                       <span className="text-slate-500">Listening Port:</span>
                       <span className="font-mono font-bold text-slate-800">{lanServerStatus.port} (API: {lanServerStatus.apiPort})</span>
                     </div>
@@ -1866,12 +1870,6 @@ export const SettingsPage: React.FC = () => {
                         </select>
                       )}
                     </div>
-                    <div className="flex justify-between items-center text-slate-600">
-                      <span className="text-slate-500">Hub Pairing Code:</span>
-                      <span className="font-mono font-bold text-slate-800 tracking-wider bg-slate-200/60 px-1.5 py-0.5 rounded">
-                        {lanServerStatus.pairingCode}
-                      </span>
-                    </div>
                     <div className="flex justify-between text-slate-600">
                       <span className="text-slate-500">Connected Secondary Counters:</span>
                       <span className="font-bold text-slate-800">{lanServerStatus.activeClientsCount} Counter(s)</span>
@@ -1879,27 +1877,110 @@ export const SettingsPage: React.FC = () => {
                   </div>
 
                   <div className="rounded-md border border-slate-100 bg-slate-50/80 p-3 flex flex-col justify-between">
-                    <label className="flex items-start gap-2.5 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={lanServerStatus.autoStart}
-                        onChange={(e) => lanServerControlService.setAutoStart(e.target.checked)}
-                        className="mt-0.5 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500 h-4 w-4"
-                      />
-                      <div>
-                        <span className="text-xs font-bold text-slate-800 block">
-                          Start server automatically on app startup
-                        </span>
-                        <span className="text-[11px] text-slate-500 block leading-tight mt-0.5">
-                          Workstation listens on 0.0.0.0 (all interfaces) so other counters can pair.
-                        </span>
-                      </div>
-                    </label>
+                    <div className="space-y-3">
+                      <label className="flex items-start gap-2.5 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={lanServerStatus.autoStart}
+                          onChange={(e) => lanServerControlService.setAutoStart(e.target.checked)}
+                          className="mt-0.5 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500 h-4 w-4"
+                        />
+                        <div>
+                          <span className="text-xs font-bold text-slate-800 block">
+                            Start server automatically on app startup
+                          </span>
+                          <span className="text-[11px] text-slate-500 block leading-tight mt-0.5">
+                            Workstation listens on 0.0.0.0 (all interfaces) so other counters can pair.
+                          </span>
+                        </div>
+                      </label>
 
-                    <div className="pt-2 border-t border-slate-200/60">
-                      <span className="text-[11px] text-slate-500 block">
-                        Main Server LAN Host: <strong className="font-mono text-slate-800">{lanServerStatus.selectedAdapterIp}:{lanServerStatus.port}</strong>
+                      <label className="flex items-start gap-2.5 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={lanServerStatus.announceEnabled}
+                          onChange={(e) => lanServerControlService.setAnnounceEnabled(e.target.checked)}
+                          className="mt-0.5 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500 h-4 w-4"
+                        />
+                        <div>
+                          <span className="text-xs font-bold text-slate-800 block">
+                            Announce this hub on local network
+                          </span>
+                          <span className="text-[11px] text-slate-500 block leading-tight mt-0.5">
+                            When disabled, secondary counters must type this hub's IP manually.
+                          </span>
+                        </div>
+                      </label>
+                    </div>
+
+                    <div className="pt-2 border-t border-slate-200/60 flex items-center justify-between">
+                      <span className="text-[11px] text-slate-500">
+                        Main Server Host: <strong className="font-mono text-slate-800">{lanServerStatus.selectedAdapterIp}:{lanServerStatus.port}</strong>
                       </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Hub Security & Pairing Mode Controls */}
+                <div className="rounded-md border border-amber-200 bg-amber-50/40 p-3 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                        <ShieldCheck className="h-4 w-4 text-amber-600" />
+                        LAN Hub Security Boundary & Pairing Control
+                      </span>
+                      <span className="text-[11px] text-slate-600 block mt-0.5">
+                        Pairing Mode opens a temporary 5-minute window for authorized counters to pair. Defaults to closed.
+                      </span>
+                    </div>
+                    {lanServerStatus.pairingMode ? (
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-bold font-mono text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded border border-emerald-300 animate-pulse">
+                          PAIRING ACTIVE ({Math.ceil(lanServerStatus.pairingExpiresIn / 60)}m left)
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => lanServerControlService.setPairingMode(0)}
+                          className="px-2.5 py-1 bg-white border border-rose-300 hover:bg-rose-50 text-rose-700 text-xs font-semibold rounded shadow-xs"
+                        >
+                          Close Pairing
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => lanServerControlService.setPairingMode(5)}
+                        className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold rounded shadow-xs transition-colors"
+                      >
+                        Open Pairing Mode (5 Mins)
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3 pt-1 border-t border-amber-200/60">
+                    <div>
+                      <label className="block text-[11px] font-semibold text-slate-600 mb-1">Hub Neutral Display Label</label>
+                      <input
+                        type="text"
+                        value={lanServerStatus.hubLabel || ""}
+                        onChange={(e) => lanServerControlService.setHubLabel(e.target.value)}
+                        placeholder="e.g. Main Counter Hub"
+                        className="w-full text-xs px-2.5 py-1.5 border border-slate-300 rounded bg-white text-slate-800 font-medium"
+                      />
+                      <span className="text-[10px] text-slate-500 mt-0.5 block">
+                        Visible on discovery. Never leaks OS hostname, personal, or store names.
+                      </span>
+                    </div>
+
+                    <div>
+                      <label className="block text-[11px] font-semibold text-slate-600 mb-1">Network Security Status</label>
+                      <div className="p-2 rounded bg-white border border-slate-200 text-[11px] text-slate-600">
+                        {lanServerStatus.selectedAdapterIp.startsWith("192.168.") || lanServerStatus.selectedAdapterIp.startsWith("10.") || lanServerStatus.selectedAdapterIp.startsWith("172.") ? (
+                          <span className="text-emerald-700 font-medium">✓ Protected Private LAN ({lanServerStatus.selectedAdapterIp})</span>
+                        ) : (
+                          <span className="text-amber-700 font-medium">⚠ Notice: Adapter IP looks public or non-standard private. Recommend private retail Wi-Fi.</span>
+                        )}
+                      </div>
                     </div>
                   </div>
                 </div>

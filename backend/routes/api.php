@@ -56,6 +56,7 @@ Route::get('/lan/v1/pull', [SyncController::class, 'lanPullSnapshot']);
 Route::post('/lan/v1/pair', [SyncController::class, 'lanPairCounter']);
 Route::get('/lan/v1/clients', [SyncController::class, 'lanGetClients']);
 Route::post('/lan/v1/clients/{id}/status', [SyncController::class, 'lanUpdateClientStatus']);
+Route::post('/lan/v1/hub/config', [SyncController::class, 'lanUpdateHubConfig']);
 Route::get('/sync/stream', [SyncController::class, 'streamSSE']);
 Route::post('/invoices/{id}/lock', [SyncController::class, 'lockInvoice']);
 Route::post('/invoices/{id}/unlock', [SyncController::class, 'unlockInvoice']);

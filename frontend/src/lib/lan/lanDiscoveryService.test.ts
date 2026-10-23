@@ -13,20 +13,18 @@ describe("LAN Hub Discovery, Pairing Handshake & Resilience Engine", () => {
     }
   });
 
-  it("1. Checks hub health endpoint and verifies store metadata", async () => {
+  it("1. Checks hub health endpoint and ensures minimal announcement privacy (no hostnames/store names)", async () => {
     const mockHealth: HubHealthCheck = {
       isHealthy: true,
-      hubId: "hub_STORE-01_main",
-      hubName: "Palakkad Main (Hub Server)",
-      storeId: "1",
-      storeName: "LamStone Pharmacy & Retail",
-      storeCode: "STORE-01",
-      version: "2.0.0",
+      hubId: "hub_d09329247de3",
+      hubLabel: "Main Counter Hub",
+      appVersion: "2.0.0",
+      protocolVersion: "1.0",
       port: 8089,
       apiPort: 8000,
       timestamp: Date.now(),
-      countersCount: 0,
-      requiresApproval: true,
+      pairingMode: false,
+      pairingExpiresIn: 0,
       latencyMs: 12,
     };
 
@@ -35,8 +33,10 @@ describe("LAN Hub Discovery, Pairing Handshake & Resilience Engine", () => {
 
     const result = await lanDiscoveryService.checkHubHealth("192.168.0.143", 8089);
     expect(result.isHealthy).toBe(true);
-    expect(result.storeCode).toBe("STORE-01");
-    expect(result.hubId).toBe("hub_STORE-01_main");
+    expect(result.hubLabel).toBe("Main Counter Hub");
+    expect(result.hubId).toBe("hub_d09329247de3");
+    expect((result as any).storeName).toBeUndefined();
+    expect((result as any).deviceName).toBeUndefined();
     spy.mockRestore();
   });
 
@@ -44,16 +44,14 @@ describe("LAN Hub Discovery, Pairing Handshake & Resilience Engine", () => {
     const unreachableCheck: HubHealthCheck = {
       isHealthy: false,
       hubId: "",
-      hubName: "",
-      storeId: "",
-      storeName: "",
-      storeCode: "",
-      version: "",
+      hubLabel: "",
+      appVersion: "",
+      protocolVersion: "",
       port: 8089,
       apiPort: 8000,
       timestamp: 0,
-      countersCount: 0,
-      requiresApproval: true,
+      pairingMode: false,
+      pairingExpiresIn: 0,
       error: "Port 8089 unreachable or connection refused",
       latencyMs: 250,
     };

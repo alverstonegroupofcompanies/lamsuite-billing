@@ -26,13 +26,15 @@ import { API_BASE_URL, DEFAULT_LAN_PORT } from "../config/env";
 
 export interface LanServerItem {
   id: string;
-  name: string;
-  device_name?: string;
+  hub_label: string;
   ip_address: string;
   port: number;
-  counter_name: string;
-  counter_code: string;
-  store_code?: string;
+  api_port: number;
+  app_version: string;
+  protocol_version: string;
+  pairing_mode: boolean;
+  pairing_expires_in: number;
+  is_paired: boolean;
   status: "online" | "idle";
   is_main: boolean;
 }
@@ -90,13 +92,15 @@ export const StoreSetupPage: React.FC<StoreSetupPageProps> = ({ onSetupComplete,
         if (health.isHealthy) {
           servers.push({
             id: health.hubId,
-            name: health.storeName,
-            device_name: health.deviceName,
+            hub_label: health.hubLabel,
             ip_address: cachedIp,
             port: health.port,
-            counter_name: health.hubName,
-            counter_code: "C01",
-            store_code: health.storeCode,
+            api_port: health.apiPort,
+            app_version: health.appVersion,
+            protocol_version: health.protocolVersion,
+            pairing_mode: health.pairingMode,
+            pairing_expires_in: health.pairingExpiresIn,
+            is_paired: false,
             status: "online",
             is_main: true,
           });
@@ -136,13 +140,15 @@ export const StoreSetupPage: React.FC<StoreSetupPageProps> = ({ onSetupComplete,
         if (found.length > 0) {
           const mapped: LanServerItem[] = found.map((p) => ({
             id: p.id,
-            name: p.name,
-            device_name: p.device_name,
+            hub_label: p.hub_label,
             ip_address: p.ip_address,
             port: p.port,
-            counter_name: p.counter_name,
-            counter_code: p.counter_code,
-            store_code: p.store_code,
+            api_port: p.api_port,
+            app_version: p.app_version,
+            protocol_version: p.protocol_version,
+            pairing_mode: p.pairing_mode,
+            pairing_expires_in: p.pairing_expires_in,
+            is_paired: false,
             status: "online",
             is_main: true,
           }));
@@ -160,13 +166,15 @@ export const StoreSetupPage: React.FC<StoreSetupPageProps> = ({ onSetupComplete,
       if (discoveredPeers.length > 0) {
         const mapped: LanServerItem[] = discoveredPeers.map((p) => ({
           id: p.id,
-          name: p.name,
-          device_name: p.device_name,
+          hub_label: p.hub_label,
           ip_address: p.ip_address,
           port: p.port,
-          counter_name: p.counter_name,
-          counter_code: p.counter_code,
-          store_code: p.store_code,
+          api_port: p.api_port,
+          app_version: p.app_version,
+          protocol_version: p.protocol_version,
+          pairing_mode: p.pairing_mode,
+          pairing_expires_in: p.pairing_expires_in,
+          is_paired: false,
           status: "online",
           is_main: true,
         }));
@@ -180,11 +188,15 @@ export const StoreSetupPage: React.FC<StoreSetupPageProps> = ({ onSetupComplete,
             return [
               {
                 id: `peer_${nativePeer.station_id}`,
-                name: nativePeer.station_name,
+                hub_label: "Main Counter Hub",
                 ip_address: nativePeer.ip_address,
                 port: nativePeer.port,
-                counter_name: nativePeer.station_name,
-                counter_code: "C01",
+                api_port: 8000,
+                app_version: "2.0.0",
+                protocol_version: "1.0",
+                pairing_mode: false,
+                pairing_expires_in: 0,
+                is_paired: false,
                 status: "online",
                 is_main: nativePeer.is_main,
               },
@@ -223,11 +235,8 @@ export const StoreSetupPage: React.FC<StoreSetupPageProps> = ({ onSetupComplete,
         setTestResult({
           status: "success",
           latency: health.latencyMs,
-          message: `Verified: ${health.storeName} (${health.storeCode}) • Hub: ${health.hubName} (${health.latencyMs}ms)`,
+          message: `Reachable: ${health.hubLabel} (v${health.appVersion}) • Latency: ${health.latencyMs}ms • ${health.pairingMode ? "Pairing Open" : "Needs Pairing Approval/Store Key"}`,
         });
-        if (storeKeyInput === "") {
-          setStoreKeyInput(health.storeCode);
-        }
       } else {
         setTestResult({
           status: "error",
@@ -307,7 +316,7 @@ export const StoreSetupPage: React.FC<StoreSetupPageProps> = ({ onSetupComplete,
         }
 
         // 2. Perform authenticated counter pairing handshake
-        setProgressStep(`Pairing counter "${counterName}" with ${health.storeName}...`);
+        setProgressStep(`Authenticating counter "${counterName}" with LAN Hub...`);
         setProgressPercent(50);
 
         const deviceUuid = `dev_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`;
@@ -326,13 +335,14 @@ export const StoreSetupPage: React.FC<StoreSetupPageProps> = ({ onSetupComplete,
             counter_name: counterName,
             counter_code: counterCode,
             device_name: clientDeviceName,
-            store_key: storeKeyInput.trim() || health.storeCode,
+            store_key: storeKeyInput.trim(),
             device_uuid: deviceUuid,
           }),
         });
 
         if (!pairRes.ok) {
-          throw new Error(`Hub pairing rejected with status ${pairRes.status}`);
+          const errData = await pairRes.json().catch(() => ({}));
+          throw new Error(errData.message || `Hub pairing rejected with status ${pairRes.status}`);
         }
 
         const pairData = await pairRes.json();
@@ -345,9 +355,9 @@ export const StoreSetupPage: React.FC<StoreSetupPageProps> = ({ onSetupComplete,
           device_id: pairData.counter_id || `cntr_${Date.now()}`,
           device_uuid: deviceUuid,
           device_name: counterName,
-          store_id: health.storeId || "1",
-          store_name: health.storeName,
-          store_code: health.storeCode,
+          store_id: String(pairData.store_id || "1"),
+          store_name: pairData.store_name || "LamStone Store",
+          store_code: pairData.store_code || "STORE-01",
           counter_id: pairData.counter_id || `cntr_${Date.now()}`,
           counter_name: counterName,
           counter_code: counterCode,
@@ -664,30 +674,22 @@ export const StoreSetupPage: React.FC<StoreSetupPageProps> = ({ onSetupComplete,
                                 </div>
                                 <div className="min-w-0">
                                   <div className="flex items-center gap-2 flex-wrap">
-                                    <span className="font-bold text-text-main truncate">{srv.name}</span>
-                                    {srv.store_code && (
-                                      <span className="px-1.5 py-0.2 rounded text-[10px] font-mono bg-canvas text-text-muted border border-border-main">
-                                        {srv.store_code}
-                                      </span>
-                                    )}
-                                    {srv.is_main && (
-                                      <span className="px-1.5 py-0.2 rounded-full text-[9px] font-bold bg-accent-soft text-accent border border-accent/20 uppercase tracking-wider">
-                                        Main Hub
+                                    <span className="font-bold text-text-main truncate">{srv.hub_label}</span>
+                                    <span className="px-1.5 py-0.2 rounded-full text-[9px] font-bold bg-amber-50 text-amber-700 border border-amber-200 uppercase tracking-wider">
+                                      Not Paired
+                                    </span>
+                                    {srv.pairing_mode && (
+                                      <span className="px-1.5 py-0.2 rounded-full text-[9px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 uppercase tracking-wider animate-pulse">
+                                        Pairing Open
                                       </span>
                                     )}
                                   </div>
                                   <div className="flex items-center gap-2 mt-0.5 text-[11px] text-text-muted font-mono flex-wrap">
-                                    <span className="text-text-main font-semibold">{srv.counter_name}</span>
-                                    {srv.device_name && (
-                                      <>
-                                        <span>•</span>
-                                        <span className="text-slate-600 bg-slate-100 dark:bg-slate-800 px-1.5 py-0.2 rounded font-sans font-medium text-[10px]">
-                                          Device: {srv.device_name}
-                                        </span>
-                                      </>
-                                    )}
-                                    <span>•</span>
                                     <span className="text-accent">{srv.ip_address}:{srv.port}</span>
+                                    <span>•</span>
+                                    <span>v{srv.app_version}</span>
+                                    <span>•</span>
+                                    <span className="text-slate-500">ID: {srv.id.slice(0, 10)}...</span>
                                   </div>
                                 </div>
                               </div>

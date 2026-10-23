@@ -125,12 +125,12 @@ export const LanDiagnosticsPanel: React.FC<LanDiagnosticsPanelProps> = ({
           <div>
             <div className="font-bold">
               {healthStatus?.isHealthy
-                ? `Hub Reachable: ${healthStatus.hubName} (${healthStatus.latencyMs}ms)`
+                ? `Hub Reachable: ${healthStatus.hubLabel} (${healthStatus.latencyMs}ms)`
                 : `Hub Unreachable at ${hubIp}:${hubPort}`}
             </div>
             <div className="text-[11px] mt-0.5 opacity-90">
               {healthStatus?.isHealthy
-                ? `Store: ${healthStatus.storeName} (${healthStatus.storeCode}) • Version ${healthStatus.version} • ${healthStatus.countersCount} Active Counter(s)`
+                ? `Hub Identity: ${healthStatus.hubLabel} • Version ${healthStatus.appVersion} • ${healthStatus.pairingMode ? "Pairing Open" : "Pairing Closed"}`
                 : healthStatus?.error || "Connection timed out or refused. Check firewall and IP address."}
             </div>
           </div>

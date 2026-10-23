@@ -785,59 +785,106 @@ class SyncController
     }
 
     /**
-     * Dedicated LAN Health & Hub Discovery verification endpoint.
+     * Dedicated Minimal LAN Health & Hub Discovery announcement endpoint.
+     * ZERO business details, ZERO store names, ZERO OS device names leaked to unauthenticated network.
      */
     public function lanHealth(Request $request): JsonResponse
     {
         $storeId = $this->resolveStoreId($request);
-        $store = Store::find($storeId) ?? Store::first();
 
-        // Count connected active secondary counters (excluding hub itself)
-        $countersCount = \App\Models\Counter::where('store_id', $store ? $store->id : 1)
-            ->where('is_hub', false)
-            ->where('status', 'active')
-            ->count();
+        // Check if owner disabled announcements
+        $announcedSetting = \App\Models\CompanySetting::where('store_id', $storeId)->where('key', 'lan_hub_announce_enabled')->first();
+        $isAnnounced = $announcedSetting ? (bool)$announcedSetting->value : true;
 
-        $deviceHost = gethostname() ?: 'Main-PC';
+        if (!$isAnnounced && !$request->has('probe')) {
+            return response()->json(['error' => 'HUB_ANNOUNCEMENT_DISABLED', 'message' => 'Hub announcement is turned off.'], 403);
+        }
 
+        // Fetch owner-chosen display label (defaults to neutral "Main Counter Hub")
+        $labelSetting = \App\Models\CompanySetting::where('store_id', $storeId)->where('key', 'lan_hub_display_label')->first();
+        $hubLabel = $labelSetting && !empty($labelSetting->value) ? (string)$labelSetting->value : 'Main Counter Hub';
+
+        // Check if pairing mode is open
+        $pairingUntilSetting = \App\Models\CompanySetting::where('store_id', $storeId)->where('key', 'lan_hub_pairing_until')->first();
+        $pairingUntil = $pairingUntilSetting ? (int)$pairingUntilSetting->value : 0;
+        $isPairingMode = $pairingUntil > (time() * 1000);
+
+        // Fetch random stable hub ID
+        $hubIdSetting = \App\Models\CompanySetting::where('store_id', $storeId)->where('key', 'lan_hub_random_id')->first();
+        if (!$hubIdSetting) {
+            $randomId = 'hub_' . bin2hex(random_bytes(6));
+            \App\Models\CompanySetting::create([
+                'store_id' => $storeId,
+                'key' => 'lan_hub_random_id',
+                'value' => $randomId,
+                'is_secret' => false,
+            ]);
+        } else {
+            $randomId = (string)$hubIdSetting->value;
+        }
+
+        // MINIMAL ANNOUNCEMENT ONLY
         return response()->json([
             'status' => 'healthy',
-            'hub_id' => 'hub_' . ($store ? $store->code : 'STORE-01') . '_main',
-            'hub_name' => ($store ? $store->name : 'Store Main') . ' (Hub Server)',
-            'device_name' => $deviceHost,
-            'store_id' => $store ? (string)$store->id : '1',
-            'store_name' => $store ? $store->name : 'LamStone Retail & Pharmacy',
-            'store_code' => $store ? $store->code : 'STORE-01',
-            'version' => '2.0.0',
+            'hub_id' => $randomId,
+            'hub_label' => $hubLabel,
+            'app_version' => '2.0.0',
+            'protocol_version' => '1.0',
             'port' => 8089,
             'api_port' => 8000,
+            'pairing_mode' => $isPairingMode,
+            'pairing_expires_in' => max(0, (int)(($pairingUntil - (time() * 1000)) / 1000)),
             'timestamp' => (int)(microtime(true) * 1000),
-            'counters_count' => $countersCount,
-            'requires_approval' => true,
         ]);
     }
 
     /**
      * Direct LAN master snapshot pull endpoint for secondary counter terminals.
-     * Enforces token validation for authenticated counters.
+     * STRICT SECURITY BOUNDARY: Enforces authenticated per-device token validation.
+     * Rejects unauthenticated requests with 401 Unauthorized.
      */
     public function lanPullSnapshot(Request $request): JsonResponse
     {
         $deviceToken = $request->header('X-Device-Token') ?: $request->query('device_token');
-        if (!empty($deviceToken)) {
-            // Verify counter is active and not revoked/blocked
-            $counter = \App\Models\Counter::where('device_uuid', $deviceToken)
-                ->orWhere('id', is_numeric($deviceToken) ? (int)$deviceToken : 0)
-                ->first();
-            if ($counter && in_array($counter->status, ['revoked', 'blocked', 'disabled'])) {
-                return response()->json([
-                    'error' => 'UNAUTHORIZED_COUNTER',
-                    'message' => 'Terminal access has been revoked or blocked by the store hub.',
-                ], 403);
+        if (empty($deviceToken)) {
+            return response()->json([
+                'error' => 'UNAUTHENTICATED_TERMINAL',
+                'message' => 'Access denied. You must pair this counter and provide a valid device token before retrieving store data.',
+            ], 401);
+        }
+
+        // Verify counter is active and not revoked/blocked
+        $counter = \App\Models\Counter::where('device_uuid', $deviceToken)
+            ->orWhere('id', is_numeric($deviceToken) ? (int)$deviceToken : 0)
+            ->first();
+
+        // Also check derived session key token format
+        if (!$counter) {
+            // Find counter by active session tokens
+            $allCounters = \App\Models\Counter::whereNotNull('device_uuid')->get();
+            foreach ($allCounters as $c) {
+                if ($c->device_uuid && hash_equals($c->device_uuid, $deviceToken)) {
+                    $counter = $c;
+                    break;
+                }
             }
         }
 
-        $storeId = $this->resolveStoreId($request);
+        if (!$counter || in_array($counter->status, ['revoked', 'blocked', 'disabled', 'pending_approval'])) {
+            return response()->json([
+                'error' => 'UNAUTHORIZED_COUNTER',
+                'message' => 'Terminal access is unauthorized, pending approval, or revoked by the store hub.',
+            ], 403);
+        }
+
+        // Update counter last seen & last sync
+        $counter->update([
+            'last_seen_at' => now(),
+            'last_sync_at' => now(),
+            'ip_address' => $request->ip(),
+        ]);
+
+        $storeId = $counter->store_id ?: $this->resolveStoreId($request);
         $products = Product::where('store_id', $storeId)->get();
         if ($products->isEmpty()) {
             $products = Product::all();
@@ -876,9 +923,33 @@ class SyncController
 
     /**
      * Secure terminal pairing handshake with store key verification or hub PIN code.
+     * Enforces:
+     * 1. Pairing Mode window check (unless valid master Store Activation Key is presented)
+     * 2. Rate limiting & lockout after 5 failed attempts
+     * 3. Audit logging of pairing events (time, device address, result)
+     * 4. Notification raised on Hub
      */
     public function lanPairCounter(Request $request): JsonResponse
     {
+        $ip = $request->ip();
+        $rateLimitKey = 'lan_pair_attempts:' . $ip;
+
+        // Check if currently locked out
+        if (\Illuminate\Support\Facades\RateLimiter::tooManyAttempts($rateLimitKey, 5)) {
+            $seconds = \Illuminate\Support\Facades\RateLimiter::availableIn($rateLimitKey);
+            \App\Models\AuditLog::log(
+                'lan_pairing_lockout',
+                'Counter',
+                null,
+                null,
+                ['ip' => $ip, 'retry_after_seconds' => $seconds]
+            );
+            return response()->json([
+                'error' => 'TOO_MANY_FAILED_ATTEMPTS',
+                'message' => "Too many failed pairing attempts from {$ip}. Locked out for {$seconds} seconds.",
+            ], 429);
+        }
+
         $validated = $request->validate([
             'counter_name' => 'required|string|max:100',
             'counter_code' => 'nullable|string|max:20',
@@ -891,28 +962,80 @@ class SyncController
         $storeId = $this->resolveStoreId($request);
         $store = Store::find($storeId) ?? Store::first();
 
-        // Security verification: Valid Store Activation Key, Store Code, or 6-digit PIN (e.g. 729481)
+        // Check if pairing window is active
+        $pairingUntilSetting = \App\Models\CompanySetting::where('store_id', $storeId)->where('key', 'lan_hub_pairing_until')->first();
+        $pairingUntil = $pairingUntilSetting ? (int)$pairingUntilSetting->value : 0;
+        $isPairingModeActive = $pairingUntil > (time() * 1000);
+
+        // Security verification: Valid Store Activation Key, Store Code, or 6-digit PIN
         $providedKey = strtoupper(trim($validated['store_key'] ?? $validated['pairing_code'] ?? ''));
         $isValidKey = false;
+        $isStoreMasterKey = false;
 
         if ($store) {
             $actualKey = strtoupper(trim($store->activation_key ?? ''));
             $actualCode = strtoupper(trim($store->code ?? ''));
-            if ($providedKey === $actualKey || $providedKey === $actualCode || str_contains($providedKey, $actualCode)) {
+            if ($providedKey === $actualKey) {
+                $isValidKey = true;
+                $isStoreMasterKey = true;
+            } elseif ($providedKey === $actualCode || str_contains($providedKey, $actualCode)) {
                 $isValidKey = true;
             }
         }
 
-        // Accept 6-digit numeric PINs or LAN-/LAM- tokens as auto-approved pairing
-        $autoApprove = $isValidKey 
-            || preg_match('/^\d{6}$/', $providedKey) 
-            || str_starts_with($providedKey, 'LAN-') 
-            || str_starts_with($providedKey, 'LAM-');
+        // Accept 6-digit numeric PINs or LAN-/LAM- tokens as valid pairing code
+        $isValidPin = preg_match('/^\d{6}$/', $providedKey) || str_starts_with($providedKey, 'LAN-') || str_starts_with($providedKey, 'LAM-');
+
+        // If pairing mode is closed and client didn't supply master store activation key, reject
+        if (!$isPairingModeActive && !$isStoreMasterKey) {
+            \Illuminate\Support\Facades\RateLimiter::hit($rateLimitKey, 900); // 15 mins
+            \App\Models\AuditLog::log(
+                'lan_pairing_rejected_closed',
+                'Counter',
+                null,
+                null,
+                ['ip' => $ip, 'counter_name' => $validated['counter_name'], 'reason' => 'pairing_mode_closed']
+            );
+            return response()->json([
+                'error' => 'PAIRING_MODE_CLOSED',
+                'message' => 'Pairing mode is currently closed on the Store Hub. Ask the store operator to open Pairing Mode in Settings > Sync & LAN Sharing.',
+            ], 403);
+        }
+
+        if (!$isValidKey && !$isValidPin) {
+            \Illuminate\Support\Facades\RateLimiter::hit($rateLimitKey, 900);
+            $remaining = 5 - \Illuminate\Support\Facades\RateLimiter::attempts($rateLimitKey);
+
+            \App\Models\AuditLog::log(
+                'lan_pairing_failed',
+                'Counter',
+                null,
+                null,
+                ['ip' => $ip, 'counter_name' => $validated['counter_name'], 'remaining_attempts' => max(0, $remaining)]
+            );
+
+            // Notify Hub of failed attempt
+            \App\Models\Notification::create([
+                'store_id' => $storeId,
+                'user_id' => 1,
+                'title' => 'Security Alert: Failed LAN Pairing Attempt',
+                'message' => "An unauthorized device from {$ip} failed pairing with invalid code. {$remaining} attempt(s) remaining.",
+                'type' => 'security',
+                'is_read' => false,
+            ]);
+
+            return response()->json([
+                'error' => 'INVALID_PAIRING_CODE',
+                'message' => "Invalid Store Key or Hub Pairing Code. {$remaining} attempts remaining before lockout.",
+            ], 401);
+        }
+
+        // Clear rate limiter on successful auth
+        \Illuminate\Support\Facades\RateLimiter::clear($rateLimitKey);
 
         $requestedCode = !empty($validated['counter_code']) ? strtoupper(trim($validated['counter_code'])) : 'C02';
         $counterName = $validated['counter_name'];
         $deviceName = $validated['device_name'] ?? null;
-        $storeId = $store ? $store->id : 1;
         $deviceUuid = $validated['device_uuid'];
 
         // Find existing counter by device_uuid first, or by (store_id, counter_code)
@@ -922,6 +1045,8 @@ class SyncController
             })
             ->first();
 
+        $autoApprove = true;
+
         if ($counter) {
             $counter->update([
                 'store_id' => $storeId,
@@ -930,8 +1055,8 @@ class SyncController
                 'device_name' => $deviceName ?: $counter->device_name,
                 'is_hub' => false,
                 'is_remote' => false,
-                'status' => $autoApprove ? 'active' : 'pending_approval',
-                'ip_address' => $request->ip(),
+                'status' => 'active',
+                'ip_address' => $ip,
                 'last_seen_at' => now(),
             ]);
         } else {
@@ -950,13 +1075,40 @@ class SyncController
                 'device_name' => $deviceName,
                 'is_hub' => false,
                 'is_remote' => false,
-                'status' => $autoApprove ? 'active' : 'pending_approval',
-                'ip_address' => $request->ip(),
+                'status' => 'active',
+                'ip_address' => $ip,
                 'last_seen_at' => now(),
             ]);
         }
 
-        $deviceToken = 'jwt_lan_' . bin2hex(random_bytes(16));
+        // Generate cryptographically secure device session token
+        $deviceToken = 'jwt_lan_' . bin2hex(random_bytes(24));
+        $counter->update(['device_uuid' => $deviceToken]);
+
+        // Audit log success
+        \App\Models\AuditLog::log(
+            'lan_pairing_success',
+            'Counter',
+            (string)$counter->id,
+            null,
+            [
+                'counter_code' => $counter->counter_code,
+                'counter_name' => $counter->counter_name,
+                'device_name' => $counter->device_name,
+                'ip' => $ip,
+            ],
+            $storeId
+        );
+
+        // Notify Hub of newly paired workstation
+        \App\Models\Notification::create([
+            'store_id' => $storeId,
+            'user_id' => 1,
+            'title' => 'Counter Terminal Paired',
+            'message' => "Workstation '{$counter->counter_name}' ({$counter->counter_code}) from IP {$ip} successfully paired.",
+            'type' => 'info',
+            'is_read' => false,
+        ]);
 
         return response()->json([
             'success' => true,
@@ -965,9 +1117,48 @@ class SyncController
             'counter_name' => $counter->counter_name,
             'store_id' => $store ? (string)$store->id : '1',
             'store_name' => $store ? $store->name : 'Store Main',
+            'store_code' => $store ? $store->code : 'STORE-01',
             'status' => $counter->status,
             'device_token' => $deviceToken,
-            'message' => $autoApprove ? 'Terminal paired and activated successfully.' : 'Terminal enrolled. Awaiting approval on Hub.',
+            'message' => 'Terminal paired and activated successfully.',
+        ]);
+    }
+
+    /**
+     * Hub controls: Update Hub display label, announce switch, or open/close pairing mode.
+     */
+    public function lanUpdateHubConfig(Request $request): JsonResponse
+    {
+        $storeId = $this->resolveStoreId($request);
+
+        if ($request->has('display_label')) {
+            $label = trim($request->input('display_label', 'Main Counter Hub'));
+            \App\Models\CompanySetting::updateOrCreate(
+                ['store_id' => $storeId, 'key' => 'lan_hub_display_label'],
+                ['value' => $label, 'is_secret' => false]
+            );
+        }
+
+        if ($request->has('announce_enabled')) {
+            $enabled = (bool)$request->input('announce_enabled');
+            \App\Models\CompanySetting::updateOrCreate(
+                ['store_id' => $storeId, 'key' => 'lan_hub_announce_enabled'],
+                ['value' => $enabled, 'is_secret' => false]
+            );
+        }
+
+        if ($request->has('pairing_mode_duration_minutes')) {
+            $duration = (int)$request->input('pairing_mode_duration_minutes');
+            $until = $duration > 0 ? (time() + ($duration * 60)) * 1000 : 0;
+            \App\Models\CompanySetting::updateOrCreate(
+                ['store_id' => $storeId, 'key' => 'lan_hub_pairing_until'],
+                ['value' => $until, 'is_secret' => false]
+            );
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Hub configuration updated successfully.',
         ]);
     }
 

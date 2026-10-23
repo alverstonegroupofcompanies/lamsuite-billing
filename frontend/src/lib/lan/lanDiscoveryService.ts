@@ -14,34 +14,29 @@ export interface NetworkInterfaceInfo {
 export interface HubHealthCheck {
   isHealthy: boolean;
   hubId: string;
-  hubName: string;
-  deviceName?: string;
-  storeId: string;
-  storeName: string;
-  storeCode: string;
-  version: string;
+  hubLabel: string;
+  appVersion: string;
+  protocolVersion: string;
   port: number;
   apiPort: number;
   timestamp: number;
-  countersCount: number;
-  requiresApproval: boolean;
+  pairingMode: boolean;
+  pairingExpiresIn: number;
   error?: string;
   latencyMs?: number;
 }
 
 export interface DiscoveredHubPeer {
   id: string;
-  name: string;
-  device_name?: string;
+  hub_label: string;
   ip_address: string;
   port: number;
   api_port: number;
-  counter_name: string;
-  counter_code: string;
-  store_id: string;
-  store_name: string;
-  store_code: string;
-  version: string;
+  app_version: string;
+  protocol_version: string;
+  pairing_mode: boolean;
+  pairing_expires_in: number;
+  is_paired: boolean;
   status: "online" | "idle";
   is_main: boolean;
   discovery_method: "udp_beacon" | "mdns" | "subnet_sweep" | "host_probe";
@@ -187,16 +182,14 @@ class LanDiscoveryService {
         return {
           isHealthy: false,
           hubId: "",
-          hubName: "",
-          storeId: "",
-          storeName: "",
-          storeCode: "",
-          version: "",
+          hubLabel: "",
+          appVersion: "",
+          protocolVersion: "",
           port: 8089,
           apiPort: port,
           timestamp: 0,
-          countersCount: 0,
-          requiresApproval: true,
+          pairingMode: false,
+          pairingExpiresIn: 0,
           error: `HTTP ${res.status}: ${res.statusText}`,
           latencyMs,
         };
@@ -206,17 +199,14 @@ class LanDiscoveryService {
       return {
         isHealthy: true,
         hubId: data.hub_id || `hub_${cleanHost}`,
-        hubName: data.hub_name || "Store Main Hub",
-        deviceName: data.device_name || "Main-PC",
-        storeId: String(data.store_id || "1"),
-        storeName: data.store_name || "LamStone Store",
-        storeCode: data.store_code || "STORE",
-        version: data.version || "2.0.0",
+        hubLabel: data.hub_label || "Main Counter Hub",
+        appVersion: data.app_version || data.version || "2.0.0",
+        protocolVersion: data.protocol_version || "1.0",
         port: data.port || 8089,
         apiPort: data.api_port || port,
         timestamp: data.timestamp || Date.now(),
-        countersCount: data.counters_count || 0,
-        requiresApproval: Boolean(data.requires_approval),
+        pairingMode: Boolean(data.pairing_mode),
+        pairingExpiresIn: Number(data.pairing_expires_in) || 0,
         latencyMs,
       };
     } catch (err: any) {
@@ -230,16 +220,14 @@ class LanDiscoveryService {
       return {
         isHealthy: false,
         hubId: "",
-        hubName: "",
-        storeId: "",
-        storeName: "",
-        storeCode: "",
-        version: "",
+        hubLabel: "",
+        appVersion: "",
+        protocolVersion: "",
         port: 8089,
         apiPort: port,
         timestamp: 0,
-        countersCount: 0,
-        requiresApproval: true,
+        pairingMode: false,
+        pairingExpiresIn: 0,
         error: errorMsg,
         latencyMs: Math.round(performance.now() - start),
       };
@@ -303,17 +291,15 @@ class LanDiscoveryService {
           if (health.isHealthy) {
             const peer: DiscoveredHubPeer = {
               id: health.hubId,
-              name: health.storeName,
-              device_name: health.deviceName,
+              hub_label: health.hubLabel,
               ip_address: host,
               port: health.port,
               api_port: health.apiPort,
-              counter_name: health.hubName,
-              counter_code: "C01",
-              store_id: health.storeId,
-              store_name: health.storeName,
-              store_code: health.storeCode,
-              version: health.version,
+              app_version: health.appVersion,
+              protocol_version: health.protocolVersion,
+              pairing_mode: health.pairingMode,
+              pairing_expires_in: health.pairingExpiresIn,
+              is_paired: false,
               status: "online",
               is_main: true,
               discovery_method: "subnet_sweep",

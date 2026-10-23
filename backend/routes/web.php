@@ -17,6 +17,7 @@ Route::get('/lan/v1/pull', [\App\Http\Controllers\Api\SyncController::class, 'la
 Route::post('/lan/v1/pair', [\App\Http\Controllers\Api\SyncController::class, 'lanPairCounter']);
 Route::get('/lan/v1/clients', [\App\Http\Controllers\Api\SyncController::class, 'lanGetClients']);
 Route::post('/lan/v1/clients/{id}/status', [\App\Http\Controllers\Api\SyncController::class, 'lanUpdateClientStatus']);
+Route::post('/lan/v1/hub/config', [\App\Http\Controllers\Api\SyncController::class, 'lanUpdateHubConfig']);
 
 Route::get('/admin/{any?}', function () {
     $distPath = base_path('../admin-panel/dist/index.html');
