@@ -20,19 +20,25 @@ import { staffAuthService, type ActiveStaffSession } from "../lib/auth/staffAuth
 import { storeDeviceService } from "../lib/auth/storeDeviceService";
 import { LockOverlay } from "./LockOverlay";
 import { AccountSwitcherModal } from "./AccountSwitcherModal";
-import { Lock, Users } from "lucide-react";
+import { StoreSwitcherModal } from "./StoreSwitcherModal";
+import { storeRegistryService, type RegisteredStoreRecord, STORE_PRESET_COLORS } from "../lib/auth/storeRegistryService";
+import { Lock, Users, Building2 } from "lucide-react";
 
 interface LayoutProps {
   children: React.ReactNode;
+  onOpenGateway?: () => void;
+  onAddNewStore?: () => void;
 }
 
-export const Layout: React.FC<LayoutProps> = ({ children }) => {
+export const Layout: React.FC<LayoutProps> = ({ children, onOpenGateway, onAddNewStore }) => {
   const location = useLocation();
   const navigate = useNavigate();
   const [time, setTime] = useState<string>(new Date().toLocaleTimeString());
   const [isOnline, setIsOnline] = useState<boolean>(navigator.onLine);
   const [isCmdPaletteOpen, setIsCmdPaletteOpen] = useState(false);
   const [isShortcutsModalOpen, setIsShortcutsModalOpen] = useState(false);
+  const [isStoreSwitcherOpen, setIsStoreSwitcherOpen] = useState(false);
+  const [activeStore, setActiveStore] = useState<RegisteredStoreRecord | null>(storeRegistryService.getActiveStore());
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isStoreDisabled, setIsStoreDisabled] = useState(false);
   const [session, setSession] = useState<ActiveStaffSession | null>(staffAuthService.getCurrentSession());
@@ -67,9 +73,13 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
         isProcessing: s.isProcessing,
       });
     });
+    const unsubReg = storeRegistryService.onRegistryChange((reg) => {
+      setActiveStore(storeRegistryService.getActiveStore());
+    });
     return () => {
       unsubStaff();
       unsubSync();
+      unsubReg();
     };
   }, []);
 
@@ -87,6 +97,16 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
       if (e.defaultPrevented) return;
 
       const isPosPage = location.pathname === "/pos" || location.pathname.startsWith("/pos");
+
+      // Multi-Store Switcher (Alt+S or Alt+F3 - Tally Style)
+      if (
+        (e.altKey && (e.key.toLowerCase() === "s" || e.code === "KeyS")) ||
+        (e.altKey && (e.key === "F3" || e.code === "F3"))
+      ) {
+        e.preventDefault();
+        setIsStoreSwitcherOpen((prev) => !prev);
+        return;
+      }
 
       // Manual Lock Terminal (Ctrl+L)
       if ((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === "l" || e.code === "KeyL")) {
@@ -303,25 +323,51 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
     );
   }
 
+  const storeColorHex = activeStore?.color || "#059669";
+
   return (
     <div className="flex h-screen flex-col bg-[var(--color-canvas)] font-sans select-none overflow-hidden">
+      {/* Visual Identity Color Strip across the top window border */}
+      <div className="h-1 w-full shrink-0" style={{ backgroundColor: storeColorHex }} />
+
       {/* Top Header Bar */}
       <header className="flex h-12 shrink-0 items-center justify-between border-b border-[var(--color-border)] bg-[var(--color-surface)] px-4 shadow-xs">
-        <Link
-          to="/dashboard"
-          className="flex items-center gap-2.5 hover:opacity-90 transition-opacity cursor-pointer text-inherit no-underline shrink-0"
-          title="Go to Dashboard (Home / Ctrl+D)"
-        >
-          <img
-            src="/app-icon.png"
-            alt="LamSuite Logo"
-            className="h-8 w-8 rounded-[8px] object-cover border border-[var(--color-border)] bg-[var(--color-surface)] shrink-0"
-          />
-          <div>
-            <h1 className="text-sm font-bold text-[var(--color-text)] leading-tight whitespace-nowrap">LamSuite Billing</h1>
-            <p className="text-[11px] text-[var(--color-text-muted)] font-medium whitespace-nowrap">Retail & Pharmacy POS</p>
-          </div>
-        </Link>
+        <div className="flex items-center gap-3 shrink-0">
+          <Link
+            to="/dashboard"
+            className="flex items-center gap-2 hover:opacity-90 transition-opacity cursor-pointer text-inherit no-underline shrink-0"
+            title="Go to Dashboard (Home / Ctrl+D)"
+          >
+            <img
+              src="/app-icon.png"
+              alt="LamSuite Logo"
+              className="h-8 w-8 rounded-[8px] object-cover border border-[var(--color-border)] bg-[var(--color-surface)] shrink-0"
+            />
+            <div>
+              <h1 className="text-sm font-bold text-[var(--color-text)] leading-tight whitespace-nowrap">LamSuite Billing</h1>
+              <p className="text-[11px] text-[var(--color-text-muted)] font-medium whitespace-nowrap">Retail & Pharmacy POS</p>
+            </div>
+          </Link>
+
+          {/* Active Store Switcher Pill (Tally-Style Company Pill) */}
+          <button
+            type="button"
+            onClick={() => setIsStoreSwitcherOpen(true)}
+            title="Switch Company / Store (Alt + S)"
+            className="flex items-center gap-2 px-2.5 py-1 rounded-btn bg-[var(--color-surface-subtle)] hover:bg-[var(--color-surface-hover)] border border-[var(--color-border)] text-xs font-semibold cursor-pointer transition-colors shadow-2xs"
+          >
+            <span
+              className="w-2.5 h-2.5 rounded-full shrink-0"
+              style={{ backgroundColor: storeColorHex }}
+            />
+            <span className="font-bold text-[var(--color-text)] max-w-[160px] truncate">
+              {activeStore?.alias || activeStore?.name || "Main Store"}
+            </span>
+            <span className="text-[10px] text-[var(--color-text-muted)] font-mono px-1 rounded bg-[var(--color-canvas)] border border-[var(--color-border)]">
+              Alt+S
+            </span>
+          </button>
+        </div>
 
         {/* Center: Command Palette Trigger Button */}
         <div className="flex-1 max-w-md mx-4">
@@ -465,6 +511,19 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
         isOpen={isAccountSwitcherOpen}
         onClose={() => setIsAccountSwitcherOpen(false)}
         onSwitched={() => setSession(staffAuthService.getCurrentSession())}
+      />
+
+      {/* Tally-Style Store Switcher Modal */}
+      <StoreSwitcherModal
+        isOpen={isStoreSwitcherOpen}
+        onClose={() => setIsStoreSwitcherOpen(false)}
+        onStoreSwitched={(switched) => {
+          setActiveStore(switched);
+          // Trigger reload of session state since store switched
+          setSession(staffAuthService.getCurrentSession());
+        }}
+        onAddNewStore={onAddNewStore}
+        onOpenGateway={onOpenGateway}
       />
     </div>
   );

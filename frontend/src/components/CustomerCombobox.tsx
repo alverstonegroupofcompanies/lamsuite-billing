@@ -118,7 +118,7 @@ export const CustomerCombobox: React.FC<CustomerComboboxProps> = ({
   const updatePosition = useCallback(() => {
     if (inputRef.current) {
       const rect = inputRef.current.getBoundingClientRect();
-      const minDropdownWidth = Math.max(rect.width, 340);
+      const minDropdownWidth = Math.max(rect.width, 480);
       let left = rect.left;
       
       // Ensure portal doesn't clip off the right edge of viewport
@@ -561,36 +561,36 @@ export const CustomerCombobox: React.FC<CustomerComboboxProps> = ({
                       : "text-[var(--color-text)] hover:bg-[var(--color-surface-hover)]"
                   }`}
                 >
-                  <div className="flex items-center gap-2">
-                    <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[var(--color-accent-soft)] text-[var(--color-accent)] font-bold text-[10px]">
+                  <div className="flex items-center gap-3 min-w-0 pr-2">
+                    <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[var(--color-accent-soft)] text-[var(--color-accent)] font-bold text-[11px]">
                       {cust.name.charAt(0).toUpperCase()}
                     </div>
-                    <div>
-                      <div className="flex items-center gap-1.5">
-                        <span className="font-medium text-[var(--color-text)]">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-semibold text-[var(--color-text)]">
                           <HighlightMatch text={cust.name} query={searchTerm} />
                         </span>
                         {cust.customer_code && (
-                          <span className="rounded-[4px] bg-[var(--color-surface-subtle)] px-1 py-0.2 text-[9px] font-mono text-[var(--color-text-muted)] border border-[var(--color-border)]">
+                          <span className="rounded px-1.5 py-0.5 text-[9px] font-mono text-[var(--color-text-muted)] bg-[var(--color-surface-subtle)] border border-[var(--color-border)]">
                             <HighlightMatch text={cust.customer_code} query={searchTerm} />
                           </span>
                         )}
                         {cust.default_discount_percent ? (
-                          <span className="rounded-full bg-[var(--color-warning-bg)] px-1.5 py-0.2 text-[9px] font-semibold text-[var(--color-warning-text)] border border-[var(--color-warning-border)]">
+                          <span className="rounded-full bg-[var(--color-warning-bg)] px-2 py-0.5 text-[9px] font-semibold text-[var(--color-warning-text)] border border-[var(--color-warning-border)]">
                             {cust.default_discount_percent}% Off
                           </span>
                         ) : null}
                       </div>
 
-                      <div className="mt-0.5 flex flex-wrap items-center gap-2 text-[10px] text-slate-500 dark:text-slate-400">
+                      <div className="mt-1 flex flex-wrap items-center gap-3 text-[11px] text-slate-500 dark:text-slate-400">
                         {cust.phone && (
-                          <span className="flex items-center gap-0.5">
-                            <Phone className="h-2.5 w-2.5 text-slate-400" />
+                          <span className="flex items-center gap-1">
+                            <Phone className="h-3 w-3 text-slate-400" />
                             <HighlightMatch text={cust.phone} query={searchTerm} />
                           </span>
                         )}
                         {cust.gstin && (
-                          <span className="font-mono text-[9px]">
+                          <span className="font-mono text-[10px]">
                             GST: <HighlightMatch text={cust.gstin} query={searchTerm} />
                           </span>
                         )}
@@ -599,10 +599,10 @@ export const CustomerCombobox: React.FC<CustomerComboboxProps> = ({
                   </div>
 
                   {/* Dues & Balance Badge */}
-                  <div className="flex flex-col items-end">
+                  <div className="flex flex-col items-end shrink-0 pl-2">
                     {hasOutstanding ? (
                       <span
-                        className={`rounded px-1.5 py-0.5 text-[10px] font-bold ${
+                        className={`rounded px-2 py-0.5 text-[10px] font-bold ${
                           exceedsLimit
                             ? "bg-red-100 text-red-700 dark:bg-red-950/80 dark:text-red-300"
                             : "bg-amber-100 text-amber-800 dark:bg-amber-950/80 dark:text-amber-300"
@@ -611,7 +611,7 @@ export const CustomerCombobox: React.FC<CustomerComboboxProps> = ({
                         ₹{cust.outstanding_balance?.toLocaleString()} due
                       </span>
                     ) : (
-                      <span className="text-[10px] text-slate-400 dark:text-slate-500">₹0 due</span>
+                      <span className="text-[10px] text-slate-400 dark:text-slate-500 font-medium">₹0 due</span>
                     )}
 
                     {isSelected && (

@@ -49,7 +49,13 @@ Route::post('/sync/push/parties', [SyncController::class, 'pushParties']);
 Route::post('/sync/push/products', [SyncController::class, 'pushProducts']);
 Route::post('/sync/push/adjustments', [SyncController::class, 'pushAdjustments']);
 Route::post('/sync/push/transfers', [SyncController::class, 'pushTransfers']);
+Route::post('/sync/push/staff', [SyncController::class, 'pushStaff']);
 Route::get('/sync/pull/deltas', [SyncController::class, 'pullDeltas']);
+Route::get('/lan/v1/health', [SyncController::class, 'lanHealth']);
+Route::get('/lan/v1/pull', [SyncController::class, 'lanPullSnapshot']);
+Route::post('/lan/v1/pair', [SyncController::class, 'lanPairCounter']);
+Route::get('/lan/v1/clients', [SyncController::class, 'lanGetClients']);
+Route::post('/lan/v1/clients/{id}/status', [SyncController::class, 'lanUpdateClientStatus']);
 Route::get('/sync/stream', [SyncController::class, 'streamSSE']);
 Route::post('/invoices/{id}/lock', [SyncController::class, 'lockInvoice']);
 Route::post('/invoices/{id}/unlock', [SyncController::class, 'unlockInvoice']);
@@ -57,6 +63,13 @@ Route::get('/inventory/negative-stock-report', [SyncController::class, 'getNegat
 Route::post('/counters/{id}/shifts/close', [CounterController::class, 'closeShift']);
 Route::post('/counters/{id}/status', [CounterController::class, 'updateStatus']);
 Route::post('/stores/day-close', [CounterController::class, 'closeStoreDay']);
+
+// Desktop Tauri Updater Manifest Endpoint
+Route::get('/app/update/{target}/{current_version}', function ($target, $current_version) {
+    // When no new update is released, Tauri expects HTTP 204 (No Content)
+    // When a new update is ready, return JSON with version, pub_date, signature, and url
+    return response()->noContent();
+});
 
 /*
 |--------------------------------------------------------------------------
@@ -139,6 +152,7 @@ Route::middleware(['auth:sanctum', 'session.timeout', 'ip.allowlist', 'scope.sto
     Route::get('/stores/{id}', [AdminStoreController::class, 'show'])->middleware('rbac:stores,view');
     Route::put('/stores/{id}', [AdminStoreController::class, 'update'])->middleware('rbac:stores,edit');
     Route::post('/stores/{id}/toggle-status', [AdminStoreController::class, 'toggleStatus'])->middleware('rbac:stores,edit');
+    Route::post('/stores/{id}/regenerate-key', [AdminStoreController::class, 'regenerateKey'])->middleware('rbac:stores,edit');
     Route::post('/stores/{id}/reset', [AdminStoreController::class, 'resetStore'])->middleware('rbac:stores,delete');
 
     // Module 3: Devices / Counters

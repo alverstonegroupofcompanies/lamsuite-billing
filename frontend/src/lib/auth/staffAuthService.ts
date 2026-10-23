@@ -41,11 +41,16 @@ export class StaffAuthService {
     this.initDemoStaffIfEmpty();
   }
 
-  async initDemoStaffIfEmpty(): Promise<void> {
+  async initDemoStaffIfEmpty(
+    storeId?: string,
+    storeMeta?: { name?: string; code?: string; alias?: string }
+  ): Promise<void> {
     try {
+      const activeStore = String(storeId || (await storeDeviceService.getDeviceProfile())?.store_id || "1");
       const users = await sqliteStorage.findAll<any>("staff_users");
-      if (!users || users.length === 0) {
-        // Seed initial store staff for immediate offline usability
+      const existingInStore = (users || []).filter((u) => String(u.store_id) === activeStore);
+      if (existingInStore.length === 0) {
+        // Seed initial store staff specific to this store partition
         const adminPw = await staffCryptoService.hashSecret("admin123");
         const adminPin = await staffCryptoService.hashPin("1234");
 
@@ -55,12 +60,28 @@ export class StaffAuthService {
         const managerPw = await staffCryptoService.hashSecret("manager123");
         const managerPin = await staffCryptoService.hashPin("2222");
 
+        const lowerMeta = `${storeMeta?.name || ""} ${storeMeta?.code || ""} ${storeMeta?.alias || ""} ${activeStore}`.toLowerCase();
+        const isBranchTwo =
+          activeStore === "2" ||
+          lowerMeta.includes("kochi") ||
+          lowerMeta.includes("store-02") ||
+          lowerMeta.includes("02");
+        const isBranchThree =
+          activeStore === "3" ||
+          lowerMeta.includes("calicut") ||
+          lowerMeta.includes("store-03") ||
+          lowerMeta.includes("03");
+
         const initialUsers: Array<Record<string, unknown>> = [
           {
-            id: "usr_admin_01",
-            store_id: "store_main",
-            username: "admin",
-            full_name: "Muhammad Anshad (Store Owner)",
+            id: `usr_admin_${activeStore}`,
+            store_id: activeStore,
+            username: isBranchTwo ? "kochi_admin" : isBranchThree ? "calicut_admin" : "admin",
+            full_name: isBranchTwo
+              ? "Suresh Menon (Branch Lead - Kochi)"
+              : isBranchThree
+              ? "Faizal K (Hub Director - Calicut)"
+              : "Muhammad Anshad (Store Owner)",
             role: "admin",
             password_hash: adminPw,
             pin_hash: adminPin,
@@ -76,10 +97,14 @@ export class StaffAuthService {
             updated_at: Date.now(),
           },
           {
-            id: "usr_manager_01",
-            store_id: "store_main",
-            username: "manager",
-            full_name: "Rahul Verma (Floor Manager)",
+            id: `usr_manager_${activeStore}`,
+            store_id: activeStore,
+            username: isBranchTwo ? "kch_manager" : isBranchThree ? "clt_manager" : "manager",
+            full_name: isBranchTwo
+              ? "Naveen Raj (Kochi Operations Manager)"
+              : isBranchThree
+              ? "Deepak Nair (Logistics Manager)"
+              : "Rahul Verma (Floor Manager)",
             role: "manager",
             password_hash: managerPw,
             pin_hash: managerPin,
@@ -97,10 +122,14 @@ export class StaffAuthService {
             updated_at: Date.now(),
           },
           {
-            id: "usr_cashier_01",
-            store_id: "store_main",
-            username: "cashier1",
-            full_name: "Ananya Nair (Counter Cashier)",
+            id: `usr_cashier_${activeStore}`,
+            store_id: activeStore,
+            username: isBranchTwo ? "kch_cashier1" : isBranchThree ? "clt_cashier1" : "cashier1",
+            full_name: isBranchTwo
+              ? "Reshma Pillai (Kochi Billing Desk)"
+              : isBranchThree
+              ? "Arun Kumar (Calicut Terminal)"
+              : "Ananya Nair (Counter Cashier)",
             role: "cashier",
             password_hash: cashierPw,
             pin_hash: cashierPin,
@@ -117,6 +146,20 @@ export class StaffAuthService {
 
         for (const u of initialUsers) {
           await sqliteStorage.insertRecord("staff_users", u.id as string, u);
+          // Enqueue for background synchronization
+          try {
+            const { syncQueueService, defaultBackendApiClient } = await import("../sync/syncQueueService");
+            await syncQueueService.enqueue("staff_user", u.id as string, "create", {
+              id: u.id,
+              store_id: u.store_id,
+              username: u.username,
+              full_name: u.full_name,
+              role: u.role,
+              biometric_registered: u.biometric_registered,
+            });
+            // Try pushing immediately in background if backend reachable
+            syncQueueService.processQueue(defaultBackendApiClient).catch(() => {});
+          } catch (_) {}
         }
       }
     } catch (_) {}
@@ -147,11 +190,27 @@ export class StaffAuthService {
     return this.idleTimeoutMs;
   }
 
-  async listActiveStaff(): Promise<StaffUser[]> {
-    const raw = await sqliteStorage.findAll<any>("staff_users");
-    return (raw || [])
-      .filter((u) => Boolean(u.is_active))
-      .map((u) => ({
+  async listActiveStaff(
+    storeId?: string,
+    storeMeta?: { name?: string; code?: string; alias?: string }
+  ): Promise<StaffUser[]> {
+    const activeStore = String(storeId || (await storeDeviceService.getDeviceProfile())?.store_id || "1");
+    let raw = await sqliteStorage.findAll<any>("staff_users");
+    
+    // Find staff strictly belonging to this store
+    let storeMatching = (raw || []).filter(
+      (u) => Boolean(u.is_active) && (String(u.store_id) === activeStore || (activeStore === "1" && u.store_id === "store_main"))
+    );
+
+    if (storeMatching.length === 0) {
+      await this.initDemoStaffIfEmpty(activeStore, storeMeta);
+      raw = await sqliteStorage.findAll<any>("staff_users");
+      storeMatching = (raw || []).filter(
+        (u) => Boolean(u.is_active) && (String(u.store_id) === activeStore || (activeStore === "1" && u.store_id === "store_main"))
+      );
+    }
+
+    return storeMatching.map((u) => ({
         id: u.id,
         store_id: u.store_id,
         username: u.username,
@@ -304,6 +363,19 @@ export class StaffAuthService {
 
     user.must_change_password = false;
     await this.persistUserRecord(user);
+
+    try {
+      const { syncQueueService, defaultBackendApiClient } = await import("../sync/syncQueueService");
+      await syncQueueService.enqueue("staff_user", user.id, "update", {
+        id: user.id,
+        store_id: user.store_id,
+        username: user.username,
+        full_name: user.full_name,
+        role: user.role,
+        biometric_registered: user.biometric_registered,
+      });
+      syncQueueService.processQueue(defaultBackendApiClient).catch(() => {});
+    } catch (_) {}
 
     if (this.currentSession && this.currentSession.user.id === user.id) {
       this.currentSession.user = { ...user };

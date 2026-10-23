@@ -50,6 +50,7 @@ export const KeyboardShortcutsModal: React.FC<KeyboardShortcutsModalProps> = ({ 
     {
       category: "Navigation & Global",
       shortcuts: [
+        { key: "Alt + S / Alt + F3", description: "Switch Company / Store (Instant Tally Switch)" },
         { key: "Home or Ctrl+D", description: "Go to Dashboard" },
         { key: "Ctrl + K", description: "Open Command Palette / Fast Search" },
         { key: "F2 / Shift+F2", description: "Purchase Register / Purchase Returns" },

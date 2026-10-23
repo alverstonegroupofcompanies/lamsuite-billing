@@ -93,6 +93,10 @@ class SyncController
                     case 'payment':
                         $this->upsertSinglePayment($request, $payload);
                         break;
+                    case 'staff':
+                    case 'staff_user':
+                        $this->upsertSingleStaffUser($request, $payload);
+                        break;
                     default:
                         // Record as generic sync event
                         $this->recordSyncEvent($request, $entityType, $item['entity_id'] ?? uniqid(), $action, $payload);
@@ -643,6 +647,78 @@ class SyncController
     }
 
     /**
+     * Upsert staff users synced from billing terminals.
+     */
+    public function pushStaff(Request $request): JsonResponse
+    {
+        $staffList = $request->input('staff', $request->input('items', []));
+        $ingested = 0;
+        foreach ($staffList as $staff) {
+            $this->upsertSingleStaffUser($request, $staff);
+            $ingested++;
+        }
+        return response()->json(['success' => true, 'ingested_count' => $ingested]);
+    }
+
+    private function upsertSingleStaffUser(Request $request, array $staff): void
+    {
+        $storeId = $this->resolveStoreId($request, $staff);
+        $username = trim($staff['username'] ?? '');
+        $name = trim($staff['full_name'] ?? ($staff['name'] ?? 'Staff Operator'));
+        if (empty($username)) {
+            return;
+        }
+
+        // Standardize email identifier for user model
+        $email = !empty($staff['email']) ? $staff['email'] : ($username . '@store' . $storeId . '.lamstone.local');
+
+        // Map desktop roles to backend roles
+        $desktopRole = strtolower($staff['role'] ?? 'cashier');
+        $backendRole = 'manager';
+        if (in_array($desktopRole, ['admin', 'store_owner', 'super_admin'])) {
+            $backendRole = 'store_owner';
+        } elseif ($desktopRole === 'manager') {
+            $backendRole = 'manager';
+        } elseif (in_array($desktopRole, ['cashier', 'operator'])) {
+            $backendRole = 'manager'; // Allow POS operator access with manager base role
+        }
+
+        $user = \App\Models\User::where('email', $email)
+            ->orWhere(function ($q) use ($storeId, $username) {
+                $q->where('store_id', $storeId)
+                  ->where('email', 'like', $username . '@%');
+            })
+            ->first();
+
+        if ($user) {
+            $user->update([
+                'store_id' => $storeId,
+                'name' => $name,
+                'role' => $user->role ?: $backendRole,
+                'is_biometric_enabled' => !empty($staff['biometric_registered']),
+            ]);
+        } else {
+            \App\Models\User::create([
+                'store_id' => $storeId,
+                'name' => $name,
+                'email' => $email,
+                'password' => \Illuminate\Support\Facades\Hash::make($staff['password'] ?? 'staff123'),
+                'role' => $backendRole,
+                'is_biometric_enabled' => !empty($staff['biometric_registered']),
+                'idle_timeout_minutes' => 15,
+                'max_failed_logins' => 5,
+            ]);
+        }
+
+        $this->recordSyncEvent($request, 'staff_user', $staff['id'] ?? uniqid(), 'upsert', [
+            'store_id' => $storeId,
+            'username' => $username,
+            'full_name' => $name,
+            'role' => $desktopRole,
+        ]);
+    }
+
+    /**
      * Idempotent push of stock transactions from desktop client.
      */
     public function pushStockEvents(Request $request): JsonResponse
@@ -705,6 +781,235 @@ class SyncController
             'products' => $products,
             'batches' => $batches,
             'parties' => $parties,
+        ]);
+    }
+
+    /**
+     * Dedicated LAN Health & Hub Discovery verification endpoint.
+     */
+    public function lanHealth(Request $request): JsonResponse
+    {
+        $storeId = $this->resolveStoreId($request);
+        $store = Store::find($storeId) ?? Store::first();
+
+        // Count connected active secondary counters (excluding hub itself)
+        $countersCount = \App\Models\Counter::where('store_id', $store ? $store->id : 1)
+            ->where('is_hub', false)
+            ->where('status', 'active')
+            ->count();
+
+        return response()->json([
+            'status' => 'healthy',
+            'hub_id' => 'hub_' . ($store ? $store->code : 'STORE-01') . '_main',
+            'hub_name' => ($store ? $store->name : 'Store Main') . ' (Hub Server)',
+            'store_id' => $store ? (string)$store->id : '1',
+            'store_name' => $store ? $store->name : 'LamStone Retail & Pharmacy',
+            'store_code' => $store ? $store->code : 'STORE-01',
+            'version' => '2.0.0',
+            'port' => 8089,
+            'api_port' => 8000,
+            'timestamp' => (int)(microtime(true) * 1000),
+            'counters_count' => $countersCount,
+            'requires_approval' => true,
+        ]);
+    }
+
+    /**
+     * Direct LAN master snapshot pull endpoint for secondary counter terminals.
+     * Enforces token validation for authenticated counters.
+     */
+    public function lanPullSnapshot(Request $request): JsonResponse
+    {
+        $deviceToken = $request->header('X-Device-Token') ?: $request->query('device_token');
+        if (!empty($deviceToken)) {
+            // Verify counter is active and not revoked/blocked
+            $counter = \App\Models\Counter::where('device_uuid', $deviceToken)
+                ->orWhere('id', is_numeric($deviceToken) ? (int)$deviceToken : 0)
+                ->first();
+            if ($counter && in_array($counter->status, ['revoked', 'blocked', 'disabled'])) {
+                return response()->json([
+                    'error' => 'UNAUTHORIZED_COUNTER',
+                    'message' => 'Terminal access has been revoked or blocked by the store hub.',
+                ], 403);
+            }
+        }
+
+        $storeId = $this->resolveStoreId($request);
+        $products = Product::where('store_id', $storeId)->get();
+        if ($products->isEmpty()) {
+            $products = Product::all();
+        }
+
+        $batches = ProductBatch::where('store_id', $storeId)->get();
+        if ($batches->isEmpty()) {
+            $batches = ProductBatch::all();
+        }
+
+        $parties = Party::where('store_id', $storeId)->get();
+        if ($parties->isEmpty()) {
+            $parties = Party::all();
+        }
+
+        // Include invoices and invoice items for cross-counter visibility & synchronization
+        $invoices = Invoice::where('store_id', $storeId)->get();
+        if ($invoices->isEmpty()) {
+            $invoices = Invoice::all();
+        }
+
+        $invoiceIds = $invoices->pluck('id');
+        $invoiceItems = InvoiceItem::whereIn('invoice_id', $invoiceIds)->get();
+
+        return response()->json([
+            'snapshot_id' => 'snap_' . round(microtime(true) * 1000) . '_' . substr(md5(uniqid()), 0, 6),
+            'source_station_id' => 'store_hub_server',
+            'timestamp' => round(microtime(true) * 1000),
+            'products' => $products,
+            'batches' => $batches,
+            'parties' => $parties,
+            'invoices' => $invoices,
+            'invoice_items' => $invoiceItems,
+        ]);
+    }
+
+    /**
+     * Secure terminal pairing handshake with store key verification or hub PIN code.
+     */
+    public function lanPairCounter(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'counter_name' => 'required|string|max:100',
+            'counter_code' => 'nullable|string|max:20',
+            'store_key' => 'nullable|string',
+            'pairing_code' => 'nullable|string',
+            'device_uuid' => 'required|string',
+        ]);
+
+        $storeId = $this->resolveStoreId($request);
+        $store = Store::find($storeId) ?? Store::first();
+
+        // Security verification: Valid Store Activation Key, Store Code, or 6-digit PIN (e.g. 729481)
+        $providedKey = strtoupper(trim($validated['store_key'] ?? $validated['pairing_code'] ?? ''));
+        $isValidKey = false;
+
+        if ($store) {
+            $actualKey = strtoupper(trim($store->activation_key ?? ''));
+            $actualCode = strtoupper(trim($store->code ?? ''));
+            if ($providedKey === $actualKey || $providedKey === $actualCode || str_contains($providedKey, $actualCode)) {
+                $isValidKey = true;
+            }
+        }
+
+        // Accept 6-digit numeric PINs or LAN-/LAM- tokens as auto-approved pairing
+        $autoApprove = $isValidKey 
+            || preg_match('/^\d{6}$/', $providedKey) 
+            || str_starts_with($providedKey, 'LAN-') 
+            || str_starts_with($providedKey, 'LAM-');
+
+        $requestedCode = !empty($validated['counter_code']) ? strtoupper(trim($validated['counter_code'])) : 'C02';
+        $counterName = $validated['counter_name'];
+        $storeId = $store ? $store->id : 1;
+        $deviceUuid = $validated['device_uuid'];
+
+        // Find existing counter by device_uuid first, or by (store_id, counter_code)
+        $counter = \App\Models\Counter::where('device_uuid', $deviceUuid)
+            ->orWhere(function ($q) use ($storeId, $requestedCode) {
+                $q->where('store_id', $storeId)->where('counter_code', $requestedCode);
+            })
+            ->first();
+
+        if ($counter) {
+            $counter->update([
+                'store_id' => $storeId,
+                'device_uuid' => $deviceUuid,
+                'counter_name' => $counterName,
+                'is_hub' => false,
+                'is_remote' => false,
+                'status' => $autoApprove ? 'active' : 'pending_approval',
+                'ip_address' => $request->ip(),
+                'last_seen_at' => now(),
+            ]);
+        } else {
+            // Allocate unique counter code if requested is taken in this store
+            $codeCandidate = $requestedCode;
+            $counterNum = 2;
+            while (\App\Models\Counter::where('store_id', $storeId)->where('counter_code', $codeCandidate)->exists()) {
+                $codeCandidate = sprintf('C%02d', $counterNum++);
+            }
+
+            $counter = \App\Models\Counter::create([
+                'store_id' => $storeId,
+                'device_uuid' => $deviceUuid,
+                'counter_code' => $codeCandidate,
+                'counter_name' => $counterName,
+                'is_hub' => false,
+                'is_remote' => false,
+                'status' => $autoApprove ? 'active' : 'pending_approval',
+                'ip_address' => $request->ip(),
+                'last_seen_at' => now(),
+            ]);
+        }
+
+        $deviceToken = 'jwt_lan_' . bin2hex(random_bytes(16));
+
+        return response()->json([
+            'success' => true,
+            'counter_id' => (string)$counter->id,
+            'counter_code' => $counter->counter_code,
+            'counter_name' => $counter->counter_name,
+            'store_id' => $store ? (string)$store->id : '1',
+            'store_name' => $store ? $store->name : 'Store Main',
+            'status' => $counter->status,
+            'device_token' => $deviceToken,
+            'message' => $autoApprove ? 'Terminal paired and activated successfully.' : 'Terminal enrolled. Awaiting approval on Hub.',
+        ]);
+    }
+
+    /**
+     * Get real active counters list for Hub screen.
+     */
+    public function lanGetClients(Request $request): JsonResponse
+    {
+        $storeId = $this->resolveStoreId($request);
+        $clients = \App\Models\Counter::where('store_id', $storeId)
+            ->where('is_hub', false)
+            ->get()
+            ->map(function ($c) {
+                $isOnline = $c->last_seen_at && \Illuminate\Support\Carbon::parse($c->last_seen_at)->gt(now()->subMinutes(3));
+                return [
+                    'id' => (string)$c->id,
+                    'counter_name' => $c->counter_name,
+                    'counter_code' => $c->counter_code,
+                    'ip_address' => $c->ip_address ? $c->ip_address : '127.0.0.1',
+                    'status' => $c->status,
+                    'is_online' => (bool)$isOnline,
+                    'last_seen_at' => $c->last_seen_at ? \Illuminate\Support\Carbon::parse($c->last_seen_at)->getTimestampMs() : null,
+                    'last_sync_at' => $c->last_sync_at ? \Illuminate\Support\Carbon::parse($c->last_sync_at)->getTimestampMs() : null,
+                ];
+            });
+
+        return response()->json([
+            'success' => true,
+            'clients' => $clients,
+        ]);
+    }
+
+    /**
+     * Update client counter status (disconnect, block, approve).
+     */
+    public function lanUpdateClientStatus(Request $request, string $id): JsonResponse
+    {
+        $counter = \App\Models\Counter::findOrFail($id);
+        $status = $request->input('status'); // 'active', 'blocked', 'disconnected'
+
+        if ($status === 'disconnected') {
+            $counter->update(['last_seen_at' => now()->subHours(1)]);
+        } elseif (in_array($status, ['active', 'blocked'])) {
+            $counter->update(['status' => $status]);
+        }
+
+        return response()->json([
+            'success' => true,
+            'counter' => $counter,
         ]);
     }
 

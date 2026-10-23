@@ -892,16 +892,95 @@ fn secure_store_delete(key: String) -> Result<Value, String> {
     Ok(json!({ "success": true }))
 }
 
-fn get_db_path() -> PathBuf {
+fn get_app_dir() -> PathBuf {
     let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
     let app_dir = PathBuf::from(home)
         .join(".gemini")
         .join("antigravity")
         .join("scratch")
         .join("lamsuite-billing");
-
     let _ = fs::create_dir_all(&app_dir);
-    app_dir.join("lamsuite_desktop.sqlite")
+    app_dir
+}
+
+fn get_store_registry_path() -> PathBuf {
+    get_app_dir().join("stores_registry.json")
+}
+
+#[tauri::command]
+fn store_registry_get() -> Result<Value, String> {
+    let path = get_store_registry_path();
+    if !path.exists() {
+        return Ok(json!({ "stores": [], "active_store_id": null, "auto_open_last": false }));
+    }
+    let content = fs::read_to_string(&path).map_err(|e| e.to_string())?;
+    let val: Value = serde_json::from_str(&content).unwrap_or_else(|_| {
+        json!({ "stores": [], "active_store_id": null, "auto_open_last": false })
+    });
+    Ok(val)
+}
+
+#[tauri::command]
+fn store_registry_save(registry: Value) -> Result<Value, String> {
+    let path = get_store_registry_path();
+    let content = serde_json::to_string_pretty(&registry).map_err(|e| e.to_string())?;
+    fs::write(&path, content).map_err(|e| e.to_string())?;
+    Ok(json!({ "success": true }))
+}
+
+#[tauri::command]
+fn db_switch_store(
+    store_id: String,
+    relative_db_path: Option<String>,
+    state: State<DbState>,
+) -> Result<Value, String> {
+    let app_dir = get_app_dir();
+    let db_path = if let Some(rel) = relative_db_path {
+        app_dir.join(rel)
+    } else {
+        let store_dir = app_dir.join("stores").join(&store_id);
+        let _ = fs::create_dir_all(&store_dir);
+        store_dir.join("store.sqlite")
+    };
+
+    if let Some(parent) = db_path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+
+    let mut conn_guard = state.conn.lock().map_err(|e| e.to_string())?;
+    let new_conn = Connection::open(&db_path).map_err(|e| e.to_string())?;
+
+    // Initialize kv_store table in the new store db
+    new_conn
+        .execute(
+            "CREATE TABLE IF NOT EXISTS kv_store (
+                table_name TEXT NOT NULL,
+                id TEXT NOT NULL,
+                data TEXT NOT NULL,
+                PRIMARY KEY (table_name, id)
+            );",
+            [],
+        )
+        .map_err(|e| e.to_string())?;
+
+    new_conn
+        .execute(
+            "CREATE INDEX IF NOT EXISTS idx_kv_table ON kv_store(table_name);",
+            [],
+        )
+        .map_err(|e| e.to_string())?;
+
+    *conn_guard = new_conn;
+
+    Ok(json!({
+        "success": true,
+        "store_id": store_id,
+        "db_path": db_path.to_string_lossy().to_string()
+    }))
+}
+
+fn get_db_path() -> PathBuf {
+    get_app_dir().join("lamsuite_desktop.sqlite")
 }
 
 fn main() {
@@ -953,6 +1032,9 @@ fn main() {
             db_find_all,
             db_delete,
             db_execute,
+            db_switch_store,
+            store_registry_get,
+            store_registry_save,
             get_system_printers,
             print_native_job,
             print_thermal,

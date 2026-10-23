@@ -24,6 +24,15 @@ import { storeDeviceService } from "./lib/auth/storeDeviceService";
 import { staffAuthService } from "./lib/auth/staffAuthService";
 import "./lib/ui/modalEscapeManager";
 
+import { StoreGatewayPage } from "./pages/StoreGatewayPage";
+import { storeRegistryService, type RegisteredStoreRecord } from "./lib/auth/storeRegistryService";
+import { autoUpdateService, type UpdateInfo } from "./lib/settings/autoUpdateService";
+import { UpdateNotificationModal } from "./components/UpdateNotificationModal";
+import { API_BASE_URL, DEFAULT_LAN_PORT } from "./config/env";
+import { cloudDeltaSyncService } from "./lib/sync/cloudDeltaSyncService";
+import { lanPeerService } from "./lib/lan/lanPeerService";
+import { productsStore } from "./lib/masters/productsStore";
+
 const LandingRedirect: React.FC = () => {
   const [target, setTarget] = useState<string>("/dashboard");
 
@@ -51,58 +60,180 @@ const LandingRedirect: React.FC = () => {
 };
 
 export const App: React.FC = () => {
-  const [isDeviceRegistered, setIsDeviceRegistered] = useState<boolean | null>(null);
+  const [isInitializing, setIsInitializing] = useState<boolean>(true);
+  const [registeredStores, setRegisteredStores] = useState<RegisteredStoreRecord[]>([]);
+  const [activeStore, setActiveStore] = useState<RegisteredStoreRecord | null>(null);
+  const [showGateway, setShowGateway] = useState<boolean>(false);
+  const [isAddingStore, setIsAddingStore] = useState<boolean>(false);
   const [hasStaffSession, setHasStaffSession] = useState<boolean>(
     Boolean(staffAuthService.getCurrentSession())
   );
+  const [availableUpdate, setAvailableUpdate] = useState<UpdateInfo | null>(null);
 
   useEffect(() => {
     initWorkspaceSettings();
+
+    // Check for updates in desktop mode
+    companySettingsService.loadSettings().then((cfg) => {
+      if (cfg?.workspace?.autoUpdateCheck !== false) {
+        autoUpdateService.checkForUpdates().then((res) => {
+          if (res.shouldUpdate) {
+            setAvailableUpdate(res);
+          }
+        }).catch(() => {
+          // Silent catch on network/offline
+        });
+      }
+    });
 
     // Trigger daily auto-backup check
     import("./lib/backup/dailyAutoBackup").then(({ dailyAutoBackupService }) => {
       dailyAutoBackupService.runDailyBackupCheck().catch(() => {});
     });
 
-    // Check device onboarding
-    storeDeviceService.isDeviceRegistered().then((registered) => {
-      if (!registered) {
-        // Auto-provision demo device profile if running in standard desktop sandbox
-        storeDeviceService
-          .registerWithActivationKey("LAM-DEMO-2026-KEY", "Counter 01", true)
-          .then(() => setIsDeviceRegistered(true))
-          .catch(() => setIsDeviceRegistered(false));
+    // Initialize Store Registry
+    storeRegistryService.loadRegistry().then(async (registry) => {
+      if (!registry.stores || registry.stores.length === 0) {
+        // Fallback check legacy store
+        const isLegacyReg = await storeDeviceService.isDeviceRegistered();
+        if (!isLegacyReg) {
+          // Provision demo store if fresh sandbox
+          try {
+            await storeDeviceService.registerWithActivationKey("LAM-DEMO-2026-KEY", "Counter 01", true);
+            const updated = await storeRegistryService.loadRegistry();
+            setRegisteredStores(updated.stores);
+            setActiveStore(storeRegistryService.getActiveStore());
+          } catch {
+            setRegisteredStores([]);
+          }
+        } else {
+          const updated = await storeRegistryService.loadRegistry();
+          setRegisteredStores(updated.stores);
+          setActiveStore(storeRegistryService.getActiveStore());
+        }
       } else {
-        setIsDeviceRegistered(true);
+        setRegisteredStores(registry.stores);
+        const currentActive = storeRegistryService.getActiveStore() || registry.stores[0];
+        setActiveStore(currentActive);
+
+        // If auto_open_last is false, present gateway screen on boot
+        if (!registry.auto_open_last) {
+          setShowGateway(true);
+        } else if (currentActive) {
+          await storeRegistryService.switchActiveStore(currentActive.id, true).catch(() => {});
+        }
       }
+      setIsInitializing(false);
     });
 
-    const unsub = staffAuthService.onSessionChange((session) => {
+    const unsubStaff = staffAuthService.onSessionChange((session) => {
       setHasStaffSession(Boolean(session));
     });
 
-    return unsub;
+    const unsubReg = storeRegistryService.onRegistryChange((reg) => {
+      setRegisteredStores(reg.stores);
+      setActiveStore(storeRegistryService.getActiveStore());
+    });
+
+    return () => {
+      unsubStaff();
+      unsubReg();
+    };
   }, []);
 
-  if (isDeviceRegistered === null) {
+  if (isInitializing) {
     return (
       <div className="min-h-screen bg-slate-900 flex items-center justify-center font-sans text-white text-xs">
-        Initializing LamSuite Billing Workstation...
+        Initializing LamSuite Multi-Store Billing Workstation...
       </div>
     );
   }
 
-  if (isDeviceRegistered === false) {
-    return <StoreSetupPage onSetupComplete={() => setIsDeviceRegistered(true)} />;
+  // If no stores are registered at all, or user clicked "Add Store"
+  if (registeredStores.length === 0 || isAddingStore) {
+    return (
+      <StoreSetupPage
+        onSetupComplete={async (profile) => {
+          setIsAddingStore(false);
+          const reg = await storeRegistryService.loadRegistry();
+          setRegisteredStores(reg.stores);
+          const active = storeRegistryService.getActiveStore() || reg.stores[reg.stores.length - 1];
+          setActiveStore(active);
+          setShowGateway(false);
+        }}
+        onCancel={registeredStores.length > 0 ? () => setIsAddingStore(false) : undefined}
+      />
+    );
   }
 
+  // Tally-style Store Gateway Selection Screen
+  if (showGateway || !activeStore) {
+    return (
+      <StoreGatewayPage
+        onSelectStore={(selected) => {
+          setActiveStore(selected);
+          setShowGateway(false);
+        }}
+        onAddNewStore={() => setIsAddingStore(true)}
+      />
+    );
+  }
+
+  // Operator PIN/Password Login for Active Store
   if (!hasStaffSession) {
-    return <StaffLoginPage onLoginSuccess={() => setHasStaffSession(true)} />;
+    return (
+      <StaffLoginPage
+        key={activeStore?.id || "default"}
+        activeStore={activeStore}
+        onLoginSuccess={async () => {
+          setHasStaffSession(true);
+
+          // On first login / sign in, ensure master catalog is pulled and ready for work
+          try {
+            const currentProducts = await productsStore.getAllProducts();
+            const activeProfile = await storeDeviceService.getDeviceProfile();
+
+            // Check if secondary LAN counter
+            const isLanClient = !activeStore?.is_hub && (
+              activeProfile?.store_id?.startsWith("store_lan") ||
+              activeStore?.db_path?.includes("lan") ||
+              activeProfile?.license_plan?.includes("LAN") ||
+              activeProfile?.counter_code !== "C01"
+            );
+
+            if (isLanClient) {
+              // Fetch only from LAN Server Hub, not from backend server
+              const hubIp = localStorage.getItem("lamsuite_hub_ip") || "192.168.0.143";
+              const deviceToken = localStorage.getItem("lamsuite_device_token") || undefined;
+              await lanPeerService.pullMasterSnapshotFromMain(hubIp, DEFAULT_LAN_PORT, undefined, deviceToken).catch(async () => {
+                await lanPeerService.pullMasterSnapshotFromMain(hubIp, 8000, undefined, deviceToken).catch(() => {});
+              });
+            } else if (currentProducts.length <= 1) {
+              // Master station / first sign in: check backend server for catalog data
+              const storeId = activeStore?.id || activeProfile?.store_id || "1";
+              await cloudDeltaSyncService.pullMasterDelta({
+                fetchMasterDeltas: async (wm) => {
+                  const res = await fetch(`${API_BASE_URL}/api/sync/pull/deltas?store_id=${storeId}&since_watermark=${wm}`);
+                  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                  return res.json();
+                },
+              }).catch(() => {});
+            }
+          } catch (e) {
+            console.warn("Post-login data pull check deferred:", e);
+          }
+        }}
+        onBackToStores={() => setShowGateway(true)}
+      />
+    );
   }
 
   return (
     <BrowserRouter>
-      <Layout>
+      <Layout
+        onOpenGateway={() => setShowGateway(true)}
+        onAddNewStore={() => setIsAddingStore(true)}
+      >
         <Routes>
           <Route path="/" element={<LandingRedirect />} />
           <Route path="/dashboard" element={<DashboardPage />} />
@@ -122,6 +253,12 @@ export const App: React.FC = () => {
           <Route path="/migration" element={<DataMigrationPage />} />
         </Routes>
       </Layout>
+      {availableUpdate && (
+        <UpdateNotificationModal
+          updateInfo={availableUpdate}
+          onClose={() => setAvailableUpdate(null)}
+        />
+      )}
     </BrowserRouter>
   );
 };

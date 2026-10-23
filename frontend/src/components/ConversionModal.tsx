@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from "react";
-import { X, Layers, Check, Sparkles, Store, Pill, ShoppingBag } from "lucide-react";
+import { X, Layers, Check, Sparkles, Store, Pill, ShoppingBag, Database } from "lucide-react";
 import type { PosCartLine } from "../lib/billing/posCartService";
 import { useModalEscape } from "../lib/ui/modalEscapeManager";
+import { unitsStore, type UnitMaster } from "../lib/masters/unitsStore";
+import { UnitAutocompleteInput } from "./UnitAutocompleteInput";
 
 interface ConversionModalProps {
   isOpen: boolean;
@@ -78,6 +80,13 @@ export const ConversionModal: React.FC<ConversionModalProps> = ({
   const [packName, setPackName] = useState<string>(line?.product.unit_name || ((line?.product.units_per_pack || 1) > 1 ? "pack" : "pc"));
   const [looseName, setLooseName] = useState<string>(line?.product.sub_unit_name || ((line?.product.units_per_pack || 1) > 1 ? "pc" : "unit"));
   const [persistMaster, setPersistMaster] = useState<boolean>(false);
+  const [masterUnits, setMasterUnits] = useState<UnitMaster[]>([]);
+
+  useEffect(() => {
+    if (isOpen) {
+      unitsStore.getAllUnits(true).then((u) => setMasterUnits(u)).catch(() => {});
+    }
+  }, [isOpen]);
 
   useEffect(() => {
     if (line) {
@@ -100,19 +109,52 @@ export const ConversionModal: React.FC<ConversionModalProps> = ({
 
   if (!isOpen || !line) return null;
 
+  const isPackInMaster = Boolean(
+    packName.trim() &&
+      masterUnits.some(
+        (u) =>
+          u.name.toLowerCase() === packName.trim().toLowerCase() ||
+          u.symbol.toLowerCase() === packName.trim().toLowerCase()
+      )
+  );
+
+  const isLooseInMaster = Boolean(
+    looseName.trim() &&
+      masterUnits.some(
+        (u) =>
+          u.name.toLowerCase() === looseName.trim().toLowerCase() ||
+          u.symbol.toLowerCase() === looseName.trim().toLowerCase()
+      )
+  );
+
   const handleApplyPreset = (preset: PresetItem) => {
     setUnitsPerPack(preset.upp);
     setPackName(preset.pack);
     setLooseName(preset.loose);
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     const upp = Math.max(1, Number(unitsPerPack) || 1);
+    const finalPack = packName.trim() || (upp > 1 ? "pack" : "pc");
+    const finalLoose = looseName.trim() || (upp > 1 ? "pc" : "unit");
+
+    // Automatically create the unit in master if not present
+    try {
+      if (finalPack) {
+        await unitsStore.ensureUnitExists(finalPack);
+      }
+      if (finalLoose) {
+        await unitsStore.ensureUnitExists(finalLoose);
+      }
+    } catch (err) {
+      console.warn("Could not ensure unit exists in master:", err);
+    }
+
     onSave(
       line.id,
       upp,
-      packName.trim() || (upp > 1 ? "pack" : "pc"),
-      looseName.trim() || (upp > 1 ? "pc" : "unit"),
+      finalPack,
+      finalLoose,
       persistMaster
     );
     onClose();
@@ -207,13 +249,25 @@ export const ConversionModal: React.FC<ConversionModalProps> = ({
             </label>
             <div className="flex items-center gap-2">
               <div className="flex-1">
-                <span className="text-[10px] text-text-muted font-semibold block mb-0.5">1 Parent Unit (Pack / Box)</span>
-                <input
-                  type="text"
+                <div className="flex items-center justify-between mb-0.5">
+                  <span className="text-[10px] text-text-muted font-semibold block">1 Parent Unit (Pack / Box)</span>
+                  {packName.trim() && (
+                    <span
+                      className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${
+                        isPackInMaster
+                          ? "text-emerald-700 bg-emerald-100/70 dark:text-emerald-300 dark:bg-emerald-950/60"
+                          : "text-amber-700 bg-amber-100/70 dark:text-amber-300 dark:bg-amber-950/60"
+                      }`}
+                    >
+                      {isPackInMaster ? "Master Unit" : "+ Creates in Master"}
+                    </span>
+                  )}
+                </div>
+                <UnitAutocompleteInput
                   value={packName}
-                  onChange={(e) => setPackName(e.target.value)}
-                  placeholder="e.g. box, bottle, pc, jar"
-                  className="w-full px-2.5 py-1.5 rounded-btn border border-border-main bg-surface font-semibold text-text-main text-xs focus:border-accent focus:ring-1 focus:ring-accent outline-none"
+                  onChange={setPackName}
+                  units={masterUnits}
+                  placeholder="e.g. Strip, Box, Bottle"
                 />
               </div>
               <span className="text-base font-black text-text-muted mt-4">=</span>
@@ -229,13 +283,25 @@ export const ConversionModal: React.FC<ConversionModalProps> = ({
                 />
               </div>
               <div className="flex-1">
-                <span className="text-[10px] text-text-muted font-semibold block mb-0.5">Base Unit (Loose / Sub-unit)</span>
-                <input
-                  type="text"
+                <div className="flex items-center justify-between mb-0.5">
+                  <span className="text-[10px] text-text-muted font-semibold block">Base Unit (Loose / Sub-unit)</span>
+                  {looseName.trim() && (
+                    <span
+                      className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${
+                        isLooseInMaster
+                          ? "text-emerald-700 bg-emerald-100/70 dark:text-emerald-300 dark:bg-emerald-950/60"
+                          : "text-amber-700 bg-amber-100/70 dark:text-amber-300 dark:bg-amber-950/60"
+                      }`}
+                    >
+                      {isLooseInMaster ? "Master Unit" : "+ Creates in Master"}
+                    </span>
+                  )}
+                </div>
+                <UnitAutocompleteInput
                   value={looseName}
-                  onChange={(e) => setLooseName(e.target.value)}
-                  placeholder="e.g. pc, unit, ml, g"
-                  className="w-full px-2.5 py-1.5 rounded-btn border border-border-main bg-surface font-semibold text-text-main text-xs focus:border-accent focus:ring-1 focus:ring-accent outline-none"
+                  onChange={setLooseName}
+                  units={masterUnits}
+                  placeholder="e.g. Tabs, Piece, ml, g"
                 />
               </div>
             </div>

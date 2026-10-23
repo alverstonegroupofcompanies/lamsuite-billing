@@ -24,6 +24,7 @@ import {
   Check,
   FolderOpen,
   ExternalLink,
+  Save,
 } from "lucide-react";
 import { posCartService, type PosCartLine } from "../lib/billing/posCartService";
 import {
@@ -58,10 +59,12 @@ import { PosShortcutHintBar, type PosFocusContext } from "../components/PosShort
 import { QuickLineEditModal } from "../components/QuickLineEditModal";
 import { QuickProductBatchEditModal } from "../components/QuickProductBatchEditModal";
 import { KeyboardShortcutsModal } from "../components/KeyboardShortcutsModal";
+import { storeRegistryService } from "../lib/auth/storeRegistryService";
 import { BillDiscountModal } from "../components/BillDiscountModal";
 import { RoundOffModal } from "../components/RoundOffModal";
 import { calculateDerivedLooseRate, formatQuantityDisplay } from "../lib/billing/unitConversion";
 import { partiesStore, type Customer, normalizeIndianPhone } from "../lib/masters/partiesStore";
+import { unitsStore } from "../lib/masters/unitsStore";
 import { useModalEscape } from "../lib/ui/modalEscapeManager";
 
 export const PosBillingPage: React.FC = () => {
@@ -266,6 +269,13 @@ export const PosBillingPage: React.FC = () => {
     looseName: string,
     persistMaster: boolean
   ) => {
+    try {
+      if (packName.trim()) await unitsStore.ensureUnitExists(packName.trim());
+      if (looseName.trim()) await unitsStore.ensureUnitExists(looseName.trim());
+    } catch (err) {
+      console.warn("Could not ensure unit in master:", err);
+    }
+
     await posCartService.updateLineConversion(lineId, unitsPerPack, packName, looseName, persistMaster);
     refreshCartState();
     showNotification(
@@ -1660,7 +1670,7 @@ export const PosBillingPage: React.FC = () => {
     showNotification("Email invoice client opened!");
   };
 
-  const handleFinalizeAndPrint = async () => {
+  const handleFinalizeAndPrint = async (shouldPrint = true) => {
     // 1. Idempotency guard: ignore repeat triggers while a save is in progress
     if (isFinalizingRef.current) {
       return;
@@ -1699,36 +1709,38 @@ export const PosBillingPage: React.FC = () => {
       });
 
       if (res.success) {
-        // 5. Check if we should open Print Preview or print directly
-        const appSettings = companySettingsService.getSettings();
-        const previewMode = appSettings.printing.previewMode || "always";
-        const isThermal = printFormat === "thermal";
-        const shouldDirectPrint = previewMode === "never" || (previewMode === "skip_thermal" && isThermal);
-
         let savedPdfPath: string | undefined;
 
-        if (shouldDirectPrint) {
-          if (printFormat === "thermal") {
-            await printingEngine.printThermalReceipt(printData);
-          } else if (printFormat === "a4") {
-            await printingEngine.printA4TaxInvoice(printData);
-          } else if (printFormat === "pdf") {
-            const exportRes = await printingEngine.exportToPdf(printData);
-            if (exportRes.cancelled) return;
-            if (!exportRes.success) {
-              showNotification(exportRes.error || "Failed to save PDF file", "error");
-              return;
+        // 5. Check if printing was requested
+        if (shouldPrint) {
+          const appSettings = companySettingsService.getSettings();
+          const previewMode = appSettings.printing.previewMode || "always";
+          const isThermal = printFormat === "thermal";
+          const shouldDirectPrint = previewMode === "never" || (previewMode === "skip_thermal" && isThermal);
+
+          if (shouldDirectPrint) {
+            if (printFormat === "thermal") {
+              await printingEngine.printThermalReceipt(printData);
+            } else if (printFormat === "a4") {
+              await printingEngine.printA4TaxInvoice(printData);
+            } else if (printFormat === "pdf") {
+              const exportRes = await printingEngine.exportToPdf(printData);
+              if (exportRes.cancelled) return;
+              if (!exportRes.success) {
+                showNotification(exportRes.error || "Failed to save PDF file", "error");
+                return;
+              }
+              savedPdfPath = exportRes.file_path;
             }
-            savedPdfPath = exportRes.file_path;
+          } else {
+            // Open Print Preview Modal with snapshot
+            setPreviewModalState({
+              isOpen: true,
+              data: printData,
+              initialFormat: printFormat === "a4" ? "a4" : "thermal_80mm",
+              title: `Tax Invoice Preview - #${invoiceNumber}`,
+            });
           }
-        } else {
-          // Open Print Preview Modal with snapshot
-          setPreviewModalState({
-            isOpen: true,
-            data: printData,
-            initialFormat: printFormat === "a4" ? "a4" : "thermal_80mm",
-            title: `Tax Invoice Preview - #${invoiceNumber}`,
-          });
         }
 
         // 6. Clear cart ONLY after save has succeeded
@@ -2796,7 +2808,26 @@ export const PosBillingPage: React.FC = () => {
           <div className="w-full max-w-md rounded-card bg-surface shadow-modal overflow-hidden border border-border-main">
             <div className="flex items-center justify-between border-b border-border-main px-5 py-3.5 bg-canvas">
               <div>
-                <h3 className="text-sm font-bold text-text-main">Bill Settlement</h3>
+                <div className="flex items-center gap-2 mb-0.5">
+                  <h3 className="text-sm font-bold text-text-main">Bill Settlement</h3>
+                  {(() => {
+                    const activeStore = storeRegistryService.getActiveStore();
+                    if (!activeStore) return null;
+                    return (
+                      <span
+                        className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-bold border"
+                        style={{
+                          backgroundColor: `${activeStore.color}15`,
+                          borderColor: `${activeStore.color}40`,
+                          color: activeStore.color,
+                        }}
+                      >
+                        <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: activeStore.color }} />
+                        {activeStore.alias || activeStore.name}
+                      </span>
+                    );
+                  })()}
+                </div>
                 <p className="text-[11px] text-text-muted font-mono">Invoice: {invoiceNumber}</p>
               </div>
               <button
@@ -2931,7 +2962,7 @@ export const PosBillingPage: React.FC = () => {
               </div>
             </div>
 
-            <div className="border-t border-slate-200 bg-slate-50 px-5 py-3.5 flex justify-end gap-2">
+            <div className="border-t border-slate-200 bg-slate-50 px-5 py-3.5 flex justify-end items-center gap-2">
               <button
                 type="button"
                 disabled={isFinalizing}
@@ -2943,7 +2974,17 @@ export const PosBillingPage: React.FC = () => {
               <button
                 type="button"
                 disabled={isFinalizing}
-                onClick={handleFinalizeAndPrint}
+                onClick={() => handleFinalizeAndPrint(false)}
+                className="flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-xs font-bold text-slate-700 shadow-xs hover:bg-slate-50 hover:border-slate-400 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                title="Save bill without printing"
+              >
+                <Save className="h-4 w-4 text-slate-600" />
+                <span>{isFinalizing ? "Saving..." : "Save"}</span>
+              </button>
+              <button
+                type="button"
+                disabled={isFinalizing}
+                onClick={() => handleFinalizeAndPrint(true)}
                 className="flex items-center gap-2 rounded-lg bg-emerald-600 px-5 py-2 text-xs font-bold text-white shadow-md hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
               >
                 <Printer className="h-4 w-4" />

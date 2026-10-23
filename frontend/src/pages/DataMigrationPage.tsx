@@ -20,11 +20,12 @@ import {
   type MigrationPrecheckResult,
   type ClientMigrationRunResult,
 } from "../lib/migration/clientMigrationEngine";
+import { API_BASE_URL, ADMIN_PORTAL_URL } from "../config/env";
 
 export const DataMigrationPage: React.FC = () => {
   const [currentStep, setCurrentStep] = useState<number>(1);
   const [sourceType, setSourceType] = useState<"api" | "file" | "device">("api");
-  const [apiUrl, setApiUrl] = useState<string>("https://admin.lamstonehealthcare.com");
+  const [apiUrl, setApiUrl] = useState<string>(ADMIN_PORTAL_URL);
   const [apiToken, setApiToken] = useState<string>("");
   const [fileContent, setFileContent] = useState<string>("");
   const [fileName, setFileName] = useState<string>("");
@@ -77,7 +78,7 @@ export const DataMigrationPage: React.FC = () => {
       } catch (clientErr: any) {
         // Fallback to backend API if available
         try {
-          const res = await fetch("http://127.0.0.1:8000/api/admin/migrations/precheck", {
+          const res = await fetch(`${API_BASE_URL}/api/admin/migrations/precheck`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({

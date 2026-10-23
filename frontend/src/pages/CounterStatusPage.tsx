@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { sqliteStorage } from "../lib/db/sqliteStorage";
 import { staffAuthService } from "../lib/auth/staffAuthService";
+import { storeRegistryService } from "../lib/auth/storeRegistryService";
 
 export interface CounterStatusItem {
   id: string;
@@ -45,7 +46,14 @@ export const CounterStatusPage: React.FC = () => {
   const loadCounters = async () => {
     setIsLoading(true);
     try {
-      const storedCounters = await sqliteStorage.findAll<any>("store_counters");
+      const activeStore = storeRegistryService.getActiveStore();
+      const activeStoreId = String(activeStore?.id || "1");
+
+      const allCounters = await sqliteStorage.findAll<any>("store_counters");
+      // Filter counters strictly belonging to the currently active store
+      const storedCounters = (allCounters || []).filter(
+        (c) => !c.store_id || String(c.store_id) === activeStoreId || (activeStoreId === "1" && c.store_id === "store_main")
+      );
       const sessions = await sqliteStorage.findAll<any>("counter_sessions");
       const shifts = await sqliteStorage.findAll<any>("cash_shifts");
       const queue = await sqliteStorage.findAll<any>("sync_queue");
@@ -105,9 +113,15 @@ export const CounterStatusPage: React.FC = () => {
           },
         ]);
       } else {
+        const currentActiveStaff = staffAuthService.getCurrentSession();
         const mapped: CounterStatusItem[] = storedCounters.map((c) => {
           const activeSession = (sessions || []).find((s) => s.counter_id === c.id && s.status === "active");
           const activeShift = (shifts || []).find((s) => s.counter_id === c.id && s.status === "open");
+
+          // If current logged in cashier is on this counter, ensure name and status reflect accurately
+          const isCurrentCounter = currentActiveStaff && (currentActiveStaff.counterId === c.id || currentActiveStaff.counterCode === (c.counter_code || "C01"));
+          const assignedUser = activeSession?.user_name || (isCurrentCounter ? currentActiveStaff?.user.full_name : null) || "Unassigned";
+          const assignedRole = activeSession?.user_role || (isCurrentCounter ? (currentActiveStaff?.user.role === "admin" ? "Store Admin" : currentActiveStaff?.user.role) : null) || "None";
 
           return {
             id: c.id,
@@ -117,9 +131,9 @@ export const CounterStatusPage: React.FC = () => {
             ip_address: c.ip_address || "127.0.0.1",
             port: c.port || 8089,
             status: c.status === "locked" ? "locked" : "active",
-            current_user: activeSession?.user_name || "Unassigned",
-            user_role: activeSession?.user_role || "None",
-            active_shift_status: activeShift ? "open" : "closed",
+            current_user: assignedUser,
+            user_role: assignedRole,
+            active_shift_status: activeShift ? "open" : (isCurrentCounter ? "open" : "closed"),
             shift_started_at: activeShift?.opened_at ? new Date(activeShift.opened_at).getTime() : undefined,
             drawer_cash: activeShift ? Number(activeShift.expected_cash || activeShift.opening_cash || 0) : 0,
             pending_queue: pendingCount,
@@ -137,8 +151,14 @@ export const CounterStatusPage: React.FC = () => {
 
   useEffect(() => {
     loadCounters();
+    const unsubscribe = storeRegistryService.onRegistryChange(() => {
+      loadCounters();
+    });
     const interval = setInterval(loadCounters, 10000);
-    return () => clearInterval(interval);
+    return () => {
+      unsubscribe();
+      clearInterval(interval);
+    };
   }, []);
 
   const handleRemoteLock = (counterId: string, counterName: string) => {

@@ -98,3 +98,18 @@ This document defines the access control policies, module visibility, operation 
 | `/api/admin/settings/company` | `GET`, `PUT` | `rbac:super_admin,store_owner` |
 | `/api/admin/settings/gst-locks` | `GET`, `POST` | `rbac:super_admin,store_owner` |
 | `/api/admin/audit-logs` | `GET` | Authenticated (No DELETE route exists) |
+
+---
+
+## Multi-Store Workstation & Store Registry Architecture (Tally Style)
+
+LamSuite Billing supports registering multiple store branches concurrently on the same workstation terminal without resetting the station.
+
+### Core Architectural Guarantees:
+1. **Isolated SQLite Stores**: Each registered store maintains its own SQLite database (`stores/{store_id}/store.sqlite`), isolated tables (invoices, held bills, customers, settings, shifts, audit logs), and search index. Only the active store's database is loaded in memory to ensure low memory footprint on Windows 7/8+ hardware.
+2. **Per-Store Scoped Vault**: Station tokens (`store:{store_id}:device_token`) and profile credentials are keyed per store.
+3. **Instant Company Switching**: Switching stores executes cleanly in under 1 second via `Alt+S`, `Alt+F3`, or `Ctrl+K`.
+4. **Active Unsaved Bill Safeguard**: If an operator attempts to switch stores while unsaved items remain in the POS cart, the switcher warns the operator to hold the bill first or confirm discard.
+5. **Distinct Store Identity**: The top header displays the store's color identity strip and store pill, and the POS Bill Settlement modal prominently highlights the target store name and color badge to prevent cross-store billing errors.
+6. **Store Gateway**: On app boot, if auto-open is disabled or on demand, a Tally-style company list gateway lets operators select a store, add a branch, customize nicknames/colors, or safely disconnect a store after generating an optional safety backup.
+

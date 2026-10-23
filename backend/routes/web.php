@@ -12,6 +12,12 @@ Route::get('/', function () {
     ]);
 });
 
+Route::get('/lan/v1/health', [\App\Http\Controllers\Api\SyncController::class, 'lanHealth']);
+Route::get('/lan/v1/pull', [\App\Http\Controllers\Api\SyncController::class, 'lanPullSnapshot']);
+Route::post('/lan/v1/pair', [\App\Http\Controllers\Api\SyncController::class, 'lanPairCounter']);
+Route::get('/lan/v1/clients', [\App\Http\Controllers\Api\SyncController::class, 'lanGetClients']);
+Route::post('/lan/v1/clients/{id}/status', [\App\Http\Controllers\Api\SyncController::class, 'lanUpdateClientStatus']);
+
 Route::get('/admin/{any?}', function () {
     $distPath = base_path('../admin-panel/dist/index.html');
     if (file_exists($distPath)) {

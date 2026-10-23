@@ -102,14 +102,28 @@ class DesktopIpcBridge implements IpcBridge {
         .replace(/([A-Z])/g, "_$1")
         .toLowerCase();
 
+      // Dual-case argument map (Tauri serde deserialization can expect camelCase or snake_case depending on configuration)
+      const dualArgs: Record<string, unknown> = {};
+      if (args && typeof args === "object") {
+        for (const [k, v] of Object.entries(args)) {
+          dualArgs[k] = v;
+          // camelCase -> snake_case
+          const snakeKey = k.replace(/([A-Z])/g, "_$1").toLowerCase();
+          dualArgs[snakeKey] = v;
+          // snake_case -> camelCase
+          const camelKey = k.replace(/_([a-z])/g, (_, letter) => letter.toUpperCase());
+          dualArgs[camelKey] = v;
+        }
+      }
+
       try {
-        return await callTauri<T>(snakeCmd, args);
+        return await callTauri<T>(snakeCmd, dualArgs);
       } catch (tauriError: any) {
         const errText = String(tauriError?.message || tauriError || "");
         // Only try original un-snaked command if command was not found
         if (errText.includes("not found") || errText.includes("Command") || errText.includes("unrecognized")) {
           try {
-            return await callTauri<T>(command, args);
+            return await callTauri<T>(command, dualArgs);
           } catch (innerError: any) {
             const innerText = String(innerError?.message || innerError || "");
             if (innerText.includes("not found") || innerText.includes("Command")) {

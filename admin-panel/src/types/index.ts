@@ -19,6 +19,7 @@ export interface Store {
   id: number;
   name: string;
   code: string;
+  activation_key?: string;
   phone?: string;
   email?: string;
   address?: string;

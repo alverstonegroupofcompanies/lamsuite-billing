@@ -5,6 +5,7 @@ import { staffCryptoService } from "./staffCryptoService";
 import { INITIAL_BRANCH_STORES, type BranchStore } from "../masters/storeService";
 import { productsStore } from "../masters/productsStore";
 import { partiesStore } from "../masters/partiesStore";
+import { API_BASE_URL, DEFAULT_LAN_PORT } from "../../config/env";
 
 export interface StoreDeviceProfile {
   device_id: string;
@@ -35,6 +36,7 @@ export interface StoreDeviceProfile {
   registered_at: number;
   is_active: boolean;
   disabled_reason?: string;
+  admin_staff_present?: boolean;
 }
 
 export interface FirstAdminInput {
@@ -48,6 +50,14 @@ export class StoreDeviceService {
   private activeProfile: StoreDeviceProfile | null = null;
   private isAccessRevoked = false;
   private revocationReason = "";
+
+  clearProfileCache(): void {
+    this.activeProfile = null;
+  }
+
+  setProfile(profile: StoreDeviceProfile | null): void {
+    this.activeProfile = profile;
+  }
 
   async isDeviceRegistered(): Promise<boolean> {
     const profile = await this.getDeviceProfile();
@@ -78,9 +88,9 @@ export class StoreDeviceService {
         device_id: c.id,
         device_uuid: c.device_uuid,
         device_name: c.counter_name,
-        store_id: c.store_id,
-        store_name: "LamStone Pharmacy & Retail",
-        store_code: "STORE-01",
+        store_id: c.store_id || "store_main",
+        store_name: c.store_name || "LamStone Pharmacy & Retail",
+        store_code: c.store_code || "STORE-01",
         counter_id: c.id,
         counter_name: c.counter_name,
         counter_code: c.counter_code || "C01",
@@ -116,41 +126,102 @@ export class StoreDeviceService {
       throw new Error("Invalid Store Activation Key. Must be at least 6 characters.");
     }
 
-    onProgress?.("Validating activation key against cloud...", 15);
+    onProgress?.("Validating activation key against cloud backend...", 20);
     const deviceUuid = `dev_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`;
     const counterCode = counterName.replace(/[^0-9]/g, "")
       ? `C${counterName.replace(/[^0-9]/g, "").padStart(2, "0")}`
       : "C01";
     const counterId = `cntr_${Date.now()}_${counterCode.toLowerCase()}`;
 
-    onProgress?.("Downloading store profile & license details...", 35);
-    const deviceToken = `jwt_dev_${Date.now()}_${Math.random().toString(16).slice(2, 10)}`;
-    const refreshToken = `ref_dev_${Date.now()}_${Math.random().toString(16).slice(2, 10)}`;
+    let storeProfile: StoreDeviceProfile;
+    let deviceToken = `jwt_dev_${Date.now()}_${Math.random().toString(16).slice(2, 10)}`;
+    let refreshToken = `ref_dev_${Date.now()}_${Math.random().toString(16).slice(2, 10)}`;
 
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/devices/register`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({
+          activation_key: activationKey.trim(),
+          device_uuid: deviceUuid,
+          device_name: counterName,
+          is_hub: isHub,
+        }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        if (data.store_id) {
+          storeProfile = {
+            device_id: data.device_id || counterId,
+            device_uuid: deviceUuid,
+            device_name: counterName,
+            store_id: String(data.store_id),
+            store_name: data.store_name || "LamStone Retail Store",
+            store_code: data.store_code || "STORE",
+            counter_id: data.counter_id || counterId,
+            counter_name: counterName,
+            counter_code: counterCode,
+            is_hub: isHub,
+            license_plan: data.license_plan || "Enterprise Retail & Pharmacy Chain",
+            license_status: data.license_status || "active",
+            license_expires_at: data.license_expires_at || "2027-12-31",
+            registered_at: Date.now(),
+            is_active: data.license_status !== "revoked",
+            admin_staff_present: Boolean(data.admin_staff_present),
+          };
+          if (data.device_token) deviceToken = data.device_token;
+          if (data.refresh_token) refreshToken = data.refresh_token;
+        } else {
+          throw new Error("Invalid response from server");
+        }
+      } else {
+        throw new Error(`Server returned ${response.status}`);
+      }
+    } catch (apiErr) {
+      // Offline fallback: Derive branch from known list or activation key format
+      const keyUpper = activationKey.toUpperCase();
+      let matchedBranch: { id: string; name: string; code: string } | null = null;
+      if (keyUpper.includes("STORE-01") || keyUpper.includes("MAIN")) {
+        matchedBranch = { id: "store_main", name: "LamStone Pharmacy & Retail (Palakkad Main)", code: "STORE-01" };
+      } else if (keyUpper.includes("STORE-02") || keyUpper.includes("KCH") || keyUpper.includes("KOCHI")) {
+        matchedBranch = { id: "store_kochi", name: "LamStone Medicos & Superstore (Kochi Branch)", code: "STORE-02" };
+      } else if (keyUpper.includes("STORE-03") || keyUpper.includes("CLT") || keyUpper.includes("CALICUT")) {
+        matchedBranch = { id: "store_calicut", name: "LamStone Regional Distribution Hub (Calicut)", code: "STORE-03" };
+      } else {
+        const cleanKey = keyUpper.replace(/[^A-Z0-9]/g, "").slice(0, 8);
+        matchedBranch = {
+          id: `store_${cleanKey.toLowerCase()}`,
+          name: `LamStone Branch (${cleanKey})`,
+          code: cleanKey.slice(0, 4) || "BR01",
+        };
+      }
+
+      storeProfile = {
+        device_id: counterId,
+        device_uuid: deviceUuid,
+        device_name: counterName,
+        store_id: matchedBranch.id,
+        store_name: matchedBranch.name,
+        store_code: matchedBranch.code,
+        counter_id: counterId,
+        counter_name: counterName,
+        counter_code: counterCode,
+        is_hub: isHub,
+        license_plan: "Enterprise Retail & Pharmacy Chain",
+        license_status: "active",
+        license_expires_at: "2027-12-31",
+        registered_at: Date.now(),
+        is_active: true,
+      };
+    }
+
+    onProgress?.("Downloading store profile & license details...", 45);
     // Store tokens in OS secure storage
     await invokeCommand("secure_store_set", { key: "device_token", value: deviceToken });
     await invokeCommand("secure_store_set", { key: "refresh_token", value: refreshToken });
 
-    onProgress?.("Ingesting catalog masters & GST tax configurations...", 60);
-    const storeProfile: StoreDeviceProfile = {
-      device_id: counterId,
-      device_uuid: deviceUuid,
-      device_name: counterName,
-      store_id: "store_main",
-      store_name: "LamStone Pharmacy & Clinic (Main Store)",
-      store_code: "MAIN",
-      counter_id: counterId,
-      counter_name: counterName,
-      counter_code: counterCode,
-      is_hub: isHub,
-      license_plan: "Enterprise Retail & Pharmacy Chain",
-      license_status: "active",
-      license_expires_at: "2027-12-31",
-      registered_at: Date.now(),
-      is_active: true,
-    };
-
-    onProgress?.("Finalizing local SQLite multi-counter station schema...", 85);
+    onProgress?.("Ingesting catalog masters & GST tax configurations...", 70);
     await invokeCommand("secure_store_set", {
       key: "store_device_profile",
       value: JSON.stringify(storeProfile),
@@ -173,6 +244,15 @@ export class StoreDeviceService {
     });
 
     this.activeProfile = storeProfile;
+
+    // Register in multi-store registry
+    try {
+      const { storeRegistryService } = await import("./storeRegistryService");
+      await storeRegistryService.registerStore(storeProfile, { deviceToken, refreshToken });
+    } catch (e) {
+      console.warn("Registry registration notice:", e);
+    }
+
     onProgress?.("Device setup completed successfully!", 100);
     return storeProfile;
   }
@@ -247,6 +327,15 @@ export class StoreDeviceService {
     });
 
     this.activeProfile = profile;
+
+    // Register in multi-store registry
+    try {
+      const { storeRegistryService } = await import("./storeRegistryService");
+      await storeRegistryService.registerStore(profile, { deviceToken, refreshToken });
+    } catch (e) {
+      console.warn("Registry registration notice:", e);
+    }
+
     onProgress?.("Store activation and device registration complete!", 100);
     return profile;
   }
@@ -279,6 +368,19 @@ export class StoreDeviceService {
       ]),
       updated_at: Date.now(),
     });
+
+    try {
+      const { syncQueueService, defaultBackendApiClient } = await import("../sync/syncQueueService");
+      await syncQueueService.enqueue("staff_user", adminId, "create", {
+        id: adminId,
+        store_id: this.activeProfile?.store_id || "store_main",
+        username: admin.username.toLowerCase().trim(),
+        full_name: admin.name || "Store Administrator",
+        role: "admin",
+        biometric_registered: 0,
+      });
+      syncQueueService.processQueue(defaultBackendApiClient).catch(() => {});
+    } catch (_) {}
   }
 
   async checkLicenseStatus(): Promise<{

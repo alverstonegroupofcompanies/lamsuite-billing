@@ -15,7 +15,9 @@ export interface SyncQueueItem {
     | "customer_payment"
     | "expense"
     | "purchase_return"
-    | "transfer";
+    | "transfer"
+    | "staff"
+    | "staff_user";
   entity_id: string;
   action: "create" | "update" | "delete";
   payload_json: string;

@@ -13,6 +13,7 @@ tauri = { version = "1", features = [ "fs-all", "shell-all",
   "dialog-all",
   "http-all",
   "window-all",
+  "updater",
   "devtools"
 ] }
 serde = { version = "1", features = ["derive"] }

@@ -12,6 +12,8 @@ import {
   RefreshCw,
   LogOut,
   HelpCircle,
+  UserPlus,
+  ArrowRight,
 } from "lucide-react";
 import { staffAuthService, type StaffUser } from "../lib/auth/staffAuthService";
 import { storeDeviceService, type StoreDeviceProfile } from "../lib/auth/storeDeviceService";
@@ -19,18 +21,26 @@ import { useModalEscape } from "../lib/ui/modalEscapeManager";
 
 interface StaffLoginPageProps {
   onLoginSuccess: () => void;
+  onBackToStores?: () => void;
+  activeStore?: { id: string; name: string; code: string; counter_name?: string } | null;
 }
 
-export const StaffLoginPage: React.FC<StaffLoginPageProps> = ({ onLoginSuccess }) => {
+export const StaffLoginPage: React.FC<StaffLoginPageProps> = ({
+  onLoginSuccess,
+  onBackToStores,
+  activeStore,
+}) => {
   const [deviceProfile, setDeviceProfile] = useState<StoreDeviceProfile | null>(null);
   const [staffList, setStaffList] = useState<StaffUser[]>([]);
   const [selectedUser, setSelectedUser] = useState<StaffUser | null>(null);
+  const [manualUsername, setManualUsername] = useState("");
   const [pin, setPin] = useState("");
   const [password, setPassword] = useState("");
   const [isPasswordMode, setIsPasswordMode] = useState(false);
   const [hasBiometrics, setHasBiometrics] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [isSeeding, setIsSeeding] = useState(false);
 
   // Forced password change modal
   const [mustChangePassword, setMustChangePassword] = useState(false);
@@ -46,14 +56,42 @@ export const StaffLoginPage: React.FC<StaffLoginPageProps> = ({ onLoginSuccess }
 
   const pinInputRef = useRef<HTMLInputElement>(null);
 
+  const loadStaffAndProfile = async () => {
+    const targetStoreId = activeStore?.id || (await storeDeviceService.getDeviceProfile())?.store_id || "1";
+    const prof = await storeDeviceService.getDeviceProfile();
+    setDeviceProfile(prof);
+    const list = await staffAuthService.listActiveStaff(targetStoreId, activeStore || undefined);
+    setStaffList(list);
+    if (list.length > 0) {
+      setSelectedUser(list[0]);
+    } else {
+      setSelectedUser(null);
+      setIsPasswordMode(true);
+    }
+  };
+
   useEffect(() => {
-    storeDeviceService.getDeviceProfile().then(setDeviceProfile);
-    staffAuthService.listActiveStaff().then((list) => {
-      setStaffList(list);
-      if (list.length > 0) setSelectedUser(list[0]);
-    });
+    loadStaffAndProfile();
     staffAuthService.isBiometricsAvailable().then(setHasBiometrics);
-  }, []);
+  }, [activeStore?.id]);
+
+  const handleSeedDefaultStaff = async () => {
+    setIsSeeding(true);
+    setErrorMsg("");
+    try {
+      const targetStoreId = activeStore?.id || (await storeDeviceService.getDeviceProfile())?.store_id || "1";
+      await staffAuthService.initDemoStaffIfEmpty(targetStoreId, activeStore || undefined);
+      const list = await staffAuthService.listActiveStaff(targetStoreId, activeStore || undefined);
+      setStaffList(list);
+      if (list.length > 0) {
+        setSelectedUser(list[0]);
+      }
+    } catch (e: any) {
+      setErrorMsg(e?.message || "Failed to initialize staff operators.");
+    } finally {
+      setIsSeeding(false);
+    }
+  };
 
   useEffect(() => {
     setPin("");
@@ -92,14 +130,18 @@ export const StaffLoginPage: React.FC<StaffLoginPageProps> = ({ onLoginSuccess }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedUser) return;
+    const targetUserIdOrUsername = selectedUser ? selectedUser.id : manualUsername.trim();
+    if (!targetUserIdOrUsername) {
+      setErrorMsg("Please select an operator or enter your username.");
+      return;
+    }
     setErrorMsg("");
     setIsLoading(true);
 
     try {
       const res = isPasswordMode
-        ? await staffAuthService.authenticateWithPassword(selectedUser.id, password)
-        : await staffAuthService.authenticateWithPin(selectedUser.id, pin);
+        ? await staffAuthService.authenticateWithPassword(targetUserIdOrUsername, password)
+        : await staffAuthService.authenticateWithPin(targetUserIdOrUsername, pin);
 
       if (!res.success) {
         setErrorMsg(res.error || "Authentication failed.");
@@ -108,8 +150,10 @@ export const StaffLoginPage: React.FC<StaffLoginPageProps> = ({ onLoginSuccess }
         // Refresh staff state to catch lockouts
         const updated = await staffAuthService.listActiveStaff();
         setStaffList(updated);
-        const cur = updated.find((u) => u.id === selectedUser.id);
-        if (cur) setSelectedUser(cur);
+        if (selectedUser) {
+          const cur = updated.find((u) => u.id === selectedUser.id);
+          if (cur) setSelectedUser(cur);
+        }
       } else {
         if (res.mustChangePassword) {
           setMustChangePassword(true);
@@ -212,6 +256,18 @@ export const StaffLoginPage: React.FC<StaffLoginPageProps> = ({ onLoginSuccess }
         </div>
 
         <div className="flex items-center gap-3">
+          {onBackToStores && (
+            <button
+              type="button"
+              onClick={onBackToStores}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-btn bg-surface hover:bg-canvas border border-border-main text-xs font-semibold text-text-main shadow-xs transition-colors cursor-pointer"
+              title="Return to Store / Company Gateway"
+            >
+              <Building2 className="w-3.5 h-3.5 text-accent" />
+              <span>Switch Store (Alt+S)</span>
+            </button>
+          )}
+
           <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-btn bg-surface border border-border-main text-xs font-semibold text-accent shadow-xs">
             <Monitor className="w-4 h-4 text-text-muted" />
             <span>{deviceProfile?.counter_name || "Counter 01"}</span>
@@ -231,50 +287,82 @@ export const StaffLoginPage: React.FC<StaffLoginPageProps> = ({ onLoginSuccess }
           </div>
 
           <div className="space-y-2 max-h-[340px] overflow-y-auto pr-1">
-            {staffList.map((user, idx) => {
-              const isSelected = selectedUser?.id === user.id;
-              const isLocked = user.locked_until && Date.now() < user.locked_until;
-
-              return (
+            {staffList.length === 0 ? (
+              <div className="p-4 rounded-card border border-dashed border-border-main bg-surface/50 text-center space-y-3">
+                <div className="w-10 h-10 rounded-full bg-accent-soft text-accent flex items-center justify-center mx-auto">
+                  <UserPlus className="w-5 h-5" />
+                </div>
+                <div>
+                  <h4 className="text-xs font-bold text-text-main">No Staff Operators Found</h4>
+                  <p className="text-[11px] text-text-muted mt-1 leading-relaxed">
+                    This store database does not have any operator accounts yet. Initialize standard staff profiles or sign in manually.
+                  </p>
+                </div>
                 <button
-                  key={user.id}
                   type="button"
-                  onClick={() => setSelectedUser(user)}
-                  className={`w-full text-left p-3 rounded-card border transition-all cursor-pointer flex items-center justify-between ${
-                    isSelected
-                      ? "bg-accent-soft text-accent border-accent/40 shadow-xs ring-1 ring-accent/30 font-semibold"
-                      : "bg-surface border-border-main hover:bg-canvas text-text-main"
-                  }`}
+                  onClick={handleSeedDefaultStaff}
+                  disabled={isSeeding}
+                  className="w-full py-2 px-3 bg-accent hover:bg-accent/90 text-white font-semibold text-xs rounded-btn shadow-xs flex items-center justify-center gap-1.5 cursor-pointer transition-all"
                 >
-                  <div className="flex items-center gap-3">
-                    <div
-                      className={`w-9 h-9 rounded-btn flex items-center justify-center font-bold text-xs ${
-                        isSelected ? "bg-accent text-white" : "bg-canvas text-text-muted border border-border-main"
-                      }`}
-                    >
-                      {user.full_name
-                        .split(" ")
-                        .map((n) => n[0])
-                        .join("")
-                        .slice(0, 2)
-                        .toUpperCase()}
-                    </div>
-                    <div>
-                      <div className="text-xs font-semibold text-text-main flex items-center gap-1.5">
-                        <span>{user.full_name}</span>
-                        {isLocked && <Lock className="w-3 h-3 text-status-danger" />}
-                      </div>
-                      <div className="text-[11px] text-text-muted capitalize">
-                        {user.role} • @{user.username}
-                      </div>
-                    </div>
-                  </div>
-                  <kbd className="px-2 py-0.5 rounded-btn bg-canvas border border-border-main text-[10px] font-mono text-text-muted tabular-nums">
-                    {idx + 1}
-                  </kbd>
+                  {isSeeding ? (
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <>
+                      <CheckCircle2 className="w-3.5 h-3.5" />
+                      <span>Seed Default Staff (Admin / Cashier)</span>
+                    </>
+                  )}
                 </button>
-              );
-            })}
+              </div>
+            ) : (
+              staffList.map((user, idx) => {
+                const isSelected = selectedUser?.id === user.id;
+                const isLocked = user.locked_until && Date.now() < user.locked_until;
+
+                return (
+                  <button
+                    key={user.id}
+                    type="button"
+                    onClick={() => {
+                      setSelectedUser(user);
+                      setManualUsername(user.username);
+                    }}
+                    className={`w-full text-left p-3 rounded-card border transition-all cursor-pointer flex items-center justify-between ${
+                      isSelected
+                        ? "bg-accent-soft text-accent border-accent/40 shadow-xs ring-1 ring-accent/30 font-semibold"
+                        : "bg-surface border-border-main hover:bg-canvas text-text-main"
+                    }`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <div
+                        className={`w-9 h-9 rounded-btn flex items-center justify-center font-bold text-xs ${
+                          isSelected ? "bg-accent text-white" : "bg-canvas text-text-muted border border-border-main"
+                        }`}
+                      >
+                        {user.full_name
+                          .split(" ")
+                          .map((n) => n[0])
+                          .join("")
+                          .slice(0, 2)
+                          .toUpperCase()}
+                      </div>
+                      <div>
+                        <div className="text-xs font-semibold text-text-main flex items-center gap-1.5">
+                          <span>{user.full_name}</span>
+                          {isLocked && <Lock className="w-3 h-3 text-status-danger" />}
+                        </div>
+                        <div className="text-[11px] text-text-muted capitalize">
+                          {user.role} • @{user.username}
+                        </div>
+                      </div>
+                    </div>
+                    <kbd className="px-2 py-0.5 rounded-btn bg-canvas border border-border-main text-[10px] font-mono text-text-muted tabular-nums">
+                      {idx + 1}
+                    </kbd>
+                  </button>
+                );
+              })
+            )}
           </div>
         </div>
 
@@ -282,10 +370,12 @@ export const StaffLoginPage: React.FC<StaffLoginPageProps> = ({ onLoginSuccess }
         <div className="md:col-span-7 bg-surface border border-border-main rounded-card p-6 sm:p-8 shadow-xs flex flex-col justify-center">
           <div className="mb-4">
             <h3 className="text-lg font-bold text-text-main">
-              Welcome, {selectedUser?.full_name || "Operator"}
+              {selectedUser ? `Welcome, ${selectedUser.full_name}` : "Sign In to Terminal"}
             </h3>
             <p className="text-xs text-text-muted mt-0.5">
-              Enter your {isPasswordMode ? "account password" : "quick 4-digit PIN"} to open the terminal.
+              {selectedUser
+                ? `Enter your ${isPasswordMode ? "account password" : "quick 4-digit PIN"} to open the terminal.`
+                : "Enter your username and password to open the store workstation."}
             </p>
           </div>
 
@@ -308,7 +398,23 @@ export const StaffLoginPage: React.FC<StaffLoginPageProps> = ({ onLoginSuccess }
           )}
 
           <form onSubmit={handleSubmit} className="space-y-4">
-            {!isPasswordMode ? (
+            {!selectedUser && (
+              <div>
+                <label className="block text-[11px] font-semibold text-text-muted uppercase tracking-wider mb-1.5">
+                  Operator Username
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={manualUsername}
+                  onChange={(e) => setManualUsername(e.target.value)}
+                  placeholder="e.g. admin or cashier1"
+                  className="w-full text-xs py-2.5 px-3 bg-canvas border border-border-main rounded-btn text-text-main focus:border-accent focus:outline-none"
+                />
+              </div>
+            )}
+
+            {!isPasswordMode && selectedUser ? (
               /* Quick PIN Field */
               <div>
                 <label className="block text-[11px] font-semibold text-text-muted uppercase tracking-wider mb-1.5">
@@ -344,7 +450,7 @@ export const StaffLoginPage: React.FC<StaffLoginPageProps> = ({ onLoginSuccess }
             )}
 
             {/* Quick PIN Numpad grid for touchscreen or mouse */}
-            {!isPasswordMode && (
+            {!isPasswordMode && selectedUser && (
               <div className="grid grid-cols-3 gap-2 max-w-[240px] mx-auto py-2">
                 {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((digit) => (
                   <button

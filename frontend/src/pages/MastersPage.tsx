@@ -17,6 +17,7 @@ import {
   Layers,
   Upload,
   Download,
+  Scale,
 } from "lucide-react";
 import { productsStore, type ProductItem, type ProductBatch } from "../lib/masters/productsStore";
 import { useModalEscape } from "../lib/ui/modalEscapeManager";
@@ -32,12 +33,14 @@ import {
   normalizeIndianPhone,
 } from "../lib/masters/partiesStore";
 import { discountSchemaEngine, type DiscountRule } from "../lib/masters/discountSchemaEngine";
+import { unitsStore, type UnitMaster } from "../lib/masters/unitsStore";
 import { sqliteStorage } from "../lib/db/sqliteStorage";
 import { ImportWizardModal } from "../lib/data-exchange/ui/ImportWizardModal";
 import { ExportDialogModal } from "../lib/data-exchange/ui/ExportDialogModal";
+import { UnitAutocompleteInput } from "../components/UnitAutocompleteInput";
 
 export const MastersPage: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<"products" | "batches" | "parties" | "discounts">("products");
+  const [activeTab, setActiveTab] = useState<"products" | "batches" | "parties" | "discounts" | "units">("products");
   const [searchQuery, setSearchQuery] = useState("");
   const [notification, setNotification] = useState<{ message: string; type: "success" | "error" } | null>(null);
   const [importEntityId, setImportEntityId] = useState<string | null>(null);
@@ -68,11 +71,25 @@ export const MastersPage: React.FC = () => {
   const [isDiscountModalOpen, setIsDiscountModalOpen] = useState(false);
   useModalEscape(isDiscountModalOpen, () => setIsDiscountModalOpen(false));
 
+  // Units state
+  const [units, setUnits] = useState<UnitMaster[]>([]);
+  const [isUnitModalOpen, setIsUnitModalOpen] = useState(false);
+  useModalEscape(isUnitModalOpen, () => setIsUnitModalOpen(false));
+  const [editingUnit, setEditingUnit] = useState<UnitMaster | null>(null);
+  const [unitForm, setUnitForm] = useState<Partial<UnitMaster>>({
+    name: "",
+    symbol: "",
+    precision: 0,
+    is_active: true,
+  });
+
   // Product Form state
   const [prodForm, setProdForm] = useState<Partial<ProductItem>>({
     name: "",
     barcode: "",
     hsn_sac_code: "30049099",
+    unit_name: "Strip",
+    sub_unit_name: "Tabs",
     mrp: 0,
     sel_rate: 0,
     ptr: 0,
@@ -140,6 +157,9 @@ export const MastersPage: React.FC = () => {
 
       const rules = discountSchemaEngine.getAllRules();
       setDiscountRules(rules);
+
+      const allUnits = await unitsStore.getAllUnits(true);
+      setUnits(allUnits);
     } catch (err) {
       console.error("Error loading master data:", err);
     }
@@ -178,12 +198,28 @@ export const MastersPage: React.FC = () => {
     );
   });
 
+  const filteredUnits = units.filter((u) => {
+    if (!searchQuery) return true;
+    const q = searchQuery.toLowerCase();
+    return (
+      u.name.toLowerCase().includes(q) ||
+      u.symbol.toLowerCase().includes(q)
+    );
+  });
+
   // Save Product
   const handleSaveProduct = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!prodForm.name || !prodForm.barcode) {
       showNotification("Product name and Barcode are required", "error");
       return;
+    }
+
+    if (prodForm.unit_name?.trim()) {
+      await unitsStore.ensureUnitExists(prodForm.unit_name.trim());
+    }
+    if (prodForm.sub_unit_name?.trim()) {
+      await unitsStore.ensureUnitExists(prodForm.sub_unit_name.trim());
     }
 
     const item: ProductItem = {
@@ -199,6 +235,8 @@ export const MastersPage: React.FC = () => {
       pts: Number(prodForm.pts) || 0,
       gst_percent: Number(prodForm.gst_percent) || 0,
       units_per_pack: Number(prodForm.units_per_pack) || 1,
+      unit_name: prodForm.unit_name?.trim() || undefined,
+      sub_unit_name: prodForm.sub_unit_name?.trim() || undefined,
       generic_name: prodForm.generic_name || "",
       rack_location: prodForm.rack_location || "",
       shelf_location: prodForm.shelf_location || "",
@@ -212,6 +250,47 @@ export const MastersPage: React.FC = () => {
     setIsProductModalOpen(false);
     setEditingProduct(null);
     loadData();
+  };
+
+  // Save Unit
+  const handleSaveUnit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const name = unitForm.name?.trim();
+    if (!name) {
+      showNotification("Unit name is required", "error");
+      return;
+    }
+
+    try {
+      const symbol = (unitForm.symbol?.trim() || name.replace(/[^a-zA-Z0-9]/g, "").slice(0, 4)).toUpperCase();
+      await unitsStore.upsertUnit({
+        id: editingUnit ? editingUnit.id : undefined,
+        name,
+        symbol,
+        precision: Math.max(0, Number(unitForm.precision) || 0),
+        is_active: unitForm.is_active ?? true,
+      });
+
+      showNotification(editingUnit ? `Unit "${name}" updated successfully` : `Unit "${name}" created successfully`);
+      setIsUnitModalOpen(false);
+      setEditingUnit(null);
+      await loadData();
+    } catch (err: any) {
+      showNotification(err.message || "Failed to save unit", "error");
+    }
+  };
+
+  // Delete Unit
+  const handleDeleteUnit = async (unit: UnitMaster) => {
+    if (confirm(`Are you sure you want to delete unit "${unit.name}" (${unit.symbol})?`)) {
+      try {
+        await unitsStore.deleteUnit(unit.id);
+        showNotification(`Unit "${unit.name}" deleted successfully`);
+        await loadData();
+      } catch (err: any) {
+        showNotification("Failed to delete unit", "error");
+      }
+    }
   };
 
   // Save Batch
@@ -364,6 +443,8 @@ export const MastersPage: React.FC = () => {
                     ? "batches"
                     : activeTab === "parties"
                     ? "customers"
+                    : activeTab === "units"
+                    ? "units"
                     : "discount_schemas";
                 setExportEntityId(entity);
               }}
@@ -411,6 +492,15 @@ export const MastersPage: React.FC = () => {
           >
             <Percent className="h-3.5 w-3.5" />
             <span>Discounts ({discountRules.length})</span>
+          </button>
+          <button
+            onClick={() => { setActiveTab("units"); setSearchQuery(""); }}
+            className={`flex items-center gap-1.5 rounded-btn px-3 py-1.5 text-xs font-semibold transition-colors ${
+              activeTab === "units" ? "bg-surface text-accent shadow-xs border border-border-main/50" : "text-text-muted hover:text-text-main"
+            }`}
+          >
+            <Scale className="h-3.5 w-3.5" />
+            <span>Units ({units.length})</span>
           </button>
         </div>
         </div>
@@ -590,6 +680,33 @@ export const MastersPage: React.FC = () => {
               <Plus className="h-4 w-4" />
               <span>Add Schema</span>
             </button>
+          )}
+          {activeTab === "units" && (
+            <>
+              <button
+                onClick={() => setImportEntityId("units")}
+                className="flex items-center gap-1.5 rounded-btn border border-border-main bg-surface px-3 py-2 text-xs font-semibold text-text-main shadow-xs hover:bg-canvas cursor-pointer transition-colors"
+              >
+                <Upload className="h-3.5 w-3.5 text-accent" />
+                <span>Import Units</span>
+              </button>
+              <button
+                onClick={() => {
+                  setEditingUnit(null);
+                  setUnitForm({
+                    name: "",
+                    symbol: "",
+                    precision: 0,
+                    is_active: true,
+                  });
+                  setIsUnitModalOpen(true);
+                }}
+                className="flex items-center gap-1.5 rounded-btn bg-accent px-3 py-2 text-xs font-semibold text-white shadow-xs hover:bg-accent/90 cursor-pointer transition-colors"
+              >
+                <Plus className="h-4 w-4" />
+                <span>Add Unit</span>
+              </button>
+            </>
           )}
         </div>
       </div>
@@ -843,6 +960,90 @@ export const MastersPage: React.FC = () => {
             </tbody>
           </table>
         )}
+
+        {activeTab === "units" && (
+          <table className="w-full text-left text-xs text-text-muted">
+            <thead className="sticky top-0 bg-canvas text-[11px] font-semibold uppercase tracking-wider text-text-muted border-b border-border-main">
+              <tr>
+                <th className="px-4 py-3">Unit Name</th>
+                <th className="px-4 py-3">GST UQC / Symbol</th>
+                <th className="px-4 py-3">Decimal Precision</th>
+                <th className="px-4 py-3 text-center">Status</th>
+                <th className="px-4 py-3 text-center">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border-main/50 font-sans">
+              {filteredUnits.length === 0 ? (
+                <tr>
+                  <td colSpan={5} className="py-8 text-center text-text-muted">
+                    No units of measure found. Click "Add Unit" to create a new unit.
+                  </td>
+                </tr>
+              ) : (
+                filteredUnits.map((u) => (
+                  <tr key={u.id} className="hover:bg-canvas/50 transition-colors">
+                    <td className="px-4 py-2.5 font-semibold text-text-main">
+                      <div className="flex items-center gap-2">
+                        <div className="rounded-btn bg-accent-soft/70 p-1 text-accent">
+                          <Scale className="h-3.5 w-3.5" />
+                        </div>
+                        <span>{u.name}</span>
+                      </div>
+                    </td>
+                    <td className="px-4 py-2.5 font-mono font-bold text-accent">
+                      <span className="rounded bg-accent-soft px-2 py-0.5 text-[11px]">
+                        {u.symbol}
+                      </span>
+                    </td>
+                    <td className="px-4 py-2.5 text-text-main font-mono">
+                      {!u.precision || u.precision === 0 ? (
+                        <span className="text-text-muted">0 (Discrete / Count)</span>
+                      ) : (
+                        <span>{u.precision} decimal{(u.precision || 0) > 1 ? "s" : ""}</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-2.5 text-center">
+                      <span
+                        className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                          u.is_active ? "bg-accent-soft text-accent" : "bg-canvas text-text-muted"
+                        }`}
+                      >
+                        {u.is_active ? "Active" : "Inactive"}
+                      </span>
+                    </td>
+                    <td className="px-4 py-2.5 text-center">
+                      <div className="flex items-center justify-center gap-1.5">
+                        <button
+                          onClick={() => {
+                            setEditingUnit(u);
+                            setUnitForm({
+                              name: u.name,
+                              symbol: u.symbol,
+                              precision: u.precision ?? 0,
+                              is_active: u.is_active,
+                            });
+                            setIsUnitModalOpen(true);
+                          }}
+                          className="rounded-btn p-1 text-text-muted hover:bg-canvas hover:text-accent cursor-pointer transition-colors"
+                          title="Edit Unit"
+                        >
+                          <Edit2 className="h-3.5 w-3.5" />
+                        </button>
+                        <button
+                          onClick={() => handleDeleteUnit(u)}
+                          className="rounded-btn p-1 text-text-muted hover:bg-canvas hover:text-red-500 cursor-pointer transition-colors"
+                          title="Delete Unit"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        )}
       </div>
 
       {/* Product Modal */}
@@ -887,7 +1088,7 @@ export const MastersPage: React.FC = () => {
                 </div>
               </div>
 
-              <div className="grid grid-cols-3 gap-4">
+              <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-[11px] font-semibold uppercase tracking-wider text-text-muted">HSN / SAC Code</label>
                   <input
@@ -912,15 +1113,51 @@ export const MastersPage: React.FC = () => {
                     <option value={28}>28%</option>
                   </select>
                 </div>
-                <div>
-                  <label className="block text-[11px] font-semibold uppercase tracking-wider text-text-muted">Units Per Pack</label>
-                  <input
-                    type="number"
-                    min="1"
-                    value={prodForm.units_per_pack || 1}
-                    onChange={(e) => setProdForm({ ...prodForm, units_per_pack: Number(e.target.value) })}
-                    className="mt-1 w-full rounded-input border border-border-main bg-surface p-2 text-xs font-mono tabular-nums text-text-main shadow-2xs focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
-                  />
+              </div>
+
+              {/* Packaging Ratio & Units */}
+              <div className="rounded-card border border-border-main bg-canvas/40 p-3.5">
+                <div className="text-[11px] font-bold text-text-main uppercase tracking-wider mb-2 flex items-center justify-between">
+                  <div className="flex items-center gap-1.5">
+                    <Scale className="h-3.5 w-3.5 text-accent" />
+                    <span>Packaging Ratio & Unit of Measure</span>
+                  </div>
+                  <span className="text-[10px] text-text-muted font-normal lowercase">
+                    (Auto-creates units in Master if new)
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="flex-1">
+                    <span className="text-[10px] text-text-muted font-semibold block mb-0.5">1 Parent Unit (Pack / Box)</span>
+                    <UnitAutocompleteInput
+                      value={prodForm.unit_name || ""}
+                      onChange={(val) => setProdForm({ ...prodForm, unit_name: val })}
+                      units={units}
+                      placeholder="e.g. Strip, Box, Bottle"
+                      className="w-full rounded-input border border-border-main bg-surface p-2 text-xs font-semibold text-text-main shadow-2xs focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
+                    />
+                  </div>
+                  <span className="text-sm font-black text-text-muted mt-4">=</span>
+                  <div className="w-24">
+                    <span className="text-[10px] text-accent font-bold block mb-0.5">Contains Qty</span>
+                    <input
+                      type="number"
+                      min="1"
+                      value={prodForm.units_per_pack || 1}
+                      onChange={(e) => setProdForm({ ...prodForm, units_per_pack: Math.max(1, Number(e.target.value) || 1) })}
+                      className="w-full rounded-input border border-accent bg-surface p-2 text-xs font-mono font-bold text-accent text-center shadow-2xs focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
+                    />
+                  </div>
+                  <div className="flex-1">
+                    <span className="text-[10px] text-text-muted font-semibold block mb-0.5">Base Unit (Loose / Sub-unit)</span>
+                    <UnitAutocompleteInput
+                      value={prodForm.sub_unit_name || ""}
+                      onChange={(val) => setProdForm({ ...prodForm, sub_unit_name: val })}
+                      units={units}
+                      placeholder="e.g. Tabs, Piece, ml, g"
+                      className="w-full rounded-input border border-border-main bg-surface p-2 text-xs font-semibold text-text-main shadow-2xs focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
+                    />
+                  </div>
                 </div>
               </div>
 
@@ -1398,6 +1635,124 @@ export const MastersPage: React.FC = () => {
                   className="rounded-btn bg-accent px-4 py-2 text-xs font-semibold text-white hover:bg-accent/90 shadow-xs cursor-pointer transition-colors"
                 >
                   Save Rule
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Unit Modal */}
+      {isUnitModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-md rounded-card bg-surface p-6 shadow-2xl border border-border-main">
+            <div className="flex items-center justify-between border-b border-border-main pb-3">
+              <div className="flex items-center gap-2">
+                <div className="rounded-btn bg-accent-soft p-1.5 text-accent">
+                  <Scale className="h-4 w-4" />
+                </div>
+                <h2 className="text-base font-bold text-text-main">
+                  {editingUnit ? "Edit Unit of Measure" : "Add New Unit of Measure"}
+                </h2>
+              </div>
+              <button
+                onClick={() => setIsUnitModalOpen(false)}
+                className="text-text-muted hover:text-text-main transition-colors cursor-pointer"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveUnit} className="mt-4 space-y-4">
+              <div>
+                <label className="block text-[11px] font-semibold uppercase tracking-wider text-text-muted">
+                  Unit Name *
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. Strip, Box, Tablet, Litre"
+                  value={unitForm.name || ""}
+                  onChange={(e) => {
+                    const name = e.target.value;
+                    const autoSymbol =
+                      !editingUnit &&
+                      (!unitForm.symbol ||
+                        unitForm.symbol === unitForm.name?.slice(0, 4).toUpperCase())
+                        ? name.replace(/[^a-zA-Z0-9]/g, "").slice(0, 4).toUpperCase()
+                        : unitForm.symbol;
+                    setUnitForm({ ...unitForm, name, symbol: autoSymbol });
+                  }}
+                  className="mt-1 w-full rounded-input border border-border-main bg-surface p-2 text-xs text-text-main shadow-2xs focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-semibold uppercase tracking-wider text-text-muted">
+                  UQC / Symbol Code (Statutory GST) *
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. STP, BOX, TAB, LTR, KGS, PCS"
+                  value={unitForm.symbol || ""}
+                  onChange={(e) =>
+                    setUnitForm({ ...unitForm, symbol: e.target.value.toUpperCase() })
+                  }
+                  className="mt-1 w-full rounded-input border border-border-main bg-surface p-2 text-xs font-mono font-bold text-accent uppercase shadow-2xs focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-semibold uppercase tracking-wider text-text-muted">
+                  Decimal Precision
+                </label>
+                <select
+                  value={unitForm.precision ?? 0}
+                  onChange={(e) =>
+                    setUnitForm({ ...unitForm, precision: Number(e.target.value) })
+                  }
+                  className="mt-1 w-full rounded-input border border-border-main bg-surface p-2 text-xs text-text-main shadow-2xs focus:border-accent focus:outline-none"
+                >
+                  <option value={0}>0 - Discrete / Whole units (e.g. Strip, Box, Tab)</option>
+                  <option value={1}>1 decimal place (0.1)</option>
+                  <option value={2}>2 decimal places (0.01 - e.g. Litre, Metre)</option>
+                  <option value={3}>3 decimal places (0.001 - e.g. Kilogram, Gram)</option>
+                  <option value={4}>4 decimal places</option>
+                </select>
+              </div>
+
+              <div className="flex items-center gap-2 pt-2">
+                <input
+                  type="checkbox"
+                  id="unit_active"
+                  checked={unitForm.is_active ?? true}
+                  onChange={(e) =>
+                    setUnitForm({ ...unitForm, is_active: e.target.checked })
+                  }
+                  className="rounded border-border-main text-accent focus:ring-accent h-4 w-4"
+                />
+                <label
+                  htmlFor="unit_active"
+                  className="text-xs font-medium text-text-main cursor-pointer"
+                >
+                  Is Active for Inventory and Billing
+                </label>
+              </div>
+
+              <div className="flex justify-end gap-2 border-t border-border-main pt-4">
+                <button
+                  type="button"
+                  onClick={() => setIsUnitModalOpen(false)}
+                  className="rounded-btn border border-border-main px-4 py-2 text-xs font-semibold text-text-muted hover:bg-canvas cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="rounded-btn bg-accent px-4 py-2 text-xs font-semibold text-white shadow-xs hover:bg-accent/90 cursor-pointer"
+                >
+                  {editingUnit ? "Update Unit" : "Save Unit"}
                 </button>
               </div>
             </form>

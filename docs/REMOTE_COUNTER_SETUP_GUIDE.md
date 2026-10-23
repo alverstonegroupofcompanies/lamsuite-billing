@@ -61,7 +61,42 @@ Under **Counter Settings**:
 
 ---
 
-## 4. Shift & Day-End Closing Procedure
+## 4. In-Store LAN Counter & Hub Setup Guide (Secondary Terminals)
+
+When connecting secondary counters inside the physical shop over local Wi-Fi or Ethernet:
+
+### 1. Main Hub Server Setup
+1. On the Main Server PC, navigate to **Settings → Sync & LAN Sharing**.
+2. Verify **In-Store LAN Hub Server** is marked `Running (Listening)`.
+3. Note your Main Server's LAN IP address displayed on the screen (e.g. `192.168.0.143`).
+4. Note your **Hub Pairing Code** (e.g. `729481`).
+
+### 2. Firewall Configuration (Windows & macOS)
+* **Windows Defender Firewall (Main PC)**:
+  1. Open Windows Search $\rightarrow$ type `Windows Defender Firewall with Advanced Security`.
+  2. Click **Inbound Rules** $\rightarrow$ **New Rule...**
+  3. Select **Port** $\rightarrow$ TCP $\rightarrow$ Specify ports: `8089, 8000`.
+  4. Select **Allow the connection** $\rightarrow$ Check **Private** network.
+  5. Name the rule: `LamSuite LAN Hub Server` $\rightarrow$ Click Finish.
+* **macOS Security (Main Mac)**:
+  1. Open **System Settings → Network → Firewall**.
+  2. Ensure incoming connections are allowed for `LamSuite Billing`.
+* **Wi-Fi Router (AP Isolation)**:
+  * In your Wi-Fi router management panel, disable **"AP Isolation" / "Client Isolation"**. When enabled, the router blocks wireless devices from speaking directly to each other.
+
+### 3. Client Counter Onboarding
+1. On the second terminal, launch LamSuite Billing and select the **LAN Counter** tab.
+2. Click **Scan LAN**:
+   * The terminal will sweep the local subnet and list detected hubs.
+   * Or enter the Store Main Hub IP (e.g. `192.168.0.143`) and Port (`8089` or `8000`).
+3. Click **Test Connection**:
+   * A live probe validates the hub identity, latency, and store name.
+4. Enter Counter Name (e.g. `Counter 02`) and click **Complete Store Onboarding**.
+5. The terminal securely pairs, downloads the master catalog, and is ready for billing.
+
+---
+
+## 5. Shift & Day-End Closing Procedure
 
 1. **Counter Shift Close**: At the end of the day or shift, the remote operator performs a *Counter Shift Close* to reconcile tenders collected (cash in drawer, card receipts, and UPI settlements).
 2. **Consolidated Store Day Close**: In the central Admin Panel or main store counter, the manager triggers *Store Day Close*. This aggregates sales, taxes collected, and tender splits across all shop and remote counters to the paisa.

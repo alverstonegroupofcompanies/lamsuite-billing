@@ -49,6 +49,7 @@ import {
 import { syncQueueService, type SyncQueueItem } from "../lib/sync/syncQueueService";
 import { cloudDeltaSyncService } from "../lib/sync/cloudDeltaSyncService";
 import { lanPeerService } from "../lib/lan/lanPeerService";
+import { lanServerControlService, type LanServerStatus } from "../lib/lan/lanServerControlService";
 import { backupService, type BackupPackage } from "../lib/backup/backupService";
 import { printingEngine } from "../lib/printing/printingEngine";
 import { sqliteStorage } from "../lib/db/sqliteStorage";
@@ -56,6 +57,10 @@ import { productsStore } from "../lib/masters/productsStore";
 import { partiesStore } from "../lib/masters/partiesStore";
 import { seed50Products } from "../lib/masters/seedProductsData";
 import { applyWorkspaceSettings } from "../lib/settings/workspaceThemeService";
+import { autoUpdateService, type UpdateInfo } from "../lib/settings/autoUpdateService";
+import { UpdateNotificationModal } from "../components/UpdateNotificationModal";
+import { storeRegistryService } from "../lib/auth/storeRegistryService";
+import { LanDiagnosticsPanel } from "../components/LanDiagnosticsPanel";
 
 export const SettingsPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState<
@@ -77,6 +82,8 @@ export const SettingsPage: React.FC = () => {
   const [lanConfig, setLanConfig] = useState(lanPeerService.getStationConfig());
   const [isLanDiscovering, setIsLanDiscovering] = useState(false);
   const [discoveredMain, setDiscoveredMain] = useState<{ station_name: string; ip_address: string; port: number } | null>(null);
+  const [lanServerStatus, setLanServerStatus] = useState<LanServerStatus>(lanServerControlService.getStatus());
+  const [isLanServerActionLoading, setIsLanServerActionLoading] = useState(false);
 
   // Backup & Reset state
   const [latestBackup, setLatestBackup] = useState<BackupPackage | null>(null);
@@ -87,6 +94,24 @@ export const SettingsPage: React.FC = () => {
 
   // Diagnostics & Tools
   const [isTestingPrinter, setIsTestingPrinter] = useState(false);
+  const [isCheckingUpdate, setIsCheckingUpdate] = useState(false);
+  const [foundUpdate, setFoundUpdate] = useState<UpdateInfo | null>(null);
+
+  const handleManualCheckUpdate = async () => {
+    setIsCheckingUpdate(true);
+    try {
+      const info = await autoUpdateService.checkForUpdates();
+      if (info.shouldUpdate) {
+        setFoundUpdate(info);
+      } else {
+        showNotification("You are on the latest version! No updates found.", "success");
+      }
+    } catch (err: any) {
+      showNotification(`Update check failed: ${err?.message || "Server unreachable"}`, "error");
+    } finally {
+      setIsCheckingUpdate(false);
+    }
+  };
 
   const showNotification = (message: string, type: "success" | "error" = "success") => {
     setNotification({ message, type });
@@ -114,6 +139,8 @@ export const SettingsPage: React.FC = () => {
 
   useEffect(() => {
     loadData();
+    const unsubLan = lanServerControlService.subscribe(setLanServerStatus);
+    return () => unsubLan();
   }, []);
 
   const handleSaveAllSettings = async (e?: React.FormEvent) => {
@@ -234,6 +261,41 @@ export const SettingsPage: React.FC = () => {
       showNotification("Failed to pull cloud deltas", "error");
     } finally {
       setIsSyncing(false);
+    }
+  };
+
+  // LAN Server Control Actions
+  const handleStartLanServer = async () => {
+    setIsLanServerActionLoading(true);
+    try {
+      const res = await lanServerControlService.startServer();
+      if (res.success) {
+        showNotification(res.message, "success");
+      } else {
+        showNotification(res.message, "error");
+      }
+    } finally {
+      setIsLanServerActionLoading(false);
+    }
+  };
+
+  const handleStopLanServer = async () => {
+    setIsLanServerActionLoading(true);
+    try {
+      const res = await lanServerControlService.stopServer();
+      showNotification(res.message, "success");
+    } finally {
+      setIsLanServerActionLoading(false);
+    }
+  };
+
+  const handleRestartLanServer = async () => {
+    setIsLanServerActionLoading(true);
+    try {
+      const res = await lanServerControlService.restartServer();
+      showNotification("LAN Hub Server restarted successfully", "success");
+    } finally {
+      setIsLanServerActionLoading(false);
     }
   };
 
@@ -1715,23 +1777,229 @@ export const SettingsPage: React.FC = () => {
                 </div>
               </div>
 
-              {/* LAN Sharing Box */}
-              <div className="rounded-lg border border-slate-200 p-4 space-y-3">
-                <div className="text-xs font-bold text-slate-800">In-Store Peer LAN Sharing</div>
-                <div className="flex items-center gap-3">
-                  <button
-                    onClick={handleDiscoverLan}
-                    disabled={isLanDiscovering}
-                    className="flex items-center gap-1.5 rounded border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 shadow-sm hover:bg-slate-50"
-                  >
-                    <Network className="h-3.5 w-3.5 text-slate-500" />
-                    <span>Discover Store Server</span>
-                  </button>
-                  {discoveredMain && (
-                    <span className="text-xs text-emerald-700 font-medium">
-                      Connected to {discoveredMain.station_name} ({discoveredMain.ip_address})
-                    </span>
+              {/* LAN Sharing & Server Controls */}
+              <div className="rounded-lg border border-slate-200 bg-white p-5 space-y-4 shadow-sm">
+                <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <Server className="h-4 w-4 text-emerald-600" />
+                      <span className="text-sm font-bold text-slate-800">In-Store LAN Hub Server</span>
+                      <span
+                        className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold ${
+                          lanServerStatus.isRunning
+                            ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                            : "bg-slate-100 text-slate-600 border border-slate-200"
+                        }`}
+                      >
+                        <span
+                          className={`w-1.5 h-1.5 rounded-full ${
+                            lanServerStatus.isRunning ? "bg-emerald-500 animate-pulse" : "bg-slate-400"
+                          }`}
+                        />
+                        {lanServerStatus.isRunning ? "Running (Listening)" : "Stopped"}
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      Accepts connections and broadcasts master catalog data to secondary counter client workstations (e.g. C02, C03).
+                    </p>
+                  </div>
+
+                  {/* Server Control Action Buttons */}
+                  <div className="flex items-center gap-2">
+                    {!lanServerStatus.isRunning ? (
+                      <button
+                        onClick={handleStartLanServer}
+                        disabled={isLanServerActionLoading}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-emerald-600 text-white text-xs font-semibold hover:bg-emerald-700 disabled:opacity-50 transition-colors shadow-xs"
+                      >
+                        <Play className="h-3.5 w-3.5 fill-current" />
+                        <span>Start Server</span>
+                      </button>
+                    ) : (
+                      <>
+                        <button
+                          onClick={handleStopLanServer}
+                          disabled={isLanServerActionLoading}
+                          className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-rose-600 text-white text-xs font-semibold hover:bg-rose-700 disabled:opacity-50 transition-colors shadow-xs"
+                        >
+                          <Square className="h-3.5 w-3.5 fill-current" />
+                          <span>Stop Server</span>
+                        </button>
+                        <button
+                          onClick={handleRestartLanServer}
+                          disabled={isLanServerActionLoading}
+                          className="flex items-center gap-1.5 px-3 py-1.5 rounded border border-slate-300 bg-slate-50 text-slate-700 text-xs font-semibold hover:bg-slate-100 disabled:opacity-50 transition-colors"
+                        >
+                          <RotateCcw className={`h-3.5 w-3.5 ${isLanServerActionLoading ? "animate-spin" : ""}`} />
+                          <span>Restart</span>
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </div>
+
+                {/* Status details & Auto-start configuration */}
+                <div className="grid grid-cols-2 gap-4 pt-1">
+                  <div className="rounded-md border border-slate-100 bg-slate-50/80 p-3 text-xs space-y-2">
+                    <div className="flex justify-between items-center text-slate-600">
+                      <span className="text-slate-500">Listening Port:</span>
+                      <span className="font-mono font-bold text-slate-800">{lanServerStatus.port} (API: {lanServerStatus.apiPort})</span>
+                    </div>
+                    <div>
+                      <div className="flex justify-between items-center text-slate-600 mb-1">
+                        <span className="text-slate-500">Active LAN IP:</span>
+                        <span className="font-mono font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                          {lanServerStatus.selectedAdapterIp || "127.0.0.1"}
+                        </span>
+                      </div>
+                      {lanServerStatus.availableAdapters && lanServerStatus.availableAdapters.length > 1 && (
+                        <select
+                          value={lanServerStatus.selectedAdapterIp}
+                          onChange={(e) => lanServerControlService.setSelectedAdapter(e.target.value)}
+                          className="w-full text-[11px] p-1 border border-slate-300 rounded bg-white text-slate-700 font-mono"
+                        >
+                          {lanServerStatus.availableAdapters.map((a, i) => (
+                            <option key={i} value={a.ip}>
+                              {a.name}: {a.ip}
+                            </option>
+                          ))}
+                        </select>
+                      )}
+                    </div>
+                    <div className="flex justify-between items-center text-slate-600">
+                      <span className="text-slate-500">Hub Pairing Code:</span>
+                      <span className="font-mono font-bold text-slate-800 tracking-wider bg-slate-200/60 px-1.5 py-0.5 rounded">
+                        {lanServerStatus.pairingCode}
+                      </span>
+                    </div>
+                    <div className="flex justify-between text-slate-600">
+                      <span className="text-slate-500">Connected Secondary Counters:</span>
+                      <span className="font-bold text-slate-800">{lanServerStatus.activeClientsCount} Counter(s)</span>
+                    </div>
+                  </div>
+
+                  <div className="rounded-md border border-slate-100 bg-slate-50/80 p-3 flex flex-col justify-between">
+                    <label className="flex items-start gap-2.5 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={lanServerStatus.autoStart}
+                        onChange={(e) => lanServerControlService.setAutoStart(e.target.checked)}
+                        className="mt-0.5 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500 h-4 w-4"
+                      />
+                      <div>
+                        <span className="text-xs font-bold text-slate-800 block">
+                          Start server automatically on app startup
+                        </span>
+                        <span className="text-[11px] text-slate-500 block leading-tight mt-0.5">
+                          Workstation listens on 0.0.0.0 (all interfaces) so other counters can pair.
+                        </span>
+                      </div>
+                    </label>
+
+                    <div className="pt-2 border-t border-slate-200/60">
+                      <span className="text-[11px] text-slate-500 block">
+                        Main Server LAN Host: <strong className="font-mono text-slate-800">{lanServerStatus.selectedAdapterIp}:{lanServerStatus.port}</strong>
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Real Active Clients List */}
+                <div className="border-t border-slate-100 pt-3 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <span className="text-xs font-bold text-slate-800 block">Connected Counter Workstations</span>
+                      <span className="text-[11px] text-slate-500">Secondary terminals synchronized with this Store Hub.</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => lanServerControlService.refreshActiveClients()}
+                      className="text-[11px] text-emerald-700 hover:underline font-semibold flex items-center gap-1"
+                    >
+                      <RefreshCw className="h-3 w-3" />
+                      <span>Refresh Clients</span>
+                    </button>
+                  </div>
+
+                  {lanServerStatus.activeClients && lanServerStatus.activeClients.length > 0 ? (
+                    <div className="border border-slate-200 rounded-lg overflow-hidden divide-y divide-slate-100">
+                      {lanServerStatus.activeClients.map((client) => (
+                        <div key={client.id} className="p-2.5 flex items-center justify-between text-xs bg-slate-50/50 hover:bg-slate-50">
+                          <div className="flex items-center gap-3">
+                            <span className={`w-2 h-2 rounded-full ${client.is_online ? "bg-emerald-500 animate-pulse" : "bg-slate-300"}`} />
+                            <div>
+                              <div className="font-bold text-slate-800 flex items-center gap-2">
+                                <span>{client.counter_name}</span>
+                                <span className="font-mono text-[10px] bg-white border border-slate-200 px-1.5 py-0.2 rounded text-slate-600">
+                                  {client.counter_code}
+                                </span>
+                              </div>
+                              <div className="text-[11px] text-slate-500 font-mono">
+                                IP: {client.ip_address} • Last Seen: {client.last_seen_at ? new Date(client.last_seen_at).toLocaleTimeString() : "Just now"}
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-2">
+                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${
+                              client.status === "active" ? "bg-emerald-100 text-emerald-800" : "bg-rose-100 text-rose-800"
+                            }`}>
+                              {client.status}
+                            </span>
+                            {client.status === "active" ? (
+                              <button
+                                type="button"
+                                onClick={() => lanServerControlService.updateClientStatus(client.id, "blocked")}
+                                className="px-2 py-1 bg-white border border-rose-300 hover:bg-rose-50 text-rose-600 text-[11px] rounded font-medium transition-colors"
+                              >
+                                Block
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => lanServerControlService.updateClientStatus(client.id, "active")}
+                                className="px-2 py-1 bg-white border border-emerald-300 hover:bg-emerald-50 text-emerald-600 text-[11px] rounded font-medium transition-colors"
+                              >
+                                Unblock
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="p-3 bg-slate-50 border border-dashed border-slate-200 rounded-md text-center text-[11px] text-slate-500">
+                      No secondary counters currently connected. When a client terminal joins via LAN Counter Setup, it will appear here.
+                    </div>
                   )}
+                </div>
+
+                {/* LAN Diagnostics Embed */}
+                <div className="border-t border-slate-100 pt-3">
+                  <LanDiagnosticsPanel hubIp={lanServerStatus.selectedAdapterIp || "127.0.0.1"} hubPort={lanServerStatus.port} isHubMode={true} />
+                </div>
+
+                {/* Secondary Terminal Discovery */}
+                <div className="border-t border-slate-100 pt-3 flex items-center justify-between">
+                  <div>
+                    <span className="text-xs font-bold text-slate-700 block">Client Counter Discovery</span>
+                    <span className="text-[11px] text-slate-500">For secondary terminals searching for this Main Hub.</span>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <button
+                      onClick={handleDiscoverLan}
+                      disabled={isLanDiscovering}
+                      className="flex items-center gap-1.5 rounded border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 shadow-xs hover:bg-slate-50 disabled:opacity-50"
+                    >
+                      <Network className="h-3.5 w-3.5 text-slate-500" />
+                      <span>{isLanDiscovering ? "Scanning Subnet..." : "Discover Store Server"}</span>
+                    </button>
+                    {discoveredMain && (
+                      <span className="text-xs text-emerald-700 font-medium">
+                        Connected to {discoveredMain.station_name} ({discoveredMain.ip_address})
+                      </span>
+                    )}
+                  </div>
                 </div>
               </div>
             </div>
@@ -1740,9 +2008,21 @@ export const SettingsPage: React.FC = () => {
           {/* TAB 9: Backup & Danger Zone */}
           {activeTab === "backup_reset" && (
             <div className="max-w-2xl space-y-6">
-              <div>
-                <h2 className="text-sm font-bold text-slate-800">Database Backup & Disaster Recovery</h2>
-                <p className="text-xs text-slate-500">Create encrypted snapshots, download backup JSON, or restore data.</p>
+              <div className="flex items-center justify-between">
+                <div>
+                  <h2 className="text-sm font-bold text-slate-800">Database Backup & Disaster Recovery</h2>
+                  <p className="text-xs text-slate-500">Create encrypted snapshots, download backup JSON, or restore data.</p>
+                </div>
+                {(() => {
+                  const activeStore = storeRegistryService.getActiveStore();
+                  if (!activeStore) return null;
+                  return (
+                    <div className="flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold border border-slate-200 bg-slate-50">
+                      <span className="w-2 h-2 rounded-full" style={{ backgroundColor: activeStore.color }} />
+                      <span>Target: {activeStore.alias || activeStore.name}</span>
+                    </div>
+                  );
+                })()}
               </div>
 
               <div className="flex items-center justify-between rounded-lg border border-slate-200 p-4">
@@ -1852,11 +2132,32 @@ export const SettingsPage: React.FC = () => {
                     <span>Seed 50 Test Products</span>
                   </button>
                 </div>
+
+                <div className="rounded-lg border border-slate-200 p-4 space-y-3">
+                  <div className="text-xs font-bold text-slate-800">Check for Software Updates</div>
+                  <p className="text-[11px] text-slate-500">
+                    Query the release API server to check if a newer version of LamSuite Billing Desktop is available.
+                  </p>
+                  <button
+                    onClick={handleManualCheckUpdate}
+                    disabled={isCheckingUpdate}
+                    className="flex items-center gap-1.5 rounded bg-indigo-600 px-3 py-2 text-xs font-semibold text-white hover:bg-indigo-700 disabled:opacity-50"
+                  >
+                    <RefreshCw className={`h-3.5 w-3.5 ${isCheckingUpdate ? "animate-spin" : ""}`} />
+                    <span>{isCheckingUpdate ? "Checking..." : "Check for Updates"}</span>
+                  </button>
+                </div>
               </div>
             </div>
           )}
         </div>
       </div>
+      {foundUpdate && (
+        <UpdateNotificationModal
+          updateInfo={foundUpdate}
+          onClose={() => setFoundUpdate(null)}
+        />
+      )}
     </div>
   );
 };

@@ -40,6 +40,7 @@ import { isTauri } from "../lib/ipc/ipcBridge";
 import { posCartService } from "../lib/billing/posCartService";
 import { productsStore, type ProductBatch, type ProductItem } from "../lib/masters/productsStore";
 import { companySettingsService } from "../lib/settings/companySettingsService";
+import { lanPeerService } from "../lib/lan/lanPeerService";
 import { PrintPreviewModal } from "../components/PrintPreviewModal";
 import { useModalEscape } from "../lib/ui/modalEscapeManager";
 
@@ -101,6 +102,8 @@ export const BillsPage: React.FC = () => {
     setTimeout(() => setNotification(null), actions && actions.length > 0 ? 8000 : 3500);
   };
 
+  const [isRefreshingFromLan, setIsRefreshingFromLan] = useState(false);
+
   const loadInvoices = async () => {
     setLoading(true);
     try {
@@ -110,13 +113,46 @@ export const BillsPage: React.FC = () => {
         paymentMode: paymentModeFilter,
         status: statusFilter,
       };
-      const list = await invoiceManagementService.listInvoices(criteria);
+      let list = await invoiceManagementService.listInvoices(criteria);
+
+      // If empty or if secondary LAN counter, check LAN Hub for latest snapshot
+      const activeStoreId = localStorage.getItem("lamsuite_active_store_id") || "default";
+      const isLanClient = localStorage.getItem("lamsuite_device_token") || localStorage.getItem("lamsuite_hub_ip");
+      if (isLanClient && (list.length === 0 || criteria.dateRange === "all" || criteria.dateRange === "today")) {
+        try {
+          const hubIp = localStorage.getItem("lamsuite_hub_ip") || "192.168.0.143";
+          const deviceToken = localStorage.getItem("lamsuite_device_token") || undefined;
+          await lanPeerService.pullMasterSnapshotFromMain(hubIp, 8089, undefined, deviceToken).catch(async () => {
+            await lanPeerService.pullMasterSnapshotFromMain(hubIp, 8000, undefined, deviceToken).catch(() => {});
+          });
+          list = await invoiceManagementService.listInvoices(criteria);
+        } catch (_) {}
+      }
+
       setInvoices(list);
       setSelectedIndex(0);
     } catch (err) {
       showNotification("Failed to load invoices", "error");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleRefreshSync = async () => {
+    setIsRefreshingFromLan(true);
+    try {
+      const hubIp = localStorage.getItem("lamsuite_hub_ip") || "192.168.0.143";
+      const deviceToken = localStorage.getItem("lamsuite_device_token") || undefined;
+      const res = await lanPeerService.pullMasterSnapshotFromMain(hubIp, 8089, undefined, deviceToken).catch(async () => {
+        return await lanPeerService.pullMasterSnapshotFromMain(hubIp, 8000, undefined, deviceToken);
+      });
+      showNotification(`Synced ${res.appliedCount} records from Store Hub!`, "success");
+      await loadInvoices();
+    } catch (e: any) {
+      await loadInvoices();
+      showNotification("Refreshed local records.", "success");
+    } finally {
+      setIsRefreshingFromLan(false);
     }
   };
 
@@ -582,11 +618,13 @@ export const BillsPage: React.FC = () => {
           </div>
 
           <button
-            onClick={loadInvoices}
-            className="flex items-center gap-1 rounded-[8px] border border-[var(--color-border)] p-1.5 text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)] cursor-pointer"
-            title="Refresh Invoices"
+            onClick={handleRefreshSync}
+            disabled={isRefreshingFromLan}
+            className="flex items-center gap-1.5 rounded-[8px] border border-[var(--color-border)] px-2.5 py-1 text-xs text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)] cursor-pointer disabled:opacity-50"
+            title="Refresh & Pull from LAN Hub"
           >
-            <RefreshCw className="h-3.5 w-3.5" />
+            <RefreshCw className={`h-3.5 w-3.5 ${isRefreshingFromLan ? "animate-spin text-emerald-500" : ""}`} />
+            <span>Sync Hub</span>
           </button>
         </div>
       </div>

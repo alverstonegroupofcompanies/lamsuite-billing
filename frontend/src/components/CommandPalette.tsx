@@ -29,6 +29,7 @@ import { reportRegistry } from "../reports/registry";
 import { useModalEscape } from "../lib/ui/modalEscapeManager";
 import { companySettingsService } from "../lib/settings/companySettingsService";
 import { operatorAuthService } from "../lib/auth/operatorAuthService";
+import { storeRegistryService } from "../lib/auth/storeRegistryService";
 
 interface CommandPaletteProps {
   isOpen: boolean;
@@ -37,7 +38,7 @@ interface CommandPaletteProps {
 
 interface CommandItem {
   id: string;
-  category: "Navigation" | "Billing & POS" | "Inventory" | "Reports" | "System";
+  category: "Navigation" | "Billing & POS" | "Inventory" | "Reports" | "System" | "Multi-Store Workspace" | "Registered Stores" | string;
   title: string;
   subtitle: string;
   shortcut?: string;
@@ -105,7 +106,42 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose 
     ? reportRegistry.getAccessibleReports(userRole, enabledMenus)
     : [];
 
+  const registeredStores = storeRegistryService.getStores();
+  const activeStoreId = storeRegistryService.getActiveStore()?.id;
+
   const commands: CommandItem[] = [
+    {
+      id: "action_switch_store_dialog",
+      category: "Multi-Store Workspace",
+      title: "Switch Company / Store...",
+      subtitle: "Open Tally-style company switcher to select another store or branch",
+      shortcut: "Alt+S",
+      icon: Building2,
+      action: () => {
+        onClose();
+        // Trigger key event for Alt+S to open modal
+        window.dispatchEvent(new KeyboardEvent("keydown", { key: "s", altKey: true }));
+      },
+    },
+    ...registeredStores.map((s) => ({
+      id: `switch_store_${s.id}`,
+      category: "Registered Stores",
+      title: `Switch to: ${s.alias || s.name}`,
+      subtitle: `${s.code} • ${s.counter_name}${s.id === activeStoreId ? " (Currently Active)" : ""}`,
+      shortcut: s.id === activeStoreId ? "Active" : "Alt+S",
+      icon: Building2,
+      action: async () => {
+        onClose();
+        if (s.id !== activeStoreId) {
+          try {
+            await storeRegistryService.switchActiveStore(s.id);
+            window.location.reload();
+          } catch (e: any) {
+            alert(e?.message || "Failed to switch store");
+          }
+        }
+      },
+    })),
     {
       id: "nav_dashboard",
       category: "Navigation",

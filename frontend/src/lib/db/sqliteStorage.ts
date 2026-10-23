@@ -605,7 +605,7 @@ export class SqliteStorageService {
     this.registerMockIpcHandlers();
   }
 
-  private registerMockIpcHandlers() {
+  registerMockIpcHandlers() {
     const db = getMockDatabase();
 
     registerMockHandler("db:migrate", async () => {
@@ -651,6 +651,27 @@ export class SqliteStorageService {
       }
       return { success: true };
     });
+
+    registerMockHandler("db:switchStore", async (args) => {
+      const { store_id } = (args as { store_id: string }) || {};
+      db.setStore(store_id || "default");
+      return { success: true, store_id };
+    });
+  }
+
+  async switchStore(storeId: string, relativeDbPath?: string): Promise<{ success: boolean; store_id: string }> {
+    const bridge = getIpcBridge();
+    const result = await bridge.invoke<{ success: boolean; store_id: string }>("db:switchStore", {
+      store_id: storeId,
+      relative_db_path: relativeDbPath,
+    });
+    // In mock mode ensure memory db is switched
+    if (bridge.runtime === "mock") {
+      getMockDatabase().setStore(storeId);
+    }
+    // Re-initialize schema on the target store database
+    await this.initDatabase();
+    return result;
   }
 
   async initDatabase(): Promise<number> {

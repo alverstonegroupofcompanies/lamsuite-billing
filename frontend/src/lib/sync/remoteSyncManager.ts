@@ -4,6 +4,7 @@ import { lanPeerService } from "../lan/lanPeerService";
 import { syncQueueService, defaultBackendApiClient } from "./syncQueueService";
 import { multiCounterStockService } from "../stock/multiCounterStockService";
 import { storeDeviceService } from "../auth/storeDeviceService";
+import { API_BASE_URL } from "../../config/env";
 
 export type TransportMode = "lan_mesh" | "cloud_sse" | "cloud_poll" | "offline";
 
@@ -80,7 +81,7 @@ export class RemoteSyncManager {
   /**
    * Evaluate best transport: LAN mesh if reachable, Cloud SSE if remote/internet available, or fallback to polling.
    */
-  async evaluateTransport(baseUrl = "http://127.0.0.1:8000"): Promise<TransportMode> {
+  async evaluateTransport(baseUrl = API_BASE_URL): Promise<TransportMode> {
     const profile = await storeDeviceService.getDeviceProfile();
     if (!profile) {
       this.transportMode = "offline";

@@ -16,6 +16,9 @@ import {
   FileSpreadsheet,
   RefreshCw,
   X,
+  Key,
+  Copy,
+  Check,
 } from "lucide-react";
 
 export const StoresPage: React.FC = () => {
@@ -168,6 +171,7 @@ export const StoresPage: React.FC = () => {
               <tr>
                 <th className="px-4 py-3">Store Details</th>
                 <th className="px-4 py-3">Code / GSTIN</th>
+                <th className="px-4 py-3">Store Activation Key</th>
                 <th className="px-4 py-3">Drug Licenses</th>
                 <th className="px-4 py-3">Plan / Expiry</th>
                 <th className="px-4 py-3 text-center">Status</th>
@@ -177,13 +181,13 @@ export const StoresPage: React.FC = () => {
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
               {isLoading ? (
                 <tr>
-                  <td colSpan={6} className="px-4 py-8 text-center text-slate-400">
+                  <td colSpan={7} className="px-4 py-8 text-center text-slate-400">
                     Loading stores...
                   </td>
                 </tr>
               ) : stores.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-4 py-8 text-center text-slate-400">
+                  <td colSpan={7} className="px-4 py-8 text-center text-slate-400">
                     No stores found matching your criteria.
                   </td>
                 </tr>
@@ -197,6 +201,24 @@ export const StoresPage: React.FC = () => {
                     <td className="px-4 py-3 font-mono">
                       <div>{s.code}</div>
                       <div className="text-[10px] text-slate-400">{s.gstin || "No GSTIN registered"}</div>
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-1.5 font-mono text-[11px]">
+                        <span className="bg-slate-100 dark:bg-slate-800 px-2 py-1 rounded text-slate-700 dark:text-slate-200 font-semibold border border-slate-200 dark:border-slate-700">
+                          {s.activation_key || `LAM-${s.code}-KEY`}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            navigator.clipboard.writeText(s.activation_key || `LAM-${s.code}-KEY`);
+                            alert(`Copied activation key: ${s.activation_key || `LAM-${s.code}-KEY`}`);
+                          }}
+                          title="Copy Activation Key to Clipboard"
+                          className="p-1 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 rounded"
+                        >
+                          <Copy className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
                     </td>
                     <td className="px-4 py-3">
                       {s.drug_license_numbers && s.drug_license_numbers.length > 0 ? (

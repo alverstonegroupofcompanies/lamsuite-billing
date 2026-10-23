@@ -1,6 +1,8 @@
 export class MockSqliteDatabase {
-  private tables = new Map<string, Map<string, Record<string, unknown>>>();
-  private schemaVersion: number = 0;
+  private activeStoreId: string = "default";
+  // Partition: Map<storeId, Map<tableName, Map<id, record>>>
+  private storePartitions = new Map<string, Map<string, Map<string, Record<string, unknown>>>>();
+  private schemaVersions = new Map<string, number>();
 
   constructor() {
     this.reset();
@@ -10,9 +12,24 @@ export class MockSqliteDatabase {
     return typeof window !== "undefined" && typeof window.localStorage !== "undefined";
   }
 
+  setStore(storeId: string) {
+    this.activeStoreId = storeId || "default";
+  }
+
+  getStore(): string {
+    return this.activeStoreId;
+  }
+
+  private getStoreTables(): Map<string, Map<string, Record<string, unknown>>> {
+    if (!this.storePartitions.has(this.activeStoreId)) {
+      this.storePartitions.set(this.activeStoreId, new Map());
+    }
+    return this.storePartitions.get(this.activeStoreId)!;
+  }
+
   reset() {
-    this.tables.clear();
-    this.schemaVersion = 0;
+    this.storePartitions.clear();
+    this.schemaVersions.clear();
     this.ensureTable("schema_version");
     this.ensureTable("invoices");
     this.ensureTable("invoice_items");
@@ -39,12 +56,13 @@ export class MockSqliteDatabase {
   }
 
   ensureTable(tableName: string): Map<string, Record<string, unknown>> {
-    if (!this.tables.has(tableName)) {
+    const tables = this.getStoreTables();
+    if (!tables.has(tableName)) {
       const map = new Map<string, Record<string, unknown>>();
       // Try restoring from localStorage if available
       if (this.isBrowser()) {
         try {
-          const raw = window.localStorage.getItem(`lamsuite_tbl_${tableName}`);
+          const raw = window.localStorage.getItem(`lamsuite_tbl_${this.activeStoreId}_${tableName}`);
           if (raw) {
             const entries: [string, Record<string, unknown>][] = JSON.parse(raw);
             for (const [k, v] of entries) {
@@ -55,9 +73,9 @@ export class MockSqliteDatabase {
           // ignore
         }
       }
-      this.tables.set(tableName, map);
+      tables.set(tableName, map);
     }
-    return this.tables.get(tableName)!;
+    return tables.get(tableName)!;
   }
 
   private persistTable(tableName: string): void {
@@ -65,7 +83,7 @@ export class MockSqliteDatabase {
       try {
         const t = this.ensureTable(tableName);
         const entries = Array.from(t.entries());
-        window.localStorage.setItem(`lamsuite_tbl_${tableName}`, JSON.stringify(entries));
+        window.localStorage.setItem(`lamsuite_tbl_${this.activeStoreId}_${tableName}`, JSON.stringify(entries));
       } catch {
         // ignore
       }
@@ -132,12 +150,13 @@ export class MockSqliteDatabase {
   }
 
   clearTable(table: string): void {
-    if (this.tables.has(table)) {
-      this.tables.get(table)!.clear();
+    const tables = this.getStoreTables();
+    if (tables.has(table)) {
+      tables.get(table)!.clear();
     }
     if (this.isBrowser()) {
       try {
-        window.localStorage.removeItem(`lamsuite_tbl_${table}`);
+        window.localStorage.removeItem(`lamsuite_tbl_${this.activeStoreId}_${table}`);
       } catch {
         // ignore
       }
@@ -149,10 +168,10 @@ export class MockSqliteDatabase {
   }
 
   getSchemaVersion(): number {
-    return this.schemaVersion;
+    return this.schemaVersions.get(this.activeStoreId) || 0;
   }
 
   setSchemaVersion(version: number): void {
-    this.schemaVersion = version;
+    this.schemaVersions.set(this.activeStoreId, version);
   }
 }

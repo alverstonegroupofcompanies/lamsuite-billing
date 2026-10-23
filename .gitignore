@@ -21,3 +21,13 @@ backend/.phpunit.result.cache
 *.sqlite-journal
 frontend/src-tauri/webview2-runtime/
 *.cab
+
+# Tauri updater private keys
+frontend/updater_keys
+frontend/updater_keys.pub
+updater_keys*
+*.key
+
+.lamsuite_secure_vault.dat
+backend/storage/framework/sessions/*
+stores_registry.json

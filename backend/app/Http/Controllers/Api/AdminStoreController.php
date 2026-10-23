@@ -87,12 +87,32 @@ class AdminStoreController
         $validated['enabled_menu_items'] = $validated['enabled_menu_items'] ?? $defaultMenus;
         $validated['is_active'] = true;
         $validated['version'] = 1;
+        $validated['activation_key'] = 'LAM-' . strtoupper($validated['code']) . '-' . strtoupper(bin2hex(random_bytes(3)));
 
         $store = Store::create($validated);
 
         AuditLog::log('create_store', 'Store', (string)$store->id, null, $store->toArray(), $store->id);
 
         return response()->json($store, 201);
+    }
+
+    /**
+     * Regenerate store activation key.
+     */
+    public function regenerateKey(string $id): JsonResponse
+    {
+        $store = Store::findOrFail($id);
+        $newKey = 'LAM-' . strtoupper($store->code) . '-' . strtoupper(bin2hex(random_bytes(3)));
+        $store->activation_key = $newKey;
+        $store->save();
+
+        AuditLog::log('regenerate_activation_key', 'Store', (string)$store->id, null, ['activation_key' => $newKey], $store->id);
+
+        return response()->json([
+            'success' => true,
+            'activation_key' => $newKey,
+            'message' => "Activation key regenerated successfully for store '{$store->name}'.",
+        ]);
     }
 
     /**

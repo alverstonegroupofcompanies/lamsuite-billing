@@ -437,6 +437,14 @@ export class PosCartService {
     return true;
   }
 
+  hasUnsavedItems(): boolean {
+    return this.lines.length > 0;
+  }
+
+  resetCart() {
+    this.clearCart();
+  }
+
   clearCart() {
     this.lines = [];
     this.customerId = "";
@@ -446,6 +454,10 @@ export class PosCartService {
     this.billDiscount = { type: "amount", value: 0 };
     this.manualRoundOff = null;
     this.prescriptionMeta = {};
+  }
+
+  addItem(product: ProductItem, batch: ProductBatch, qty = 1, looseQty = 0) {
+    return this.addProductToCart(product, batch, qty, looseQty);
   }
 
   getTotals(): InvoiceTotals {
