@@ -798,10 +798,13 @@ class SyncController
             ->where('status', 'active')
             ->count();
 
+        $deviceHost = gethostname() ?: 'Main-PC';
+
         return response()->json([
             'status' => 'healthy',
             'hub_id' => 'hub_' . ($store ? $store->code : 'STORE-01') . '_main',
             'hub_name' => ($store ? $store->name : 'Store Main') . ' (Hub Server)',
+            'device_name' => $deviceHost,
             'store_id' => $store ? (string)$store->id : '1',
             'store_name' => $store ? $store->name : 'LamStone Retail & Pharmacy',
             'store_code' => $store ? $store->code : 'STORE-01',
@@ -879,6 +882,7 @@ class SyncController
         $validated = $request->validate([
             'counter_name' => 'required|string|max:100',
             'counter_code' => 'nullable|string|max:20',
+            'device_name' => 'nullable|string|max:100',
             'store_key' => 'nullable|string',
             'pairing_code' => 'nullable|string',
             'device_uuid' => 'required|string',
@@ -907,6 +911,7 @@ class SyncController
 
         $requestedCode = !empty($validated['counter_code']) ? strtoupper(trim($validated['counter_code'])) : 'C02';
         $counterName = $validated['counter_name'];
+        $deviceName = $validated['device_name'] ?? null;
         $storeId = $store ? $store->id : 1;
         $deviceUuid = $validated['device_uuid'];
 
@@ -922,6 +927,7 @@ class SyncController
                 'store_id' => $storeId,
                 'device_uuid' => $deviceUuid,
                 'counter_name' => $counterName,
+                'device_name' => $deviceName ?: $counter->device_name,
                 'is_hub' => false,
                 'is_remote' => false,
                 'status' => $autoApprove ? 'active' : 'pending_approval',
@@ -941,6 +947,7 @@ class SyncController
                 'device_uuid' => $deviceUuid,
                 'counter_code' => $codeCandidate,
                 'counter_name' => $counterName,
+                'device_name' => $deviceName,
                 'is_hub' => false,
                 'is_remote' => false,
                 'status' => $autoApprove ? 'active' : 'pending_approval',
@@ -979,6 +986,7 @@ class SyncController
                     'id' => (string)$c->id,
                     'counter_name' => $c->counter_name,
                     'counter_code' => $c->counter_code,
+                    'device_name' => $c->device_name ?: ($c->counter_name . ' (' . ($c->counter_code ?: 'PC') . ')'),
                     'ip_address' => $c->ip_address ? $c->ip_address : '127.0.0.1',
                     'status' => $c->status,
                     'is_online' => (bool)$isOnline,

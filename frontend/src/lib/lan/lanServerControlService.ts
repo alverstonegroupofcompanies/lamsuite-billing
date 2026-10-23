@@ -7,6 +7,7 @@ export interface ConnectedCounterClient {
   id: string;
   counter_name: string;
   counter_code: string;
+  device_name?: string;
   ip_address: string;
   status: "active" | "blocked" | "pending_approval" | "disconnected";
   is_online: boolean;

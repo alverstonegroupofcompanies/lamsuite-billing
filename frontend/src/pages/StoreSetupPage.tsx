@@ -27,6 +27,7 @@ import { API_BASE_URL, DEFAULT_LAN_PORT } from "../config/env";
 export interface LanServerItem {
   id: string;
   name: string;
+  device_name?: string;
   ip_address: string;
   port: number;
   counter_name: string;
@@ -90,6 +91,7 @@ export const StoreSetupPage: React.FC<StoreSetupPageProps> = ({ onSetupComplete,
           servers.push({
             id: health.hubId,
             name: health.storeName,
+            device_name: health.deviceName,
             ip_address: cachedIp,
             port: health.port,
             counter_name: health.hubName,
@@ -135,6 +137,7 @@ export const StoreSetupPage: React.FC<StoreSetupPageProps> = ({ onSetupComplete,
           const mapped: LanServerItem[] = found.map((p) => ({
             id: p.id,
             name: p.name,
+            device_name: p.device_name,
             ip_address: p.ip_address,
             port: p.port,
             counter_name: p.counter_name,
@@ -158,6 +161,7 @@ export const StoreSetupPage: React.FC<StoreSetupPageProps> = ({ onSetupComplete,
         const mapped: LanServerItem[] = discoveredPeers.map((p) => ({
           id: p.id,
           name: p.name,
+          device_name: p.device_name,
           ip_address: p.ip_address,
           port: p.port,
           counter_name: p.counter_name,
@@ -311,12 +315,17 @@ export const StoreSetupPage: React.FC<StoreSetupPageProps> = ({ onSetupComplete,
           ? `C${counterName.replace(/[^0-9]/g, "").padStart(2, "0")}`
           : "C02";
 
+        const clientDeviceName = typeof navigator !== "undefined" && navigator.userAgent
+          ? (navigator.userAgent.includes("Mac") ? "Mac-Terminal" : navigator.userAgent.includes("Win") ? "Windows-Terminal" : "Client-Terminal")
+          : "Secondary-PC";
+
         const pairRes = await fetch(`http://${cleanHub}:${health.apiPort}/api/lan/v1/pair`, {
           method: "POST",
           headers: { "Content-Type": "application/json", Accept: "application/json" },
           body: JSON.stringify({
             counter_name: counterName,
             counter_code: counterCode,
+            device_name: clientDeviceName,
             store_key: storeKeyInput.trim() || health.storeCode,
             device_uuid: deviceUuid,
           }),
@@ -667,8 +676,16 @@ export const StoreSetupPage: React.FC<StoreSetupPageProps> = ({ onSetupComplete,
                                       </span>
                                     )}
                                   </div>
-                                  <div className="flex items-center gap-2 mt-0.5 text-[11px] text-text-muted font-mono">
+                                  <div className="flex items-center gap-2 mt-0.5 text-[11px] text-text-muted font-mono flex-wrap">
                                     <span className="text-text-main font-semibold">{srv.counter_name}</span>
+                                    {srv.device_name && (
+                                      <>
+                                        <span>•</span>
+                                        <span className="text-slate-600 bg-slate-100 dark:bg-slate-800 px-1.5 py-0.2 rounded font-sans font-medium text-[10px]">
+                                          Device: {srv.device_name}
+                                        </span>
+                                      </>
+                                    )}
                                     <span>•</span>
                                     <span className="text-accent">{srv.ip_address}:{srv.port}</span>
                                   </div>

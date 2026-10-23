@@ -1933,6 +1933,11 @@ export const SettingsPage: React.FC = () => {
                                 <span className="font-mono text-[10px] bg-white border border-slate-200 px-1.5 py-0.2 rounded text-slate-600">
                                   {client.counter_code}
                                 </span>
+                                {client.device_name && (
+                                  <span className="text-[10px] font-sans font-medium bg-slate-100 text-slate-600 px-1.5 py-0.2 rounded border border-slate-200">
+                                    {client.device_name}
+                                  </span>
+                                )}
                               </div>
                               <div className="text-[11px] text-slate-500 font-mono">
                                 IP: {client.ip_address} • Last Seen: {client.last_seen_at ? new Date(client.last_seen_at).toLocaleTimeString() : "Just now"}

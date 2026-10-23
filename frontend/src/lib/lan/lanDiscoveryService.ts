@@ -15,6 +15,7 @@ export interface HubHealthCheck {
   isHealthy: boolean;
   hubId: string;
   hubName: string;
+  deviceName?: string;
   storeId: string;
   storeName: string;
   storeCode: string;
@@ -31,6 +32,7 @@ export interface HubHealthCheck {
 export interface DiscoveredHubPeer {
   id: string;
   name: string;
+  device_name?: string;
   ip_address: string;
   port: number;
   api_port: number;
@@ -205,6 +207,7 @@ class LanDiscoveryService {
         isHealthy: true,
         hubId: data.hub_id || `hub_${cleanHost}`,
         hubName: data.hub_name || "Store Main Hub",
+        deviceName: data.device_name || "Main-PC",
         storeId: String(data.store_id || "1"),
         storeName: data.store_name || "LamStone Store",
         storeCode: data.store_code || "STORE",
@@ -301,6 +304,7 @@ class LanDiscoveryService {
             const peer: DiscoveredHubPeer = {
               id: health.hubId,
               name: health.storeName,
+              device_name: health.deviceName,
               ip_address: host,
               port: health.port,
               api_port: health.apiPort,

@@ -12,6 +12,7 @@ class Counter extends Model
         'store_id',
         'counter_code',
         'counter_name',
+        'device_name',
         'location_name',
         'is_remote',
         'is_hub',
