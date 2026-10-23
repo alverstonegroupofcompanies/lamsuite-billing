@@ -830,7 +830,7 @@ class SyncController
             'hub_label' => $hubLabel,
             'app_version' => '2.0.0',
             'protocol_version' => '1.0',
-            'port' => 8089,
+            'port' => 8000,
             'api_port' => 8000,
             'pairing_mode' => $isPairingMode,
             'pairing_expires_in' => max(0, (int)(($pairingUntil - (time() * 1000)) / 1000)),

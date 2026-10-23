@@ -41,7 +41,7 @@ const LAN_SERVER_STORAGE_KEY = "lamsuite_lan_server_config";
 class LanServerControlService {
   private isRunning = false;
   private autoStart = true;
-  private port = 8089;
+  private port = 8000;
   private apiPort = 8000;
   private bindAddress = "0.0.0.0";
   private selectedAdapterIp = "";
@@ -88,7 +88,7 @@ class LanServerControlService {
       if (raw) {
         const parsed = JSON.parse(raw);
         this.autoStart = parsed.autoStart ?? true;
-        this.port = parsed.port || 8089;
+        this.port = parsed.port || 8000;
         this.apiPort = parsed.apiPort || 8000;
         this.bindAddress = "0.0.0.0";
         if (parsed.selectedAdapterIp) {

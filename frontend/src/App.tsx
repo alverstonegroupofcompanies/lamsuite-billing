@@ -203,11 +203,16 @@ export const App: React.FC = () => {
 
             if (isLanClient) {
               // Fetch only from LAN Server Hub, not from backend server
-              const hubIp = localStorage.getItem("lamsuite_hub_ip") || "192.168.0.143";
+              const hubIp = localStorage.getItem("lamsuite_hub_ip");
+              const hubPort = Number(localStorage.getItem("lamsuite_hub_port")) || DEFAULT_LAN_PORT;
               const deviceToken = localStorage.getItem("lamsuite_device_token") || undefined;
-              await lanPeerService.pullMasterSnapshotFromMain(hubIp, DEFAULT_LAN_PORT, undefined, deviceToken).catch(async () => {
-                await lanPeerService.pullMasterSnapshotFromMain(hubIp, 8000, undefined, deviceToken).catch(() => {});
-              });
+              if (hubIp) {
+                await lanPeerService.pullMasterSnapshotFromMain(hubIp, hubPort, undefined, deviceToken).catch(async () => {
+                  if (hubPort !== 8000) {
+                    await lanPeerService.pullMasterSnapshotFromMain(hubIp, 8000, undefined, deviceToken).catch(() => {});
+                  }
+                });
+              }
             } else if (currentProducts.length <= 1) {
               // Master station / first sign in: check backend server for catalog data
               const storeId = activeStore?.id || activeProfile?.store_id || "1";

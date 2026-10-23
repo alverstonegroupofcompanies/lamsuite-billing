@@ -1,4 +1,5 @@
 import { sqliteStorage } from "../db/sqliteStorage";
+import { getResolvedApiBaseUrl } from "../../config/env";
 
 export interface SyncQueueItem {
   id: string;
@@ -41,17 +42,22 @@ export interface SyncApiClient {
  * Default Real-Time Backend API Client communicating with Laravel backend /api endpoints
  */
 export class BackendHttpApiClient implements SyncApiClient {
-  private baseUrl: string;
+  private baseUrl?: string;
 
-  constructor(baseUrl = "") {
+  constructor(baseUrl?: string) {
     this.baseUrl = baseUrl;
+  }
+
+  private getEffectiveBaseUrl(): string {
+    return this.baseUrl || getResolvedApiBaseUrl();
   }
 
   async pushBatch(items: Array<{ id: string; entity_type: string; action: string; payload: Record<string, unknown> }>): Promise<{
     success: boolean;
     results: { total: number; processed: number; failed: number };
   }> {
-    const res = await fetch(`${this.baseUrl}/api/sync/push/batch`, {
+    const url = `${this.getEffectiveBaseUrl()}/api/sync/push/batch`;
+    const res = await fetch(url, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -68,7 +74,8 @@ export class BackendHttpApiClient implements SyncApiClient {
   }
 
   async pushInvoices(items: Record<string, unknown>[]): Promise<{ success: boolean; ingested_count: number }> {
-    const res = await fetch(`${this.baseUrl}/api/sync/push/invoices`, {
+    const url = `${this.getEffectiveBaseUrl()}/api/sync/push/invoices`;
+    const res = await fetch(url, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -85,7 +92,8 @@ export class BackendHttpApiClient implements SyncApiClient {
   }
 
   async pushStockEvents(items: Record<string, unknown>[]): Promise<{ success: boolean; ingested_count: number }> {
-    const res = await fetch(`${this.baseUrl}/api/sync/push/stock-events`, {
+    const url = `${this.getEffectiveBaseUrl()}/api/sync/push/stock-events`;
+    const res = await fetch(url, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",

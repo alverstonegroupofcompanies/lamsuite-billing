@@ -12,4 +12,15 @@ export const ADMIN_PORTAL_URL: string = (
 ).replace(/\/+$/, "");
 
 export const DEFAULT_LAN_PORT: number =
-  Number(import.meta.env.VITE_DEFAULT_LAN_PORT) || 8089;
+  Number(import.meta.env.VITE_DEFAULT_LAN_PORT) || 8000;
+
+export function getResolvedApiBaseUrl(): string {
+  if (typeof localStorage !== "undefined") {
+    const hubIp = localStorage.getItem("lamsuite_hub_ip");
+    const hubPort = localStorage.getItem("lamsuite_hub_port") || "8000";
+    if (hubIp && hubIp !== "127.0.0.1" && hubIp !== "localhost" && !hubIp.includes("tauri.localhost")) {
+      return `http://${hubIp.trim()}:${hubPort}`;
+    }
+  }
+  return API_BASE_URL;
+}

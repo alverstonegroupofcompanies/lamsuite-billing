@@ -120,12 +120,17 @@ export const BillsPage: React.FC = () => {
       const isLanClient = localStorage.getItem("lamsuite_device_token") || localStorage.getItem("lamsuite_hub_ip");
       if (isLanClient && (list.length === 0 || criteria.dateRange === "all" || criteria.dateRange === "today")) {
         try {
-          const hubIp = localStorage.getItem("lamsuite_hub_ip") || "192.168.0.143";
+          const hubIp = localStorage.getItem("lamsuite_hub_ip");
+          const hubPort = Number(localStorage.getItem("lamsuite_hub_port")) || 8000;
           const deviceToken = localStorage.getItem("lamsuite_device_token") || undefined;
-          await lanPeerService.pullMasterSnapshotFromMain(hubIp, 8089, undefined, deviceToken).catch(async () => {
-            await lanPeerService.pullMasterSnapshotFromMain(hubIp, 8000, undefined, deviceToken).catch(() => {});
-          });
-          list = await invoiceManagementService.listInvoices(criteria);
+          if (hubIp) {
+            await lanPeerService.pullMasterSnapshotFromMain(hubIp, hubPort, undefined, deviceToken).catch(async () => {
+              if (hubPort !== 8000) {
+                await lanPeerService.pullMasterSnapshotFromMain(hubIp, 8000, undefined, deviceToken).catch(() => {});
+              }
+            });
+            list = await invoiceManagementService.listInvoices(criteria);
+          }
         } catch (_) {}
       }
 
@@ -141,12 +146,15 @@ export const BillsPage: React.FC = () => {
   const handleRefreshSync = async () => {
     setIsRefreshingFromLan(true);
     try {
-      const hubIp = localStorage.getItem("lamsuite_hub_ip") || "192.168.0.143";
+      const hubIp = localStorage.getItem("lamsuite_hub_ip");
+      const hubPort = Number(localStorage.getItem("lamsuite_hub_port")) || 8000;
       const deviceToken = localStorage.getItem("lamsuite_device_token") || undefined;
-      const res = await lanPeerService.pullMasterSnapshotFromMain(hubIp, 8089, undefined, deviceToken).catch(async () => {
-        return await lanPeerService.pullMasterSnapshotFromMain(hubIp, 8000, undefined, deviceToken);
-      });
-      showNotification(`Synced ${res.appliedCount} records from Store Hub!`, "success");
+      if (hubIp) {
+        const res = await lanPeerService.pullMasterSnapshotFromMain(hubIp, hubPort, undefined, deviceToken).catch(async () => {
+          return await lanPeerService.pullMasterSnapshotFromMain(hubIp, 8000, undefined, deviceToken);
+        });
+        showNotification(`Synced ${res.appliedCount} records from Store Hub!`, "success");
+      }
       await loadInvoices();
     } catch (e: any) {
       await loadInvoices();

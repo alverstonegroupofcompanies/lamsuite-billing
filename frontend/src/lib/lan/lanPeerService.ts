@@ -33,10 +33,10 @@ export class LanPeerService {
   private role: StationRole = "counter_client";
   private stationId = `stn_${Date.now()}_${Math.random().toString(16).slice(2, 6)}`;
   private stationName = "Counter Station";
-  private lanPort = 8089;
+  private lanPort = 8000;
   private knownPeers: LanPeerInfo[] = [];
 
-  configureStation(role: StationRole, stationName: string, port = 8089) {
+  configureStation(role: StationRole, stationName: string, port = 8000) {
     this.role = role;
     this.stationName = stationName;
     this.lanPort = port;

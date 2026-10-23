@@ -374,7 +374,7 @@ export const StoreSetupPage: React.FC<StoreSetupPageProps> = ({ onSetupComplete,
         setProgressPercent(80);
         let appliedCount = 0;
         try {
-          const fetchRes = await lanPeerService.pullMasterSnapshotFromMain(cleanHub, 8089, undefined, deviceToken);
+          const fetchRes = await lanPeerService.pullMasterSnapshotFromMain(cleanHub, hubPort, undefined, deviceToken);
           appliedCount = fetchRes.appliedCount;
         } catch (lanErr: any) {
           try {
