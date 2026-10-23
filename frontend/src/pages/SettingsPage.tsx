@@ -1942,9 +1942,13 @@ export const SettingsPage: React.FC = () => {
 
                           <div className="flex items-center gap-2">
                             <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${
-                              client.status === "active" ? "bg-emerald-100 text-emerald-800" : "bg-rose-100 text-rose-800"
+                              client.status === "blocked"
+                                ? "bg-rose-100 text-rose-800"
+                                : client.is_online
+                                ? "bg-emerald-100 text-emerald-800"
+                                : "bg-slate-100 text-slate-600"
                             }`}>
-                              {client.status}
+                              {client.status === "blocked" ? "BLOCKED" : client.is_online ? "ONLINE" : "OFFLINE"}
                             </span>
                             {client.status === "active" ? (
                               <button

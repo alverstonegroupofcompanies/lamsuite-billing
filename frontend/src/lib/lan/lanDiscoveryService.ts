@@ -67,8 +67,17 @@ class LanDiscoveryService {
 
     // 1. Check window.location if accessed via LAN IP directly (e.g. 192.168.0.x)
     if (typeof window !== "undefined" && window.location.hostname) {
-      const host = window.location.hostname;
-      if (host !== "localhost" && host !== "127.0.0.1" && host !== "::1") {
+      const host = window.location.hostname.trim();
+      // Exclude localhost, loopbacks, and desktop webview internal origins like tauri.localhost
+      const isInternalHost =
+        host === "localhost" ||
+        host === "127.0.0.1" ||
+        host === "::1" ||
+        host === "tauri.localhost" ||
+        host.endsWith(".localhost") ||
+        host.includes("tauri");
+
+      if (!isInternalHost) {
         addIfUnique({
           name: "Active Host Connection",
           ip: host,
@@ -138,7 +147,7 @@ class LanDiscoveryService {
       }
     }
 
-    // Always ensure loopback is documented as local fallback
+    // Always ensure loopback is documented as local fallback with explicit loopback label
     addIfUnique({
       name: "Loopback Interface (Host only)",
       ip: "127.0.0.1",

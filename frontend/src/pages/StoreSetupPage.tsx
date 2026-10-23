@@ -80,26 +80,27 @@ export const StoreSetupPage: React.FC<StoreSetupPageProps> = ({ onSetupComplete,
   // Populate discovered LAN servers from registered stores & active network peers
   const loadLanServers = async () => {
     try {
-      const registered = storeRegistryService.getStores();
       const servers: LanServerItem[] = [];
 
-      // Add servers derived from local hubs / registered store servers
-      registered.forEach((st) => {
-        servers.push({
-          id: `reg_${st.id}_${st.counter_id}`,
-          name: st.name,
-          ip_address: "127.0.0.1",
-          port: 8089,
-          counter_name: st.counter_name || "Counter 01 (Store Hub)",
-          counter_code: st.counter_code || "C01",
-          store_code: st.code,
-          status: "online",
-          is_main: true,
-        });
-      });
+      // Only check live verified hub if user has configured one or previously discovered one
+      const cachedIp = localStorage.getItem("lamsuite_hub_ip");
+      if (cachedIp && cachedIp !== "127.0.0.1" && cachedIp !== "tauri.localhost") {
+        const health = await lanDiscoveryService.checkHubHealth(cachedIp, 8000, 800);
+        if (health.isHealthy) {
+          servers.push({
+            id: health.hubId,
+            name: health.storeName,
+            ip_address: cachedIp,
+            port: health.port,
+            counter_name: health.hubName,
+            counter_code: "C01",
+            store_code: health.storeCode,
+            status: "online",
+            is_main: true,
+          });
+        }
+      }
 
-      // Default network servers if none or for multi-counter LAN demo
-      // Only include local registered hubs or active discovered hubs (avoid fake fallback servers)
       setLanServers(servers);
       if (servers.length > 0 && !hubIp) {
         setHubIp(servers[0].ip_address);
@@ -153,8 +154,6 @@ export const StoreSetupPage: React.FC<StoreSetupPageProps> = ({ onSetupComplete,
       // 3. Check native peer discovery if running inside desktop container
       const nativePeer = await lanPeerService.discoverMainStation().catch(() => null);
 
-      loadLanServers();
-
       if (discoveredPeers.length > 0) {
         const mapped: LanServerItem[] = discoveredPeers.map((p) => ({
           id: p.id,
@@ -170,7 +169,7 @@ export const StoreSetupPage: React.FC<StoreSetupPageProps> = ({ onSetupComplete,
         setLanServers(mapped);
         setHubIp(mapped[0].ip_address);
         setSelectedServerId(mapped[0].id);
-      } else if (nativePeer) {
+      } else if (nativePeer && nativePeer.ip_address !== "127.0.0.1" && nativePeer.ip_address !== "tauri.localhost") {
         setLanServers((prev) => {
           const exists = prev.some((p) => p.ip_address === nativePeer.ip_address);
           if (!exists) {
