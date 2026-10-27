@@ -22,6 +22,9 @@ RUN mkdir -p /var/cache/nginx /var/run /tmp && \
 COPY --from=builder /app/dist /usr/share/nginx/html
 RUN chown -R nginx:nginx /usr/share/nginx/html
 
+# Copy custom Nginx configuration with SPA fallback and no-cache for index.html/env.js
+COPY docker/nginx.conf /etc/nginx/nginx.conf
+
 # Copy runtime entrypoint script to dynamically inject environment configuration
 COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
