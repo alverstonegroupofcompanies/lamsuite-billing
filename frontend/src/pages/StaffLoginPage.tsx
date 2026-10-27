@@ -18,6 +18,7 @@ import {
 import { staffAuthService, type StaffUser } from "../lib/auth/staffAuthService";
 import { storeDeviceService, type StoreDeviceProfile } from "../lib/auth/storeDeviceService";
 import { useModalEscape } from "../lib/ui/modalEscapeManager";
+import { API_BASE_URL } from "../config/env";
 
 interface StaffLoginPageProps {
   onLoginSuccess: () => void;
@@ -41,6 +42,25 @@ export const StaffLoginPage: React.FC<StaffLoginPageProps> = ({
   const [errorMsg, setErrorMsg] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [isSeeding, setIsSeeding] = useState(false);
+  const [isOnline, setIsOnline] = useState<boolean>(navigator.onLine);
+
+  useEffect(() => {
+    let mounted = true;
+    const checkOnline = async () => {
+      try {
+        const res = await fetch(`${API_BASE_URL}/api/lan/v1/health`, { method: "GET" });
+        if (mounted) setIsOnline(res.ok);
+      } catch {
+        if (mounted) setIsOnline(false);
+      }
+    };
+    checkOnline();
+    const timer = setInterval(checkOnline, 15000);
+    return () => {
+      mounted = false;
+      clearInterval(timer);
+    };
+  }, []);
 
   // Forced password change modal
   const [mustChangePassword, setMustChangePassword] = useState(false);
@@ -247,10 +267,17 @@ export const StaffLoginPage: React.FC<StaffLoginPageProps> = ({
             <div className="flex items-center gap-2 text-[11px] text-text-muted">
               <span className="font-mono tabular-nums">{deviceProfile?.store_code || "STORE-01"}</span>
               <span>•</span>
-              <span className="flex items-center gap-1 text-accent font-medium">
-                <CheckCircle2 className="w-3 h-3" />
-                Offline Ready
-              </span>
+              {isOnline ? (
+                <span className="flex items-center gap-1.5 text-emerald-400 font-medium">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                  <span>Online Active</span>
+                </span>
+              ) : (
+                <span className="flex items-center gap-1.5 text-amber-400 font-medium">
+                  <AlertTriangle className="w-3 h-3" />
+                  <span>Offline Mode</span>
+                </span>
+              )}
             </div>
           </div>
         </div>
@@ -288,31 +315,17 @@ export const StaffLoginPage: React.FC<StaffLoginPageProps> = ({
 
           <div className="space-y-2 max-h-[340px] overflow-y-auto pr-1">
             {staffList.length === 0 ? (
-              <div className="p-4 rounded-card border border-dashed border-border-main bg-surface/50 text-center space-y-3">
+              <div className="p-5 rounded-card border border-dashed border-border-main bg-surface/50 text-center space-y-3">
                 <div className="w-10 h-10 rounded-full bg-accent-soft text-accent flex items-center justify-center mx-auto">
                   <UserPlus className="w-5 h-5" />
                 </div>
                 <div>
-                  <h4 className="text-xs font-bold text-text-main">No Staff Operators Found</h4>
+                  <h4 className="text-xs font-bold text-text-main">No Staff Operators Registered</h4>
                   <p className="text-[11px] text-text-muted mt-1 leading-relaxed">
-                    This store database does not have any operator accounts yet. Initialize standard staff profiles or sign in manually.
+                    No operator accounts exist for this store partition yet. Enter your Administrator / Store Owner credentials on the right to sign in and open this terminal.
                   </p>
                 </div>
-                <button
-                  type="button"
-                  onClick={handleSeedDefaultStaff}
-                  disabled={isSeeding}
-                  className="w-full py-2 px-3 bg-accent hover:bg-accent/90 text-white font-semibold text-xs rounded-btn shadow-xs flex items-center justify-center gap-1.5 cursor-pointer transition-all"
-                >
-                  {isSeeding ? (
-                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                  ) : (
-                    <>
-                      <CheckCircle2 className="w-3.5 h-3.5" />
-                      <span>Seed Default Staff (Admin / Cashier)</span>
-                    </>
-                  )}
-                </button>
+              </div>
               </div>
             ) : (
               staffList.map((user, idx) => {
@@ -401,14 +414,14 @@ export const StaffLoginPage: React.FC<StaffLoginPageProps> = ({
             {!selectedUser && (
               <div>
                 <label className="block text-[11px] font-semibold text-text-muted uppercase tracking-wider mb-1.5">
-                  Operator Username
+                  Operator Username or Email
                 </label>
                 <input
                   type="text"
                   required
                   value={manualUsername}
                   onChange={(e) => setManualUsername(e.target.value)}
-                  placeholder="e.g. admin or cashier1"
+                  placeholder="e.g. admin or owner@lamstone.in"
                   className="w-full text-xs py-2.5 px-3 bg-canvas border border-border-main rounded-btn text-text-main focus:border-accent focus:outline-none"
                 />
               </div>

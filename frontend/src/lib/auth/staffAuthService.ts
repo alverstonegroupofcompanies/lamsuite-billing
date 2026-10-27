@@ -1,6 +1,7 @@
 import { sqliteStorage } from "../db/sqliteStorage";
 import { staffCryptoService } from "./staffCryptoService";
 import { storeDeviceService } from "./storeDeviceService";
+import { API_BASE_URL } from "../../config/env";
 
 export interface StaffUser {
   id: string;
@@ -38,7 +39,88 @@ export class StaffAuthService {
   private sessionListeners: Array<(session: ActiveStaffSession | null) => void> = [];
 
   constructor() {
-    this.initDemoStaffIfEmpty();
+    // Online-first: do not auto-seed dummy demo users. Real users are managed via Central Admin.
+  }
+
+  async cleanupSyntheticDemoUsers(): Promise<void> {
+    if (typeof process !== "undefined" && process.env.NODE_ENV === "test") {
+      return;
+    }
+    try {
+      const all = await sqliteStorage.findAll<any>("staff_users");
+      for (const u of all || []) {
+        if (
+          u.full_name?.includes("Rahul Verma") ||
+          u.full_name?.includes("Ananya Nair") ||
+          u.full_name?.includes("Naveen Raj") ||
+          u.full_name?.includes("Reshma Pillai") ||
+          u.full_name?.includes("Deepak Nair") ||
+          u.full_name?.includes("Arun Kumar")
+        ) {
+          await sqliteStorage.deleteRecord("staff_users", u.id);
+        }
+      }
+    } catch (_) {}
+  }
+
+  async syncStaffFromBackend(storeId?: string): Promise<StaffUser[]> {
+    const activeStore = String(storeId || (await storeDeviceService.getDeviceProfile())?.store_id || "1");
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/staff/offline-cache?store_id=${activeStore}`, {
+        headers: { Accept: "application/json" },
+      });
+      if (res.ok) {
+        const body = await res.json();
+        if (body.success && Array.isArray(body.staff)) {
+          // Replace local cache for this store with verified cloud users
+          const currentLocal = await sqliteStorage.findAll<any>("staff_users");
+          for (const u of currentLocal || []) {
+            if (String(u.store_id) === activeStore) {
+              await sqliteStorage.deleteRecord("staff_users", u.id);
+            }
+          }
+
+          for (const s of body.staff) {
+            const userRecord = {
+              id: String(s.id),
+              store_id: String(s.store_id),
+              username: s.username,
+              full_name: s.full_name,
+              role: s.role,
+              password_hash: s.password_hash,
+              pin_hash: s.pin_hash,
+              is_active: s.is_active ? 1 : 0,
+              must_change_password: s.must_change_password ? 1 : 0,
+              biometric_registered: s.biometric_registered ? 1 : 0,
+              failed_attempts: s.failed_attempts || 0,
+              locked_until: s.locked_until,
+              permissions_json: JSON.stringify(s.permissions || ["*"]),
+              enabled_menus_json: JSON.stringify(s.enabled_menus || ["pos", "bills"]),
+              updated_at: Date.now(),
+            };
+            await sqliteStorage.insertRecord("staff_users", userRecord.id, userRecord);
+          }
+
+          return body.staff.map((u: any) => ({
+            id: String(u.id),
+            store_id: String(u.store_id),
+            username: u.username,
+            full_name: u.full_name,
+            role: u.role,
+            is_active: Boolean(u.is_active),
+            must_change_password: Boolean(u.must_change_password),
+            biometric_registered: Boolean(u.biometric_registered),
+            failed_attempts: u.failed_attempts || 0,
+            locked_until: u.locked_until,
+            permissions: u.permissions || ["*"],
+            enabled_menus: u.enabled_menus || ["pos", "bills"],
+          }));
+        }
+      }
+    } catch (_) {
+      // Cloud unreachable: fallback to local cache
+    }
+    return [];
   }
 
   async initDemoStaffIfEmpty(
@@ -50,7 +132,7 @@ export class StaffAuthService {
       const users = await sqliteStorage.findAll<any>("staff_users");
       const existingInStore = (users || []).filter((u) => String(u.store_id) === activeStore);
       if (existingInStore.length === 0) {
-        // Seed initial store staff specific to this store partition
+        // Seed initial store staff specific to this store partition (for local mock/tests only)
         const adminPw = await staffCryptoService.hashSecret("admin123");
         const adminPin = await staffCryptoService.hashPin("1234");
 
@@ -146,20 +228,6 @@ export class StaffAuthService {
 
         for (const u of initialUsers) {
           await sqliteStorage.insertRecord("staff_users", u.id as string, u);
-          // Enqueue for background synchronization
-          try {
-            const { syncQueueService, defaultBackendApiClient } = await import("../sync/syncQueueService");
-            await syncQueueService.enqueue("staff_user", u.id as string, "create", {
-              id: u.id,
-              store_id: u.store_id,
-              username: u.username,
-              full_name: u.full_name,
-              role: u.role,
-              biometric_registered: u.biometric_registered,
-            });
-            // Try pushing immediately in background if backend reachable
-            syncQueueService.processQueue(defaultBackendApiClient).catch(() => {});
-          } catch (_) {}
         }
       }
     } catch (_) {}
@@ -194,38 +262,39 @@ export class StaffAuthService {
     storeId?: string,
     storeMeta?: { name?: string; code?: string; alias?: string }
   ): Promise<StaffUser[]> {
+    await this.cleanupSyntheticDemoUsers();
     const activeStore = String(storeId || (await storeDeviceService.getDeviceProfile())?.store_id || "1");
+
+    // 1. ONLINE FIRST: Attempt to sync real staff users from backend
+    try {
+      const remoteStaff = await this.syncStaffFromBackend(activeStore);
+      if (remoteStaff.length > 0) {
+        return remoteStaff;
+      }
+    } catch (_) {}
+
+    // 2. Fallback to local offline cache
     let raw = await sqliteStorage.findAll<any>("staff_users");
-    
-    // Find staff strictly belonging to this store
     let storeMatching = (raw || []).filter(
       (u) => Boolean(u.is_active) && (String(u.store_id) === activeStore || (activeStore === "1" && u.store_id === "store_main"))
     );
 
-    if (storeMatching.length === 0) {
-      await this.initDemoStaffIfEmpty(activeStore, storeMeta);
-      raw = await sqliteStorage.findAll<any>("staff_users");
-      storeMatching = (raw || []).filter(
-        (u) => Boolean(u.is_active) && (String(u.store_id) === activeStore || (activeStore === "1" && u.store_id === "store_main"))
-      );
-    }
-
     return storeMatching.map((u) => ({
-        id: u.id,
-        store_id: u.store_id,
-        username: u.username,
-        full_name: u.full_name,
-        role: u.role,
-        password_hash: u.password_hash,
-        pin_hash: u.pin_hash,
-        is_active: Boolean(u.is_active),
-        must_change_password: Boolean(u.must_change_password),
-        biometric_registered: Boolean(u.biometric_registered),
-        failed_attempts: Number(u.failed_attempts || 0),
-        locked_until: u.locked_until ? Number(u.locked_until) : null,
-        permissions: u.permissions_json ? JSON.parse(u.permissions_json) : [],
-        enabled_menus: u.enabled_menus_json ? JSON.parse(u.enabled_menus_json) : [],
-      }));
+      id: u.id,
+      store_id: u.store_id,
+      username: u.username,
+      full_name: u.full_name,
+      role: u.role,
+      password_hash: u.password_hash,
+      pin_hash: u.pin_hash,
+      is_active: Boolean(u.is_active),
+      must_change_password: Boolean(u.must_change_password),
+      biometric_registered: Boolean(u.biometric_registered),
+      failed_attempts: Number(u.failed_attempts || 0),
+      locked_until: u.locked_until ? Number(u.locked_until) : null,
+      permissions: u.permissions_json ? JSON.parse(u.permissions_json) : [],
+      enabled_menus: u.enabled_menus_json ? JSON.parse(u.enabled_menus_json) : [],
+    }));
   }
 
   async isBiometricsAvailable(): Promise<boolean> {
@@ -245,7 +314,63 @@ export class StaffAuthService {
     usernameOrId: string,
     pin: string
   ): Promise<{ success: boolean; error?: string; mustChangePassword?: boolean; user?: StaffUser }> {
-    const user = await this.findStaff(usernameOrId);
+    const profile = await storeDeviceService.getDeviceProfile();
+    const activeStore = profile?.store_id || "1";
+    const localUser = await this.findStaff(usernameOrId);
+
+    // 1. ONLINE FIRST: Authenticate with Cloud Backend API if in browser and online
+    if (typeof window !== "undefined" && navigator.onLine) {
+      try {
+        const res = await fetch(`${API_BASE_URL}/api/staff/login`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "application/json",
+            ...(profile?.device_token ? { "X-Device-Token": profile.device_token } : {}),
+          },
+          body: JSON.stringify({
+            store_id: activeStore,
+            username: usernameOrId,
+            pin: pin,
+            counter_id: profile?.counter_name || "C01",
+          }),
+        });
+
+        if (res.ok) {
+          const body = await res.json();
+          if (body.success && body.user) {
+            const staffUser: StaffUser = {
+              id: String(body.user.id),
+              store_id: String(body.user.store_id || activeStore),
+              username: body.user.username,
+              full_name: body.user.name || body.user.username,
+              role: body.user.role,
+              password_hash: "",
+              pin_hash: "",
+              is_active: true,
+              must_change_password: Boolean(body.user.must_change_password),
+              biometric_registered: false,
+              failed_attempts: 0,
+              locked_until: null,
+              permissions: body.user.permissions || ["*"],
+              enabled_menus: body.user.enabled_menus || ["pos", "bills"],
+            };
+            if (body.token) {
+              localStorage.setItem("staff_token", body.token);
+            }
+            return await this.establishSession(staffUser);
+          }
+        } else if (!localUser && (res.status === 401 || res.status === 403 || res.status === 422 || res.status === 423)) {
+          const err = await res.json().catch(() => ({}));
+          return { success: false, error: err.message || "Invalid PIN." };
+        }
+      } catch (_) {
+        // Cloud unreachable: fallback to local offline cache
+      }
+    }
+
+    // 2. OFFLINE FALLBACK
+    const user = localUser || (await this.findStaff(usernameOrId));
     if (!user) return { success: false, error: "Staff member not found or inactive." };
 
     // Check lockout
@@ -270,7 +395,63 @@ export class StaffAuthService {
     usernameOrId: string,
     password: string
   ): Promise<{ success: boolean; error?: string; mustChangePassword?: boolean; user?: StaffUser }> {
-    const user = await this.findStaff(usernameOrId);
+    const profile = await storeDeviceService.getDeviceProfile();
+    const activeStore = profile?.store_id || "1";
+    const localUser = await this.findStaff(usernameOrId);
+
+    // 1. ONLINE FIRST: Authenticate with Cloud Backend API if in browser and online
+    if (typeof window !== "undefined" && navigator.onLine) {
+      try {
+        const res = await fetch(`${API_BASE_URL}/api/staff/login`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "application/json",
+            ...(profile?.device_token ? { "X-Device-Token": profile.device_token } : {}),
+          },
+          body: JSON.stringify({
+            store_id: activeStore,
+            username: usernameOrId,
+            password: password,
+            counter_id: profile?.counter_name || "C01",
+          }),
+        });
+
+        if (res.ok) {
+          const body = await res.json();
+          if (body.success && body.user) {
+            const staffUser: StaffUser = {
+              id: String(body.user.id),
+              store_id: String(body.user.store_id || activeStore),
+              username: body.user.username,
+              full_name: body.user.name || body.user.username,
+              role: body.user.role,
+              password_hash: "",
+              pin_hash: "",
+              is_active: true,
+              must_change_password: Boolean(body.user.must_change_password),
+              biometric_registered: false,
+              failed_attempts: 0,
+              locked_until: null,
+              permissions: body.user.permissions || ["*"],
+              enabled_menus: body.user.enabled_menus || ["pos", "bills"],
+            };
+            if (body.token) {
+              localStorage.setItem("staff_token", body.token);
+            }
+            return await this.establishSession(staffUser);
+          }
+        } else if (!localUser && (res.status === 401 || res.status === 403 || res.status === 422 || res.status === 423)) {
+          const err = await res.json().catch(() => ({}));
+          return { success: false, error: err.message || "Invalid credentials." };
+        }
+      } catch (_) {
+        // Cloud unreachable: fallback to local offline cache
+      }
+    }
+
+    // 2. OFFLINE FALLBACK
+    const user = localUser || (await this.findStaff(usernameOrId));
     if (!user) return { success: false, error: "Staff member not found or inactive." };
 
     if (user.locked_until && Date.now() < user.locked_until) {
