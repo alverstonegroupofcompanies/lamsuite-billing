@@ -73,6 +73,10 @@ RUN php artisan package:discover --ansi && \
 COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
+# Prepare writable Caddy storage for the non-root runtime user.
+RUN mkdir -p /data/caddy/locks /config/caddy \
+    && chown -R www-data:www-data /data/caddy /config/caddy
+
 USER www-data
 
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
