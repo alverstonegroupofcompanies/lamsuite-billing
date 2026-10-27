@@ -154,65 +154,122 @@ jobs:
         uses: appleboy/ssh-action@v1.0.3
         env:
           COMMIT_SHA: ${{ github.sha }}
+          IMAGE_BACKEND: ghcr.io/${{ github.repository_owner }}/lamsuite-backend
+          IMAGE_PANEL: ghcr.io/${{ github.repository_owner }}/lamsuite-panel
+          IMAGE_MCP: ghcr.io/${{ github.repository_owner }}/lamsuite-mcp
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER || 'deploy' }}
           password: ${{ secrets.SSH_PASSWORD }}
-          envs: COMMIT_SHA
+          envs: COMMIT_SHA,IMAGE_BACKEND,IMAGE_PANEL,IMAGE_MCP
           script: |
+
             set -euo pipefail
             cd /opt/lamsuite
 
-            # 1. Record current running image tag for rollback
-            PREV_TAG=$(cat .current_deploy_tag 2>/dev/null || echo "latest")
-            echo "Previous deploy tag: $PREV_TAG"
+            # Remember the last recorded deployment tag.
+            PREV_TAG=$(cat .current_deploy_tag 2>/dev/null || true)
+            if [ -z "$PREV_TAG" ]; then
+              echo "ERROR: No previous deployment tag found; refusing deployment." >&2
+              exit 1
+            fi
 
-            # 2. Pull new images
-            echo "$COMMIT_SHA" > .current_deploy_tag
-            export DOCKER_TAG="$COMMIT_SHA"
-            docker compose pull
+            # Normalize legacy raw SHA tags to the image tag format.
+            if [[ "$PREV_TAG" =~ ^[0-9a-f]{40}$ ]]; then
+              PREV_TAG="sha-$PREV_TAG"
+            fi
 
-            # 3. Controlled Database Migration Step (One-off container, no seeders)
+            echo "Previous deployment tag: $PREV_TAG"
+
+            # Check out the exact source revision used to build the images.
+            git fetch origin "$COMMIT_SHA"
+            git checkout --detach "$COMMIT_SHA"
+
+            export IMAGE_BACKEND IMAGE_PANEL IMAGE_MCP
+            export DOCKER_TAG="sha-$COMMIT_SHA"
+
+            # Rollback is phase-aware; before migrations, leave running services unchanged.
+            DEPLOY_PHASE="pre-migration"
+
+            rollback() {
+              rc=$?
+              trap - ERR
+              echo "ERROR: Deployment failed during $DEPLOY_PHASE (exit $rc)." >&2
+
+              if [ "$DEPLOY_PHASE" = "pre-migration" ]; then
+                echo "No migration was started; leaving running services unchanged." >&2
+                exit "$rc"
+              fi
+
+              echo "Attempting application-image rollback to $PREV_TAG." >&2
+              export DOCKER_TAG="$PREV_TAG"
+              if docker compose pull api worker scheduler reverb panel mcp &&
+                 docker compose up -d --remove-orphans; then
+                echo "Rollback commands completed. Verify application health and database compatibility." >&2
+              else
+                echo "CRITICAL: Automatic application rollback failed; manual intervention is required." >&2
+              fi
+              echo "WARNING: Database migrations are not automatically reversed." >&2
+              exit "$rc"
+            }
+
+            trap rollback ERR
+
+            # Pull all required images before touching the database.
+            docker compose pull api worker scheduler reverb panel mcp
+
+            # Back up the production database before running migrations.
+            echo "--> Creating pre-migration database backup..."
+            BACKUP_FILE="/root/lamsuite_billing_predeploy_$(date +%Y%m%d_%H%M%S).sql"
+            if ! docker compose exec -T db sh -c 'exec mysqldump --user="$MYSQL_USER" --password="$MYSQL_PASSWORD" --single-transaction --routines --triggers --no-tablespaces "$MYSQL_DATABASE"' > "$BACKUP_FILE"; then
+              rm -f "$BACKUP_FILE"
+              echo "ERROR: Database backup failed; refusing to run migrations." >&2
+              exit 1
+            fi
+            chmod 600 "$BACKUP_FILE"
+            if ! test -s "$BACKUP_FILE" || ! grep -q -- '-- Dump completed on' "$BACKUP_FILE"; then
+              echo "ERROR: Database backup verification failed; refusing to run migrations." >&2
+              rm -f "$BACKUP_FILE"
+              exit 1
+            fi
+            echo "Database backup completed: $BACKUP_FILE"
+
+            DEPLOY_PHASE="migration"
             echo "--> Running database migrations..."
             docker compose run --rm --no-deps api php artisan migrate --force
 
-            # 4. Controlled Cache Warmup
+            DEPLOY_PHASE="cache-warmup"
             echo "--> Warming application caches..."
             docker compose run --rm --no-deps api php artisan config:cache
             docker compose run --rm --no-deps api php artisan route:cache
             docker compose run --rm --no-deps api php artisan view:cache
 
-            # 5. Zero-downtime rolling reload
-            echo "--> Reloading services..."
+            DEPLOY_PHASE="service-start"
+            echo "--> Starting application services..."
             docker compose up -d --remove-orphans
 
-            # 6. Post-deploy healthcheck probe
-            echo "--> Probing deployment health..."
+            DEPLOY_PHASE="health-check"
+            echo "--> Checking deployment health..."
             source .env
-            PROBE_SUCCESS=false
 
             for i in $(seq 1 12); do
-                echo "Healthcheck attempt $i/12..."
-                API_HEALTH=$(curl -sk -o /dev/null -w "%{http_code}" "https://${SUBDOMAIN_API}.${DOMAIN}/up" || true)
-                PANEL_HEALTH=$(curl -sk -o /dev/null -w "%{http_code}" "https://${SUBDOMAIN_PANEL}.${DOMAIN}/health" || true)
-                MCP_HEALTH=$(curl -sk -o /dev/null -w "%{http_code}" "https://${SUBDOMAIN_MCP}.${DOMAIN}/health" || true)
+              API_HEALTH=$(curl -sk -o /dev/null -w "%{http_code}" "https://${SUBDOMAIN_API}.${DOMAIN}/up" || true)
+              PANEL_HEALTH=$(curl -sk -o /dev/null -w "%{http_code}" "https://${SUBDOMAIN_PANEL}.${DOMAIN}/health" || true)
+              MCP_HEALTH=$(curl -sk -o /dev/null -w "%{http_code}" "https://${SUBDOMAIN_MCP}.${DOMAIN}/health" || true)
 
-                if [ "$API_HEALTH" = "200" ] && [ "$PANEL_HEALTH" = "200" ] && [ "$MCP_HEALTH" = "200" ]; then
-                    echo "All health probes PASSED! (API: $API_HEALTH, Panel: $PANEL_HEALTH, MCP: $MCP_HEALTH)"
-                    PROBE_SUCCESS=true
-                    break
-                fi
-                sleep 5
+              if [ "$API_HEALTH" = "200" ] &&
+                [ "$PANEL_HEALTH" = "200" ] &&
+                [ "$MCP_HEALTH" = "200" ]; then
+                echo "All health checks passed."
+                trap - ERR
+                echo "sha-$COMMIT_SHA" > .current_deploy_tag
+                echo "Deployment successfully verified."
+                exit 0
+              fi
+
+              echo "Health check attempt $i/12 failed (API=$API_HEALTH, Panel=$PANEL_HEALTH, MCP=$MCP_HEALTH)."
+              sleep 5
             done
 
-            # 7. Rollback if probe failed
-            if [ "$PROBE_SUCCESS" != "true" ]; then
-                echo "CRITICAL: Healthcheck failed! Initiating automated rollback to: $PREV_TAG" >&2
-                echo "$PREV_TAG" > .current_deploy_tag
-                export DOCKER_TAG="$PREV_TAG"
-                docker compose pull
-                docker compose up -d --remove-orphans
-                exit 1
-            fi
-
-            echo "Deployment successfully verified."
+            echo "ERROR: Health checks failed after retries." >&2
+            exit 1

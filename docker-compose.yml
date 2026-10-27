@@ -119,7 +119,7 @@ services:
     build:
       context: ./backend
       target: api
-    image: lamsuite-backend:latest
+    image: ${IMAGE_BACKEND:-lamsuite-backend}:${DOCKER_TAG:-latest}
     container_name: lamsuite-api
     restart: unless-stopped
     command: ["frankenphp", "run", "--config", "/etc/caddy/Caddyfile"]
@@ -189,7 +189,7 @@ services:
     build:
       context: ./backend
       target: base
-    image: lamsuite-backend:latest
+    image: ${IMAGE_BACKEND:-lamsuite-backend}:${DOCKER_TAG:-latest}
     container_name: lamsuite-worker
     restart: unless-stopped
     command: ["php", "artisan", "queue:work", "--tries=3", "--timeout=90", "--memory=256"]
@@ -240,7 +240,7 @@ services:
     build:
       context: ./backend
       target: base
-    image: lamsuite-backend:latest
+    image: ${IMAGE_BACKEND:-lamsuite-backend}:${DOCKER_TAG:-latest}
     container_name: lamsuite-scheduler
     restart: unless-stopped
     command: ["php", "artisan", "schedule:work"]
@@ -284,7 +284,7 @@ services:
     build:
       context: ./backend
       target: base
-    image: lamsuite-backend:latest
+    image: ${IMAGE_BACKEND:-lamsuite-backend}:${DOCKER_TAG:-latest}
     container_name: lamsuite-reverb
     restart: unless-stopped
     command: ["php", "artisan", "reverb:start", "--host=0.0.0.0", "--port=8080"]
@@ -336,7 +336,7 @@ services:
   panel:
     build:
       context: ./admin-panel
-    image: lamsuite-panel:latest
+    image: ${IMAGE_PANEL:-lamsuite-panel}:${DOCKER_TAG:-latest}
     container_name: lamsuite-panel
     restart: unless-stopped
     environment:
@@ -363,7 +363,7 @@ services:
   mcp:
     build:
       context: ./mcp-server
-    image: lamsuite-mcp:latest
+    image: ${IMAGE_MCP:-lamsuite-mcp}:${DOCKER_TAG:-latest}
     container_name: lamsuite-mcp
     restart: unless-stopped
     depends_on:
