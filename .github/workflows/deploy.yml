@@ -10,6 +10,7 @@ env:
   IMAGE_BACKEND: ghcr.io/${{ github.repository_owner }}/lamsuite-backend
   IMAGE_PANEL: ghcr.io/${{ github.repository_owner }}/lamsuite-panel
   IMAGE_MCP: ghcr.io/${{ github.repository_owner }}/lamsuite-mcp
+  IMAGE_WEB: ghcr.io/${{ github.repository_owner }}/lamsuite-web
 
 jobs:
   # ----------------------------------------------------------------------------
@@ -52,6 +53,12 @@ jobs:
       - name: Test Admin Panel Build
         run: |
           cd admin-panel
+          npm ci
+          npm run build
+
+      - name: Test Web Frontend Build
+        run: |
+          cd frontend
           npm ci
           npm run build
 
@@ -141,6 +148,27 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      - name: Extract Metadata (Web)
+        id: meta-web
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE_WEB }}
+          tags: |
+            type=sha,format=long
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build & Push Web Image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./frontend
+          push: true
+          tags: ${{ steps.meta-web.outputs.tags }}
+          labels: ${{ steps.meta-web.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
   # ----------------------------------------------------------------------------
   # Job 3: Zero-Downtime Deploy & Rollback Gate
   # ----------------------------------------------------------------------------
@@ -157,11 +185,12 @@ jobs:
           IMAGE_BACKEND: ghcr.io/${{ github.repository_owner }}/lamsuite-backend
           IMAGE_PANEL: ghcr.io/${{ github.repository_owner }}/lamsuite-panel
           IMAGE_MCP: ghcr.io/${{ github.repository_owner }}/lamsuite-mcp
+          IMAGE_WEB: ghcr.io/${{ github.repository_owner }}/lamsuite-web
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER || 'deploy' }}
           password: ${{ secrets.SSH_PASSWORD }}
-          envs: COMMIT_SHA,IMAGE_BACKEND,IMAGE_PANEL,IMAGE_MCP
+          envs: COMMIT_SHA,IMAGE_BACKEND,IMAGE_PANEL,IMAGE_MCP,IMAGE_WEB
           script: |
 
             set -euo pipefail
@@ -181,7 +210,7 @@ jobs:
 
             echo "Previous deployment tag: $PREV_TAG"
 
-            export IMAGE_BACKEND IMAGE_PANEL IMAGE_MCP
+            export IMAGE_BACKEND IMAGE_PANEL IMAGE_MCP IMAGE_WEB
             export DOCKER_TAG="sha-$COMMIT_SHA"
 
             # Rollback is phase-aware; before migrations, leave running services unchanged.
@@ -199,8 +228,8 @@ jobs:
 
               echo "Attempting application-image rollback to $PREV_TAG." >&2
               export DOCKER_TAG="$PREV_TAG"
-              if docker compose pull api worker scheduler reverb panel mcp &&
-                 docker compose up -d --remove-orphans; then
+              if docker compose --profile web pull api worker scheduler reverb panel mcp web &&
+                 docker compose --profile web up -d --remove-orphans; then
                 echo "Rollback commands completed. Verify application health and database compatibility." >&2
               else
                 echo "CRITICAL: Automatic application rollback failed; manual intervention is required." >&2
@@ -212,7 +241,7 @@ jobs:
             trap rollback ERR
 
             # Pull all required images before touching the database.
-            docker compose pull api worker scheduler reverb panel mcp
+            docker compose --profile web pull api worker scheduler reverb panel mcp web
 
             # Back up the production database before running migrations.
             echo "--> Creating pre-migration database backup..."
@@ -241,7 +270,7 @@ jobs:
 
             DEPLOY_PHASE="service-start"
             echo "--> Starting application services..."
-            docker compose up -d --remove-orphans
+            docker compose --profile web up -d --remove-orphans
 
             DEPLOY_PHASE="health-check"
             echo "--> Checking deployment health..."

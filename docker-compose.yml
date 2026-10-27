@@ -408,7 +408,7 @@ services:
       - web
     build:
       context: ./frontend
-    image: lamsuite-web:latest
+    image: ${IMAGE_WEB:-lamsuite-web}:${DOCKER_TAG:-latest}
     container_name: lamsuite-web
     restart: unless-stopped
     environment:
