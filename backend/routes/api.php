@@ -155,6 +155,11 @@ Route::middleware('auth:sanctum')->group(function () {
 | Web Admin Panel API (Sanctum + Tenant Scoping + RBAC + IP Allowlist)
 |--------------------------------------------------------------------------
 */
+// Alias for backwards compatibility / un-prefixed store operations
+Route::middleware(['auth:sanctum', 'session.timeout', 'ip.allowlist', 'scope.store'])
+    ->post('/stores/{id}/regenerate-key', [AdminStoreController::class, 'regenerateKey'])
+    ->middleware('rbac:stores,edit');
+
 Route::middleware(['auth:sanctum', 'session.timeout', 'ip.allowlist', 'scope.store'])->prefix('admin')->group(function () {
     // Auth, 2FA, Sessions & Impersonation
     Route::get('/me', [AdminAuthController::class, 'me']);

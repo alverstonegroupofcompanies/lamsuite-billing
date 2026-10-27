@@ -224,7 +224,7 @@ export const StoresPage: React.FC = () => {
                             onClick={async () => {
                               if (confirm(`Regenerate activation key for store "${s.name}"? Previous keys will be revoked.`)) {
                                 try {
-                                  const res = await api.post<{ success: boolean; activation_key: string; message: string }>(`/stores/${s.id}/regenerate-key`);
+                                  const res = await api.post<{ success: boolean; activation_key: string; message: string }>(`/admin/stores/${s.id}/regenerate-key`);
                                   alert(res.message + "\nNew Key: " + res.activation_key);
                                   fetchStores();
                                 } catch (e: any) {
