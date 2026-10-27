@@ -1,0 +1,30 @@
+services:
+  phpmyadmin:
+    image: phpmyadmin:5
+    container_name: lamsuite-phpmyadmin
+    restart: unless-stopped
+    environment:
+      PMA_HOST: lamsuite-db
+      PMA_PORT: 3306
+      PMA_ABSOLUTE_URI: https://api.lamstonehealthcare.com/secretpanel2026/
+      UPLOAD_LIMIT: 64M
+    networks:
+      - lamsuite-internal
+      - lamsuite-public
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=lamsuite-public"
+      - "traefik.http.routers.secretpanel.rule=Host(`api.lamstonehealthcare.com`) && PathPrefix(`/secretpanel2026`)"
+      - "traefik.http.routers.secretpanel.entrypoints=web"
+      - "traefik.http.routers.secretpanel.priority=100"
+      - "traefik.http.routers.secretpanel.middlewares=secretpanel-auth@file,secretpanel-strip@file"
+      - "traefik.http.routers.secretpanel.service=secretpanel"
+      - "traefik.http.services.secretpanel.loadbalancer.server.port=80"
+
+networks:
+  lamsuite-internal:
+    external: true
+    name: lamsuite-internal
+  lamsuite-public:
+    external: true
+    name: lamsuite-public

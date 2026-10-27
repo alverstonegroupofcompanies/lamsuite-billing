@@ -4,18 +4,8 @@ http:
     # Production Security Headers
     security-headers:
       headers:
-        accessControlAllowMethods:
-          - GET
-          - OPTIONS
-          - PUT
-          - POST
-          - DELETE
-        accessControlMaxAge: 100
         hostsProxyHeaders:
           - "X-Forwarded-Host"
-        sslRedirect: true
-        sslForceHost: true
-        sslHost: ""
         sslProxyHeaders:
           X-Forwarded-Proto: https
         stsSeconds: 31536000
@@ -56,4 +46,17 @@ http:
     traefik-dashboard-auth:
       basicAuth:
         users:
-          - "${TRAEFIK_DASHBOARD_AUTH:-admin:$2y$05$1vB8oIq9kQcZpEceL5cWcOu2w6EKn9gE7O1d1V1pT0qF1Z0J4jVKe}"
+          - "admin:$2y$05$cFW0UoenVeDrUyw.7v6vzONcmrIICNC4YJbnfRSwNsmnDYYutayni"
+
+    # Extra authentication for phpMyAdmin
+    secretpanel-auth:
+      basicAuth:
+        usersFile: /etc/traefik/dynamic/secretpanel.htpasswd
+        realm: "Restricted phpMyAdmin"
+        removeHeader: true
+
+    # Remove the public URL prefix before forwarding to phpMyAdmin
+    secretpanel-strip:
+      stripPrefix:
+        prefixes:
+          - /secretpanel2026

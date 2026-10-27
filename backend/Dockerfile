@@ -25,9 +25,23 @@ RUN install-php-extensions \
     bcmath \
     pcntl \
     opcache \
-    redis \
     zip \
     intl
+
+# Build phpredis directly from GitHub to bypass PECL metadata errors.
+RUN apk add --no-cache --virtual .redis-build-deps \
+        autoconf gcc g++ make musl-dev linux-headers re2c \
+    && curl -fsSL https://github.com/phpredis/phpredis/archive/refs/tags/6.2.0.tar.gz -o /tmp/phpredis.tar.gz \
+    && tar -xzf /tmp/phpredis.tar.gz -C /tmp \
+    && cd /tmp/phpredis-6.2.0 \
+    && phpize \
+    && ./configure --enable-redis \
+    && make -j2 \
+    && make install \
+    && echo "extension=redis.so" > /usr/local/etc/php/conf.d/redis.ini \
+    && cd / \
+    && rm -rf /tmp/phpredis-6.2.0 /tmp/phpredis.tar.gz \
+    && apk del .redis-build-deps
 
 # Production PHP settings
 RUN mv "$PHP_INI_DIR/php.ini-production" "$PHP_INI_DIR/php.ini" && \

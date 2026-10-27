@@ -8,7 +8,8 @@ services:
     image: tecnativa/docker-socket-proxy:latest
     container_name: lamsuite-socket-proxy
     restart: unless-stopped
-    read_only: true
+    tmpfs:
+      - /tmp
     environment:
       - CONTAINERS=1
       - SERVICES=1
@@ -27,15 +28,14 @@ services:
       - no-new-privileges:true
 
   traefik:
-    image: traefik:v3.1
+    image: traefik:v3.7.16
     container_name: lamsuite-traefik
     restart: unless-stopped
     depends_on:
       socket-proxy:
         condition: service_healthy
     ports:
-      - "80:80"
-      - "443:443"
+      - "127.0.0.1:8080:80"
     environment:
       - ACME_EMAIL=${ACME_EMAIL}
       - DOMAIN=${DOMAIN}
@@ -51,8 +51,7 @@ services:
       - "traefik.enable=true"
       # Traefik Dashboard (Authenticated)
       - "traefik.http.routers.traefik-dashboard.rule=Host(`traefik.${DOMAIN}`) && (PathPrefix(`/api`) || PathPrefix(`/dashboard`))"
-      - "traefik.http.routers.traefik-dashboard.entrypoints=websecure"
-      - "traefik.http.routers.traefik-dashboard.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.traefik-dashboard.entrypoints=web"
       - "traefik.http.routers.traefik-dashboard.service=api@internal"
       - "traefik.http.routers.traefik-dashboard.middlewares=traefik-dashboard-auth@file"
     healthcheck:
@@ -73,7 +72,6 @@ services:
     command:
       - --character-set-server=utf8mb4
       - --collation-server=utf8mb4_unicode_ci
-      - --default-authentication-plugin=caching_sha2_password
       - --max_connections=300
     environment:
       MYSQL_DATABASE: ${DB_DATABASE:-lamsuite_billing}
@@ -124,6 +122,7 @@ services:
     image: lamsuite-backend:latest
     container_name: lamsuite-api
     restart: unless-stopped
+    command: ["frankenphp", "run", "--config", "/etc/caddy/Caddyfile"]
     depends_on:
       db:
         condition: service_healthy
@@ -168,13 +167,11 @@ services:
       - "traefik.enable=true"
       # Standard 4 Labels
       - "traefik.http.routers.api.rule=Host(`${SUBDOMAIN_API:-api}.${DOMAIN}`)"
-      - "traefik.http.routers.api.entrypoints=websecure"
-      - "traefik.http.routers.api.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.api.entrypoints=web"
       - "traefik.http.services.api.loadbalancer.server.port=8000"
       # Anti-Brute-Force Rate Limiting for Authentication & Activation Endpoints
       - "traefik.http.routers.api-auth.rule=Host(`${SUBDOMAIN_API:-api}.${DOMAIN}`) && (PathPrefix(`/api/login`) || PathPrefix(`/api/auth/login`) || PathPrefix(`/api/staff/login`) || PathPrefix(`/api/devices/register`) || PathPrefix(`/api/lan/v1/pair`))"
-      - "traefik.http.routers.api-auth.entrypoints=websecure"
-      - "traefik.http.routers.api-auth.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.api-auth.entrypoints=web"
       - "traefik.http.routers.api-auth.middlewares=rate-limit-auth@file"
       - "traefik.http.routers.api-auth.service=api"
     healthcheck:
@@ -319,8 +316,7 @@ services:
       - "traefik.enable=true"
       # Standard 4 Labels
       - "traefik.http.routers.reverb.rule=Host(`${SUBDOMAIN_WS:-ws}.${DOMAIN}`)"
-      - "traefik.http.routers.reverb.entrypoints=websecure"
-      - "traefik.http.routers.reverb.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.reverb.entrypoints=web"
       - "traefik.http.services.reverb.loadbalancer.server.port=8080"
       # WebSocket Long Idle Timeout & No Buffering
       - "traefik.http.services.reverb.loadbalancer.responseforwarding.flushinterval=-1"
@@ -352,8 +348,7 @@ services:
       - "traefik.enable=true"
       # Standard 4 Labels
       - "traefik.http.routers.panel.rule=Host(`${SUBDOMAIN_PANEL:-panel}.${DOMAIN}`)"
-      - "traefik.http.routers.panel.entrypoints=websecure"
-      - "traefik.http.routers.panel.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.panel.entrypoints=web"
       - "traefik.http.services.panel.loadbalancer.server.port=80"
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:80/health"]
@@ -390,8 +385,7 @@ services:
       - "traefik.enable=true"
       # Standard 4 Labels
       - "traefik.http.routers.mcp.rule=Host(`${SUBDOMAIN_MCP:-mcp}.${DOMAIN}`)"
-      - "traefik.http.routers.mcp.entrypoints=websecure"
-      - "traefik.http.routers.mcp.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.mcp.entrypoints=web"
       - "traefik.http.services.mcp.loadbalancer.server.port=3000"
       # Streamable SSE Buffering Bypass
       - "traefik.http.services.mcp.loadbalancer.responseforwarding.flushinterval=-1"
@@ -423,8 +417,7 @@ services:
       - "traefik.enable=true"
       # Standard 4 Labels
       - "traefik.http.routers.web.rule=Host(`${SUBDOMAIN_APP:-app}.${DOMAIN}`)"
-      - "traefik.http.routers.web.entrypoints=websecure"
-      - "traefik.http.routers.web.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.web.entrypoints=web"
       - "traefik.http.services.web.loadbalancer.server.port=80"
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:80/"]
@@ -450,8 +443,7 @@ services:
       - "traefik.enable=true"
       # Standard 4 Labels
       - "traefik.http.routers.updates.rule=Host(`${SUBDOMAIN_UPDATES:-updates}.${DOMAIN}`)"
-      - "traefik.http.routers.updates.entrypoints=websecure"
-      - "traefik.http.routers.updates.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.updates.entrypoints=web"
       - "traefik.http.services.updates.loadbalancer.server.port=80"
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:80/"]
