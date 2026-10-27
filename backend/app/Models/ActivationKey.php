@@ -85,8 +85,11 @@ class ActivationKey extends Model
             'created_by' => $options['created_by'] ?? null,
         ]);
 
-        // Keep stores.activation_key_hash updated for fast lookup
-        $store->update(['activation_key_hash' => $keyHash]);
+        // Keep stores.activation_key and stores.activation_key_hash updated for fast lookup & admin display
+        $store->update([
+            'activation_key' => $rawKey,
+            'activation_key_hash' => $keyHash,
+        ]);
 
         return [
             'raw_key' => $rawKey,
