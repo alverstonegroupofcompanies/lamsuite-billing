@@ -181,10 +181,6 @@ jobs:
 
             echo "Previous deployment tag: $PREV_TAG"
 
-            # Check out the exact source revision used to build the images.
-            git fetch origin "$COMMIT_SHA"
-            git checkout --detach "$COMMIT_SHA"
-
             export IMAGE_BACKEND IMAGE_PANEL IMAGE_MCP
             export DOCKER_TAG="sha-$COMMIT_SHA"
 
