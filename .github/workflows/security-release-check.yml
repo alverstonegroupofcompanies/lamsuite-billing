@@ -1,0 +1,52 @@
+name: Security & Release Gate Checks
+
+on:
+  push:
+    branches: [ main, release/** ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  backend-security:
+    name: Backend Activation Security Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: mbstring, xml, ctype, iconv, sqlite3, pdo_sqlite
+          coverage: none
+
+      - name: Install Dependencies
+        run: |
+          cd backend
+          composer install --prefer-dist --no-progress
+
+      - name: Run Backend Security Test Suite
+        run: |
+          cd backend
+          ./vendor/bin/phpunit tests/Feature/DeviceActivationSecurityTest.php
+
+  frontend-security:
+    name: Frontend Release Security & Gate Checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install Frontend Dependencies
+        run: |
+          cd frontend
+          npm ci
+
+      - name: Release Security Gate Check
+        run: |
+          cd frontend
+          npm run check:security

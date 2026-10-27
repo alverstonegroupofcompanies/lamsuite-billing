@@ -15,6 +15,7 @@ export const ConfigSchema = z.object({
   transport: z.enum(["stdio", "http"]).default("stdio"),
   httpPort: z.number().int().positive().default(3000),
   httpHost: z.string().default("0.0.0.0"),
+  mcpAuthToken: z.string().optional().default(""),
 });
 
 export type ServerConfig = z.infer<typeof ConfigSchema>;
@@ -56,6 +57,7 @@ export function loadConfig(overrides: Partial<ServerConfig> = {}): ServerConfig 
     transport: cliTransport || (process.env.LAMSUITE_MCP_TRANSPORT as any) || "stdio",
     httpPort: cliPort || (process.env.PORT ? Number(process.env.PORT) : 3000),
     httpHost: process.env.LAMSUITE_MCP_HOST || "0.0.0.0",
+    mcpAuthToken: process.env.LAMSUITE_MCP_AUTH_TOKEN || process.env.MCP_AUTH_TOKEN || "",
     ...overrides,
   };
 

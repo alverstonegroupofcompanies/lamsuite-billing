@@ -4,10 +4,11 @@ import { buildToolResponse } from "../../utils/formatters.js";
 
 export const approveCounterTool: ToolDefinition = {
   name: "lamsuite_approve_counter",
-  description: "Approve a newly enrolled remote counter workstation or revoke an existing device remotely.",
+  description: "Approve a newly enrolled remote counter workstation via pairing code or counter ID, or revoke an existing device remotely.",
   inputSchema: z.object({
-    counter_id: z.string().describe("Counter ID to approve or revoke"),
-    status: z.enum(["active", "revoked", "pending_approval", "locked"]).describe("Target counter status"),
+    counter_id: z.string().optional().describe("Counter ID to approve or revoke"),
+    pairing_code: z.string().optional().describe("6-character pairing code e.g. LK-8421 displayed on counter"),
+    status: z.enum(["active", "revoked", "pending_approval", "locked"]).default("active").describe("Target counter status"),
     reason: z.string().optional().describe("Revocation reason if revoking access"),
   }),
   annotations: {
@@ -18,6 +19,15 @@ export const approveCounterTool: ToolDefinition = {
   requiredPermission: "store:write",
   isWriteTool: true,
   handler: async (args, { client }) => {
+    if (args.pairing_code) {
+      const res = await (client as any).post?.(`/api/counters/approve-pairing`, {
+        pairing_code: args.pairing_code,
+      }) ?? { success: true };
+      return buildToolResponse(`Counter approved via pairing code ${args.pairing_code}`, res);
+    }
+    if (!args.counter_id) {
+      throw new Error("Either counter_id or pairing_code must be provided.");
+    }
     const res = await (client as any).post?.(`/api/admin/counters/${args.counter_id}/status`, {
       status: args.status,
       revoke_reason: args.reason,

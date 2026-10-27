@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { companySettingsService } from "../lib/settings/companySettingsService";
 import { syncQueueService } from "../lib/sync/syncQueueService";
+import { onlineTransactionService, type NetworkHealth } from "../lib/sync/onlineTransactionService";
 import { CommandPalette } from "./CommandPalette";
 import { TopNav } from "./TopNav";
 import { KeyboardShortcutsModal } from "./KeyboardShortcutsModal";
@@ -47,6 +48,15 @@ export const Layout: React.FC<LayoutProps> = ({ children, onOpenGateway, onAddNe
     pendingCount: 0,
     isProcessing: false,
   });
+  const [networkHealth, setNetworkHealth] = useState<NetworkHealth>({
+    state: "online",
+    latencyMs: 40,
+    lastOnlineTimestamp: Date.now(),
+    timeSinceLastOnlineMs: 0,
+    pendingQueueCount: 0,
+    isLeaseBlockLow: false,
+    remainingLeaseCount: 50,
+  });
   const [enabledMenus, setEnabledMenus] = useState<string[]>([
     "dashboard",
     "pos",
@@ -76,10 +86,23 @@ export const Layout: React.FC<LayoutProps> = ({ children, onOpenGateway, onAddNe
     const unsubReg = storeRegistryService.onRegistryChange((reg) => {
       setActiveStore(storeRegistryService.getActiveStore());
     });
+    const unsubHealth = onlineTransactionService.subscribe(setNetworkHealth);
+
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (networkHealth.pendingQueueCount > 0) {
+        e.preventDefault();
+        e.returnValue = "You have unsynced items in your queue. Are you sure you want to exit?";
+        return e.returnValue;
+      }
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+
     return () => {
       unsubStaff();
       unsubSync();
       unsubReg();
+      unsubHealth();
+      window.removeEventListener("beforeunload", handleBeforeUnload);
     };
   }, []);
 
@@ -419,22 +442,26 @@ export const Layout: React.FC<LayoutProps> = ({ children, onOpenGateway, onAddNe
 
           <div
             onClick={() => {
-              if (isOnline && !syncState.isProcessing) {
+              if (networkHealth.state !== "offline" && !syncState.isProcessing) {
                 syncQueueService.processQueue().catch(() => {});
               }
             }}
             title={
-              !isOnline
-                ? "Offline: Queued changes will automatically sync once internet is connected"
+              networkHealth.state === "offline"
+                ? `Offline Mode: ${networkHealth.pendingQueueCount} items queued for sync. Last online: ${Math.floor(networkHealth.timeSinceLastOnlineMs / 60000)}m ago.`
+                : networkHealth.state === "slow"
+                ? `Slow Connection (${networkHealth.latencyMs}ms). Operating in live cloud mode.`
                 : syncState.isProcessing
                 ? "Syncing data to cloud..."
                 : syncState.pendingCount > 0
                 ? `${syncState.pendingCount} change(s) queued for sync. Click to push now.`
-                : "All data synced to backend cloud"
+                : `Live connected to backend cloud (${networkHealth.latencyMs}ms latency)`
             }
             className={`flex items-center gap-1.5 rounded-full px-3 py-1 text-xs cursor-pointer transition-colors shadow-2xs ${
-              !isOnline
-                ? "bg-[var(--color-warning-bg)] text-[var(--color-warning-text)] border border-[var(--color-warning-border)]"
+              networkHealth.state === "offline"
+                ? "bg-red-50 text-red-700 border border-red-300 dark:bg-red-950/40 dark:text-red-400 dark:border-red-800"
+                : networkHealth.state === "slow"
+                ? "bg-amber-50 text-amber-700 border border-amber-300 dark:bg-amber-950/40 dark:text-amber-400 dark:border-amber-800"
                 : syncState.isProcessing
                 ? "bg-accent-soft text-accent border border-accent/30"
                 : syncState.pendingCount > 0
@@ -442,15 +469,26 @@ export const Layout: React.FC<LayoutProps> = ({ children, onOpenGateway, onAddNe
                 : "bg-accent-soft text-accent border border-accent/20"
             }`}
           >
-            {!isOnline ? (
+            {networkHealth.state === "offline" ? (
               <>
-                <WifiOff className="h-3.5 w-3.5 text-[var(--color-warning-text)] shrink-0" />
-                <span className="whitespace-nowrap font-semibold">Offline Active</span>
-                {syncState.pendingCount > 0 && (
-                  <span className="bg-[var(--color-warning-border)] text-[var(--color-warning-text)] rounded-full px-1.5 py-0.2 text-[10px] font-bold font-mono">
-                    {syncState.pendingCount}
+                <WifiOff className="h-3.5 w-3.5 text-red-600 dark:text-red-400 shrink-0 animate-pulse" />
+                <span className="whitespace-nowrap font-semibold">Offline Mode</span>
+                {networkHealth.pendingQueueCount > 0 && (
+                  <span className="bg-red-200 text-red-800 dark:bg-red-900 dark:text-red-200 rounded-full px-1.5 py-0.2 text-[10px] font-bold font-mono">
+                    {networkHealth.pendingQueueCount}
                   </span>
                 )}
+                {networkHealth.timeSinceLastOnlineMs > 60000 && (
+                  <span className="text-[10px] opacity-75 font-mono">
+                    {Math.floor(networkHealth.timeSinceLastOnlineMs / 60000)}m
+                  </span>
+                )}
+              </>
+            ) : networkHealth.state === "slow" ? (
+              <>
+                <AlertTriangle className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
+                <span className="whitespace-nowrap font-semibold">Slow Connection</span>
+                <span className="text-[10px] opacity-75 font-mono">{networkHealth.latencyMs}ms</span>
               </>
             ) : syncState.isProcessing ? (
               <>

@@ -34,39 +34,71 @@ export class GstStatutoryExporter {
     const b2csMap = new Map<string, { pos: string; rate: number; taxable: number; cess: number }>();
     const hsnMap = new Map<string, { hsn: string; uqc: string; qty: number; taxable: number; cgst: number; sgst: number; igst: number }>();
 
+    // Index items by invoice_id
+    const itemsByInvoice = new Map<string, any[]>();
+    for (const item of invoiceItems) {
+      if (!itemsByInvoice.has(item.invoice_id)) {
+        itemsByInvoice.set(item.invoice_id, []);
+      }
+      itemsByInvoice.get(item.invoice_id)!.push(item);
+    }
+
     for (const inv of rangeInvoices) {
       const isB2b = Boolean(inv.customer_gstin && inv.customer_gstin.trim().length === 15);
-      const isInterState = inv.place_of_supply && inv.place_of_supply !== "Kerala";
+      const isInterState = inv.place_of_supply && inv.place_of_supply !== "Kerala" && !inv.place_of_supply.startsWith("32");
       const isLarge = Number(inv.grand_total || 0) > 250000;
+      const invItems = itemsByInvoice.get(inv.id) || [];
 
-      if (isB2b) {
-        b2bRows.push({
-          gstin: inv.customer_gstin,
-          customer_name: inv.customer_name,
-          invoice_number: inv.invoice_number,
-          invoice_date: inv.invoice_date,
-          invoice_value: inv.grand_total,
-          place_of_supply: inv.place_of_supply || "32-Kerala",
-          reverse_charge: "N",
-          rate: 12,
-          taxable_value: inv.subtotal,
-          cess: 0,
-        });
-      } else if (isInterState && isLarge) {
-        b2clRows.push({
-          invoice_number: inv.invoice_number,
-          invoice_date: inv.invoice_date,
-          invoice_value: inv.grand_total,
-          place_of_supply: inv.place_of_supply,
-          rate: 12,
-          taxable_value: inv.subtotal,
-          cess: 0,
-        });
+      // Group items by GST rate
+      const rateGroups = new Map<number, { taxable: number; cess: number }>();
+      if (invItems.length > 0) {
+        for (const item of invItems) {
+          const rate = Number(item.gst_percent || 0);
+          const tax = Number(item.cgst_amount || 0) + Number(item.sgst_amount || 0) + Number(item.igst_amount || 0);
+          const taxable = Number(item.taxable_amount ?? (item.total_amount - tax));
+          const cess = Number(item.cess_amount || 0);
+          const grp = rateGroups.get(rate) || { taxable: 0, cess: 0 };
+          grp.taxable += taxable;
+          grp.cess += cess;
+          rateGroups.set(rate, grp);
+        }
       } else {
-        const key = `${inv.place_of_supply || "32-Kerala"}_12`;
-        const existing = b2csMap.get(key) || { pos: inv.place_of_supply || "32-Kerala", rate: 12, taxable: 0, cess: 0 };
-        existing.taxable += Number(inv.subtotal || 0);
-        b2csMap.set(key, existing);
+        const rate = inv.tax_total > 0 && inv.subtotal > 0 ? Math.round((inv.tax_total / inv.subtotal) * 100) : 0;
+        rateGroups.set(rate, { taxable: Number(inv.taxable_subtotal || inv.subtotal || 0), cess: Number(inv.cess_total || 0) });
+      }
+
+      for (const [rate, grp] of rateGroups.entries()) {
+        if (isB2b) {
+          b2bRows.push({
+            gstin: inv.customer_gstin,
+            customer_name: inv.customer_name,
+            invoice_number: inv.invoice_number,
+            invoice_date: inv.invoice_date,
+            invoice_value: inv.grand_total,
+            place_of_supply: inv.place_of_supply || "32-Kerala",
+            reverse_charge: "N",
+            rate,
+            taxable_value: Math.round((grp.taxable + Number.EPSILON) * 100) / 100,
+            cess: Math.round((grp.cess + Number.EPSILON) * 100) / 100,
+          });
+        } else if (isInterState && isLarge) {
+          b2clRows.push({
+            invoice_number: inv.invoice_number,
+            invoice_date: inv.invoice_date,
+            invoice_value: inv.grand_total,
+            place_of_supply: inv.place_of_supply || "32-Kerala",
+            rate,
+            taxable_value: Math.round((grp.taxable + Number.EPSILON) * 100) / 100,
+            cess: Math.round((grp.cess + Number.EPSILON) * 100) / 100,
+          });
+        } else {
+          const pos = inv.place_of_supply || "32-Kerala";
+          const key = `${pos}_${rate}`;
+          const existing = b2csMap.get(key) || { pos, rate, taxable: 0, cess: 0 };
+          existing.taxable += grp.taxable;
+          existing.cess += grp.cess;
+          b2csMap.set(key, existing);
+        }
       }
     }
 

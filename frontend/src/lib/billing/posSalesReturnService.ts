@@ -1,6 +1,7 @@
 import { sqliteStorage } from "../db/sqliteStorage";
 import { productsStore, type ProductBatch } from "../masters/productsStore";
 import { syncQueueService } from "../sync/syncQueueService";
+import { calculateDocumentTaxes, type CompanyTaxMode } from "../tax-engine/taxEngine";
 import type { InvoiceRecord, InvoiceItemRecord } from "../reports/reportEngine";
 
 export interface ReturnItemInput {
@@ -33,24 +34,47 @@ export class PosSalesReturnService {
     returnItems: ReturnItemInput[],
     refundPaymentMode = "Cash"
   ): Promise<{ success: boolean; creditNoteId: string; refundAmount: number }> {
-    let subtotal = 0;
-    let taxTotal = 0;
     const now = Date.now();
     const creditNoteId = `cn_${now}_${Math.random().toString(16).slice(2, 6)}`;
 
-    for (const item of returnItems) {
-      const unitsPerPack = item.units_per_pack || 1;
-      const totalUnits = item.qty + (item.loose_qty ? item.loose_qty / unitsPerPack : 0);
-      const lineTaxable = Math.round(totalUnits * item.return_rate * 100) / 100;
-      const lineTax = Math.round((lineTaxable * item.gst_percent) / 100 * 100) / 100;
+    // Look up original invoice if present
+    let originalInv: InvoiceRecord | null = null;
+    if (originalInvoiceNumber) {
+      const allInvoices = await sqliteStorage.findAll<InvoiceRecord>("invoices");
+      originalInv = allInvoices.find((i) => i.invoice_number === originalInvoiceNumber) || null;
+    }
 
-      subtotal = Math.round((subtotal + lineTaxable) * 100) / 100;
-      taxTotal = Math.round((taxTotal + lineTax) * 100) / 100;
+    const isTaxInclusive = (originalInv as any)?.is_tax_inclusive || false;
+    const storeState = (originalInv as any)?.store_state_code || "32";
+    const placeOfSupply = originalInv?.place_of_supply || "32-Kerala";
+
+    const taxLines = returnItems.map((item, idx) => ({
+      line_id: `line_${idx}`,
+      product_id: item.product_id,
+      product_name: item.product_name || `Item ${idx}`,
+      qty: item.qty,
+      loose_qty: item.loose_qty || 0,
+      units_per_pack: item.units_per_pack || 1,
+      unit_price: item.return_rate,
+      gst_percent: item.gst_percent,
+    }));
+
+    const taxResult = calculateDocumentTaxes({
+      store_state: storeState,
+      customer_gstin: originalInv?.customer_gstin,
+      place_of_supply: placeOfSupply,
+      default_tax_mode: isTaxInclusive ? "inclusive" : "exclusive",
+      lines: taxLines,
+    });
+
+    for (let i = 0; i < returnItems.length; i++) {
+      const item = returnItems[i];
+      const unitsPerPack = item.units_per_pack || 1;
+      const returnedBaseUnits = item.qty * unitsPerPack + (item.loose_qty || 0);
 
       // Restock batch in SQLite
       const batch = await sqliteStorage.findById<ProductBatch>("product_batches", item.batch_id);
       if (batch) {
-        const returnedBaseUnits = item.qty * unitsPerPack + (item.loose_qty || 0);
         batch.stock_qty += returnedBaseUnits;
         await productsStore.upsertBatch(batch);
 
@@ -69,8 +93,6 @@ export class PosSalesReturnService {
       }
     }
 
-    const grandTotal = Math.round((subtotal + taxTotal) * 100) / 100;
-
     const creditNoteRow: InvoiceRecord = {
       id: creditNoteId,
       module_key: "credit_note",
@@ -78,12 +100,19 @@ export class PosSalesReturnService {
       invoice_date: new Date().toISOString().slice(0, 10),
       customer_id: customerId,
       customer_name: customerName,
-      subtotal,
-      discount_total: 0,
-      tax_total: taxTotal,
-      round_off: 0,
-      grand_total: grandTotal,
-      paid_amount: grandTotal,
+      customer_gstin: originalInv?.customer_gstin,
+      place_of_supply: placeOfSupply,
+      subtotal: taxResult.taxable_subtotal,
+      taxable_subtotal: taxResult.taxable_subtotal,
+      discount_total: Math.round((taxResult.line_discount_total + taxResult.bill_discount_total) * 100) / 100,
+      tax_total: taxResult.total_tax,
+      cgst_total: taxResult.cgst_total,
+      sgst_total: taxResult.sgst_total,
+      igst_total: taxResult.igst_total,
+      cess_total: taxResult.cess_total,
+      round_off: taxResult.round_off,
+      grand_total: taxResult.grand_total,
+      paid_amount: taxResult.grand_total,
       payment_mode: refundPaymentMode,
       status: "issued",
       original_invoice_number: originalInvoiceNumber,
@@ -91,44 +120,73 @@ export class PosSalesReturnService {
     };
 
     await sqliteStorage.insertRecord("invoices", creditNoteId, creditNoteRow);
-    await syncQueueService.enqueue("invoice", creditNoteId, "create", {
-      ...creditNoteRow,
-      items: returnItems.map((item) => ({
+
+    // Mirror each item into invoice_items
+    for (let i = 0; i < returnItems.length; i++) {
+      const item = returnItems[i];
+      const lineRes = taxResult.lines[i];
+      const itemId = `cni_${now}_${i}_${Math.random().toString(16).slice(2, 6)}`;
+      const mirrorItem: InvoiceItemRecord = {
+        id: itemId,
+        invoice_id: creditNoteId,
         product_id: item.product_id,
-        product_name: item.product_name,
+        product_name: item.product_name || "Returned Item",
         batch_no: item.batch_no,
-        qty: item.qty,
+        qty: lineRes.qty,
         unit_price: item.return_rate,
         gst_percent: item.gst_percent,
-        tax_amount: Math.round(((item.qty * item.return_rate * item.gst_percent) / 100) * 100) / 100,
-        total_amount: Math.round(((item.qty * item.return_rate) * (1 + item.gst_percent / 100)) * 100) / 100,
+        cgst_amount: lineRes.cgst_amount,
+        sgst_amount: lineRes.sgst_amount,
+        igst_amount: lineRes.igst_amount,
+        total_amount: lineRes.total_amount,
+      };
+      await sqliteStorage.insertRecord("invoice_items", itemId, mirrorItem);
+    }
+
+    await syncQueueService.enqueue("invoice", creditNoteId, "create", {
+      ...creditNoteRow,
+      items: returnItems.map((item, idx) => ({
+        product_id: item.product_id,
+        product_name: item.product_name || "Returned Item",
+        batch_no: item.batch_no,
+        qty: taxResult.lines[idx].qty,
+        unit_price: item.return_rate,
+        gst_percent: item.gst_percent,
+        tax_amount: Math.round((taxResult.lines[idx].cgst_amount + taxResult.lines[idx].sgst_amount + taxResult.lines[idx].igst_amount + taxResult.lines[idx].cess_amount) * 100) / 100,
+        total_amount: taxResult.lines[idx].total_amount,
       })),
     });
 
     return {
       success: true,
       creditNoteId,
-      refundAmount: grandTotal,
+      refundAmount: taxResult.grand_total,
     };
   }
 
   async createQuotation(
     quotationNumber: string,
     customerName: string,
-    lines: QuotationLineInput[]
+    lines: QuotationLineInput[],
+    defaultTaxMode: CompanyTaxMode = "exclusive"
   ): Promise<{ success: boolean; quotationId: string }> {
     const quotationId = `quot_${Date.now()}_${Math.random().toString(16).slice(2, 6)}`;
     const now = Date.now();
 
-    let subtotal = 0;
-    let taxTotal = 0;
+    const taxLines = lines.map((line, idx) => ({
+      line_id: `line_${idx}`,
+      product_id: line.product_id,
+      product_name: line.product_name,
+      qty: line.qty,
+      unit_price: line.unit_price,
+      gst_percent: line.gst_percent,
+    }));
 
-    for (const line of lines) {
-      const lineTaxable = Math.round(line.qty * line.unit_price * 100) / 100;
-      const lineTax = Math.round((lineTaxable * line.gst_percent) / 100 * 100) / 100;
-      subtotal = Math.round((subtotal + lineTaxable) * 100) / 100;
-      taxTotal = Math.round((taxTotal + lineTax) * 100) / 100;
-    }
+    const taxResult = calculateDocumentTaxes({
+      store_state: "32",
+      default_tax_mode: defaultTaxMode,
+      lines: taxLines,
+    });
 
     const quotationRow: InvoiceRecord = {
       id: quotationId,
@@ -136,11 +194,16 @@ export class PosSalesReturnService {
       invoice_number: quotationNumber,
       invoice_date: new Date().toISOString().slice(0, 10),
       customer_name: customerName,
-      subtotal,
-      discount_total: 0,
-      tax_total: taxTotal,
-      round_off: 0,
-      grand_total: Math.round((subtotal + taxTotal) * 100) / 100,
+      subtotal: taxResult.taxable_subtotal,
+      taxable_subtotal: taxResult.taxable_subtotal,
+      discount_total: Math.round((taxResult.line_discount_total + taxResult.bill_discount_total) * 100) / 100,
+      tax_total: taxResult.total_tax,
+      cgst_total: taxResult.cgst_total,
+      sgst_total: taxResult.sgst_total,
+      igst_total: taxResult.igst_total,
+      cess_total: taxResult.cess_total,
+      round_off: taxResult.round_off,
+      grand_total: taxResult.grand_total,
       paid_amount: 0,
       payment_mode: "Quotation",
       status: "issued",
@@ -148,6 +211,27 @@ export class PosSalesReturnService {
     };
 
     await sqliteStorage.insertRecord("invoices", quotationId, quotationRow);
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      const lineRes = taxResult.lines[i];
+      const itemId = `qi_${now}_${i}_${Math.random().toString(16).slice(2, 6)}`;
+      const mirrorItem: InvoiceItemRecord = {
+        id: itemId,
+        invoice_id: quotationId,
+        product_id: line.product_id,
+        product_name: line.product_name,
+        qty: line.qty,
+        unit_price: line.unit_price,
+        gst_percent: line.gst_percent,
+        cgst_amount: lineRes.cgst_amount,
+        sgst_amount: lineRes.sgst_amount,
+        igst_amount: lineRes.igst_amount,
+        total_amount: lineRes.total_amount,
+      };
+      await sqliteStorage.insertRecord("invoice_items", itemId, mirrorItem);
+    }
+
     return { success: true, quotationId };
   }
 

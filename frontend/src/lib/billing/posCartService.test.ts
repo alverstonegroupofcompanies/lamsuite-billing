@@ -53,7 +53,8 @@ describe("POS Cart Service & Checkout Pipeline (POS-001, POS-002, POS-007, STK-0
     posCartService.addProductToCart(product, batch, 0, 4);
 
     const totals = posCartService.getTotals();
-    expect(totals.net_before_round).toBe(10);
+    expect(totals.grand_total).toBe(10);
+    expect(totals.round_off).toBe(-0.01);
   });
 
   it("attaches clinical metadata (Doctor & Patient)", () => {

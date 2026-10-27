@@ -25,9 +25,16 @@ export interface InvoiceRecord {
   customer_phone?: string;
   customer_gstin?: string;
   place_of_supply?: string;
+  store_state_code?: string;
+  tax_type?: "intra_state" | "inter_state" | string;
   subtotal: number;
+  taxable_subtotal?: number;
   discount_total: number;
   tax_total: number;
+  cgst_total?: number;
+  sgst_total?: number;
+  igst_total?: number;
+  cess_total?: number;
   round_off: number;
   grand_total: number;
   paid_amount: number;
@@ -62,10 +69,13 @@ export interface InvoiceItemRecord {
   mrp?: number;
   discount_percent?: number;
   discount_amount?: number;
+  taxable_amount?: number;
   gst_percent: number;
   cgst_amount?: number;
   sgst_amount?: number;
   igst_amount?: number;
+  cess_percent?: number;
+  cess_amount?: number;
   total_amount: number;
 }
 

@@ -93,6 +93,50 @@ class MigrationReconciliationService
             ];
         }
 
+        // 2b. Statutory Tax Engine Audit on Migrated Invoices
+        $migratedInvoices = Invoice::with('items')
+            ->where('store_id', $storeId)
+            ->where('status', '!=', 'cancelled')
+            ->get();
+
+        foreach ($migratedInvoices as $mInv) {
+            if ($mInv->items->isEmpty()) continue;
+
+            $taxLines = [];
+            foreach ($mInv->items as $item) {
+                $taxLines[] = [
+                    'product_id' => $item->product_id,
+                    'product_name' => $item->product_name,
+                    'qty' => (float) $item->qty,
+                    'unit_price' => (float) $item->unit_price,
+                    'gst_percent' => (float) $item->gst_percent,
+                    'discount_percent' => (float) ($item->discount_percent ?? 0),
+                    'discount_amount' => (float) ($item->discount_amount ?? 0),
+                ];
+            }
+
+            $recalc = \App\Services\Tax\TaxEngine::calculate([
+                'store_state' => $mInv->store_state_code ?? '32',
+                'customer_gstin' => $mInv->customer_gstin,
+                'place_of_supply' => $mInv->place_of_supply,
+                'default_tax_mode' => $mInv->is_tax_inclusive ? 'inclusive' : 'exclusive',
+                'lines' => $taxLines,
+            ]);
+
+            $storedTax = (float) $mInv->tax_total;
+            $engineTax = (float) $recalc['total_tax'];
+            $taxDiff = round(abs($storedTax - $engineTax), 2);
+
+            if ($taxDiff > 0.05) {
+                $discrepancies[] = [
+                    'category' => 'tax_engine_variance',
+                    'entity' => 'invoice',
+                    'reference' => $mInv->invoice_number,
+                    'message' => "Invoice #{$mInv->invoice_number} tax variance: stored ₹{$storedTax} vs authoritative TaxEngine ₹{$engineTax} (diff: ₹{$taxDiff}). Legacy system likely used non-standard rounding or exclusive pricing assumption.",
+                ];
+            }
+        }
+
         // 3. Tax Slabs (0, 5, 12, 18, 28)
         $slabs = [0, 5, 12, 18, 28];
         $slabReport = [];

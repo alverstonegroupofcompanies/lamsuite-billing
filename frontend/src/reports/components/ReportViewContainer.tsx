@@ -18,6 +18,7 @@ import { ReportColumnManagerModal } from "./ReportColumnManagerModal";
 import { ReportPrintPreviewModal } from "./ReportPrintPreviewModal";
 import { isTauri, getIpcBridge } from "../../lib/ipc/ipcBridge";
 import { useModalEscape } from "../../lib/ui/modalEscapeManager";
+import { onlineTransactionService } from "../../lib/sync/onlineTransactionService";
 
 interface ReportViewContainerProps {
   report: ReportModule;
@@ -196,6 +197,14 @@ export const ReportViewContainer: React.FC<ReportViewContainerProps> = ({ report
 
   return (
     <div className="flex flex-col h-full bg-gray-50 overflow-hidden">
+      {(onlineTransactionService as any).connectionState === "offline" && (
+        <div className="bg-amber-50 border-b border-amber-200 px-4 py-2 flex items-center gap-2 text-xs text-amber-800">
+          <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
+          <span>
+            <strong>Offline Fallback:</strong> Showing local cached report data. Cloud multi-counter figures will refresh automatically once connection is restored.
+          </span>
+        </div>
+      )}
       {/* Top Action Bar */}
       <div className="bg-white border-b border-gray-200 px-4 py-2.5 flex flex-wrap items-center justify-between gap-3 shadow-2xs">
         <div className="flex items-center gap-2 flex-1 min-w-[200px] max-w-md">

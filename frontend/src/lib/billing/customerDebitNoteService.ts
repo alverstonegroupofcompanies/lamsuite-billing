@@ -4,6 +4,7 @@ import { partiesStore, type Customer } from "../masters/partiesStore";
 import { syncQueueService } from "../sync/syncQueueService";
 import { companySettingsService } from "../settings/companySettingsService";
 import { round2 } from "./billingCalculations";
+import { calculateDocumentTaxes } from "../tax-engine/taxEngine";
 import type { InvoiceRecord, InvoiceItemRecord } from "../reports/reportEngine";
 
 export type DebitNoteStatus =
@@ -260,6 +261,11 @@ export interface AutoSuggestCandidate {
   unit_price: number;
   discount_percent: number;
   gst_percent: number;
+  cess_percent?: number;
+  place_of_supply?: string;
+  store_state_code?: string;
+  is_inter_state?: boolean;
+  is_tax_inclusive?: boolean;
   sec_34_warning?: string;
 }
 
@@ -409,6 +415,7 @@ export class CustomerDebitNoteService {
 
         if (remainingReturnable > 0) {
           const sec34 = checkSec34TimeLimit(inv.invoice_date);
+          const isInterState = inv.tax_type === "inter_state" || (inv.igst_total !== undefined && inv.igst_total > 0) || ((item.igst_amount !== undefined) && item.igst_amount > 0);
           candidates.push({
             invoice_id: inv.id,
             invoice_number: inv.invoice_number,
@@ -425,6 +432,11 @@ export class CustomerDebitNoteService {
             unit_price: item.unit_price,
             discount_percent: item.discount_percent || 0,
             gst_percent: item.gst_percent || 0,
+            cess_percent: (item as any).cess_percent || 0,
+            place_of_supply: inv.place_of_supply,
+            store_state_code: (inv as any).store_state_code,
+            is_inter_state: isInterState,
+            is_tax_inclusive: (inv as any).is_tax_inclusive || false,
             sec_34_warning: sec34.warning,
           });
         }
@@ -488,7 +500,7 @@ export class CustomerDebitNoteService {
    * Calculates taxable, GST, and gross amount for an allocation based on original invoice pricing
    */
   calculateAllocationValues(
-    candidate: {
+    candidate: AutoSuggestCandidate | {
       invoice_id: string;
       invoice_number: string;
       invoice_date: string;
@@ -504,20 +516,39 @@ export class CustomerDebitNoteService {
       unit_price: number;
       discount_percent: number;
       gst_percent: number;
+      cess_percent?: number;
+      place_of_supply?: string;
+      store_state_code?: string;
+      is_inter_state?: boolean;
+      is_tax_inclusive?: boolean;
     },
     returnQty: number,
     condition: ReturnCondition = "restock",
     reason: ReturnReason = "customer_return"
   ): InvoiceAllocation {
-    const gross = round2(returnQty * candidate.unit_price);
-    const discAmount = round2((gross * (candidate.discount_percent || 0)) / 100);
-    const taxable = round2(gross - discAmount);
+    const isTaxInclusive = candidate.is_tax_inclusive || false;
+    const storeState = candidate.store_state_code || "32";
+    const placeOfSupply = candidate.place_of_supply || (candidate.is_inter_state ? "99-Other" : "32-Kerala");
 
-    const totalTax = round2((taxable * candidate.gst_percent) / 100);
-    const cgst = round2(totalTax / 2);
-    const sgst = round2(totalTax - cgst);
-    const igst = 0;
-    const totalAmount = round2(taxable + totalTax);
+    const taxResult = calculateDocumentTaxes({
+      store_state: storeState,
+      place_of_supply: placeOfSupply,
+      default_tax_mode: isTaxInclusive ? "inclusive" : "exclusive",
+      lines: [
+        {
+          line_id: "alloc_line",
+          product_id: candidate.product_id,
+          product_name: candidate.product_name,
+          qty: returnQty,
+          unit_price: candidate.unit_price,
+          discount_percent: candidate.discount_percent || 0,
+          gst_percent: candidate.gst_percent || 0,
+          cess_percent: candidate.cess_percent || 0,
+        },
+      ],
+    });
+
+    const lineRes = taxResult.lines[0];
 
     return {
       id: `alloc_${Date.now()}_${Math.random().toString(16).slice(2, 6)}`,
@@ -536,13 +567,13 @@ export class CustomerDebitNoteService {
       return_qty: returnQty,
       unit_price: candidate.unit_price,
       discount_percent: candidate.discount_percent,
-      discount_amount: discAmount,
+      discount_amount: lineRes.line_discount,
       gst_percent: candidate.gst_percent,
-      cgst_amount: cgst,
-      sgst_amount: sgst,
-      igst_amount: igst,
-      taxable_amount: taxable,
-      total_amount: totalAmount,
+      cgst_amount: lineRes.cgst_amount,
+      sgst_amount: lineRes.sgst_amount,
+      igst_amount: lineRes.igst_amount,
+      taxable_amount: lineRes.taxable_amount,
+      total_amount: lineRes.total_amount,
       condition,
       reason,
       status: "pending",

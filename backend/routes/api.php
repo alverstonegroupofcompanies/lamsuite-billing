@@ -28,6 +28,8 @@ use App\Http\Controllers\Api\PrintController;
 use App\Http\Controllers\Api\DataExchangeController;
 use App\Http\Controllers\Api\MigrationController;
 use App\Http\Controllers\Api\CounterController;
+use App\Http\Controllers\Api\HeldBillController;
+use App\Http\Controllers\Api\StaffAuthController;
 
 /*
 |--------------------------------------------------------------------------
@@ -37,10 +39,20 @@ use App\Http\Controllers\Api\CounterController;
 Route::post('/login', [AdminAuthController::class, 'login']);
 Route::post('/auth/login', [AdminAuthController::class, 'login']);
 Route::post('/devices/register', [AuthController::class, 'registerDevice']);
+Route::post('/devices/register-owner', [AuthController::class, 'registerDeviceWithOwner']);
+Route::match(['get', 'post'], '/devices/validate', [AuthController::class, 'validateToken']);
 Route::post('/counters/enroll', [CounterController::class, 'enroll']);
+Route::get('/counters/enrollment-status/{device_uuid}', [CounterController::class, 'checkEnrollmentStatus']);
+Route::post('/counters/approve-pairing', [CounterController::class, 'approvePairing']);
+Route::get('/counters/{id}/watch', [CounterController::class, 'watch']);
 Route::get('/counters', [CounterController::class, 'index']);
 Route::get('/branches', [AuthController::class, 'branches']);
 Route::get('/license/check', [AuthController::class, 'checkLicense']);
+
+// Staff Terminal Authentication & Offline Hash Cache
+Route::post('/staff/login', [StaffAuthController::class, 'login']);
+Route::get('/staff/offline-cache', [StaffAuthController::class, 'offlineCache']);
+Route::post('/staff/admin-unlock', [StaffAuthController::class, 'adminUnlock']);
 Route::post('/sync/push/batch', [SyncController::class, 'pushBatch']);
 Route::post('/sync/push/invoices', [SyncController::class, 'pushInvoices']);
 Route::post('/sync/push/stock-events', [SyncController::class, 'pushStockEvents']);
@@ -60,7 +72,22 @@ Route::post('/lan/v1/hub/config', [SyncController::class, 'lanUpdateHubConfig'])
 Route::get('/sync/stream', [SyncController::class, 'streamSSE']);
 Route::post('/invoices/{id}/lock', [SyncController::class, 'lockInvoice']);
 Route::post('/invoices/{id}/unlock', [SyncController::class, 'unlockInvoice']);
+Route::get('/invoices', [InvoiceController::class, 'index']);
+Route::post('/invoices', [InvoiceController::class, 'store']);
+Route::get('/invoices/{id}', [InvoiceController::class, 'show']);
+Route::post('/invoices/{id}/cancel', [InvoiceController::class, 'cancel']);
+
+// Distributed Live Held Bills across all counters
+Route::get('/held-bills', [HeldBillController::class, 'index']);
+Route::post('/held-bills', [HeldBillController::class, 'store']);
+Route::post('/held-bills/{id}/claim', [HeldBillController::class, 'claim']);
+Route::delete('/held-bills/{id}', [HeldBillController::class, 'destroy']);
+
+// Counter series sequence block lease
+Route::post('/counters/{id}/lease-sequence', [CounterController::class, 'leaseSequence']);
+
 Route::get('/inventory/negative-stock-report', [SyncController::class, 'getNegativeStockReport']);
+Route::post('/counters/{id}/shifts/open', [CounterController::class, 'openShift']);
 Route::post('/counters/{id}/shifts/close', [CounterController::class, 'closeShift']);
 Route::post('/counters/{id}/status', [CounterController::class, 'updateStatus']);
 Route::post('/stores/day-close', [CounterController::class, 'closeStoreDay']);
@@ -93,11 +120,6 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::delete('/products/{id}', [ProductController::class, 'destroy']);
     Route::post('/products/{id}/batches', [ProductController::class, 'addBatch']);
 
-    Route::get('/invoices', [InvoiceController::class, 'index']);
-    Route::post('/invoices', [InvoiceController::class, 'store']);
-    Route::get('/invoices/{id}', [InvoiceController::class, 'show']);
-    Route::post('/invoices/{id}/cancel', [InvoiceController::class, 'cancel']);
-
     Route::get('/purchases', [PurchaseController::class, 'index']);
     Route::post('/purchases', [PurchaseController::class, 'store']);
     Route::get('/purchases/{id}', [PurchaseController::class, 'show']);
@@ -116,7 +138,9 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/reports/gstr-1', [ReportController::class, 'gstr1']);
     Route::get('/reports/hsn-summary', [ReportController::class, 'hsnSummary']);
     Route::get('/reports/customer-aging', [ReportController::class, 'customerAging']);
+    Route::get('/reports/tax-reconciliation', [ReportController::class, 'taxReconciliation']);
     Route::get('/dashboard/metrics', [ReportController::class, 'dashboardMetrics']);
+    Route::post('/staff/change-password', [StaffAuthController::class, 'changePassword']);
 
     // Data Exchange (Universal Import / Export)
     Route::post('/data-exchange/preview', [DataExchangeController::class, 'preview']);
@@ -140,6 +164,7 @@ Route::middleware(['auth:sanctum', 'session.timeout', 'ip.allowlist', 'scope.sto
     Route::post('/2fa/disable', [AdminAuthController::class, 'disable2fa']);
     Route::post('/impersonate', [AdminAuthController::class, 'impersonate']);
     Route::post('/stop-impersonate', [AdminAuthController::class, 'stopImpersonate']);
+    Route::post('/switch-store', [AdminAuthController::class, 'switchStore']);
     Route::post('/password-reset', [AdminAuthController::class, 'resetPassword']);
     Route::get('/sessions', [AdminAuthController::class, 'activeSessions']);
     Route::post('/sessions/{id}/logout', [AdminAuthController::class, 'forceLogoutSession']);
@@ -158,9 +183,12 @@ Route::middleware(['auth:sanctum', 'session.timeout', 'ip.allowlist', 'scope.sto
 
     // Module 3: Devices / Counters
     Route::get('/devices', [AdminDeviceController::class, 'index'])->middleware('rbac:devices,view');
+    Route::get('/devices/audit/rogue', [AdminDeviceController::class, 'auditRogueRegistrations'])->middleware('rbac:devices,view');
+    Route::post('/devices/audit/purge/{id}', [AdminDeviceController::class, 'purgeRogueDevice'])->middleware('rbac:devices,edit');
     Route::post('/devices/{id}/status', [AdminDeviceController::class, 'updateStatus'])->middleware('rbac:devices,edit');
     Route::post('/devices/{id}/force-resync', [AdminDeviceController::class, 'forceResync'])->middleware('rbac:devices,edit');
     Route::get('/counters', [CounterController::class, 'index'])->middleware('rbac:devices,view');
+    Route::post('/counters/approve-pairing', [CounterController::class, 'approvePairing'])->middleware('rbac:devices,edit');
     Route::post('/counters/{id}/status', [CounterController::class, 'updateStatus'])->middleware('rbac:devices,edit');
     Route::post('/counters/{id}/settings', [CounterController::class, 'updateSettings'])->middleware('rbac:devices,edit');
     Route::post('/counters/{id}/lease-sequence', [CounterController::class, 'leaseSequence'])->middleware('rbac:devices,edit');

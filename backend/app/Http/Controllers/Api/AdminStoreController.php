@@ -87,11 +87,12 @@ class AdminStoreController
         $validated['enabled_menu_items'] = $validated['enabled_menu_items'] ?? $defaultMenus;
         $validated['is_active'] = true;
         $validated['version'] = 1;
-        $validated['activation_key'] = 'LAM-' . strtoupper($validated['code']) . '-' . strtoupper(bin2hex(random_bytes(3)));
 
         $store = Store::create($validated);
+        $keyResult = \App\Models\ActivationKey::generateKey($store, ['created_by' => auth()->id()]);
+        $store->activation_key = $keyResult['raw_key']; // Temporary attribute for presentation to creator
 
-        AuditLog::log('create_store', 'Store', (string)$store->id, null, $store->toArray(), $store->id);
+        AuditLog::log('create_store', 'Store', (string)$store->id, null, array_merge($store->toArray(), ['activation_key' => $keyResult['model']->key_prefix]), $store->id);
 
         return response()->json($store, 201);
     }
@@ -102,15 +103,25 @@ class AdminStoreController
     public function regenerateKey(string $id): JsonResponse
     {
         $store = Store::findOrFail($id);
-        $newKey = 'LAM-' . strtoupper($store->code) . '-' . strtoupper(bin2hex(random_bytes(3)));
-        $store->activation_key = $newKey;
-        $store->save();
 
-        AuditLog::log('regenerate_activation_key', 'Store', (string)$store->id, null, ['activation_key' => $newKey], $store->id);
+        // Revoke existing active keys
+        \App\Models\ActivationKey::where('store_id', $store->id)
+            ->where('is_revoked', false)
+            ->update([
+                'is_revoked' => true,
+                'revoked_at' => now(),
+                'revoke_reason' => 'Superseded by new activation key',
+            ]);
+
+        $keyResult = \App\Models\ActivationKey::generateKey($store, ['created_by' => auth()->id()]);
+        $newKey = $keyResult['raw_key'];
+
+        AuditLog::log('regenerate_activation_key', 'Store', (string)$store->id, null, ['key_prefix' => $keyResult['model']->key_prefix], $store->id);
 
         return response()->json([
             'success' => true,
             'activation_key' => $newKey,
+            'key_prefix' => $keyResult['model']->key_prefix,
             'message' => "Activation key regenerated successfully for store '{$store->name}'.",
         ]);
     }

@@ -211,6 +211,8 @@ export const itemWisePurchaseReport: ReportModule<any, ItemWisePurchaseRow> = {
             cgst_amount: line.cgst_amount || 0,
             sgst_amount: line.sgst_amount || 0,
             igst_amount: line.igst_amount || 0,
+            cess_amount: line.cess_amount || 0,
+            taxable_amount: line.taxable_amount || line.subtotal || ((line.total_amount || line.amount || 0) - (line.tax_amount || 0)),
             tax_amount: line.tax_amount || 0,
             total_amount: line.total_amount || line.amount || 0,
           });

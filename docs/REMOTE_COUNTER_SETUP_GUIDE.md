@@ -18,10 +18,11 @@ This guide explains how to set up and operate Remote Billing Counters (such as b
 
 ## 2. Remote Counter Architecture & Operational Model
 
-- **Shared Single Source of Truth**: All counters in the store share catalog items, prices, batches, customer ledgers, and suppliers.
-- **Offline-First Resilience**: If the internet disconnects, the remote counter continues billing locally using its embedded SQLite database.
-- **Collision-Free Numbering**: Each counter is assigned an independent document series prefix (e.g. `C01-INV-1001` for Shop Counter, `C02-INV-1001` for Home Counter) or a leased range block, guaranteeing that bill numbers never collide even during prolonged offline periods.
-- **Append-Only Stock Ledger Merging**: Sales, returns, and write-offs merge into central inventory as delta entries rather than overwriting absolute balances. If concurrent offline sales result in a batch deficit, the batch balance goes negative, an alert is flagged, and the discrepancy appears in the Negative Stock Reconciliation Register for physical auditing.
+- **Online-First Single Source of Truth**: All counters in the store communicate live with the central cloud backend. Master catalog items, prices, batches, customer ledgers, and document locks update in real time across all counters.
+- **Resilient Offline Fallback**: If internet connectivity drops, the remote counter continues billing locally using its embedded SQLite cache and pre-leased document number blocks.
+- **Collision-Free Numbering**: Counters lease reserved blocks of numbers (e.g. 50 numbers) in advance with automatic background replenishment. If exhausted offline, an emergency temporary series (`TEMP-C01-XXXX`) engages and auto-maps upon reconnect.
+- **Tier-2 LAN Hub**: On local shop networks where WAN drops but LAN is up, counters share live stock, held bills, and locks through the local LAN Hub station.
+- **Append-Only Stock Ledger & Reconciliation**: Online sales deduct stock atomically with row locks (`FOR UPDATE`). Reconnecting offline sales are merged in chronological order; any batch deficits are logged in the Negative Stock Reconciliation Register for supervisor auditing.
 
 ---
 

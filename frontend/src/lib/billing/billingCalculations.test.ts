@@ -145,32 +145,30 @@ describe("Billing & Indian GST Calculation Engine (POS-002, POS-003, POS-004, NF
         },
       ];
 
-      // ₹10 discount applied to bill
+      // ₹10 discount applied to bill: ₹118 - ₹10 = ₹108 inclusive -> Taxable 91.53, Tax 16.47, Grand 108
       const totals = calculateInvoiceTotals(lines, { type: "amount", value: 10 }, "inclusive", false, false);
 
-      expect(totals.taxable_subtotal).toBe(100);
+      expect(totals.taxable_subtotal).toBe(91.53);
       expect(totals.bill_discount_amount).toBe(10);
-      // Net taxable is 90. Tax scaled by 90/100 -> 18 * 0.9 = 16.2
-      expect(totals.total_tax).toBe(16.2);
-      expect(totals.grand_total).toBe(106.2);
+      expect(totals.total_tax).toBe(16.48);
+      expect(totals.grand_total).toBe(108.01);
     });
 
     it("applies percentage overall bill discount across invoice", () => {
       const lines: BillingLineInput[] = [
         {
           qty: 2,
-          unit_price: 100, // Exclusive mode: Taxable 200, 18% Tax 36
+          unit_price: 100, // Exclusive mode (PTR): Gross 200, 18% Tax 36
           gst_percent: 18,
           rate_basis: "ptr",
         },
       ];
 
-      // 10% bill discount
+      // 10% bill discount: Net taxable = 180. Tax = 32.4
       const totals = calculateInvoiceTotals(lines, { type: "percent", value: 10 }, "inclusive", false, false);
 
-      expect(totals.taxable_subtotal).toBe(200);
+      expect(totals.taxable_subtotal).toBe(180);
       expect(totals.bill_discount_amount).toBe(20);
-      // Net taxable = 180. Tax = 36 * 0.9 = 32.4
       expect(totals.total_tax).toBe(32.4);
       expect(totals.net_before_round).toBe(212.4);
       expect(totals.grand_total).toBe(212.4);

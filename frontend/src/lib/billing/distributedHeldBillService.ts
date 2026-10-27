@@ -1,4 +1,5 @@
 import { sqliteStorage } from "../db/sqliteStorage";
+import { getResolvedApiBaseUrl } from "../../config/env";
 
 export interface DistributedHeldBill {
   id: string;
@@ -16,6 +17,10 @@ export interface DistributedHeldBill {
 }
 
 export class DistributedHeldBillService {
+  private getEffectiveBaseUrl(): string {
+    return getResolvedApiBaseUrl();
+  }
+
   async holdBill(
     counterId: string,
     counterName: string,
@@ -35,15 +40,54 @@ export class DistributedHeldBillService {
       items_count: itemsCount,
       grand_total: grandTotal,
       held_at: Date.now(),
-      cart_payload: JSON.stringify(cartPayload),
+      cart_payload: cartPayload,
       status: "held",
     };
 
-    await sqliteStorage.insertRecord("distributed_held_bills", holdId, record);
+    // 1. Commit to local SQLite cache
+    await sqliteStorage.insertRecord("distributed_held_bills", holdId, {
+      ...record,
+      cart_payload: JSON.stringify(cartPayload),
+    });
+
+    // 2. Broadcast online to Cloud Backend if reachable
+    try {
+      await fetch(`${this.getEffectiveBaseUrl()}/api/held-bills`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify(record),
+      });
+    } catch {
+      // Degraded offline: already saved in local cache
+    }
+
     return holdId;
   }
 
   async listHeldBills(): Promise<DistributedHeldBill[]> {
+    // Attempt live fetch from server
+    try {
+      const res = await fetch(`${this.getEffectiveBaseUrl()}/api/held-bills`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success && Array.isArray(data.held_bills)) {
+          // Sync server held bills to local cache
+          for (const b of data.held_bills) {
+            await sqliteStorage.insertRecord("distributed_held_bills", b.id, {
+              ...b,
+              cart_payload: typeof b.cart_payload === "string" ? b.cart_payload : JSON.stringify(b.cart_payload),
+            });
+          }
+          return data.held_bills.map((b: any) => ({
+            ...b,
+            cart_payload: typeof b.cart_payload === "string" ? JSON.parse(b.cart_payload) : b.cart_payload,
+          }));
+        }
+      }
+    } catch {
+      // Offline fallback: read from local cache
+    }
+
     const raw = await sqliteStorage.findAll<any>("distributed_held_bills");
     return (raw || [])
       .filter((b) => b.status === "held")
@@ -66,6 +110,36 @@ export class DistributedHeldBillService {
     holdId: string,
     claimingCounterId: string
   ): Promise<{ success: boolean; bill?: DistributedHeldBill; error?: string }> {
+    // 1. Try online claim first (prevents race condition across counters)
+    try {
+      const res = await fetch(`${this.getEffectiveBaseUrl()}/api/held-bills/${holdId}/claim`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ counter_id: claimingCounterId }),
+      });
+
+      if (res.status === 409) {
+        const data = await res.json();
+        return { success: false, error: data.message || "This bill has already been recalled or claimed by another counter." };
+      }
+
+      if (res.ok) {
+        const data = await res.json();
+        const serverBill = data.held_bill;
+        const parsed = {
+          ...serverBill,
+          cart_payload: typeof serverBill.cart_payload === "string" ? JSON.parse(serverBill.cart_payload) : serverBill.cart_payload,
+        };
+        await sqliteStorage.insertRecord("distributed_held_bills", holdId, {
+          ...serverBill,
+          cart_payload: JSON.stringify(parsed.cart_payload),
+        });
+        return { success: true, bill: parsed };
+      }
+    } catch {
+      // Offline fallback: check local cache
+    }
+
     const raw = await sqliteStorage.findById<any>("distributed_held_bills", holdId);
     if (!raw) {
       return { success: false, error: "Held bill not found" };
@@ -74,41 +148,41 @@ export class DistributedHeldBillService {
     if (raw.status !== "held") {
       return {
         success: false,
-        error: `Held bill has already been recalled or processed by ${raw.claimed_by_counter_id || "another counter"}.`,
+        error: `Bill has already been recalled or claimed by counter ${raw.claimed_by_counter_id || "another"}`,
       };
     }
 
-    // Atomic claim transition
-    raw.status = "claimed";
-    raw.claimed_by_counter_id = claimingCounterId;
-    raw.claimed_at = Date.now();
-    await sqliteStorage.insertRecord("distributed_held_bills", holdId, raw);
+    const updated = {
+      ...raw,
+      status: "claimed",
+      claimed_by_counter_id: claimingCounterId,
+      claimed_at: Date.now(),
+    };
+
+    await sqliteStorage.insertRecord("distributed_held_bills", holdId, updated);
 
     return {
       success: true,
       bill: {
-        id: raw.id,
-        held_by_counter_id: raw.held_by_counter_id,
-        held_by_counter_name: raw.held_by_counter_name,
-        held_by_user_name: raw.held_by_user_name,
-        customer_name: raw.customer_name,
-        items_count: Number(raw.items_count),
-        grand_total: Number(raw.grand_total),
-        held_at: Number(raw.held_at),
-        cart_payload: typeof raw.cart_payload === "string" ? JSON.parse(raw.cart_payload) : raw.cart_payload,
-        status: "claimed",
-        claimed_by_counter_id: claimingCounterId,
-        claimed_at: raw.claimed_at,
+        ...updated,
+        cart_payload: typeof updated.cart_payload === "string" ? JSON.parse(updated.cart_payload) : updated.cart_payload,
       },
     };
   }
 
-  async cancelHeldBill(holdId: string): Promise<boolean> {
-    const raw = await sqliteStorage.findById<any>("distributed_held_bills", holdId);
-    if (!raw) return false;
-    raw.status = "cancelled";
-    await sqliteStorage.insertRecord("distributed_held_bills", holdId, raw);
-    return true;
+  async releaseOrCancelHold(holdId: string): Promise<void> {
+    try {
+      await fetch(`${this.getEffectiveBaseUrl()}/api/held-bills/${holdId}`, { method: "DELETE" });
+    } catch {}
+
+    const existing = await sqliteStorage.findById<any>("distributed_held_bills", holdId);
+    if (existing) {
+      await sqliteStorage.insertRecord("distributed_held_bills", holdId, {
+        ...existing,
+        status: "cancelled",
+        updated_at: Date.now(),
+      });
+    }
   }
 }
 

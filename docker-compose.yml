@@ -1,0 +1,497 @@
+name: lamsuite-billing
+
+services:
+  # =========================================================================
+  # 1. Reverse Proxy & Security Edge (Traefik v3 + Docker Socket Proxy)
+  # =========================================================================
+  socket-proxy:
+    image: tecnativa/docker-socket-proxy:latest
+    container_name: lamsuite-socket-proxy
+    restart: unless-stopped
+    read_only: true
+    environment:
+      - CONTAINERS=1
+      - SERVICES=1
+      - NETWORKS=1
+      - TASKS=1
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - socket-net
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:2375/version"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+    security_opt:
+      - no-new-privileges:true
+
+  traefik:
+    image: traefik:v3.1
+    container_name: lamsuite-traefik
+    restart: unless-stopped
+    depends_on:
+      socket-proxy:
+        condition: service_healthy
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      - ACME_EMAIL=${ACME_EMAIL}
+      - DOMAIN=${DOMAIN}
+      - TRAEFIK_DASHBOARD_AUTH=${TRAEFIK_DASHBOARD_AUTH:-admin:$$2y$$05$$1vB8oIq9kQcZpEceL5cWcOu2w6EKn9gE7O1d1V1pT0qF1Z0J4jVKe}
+    volumes:
+      - ./traefik/traefik.yml:/etc/traefik/traefik.yml:ro
+      - ./traefik/dynamic:/etc/traefik/dynamic:ro
+      - traefik_certs:/etc/traefik/acme
+    networks:
+      - socket-net
+      - lamsuite-public
+    labels:
+      - "traefik.enable=true"
+      # Traefik Dashboard (Authenticated)
+      - "traefik.http.routers.traefik-dashboard.rule=Host(`traefik.${DOMAIN}`) && (PathPrefix(`/api`) || PathPrefix(`/dashboard`))"
+      - "traefik.http.routers.traefik-dashboard.entrypoints=websecure"
+      - "traefik.http.routers.traefik-dashboard.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.traefik-dashboard.service=api@internal"
+      - "traefik.http.routers.traefik-dashboard.middlewares=traefik-dashboard-auth@file"
+    healthcheck:
+      test: ["CMD", "traefik", "healthcheck", "--ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+    security_opt:
+      - no-new-privileges:true
+
+  # =========================================================================
+  # 2. Storage & Caching Layer (Strictly Private Internal Network)
+  # =========================================================================
+  db:
+    image: mysql:8.4
+    container_name: lamsuite-db
+    restart: unless-stopped
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --default-authentication-plugin=caching_sha2_password
+      - --max_connections=300
+    environment:
+      MYSQL_DATABASE: ${DB_DATABASE:-lamsuite_billing}
+      MYSQL_USER: ${DB_USERNAME:-lamsuite}
+      MYSQL_PASSWORD: ${DB_PASSWORD}
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:-${DB_PASSWORD}_root}
+    volumes:
+      - db_data:/var/lib/mysql
+    networks:
+      - lamsuite-internal
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u$$MYSQL_USER -p$$MYSQL_PASSWORD || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 1536M
+
+  redis:
+    image: redis:7.4-alpine
+    container_name: lamsuite-redis
+    restart: unless-stopped
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD}", "--appendonly", "yes", "--maxmemory", "256mb", "--maxmemory-policy", "volatile-lru"]
+    volumes:
+      - redis_data:/data
+    networks:
+      - lamsuite-internal
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 384M
+
+  # =========================================================================
+  # 3. Application Core (API, Queue Worker, Scheduler, WebSockets)
+  # =========================================================================
+  api:
+    build:
+      context: ./backend
+      target: api
+    image: lamsuite-backend:latest
+    container_name: lamsuite-api
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      - APP_NAME=${APP_NAME:-LamSuite Billing}
+      - APP_ENV=${APP_ENV:-production}
+      - APP_KEY=${APP_KEY}
+      - APP_DEBUG=${APP_DEBUG:-false}
+      - APP_URL=https://${SUBDOMAIN_API:-api}.${DOMAIN}
+      - APP_TIMEZONE=${APP_TIMEZONE:-Asia/Kolkata}
+      - DOMAIN=${DOMAIN}
+      - DB_CONNECTION=mysql
+      - DB_HOST=db
+      - DB_PORT=3306
+      - DB_DATABASE=${DB_DATABASE:-lamsuite_billing}
+      - DB_USERNAME=${DB_USERNAME:-lamsuite}
+      - DB_PASSWORD=${DB_PASSWORD}
+      - CACHE_STORE=redis
+      - QUEUE_CONNECTION=redis
+      - SESSION_DRIVER=redis
+      - SESSION_DOMAIN=.${DOMAIN}
+      - SANCTUM_STATEFUL_DOMAINS=${SUBDOMAIN_PANEL:-panel}.${DOMAIN},${SUBDOMAIN_APP:-app}.${DOMAIN},${DOMAIN}
+      - REDIS_CLIENT=phpredis
+      - REDIS_HOST=redis
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
+      - REDIS_PORT=6379
+      - BROADCAST_CONNECTION=reverb
+      - REVERB_APP_ID=${REVERB_APP_ID:-lamsuite_local}
+      - REVERB_APP_KEY=${REVERB_APP_KEY:-lamsuite_reverb_key}
+      - REVERB_APP_SECRET=${REVERB_APP_SECRET:-lamsuite_reverb_secret}
+      - REVERB_HOST=reverb
+      - REVERB_PORT=8080
+      - REVERB_SCHEME=http
+    volumes:
+      - storage_data:/var/www/html/storage/app/public
+    networks:
+      - lamsuite-public
+      - lamsuite-internal
+    labels:
+      - "traefik.enable=true"
+      # Standard 4 Labels
+      - "traefik.http.routers.api.rule=Host(`${SUBDOMAIN_API:-api}.${DOMAIN}`)"
+      - "traefik.http.routers.api.entrypoints=websecure"
+      - "traefik.http.routers.api.tls.certresolver=letsencrypt"
+      - "traefik.http.services.api.loadbalancer.server.port=8000"
+      # Anti-Brute-Force Rate Limiting for Authentication & Activation Endpoints
+      - "traefik.http.routers.api-auth.rule=Host(`${SUBDOMAIN_API:-api}.${DOMAIN}`) && (PathPrefix(`/api/login`) || PathPrefix(`/api/auth/login`) || PathPrefix(`/api/staff/login`) || PathPrefix(`/api/devices/register`) || PathPrefix(`/api/lan/v1/pair`))"
+      - "traefik.http.routers.api-auth.entrypoints=websecure"
+      - "traefik.http.routers.api-auth.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.api-auth.middlewares=rate-limit-auth@file"
+      - "traefik.http.routers.api-auth.service=api"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:8000/up"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    deploy:
+      resources:
+        limits:
+          memory: 1024M
+
+  worker:
+    build:
+      context: ./backend
+      target: base
+    image: lamsuite-backend:latest
+    container_name: lamsuite-worker
+    restart: unless-stopped
+    command: ["php", "artisan", "queue:work", "--tries=3", "--timeout=90", "--memory=256"]
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      - APP_NAME=${APP_NAME:-LamSuite Billing}
+      - APP_ENV=${APP_ENV:-production}
+      - APP_KEY=${APP_KEY}
+      - APP_DEBUG=${APP_DEBUG:-false}
+      - DB_CONNECTION=mysql
+      - DB_HOST=db
+      - DB_PORT=3306
+      - DB_DATABASE=${DB_DATABASE:-lamsuite_billing}
+      - DB_USERNAME=${DB_USERNAME:-lamsuite}
+      - DB_PASSWORD=${DB_PASSWORD}
+      - CACHE_STORE=redis
+      - QUEUE_CONNECTION=redis
+      - REDIS_CLIENT=phpredis
+      - REDIS_HOST=redis
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
+      - REDIS_PORT=6379
+      - BROADCAST_CONNECTION=reverb
+      - REVERB_APP_ID=${REVERB_APP_ID:-lamsuite_local}
+      - REVERB_APP_KEY=${REVERB_APP_KEY:-lamsuite_reverb_key}
+      - REVERB_APP_SECRET=${REVERB_APP_SECRET:-lamsuite_reverb_secret}
+      - REVERB_HOST=reverb
+      - REVERB_PORT=8080
+      - REVERB_SCHEME=http
+    volumes:
+      - storage_data:/var/www/html/storage/app/public
+    networks:
+      - lamsuite-internal
+    healthcheck:
+      test: ["CMD-SHELL", "ps aux | grep -v grep | grep 'queue:work' || exit 1"]
+      interval: 20s
+      timeout: 5s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+  scheduler:
+    build:
+      context: ./backend
+      target: base
+    image: lamsuite-backend:latest
+    container_name: lamsuite-scheduler
+    restart: unless-stopped
+    command: ["php", "artisan", "schedule:work"]
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      - APP_NAME=${APP_NAME:-LamSuite Billing}
+      - APP_ENV=${APP_ENV:-production}
+      - APP_KEY=${APP_KEY}
+      - APP_DEBUG=${APP_DEBUG:-false}
+      - DB_CONNECTION=mysql
+      - DB_HOST=db
+      - DB_PORT=3306
+      - DB_DATABASE=${DB_DATABASE:-lamsuite_billing}
+      - DB_USERNAME=${DB_USERNAME:-lamsuite}
+      - DB_PASSWORD=${DB_PASSWORD}
+      - CACHE_STORE=redis
+      - QUEUE_CONNECTION=redis
+      - REDIS_CLIENT=phpredis
+      - REDIS_HOST=redis
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
+      - REDIS_PORT=6379
+    volumes:
+      - storage_data:/var/www/html/storage/app/public
+    networks:
+      - lamsuite-internal
+    healthcheck:
+      test: ["CMD-SHELL", "ps aux | grep -v grep | grep 'schedule:work' || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
+  reverb:
+    build:
+      context: ./backend
+      target: base
+    image: lamsuite-backend:latest
+    container_name: lamsuite-reverb
+    restart: unless-stopped
+    command: ["php", "artisan", "reverb:start", "--host=0.0.0.0", "--port=8080"]
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      - APP_NAME=${APP_NAME:-LamSuite Billing}
+      - APP_ENV=${APP_ENV:-production}
+      - APP_KEY=${APP_KEY}
+      - APP_DEBUG=${APP_DEBUG:-false}
+      - CACHE_STORE=redis
+      - QUEUE_CONNECTION=redis
+      - REDIS_CLIENT=phpredis
+      - REDIS_HOST=redis
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
+      - REDIS_PORT=6379
+      - REVERB_APP_ID=${REVERB_APP_ID:-lamsuite_local}
+      - REVERB_APP_KEY=${REVERB_APP_KEY:-lamsuite_reverb_key}
+      - REVERB_APP_SECRET=${REVERB_APP_SECRET:-lamsuite_reverb_secret}
+      - REVERB_HOST=0.0.0.0
+      - REVERB_PORT=8080
+      - REVERB_SERVER_HOST=0.0.0.0
+      - REVERB_SERVER_PORT=8080
+    networks:
+      - lamsuite-public
+      - lamsuite-internal
+    labels:
+      - "traefik.enable=true"
+      # Standard 4 Labels
+      - "traefik.http.routers.reverb.rule=Host(`${SUBDOMAIN_WS:-ws}.${DOMAIN}`)"
+      - "traefik.http.routers.reverb.entrypoints=websecure"
+      - "traefik.http.routers.reverb.tls.certresolver=letsencrypt"
+      - "traefik.http.services.reverb.loadbalancer.server.port=8080"
+      # WebSocket Long Idle Timeout & No Buffering
+      - "traefik.http.services.reverb.loadbalancer.responseforwarding.flushinterval=-1"
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 8080 || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 384M
+
+  # =========================================================================
+  # 4. Frontends & Tooling (Admin Panel & MCP Server)
+  # =========================================================================
+  panel:
+    build:
+      context: ./admin-panel
+    image: lamsuite-panel:latest
+    container_name: lamsuite-panel
+    restart: unless-stopped
+    environment:
+      - VITE_API_BASE_URL=https://${SUBDOMAIN_API:-api}.${DOMAIN}
+      - VITE_WS_URL=wss://${SUBDOMAIN_WS:-ws}.${DOMAIN}
+    networks:
+      - lamsuite-public
+    labels:
+      - "traefik.enable=true"
+      # Standard 4 Labels
+      - "traefik.http.routers.panel.rule=Host(`${SUBDOMAIN_PANEL:-panel}.${DOMAIN}`)"
+      - "traefik.http.routers.panel.entrypoints=websecure"
+      - "traefik.http.routers.panel.tls.certresolver=letsencrypt"
+      - "traefik.http.services.panel.loadbalancer.server.port=80"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:80/health"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+
+  mcp:
+    build:
+      context: ./mcp-server
+    image: lamsuite-mcp:latest
+    container_name: lamsuite-mcp
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - LAMSUITE_MCP_TRANSPORT=http
+      - LAMSUITE_API_URL=http://api:8000/api
+      - LAMSUITE_STORE_ID=1
+      - LAMSUITE_READ_ONLY=${MCP_READ_ONLY:-true}
+      - LAMSUITE_API_ROLE=admin
+      - LAMSUITE_MCP_AUTH_TOKEN=${MCP_AUTH_TOKEN}
+    networks:
+      - lamsuite-public
+      - lamsuite-internal
+    labels:
+      - "traefik.enable=true"
+      # Standard 4 Labels
+      - "traefik.http.routers.mcp.rule=Host(`${SUBDOMAIN_MCP:-mcp}.${DOMAIN}`)"
+      - "traefik.http.routers.mcp.entrypoints=websecure"
+      - "traefik.http.routers.mcp.tls.certresolver=letsencrypt"
+      - "traefik.http.services.mcp.loadbalancer.server.port=3000"
+      # Streamable SSE Buffering Bypass
+      - "traefik.http.services.mcp.loadbalancer.responseforwarding.flushinterval=-1"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/health"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
+  # =========================================================================
+  # 5. Optional Services (Web Billing App & Tauri Auto-Updater)
+  # Activated via: docker compose --profile web --profile updates up -d
+  # =========================================================================
+  web:
+    profiles:
+      - web
+    build:
+      context: ./frontend
+    image: lamsuite-web:latest
+    container_name: lamsuite-web
+    restart: unless-stopped
+    networks:
+      - lamsuite-public
+    labels:
+      - "traefik.enable=true"
+      # Standard 4 Labels
+      - "traefik.http.routers.web.rule=Host(`${SUBDOMAIN_APP:-app}.${DOMAIN}`)"
+      - "traefik.http.routers.web.entrypoints=websecure"
+      - "traefik.http.routers.web.tls.certresolver=letsencrypt"
+      - "traefik.http.services.web.loadbalancer.server.port=80"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:80/"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+
+  updates:
+    profiles:
+      - updates
+    image: nginx:1.27-alpine
+    container_name: lamsuite-updates
+    restart: unless-stopped
+    volumes:
+      - updates_data:/usr/share/nginx/html:ro
+    networks:
+      - lamsuite-public
+    labels:
+      - "traefik.enable=true"
+      # Standard 4 Labels
+      - "traefik.http.routers.updates.rule=Host(`${SUBDOMAIN_UPDATES:-updates}.${DOMAIN}`)"
+      - "traefik.http.routers.updates.entrypoints=websecure"
+      - "traefik.http.routers.updates.tls.certresolver=letsencrypt"
+      - "traefik.http.services.updates.loadbalancer.server.port=80"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:80/"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+
+# =========================================================================
+# Networks Definition
+# =========================================================================
+networks:
+  lamsuite-public:
+    name: lamsuite-public
+    driver: bridge
+
+  lamsuite-internal:
+    name: lamsuite-internal
+    driver: bridge
+    internal: true
+
+  socket-net:
+    name: lamsuite-socket-net
+    driver: bridge
+    internal: true
+
+# =========================================================================
+# Volumes Definition
+# =========================================================================
+volumes:
+  db_data:
+    name: lamsuite_db_data
+  redis_data:
+    name: lamsuite_redis_data
+  storage_data:
+    name: lamsuite_storage_data
+  traefik_certs:
+    name: lamsuite_traefik_certs
+  updates_data:
+    name: lamsuite_updates_data

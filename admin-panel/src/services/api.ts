@@ -2,7 +2,23 @@
  * Central HTTP client for the LamSuite Billing Web Admin Panel
  */
 
-const API_BASE = "/api";
+declare global {
+  interface Window {
+    __ENV__?: {
+      VITE_API_BASE_URL?: string;
+      VITE_WS_URL?: string;
+    };
+  }
+}
+
+const rawApiBase =
+  (typeof window !== "undefined" && window.__ENV__?.VITE_API_BASE_URL) ||
+  import.meta.env.VITE_API_BASE_URL ||
+  "";
+
+export const API_BASE = rawApiBase
+  ? (rawApiBase.endsWith("/api") ? rawApiBase.replace(/\/+$/, "") : `${rawApiBase.replace(/\/+$/, "")}/api`)
+  : "/api";
 
 export class ApiError extends Error {
   status: number;

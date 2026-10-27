@@ -1,0 +1,59 @@
+# Traefik Dynamic Configuration: Middlewares & Security Profiles
+http:
+  middlewares:
+    # Production Security Headers
+    security-headers:
+      headers:
+        accessControlAllowMethods:
+          - GET
+          - OPTIONS
+          - PUT
+          - POST
+          - DELETE
+        accessControlMaxAge: 100
+        hostsProxyHeaders:
+          - "X-Forwarded-Host"
+        sslRedirect: true
+        sslForceHost: true
+        sslHost: ""
+        sslProxyHeaders:
+          X-Forwarded-Proto: https
+        stsSeconds: 31536000
+        stsIncludeSubdomains: true
+        stsPreload: true
+        forceSTSHeader: true
+        frameDeny: false
+        customFrameOptionsValue: "SAMEORIGIN"
+        contentTypeNosniff: true
+        browserXssFilter: true
+        referrerPolicy: "strict-origin-when-cross-origin"
+        permissionsPolicy: "camera=(), microphone=(), geolocation=()"
+
+    # High-efficiency Gzip Compression
+    gzip-compress:
+      compress:
+        minResponseBodyBytes: 1024
+
+    # Rate Limiting for Auth & Activation Endpoints (Anti-Brute Force)
+    rate-limit-auth:
+      rateLimit:
+        average: 10
+        burst: 20
+        period: 1m
+        sourceCriterion:
+          requestHeaderName: "X-Forwarded-For"
+
+    # Strict Rate Limiting for LAN Pairing & Enrollment
+    rate-limit-sensitive:
+      rateLimit:
+        average: 5
+        burst: 10
+        period: 1m
+        sourceCriterion:
+          requestHeaderName: "X-Forwarded-For"
+
+    # Traefik Dashboard Basic Authentication
+    traefik-dashboard-auth:
+      basicAuth:
+        users:
+          - "${TRAEFIK_DASHBOARD_AUTH:-admin:$2y$05$1vB8oIq9kQcZpEceL5cWcOu2w6EKn9gE7O1d1V1pT0qF1Z0J4jVKe}"

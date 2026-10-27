@@ -17,9 +17,13 @@ class User extends Authenticatable
         'store_id',
         'name',
         'email',
+        'username',
         'password',
+        'pin_hash',
+        'must_change_password',
         'role',
         'permissions',
+        'enabled_menus',
         'allowed_store_ids',
         'totp_secret',
         'totp_enabled',
@@ -33,6 +37,7 @@ class User extends Authenticatable
 
     protected $hidden = [
         'password',
+        'pin_hash',
         'remember_token',
         'totp_secret',
     ];
@@ -40,7 +45,9 @@ class User extends Authenticatable
     protected $casts = [
         'email_verified_at' => 'datetime',
         'password' => 'hashed',
+        'must_change_password' => 'boolean',
         'permissions' => 'array',
+        'enabled_menus' => 'array',
         'allowed_store_ids' => 'array',
         'totp_enabled' => 'boolean',
         'is_biometric_enabled' => 'boolean',

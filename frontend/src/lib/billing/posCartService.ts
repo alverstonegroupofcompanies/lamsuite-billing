@@ -9,6 +9,7 @@ import {
 } from "./billingCalculations";
 import { sqliteStorage } from "../db/sqliteStorage";
 import { syncQueueService } from "../sync/syncQueueService";
+import { onlineTransactionService } from "../sync/onlineTransactionService";
 import { staffAuthService } from "../auth/staffAuthService";
 import { cashShiftService } from "./cashShiftService";
 
@@ -494,7 +495,7 @@ export class PosCartService {
       totalsSnapshot?: InvoiceTotals;
       operatorId?: string;
     }
-  ): Promise<{ success: boolean; invoiceId: string }> {
+  ): Promise<{ success: boolean; invoiceId: string; invoiceNumber?: string; isOfflineQueued?: boolean; isTempNumber?: boolean }> {
     const linesToFinalize = options?.linesSnapshot && options.linesSnapshot.length > 0
       ? options.linesSnapshot
       : this.lines;
@@ -504,18 +505,15 @@ export class PosCartService {
     }
 
     const totals = options?.totalsSnapshot || this.getTotals();
-    const invoiceId = `inv_${Date.now()}_${Math.random().toString(16).slice(2, 6)}`;
     const externalId = `ext_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`;
-    const now = Date.now();
 
     const currentSession = staffAuthService.getCurrentSession();
     const activeCounterId = currentSession?.counterId || "Counter 01";
-    const activeUserId = currentSession?.user?.id || options?.operatorId || "usr_cashier_01";
-    const activeUserName = currentSession?.user?.full_name || "Store Cashier";
 
-    const invoiceRow = {
-      id: invoiceId,
-      module_key: "invoice",
+    // 1. Submit through Online Transaction Service (Online-First with offline fallback)
+    const txRes = await onlineTransactionService.submitAuthoritativeInvoice({
+      external_id: externalId,
+      idempotency_key: externalId,
       invoice_number: invoiceNumber,
       invoice_date: new Date().toISOString().slice(0, 10),
       customer_id: this.customerId,
@@ -523,41 +521,25 @@ export class PosCartService {
       customer_phone: this.customerPhone,
       customer_gstin: this.customerGstin,
       place_of_supply: this.placeOfSupply,
+      payment_mode: paymentMode,
+      paid_amount: totals.grand_total,
+      counter_id: activeCounterId,
+      patient_name: this.prescriptionMeta.patient_name,
+      doctor_name: this.prescriptionMeta.doctor_name,
+      doctor_reg_no: this.prescriptionMeta.doctor_reg_no,
+      bill_discount_percent: this.billDiscount?.type === "percent" ? this.billDiscount.value : 0,
+      bill_discount_amount: totals.bill_discount_amount,
+      manual_round_off: this.manualRoundOff,
       subtotal: totals.taxable_subtotal,
       discount_total: totals.line_discount_total + totals.bill_discount_amount,
       tax_total: totals.total_tax,
       round_off: totals.round_off,
       grand_total: totals.grand_total,
-      paid_amount: totals.grand_total,
-      payment_mode: paymentMode,
-      status: "issued",
-      counter_id: activeCounterId,
-      created_by_user_id: activeUserId,
-      created_by_user_name: activeUserName,
-      patient_name: this.prescriptionMeta.patient_name,
-      doctor_name: this.prescriptionMeta.doctor_name,
-      doctor_reg_no: this.prescriptionMeta.doctor_reg_no,
-      sync_state: "pending",
-      external_id: externalId,
-      created_at: now,
-      updated_at: now,
-    };
-
-    // Record tender in active counter shift
-    await cashShiftService.recordSaleTender(activeCounterId, paymentMode, totals.grand_total);
-
-    // 1. Commit Invoice to local SQLite
-    await sqliteStorage.insertRecord("invoices", invoiceId, invoiceRow);
-
-    // 2. Commit Invoice Line Items & Stock Transactions
-    for (const line of linesToFinalize) {
-      const lineItemId = `inv_item_${Date.now()}_${Math.random().toString(16).slice(2, 6)}`;
-      await sqliteStorage.insertRecord("invoice_items", lineItemId, {
-        id: lineItemId,
-        invoice_id: invoiceId,
+      is_inter_state: this.isInterState,
+      items: linesToFinalize.map((line) => ({
         product_id: line.product.id,
         product_name: line.product.name,
-        hsn_code: line.product.hsn_sac_code,
+        batch_id: line.selectedBatch.id,
         batch_no: line.selectedBatch.batch_no,
         expiry_date: line.selectedBatch.expiry_date,
         qty: line.qty,
@@ -568,82 +550,33 @@ export class PosCartService {
         discount_percent: line.discount_percent,
         discount_amount: line.discount_amount,
         gst_percent: line.product.gst_percent,
-        cgst_amount: line.calculated.cgst_amount,
-        sgst_amount: line.calculated.sgst_amount,
-        igst_amount: line.calculated.igst_amount,
-        total_amount: line.calculated.total_amount,
-      });
-
-      // Deduct stock in double-entry ledger without artificial 0 clamping
-      const deductedBaseUnits = line.qty * (line.product.units_per_pack || 1) + (line.loose_qty || 0);
-
-      // Fetch or create batch in database
-      const allBatches = await sqliteStorage.findAll<ProductBatch>("product_batches");
-      let batch = allBatches.find((b) => b.id === line.selectedBatch.id);
-
-      if (!batch) {
-        batch = {
-          ...line.selectedBatch,
-          stock_qty: -(deductedBaseUnits),
-        };
-        await productsStore.upsertBatch(batch, false);
-      } else {
-        batch.stock_qty = (batch.stock_qty || 0) - deductedBaseUnits;
-        await productsStore.upsertBatch(batch, false);
-      }
-
-      // Update product current_stock
-      const prod = await productsStore.getProductById(line.product.id);
-      if (prod) {
-        prod.current_stock = (prod.current_stock || 0) - deductedBaseUnits;
-        await productsStore.upsertProduct(prod, false);
-      }
-
-      const stockTxId = `stk_tx_${Date.now()}_${Math.random().toString(16).slice(2, 6)}`;
-      const isShortage = line.isNegativeStock || (batch.stock_qty < 0);
-      const noteStr = isShortage
-        ? `Sale beyond available stock (Batch: ${line.selectedBatch.batch_no}, short: ${line.shortageQty || Math.abs(batch.stock_qty)})`
-        : `Sale (Bill: ${invoiceNumber})`;
-
-      await sqliteStorage.insertRecord("stock_transactions", stockTxId, {
-        id: stockTxId,
-        product_id: line.product.id,
-        batch_id: line.selectedBatch.id,
-        event_type: "SALE",
-        qty_delta: -deductedBaseUnits,
-        reference_type: "INVOICE",
-        reference_id: invoiceId,
-        counter_id: activeCounterId,
-        created_by_user_id: activeUserId,
-        notes: noteStr,
-        created_at: now,
-      });
-    }
-
-    // 3. Enqueue for background sync with items
-    await syncQueueService.enqueue("invoice", invoiceId, "create", {
-      ...invoiceRow,
-      items: linesToFinalize.map((line) => ({
-        product_id: line.product.id,
-        product_name: line.product.name,
-        batch_no: line.selectedBatch.batch_no,
-        expiry_date: line.selectedBatch.expiry_date,
-        qty: line.qty,
-        unit_price: line.unit_price,
-        discount_percent: line.discount_percent,
-        discount_amount: line.discount_amount,
-        gst_percent: line.product.gst_percent,
-        tax_amount: (line.calculated.cgst_amount || 0) + (line.calculated.sgst_amount || 0) + (line.calculated.igst_amount || 0),
-        total_amount: line.calculated.total_amount,
+        rate_basis: line.rate_basis,
       })),
     });
 
-    // 4. Reset Cart only if autoClear is not explicitly disabled
+    if (!txRes.success) {
+      throw new Error(txRes.error || "Invoice failed to finalize.");
+    }
+
+    const finalizedInvoice = txRes.invoice;
+    const finalId = finalizedInvoice.id || externalId;
+    const finalDocNumber = finalizedInvoice.invoice_number || invoiceNumber;
+
+    // Record tender in active counter shift
+    await cashShiftService.recordSaleTender(activeCounterId, paymentMode, totals.grand_total);
+
+    // Reset Cart only if autoClear is not explicitly disabled
     if (options?.autoClear !== false) {
       this.clearCart();
     }
 
-    return { success: true, invoiceId };
+    return {
+      success: true,
+      invoiceId: String(finalId),
+      invoiceNumber: finalDocNumber,
+      isOfflineQueued: txRes.isOfflineQueued,
+      isTempNumber: txRes.isTempNumber,
+    };
   }
 }
 

@@ -6,6 +6,7 @@ import { companySettingsService } from "../settings/companySettingsService";
 import { round2 } from "../billing/billingCalculations";
 import { getIndianFinancialYear } from "../billing/salesReturnService";
 import { syncQueueService } from "../sync/syncQueueService";
+import { calculateDocumentTaxes } from "../tax-engine/taxEngine";
 
 export interface PurchaseLineItemInput {
   product_id: string;
@@ -39,6 +40,7 @@ export interface PurchaseLineCalculation {
   cgst_amount: number;
   sgst_amount: number;
   igst_amount: number;
+  cess_amount: number;
   total_tax: number;
   total_amount: number;
   effective_unit_cost: number;
@@ -84,6 +86,7 @@ export interface PurchaseDocumentRecord {
   cgst_total: number;
   sgst_total: number;
   igst_total: number;
+  cess_total?: number;
   round_off: number;
   grand_total: number;
   paid_amount: number;
@@ -116,12 +119,14 @@ export interface PurchaseItemRecord {
   discount_percent: number;
   discount_amount: number;
   effective_unit_cost: number;
+  taxable_amount: number;
   mrp?: number;
   selling_rate?: number;
   gst_percent: number;
   cgst_amount: number;
   sgst_amount: number;
   igst_amount: number;
+  cess_amount: number;
   tax_amount: number;
   total_amount: number;
 }
@@ -183,62 +188,50 @@ export class PurchaseService {
     const free = Math.max(0, line.free_qty || 0);
     const unitsPerPack = Math.max(1, line.units_per_pack || 1);
 
-    const billedUnits = packs * unitsPerPack + loose;
-    const freeUnits = free * unitsPerPack;
-    const totalStockUnits = billedUnits + freeUnits;
+    const doc = calculateDocumentTaxes({
+      store_state: "32",
+      place_of_supply: isInterstate ? "27-Maharashtra" : "32-Kerala",
+      default_tax_mode: "exclusive",
+      lines: [
+        {
+          qty: packs,
+          loose_qty: loose,
+          free_qty: free,
+          units_per_pack: unitsPerPack,
+          unit_price: line.purchase_rate,
+          mrp: line.mrp,
+          rate_basis: "ptr",
+          discount_percent: line.discount_percent,
+          discount_amount: line.discount_amount,
+          gst_percent: line.gst_percent,
+          cess_percent: line.cess_percent,
+          is_tax_inclusive: false,
+        },
+      ],
+      auto_round_off: false,
+    });
 
-    // Gross amount = (packs * rate) + (loose fraction * rate)
-    const ratePerUnit = line.purchase_rate / unitsPerPack;
-    const grossAmount = round2(billedUnits * ratePerUnit);
-
-    // Apply trade discount % and flat discount amount
-    const percentDisc = line.discount_percent ? round2((grossAmount * line.discount_percent) / 100) : 0;
-    const flatDisc = Math.max(0, line.discount_amount || 0);
-    const totalDiscount = round2(Math.min(grossAmount, percentDisc + flatDisc));
-
-    const taxableAmount = round2(Math.max(0, grossAmount - totalDiscount));
-
-    const combinedGst = (line.gst_percent || 0) + (line.cess_percent || 0);
-    const totalTax = round2((taxableAmount * combinedGst) / 100);
-
-    let cgst = 0;
-    let sgst = 0;
-    let igst = 0;
-
-    if (isInterstate) {
-      igst = totalTax;
-    } else {
-      cgst = round2(totalTax / 2);
-      sgst = round2(totalTax - cgst);
-    }
-
-    const totalAmount = round2(taxableAmount + totalTax);
-
-    // Effective landing cost per sellable stock unit (ex-tax)
-    const effectiveUnitCost = totalStockUnits > 0 ? round2(taxableAmount / totalStockUnits) : 0;
-
-    // Calculate margin percentage against selling price
-    // Selling price per unit
+    const c = doc.lines[0];
     const sellRate = line.selling_rate || (line.mrp ? line.mrp / unitsPerPack : 0);
     let marginPercent = 0;
     if (sellRate > 0) {
-      // margin = ((Selling Rate - Landing Cost) / Selling Rate) * 100
-      marginPercent = round2(((sellRate - effectiveUnitCost) / sellRate) * 100);
+      marginPercent = round2(((sellRate - c.effective_unit_cost!) / sellRate) * 100);
     }
 
     return {
-      billed_units: billedUnits,
-      free_units: freeUnits,
-      total_stock_units: totalStockUnits,
-      gross_amount: grossAmount,
-      discount_amount: totalDiscount,
-      taxable_amount: taxableAmount,
-      cgst_amount: cgst,
-      sgst_amount: sgst,
-      igst_amount: igst,
-      total_tax: totalTax,
-      total_amount: totalAmount,
-      effective_unit_cost: effectiveUnitCost,
+      billed_units: c.billed_units,
+      free_units: c.free_units,
+      total_stock_units: c.total_units,
+      gross_amount: c.gross_amount,
+      discount_amount: c.line_discount,
+      taxable_amount: c.taxable_amount,
+      cgst_amount: c.cgst_amount,
+      sgst_amount: c.sgst_amount,
+      igst_amount: c.igst_amount,
+      cess_amount: c.cess_amount,
+      total_tax: c.total_tax,
+      total_amount: c.total_amount,
+      effective_unit_cost: c.effective_unit_cost || 0,
       margin_percent: marginPercent,
     };
   }
@@ -268,6 +261,7 @@ export class PurchaseService {
     let cgstTotal = 0;
     let sgstTotal = 0;
     let igstTotal = 0;
+    let cessTotal = 0;
     let totalLinesAmount = 0;
 
     const isInterstate = Boolean(doc.is_interstate);
@@ -282,6 +276,7 @@ export class PurchaseService {
       cgstTotal += calc.cgst_amount;
       sgstTotal += calc.sgst_amount;
       igstTotal += calc.igst_amount;
+      cessTotal += calc.cess_amount;
       totalLinesAmount += calc.total_amount;
 
       // Track received quantity per product for PO fulfillment
@@ -368,12 +363,14 @@ export class PurchaseService {
         discount_percent: line.discount_percent || 0,
         discount_amount: calc.discount_amount,
         effective_unit_cost: calc.effective_unit_cost,
+        taxable_amount: calc.taxable_amount,
         mrp: line.mrp,
         selling_rate: line.selling_rate,
         gst_percent: line.gst_percent,
         cgst_amount: calc.cgst_amount,
         sgst_amount: calc.sgst_amount,
         igst_amount: calc.igst_amount,
+        cess_amount: calc.cess_amount,
         tax_amount: calc.total_tax,
         total_amount: calc.total_amount,
       };
@@ -405,6 +402,7 @@ export class PurchaseService {
       cgst_total: round2(cgstTotal),
       sgst_total: round2(sgstTotal),
       igst_total: round2(igstTotal),
+      cess_total: round2(cessTotal),
       round_off: round2(roundOff),
       grand_total: round2(grandTotal),
       paid_amount: 0,
@@ -580,6 +578,8 @@ export class PurchaseService {
               cgst_amount: doc.cgst_total || (doc.tax_total ? doc.tax_total / 2 : 0),
               sgst_amount: doc.sgst_total || (doc.tax_total ? doc.tax_total / 2 : 0),
               igst_amount: doc.igst_total || 0,
+              cess_amount: doc.cess_total || 0,
+              taxable_amount: doc.subtotal || (rate * (tx.qty_delta || 1)),
               tax_amount: doc.tax_total || 0,
               total_amount: total,
             };

@@ -77,8 +77,9 @@ describe("Keyboard-Operable POS Billing Workflow", () => {
     // F2: Update line discount to 10%
     posCartService.updateLineDiscount(lineId, 10);
     expect(posCartService.getLines()[0].discount_percent).toBe(10);
-    // 60 - 10% = 54.00
-    expect(posCartService.getLines()[0].calculated.total_amount).toBeCloseTo(54, 2);
+    // 60 - 10% = 54.00 (statutory paise split: taxable 48.21 + CGST 2.89 + SGST 2.89 = 53.99)
+    expect(posCartService.getLines()[0].calculated.total_amount).toBeCloseTo(54, 1);
+    expect(posCartService.getTotals().grand_total).toBe(54);
 
     // F3: Quick update selling rate to 25.00
     posCartService.updateLinePrice(lineId, 25, "sel_rate");

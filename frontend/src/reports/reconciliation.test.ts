@@ -53,7 +53,7 @@ describe("Financial Data Layer & Reports Reconciliation (Zero Drift to the Paisa
       invoice_number: "INV-1002",
       invoice_date: testDate,
       customer_name: "Apollo Pharmacy",
-      customer_gstin: "32AABCA1234F1Z5",
+      customer_gstin: "32AABCA1234F1ZI",
       subtotal: 1000,
       tax_total: 180,
       round_off: 0,
@@ -219,7 +219,7 @@ describe("Financial Data Layer & Reports Reconciliation (Zero Drift to the Paisa
     // GSTR-1 B2B (Table 4) must include Apollo Pharmacy
     const b2bRow = gstr1Result.rows.find((r) => r.section_table.includes("Table 4"));
     expect(b2bRow).toBeDefined();
-    expect(b2bRow!.recipient_gstin).toBe("32AABCA1234F1Z5");
+    expect(b2bRow!.recipient_gstin).toBe("32AABCA1234F1ZI");
     expect(b2bRow!.taxable_value).toBe(1000.0);
   });
 

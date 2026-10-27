@@ -13,6 +13,9 @@ class Store extends Model
         'name',
         'code',
         'activation_key',
+        'activation_key_hash',
+        'require_device_approval',
+        'wipe_on_revocation',
         'phone',
         'email',
         'address',
@@ -32,12 +35,19 @@ class Store extends Model
 
     protected $casts = [
         'is_active' => 'boolean',
+        'require_device_approval' => 'boolean',
+        'wipe_on_revocation' => 'boolean',
         'drug_license_numbers' => 'array',
         'enabled_menu_items' => 'array',
         'feature_flags' => 'array',
         'license_expires_at' => 'date',
         'version' => 'integer',
     ];
+
+    public function activationKeys(): HasMany
+    {
+        return $this->hasMany(ActivationKey::class);
+    }
 
     public function users(): HasMany
     {

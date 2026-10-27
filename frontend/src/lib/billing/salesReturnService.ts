@@ -4,6 +4,7 @@ import { partiesStore, type Customer } from "../masters/partiesStore";
 import { syncQueueService } from "../sync/syncQueueService";
 import { companySettingsService } from "../settings/companySettingsService";
 import { round2 } from "./billingCalculations";
+import { calculateDocumentTaxes } from "../tax-engine/taxEngine";
 import type { InvoiceRecord, InvoiceItemRecord } from "../reports/reportEngine";
 
 export type ReturnReason = "damaged" | "expired" | "wrong_item" | "customer_return" | "other";
@@ -174,6 +175,16 @@ export class SalesReturnService {
     const returnId = `sr_${now}_${Math.random().toString(16).slice(2, 6)}`;
     const returnNumber = await this.generateNextReturnNumber();
 
+    // Look up original invoice if available
+    let originalInv: InvoiceRecord | null = null;
+    if (input.original_invoice_id) {
+      originalInv = await sqliteStorage.findById<InvoiceRecord>("invoices", input.original_invoice_id);
+    }
+    if (!originalInv && input.original_invoice_number) {
+      const allInvoices = await sqliteStorage.findAll<InvoiceRecord>("invoices");
+      originalInv = allInvoices.find((i) => i.invoice_number === input.original_invoice_number) || null;
+    }
+
     // 1. Validation against original invoice
     if (input.original_invoice_number) {
       const returnedQtyMap = await this.getReturnedQtyMapForInvoice(input.original_invoice_number);
@@ -195,46 +206,54 @@ export class SalesReturnService {
       }
     }
 
-    // 2. Compute financial breakdown line by line
-    let subtotal = 0;
-    let discountTotal = 0;
-    let cgstTotal = 0;
-    let sgstTotal = 0;
-    let igstTotal = 0;
+    // 2. Compute financial breakdown line by line via statutory TaxEngine
+    const taxLines = input.lines.map((line, idx) => ({
+      line_id: `line_${idx}`,
+      product_id: line.product_id,
+      product_name: line.product_name,
+      hsn_code: line.hsn_code || "",
+      qty: line.return_qty,
+      pack_qty: line.return_qty,
+      loose_qty: 0,
+      units_per_pack: 1,
+      unit_price: line.unit_price,
+      discount_percent: line.discount_percent || 0,
+      gst_percent: line.gst_percent || 0,
+      gst_rate: line.gst_percent || 0,
+      cess_percent: (line as any).cess_percent || 0,
+      cess_rate: (line as any).cess_percent || 0,
+    }));
+
+    const customerGstin = input.customer_gstin || originalInv?.customer_gstin;
+    const placeOfSupply = originalInv?.place_of_supply || "32-Kerala";
+    const storeState = (originalInv as any)?.store_state_code;
+    const isTaxInclusive = (originalInv as any)?.is_tax_inclusive || false;
+
+    const taxResult = calculateDocumentTaxes({
+      store_state: storeState || "32",
+      lines: taxLines,
+      customer_gstin: customerGstin,
+      place_of_supply: placeOfSupply,
+      default_tax_mode: isTaxInclusive ? "inclusive" : "exclusive",
+    });
 
     const returnLines: SalesReturnItem[] = [];
 
-    for (const line of input.lines) {
-      const lineGross = round2(line.return_qty * line.unit_price);
-      const discPercent = line.discount_percent || 0;
-      const discAmount = round2((lineGross * discPercent) / 100);
-      const taxable = round2(lineGross - discAmount);
-
-      const gst = line.gst_percent || 0;
-      const totalTax = round2((taxable * gst) / 100);
-      const cgst = round2(totalTax / 2);
-      const sgst = round2(totalTax - cgst);
-      const igst = 0; // standard intra-state reversal
-      const lineTotal = round2(taxable + totalTax);
-
-      subtotal = round2(subtotal + taxable);
-      discountTotal = round2(discountTotal + discAmount);
-      cgstTotal = round2(cgstTotal + cgst);
-      sgstTotal = round2(sgstTotal + sgst);
-      igstTotal = round2(igstTotal + igst);
-
-      const itemId = `sri_${now}_${Math.random().toString(16).slice(2, 6)}`;
+    for (let i = 0; i < input.lines.length; i++) {
+      const line = input.lines[i];
+      const lineRes = taxResult.lines[i];
+      const itemId = `sri_${now}_${i}_${Math.random().toString(16).slice(2, 6)}`;
 
       returnLines.push({
         ...line,
         id: itemId,
         return_id: returnId,
-        discount_amount: discAmount,
-        taxable_amount: taxable,
-        cgst_amount: cgst,
-        sgst_amount: sgst,
-        igst_amount: igst,
-        total_amount: lineTotal,
+        discount_amount: lineRes.line_discount,
+        taxable_amount: lineRes.taxable_amount,
+        cgst_amount: lineRes.cgst_amount,
+        sgst_amount: lineRes.sgst_amount,
+        igst_amount: lineRes.igst_amount,
+        total_amount: lineRes.total_amount,
       });
 
       // 3. Double-entry Stock updates
@@ -297,11 +316,14 @@ export class SalesReturnService {
       }
     }
 
-    const taxTotal = round2(cgstTotal + sgstTotal + igstTotal);
-    const rawTotal = subtotal + taxTotal;
-    const roundedGrandTotal = Math.round(rawTotal);
-    const roundOff = round2(roundedGrandTotal - rawTotal);
-    const grandTotal = roundedGrandTotal;
+    const subtotal = taxResult.taxable_subtotal;
+    const discountTotal = round2(taxResult.line_discount_total + taxResult.bill_discount_total);
+    const taxTotal = taxResult.total_tax;
+    const cgstTotal = taxResult.cgst_total;
+    const sgstTotal = taxResult.sgst_total;
+    const igstTotal = taxResult.igst_total;
+    const roundOff = taxResult.round_off;
+    const grandTotal = taxResult.grand_total;
 
     const refundAmount = input.refund_amount !== undefined ? input.refund_amount : grandTotal;
     const refundStatus = refundAmount >= grandTotal ? "paid" : refundAmount > 0 ? "partial" : "unpaid";
@@ -327,7 +349,7 @@ export class SalesReturnService {
       customer_id: input.customer_id,
       customer_name: input.customer_name || "Customer",
       customer_phone: input.customer_phone,
-      customer_gstin: input.customer_gstin,
+      customer_gstin: customerGstin,
       lines: returnLines,
       subtotal,
       discount_total: discountTotal,
@@ -357,11 +379,16 @@ export class SalesReturnService {
       invoice_date: today,
       customer_id: input.customer_id,
       customer_name: input.customer_name || "Customer",
-      customer_gstin: input.customer_gstin,
-      place_of_supply: "32-Kerala",
+      customer_gstin: customerGstin,
+      place_of_supply: placeOfSupply,
       subtotal,
+      taxable_subtotal: taxResult.taxable_subtotal,
       discount_total: discountTotal,
       tax_total: taxTotal,
+      cgst_total: cgstTotal,
+      sgst_total: sgstTotal,
+      igst_total: igstTotal,
+      cess_total: taxResult.cess_total,
       round_off: roundOff,
       grand_total: grandTotal,
       paid_amount: refundAmount,
@@ -372,7 +399,9 @@ export class SalesReturnService {
     };
     await sqliteStorage.insertRecord("invoices", returnId, mirrorInvoice);
 
-    for (const item of returnLines) {
+    for (let i = 0; i < returnLines.length; i++) {
+      const item = returnLines[i];
+      const lineRes = taxResult.lines[i];
       const mirrorItem: InvoiceItemRecord = {
         id: item.id,
         invoice_id: returnId,

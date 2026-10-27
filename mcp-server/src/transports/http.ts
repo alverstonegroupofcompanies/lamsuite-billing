@@ -13,7 +13,7 @@ export function createHttpServer(
   // Store active SSE sessions
   const sessions = new Map<string, { transport: SSEServerTransport; server: Server }>();
 
-  // Health check
+  // Health check (always public)
   app.get("/health", (_req: Request, res: Response) => {
     const { config } = serverFactory();
     res.json({
@@ -22,9 +22,40 @@ export function createHttpServer(
       transport: "http-sse",
       read_only: config.readOnly,
       store_id: config.storeId,
+      authenticated: Boolean(config.mcpAuthToken),
       active_sessions: sessions.size,
     });
   });
+
+  // Authentication middleware for MCP protocol endpoints
+  const authMiddleware = (req: Request, res: Response, next: () => void) => {
+    const { config } = serverFactory();
+    const expectedToken = config.mcpAuthToken;
+    if (!expectedToken) {
+      return next();
+    }
+
+    const authHeader = req.headers.authorization || "";
+    const tokenFromHeader = authHeader.startsWith("Bearer ")
+      ? authHeader.slice(7).trim()
+      : null;
+    const tokenFromQuery = req.query.token as string | undefined;
+
+    const providedToken = tokenFromHeader || tokenFromQuery;
+
+    if (!providedToken || providedToken !== expectedToken) {
+      res.status(401).json({
+        error: "Unauthorized",
+        message: "Valid bearer token (Authorization: Bearer <token>) or ?token= required.",
+      });
+      return;
+    }
+
+    next();
+  };
+
+  app.use("/sse", authMiddleware);
+  app.use("/messages", authMiddleware);
 
   // SSE stream endpoint
   app.get("/sse", async (req: Request, res: Response) => {

@@ -55,6 +55,8 @@ export const StoreSetupPage: React.FC<StoreSetupPageProps> = ({ onSetupComplete,
   const [ownerPassword, setOwnerPassword] = useState("password123");
   const [branches, setBranches] = useState<BranchStore[]>(INITIAL_BRANCH_STORES);
   const [selectedBranchId, setSelectedBranchId] = useState("store_main");
+  const [totpCode, setTotpCode] = useState("");
+  const [requires2fa, setRequires2fa] = useState(false);
 
   // Secondary counter LAN mode
   const [hubIp, setHubIp] = useState("");
@@ -116,6 +118,15 @@ export const StoreSetupPage: React.FC<StoreSetupPageProps> = ({ onSetupComplete,
       // ignore
     }
   };
+
+  useEffect(() => {
+    storeDeviceService.fetchBranchesForOwner().then((b) => {
+      if (b.length > 0) {
+        setBranches(b);
+        setSelectedBranchId(b[0].id);
+      }
+    }).catch(() => {});
+  }, []);
 
   useEffect(() => {
     if (setupMode === "lan_secondary") {
@@ -287,6 +298,7 @@ export const StoreSetupPage: React.FC<StoreSetupPageProps> = ({ onSetupComplete,
           selectedBranchId,
           counterName,
           isHub,
+          totpCode || undefined,
           (step, pct) => {
             setProgressStep(step);
             setProgressPercent(pct);
@@ -444,6 +456,11 @@ export const StoreSetupPage: React.FC<StoreSetupPageProps> = ({ onSetupComplete,
       }, 400);
     } catch (err: any) {
       setIsProgressing(false);
+      if (err?.requires_2fa) {
+        setRequires2fa(true);
+        setErrorMsg("Two-factor authentication code (TOTP) required. Please enter the 6-digit code from your authenticator app below.");
+        return;
+      }
       setErrorMsg(err?.message || "Device registration failed. Please check credentials or network.");
     }
   };
@@ -609,6 +626,24 @@ export const StoreSetupPage: React.FC<StoreSetupPageProps> = ({ onSetupComplete,
                       ))}
                     </select>
                   </div>
+
+                  {requires2fa && (
+                    <div className="bg-amber-500/10 border border-amber-500/30 p-3 rounded-btn space-y-1.5">
+                      <label className="block text-[11px] font-bold uppercase tracking-wider text-amber-600 dark:text-amber-400">
+                        Two-Factor Authentication Code (TOTP)
+                      </label>
+                      <input
+                        type="text"
+                        maxLength={6}
+                        required
+                        value={totpCode}
+                        onChange={(e) => setTotpCode(e.target.value.replace(/[^0-9]/g, ""))}
+                        placeholder="000000"
+                        className="w-full px-3.5 py-2 bg-surface border border-border-main rounded-btn text-text-main font-mono text-center tracking-widest text-sm focus:border-accent focus:outline-none tabular-nums"
+                      />
+                      <p className="text-[10px] text-text-muted">Enter the 6-digit code from your authenticator app</p>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -852,22 +887,12 @@ export const StoreSetupPage: React.FC<StoreSetupPageProps> = ({ onSetupComplete,
                 </div>
               </div>
 
-              {/* Toggle First Admin Onboarding */}
-              <div className="pt-2">
-                <button
-                  type="button"
-                  onClick={() => setNeedsFirstAdmin(!needsFirstAdmin)}
-                  className="text-xs text-accent hover:underline font-semibold flex items-center gap-1"
-                >
-                  {needsFirstAdmin ? "− Hide First-Admin Setup" : "+ Initialize First Store Admin (New Store)"}
-                </button>
-              </div>
-
+              {/* First Admin Onboarding (Triggered only if server confirms store has no administrator) */}
               {needsFirstAdmin && (
                 <div className="bg-canvas p-4 rounded-card border border-border-main space-y-3">
                   <h4 className="text-xs font-bold text-text-main flex items-center gap-1.5">
                     <ShieldCheck className="w-4 h-4 text-accent" />
-                    First Administrator Account
+                    First Administrator Account (Server-Verified New Store)
                   </h4>
                   <div className="grid grid-cols-2 gap-2 text-xs">
                     <div>

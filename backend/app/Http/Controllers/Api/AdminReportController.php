@@ -101,16 +101,26 @@ class AdminReportController
                         'taxable_value' => 0,
                         'cgst_amount' => 0,
                         'sgst_amount' => 0,
+                        'igst_amount' => 0,
+                        'cess_amount' => 0,
                         'total_tax' => 0,
                     ];
                 }
 
-                $taxable = $item->total_amount - $item->tax_amount;
+                $taxable = $item->taxable_amount ?? ($item->total_amount - $item->tax_amount);
+                $isInter = ($inv->tax_type === 'inter_state') || ($item->igst_amount && $item->igst_amount > 0);
+                $cgst = $item->cgst_amount ?? ($isInter ? 0 : $item->tax_amount / 2);
+                $sgst = $item->sgst_amount ?? ($isInter ? 0 : $item->tax_amount / 2);
+                $igst = $item->igst_amount ?? ($isInter ? $item->tax_amount : 0);
+                $cess = $item->cess_amount ?? 0;
+
                 $hsnMap[$hsn]['total_qty'] += $item->qty;
                 $hsnMap[$hsn]['taxable_value'] += $taxable;
-                $hsnMap[$hsn]['cgst_amount'] += ($item->tax_amount / 2);
-                $hsnMap[$hsn]['sgst_amount'] += ($item->tax_amount / 2);
-                $hsnMap[$hsn]['total_tax'] += $item->tax_amount;
+                $hsnMap[$hsn]['cgst_amount'] += $cgst;
+                $hsnMap[$hsn]['sgst_amount'] += $sgst;
+                $hsnMap[$hsn]['igst_amount'] += $igst;
+                $hsnMap[$hsn]['cess_amount'] += $cess;
+                $hsnMap[$hsn]['total_tax'] += ($cgst + $sgst + $igst + $cess);
             }
         }
 
@@ -137,6 +147,8 @@ class AdminReportController
                     'taxable_value' => round($h['taxable_value'], 2),
                     'cgst_amount' => round($h['cgst_amount'], 2),
                     'sgst_amount' => round($h['sgst_amount'], 2),
+                    'igst_amount' => round($h['igst_amount'], 2),
+                    'cess_amount' => round($h['cess_amount'], 2),
                     'total_tax' => round($h['total_tax'], 2),
                 ];
             }, $hsnMap)),

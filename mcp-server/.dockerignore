@@ -1,7 +1,8 @@
 node_modules
 dist
-tests
 .git
-*.log
-catalog.json
-client.json
+.github
+tests
+audit.log
+Dockerfile*
+docker-compose*

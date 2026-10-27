@@ -4,8 +4,11 @@
 [![Frontend Tests](https://img.shields.io/badge/Desktop%20Tests-111%2F111%20Passing-brightgreen)](frontend/)
 [![Admin Panel](https://img.shields.io/badge/Admin%20Panel-React%2019%20%2B%20Vite%206-blue)](admin-panel/)
 [![License](https://img.shields.io/badge/License-Proprietary-red)](LICENSE)
+[![Production Docker](https://img.shields.io/badge/Production%20Hosting-Docker%20%2B%20Traefik%20v3-blueviolet)](DEPLOYMENT.md)
 
 The **LamSuite Central Web Admin Panel** provides enterprise store owners, administrators, managers, and accountants with a browser-based console to oversee multi-store retail pharmacy operations, manage hardware POS devices, enforce live feature gating, audit transactions, resolve sync conflicts, and examine statutory GST analytics — with zero requirement for the desktop application to be running.
+
+> **Production Deployment Guide**: For full single-server Docker hosting, Traefik v3 proxy routing, Let's Encrypt certificates, automated backups, and server hardening, refer to [DEPLOYMENT.md](DEPLOYMENT.md).
 
 ---
 

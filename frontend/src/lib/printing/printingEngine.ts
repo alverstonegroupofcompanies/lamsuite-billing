@@ -44,6 +44,11 @@ export interface InvoicePrintData {
     discount_amount?: number;
     taxable_amount?: number;
     gst_percent: number;
+    cgst_amount?: number;
+    sgst_amount?: number;
+    igst_amount?: number;
+    cess_percent?: number;
+    cess_amount?: number;
     amount: number;
   }>;
   subtotal: number;
@@ -51,6 +56,7 @@ export interface InvoicePrintData {
   cgst_total?: number;
   sgst_total?: number;
   igst_total?: number;
+  cess_total?: number;
   round_off: number;
   grand_total: number;
   amount_in_words?: string;
@@ -82,10 +88,15 @@ export interface PrintRenderOptions {
 export interface HsnSummaryRow {
   hsnCode: string;
   taxableValue: number;
+  rate?: number;
   cgstRate: number;
   cgstAmount: number;
   sgstRate: number;
   sgstAmount: number;
+  igstRate: number;
+  igstAmount: number;
+  cessRate: number;
+  cessAmount: number;
   totalTax: number;
 }
 
@@ -148,41 +159,59 @@ export function numberToWordsIndian(amount: number): string {
 }
 
 export function calculateHsnSummary(lines: InvoicePrintData["lines"]): HsnSummaryRow[] {
-  const map = new Map<string, { hsnCode: string; rate: number; taxable: number; total: number }>();
+  const map = new Map<string, HsnSummaryRow>();
   for (const l of lines) {
     const hsn = l.hsn_code || "300490";
     const gstRate = l.gst_percent || 0;
-    const key = `${hsn}_${gstRate}`;
+    const cessRate = l.cess_percent || 0;
+    const key = `${hsn}_${gstRate}_${cessRate}`;
     const lineTotal = l.amount || 0;
     const lineTaxable = l.taxable_amount !== undefined
       ? l.taxable_amount
-      : (gstRate > 0 ? lineTotal / (1 + gstRate / 100) : lineTotal);
+      : (gstRate > 0 ? round2(lineTotal / (1 + gstRate / 100)) : lineTotal);
 
-    const existing = map.get(key) || { hsnCode: hsn, rate: gstRate, taxable: 0, total: 0 };
-    existing.taxable += lineTaxable;
-    existing.total += lineTotal;
+    const isInterState = l.igst_amount !== undefined && l.igst_amount > 0;
+    const halfRate = isInterState ? 0 : gstRate / 2;
+
+    const lineCgst = l.cgst_amount !== undefined
+      ? l.cgst_amount
+      : (isInterState ? 0 : round2(lineTaxable * (halfRate / 100)));
+    const lineSgst = l.sgst_amount !== undefined
+      ? l.sgst_amount
+      : (isInterState ? 0 : round2(lineTaxable * (halfRate / 100)));
+    const lineIgst = l.igst_amount !== undefined
+      ? l.igst_amount
+      : (isInterState ? round2(lineTaxable * (gstRate / 100)) : 0);
+    const lineCess = l.cess_amount !== undefined
+      ? l.cess_amount
+      : (cessRate > 0 ? round2(lineTaxable * (cessRate / 100)) : 0);
+
+    const existing = map.get(key) || {
+      hsnCode: hsn,
+      taxableValue: 0,
+      rate: gstRate,
+      cgstRate: halfRate,
+      cgstAmount: 0,
+      sgstRate: halfRate,
+      sgstAmount: 0,
+      igstRate: isInterState ? gstRate : 0,
+      igstAmount: 0,
+      cessRate,
+      cessAmount: 0,
+      totalTax: 0,
+    };
+
+    existing.taxableValue = round2(existing.taxableValue + lineTaxable);
+    existing.cgstAmount = round2(existing.cgstAmount + lineCgst);
+    existing.sgstAmount = round2(existing.sgstAmount + lineSgst);
+    existing.igstAmount = round2(existing.igstAmount + lineIgst);
+    existing.cessAmount = round2(existing.cessAmount + lineCess);
+    existing.totalTax = round2(existing.cgstAmount + existing.sgstAmount + existing.igstAmount + existing.cessAmount);
+
     map.set(key, existing);
   }
 
-  const rows: HsnSummaryRow[] = [];
-  map.forEach((item) => {
-    const taxableValue = round2(item.taxable);
-    const halfRate = item.rate / 2;
-    const cgstAmount = round2(taxableValue * (halfRate / 100));
-    const sgstAmount = round2(taxableValue * (halfRate / 100));
-    const totalTax = round2(cgstAmount + sgstAmount);
-    rows.push({
-      hsnCode: item.hsnCode,
-      taxableValue,
-      cgstRate: halfRate,
-      cgstAmount,
-      sgstRate: halfRate,
-      sgstAmount,
-      totalTax,
-    });
-  });
-
-  return rows;
+  return Array.from(map.values());
 }
 
 export function generateQrCodeSvg(text: string, size = 80): string {
@@ -546,12 +575,17 @@ export class PrintingEngine {
     const upiUri = generateUpiPaymentString(upiVpa, data.store_name, data.grand_total, data.invoice_number);
     const qrSvg = generateQrCodeSvg(upiUri, 76);
 
+    const isInterState = (data.igst_total !== undefined && data.igst_total > 0) || hsnRows.some((r) => r.igstAmount > 0);
     const cgstTotal = data.cgst_total !== undefined ? data.cgst_total : round2(data.tax_total / 2);
     const sgstTotal = data.sgst_total !== undefined ? data.sgst_total : round2(data.tax_total / 2);
+    const igstTotal = data.igst_total !== undefined ? data.igst_total : (isInterState ? data.tax_total : 0);
+    const cessTotal = data.cess_total !== undefined ? data.cess_total : hsnRows.reduce((sum, r) => sum + r.cessAmount, 0);
 
     let totalHsnTaxable = 0;
     let totalHsnCgst = 0;
     let totalHsnSgst = 0;
+    let totalHsnIgst = 0;
+    let totalHsnCess = 0;
     let totalHsnTax = 0;
 
     const hsnRowsHtml = hsnRows
@@ -559,7 +593,22 @@ export class PrintingEngine {
         totalHsnTaxable += r.taxableValue;
         totalHsnCgst += r.cgstAmount;
         totalHsnSgst += r.sgstAmount;
+        totalHsnIgst += r.igstAmount;
+        totalHsnCess += r.cessAmount;
         totalHsnTax += r.totalTax;
+
+        if (isInterState) {
+          return `
+          <tr>
+            <td style="padding: 4px 6px; text-align: center; border-bottom: 1px solid #cbd5e1; border-right: 1px solid #cbd5e1;">${r.hsnCode}</td>
+            <td style="padding: 4px 6px; text-align: right; border-bottom: 1px solid #cbd5e1; border-right: 1px solid #cbd5e1; font-variant-numeric: tabular-nums;">₹ ${r.taxableValue.toFixed(2)}</td>
+            <td style="padding: 4px 6px; text-align: right; border-bottom: 1px solid #cbd5e1; border-right: 1px solid #cbd5e1; font-variant-numeric: tabular-nums;">${r.igstRate}%</td>
+            <td style="padding: 4px 6px; text-align: right; border-bottom: 1px solid #cbd5e1; border-right: 1px solid #cbd5e1; font-variant-numeric: tabular-nums;">₹ ${r.igstAmount.toFixed(2)}</td>
+            ${cessTotal > 0 ? `<td style="padding: 4px 6px; text-align: right; border-bottom: 1px solid #cbd5e1; border-right: 1px solid #cbd5e1; font-variant-numeric: tabular-nums;">₹ ${r.cessAmount.toFixed(2)}</td>` : ""}
+            <td style="padding: 4px 6px; text-align: right; border-bottom: 1px solid #cbd5e1; font-weight: 700; font-variant-numeric: tabular-nums;">₹ ${r.totalTax.toFixed(2)}</td>
+          </tr>`;
+        }
+
         return `
         <tr>
           <td style="padding: 4px 6px; text-align: center; border-bottom: 1px solid #cbd5e1; border-right: 1px solid #cbd5e1;">${r.hsnCode}</td>
@@ -568,6 +617,7 @@ export class PrintingEngine {
           <td style="padding: 4px 6px; text-align: right; border-bottom: 1px solid #cbd5e1; border-right: 1px solid #cbd5e1; font-variant-numeric: tabular-nums;">₹ ${r.cgstAmount.toFixed(2)}</td>
           <td style="padding: 4px 6px; text-align: right; border-bottom: 1px solid #cbd5e1; border-right: 1px solid #cbd5e1; font-variant-numeric: tabular-nums;">${r.sgstRate}%</td>
           <td style="padding: 4px 6px; text-align: right; border-bottom: 1px solid #cbd5e1; border-right: 1px solid #cbd5e1; font-variant-numeric: tabular-nums;">₹ ${r.sgstAmount.toFixed(2)}</td>
+          ${cessTotal > 0 ? `<td style="padding: 4px 6px; text-align: right; border-bottom: 1px solid #cbd5e1; border-right: 1px solid #cbd5e1; font-variant-numeric: tabular-nums;">₹ ${r.cessAmount.toFixed(2)}</td>` : ""}
           <td style="padding: 4px 6px; text-align: right; border-bottom: 1px solid #cbd5e1; font-weight: 700; font-variant-numeric: tabular-nums;">₹ ${r.totalTax.toFixed(2)}</td>
         </tr>`;
       })
@@ -691,7 +741,7 @@ export class PrintingEngine {
         ${
           showHsn
             ? `
-        <!-- HSN Tax Summary -->
+        <!-- HSN / GST Tax Summary -->
         <div style="margin-top: 10px; margin-bottom: 10px;">
           <div style="font-weight: 700; font-size: 9px; color: #475569; text-transform: uppercase; margin-bottom: 3px;">HSN / GST Tax Summary</div>
           <table class="data-table" style="margin-bottom: 0;">
@@ -699,10 +749,16 @@ export class PrintingEngine {
               <tr>
                 <th style="text-align: center; border-right: 1px solid #cbd5e1;">HSN/SAC</th>
                 <th style="text-align: right; border-right: 1px solid #cbd5e1;">Taxable Value (₹)</th>
+                ${isInterState ? `
+                <th style="text-align: right; border-right: 1px solid #cbd5e1;">IGST %</th>
+                <th style="text-align: right; border-right: 1px solid #cbd5e1;">IGST (₹)</th>
+                ` : `
                 <th style="text-align: right; border-right: 1px solid #cbd5e1;">CGST %</th>
                 <th style="text-align: right; border-right: 1px solid #cbd5e1;">CGST (₹)</th>
                 <th style="text-align: right; border-right: 1px solid #cbd5e1;">SGST %</th>
                 <th style="text-align: right; border-right: 1px solid #cbd5e1;">SGST (₹)</th>
+                `}
+                ${cessTotal > 0 ? `<th style="text-align: right; border-right: 1px solid #cbd5e1;">Cess (₹)</th>` : ""}
                 <th style="text-align: right;">Total Tax (₹)</th>
               </tr>
             </thead>
@@ -711,10 +767,16 @@ export class PrintingEngine {
               <tr style="background: #f1f5f9; font-weight: 700;">
                 <td style="padding: 4px 6px; text-align: center; border-top: 1px solid #94a3b8; border-right: 1px solid #cbd5e1;">Total</td>
                 <td style="padding: 4px 6px; text-align: right; border-top: 1px solid #94a3b8; border-right: 1px solid #cbd5e1; font-variant-numeric: tabular-nums;">₹ ${totalHsnTaxable.toFixed(2)}</td>
+                ${isInterState ? `
+                <td style="padding: 4px 6px; border-top: 1px solid #94a3b8; border-right: 1px solid #cbd5e1;"></td>
+                <td style="padding: 4px 6px; text-align: right; border-top: 1px solid #94a3b8; border-right: 1px solid #cbd5e1; font-variant-numeric: tabular-nums;">₹ ${totalHsnIgst.toFixed(2)}</td>
+                ` : `
                 <td style="padding: 4px 6px; border-top: 1px solid #94a3b8; border-right: 1px solid #cbd5e1;"></td>
                 <td style="padding: 4px 6px; text-align: right; border-top: 1px solid #94a3b8; border-right: 1px solid #cbd5e1; font-variant-numeric: tabular-nums;">₹ ${totalHsnCgst.toFixed(2)}</td>
                 <td style="padding: 4px 6px; border-top: 1px solid #94a3b8; border-right: 1px solid #cbd5e1;"></td>
                 <td style="padding: 4px 6px; text-align: right; border-top: 1px solid #94a3b8; border-right: 1px solid #cbd5e1; font-variant-numeric: tabular-nums;">₹ ${totalHsnSgst.toFixed(2)}</td>
+                `}
+                ${cessTotal > 0 ? `<td style="padding: 4px 6px; text-align: right; border-top: 1px solid #94a3b8; border-right: 1px solid #cbd5e1; font-variant-numeric: tabular-nums;">₹ ${totalHsnCess.toFixed(2)}</td>` : ""}
                 <td style="padding: 4px 6px; text-align: right; border-top: 1px solid #94a3b8; font-variant-numeric: tabular-nums;">₹ ${totalHsnTax.toFixed(2)}</td>
               </tr>
             </tbody>
@@ -746,9 +808,14 @@ export class PrintingEngine {
             <div class="footer-cell">
               <div class="totals-card">
                 <div class="total-line"><span>Taxable Subtotal:</span><span style="font-weight: 600;">₹ ${data.subtotal.toFixed(2)}</span></div>
+                ${isInterState ? `
+                <div class="total-line"><span>Integrated GST (IGST):</span><span style="font-weight: 600;">₹ ${igstTotal.toFixed(2)}</span></div>
+                ` : `
                 <div class="total-line"><span>Central GST (CGST):</span><span style="font-weight: 600;">₹ ${cgstTotal.toFixed(2)}</span></div>
                 <div class="total-line"><span>State GST (SGST):</span><span style="font-weight: 600;">₹ ${sgstTotal.toFixed(2)}</span></div>
-                <div class="total-line"><span>Total GST:</span><span style="font-weight: 600;">₹ ${data.tax_total.toFixed(2)}</span></div>
+                `}
+                ${cessTotal > 0 ? `<div class="total-line"><span>Cess:</span><span style="font-weight: 600;">₹ ${cessTotal.toFixed(2)}</span></div>` : ""}
+                <div class="total-line"><span>Total Tax:</span><span style="font-weight: 600;">₹ ${data.tax_total.toFixed(2)}</span></div>
                 ${data.round_off ? `<div class="total-line"><span>Round Off:</span><span style="font-weight: 600;">${data.round_off > 0 ? "+" : ""}₹ ${data.round_off.toFixed(2)}</span></div>` : ""}
                 <div class="grand-total-line"><span>Grand Total:</span><span>₹ ${data.grand_total.toFixed(2)}</span></div>
               </div>
@@ -972,8 +1039,11 @@ export class PrintingEngine {
     const upiUri = generateUpiPaymentString(upiVpa, data.store_name, data.grand_total, data.invoice_number);
     const qrSvg = generateQrCodeSvg(upiUri, is58 ? 85 : 100);
 
+    const isInterState = data.igst_total !== undefined && data.igst_total > 0;
     const cgstTotal = data.cgst_total !== undefined ? data.cgst_total : round2(data.tax_total / 2);
     const sgstTotal = data.sgst_total !== undefined ? data.sgst_total : round2(data.tax_total / 2);
+    const igstTotal = data.igst_total !== undefined ? data.igst_total : (isInterState ? data.tax_total : 0);
+    const cessTotal = data.cess_total !== undefined ? data.cess_total : 0;
 
     const linesHtml = data.lines
       .map((l, i) => {
@@ -1073,8 +1143,13 @@ export class PrintingEngine {
 
     <div class="divider"></div>
     <div class="flex-between"><span>Subtotal:</span><span>₹${data.subtotal.toFixed(2)}</span></div>
+    ${isInterState ? `
+    <div class="flex-between"><span>IGST:</span><span>₹${igstTotal.toFixed(2)}</span></div>
+    ` : `
     <div class="flex-between"><span>CGST:</span><span>₹${cgstTotal.toFixed(2)}</span></div>
     <div class="flex-between"><span>SGST:</span><span>₹${sgstTotal.toFixed(2)}</span></div>
+    `}
+    ${cessTotal > 0 ? `<div class="flex-between"><span>Cess:</span><span>₹${cessTotal.toFixed(2)}</span></div>` : ""}
     ${data.round_off ? `<div class="flex-between"><span>Round Off:</span><span>${data.round_off > 0 ? "+" : ""}₹${data.round_off.toFixed(2)}</span></div>` : ""}
     
     <div class="double-divider"></div>
@@ -1121,8 +1196,11 @@ export class PrintingEngine {
     const upiUri = generateUpiPaymentString(upiVpa, data.store_name, data.grand_total, data.invoice_number);
     const qrSvg = generateQrCodeSvg(upiUri, 58);
 
+    const isInterState = data.igst_total !== undefined && data.igst_total > 0;
     const cgstTotal = data.cgst_total !== undefined ? data.cgst_total : round2(data.tax_total / 2);
     const sgstTotal = data.sgst_total !== undefined ? data.sgst_total : round2(data.tax_total / 2);
+    const igstTotal = data.igst_total !== undefined ? data.igst_total : (isInterState ? data.tax_total : 0);
+    const cessTotal = data.cess_total !== undefined ? data.cess_total : 0;
 
     const itemsRows = data.lines
       .map(
@@ -1406,15 +1484,35 @@ export class PrintingEngine {
 
     // HSN Tax Summary Table
     const hsnRows = calculateHsnSummary(data.lines);
+    const isInterState = (data.igst_total !== undefined && data.igst_total > 0) || hsnRows.some((r) => r.igstAmount > 0);
+    const cessTotal = data.cess_total !== undefined ? data.cess_total : hsnRows.reduce((sum, r) => sum + r.cessAmount, 0);
+
     let totalHsnTaxable = 0;
     let totalHsnCgst = 0;
     let totalHsnSgst = 0;
+    let totalHsnIgst = 0;
+    let totalHsnCess = 0;
     let totalHsnTax = 0;
+
     const hsnTableBody = hsnRows.map((r) => {
       totalHsnTaxable += r.taxableValue;
       totalHsnCgst += r.cgstAmount;
       totalHsnSgst += r.sgstAmount;
+      totalHsnIgst += r.igstAmount;
+      totalHsnCess += r.cessAmount;
       totalHsnTax += r.totalTax;
+
+      if (isInterState) {
+        return [
+          r.hsnCode,
+          `₹ ${r.taxableValue.toFixed(2)}`,
+          `${r.igstRate}%`,
+          `₹ ${r.igstAmount.toFixed(2)}`,
+          ...(cessTotal > 0 ? [`₹ ${r.cessAmount.toFixed(2)}`] : []),
+          `₹ ${r.totalTax.toFixed(2)}`,
+        ];
+      }
+
       return [
         r.hsnCode,
         `₹ ${r.taxableValue.toFixed(2)}`,
@@ -1422,18 +1520,32 @@ export class PrintingEngine {
         `₹ ${r.cgstAmount.toFixed(2)}`,
         `${r.sgstRate}%`,
         `₹ ${r.sgstAmount.toFixed(2)}`,
+        ...(cessTotal > 0 ? [`₹ ${r.cessAmount.toFixed(2)}`] : []),
         `₹ ${r.totalTax.toFixed(2)}`,
       ];
     });
-    hsnTableBody.push([
-      "Total",
-      `₹ ${totalHsnTaxable.toFixed(2)}`,
-      "",
-      `₹ ${totalHsnCgst.toFixed(2)}`,
-      "",
-      `₹ ${totalHsnSgst.toFixed(2)}`,
-      `₹ ${totalHsnTax.toFixed(2)}`,
-    ]);
+
+    if (isInterState) {
+      hsnTableBody.push([
+        "Total",
+        `₹ ${totalHsnTaxable.toFixed(2)}`,
+        "",
+        `₹ ${totalHsnIgst.toFixed(2)}`,
+        ...(cessTotal > 0 ? [`₹ ${totalHsnCess.toFixed(2)}`] : []),
+        `₹ ${totalHsnTax.toFixed(2)}`,
+      ]);
+    } else {
+      hsnTableBody.push([
+        "Total",
+        `₹ ${totalHsnTaxable.toFixed(2)}`,
+        "",
+        `₹ ${totalHsnCgst.toFixed(2)}`,
+        "",
+        `₹ ${totalHsnSgst.toFixed(2)}`,
+        ...(cessTotal > 0 ? [`₹ ${totalHsnCess.toFixed(2)}`] : []),
+        `₹ ${totalHsnTax.toFixed(2)}`,
+      ]);
+    }
 
     const hsnAlignments: Record<number, "left" | "center" | "right"> = {
       0: "center",
@@ -1443,6 +1555,7 @@ export class PrintingEngine {
       4: "right",
       5: "right",
       6: "right",
+      7: "right",
     };
 
     doc.setFont("Roboto", "bold");
@@ -1450,10 +1563,14 @@ export class PrintingEngine {
     doc.setTextColor(71, 85, 105);
     doc.text("HSN / GST TAX SUMMARY", marginX, currY);
 
+    const hsnHead = isInterState
+      ? [["HSN/SAC", "Taxable Value (₹)", "IGST %", "IGST (₹)", ...(cessTotal > 0 ? ["Cess (₹)"] : []), "Total Tax (₹)"]]
+      : [["HSN/SAC", "Taxable Value (₹)", "CGST %", "CGST (₹)", "SGST %", "SGST (₹)", ...(cessTotal > 0 ? ["Cess (₹)"] : []), "Total Tax (₹)"]];
+
     autoTable(doc, {
       startY: currY + 1.5,
       margin: { left: marginX, right: marginX },
-      head: [["HSN/SAC", "Taxable Value (₹)", "CGST %", "CGST (₹)", "SGST %", "SGST (₹)", "Total Tax (₹)"]],
+      head: hsnHead,
       body: hsnTableBody,
       theme: "grid",
       styles: {
@@ -1468,15 +1585,6 @@ export class PrintingEngine {
         fillColor: [241, 245, 249],
         textColor: [15, 23, 42],
         fontSize: 7,
-      },
-      columnStyles: {
-        0: { cellWidth: 26 },
-        1: { cellWidth: 32 },
-        2: { cellWidth: 20 },
-        3: { cellWidth: 26 },
-        4: { cellWidth: 20 },
-        5: { cellWidth: 26 },
-        6: { cellWidth: 36, fontStyle: "bold" },
       },
       didParseCell: (hookData) => {
         hookData.cell.styles.halign = hsnAlignments[hookData.column.index] || "left";
@@ -1557,19 +1665,30 @@ export class PrintingEngine {
 
     const cgstTotal = data.cgst_total !== undefined ? data.cgst_total : round2(data.tax_total / 2);
     const sgstTotal = data.sgst_total !== undefined ? data.sgst_total : round2(data.tax_total / 2);
+    const igstTotal = data.igst_total !== undefined ? data.igst_total : (isInterState ? data.tax_total : 0);
     const rightValX = colRightX + colRightWidth - 4;
 
     doc.text("Taxable Subtotal:", colRightX + 3, row1Y + 5);
     doc.text(`₹ ${data.subtotal.toFixed(2)}`, rightValX, row1Y + 5, { align: "right" });
 
-    doc.text("Central GST (CGST):", colRightX + 3, row1Y + 9.5);
-    doc.text(`₹ ${cgstTotal.toFixed(2)}`, rightValX, row1Y + 9.5, { align: "right" });
+    if (isInterState) {
+      doc.text("Integrated GST (IGST):", colRightX + 3, row1Y + 9.5);
+      doc.text(`₹ ${igstTotal.toFixed(2)}`, rightValX, row1Y + 9.5, { align: "right" });
+    } else {
+      doc.text("Central GST (CGST):", colRightX + 3, row1Y + 9.5);
+      doc.text(`₹ ${cgstTotal.toFixed(2)}`, rightValX, row1Y + 9.5, { align: "right" });
 
-    doc.text("State GST (SGST):", colRightX + 3, row1Y + 14);
-    doc.text(`₹ ${sgstTotal.toFixed(2)}`, rightValX, row1Y + 14, { align: "right" });
+      doc.text("State GST (SGST):", colRightX + 3, row1Y + 14);
+      doc.text(`₹ ${sgstTotal.toFixed(2)}`, rightValX, row1Y + 14, { align: "right" });
+    }
 
-    doc.text("Total GST:", colRightX + 3, row1Y + 18.5);
-    doc.text(`₹ ${data.tax_total.toFixed(2)}`, rightValX, row1Y + 18.5, { align: "right" });
+    if (cessTotal > 0) {
+      doc.text("Cess:", colRightX + 3, row1Y + (isInterState ? 14 : 17));
+      doc.text(`₹ ${cessTotal.toFixed(2)}`, rightValX, row1Y + (isInterState ? 14 : 17), { align: "right" });
+    }
+
+    doc.text("Total Tax:", colRightX + 3, row1Y + 19);
+    doc.text(`₹ ${data.tax_total.toFixed(2)}`, rightValX, row1Y + 19, { align: "right" });
 
     if (data.round_off !== 0) {
       const roSign = data.round_off > 0 ? "+" : "";
@@ -1873,8 +1992,11 @@ export class PrintingEngine {
    * Generates Statutory A4 Credit Note HTML for Sales Returns
    */
   generateCreditNoteA4Html(data: CreditNotePrintData): string {
+    const isInterState = data.igst_total !== undefined && data.igst_total > 0;
     const cgstTotal = data.cgst_total !== undefined ? data.cgst_total : round2(data.tax_total / 2);
     const sgstTotal = data.sgst_total !== undefined ? data.sgst_total : round2(data.tax_total / 2);
+    const igstTotal = data.igst_total !== undefined ? data.igst_total : (isInterState ? data.tax_total : 0);
+    const cessTotal = data.cess_total !== undefined ? data.cess_total : 0;
     const amountWords = data.amount_in_words || numberToWordsIndian(data.grand_total);
 
     const pageChunks = chunkInvoiceLines(data.lines, 14, 16, 24, 14);
@@ -2101,8 +2223,11 @@ export class PrintingEngine {
     const copyMarker = options?.copyMarker;
     const curr = options?.currencySymbolFormat === "rs_text" ? "Rs. " : "₹";
 
+    const isInterState = data.igst_total !== undefined && data.igst_total > 0;
     const cgstTotal = data.cgst_total !== undefined ? data.cgst_total : round2(data.tax_total / 2);
     const sgstTotal = data.sgst_total !== undefined ? data.sgst_total : round2(data.tax_total / 2);
+    const igstTotal = data.igst_total !== undefined ? data.igst_total : (isInterState ? data.tax_total : 0);
+    const cessTotal = data.cess_total !== undefined ? data.cess_total : 0;
 
     const linesHtml = data.lines
       .map((l, i) => {
@@ -2248,8 +2373,11 @@ export class PrintingEngine {
     const copyMarker = options?.copyMarker;
     const curr = options?.currencySymbolFormat === "rs_text" ? "Rs. " : "₹";
 
+    const isInterState = data.igst_total !== undefined && data.igst_total > 0;
     const cgstTotal = data.cgst_total !== undefined ? data.cgst_total : round2(data.tax_total / 2);
     const sgstTotal = data.sgst_total !== undefined ? data.sgst_total : round2(data.tax_total / 2);
+    const igstTotal = data.igst_total !== undefined ? data.igst_total : (isInterState ? data.tax_total : 0);
+    const cessTotal = data.cess_total !== undefined ? data.cess_total : 0;
 
     const linesHtml = data.lines
       .map((l, i) => {
@@ -2535,8 +2663,11 @@ export class PrintingEngine {
    * Generates Statutory A4 Debit Note HTML for Purchase Returns
    */
   generateDebitNoteA4Html(data: DebitNotePrintData): string {
+    const isInterState = data.igst_total !== undefined && data.igst_total > 0;
     const cgstTotal = data.cgst_total !== undefined ? data.cgst_total : round2(data.tax_total / 2);
     const sgstTotal = data.sgst_total !== undefined ? data.sgst_total : round2(data.tax_total / 2);
+    const igstTotal = data.igst_total !== undefined ? data.igst_total : (isInterState ? data.tax_total : 0);
+    const cessTotal = data.cess_total !== undefined ? data.cess_total : 0;
     const amountWords = data.amount_in_words || numberToWordsIndian(data.grand_total);
 
     const pageChunks = chunkInvoiceLines(data.lines, 14, 16, 24, 14);
@@ -3454,6 +3585,11 @@ export interface ReturnLinePrintItem {
   qty: number;
   rate: number;
   gst_percent: number;
+  taxable_amount?: number;
+  cgst_amount?: number;
+  sgst_amount?: number;
+  igst_amount?: number;
+  cess_amount?: number;
   amount: number;
   reason?: string;
 }
@@ -3479,6 +3615,8 @@ export interface CreditNotePrintData {
   tax_total: number;
   cgst_total?: number;
   sgst_total?: number;
+  igst_total?: number;
+  cess_total?: number;
   round_off: number;
   grand_total: number;
   refund_mode: string;
@@ -3503,6 +3641,8 @@ export interface DebitNotePrintData {
   tax_total: number;
   cgst_total?: number;
   sgst_total?: number;
+  igst_total?: number;
+  cess_total?: number;
   round_off: number;
   grand_total: number;
   settlement_type: string;

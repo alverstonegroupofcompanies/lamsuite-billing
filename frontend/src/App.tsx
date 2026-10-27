@@ -96,35 +96,48 @@ export const App: React.FC = () => {
       if (!registry.stores || registry.stores.length === 0) {
         // Fallback check legacy store
         const isLegacyReg = await storeDeviceService.isDeviceRegistered();
-        if (!isLegacyReg) {
-          // Provision demo store if fresh sandbox
-          try {
-            await storeDeviceService.registerWithActivationKey("LAM-DEMO-2026-KEY", "Counter 01", true);
-            const updated = await storeRegistryService.loadRegistry();
-            setRegisteredStores(updated.stores);
-            setActiveStore(storeRegistryService.getActiveStore());
-          } catch {
-            setRegisteredStores([]);
-          }
-        } else {
+        if (isLegacyReg) {
           const updated = await storeRegistryService.loadRegistry();
           setRegisteredStores(updated.stores);
           setActiveStore(storeRegistryService.getActiveStore());
+        } else {
+          setRegisteredStores([]);
         }
       } else {
-        setRegisteredStores(registry.stores);
-        const currentActive = storeRegistryService.getActiveStore() || registry.stores[0];
-        setActiveStore(currentActive);
+        // Online token re-validation with cloud backend on boot
+        const validation = await storeDeviceService.validateDeviceSession().catch(() => ({ valid: true, locked: false }));
+        if (validation.locked) {
+          console.warn("Workstation token unrecognized or revoked by server. Device reset to Setup.");
+          const updated = await storeRegistryService.loadRegistry();
+          setRegisteredStores(updated.stores.filter((s) => s.is_active));
+          setActiveStore(null);
+        } else {
+          setRegisteredStores(registry.stores);
+          const currentActive = storeRegistryService.getActiveStore() || registry.stores[0];
+          setActiveStore(currentActive);
 
-        // If auto_open_last is false, present gateway screen on boot
-        if (!registry.auto_open_last) {
-          setShowGateway(true);
-        } else if (currentActive) {
-          await storeRegistryService.switchActiveStore(currentActive.id, true).catch(() => {});
+          // If auto_open_last is false, present gateway screen on boot
+          if (!registry.auto_open_last) {
+            setShowGateway(true);
+          } else if (currentActive) {
+            await storeRegistryService.switchActiveStore(currentActive.id, true).catch(() => {});
+          }
         }
       }
       setIsInitializing(false);
     });
+
+    // Periodic heartbeat token re-validation while online (every 5 minutes)
+    const heartbeatTimer = setInterval(() => {
+      storeDeviceService.validateDeviceSession().then((val) => {
+        if (val.locked) {
+          storeRegistryService.loadRegistry().then((updated) => {
+            setRegisteredStores(updated.stores.filter((s) => s.is_active));
+            setActiveStore(null);
+          });
+        }
+      }).catch(() => {});
+    }, 5 * 60 * 1000);
 
     const unsubStaff = staffAuthService.onSessionChange((session) => {
       setHasStaffSession(Boolean(session));
@@ -136,6 +149,7 @@ export const App: React.FC = () => {
     });
 
     return () => {
+      clearInterval(heartbeatTimer);
       unsubStaff();
       unsubReg();
     };

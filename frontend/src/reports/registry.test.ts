@@ -3,9 +3,9 @@ import { reportRegistry, REPORT_CATEGORIES } from "./registry";
 import { canAccessReport } from "./permissions";
 
 describe("ReportRegistry & Pluggable Modules", () => {
-  it("registers all 30 modern ERP report modules across all 8 business categories", () => {
+  it("registers all modern ERP report modules across all 8 business categories", () => {
     const all = reportRegistry.getAll();
-    expect(all.length).toBe(30);
+    expect(all.length).toBe(31);
 
     const ids = all.map((r) => r.id);
 
@@ -18,12 +18,13 @@ describe("ReportRegistry & Pluggable Modules", () => {
     expect(ids).toContain("sales-return-register");
     expect(ids).toContain("discount-report");
 
-    // 2. Statutory GST & Taxes (5)
+    // 2. Statutory GST & Taxes (6)
     expect(ids).toContain("gstr1-summary");
     expect(ids).toContain("hsn-summary");
     expect(ids).toContain("gstr-3b-summary");
     expect(ids).toContain("gstr-2-itc");
     expect(ids).toContain("gst-slab-report");
+    expect(ids).toContain("tax-reconciliation");
 
     // 3. Inventory & Warehouse (6)
     expect(ids).toContain("stock-summary");

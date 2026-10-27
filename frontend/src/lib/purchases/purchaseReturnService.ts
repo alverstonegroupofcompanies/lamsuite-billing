@@ -5,6 +5,7 @@ import { syncQueueService } from "../sync/syncQueueService";
 import { companySettingsService } from "../settings/companySettingsService";
 import { round2 } from "../billing/billingCalculations";
 import { getIndianFinancialYear } from "../billing/salesReturnService";
+import { calculateDocumentTaxes } from "../tax-engine/taxEngine";
 
 export type PurchaseReturnReason = "expired" | "damaged" | "near_expiry" | "wrong_supply" | "excess" | "other";
 export type PurchaseReturnSettlement = "credit_adjust" | "refund";
@@ -29,6 +30,8 @@ export interface PurchaseReturnItem extends PurchaseReturnLineInput {
   taxable_amount: number;
   cgst_amount: number;
   sgst_amount: number;
+  igst_amount: number;
+  cess_amount?: number;
   total_amount: number;
 }
 
@@ -61,6 +64,8 @@ export interface PurchaseReturnRecord {
   tax_total: number;
   cgst_total: number;
   sgst_total: number;
+  igst_total: number;
+  cess_total?: number;
   round_off: number;
   grand_total: number;
   settlement_type: PurchaseReturnSettlement;
@@ -191,35 +196,48 @@ export class PurchaseReturnService {
       }
     }
 
-    // 2. Compute financial breakdown line by line
-    let subtotal = 0;
-    let cgstTotal = 0;
-    let sgstTotal = 0;
+    // Determine if original purchase or supplier is inter-state
+    const isInterstate = input.supplier_gstin ? !input.supplier_gstin.trim().startsWith("32") : false;
+
+    // 2. Compute financial breakdown line by line via TaxEngine
+    const docTaxes = calculateDocumentTaxes({
+      store_state: "32",
+      customer_gstin: input.supplier_gstin,
+      place_of_supply: isInterstate ? "XX" : "32",
+      default_tax_mode: "exclusive",
+      lines: input.lines.map((l, idx) => ({
+        line_id: `PR_${idx}`,
+        product_id: l.product_id,
+        product_name: l.product_name,
+        hsn_code: l.hsn_code,
+        qty: l.return_qty,
+        loose_qty: 0,
+        unit_price: l.purchase_rate,
+        rate_basis: "ptr",
+        discount_percent: 0,
+        gst_percent: l.gst_percent,
+        is_tax_inclusive: false,
+      })),
+      auto_round_off: true,
+    });
 
     const returnLines: PurchaseReturnItem[] = [];
 
-    for (const line of input.lines) {
-      const taxable = round2(line.return_qty * line.purchase_rate);
-      const gst = line.gst_percent || 0;
-      const totalTax = round2((taxable * gst) / 100);
-      const cgst = round2(totalTax / 2);
-      const sgst = round2(totalTax - cgst);
-      const lineTotal = round2(taxable + totalTax);
-
-      subtotal = round2(subtotal + taxable);
-      cgstTotal = round2(cgstTotal + cgst);
-      sgstTotal = round2(sgstTotal + sgst);
-
+    for (let i = 0; i < input.lines.length; i++) {
+      const line = input.lines[i];
+      const cLine = docTaxes.lines[i];
       const itemId = `pri_${now}_${Math.random().toString(16).slice(2, 6)}`;
 
       returnLines.push({
         ...line,
         id: itemId,
         return_id: returnId,
-        taxable_amount: taxable,
-        cgst_amount: cgst,
-        sgst_amount: sgst,
-        total_amount: lineTotal,
+        taxable_amount: cLine.taxable_amount,
+        cgst_amount: cLine.cgst_amount,
+        sgst_amount: cLine.sgst_amount,
+        igst_amount: cLine.igst_amount,
+        cess_amount: cLine.cess_amount,
+        total_amount: cLine.total_amount,
       });
 
       // 3. Decrement Inventory Batch Stock
@@ -249,11 +267,14 @@ export class PurchaseReturnService {
       });
     }
 
-    const taxTotal = round2(cgstTotal + sgstTotal);
-    const rawTotal = subtotal + taxTotal;
-    const roundedGrandTotal = Math.round(rawTotal);
-    const roundOff = round2(roundedGrandTotal - rawTotal);
-    const grandTotal = roundedGrandTotal;
+    const subtotal = docTaxes.taxable_subtotal;
+    const cgstTotal = docTaxes.cgst_total;
+    const sgstTotal = docTaxes.sgst_total;
+    const igstTotal = docTaxes.igst_total;
+    const cessTotal = docTaxes.cess_total;
+    const taxTotal = docTaxes.total_tax;
+    const roundOff = docTaxes.round_off;
+    const grandTotal = docTaxes.grand_total;
 
     // 5. Build and save Purchase Return Record
     const returnRecord: PurchaseReturnRecord = {
@@ -272,6 +293,8 @@ export class PurchaseReturnService {
       tax_total: taxTotal,
       cgst_total: cgstTotal,
       sgst_total: sgstTotal,
+      igst_total: igstTotal,
+      cess_total: cessTotal,
       round_off: roundOff,
       grand_total: grandTotal,
       settlement_type: input.settlement_type,

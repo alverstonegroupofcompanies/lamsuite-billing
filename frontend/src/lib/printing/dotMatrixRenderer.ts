@@ -298,29 +298,48 @@ export class DotMatrixRenderer {
     // HSN Summary Table (Aligned strictly <= 80 cols)
     if (options?.showHsnSummary !== false) {
       const hsnRows = calculateHsnSummary(data.lines);
+      const isInterState = (data.igst_total !== undefined && data.igst_total > 0) || hsnRows.some((r) => r.igstAmount > 0);
       if (hsnRows.length > 0) {
-        const hsnHead = `${this.padRight("HSN/SAC", 8)} ${this.padLeft("TaxableVal(Rs)", 14)} ${this.padLeft("CGST%", 5)} ${this.padLeft("CGST(Rs)", 9)} ${this.padLeft("SGST%", 5)} ${this.padLeft("SGST(Rs)", 9)} ${this.padLeft("TotalTax(Rs)", 12)}`;
-        footerLines.push(leftMargin + hsnHead);
-        footerLines.push(divSingle);
-        hsnRows.forEach((h) => {
-          const hCode = this.padRight(h.hsnCode, 8);
-          const tVal = this.padLeft(this.formatAmount(h.taxableValue), 14);
-          const cRate = this.padLeft(`${h.cgstRate}%`, 5);
-          const cAmt = this.padLeft(this.formatAmount(h.cgstAmount), 9);
-          const sRate = this.padLeft(`${h.sgstRate}%`, 5);
-          const sAmt = this.padLeft(this.formatAmount(h.sgstAmount), 9);
-          const totTax = this.padLeft(this.formatAmount(h.totalTax), 12);
-          footerLines.push(`${leftMargin}${hCode} ${tVal} ${cRate} ${cAmt} ${sRate} ${sAmt} ${totTax}`);
-        });
+        if (isInterState) {
+          const hsnHead = `${this.padRight("HSN/SAC", 10)} ${this.padLeft("TaxableVal(Rs)", 18)} ${this.padLeft("IGST%", 8)} ${this.padLeft("IGST(Rs)", 14)} ${this.padLeft("TotalTax(Rs)", 16)}`;
+          footerLines.push(leftMargin + hsnHead);
+          footerLines.push(divSingle);
+          hsnRows.forEach((h) => {
+            const hCode = this.padRight(h.hsnCode, 10);
+            const tVal = this.padLeft(this.formatAmount(h.taxableValue), 18);
+            const iRate = this.padLeft(`${h.igstRate}%`, 8);
+            const iAmt = this.padLeft(this.formatAmount(h.igstAmount), 14);
+            const totTax = this.padLeft(this.formatAmount(h.totalTax), 16);
+            footerLines.push(`${leftMargin}${hCode} ${tVal} ${iRate} ${iAmt} ${totTax}`);
+          });
+        } else {
+          const hsnHead = `${this.padRight("HSN/SAC", 8)} ${this.padLeft("TaxableVal(Rs)", 14)} ${this.padLeft("CGST%", 5)} ${this.padLeft("CGST(Rs)", 9)} ${this.padLeft("SGST%", 5)} ${this.padLeft("SGST(Rs)", 9)} ${this.padLeft("TotalTax(Rs)", 12)}`;
+          footerLines.push(leftMargin + hsnHead);
+          footerLines.push(divSingle);
+          hsnRows.forEach((h) => {
+            const hCode = this.padRight(h.hsnCode, 8);
+            const tVal = this.padLeft(this.formatAmount(h.taxableValue), 14);
+            const cRate = this.padLeft(`${h.cgstRate}%`, 5);
+            const cAmt = this.padLeft(this.formatAmount(h.cgstAmount), 9);
+            const sRate = this.padLeft(`${h.sgstRate}%`, 5);
+            const sAmt = this.padLeft(this.formatAmount(h.sgstAmount), 9);
+            const totTax = this.padLeft(this.formatAmount(h.totalTax), 12);
+            footerLines.push(`${leftMargin}${hCode} ${tVal} ${cRate} ${cAmt} ${sRate} ${sAmt} ${totTax}`);
+          });
+        }
         footerLines.push(divSingle);
       }
     }
 
     // Totals Box (Right Aligned to 80 cols)
+    const isInterState = (data.igst_total !== undefined && data.igst_total > 0);
     const subtotalStr = `Taxable Subtotal  : ${curr} ` + this.padLeft(this.formatAmount(data.subtotal), 11);
     footerLines.push(leftMargin + this.padLeft(subtotalStr, cols));
 
-    if (data.cgst_total !== undefined && data.sgst_total !== undefined) {
+    if (isInterState) {
+      const igstStr = `Integrated (IGST) : ${curr} ` + this.padLeft(this.formatAmount(data.igst_total || data.tax_total), 11);
+      footerLines.push(leftMargin + this.padLeft(igstStr, cols));
+    } else if (data.cgst_total !== undefined && data.sgst_total !== undefined) {
       const cgstStr = `Central GST (CGST): ${curr} ` + this.padLeft(this.formatAmount(data.cgst_total), 11);
       const sgstStr = `State GST (SGST)  : ${curr} ` + this.padLeft(this.formatAmount(data.sgst_total), 11);
       footerLines.push(leftMargin + this.padLeft(cgstStr, cols));
@@ -328,6 +347,11 @@ export class DotMatrixRenderer {
     } else if (data.tax_total > 0) {
       const taxStr = `GST Tax Total     : ${curr} ` + this.padLeft(this.formatAmount(data.tax_total), 11);
       footerLines.push(leftMargin + this.padLeft(taxStr, cols));
+    }
+
+    if (data.cess_total && data.cess_total > 0) {
+      const cessStr = `Cess Total        : ${curr} ` + this.padLeft(this.formatAmount(data.cess_total), 11);
+      footerLines.push(leftMargin + this.padLeft(cessStr, cols));
     }
 
     if (data.round_off && Math.abs(data.round_off) > 0.001) {
@@ -474,27 +498,48 @@ export class DotMatrixRenderer {
     // HSN Summary Table
     if (options?.showHsnSummary !== false) {
       const hsnRows = calculateHsnSummary(data.lines);
+      const isInterState = (data.igst_total !== undefined && data.igst_total > 0) || hsnRows.some((r) => r.igstAmount > 0);
       if (hsnRows.length > 0) {
-        footerLines.push(leftMargin + "HSN/SAC Code       Taxable Amount(Rs)       CGST%      CGST Amount(Rs)      SGST%      SGST Amount(Rs)       Total Tax Amount(Rs)");
-        hsnRows.forEach((h) => {
-          const cCode = this.padRight(h.hsnCode, 18);
-          const tAmt = this.padLeft(this.formatAmount(h.taxableValue), 24);
-          const cRate = this.padLeft(`${h.cgstRate}%`, 11);
-          const cVal = this.padLeft(this.formatAmount(h.cgstAmount), 20);
-          const sRate = this.padLeft(`${h.sgstRate}%`, 11);
-          const sVal = this.padLeft(this.formatAmount(h.sgstAmount), 20);
-          const totVal = this.padLeft(this.formatAmount(h.totalTax), 26);
-          footerLines.push(`${leftMargin}${cCode}${tAmt}${cRate}${cVal}${sRate}${sVal}${totVal}`);
-        });
+        if (isInterState) {
+          footerLines.push(leftMargin + "HSN/SAC Code       Taxable Amount(Rs)       IGST%      IGST Amount(Rs)       Total Tax Amount(Rs)");
+          hsnRows.forEach((h) => {
+            const cCode = this.padRight(h.hsnCode, 18);
+            const tAmt = this.padLeft(this.formatAmount(h.taxableValue), 24);
+            const iRate = this.padLeft(`${h.igstRate}%`, 11);
+            const iVal = this.padLeft(this.formatAmount(h.igstAmount), 20);
+            const totVal = this.padLeft(this.formatAmount(h.totalTax), 26);
+            footerLines.push(`${leftMargin}${cCode}${tAmt}${iRate}${iVal}${totVal}`);
+          });
+        } else {
+          footerLines.push(leftMargin + "HSN/SAC Code       Taxable Amount(Rs)       CGST%      CGST Amount(Rs)      SGST%      SGST Amount(Rs)       Total Tax Amount(Rs)");
+          hsnRows.forEach((h) => {
+            const cCode = this.padRight(h.hsnCode, 18);
+            const tAmt = this.padLeft(this.formatAmount(h.taxableValue), 24);
+            const cRate = this.padLeft(`${h.cgstRate}%`, 11);
+            const cVal = this.padLeft(this.formatAmount(h.cgstAmount), 20);
+            const sRate = this.padLeft(`${h.sgstRate}%`, 11);
+            const sVal = this.padLeft(this.formatAmount(h.sgstAmount), 20);
+            const totVal = this.padLeft(this.formatAmount(h.totalTax), 26);
+            footerLines.push(`${leftMargin}${cCode}${tAmt}${cRate}${cVal}${sRate}${sVal}${totVal}`);
+          });
+        }
         footerLines.push(divSingle);
       }
     }
 
     // Totals Box
+    const isInterState = (data.igst_total !== undefined && data.igst_total > 0);
     footerLines.push(leftMargin + this.padLeft(`Taxable Subtotal  : ${curr} ` + this.padLeft(this.formatAmount(data.subtotal), 14), cols));
-    if (data.cgst_total !== undefined && data.sgst_total !== undefined) {
+    if (isInterState) {
+      footerLines.push(leftMargin + this.padLeft(`IGST Amount       : ${curr} ` + this.padLeft(this.formatAmount(data.igst_total || data.tax_total), 14), cols));
+    } else if (data.cgst_total !== undefined && data.sgst_total !== undefined) {
       footerLines.push(leftMargin + this.padLeft(`CGST Amount       : ${curr} ` + this.padLeft(this.formatAmount(data.cgst_total), 14), cols));
       footerLines.push(leftMargin + this.padLeft(`SGST Amount       : ${curr} ` + this.padLeft(this.formatAmount(data.sgst_total), 14), cols));
+    } else if (data.tax_total > 0) {
+      footerLines.push(leftMargin + this.padLeft(`GST Tax Total     : ${curr} ` + this.padLeft(this.formatAmount(data.tax_total), 14), cols));
+    }
+    if (data.cess_total && data.cess_total > 0) {
+      footerLines.push(leftMargin + this.padLeft(`Cess Amount       : ${curr} ` + this.padLeft(this.formatAmount(data.cess_total), 14), cols));
     }
     if (data.round_off) {
       footerLines.push(leftMargin + this.padLeft(`Round Off         : ${curr} ` + this.padLeft(this.formatAmount(data.round_off), 14), cols));

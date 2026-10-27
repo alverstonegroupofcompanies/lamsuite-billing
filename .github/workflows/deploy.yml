@@ -1,0 +1,218 @@
+name: Build, Test & Deploy Pipeline
+
+on:
+  push:
+    branches: [ main ]
+    tags: [ 'v*.*.*' ]
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_BACKEND: ghcr.io/${{ github.repository_owner }}/lamsuite-backend
+  IMAGE_PANEL: ghcr.io/${{ github.repository_owner }}/lamsuite-panel
+  IMAGE_MCP: ghcr.io/${{ github.repository_owner }}/lamsuite-mcp
+
+jobs:
+  # ----------------------------------------------------------------------------
+  # Job 1: Test & Quality Gate
+  # ----------------------------------------------------------------------------
+  test:
+    name: Automated Unit & Security Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup PHP 8.3
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: mbstring, xml, ctype, iconv, sqlite3, pdo_sqlite, bcmath, pcntl
+          coverage: none
+
+      - name: Install Backend Dependencies
+        run: |
+          cd backend
+          composer install --prefer-dist --no-progress
+
+      - name: Run Backend PHPUnit Suite
+        run: |
+          cd backend
+          ./vendor/bin/phpunit
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Test MCP Server
+        run: |
+          cd mcp-server
+          npm ci
+          npm test
+
+      - name: Test Admin Panel Build
+        run: |
+          cd admin-panel
+          npm ci
+          npm run build
+
+  # ----------------------------------------------------------------------------
+  # Job 2: Build & Push Multi-Stage Production Images
+  # ----------------------------------------------------------------------------
+  build-and-push:
+    name: Build & Push Docker Images
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract Metadata (Backend)
+        id: meta-backend
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE_BACKEND }}
+          tags: |
+            type=sha,format=long
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build & Push Backend Image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./backend
+          push: true
+          tags: ${{ steps.meta-backend.outputs.tags }}
+          labels: ${{ steps.meta-backend.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Extract Metadata (Panel)
+        id: meta-panel
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE_PANEL }}
+          tags: |
+            type=sha,format=long
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build & Push Panel Image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./admin-panel
+          push: true
+          tags: ${{ steps.meta-panel.outputs.tags }}
+          labels: ${{ steps.meta-panel.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Extract Metadata (MCP)
+        id: meta-mcp
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE_MCP }}
+          tags: |
+            type=sha,format=long
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build & Push MCP Image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./mcp-server
+          push: true
+          tags: ${{ steps.meta-mcp.outputs.tags }}
+          labels: ${{ steps.meta-mcp.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ----------------------------------------------------------------------------
+  # Job 3: Zero-Downtime Deploy & Rollback Gate
+  # ----------------------------------------------------------------------------
+  deploy:
+    name: Deploy to Production Host & Health Gate
+    needs: build-and-push
+    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        env:
+          COMMIT_SHA: ${{ github.sha }}
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER || 'deploy' }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          envs: COMMIT_SHA
+          script: |
+            set -euo pipefail
+            cd /opt/lamsuite
+
+            # 1. Record current running image tag for rollback
+            PREV_TAG=$(cat .current_deploy_tag 2>/dev/null || echo "latest")
+            echo "Previous deploy tag: $PREV_TAG"
+
+            # 2. Pull new images
+            echo "$COMMIT_SHA" > .current_deploy_tag
+            export DOCKER_TAG="$COMMIT_SHA"
+            docker compose pull
+
+            # 3. Controlled Database Migration Step (One-off container, no seeders)
+            echo "--> Running database migrations..."
+            docker compose run --rm --no-deps api php artisan migrate --force
+
+            # 4. Controlled Cache Warmup
+            echo "--> Warming application caches..."
+            docker compose run --rm --no-deps api php artisan config:cache
+            docker compose run --rm --no-deps api php artisan route:cache
+            docker compose run --rm --no-deps api php artisan view:cache
+
+            # 5. Zero-downtime rolling reload
+            echo "--> Reloading services..."
+            docker compose up -d --remove-orphans
+
+            # 6. Post-deploy healthcheck probe
+            echo "--> Probing deployment health..."
+            source .env
+            PROBE_SUCCESS=false
+
+            for i in $(seq 1 12); do
+                echo "Healthcheck attempt $i/12..."
+                API_HEALTH=$(curl -sk -o /dev/null -w "%{http_code}" "https://${SUBDOMAIN_API}.${DOMAIN}/up" || true)
+                PANEL_HEALTH=$(curl -sk -o /dev/null -w "%{http_code}" "https://${SUBDOMAIN_PANEL}.${DOMAIN}/health" || true)
+                MCP_HEALTH=$(curl -sk -o /dev/null -w "%{http_code}" "https://${SUBDOMAIN_MCP}.${DOMAIN}/health" || true)
+
+                if [ "$API_HEALTH" = "200" ] && [ "$PANEL_HEALTH" = "200" ] && [ "$MCP_HEALTH" = "200" ]; then
+                    echo "All health probes PASSED! (API: $API_HEALTH, Panel: $PANEL_HEALTH, MCP: $MCP_HEALTH)"
+                    PROBE_SUCCESS=true
+                    break
+                fi
+                sleep 5
+            done
+
+            # 7. Rollback if probe failed
+            if [ "$PROBE_SUCCESS" != "true" ]; then
+                echo "CRITICAL: Healthcheck failed! Initiating automated rollback to: $PREV_TAG" >&2
+                echo "$PREV_TAG" > .current_deploy_tag
+                export DOCKER_TAG="$PREV_TAG"
+                docker compose pull
+                docker compose up -d --remove-orphans
+                exit 1
+            fi
+
+            echo "Deployment successfully verified."

@@ -38,7 +38,10 @@ class MultiCounterDeviceTest extends TestCase
 
     public function test_device_registration_returns_tokens_and_counter_metadata(): void
     {
+        $keyResult = \App\Models\ActivationKey::generateKey($this->store);
+
         $response = $this->postJson('/api/devices/register', [
+            'activation_key' => $keyResult['raw_key'],
             'device_uuid' => 'hw_test_mac_12345',
             'device_name' => 'Counter 02 Station',
             'store_id' => 'store_main',
@@ -48,10 +51,9 @@ class MultiCounterDeviceTest extends TestCase
         $response->assertStatus(200)
             ->assertJson([
                 'success' => true,
-                'status' => 'activated',
+                'status' => 'active',
                 'counter_name' => 'Counter 02 Station',
                 'is_hub' => false,
-                'license_plan' => 'Enterprise Retail & Pharmacy Chain',
             ]);
 
         $this->assertNotEmpty($response->json('device_token'));

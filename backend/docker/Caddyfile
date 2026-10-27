@@ -1,0 +1,17 @@
+{
+    admin off
+    auto_https off
+    log {
+        output stdout
+        format json
+        level WARN
+    }
+}
+
+:8000 {
+    root * /var/www/html/public
+    encode zstd gzip
+
+    # Standard Laravel routing
+    php_server
+}

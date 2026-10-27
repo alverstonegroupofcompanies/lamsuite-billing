@@ -218,6 +218,26 @@ export const StoresPage: React.FC = () => {
                         >
                           <Copy className="w-3.5 h-3.5" />
                         </button>
+                        {hasPermission("stores", "edit") && (
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              if (confirm(`Regenerate activation key for store "${s.name}"? Previous keys will be revoked.`)) {
+                                try {
+                                  const res = await api.post<{ success: boolean; activation_key: string; message: string }>(`/stores/${s.id}/regenerate-key`);
+                                  alert(res.message + "\nNew Key: " + res.activation_key);
+                                  fetchStores();
+                                } catch (e: any) {
+                                  alert("Failed to regenerate key: " + (e.message || "Unknown error"));
+                                }
+                              }
+                            }}
+                            title="Regenerate Activation Key (Invalidates previous keys)"
+                            className="p-1 text-slate-400 hover:text-amber-600 dark:hover:text-amber-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded"
+                          >
+                            <RefreshCw className="w-3.5 h-3.5" />
+                          </button>
+                        )}
                       </div>
                     </td>
                     <td className="px-4 py-3">

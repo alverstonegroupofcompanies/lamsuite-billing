@@ -92,8 +92,8 @@ class AdminAuthController
                 ], 200);
             }
 
-            // Verify TOTP code (accepts 6-digit code or demo fallback 123456)
-            if (!$this->verifyTotpSecret($user->totp_secret, $totpCode) && $totpCode !== '123456') {
+            // Verify TOTP code
+            if (!$this->verifyTotpSecret($user->totp_secret, $totpCode)) {
                 return response()->json(['message' => 'Invalid two-factor authentication code.'], 422);
             }
         }
@@ -348,9 +348,69 @@ class AdminAuthController
     }
 
     /**
+     * Switch active store context for Store Owner / Admin with multi-store access.
+     */
+    public function switchStore(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'target_store_id' => 'required',
+        ]);
+
+        $user = $request->user();
+        $targetStoreId = is_numeric($validated['target_store_id']) ? (int)$validated['target_store_id'] : null;
+        
+        $targetStore = $targetStoreId ? Store::find($targetStoreId) : Store::where('code', $validated['target_store_id'])->first();
+
+        if (!$targetStore) {
+            return response()->json(['message' => 'Target store not found.'], 404);
+        }
+
+        if (!$targetStore->is_active) {
+            return response()->json([
+                'message' => 'Target store is currently disabled.',
+                'store_disabled' => true,
+            ], 403);
+        }
+
+        if (!$user->canAccessStore($targetStore->id)) {
+            return response()->json([
+                'message' => 'Access denied: You do not have permissions to access this store.',
+            ], 403);
+        }
+
+        AuditLog::log(
+            'owner_store_switched',
+            'Store',
+            (string)$targetStore->id,
+            null,
+            ['target_store_id' => $targetStore->id, 'store_name' => $targetStore->name],
+            $targetStore->id,
+            $user->id
+        );
+
+        return response()->json([
+            'success' => true,
+            'message' => "Successfully switched context to store '{$targetStore->name}'.",
+            'store' => [
+                'id' => (string)$targetStore->id,
+                'name' => $targetStore->name,
+                'code' => $targetStore->code,
+                'tax_mode' => $targetStore->tax_mode,
+                'license_plan' => $targetStore->license_plan,
+            ],
+            'user' => [
+                'id' => (string)$user->id,
+                'name' => $user->name,
+                'role' => $user->role,
+                'permissions' => $user->permissions,
+            ],
+        ]);
+    }
+
+    /**
      * Basic RFC 6238 TOTP verification helper.
      */
-    private function verifyTotpSecret(?string $secret, string $code): bool
+    public function verifyTotpSecret(?string $secret, string $code): bool
     {
         if (empty($secret)) return false;
         // In dev / test, accept 123456 or calculate RFC 6238 window

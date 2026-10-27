@@ -18,7 +18,7 @@ export type TransferStatus =
 
 export type TransferRateBasis = "mrp" | "sel_rate" | "ptr" | "pts" | "cost_price";
 
-export type TransferGstTreatment = "intra_state" | "inter_state";
+export type TransferGstTreatment = "same_gstin" | "intra_state" | "inter_state";
 
 export interface TransportDetails {
   transporter_name?: string;
@@ -219,22 +219,42 @@ export class InterStoreTransferService {
     }
 
     const looseRate = upp > 1 ? round2(basePackRate / upp) : basePackRate;
-    const taxableAmount = round2(normalized.packs * basePackRate + normalized.loose * looseRate);
+    const gross = round2(normalized.packs * basePackRate + normalized.loose * looseRate);
 
     const gstPercent = product.gst_percent || 0;
+    let taxableAmount = gross;
     let cgstAmount = 0;
     let sgstAmount = 0;
     let igstAmount = 0;
 
-    if (gstTreatment === "inter_state") {
-      igstAmount = round2(taxableAmount * (gstPercent / 100));
+    if (gstTreatment === "same_gstin") {
+      // Non-taxable internal supply under same GSTIN (Section 7 CGST Act, Delivery Challan)
+      taxableAmount = gross;
+      cgstAmount = 0;
+      sgstAmount = 0;
+      igstAmount = 0;
+    } else if (rateBasis === "mrp") {
+      // Statutory GST-inclusive pricing
+      taxableAmount = gstPercent > 0 ? round2(gross / (1 + gstPercent / 100)) : gross;
+      const totalTax = Math.max(0, round2(gross - taxableAmount));
+      if (gstTreatment === "inter_state") {
+        igstAmount = totalTax;
+      } else {
+        cgstAmount = round2(totalTax / 2);
+        sgstAmount = round2(totalTax - cgstAmount);
+      }
     } else {
-      cgstAmount = round2(taxableAmount * (gstPercent / 200));
-      sgstAmount = round2(taxableAmount * (gstPercent / 200));
+      taxableAmount = gross;
+      if (gstTreatment === "inter_state") {
+        igstAmount = round2(taxableAmount * (gstPercent / 100));
+      } else {
+        cgstAmount = round2(taxableAmount * (gstPercent / 200));
+        sgstAmount = round2(taxableAmount * (gstPercent / 200));
+      }
     }
 
-    const totalTax = gstTreatment === "inter_state" ? igstAmount : round2(cgstAmount + sgstAmount);
-    const totalAmount = round2(taxableAmount + totalTax);
+    const totalTax = gstTreatment === "same_gstin" ? 0 : (gstTreatment === "inter_state" ? igstAmount : round2(cgstAmount + sgstAmount));
+    const totalAmount = rateBasis === "mrp" && gstTreatment !== "same_gstin" ? gross : round2(taxableAmount + totalTax);
 
     return {
       transfer_total_qty: totalQty,

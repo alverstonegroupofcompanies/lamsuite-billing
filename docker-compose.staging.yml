@@ -1,0 +1,55 @@
+# Staging environment override: docker compose -f docker-compose.yml -f docker-compose.staging.yml up -d
+name: lamsuite-staging
+
+services:
+  traefik:
+    container_name: lamsuite-staging-traefik
+
+  api:
+    container_name: lamsuite-staging-api
+    environment:
+      - APP_ENV=staging
+      - APP_DEBUG=true
+      - APP_URL=https://${SUBDOMAIN_API:-api}.staging.${DOMAIN}
+      - SANCTUM_STATEFUL_DOMAINS=${SUBDOMAIN_PANEL:-panel}.staging.${DOMAIN},${SUBDOMAIN_APP:-app}.staging.${DOMAIN},staging.${DOMAIN}
+      - SESSION_DOMAIN=.staging.${DOMAIN}
+    labels:
+      - "traefik.http.routers.api.rule=Host(`${SUBDOMAIN_API:-api}.staging.${DOMAIN}`)"
+
+  reverb:
+    container_name: lamsuite-staging-reverb
+    labels:
+      - "traefik.http.routers.reverb.rule=Host(`${SUBDOMAIN_WS:-ws}.staging.${DOMAIN}`)"
+
+  panel:
+    container_name: lamsuite-staging-panel
+    environment:
+      - VITE_API_BASE_URL=https://${SUBDOMAIN_API:-api}.staging.${DOMAIN}
+      - VITE_WS_URL=wss://${SUBDOMAIN_WS:-ws}.staging.${DOMAIN}
+    labels:
+      - "traefik.http.routers.panel.rule=Host(`${SUBDOMAIN_PANEL:-panel}.staging.${DOMAIN}`)"
+
+  mcp:
+    container_name: lamsuite-staging-mcp
+    environment:
+      - LAMSUITE_READ_ONLY=true
+    labels:
+      - "traefik.http.routers.mcp.rule=Host(`${SUBDOMAIN_MCP:-mcp}.staging.${DOMAIN}`)"
+
+  db:
+    container_name: lamsuite-staging-db
+    environment:
+      MYSQL_DATABASE: lamsuite_staging
+
+  redis:
+    container_name: lamsuite-staging-redis
+
+  worker:
+    container_name: lamsuite-staging-worker
+    environment:
+      - APP_ENV=staging
+
+  scheduler:
+    container_name: lamsuite-staging-scheduler
+    environment:
+      - APP_ENV=staging

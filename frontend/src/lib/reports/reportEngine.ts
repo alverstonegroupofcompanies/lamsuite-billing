@@ -12,14 +12,21 @@ export interface InvoiceRecord {
   customer_name?: string;
   customer_gstin?: string;
   place_of_supply?: string; // State code or name, e.g. "32" or "32-Kerala"
+  store_state_code?: string;
+  tax_type?: "intra_state" | "inter_state" | string;
   subtotal: number;
+  taxable_subtotal?: number;
   discount_total: number;
   tax_total: number;
+  cgst_total?: number;
+  sgst_total?: number;
+  igst_total?: number;
+  cess_total?: number;
   round_off: number;
   grand_total: number;
   paid_amount: number;
   payment_mode: string; // 'Cash' | 'UPI' | 'Card' | 'Credit' | 'Bank Transfer' | 'Cheque'
-  status: string; // 'issued' | 'cancelled'
+  status: string; // 'issued' | 'cancelled' | 'converted'
   original_invoice_number?: string;
   created_at: number;
 }
@@ -39,10 +46,13 @@ export interface InvoiceItemRecord {
   mrp?: number;
   discount_percent?: number;
   discount_amount?: number;
+  taxable_amount?: number;
   gst_percent: number;
   cgst_amount: number;
   sgst_amount: number;
   igst_amount: number;
+  cess_percent?: number;
+  cess_amount?: number;
   total_amount: number;
 }
 

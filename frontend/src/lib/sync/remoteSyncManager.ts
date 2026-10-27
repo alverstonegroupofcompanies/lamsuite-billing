@@ -79,7 +79,10 @@ export class RemoteSyncManager {
   }
 
   /**
-   * Evaluate best transport: LAN mesh if reachable, Cloud SSE if remote/internet available, or fallback to polling.
+   * Evaluate best transport with online-first priority:
+   * 1. Cloud Backend (Single Source of Truth)
+   * 2. LAN Hub Station (when Internet is down but shop network is up)
+   * 3. Standalone Offline Fallback
    */
   async evaluateTransport(baseUrl = API_BASE_URL): Promise<TransportMode> {
     const profile = await storeDeviceService.getDeviceProfile();
@@ -89,27 +92,41 @@ export class RemoteSyncManager {
       return "offline";
     }
 
-    // 1. Check if LAN peer/hub is discovered
+    // 1. Prefer Cloud first: try Cloud SSE / health check
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 2500);
+      const res = await fetch(`${baseUrl}/api/lan/v1/health`, { signal: controller.signal });
+      clearTimeout(timeoutId);
+
+      if (res.ok) {
+        this.connectCloudStream(baseUrl, profile.counter_code || "C01");
+        return this.transportMode;
+      }
+    } catch {
+      // Cloud unreachable
+    }
+
+    // 2. Second layer: LAN Hub / mesh if reachable on local shop network
     const lanConfig = lanPeerService.getStationConfig();
     const isMain = lanConfig.role === "main_station";
 
     if (!isMain) {
-      const lanPeer = await lanPeerService.discoverMainStation();
-      if (lanPeer) {
-        this.transportMode = "lan_mesh";
-        this.notify();
-        return "lan_mesh";
+      try {
+        const lanPeer = await lanPeerService.discoverMainStation();
+        if (lanPeer) {
+          this.transportMode = "lan_mesh";
+          this.notify();
+          return "lan_mesh";
+        }
+      } catch {
+        // LAN peer discovery failed
       }
     }
 
-    // 2. Try Cloud SSE connection
-    try {
-      this.connectCloudStream(baseUrl, profile.counter_code || "C01");
-      return this.transportMode;
-    } catch {
-      this.startPollingFallback(baseUrl);
-      return "cloud_poll";
-    }
+    // 3. Fallback to offline polling / standalone mode
+    this.startPollingFallback(baseUrl);
+    return "cloud_poll";
   }
 
   /**
@@ -188,18 +205,63 @@ export class RemoteSyncManager {
     if (syncEvt.entity_type === "stock_adjustment" || syncEvt.entity_type === "stock_event") {
       const payload = typeof syncEvt.client_data === "string" ? JSON.parse(syncEvt.client_data) : syncEvt.client_data;
       if (payload) {
+        // 1. Merge into counter delta tracking
         await multiCounterStockService.syncMergeCounterStockDeltas([
           {
             id: syncEvt.entity_id || `remote_delta_${Date.now()}`,
             product_id: payload.product_id,
             batch_id: payload.batch_id || payload.batch_no,
-            counter_id: payload.counter_id || "remote",
+            counter_id: payload.counter_id || payload.counter_code || "remote",
             qty_delta: Number(payload.qty_delta || 0),
             reference_type: payload.reference_type || "remote_sale",
             reference_id: payload.reference_id || "",
             created_at: Date.now(),
           },
         ]);
+
+        // 2. Directly update local SQLite batch cache for instant UI reflection
+        if (payload.batch_id || payload.batch_no) {
+          const batchKey = String(payload.batch_id || payload.batch_no);
+          const existingBatch = await sqliteStorage.findById<any>("product_batches", batchKey);
+          if (existingBatch) {
+            const newStock = payload.remaining_stock !== undefined 
+              ? Number(payload.remaining_stock) 
+              : ((Number(existingBatch.stock_qty) || 0) + Number(payload.qty_delta || 0));
+            await sqliteStorage.insertRecord("product_batches", batchKey, {
+              ...existingBatch,
+              stock_qty: newStock,
+              updated_at: Date.now(),
+            });
+          }
+        }
+      }
+    } else if (syncEvt.entity_type === "held_bill") {
+      const payload = typeof syncEvt.client_data === "string" ? JSON.parse(syncEvt.client_data) : syncEvt.client_data;
+      if (payload && payload.id) {
+        if (syncEvt.action === "delete") {
+          const existing = await sqliteStorage.findById<any>("distributed_held_bills", payload.id);
+          if (existing) {
+            await sqliteStorage.insertRecord("distributed_held_bills", payload.id, {
+              ...existing,
+              status: "cancelled",
+            });
+          }
+        } else {
+          await sqliteStorage.insertRecord("distributed_held_bills", payload.id, {
+            ...payload,
+            cart_payload: typeof payload.cart_payload === "string" ? payload.cart_payload : JSON.stringify(payload.cart_payload),
+          });
+        }
+      }
+    } else if (syncEvt.entity_type === "invoice") {
+      const payload = typeof syncEvt.client_data === "string" ? JSON.parse(syncEvt.client_data) : syncEvt.client_data;
+      if (payload && payload.id) {
+        const localId = `inv_${payload.id}`;
+        await sqliteStorage.insertRecord("invoices", localId, {
+          ...payload,
+          id: localId,
+          sync_state: "synced",
+        });
       }
     } else if (syncEvt.entity_type === "product" || syncEvt.entity_type === "party") {
       // Pull fresh deltas

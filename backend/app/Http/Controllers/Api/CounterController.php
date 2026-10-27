@@ -81,13 +81,38 @@ class CounterController
                 'last_seen_at' => now(),
             ]);
 
+            $pairingCode = null;
+            if ($existing->status === 'pending_approval') {
+                if (!$existing->pairing_code || !$existing->pairing_expires_at || $existing->pairing_expires_at->isPast()) {
+                    $pairingCode = $existing->generatePairingCode();
+                } else {
+                    $pairingCode = $existing->pairing_code;
+                }
+            }
+
             return response()->json([
                 'success' => true,
                 'counter' => $existing,
                 'status' => $existing->status,
+                'pairing_code' => $pairingCode,
+                'device_token' => $existing->status === 'active' ? ($existing->device_token ?? $existing->issueDeviceToken()) : null,
                 'message' => "Device enrollment updated. Current status: {$existing->status}",
             ]);
         }
+
+        $hasAuth = auth('sanctum')->check();
+        $activationKeyInput = $request->input('activation_key');
+        $validKey = false;
+        if (!empty($activationKeyInput)) {
+            $keyHash = \App\Models\ActivationKey::hashKey($activationKeyInput);
+            $keyModel = \App\Models\ActivationKey::where('key_hash', $keyHash)->where('store_id', $store->id)->first();
+            if ($keyModel && $keyModel->isValid()) {
+                $validKey = true;
+                $keyModel->incrementActivation();
+            }
+        }
+
+        $autoApprove = ($hasAuth || $validKey) && !$store->require_device_approval;
 
         $counter = Counter::create([
             'store_id' => $store->id,
@@ -96,7 +121,7 @@ class CounterController
             'location_name' => $validated['location_name'] ?? 'Remote Office',
             'is_remote' => (bool)($validated['is_remote'] ?? true),
             'is_digital_only' => (bool)($validated['is_digital_only'] ?? false),
-            'status' => 'pending_approval',
+            'status' => $autoApprove ? 'active' : 'pending_approval',
             'device_uuid' => $validated['device_uuid'],
             'mac_address' => $validated['mac_address'] ?? null,
             'ip_address' => $request->ip(),
@@ -114,20 +139,35 @@ class CounterController
             ],
         ]);
 
+        $pairingCode = null;
+        $deviceToken = null;
+
+        if ($autoApprove) {
+            $deviceToken = $counter->issueDeviceToken();
+            $fy = $this->calculateFinancialYear();
+            $this->ensureCounterSequences($counter, $fy);
+        } else {
+            $pairingCode = $counter->generatePairingCode();
+        }
+
         AuditLog::log(
             'counter_enroll_requested',
             'Counter',
             (string)$counter->id,
             null,
-            ['device_uuid' => $counter->device_uuid, 'location' => $counter->location_name],
+            ['device_uuid' => $counter->device_uuid, 'location' => $counter->location_name, 'pairing_code' => $pairingCode],
             $store->id
         );
 
         return response()->json([
             'success' => true,
             'counter' => $counter,
-            'status' => 'pending_approval',
-            'message' => 'Remote counter registered successfully. Awaiting store owner approval in Admin Panel.',
+            'status' => $counter->status,
+            'pairing_code' => $pairingCode,
+            'device_token' => $deviceToken,
+            'message' => $autoApprove
+                ? 'Counter registered and activated directly.'
+                : 'Remote counter registered successfully. Awaiting store owner approval in Admin Panel with pairing code.',
         ], 201);
     }
 
@@ -156,6 +196,9 @@ class CounterController
 
         // Auto-initialize sequence series if approved
         if ($counter->status === 'active') {
+            if (!$counter->device_token) {
+                $counter->issueDeviceToken();
+            }
             $fy = $this->calculateFinancialYear();
             $this->ensureCounterSequences($counter, $fy);
         }
@@ -224,12 +267,14 @@ class CounterController
             'range_start' => 'nullable|integer',
             'range_end' => 'nullable|integer',
             'next_number' => 'nullable|integer',
+            'allocate_block' => 'nullable|boolean',
+            'block_size' => 'nullable|integer|min:5|max:1000',
         ]);
 
         $fy = $validated['financial_year'] ?? $this->calculateFinancialYear();
         $defaultPrefix = $validated['prefix'] ?? "{$counter->counter_code}-" . strtoupper(substr($validated['doc_type'], 0, 3));
 
-        $sequence = CounterSequence::updateOrCreate(
+        $sequence = CounterSequence::firstOrCreate(
             [
                 'counter_id' => $counter->id,
                 'doc_type' => $validated['doc_type'],
@@ -238,16 +283,105 @@ class CounterController
             [
                 'store_id' => $counter->store_id,
                 'prefix' => $defaultPrefix,
-                'range_start' => $validated['range_start'] ?? null,
-                'range_end' => $validated['range_end'] ?? null,
                 'next_number' => $validated['next_number'] ?? 1001,
             ]
         );
 
+        $leasedBlock = null;
+        if (!empty($validated['allocate_block'])) {
+            $blockSize = (int)($validated['block_size'] ?? 50);
+            $rangeStart = $sequence->next_number;
+            $rangeEnd = $rangeStart + $blockSize - 1;
+
+            $sequence->update([
+                'prefix' => $validated['prefix'] ?? $sequence->prefix,
+                'range_start' => $rangeStart,
+                'range_end' => $rangeEnd,
+                'next_number' => $rangeEnd + 1,
+            ]);
+
+            $leasedBlock = [
+                'prefix' => $sequence->prefix,
+                'financial_year' => $fy,
+                'range_start' => $rangeStart,
+                'range_end' => $rangeEnd,
+                'block_size' => $blockSize,
+                'next_number' => $rangeStart,
+            ];
+        } else {
+            $sequence->update(array_filter([
+                'prefix' => $validated['prefix'] ?? $sequence->prefix,
+                'range_start' => $validated['range_start'] ?? $sequence->range_start,
+                'range_end' => $validated['range_end'] ?? $sequence->range_end,
+                'next_number' => $validated['next_number'] ?? $sequence->next_number,
+            ], fn($v) => !is_null($v)));
+        }
+
         return response()->json([
             'success' => true,
-            'sequence' => $sequence,
-            'message' => "Document series leased for {$counter->counter_code} ({$sequence->prefix}).",
+            'sequence' => $sequence->fresh(),
+            'leased_block' => $leasedBlock,
+            'message' => $leasedBlock 
+                ? "Allocated number block {$leasedBlock['range_start']}-{$leasedBlock['range_end']} for {$counter->counter_code}."
+                : "Document series leased for {$counter->counter_code} ({$sequence->prefix}).",
+        ]);
+    }
+
+    /**
+     * Open a counter shift with opening cash float.
+     */
+    public function openShift(Request $request, string $id): JsonResponse
+    {
+        $counter = Counter::findOrFail($id);
+        $validated = $request->validate([
+            'opening_float' => 'nullable|numeric|min:0',
+            'notes' => 'nullable|string',
+        ]);
+
+        $openingFloat = (float)($validated['opening_float'] ?? 0);
+        $user = $request->user();
+
+        // Check if an open shift already exists for this counter
+        $existing = CounterShift::where('counter_id', $counter->id)
+            ->where('status', 'open')
+            ->first();
+
+        if ($existing) {
+            return response()->json([
+                'success' => true,
+                'shift' => $existing,
+                'message' => 'Shift is already open for this counter.',
+            ]);
+        }
+
+        $shift = CounterShift::create([
+            'store_id' => $counter->store_id,
+            'counter_id' => $counter->id,
+            'opened_by_user_id' => $user?->id,
+            'opening_float' => $openingFloat,
+            'cash_sales' => 0,
+            'digital_sales' => 0,
+            'cash_refunds' => 0,
+            'cash_drops' => 0,
+            'status' => 'open',
+            'opened_at' => now(),
+            'notes' => $validated['notes'] ?? 'Shift opened at counter terminal',
+        ]);
+
+        AuditLog::log(
+            'counter_shift_opened',
+            'CounterShift',
+            (string)$shift->id,
+            null,
+            ['opening_float' => $openingFloat, 'counter_code' => $counter->counter_code],
+            $counter->store_id,
+            $user?->id
+        );
+
+        return response()->json([
+            'success' => true,
+            'shift' => $shift,
+            'message' => "Shift opened with opening float ₹{$openingFloat} for counter {$counter->counter_code}.",
         ]);
     }
 
@@ -346,6 +480,137 @@ class CounterController
             'success' => true,
             'day_close' => $dayClose,
             'message' => "Store day close consolidated for date {$closeDate}.",
+        ]);
+    }
+
+    /**
+     * Poll / check device enrollment status by hardware UUID.
+     */
+    public function checkEnrollmentStatus(Request $request, string $deviceUuid): JsonResponse
+    {
+        $counter = Counter::where('device_uuid', $deviceUuid)->with(['store'])->first();
+
+        if (!$counter) {
+            return response()->json([
+                'success' => false,
+                'status' => 'not_found',
+                'message' => 'Device not registered.',
+            ], 404);
+        }
+
+        $store = $counter->store;
+
+        return response()->json([
+            'success' => true,
+            'status' => $counter->status,
+            'counter_id' => $counter->id,
+            'counter_code' => $counter->counter_code,
+            'counter_name' => $counter->counter_name,
+            'store_id' => $counter->store_id,
+            'store_name' => $store ? $store->name : null,
+            'store_code' => $store ? $store->code : null,
+            'is_active' => $counter->status === 'active',
+            'is_store_active' => $store ? (bool)$store->is_active : false,
+            'device_token' => $counter->status === 'active' ? $counter->device_token : null,
+            'pairing_code' => $counter->status === 'pending_approval' ? $counter->pairing_code : null,
+            'pairing_expires_at' => $counter->pairing_expires_at ? $counter->pairing_expires_at->toIso8601String() : null,
+            'role_profile' => $counter->role_profile,
+            'printer_profile' => $counter->printer_profile,
+        ]);
+    }
+
+    /**
+     * Approve counter enrollment using 6-character pairing code (e.g. LK-8421).
+     */
+    public function approvePairing(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'pairing_code' => 'required|string',
+            'store_id' => 'nullable',
+        ]);
+
+        $normalizedCode = strtoupper(trim($validated['pairing_code']));
+
+        $query = Counter::where('pairing_code', $normalizedCode)
+            ->where('status', 'pending_approval');
+
+        if (!empty($validated['store_id'])) {
+            $query->where('store_id', $validated['store_id']);
+        }
+
+        $counter = $query->first();
+
+        if (!$counter) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Invalid pairing code or counter not found.',
+            ], 404);
+        }
+
+        if ($counter->pairing_expires_at && $counter->pairing_expires_at->isPast()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Pairing code has expired. Please refresh registration on the device.',
+            ], 410);
+        }
+
+        $deviceToken = $counter->issueDeviceToken();
+        $counter->update([
+            'approved_by' => $request->user()?->id,
+        ]);
+
+        $fy = $this->calculateFinancialYear();
+        $this->ensureCounterSequences($counter, $fy);
+
+        AuditLog::log(
+            'counter_pairing_approved',
+            'Counter',
+            (string)$counter->id,
+            null,
+            ['pairing_code' => $normalizedCode, 'counter_code' => $counter->counter_code],
+            $counter->store_id,
+            $request->user()?->id
+        );
+
+        return response()->json([
+            'success' => true,
+            'message' => "Counter '{$counter->counter_name}' ({$counter->counter_code}) approved successfully.",
+            'counter' => $counter->fresh(['sequences']),
+            'device_token' => $deviceToken,
+        ]);
+    }
+
+    /**
+     * Live heartbeat and revocation watcher for counter & store status.
+     */
+    public function watch(Request $request, string $id): JsonResponse
+    {
+        $counter = Counter::with(['store'])->find($id);
+
+        if (!$counter) {
+            return response()->json(['error' => 'Counter not found'], 404);
+        }
+
+        $store = $counter->store;
+        $isStoreActive = $store ? (bool)$store->is_active : false;
+        $licenseStatus = $store ? ($store->license_status ?? 'active') : 'expired';
+
+        // Update last seen
+        $counter->update([
+            'last_seen_at' => now(),
+            'ip_address' => $request->ip(),
+        ]);
+
+        return response()->json([
+            'success' => true,
+            'counter_id' => $counter->id,
+            'counter_code' => $counter->counter_code,
+            'counter_status' => $counter->status,
+            'is_counter_active' => $counter->status === 'active',
+            'store_id' => $counter->store_id,
+            'is_store_active' => $isStoreActive,
+            'license_status' => $licenseStatus,
+            'timestamp' => now()->toIso8601String(),
         ]);
     }
 

@@ -8,6 +8,8 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "test": "vitest run",
+    "test:security": "vitest run src/lib/auth/storeDeviceService.test.ts",
+    "check:security": "node scripts/checkReleaseSecurity.cjs && vitest run src/lib/auth/storeDeviceService.test.ts",
     "test:watch": "vitest",
     "tauri": "DEVELOPER_DIR=/Library/Developer/CommandLineTools tauri"
   },

@@ -1,3 +1,10 @@
+import {
+  calculateDocumentTaxes,
+  type TaxEngineDocumentInput,
+  type TaxEngineCalculatedLine,
+  cleanStateCode,
+} from "./taxEngine.js";
+
 export type CompanyTaxMode = "inclusive" | "exclusive";
 
 export interface LineCalculationInput {
@@ -62,9 +69,9 @@ export function calculateLineGross(
   const upp = Math.max(1, Number(unitsPerPack) || 1);
   const price = Math.max(0, Number(unitPrice) || 0);
 
-  const packGross = packs * price;
-  const looseGross = loose > 0 ? (loose / upp) * price : 0;
-  return round2(packGross + looseGross);
+  const packGross = Math.round(packs * price * 100);
+  const looseGross = loose > 0 ? Math.round((loose * price * 100) / upp) : 0;
+  return round2((packGross + looseGross) / 100);
 }
 
 export function calculateLineDiscount(
@@ -77,7 +84,7 @@ export function calculateLineDiscount(
     return round2(Math.min(gross, Math.max(0, Number(discountAmount) || 0)));
   }
   const pct = Math.max(0, Number(discountPercent) || 0);
-  return round2(Math.min(gross, gross * (pct / 100)));
+  return round2(Math.min(gross, (gross * pct) / 100));
 }
 
 export function calculateSingleLine(
@@ -86,89 +93,45 @@ export function calculateSingleLine(
   customerGstinOrState?: string,
   taxMode: CompanyTaxMode = "inclusive"
 ): CalculatedLineResult {
-  const qty = Math.max(0, Number(line.qty) || 0);
-  const looseQty = Math.max(0, Number(line.loose_qty) || 0);
-  const unitsPerPack = Math.max(1, Number(line.units_per_pack) || 1);
-  const unitPrice = Math.max(0, Number(line.unit_price) || 0);
-  const gstPercent = Math.max(0, Number(line.gst_percent) || 0);
-  const cessPercent = Math.max(0, Number(line.cess_percent) || 0);
+  const doc = calculateDocumentTaxes({
+    store_state: storeStateCode,
+    customer_gstin: customerGstinOrState,
+    default_tax_mode: taxMode,
+    lines: [
+      {
+        qty: line.qty,
+        loose_qty: line.loose_qty,
+        units_per_pack: line.units_per_pack,
+        unit_price: line.unit_price,
+        rate_basis: line.rate_basis,
+        discount_percent: line.discount_percent,
+        discount_amount: line.discount_amount,
+        gst_percent: line.gst_percent,
+        cess_percent: line.cess_percent,
+      },
+    ],
+    auto_round_off: false,
+  });
 
-  const gross = calculateLineGross(qty, looseQty, unitsPerPack, unitPrice);
-  const discount = calculateLineDiscount(gross, line.discount_percent, line.discount_amount);
-  const net = Math.max(0, round2(gross - discount));
-
-  // Determine intra-state vs inter-state
-  let customerState = storeStateCode;
-  if (customerGstinOrState) {
-    const clean = customerGstinOrState.trim();
-    if (clean.length === 15) {
-      customerState = clean.substring(0, 2);
-    } else if (clean.length === 2) {
-      customerState = clean;
-    }
-  }
-  const isInterState = customerState !== storeStateCode;
-
-  // Inclusive vs exclusive tax calculation
-  const isInclusive =
-    line.rate_basis === "mrp"
-      ? true
-      : line.rate_basis === "ptr" || line.rate_basis === "pts"
-      ? false
-      : taxMode === "inclusive";
-
-  let taxable: number;
-  let tax: number;
-  let total: number;
-
-  if (isInclusive) {
-    taxable = gstPercent > 0 ? round2(net / (1 + gstPercent / 100)) : net;
-    tax = round2(net - taxable);
-    total = net;
-  } else {
-    taxable = net;
-    tax = round2((taxable * gstPercent) / 100);
-    total = round2(taxable + tax);
-  }
-
-  let cgstRate = 0;
-  let cgstAmount = 0;
-  let sgstRate = 0;
-  let sgstAmount = 0;
-  let igstRate = 0;
-  let igstAmount = 0;
-
-  if (isInterState) {
-    igstRate = gstPercent;
-    igstAmount = tax;
-  } else {
-    cgstRate = gstPercent / 2;
-    cgstAmount = round2(tax / 2);
-    sgstRate = gstPercent / 2;
-    sgstAmount = round2(tax - cgstAmount);
-  }
-
-  const cessAmount = cessPercent > 0 ? round2((taxable * cessPercent) / 100) : 0;
-  total = round2(total + cessAmount);
-
+  const c = doc.lines[0];
   return {
-    qty,
-    loose_qty: looseQty,
-    units_per_pack: unitsPerPack,
-    unit_price: unitPrice,
-    gross_amount: gross,
-    discount_amount: discount,
-    net_amount: net,
-    taxable_amount: taxable,
-    cgst_rate: cgstRate,
-    cgst_amount: cgstAmount,
-    sgst_rate: sgstRate,
-    sgst_amount: sgstAmount,
-    igst_rate: igstRate,
-    igst_amount: igstAmount,
-    cess_amount: cessAmount,
-    total_tax: round2(tax + cessAmount),
-    total_amount: total,
+    qty: c.qty,
+    loose_qty: c.loose_qty,
+    units_per_pack: c.units_per_pack,
+    unit_price: c.unit_price,
+    gross_amount: c.gross_amount,
+    discount_amount: c.line_discount,
+    net_amount: round2(c.gross_amount - c.line_discount),
+    taxable_amount: c.taxable_amount,
+    cgst_rate: c.cgst_rate,
+    cgst_amount: c.cgst_amount,
+    sgst_rate: c.sgst_rate,
+    sgst_amount: c.sgst_amount,
+    igst_rate: c.igst_rate,
+    igst_amount: c.igst_amount,
+    cess_amount: c.cess_amount,
+    total_tax: c.total_tax,
+    total_amount: c.total_amount,
   };
 }
 
@@ -177,58 +140,36 @@ export function calculateInvoiceTotals(
   billDiscountPercent: number = 0,
   billDiscountAmount: number = 0
 ): InvoiceTotalsResult {
-  let subtotal = 0;
-  let taxableSubtotal = 0;
-  let lineDiscountTotal = 0;
-  let cgstTotal = 0;
-  let sgstTotal = 0;
-  let igstTotal = 0;
-  let cessTotal = 0;
-
-  for (const line of calculatedLines) {
-    subtotal = round2(subtotal + line.gross_amount);
-    taxableSubtotal = round2(taxableSubtotal + line.taxable_amount);
-    lineDiscountTotal = round2(lineDiscountTotal + line.discount_amount);
-    cgstTotal = round2(cgstTotal + line.cgst_amount);
-    sgstTotal = round2(sgstTotal + line.sgst_amount);
-    igstTotal = round2(igstTotal + line.igst_amount);
-    cessTotal = round2(cessTotal + line.cess_amount);
-  }
-
-  // Bill-level discount
-  let computedBillDiscount = 0;
-  if (billDiscountAmount > 0) {
-    computedBillDiscount = round2(Math.min(subtotal - lineDiscountTotal, billDiscountAmount));
-  } else if (billDiscountPercent > 0) {
-    const netBeforeBillDiscount = Math.max(0, subtotal - lineDiscountTotal);
-    computedBillDiscount = round2(netBeforeBillDiscount * (billDiscountPercent / 100));
-  }
-
-  const totalTax = round2(cgstTotal + sgstTotal + igstTotal + cessTotal);
-  let linesTotal = 0;
-  for (const line of calculatedLines) {
-    linesTotal = round2(linesTotal + line.total_amount);
-  }
-  const netBeforeRound = Math.max(
-    0,
-    round2(linesTotal - computedBillDiscount)
-  );
-
-  const roundedGrandTotal = Math.round(netBeforeRound);
-  const roundOff = round2(roundedGrandTotal - netBeforeRound);
+  const doc = calculateDocumentTaxes({
+    store_state: "32",
+    lines: calculatedLines.map((l) => ({
+      qty: l.qty,
+      loose_qty: l.loose_qty,
+      units_per_pack: l.units_per_pack,
+      unit_price: l.unit_price,
+      discount_amount: l.discount_amount,
+      gst_percent: (l.cgst_rate + l.sgst_rate + l.igst_rate),
+      cess_percent: l.taxable_amount > 0 ? (l.cess_amount / l.taxable_amount) * 100 : 0,
+    })),
+    bill_discount: {
+      type: billDiscountPercent > 0 ? "percent" : "amount",
+      value: billDiscountPercent > 0 ? billDiscountPercent : billDiscountAmount,
+    },
+    auto_round_off: true,
+  });
 
   return {
-    subtotal,
-    taxable_subtotal: taxableSubtotal,
-    line_discount_total: lineDiscountTotal,
-    bill_discount_amount: computedBillDiscount,
-    total_tax: totalTax,
-    cgst_total: cgstTotal,
-    sgst_total: sgstTotal,
-    igst_total: igstTotal,
-    cess_total: cessTotal,
-    net_before_round: netBeforeRound,
-    round_off: roundOff,
-    grand_total: roundedGrandTotal,
+    subtotal: doc.gross_subtotal,
+    taxable_subtotal: doc.taxable_subtotal,
+    line_discount_total: doc.line_discount_total,
+    bill_discount_amount: doc.bill_discount_total,
+    total_tax: doc.total_tax,
+    cgst_total: doc.cgst_total,
+    sgst_total: doc.sgst_total,
+    igst_total: doc.igst_total,
+    cess_total: doc.cess_total,
+    net_before_round: doc.net_before_round,
+    round_off: doc.round_off,
+    grand_total: doc.grand_total,
   };
 }

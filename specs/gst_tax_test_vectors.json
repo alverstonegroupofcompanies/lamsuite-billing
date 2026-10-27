@@ -1,0 +1,652 @@
+{
+  "version": "1.0",
+  "description": "LamSuite Billing Statutory GST Test Vectors covering all statutory and commercial edge cases to the paisa",
+  "store_defaults": {
+    "state_code": "32",
+    "state_name": "Kerala",
+    "gstin": "32AABCL1234F1Z5",
+    "tax_mode": "inclusive"
+  },
+  "test_cases": [
+    {
+      "id": "TC01_SINGLE_LINE_EXCLUSIVE_INTRA",
+      "name": "Single line tax-exclusive intra-state (18% GST)",
+      "store_state": "32",
+      "customer_gstin": null,
+      "place_of_supply": "32",
+      "tax_mode": "exclusive",
+      "lines": [
+        {
+          "line_id": "L1",
+          "product_name": "Paracetamol 500mg",
+          "hsn_code": "30049099",
+          "qty": 2,
+          "loose_qty": 0,
+          "units_per_pack": 10,
+          "unit_price": 100.00,
+          "rate_basis": "sel_rate",
+          "discount_percent": 0,
+          "discount_amount": 0,
+          "gst_percent": 18,
+          "cess_percent": 0
+        }
+      ],
+      "bill_discount": { "type": "amount", "value": 0 },
+      "auto_round_off": true,
+      "expected_lines": [
+        {
+          "line_id": "L1",
+          "gross_amount": 200.00,
+          "line_discount": 0.00,
+          "allocated_bill_discount": 0.00,
+          "taxable_amount": 200.00,
+          "cgst_rate": 9.0,
+          "cgst_amount": 18.00,
+          "sgst_rate": 9.0,
+          "sgst_amount": 18.00,
+          "igst_rate": 0.0,
+          "igst_amount": 0.00,
+          "cess_amount": 0.00,
+          "total_tax": 36.00,
+          "total_amount": 236.00
+        }
+      ],
+      "expected_totals": {
+        "gross_subtotal": 200.00,
+        "line_discount_total": 0.00,
+        "bill_discount_total": 0.00,
+        "taxable_subtotal": 200.00,
+        "cgst_total": 18.00,
+        "sgst_total": 18.00,
+        "igst_total": 0.00,
+        "cess_total": 0.00,
+        "total_tax": 36.00,
+        "net_before_round": 236.00,
+        "round_off": 0.00,
+        "grand_total": 236.00
+      }
+    },
+    {
+      "id": "TC02_SINGLE_LINE_INCLUSIVE_INTRA",
+      "name": "Single line tax-inclusive intra-state MRP back-calculation (12% GST)",
+      "store_state": "32",
+      "customer_gstin": null,
+      "place_of_supply": "32",
+      "tax_mode": "inclusive",
+      "lines": [
+        {
+          "line_id": "L1",
+          "product_name": "Augmentin 625 Duo",
+          "hsn_code": "30049099",
+          "qty": 1,
+          "loose_qty": 0,
+          "units_per_pack": 10,
+          "unit_price": 201.60,
+          "rate_basis": "mrp",
+          "discount_percent": 0,
+          "discount_amount": 0,
+          "gst_percent": 12,
+          "cess_percent": 0
+        }
+      ],
+      "bill_discount": { "type": "amount", "value": 0 },
+      "auto_round_off": true,
+      "expected_lines": [
+        {
+          "line_id": "L1",
+          "gross_amount": 201.60,
+          "line_discount": 0.00,
+          "allocated_bill_discount": 0.00,
+          "taxable_amount": 180.00,
+          "cgst_rate": 6.0,
+          "cgst_amount": 10.80,
+          "sgst_rate": 6.0,
+          "sgst_amount": 10.80,
+          "igst_rate": 0.0,
+          "igst_amount": 0.00,
+          "cess_amount": 0.00,
+          "total_tax": 21.60,
+          "total_amount": 201.60
+        }
+      ],
+      "expected_totals": {
+        "gross_subtotal": 201.60,
+        "line_discount_total": 0.00,
+        "bill_discount_total": 0.00,
+        "taxable_subtotal": 180.00,
+        "cgst_total": 10.80,
+        "sgst_total": 10.80,
+        "igst_total": 0.00,
+        "cess_total": 0.00,
+        "total_tax": 21.60,
+        "net_before_round": 201.60,
+        "round_off": 0.40,
+        "grand_total": 202.00
+      }
+    },
+    {
+      "id": "TC03_INTER_STATE_SUPPLY_IGST",
+      "name": "Inter-state supply with IGST (Customer in Tamil Nadu State 33)",
+      "store_state": "32",
+      "customer_gstin": "33AABCT9999F1Z2",
+      "place_of_supply": "33",
+      "tax_mode": "exclusive",
+      "lines": [
+        {
+          "line_id": "L1",
+          "product_name": "Surgical Gloves Box",
+          "hsn_code": "40151100",
+          "qty": 5,
+          "loose_qty": 0,
+          "units_per_pack": 1,
+          "unit_price": 450.00,
+          "rate_basis": "sel_rate",
+          "discount_percent": 0,
+          "discount_amount": 0,
+          "gst_percent": 12,
+          "cess_percent": 0
+        }
+      ],
+      "bill_discount": { "type": "amount", "value": 0 },
+      "auto_round_off": true,
+      "expected_lines": [
+        {
+          "line_id": "L1",
+          "gross_amount": 2250.00,
+          "line_discount": 0.00,
+          "allocated_bill_discount": 0.00,
+          "taxable_amount": 2250.00,
+          "cgst_rate": 0.0,
+          "cgst_amount": 0.00,
+          "sgst_rate": 0.0,
+          "sgst_amount": 0.00,
+          "igst_rate": 12.0,
+          "igst_amount": 270.00,
+          "cess_amount": 0.00,
+          "total_tax": 270.00,
+          "total_amount": 2520.00
+        }
+      ],
+      "expected_totals": {
+        "gross_subtotal": 2250.00,
+        "line_discount_total": 0.00,
+        "bill_discount_total": 0.00,
+        "taxable_subtotal": 2250.00,
+        "cgst_total": 0.00,
+        "sgst_total": 0.00,
+        "igst_total": 270.00,
+        "cess_total": 0.00,
+        "total_tax": 270.00,
+        "net_before_round": 2520.00,
+        "round_off": 0.00,
+        "grand_total": 2520.00
+      }
+    },
+    {
+      "id": "TC04_MIXED_RATES_WITH_LINE_AND_BILL_DISCOUNT",
+      "name": "Mixed GST rates (5%, 12%, 18%) with line discount and proportional bill discount",
+      "store_state": "32",
+      "customer_gstin": null,
+      "place_of_supply": "32",
+      "tax_mode": "exclusive",
+      "lines": [
+        {
+          "line_id": "L1",
+          "product_name": "Product 5%",
+          "hsn_code": "300410",
+          "qty": 1,
+          "loose_qty": 0,
+          "units_per_pack": 1,
+          "unit_price": 100.00,
+          "rate_basis": "sel_rate",
+          "discount_percent": 10,
+          "discount_amount": 0,
+          "gst_percent": 5,
+          "cess_percent": 0
+        },
+        {
+          "line_id": "L2",
+          "product_name": "Product 12%",
+          "hsn_code": "300420",
+          "qty": 2,
+          "loose_qty": 0,
+          "units_per_pack": 1,
+          "unit_price": 150.00,
+          "rate_basis": "sel_rate",
+          "discount_percent": 0,
+          "discount_amount": 20.00,
+          "gst_percent": 12,
+          "cess_percent": 0
+        },
+        {
+          "line_id": "L3",
+          "product_name": "Product 18%",
+          "hsn_code": "300430",
+          "qty": 1,
+          "loose_qty": 0,
+          "units_per_pack": 1,
+          "unit_price": 200.00,
+          "rate_basis": "sel_rate",
+          "discount_percent": 0,
+          "discount_amount": 0,
+          "gst_percent": 18,
+          "cess_percent": 0
+        }
+      ],
+      "bill_discount": { "type": "amount", "value": 57.00 },
+      "auto_round_off": true,
+      "expected_lines": [
+        {
+          "line_id": "L1",
+          "gross_amount": 100.00,
+          "line_discount": 10.00,
+          "allocated_bill_discount": 9.00,
+          "taxable_amount": 81.00,
+          "cgst_rate": 2.5,
+          "cgst_amount": 2.03,
+          "sgst_rate": 2.5,
+          "sgst_amount": 2.03,
+          "igst_rate": 0.0,
+          "igst_amount": 0.00,
+          "cess_amount": 0.00,
+          "total_tax": 4.06,
+          "total_amount": 85.06
+        },
+        {
+          "line_id": "L2",
+          "gross_amount": 300.00,
+          "line_discount": 20.00,
+          "allocated_bill_discount": 28.00,
+          "taxable_amount": 252.00,
+          "cgst_rate": 6.0,
+          "cgst_amount": 15.12,
+          "sgst_rate": 6.0,
+          "sgst_amount": 15.12,
+          "igst_rate": 0.0,
+          "igst_amount": 0.00,
+          "cess_amount": 0.00,
+          "total_tax": 30.24,
+          "total_amount": 282.24
+        },
+        {
+          "line_id": "L3",
+          "gross_amount": 200.00,
+          "line_discount": 0.00,
+          "allocated_bill_discount": 20.00,
+          "taxable_amount": 180.00,
+          "cgst_rate": 9.0,
+          "cgst_amount": 16.20,
+          "sgst_rate": 9.0,
+          "sgst_amount": 16.20,
+          "igst_rate": 0.0,
+          "igst_amount": 0.00,
+          "cess_amount": 0.00,
+          "total_tax": 32.40,
+          "total_amount": 212.40
+        }
+      ],
+      "expected_totals": {
+        "gross_subtotal": 600.00,
+        "line_discount_total": 30.00,
+        "bill_discount_total": 57.00,
+        "taxable_subtotal": 513.00,
+        "cgst_total": 33.35,
+        "sgst_total": 33.35,
+        "igst_total": 0.00,
+        "cess_total": 0.00,
+        "total_tax": 66.70,
+        "net_before_round": 579.70,
+        "round_off": 0.30,
+        "grand_total": 580.00
+      }
+    },
+    {
+      "id": "TC05_PACK_AND_LOOSE_QUANTITY",
+      "name": "Pack + loose tablet pricing with fractional precision",
+      "store_state": "32",
+      "customer_gstin": null,
+      "place_of_supply": "32",
+      "tax_mode": "exclusive",
+      "lines": [
+        {
+          "line_id": "L1",
+          "product_name": "Azithromycin 500mg Strip of 3",
+          "hsn_code": "30049099",
+          "qty": 2,
+          "loose_qty": 1,
+          "units_per_pack": 3,
+          "unit_price": 120.00,
+          "rate_basis": "sel_rate",
+          "discount_percent": 0,
+          "discount_amount": 0,
+          "gst_percent": 12,
+          "cess_percent": 0
+        }
+      ],
+      "bill_discount": { "type": "amount", "value": 0 },
+      "auto_round_off": true,
+      "expected_lines": [
+        {
+          "line_id": "L1",
+          "gross_amount": 280.00,
+          "line_discount": 0.00,
+          "allocated_bill_discount": 0.00,
+          "taxable_amount": 280.00,
+          "cgst_rate": 6.0,
+          "cgst_amount": 16.80,
+          "sgst_rate": 6.0,
+          "sgst_amount": 16.80,
+          "igst_rate": 0.0,
+          "igst_amount": 0.00,
+          "cess_amount": 0.00,
+          "total_tax": 33.60,
+          "total_amount": 313.60
+        }
+      ],
+      "expected_totals": {
+        "gross_subtotal": 280.00,
+        "line_discount_total": 0.00,
+        "bill_discount_total": 0.00,
+        "taxable_subtotal": 280.00,
+        "cgst_total": 16.80,
+        "sgst_total": 16.80,
+        "igst_total": 0.00,
+        "cess_total": 0.00,
+        "total_tax": 33.60,
+        "net_before_round": 313.60,
+        "round_off": 0.40,
+        "grand_total": 314.00
+      }
+    },
+    {
+      "id": "TC06_CESS_CALCULATION_EXCLUSIVE",
+      "name": "Statutory Cess calculation on tax-exclusive line (28% GST + 12% Cess)",
+      "store_state": "32",
+      "customer_gstin": null,
+      "place_of_supply": "32",
+      "tax_mode": "exclusive",
+      "lines": [
+        {
+          "line_id": "L1",
+          "product_name": "Luxury Wellness Drink",
+          "hsn_code": "220210",
+          "qty": 1,
+          "loose_qty": 0,
+          "units_per_pack": 1,
+          "unit_price": 1000.00,
+          "rate_basis": "sel_rate",
+          "discount_percent": 0,
+          "discount_amount": 0,
+          "gst_percent": 28,
+          "cess_percent": 12
+        }
+      ],
+      "bill_discount": { "type": "amount", "value": 0 },
+      "auto_round_off": true,
+      "expected_lines": [
+        {
+          "line_id": "L1",
+          "gross_amount": 1000.00,
+          "line_discount": 0.00,
+          "allocated_bill_discount": 0.00,
+          "taxable_amount": 1000.00,
+          "cgst_rate": 14.0,
+          "cgst_amount": 140.00,
+          "sgst_rate": 14.0,
+          "sgst_amount": 140.00,
+          "igst_rate": 0.0,
+          "igst_amount": 0.00,
+          "cess_amount": 120.00,
+          "total_tax": 400.00,
+          "total_amount": 1400.00
+        }
+      ],
+      "expected_totals": {
+        "gross_subtotal": 1000.00,
+        "line_discount_total": 0.00,
+        "bill_discount_total": 0.00,
+        "taxable_subtotal": 1000.00,
+        "cgst_total": 140.00,
+        "sgst_total": 140.00,
+        "igst_total": 0.00,
+        "cess_total": 120.00,
+        "total_tax": 400.00,
+        "net_before_round": 1400.00,
+        "round_off": 0.00,
+        "grand_total": 1400.00
+      }
+    },
+    {
+      "id": "TC07_CESS_CALCULATION_INCLUSIVE",
+      "name": "Statutory Cess calculation on tax-inclusive line (12% GST + 2% Cess on MRP 100)",
+      "store_state": "32",
+      "customer_gstin": null,
+      "place_of_supply": "32",
+      "tax_mode": "inclusive",
+      "lines": [
+        {
+          "line_id": "L1",
+          "product_name": "Special Medicated Shampoo",
+          "hsn_code": "330510",
+          "qty": 1,
+          "loose_qty": 0,
+          "units_per_pack": 1,
+          "unit_price": 100.00,
+          "rate_basis": "mrp",
+          "discount_percent": 0,
+          "discount_amount": 0,
+          "gst_percent": 12,
+          "cess_percent": 2
+        }
+      ],
+      "bill_discount": { "type": "amount", "value": 0 },
+      "auto_round_off": true,
+      "expected_lines": [
+        {
+          "line_id": "L1",
+          "gross_amount": 100.00,
+          "line_discount": 0.00,
+          "allocated_bill_discount": 0.00,
+          "taxable_amount": 87.72,
+          "cgst_rate": 6.0,
+          "cgst_amount": 5.26,
+          "sgst_rate": 6.0,
+          "sgst_amount": 5.26,
+          "igst_rate": 0.0,
+          "igst_amount": 0.00,
+          "cess_amount": 1.75,
+          "total_tax": 12.27,
+          "total_amount": 99.99
+        }
+      ],
+      "expected_totals": {
+        "gross_subtotal": 100.00,
+        "line_discount_total": 0.00,
+        "bill_discount_total": 0.00,
+        "taxable_subtotal": 87.72,
+        "cgst_total": 5.26,
+        "sgst_total": 5.26,
+        "igst_total": 0.00,
+        "cess_total": 1.75,
+        "total_tax": 12.27,
+        "net_before_round": 99.99,
+        "round_off": 0.01,
+        "grand_total": 100.00
+      }
+    },
+    {
+      "id": "TC08_AWKWARD_ODD_PAISE_SPLIT",
+      "name": "Odd paise tax split consistency (₹0.05 tax across CGST and SGST)",
+      "store_state": "32",
+      "customer_gstin": null,
+      "place_of_supply": "32",
+      "tax_mode": "exclusive",
+      "lines": [
+        {
+          "line_id": "L1",
+          "product_name": "Low Cost Bandage",
+          "hsn_code": "300510",
+          "qty": 1,
+          "loose_qty": 0,
+          "units_per_pack": 1,
+          "unit_price": 0.83,
+          "rate_basis": "sel_rate",
+          "discount_percent": 0,
+          "discount_amount": 0,
+          "gst_percent": 5,
+          "cess_percent": 0
+        }
+      ],
+      "bill_discount": { "type": "amount", "value": 0 },
+      "auto_round_off": true,
+      "expected_lines": [
+        {
+          "line_id": "L1",
+          "gross_amount": 0.83,
+          "line_discount": 0.00,
+          "allocated_bill_discount": 0.00,
+          "taxable_amount": 0.83,
+          "cgst_rate": 2.5,
+          "cgst_amount": 0.02,
+          "sgst_rate": 2.5,
+          "sgst_amount": 0.02,
+          "igst_rate": 0.0,
+          "igst_amount": 0.00,
+          "cess_amount": 0.00,
+          "total_tax": 0.04,
+          "total_amount": 0.87
+        }
+      ],
+      "expected_totals": {
+        "gross_subtotal": 0.83,
+        "line_discount_total": 0.00,
+        "bill_discount_total": 0.00,
+        "taxable_subtotal": 0.83,
+        "cgst_total": 0.02,
+        "sgst_total": 0.02,
+        "igst_total": 0.00,
+        "cess_total": 0.00,
+        "total_tax": 0.04,
+        "net_before_round": 0.87,
+        "round_off": 0.13,
+        "grand_total": 1.00
+      }
+    },
+    {
+      "id": "TC09_NIL_RATED_AND_EXEMPT",
+      "name": "Nil rated and exempt items with 0% tax",
+      "store_state": "32",
+      "customer_gstin": null,
+      "place_of_supply": "32",
+      "tax_mode": "exclusive",
+      "lines": [
+        {
+          "line_id": "L1",
+          "product_name": "Human Blood Unit",
+          "hsn_code": "3002",
+          "qty": 1,
+          "loose_qty": 0,
+          "units_per_pack": 1,
+          "unit_price": 1500.00,
+          "rate_basis": "sel_rate",
+          "discount_percent": 0,
+          "discount_amount": 0,
+          "gst_percent": 0,
+          "cess_percent": 0
+        }
+      ],
+      "bill_discount": { "type": "amount", "value": 0 },
+      "auto_round_off": true,
+      "expected_lines": [
+        {
+          "line_id": "L1",
+          "gross_amount": 1500.00,
+          "line_discount": 0.00,
+          "allocated_bill_discount": 0.00,
+          "taxable_amount": 1500.00,
+          "cgst_rate": 0.0,
+          "cgst_amount": 0.00,
+          "sgst_rate": 0.0,
+          "sgst_amount": 0.00,
+          "igst_rate": 0.0,
+          "igst_amount": 0.00,
+          "cess_amount": 0.00,
+          "total_tax": 0.00,
+          "total_amount": 1500.00
+        }
+      ],
+      "expected_totals": {
+        "gross_subtotal": 1500.00,
+        "line_discount_total": 0.00,
+        "bill_discount_total": 0.00,
+        "taxable_subtotal": 1500.00,
+        "cgst_total": 0.00,
+        "sgst_total": 0.00,
+        "igst_total": 0.00,
+        "cess_total": 0.00,
+        "total_tax": 0.00,
+        "net_before_round": 1500.00,
+        "round_off": 0.00,
+        "grand_total": 1500.00
+      }
+    },
+    {
+      "id": "TC10_ROUND_OFF_SECTION_170_NEGATIVE",
+      "name": "Negative round off: Net ₹100.35 rounded down by -₹0.35 to ₹100.00",
+      "store_state": "32",
+      "customer_gstin": null,
+      "place_of_supply": "32",
+      "tax_mode": "exclusive",
+      "lines": [
+        {
+          "line_id": "L1",
+          "product_name": "Sample Tablet Pack",
+          "hsn_code": "30049099",
+          "qty": 1,
+          "loose_qty": 0,
+          "units_per_pack": 1,
+          "unit_price": 85.04,
+          "rate_basis": "sel_rate",
+          "discount_percent": 0,
+          "discount_amount": 0,
+          "gst_percent": 18,
+          "cess_percent": 0
+        }
+      ],
+      "bill_discount": { "type": "amount", "value": 0 },
+      "auto_round_off": true,
+      "expected_lines": [
+        {
+          "line_id": "L1",
+          "gross_amount": 85.04,
+          "line_discount": 0.00,
+          "allocated_bill_discount": 0.00,
+          "taxable_amount": 85.04,
+          "cgst_rate": 9.0,
+          "cgst_amount": 7.65,
+          "sgst_rate": 9.0,
+          "sgst_amount": 7.65,
+          "igst_rate": 0.0,
+          "igst_amount": 0.00,
+          "cess_amount": 0.00,
+          "total_tax": 15.30,
+          "total_amount": 100.34
+        }
+      ],
+      "expected_totals": {
+        "gross_subtotal": 85.04,
+        "line_discount_total": 0.00,
+        "bill_discount_total": 0.00,
+        "taxable_subtotal": 85.04,
+        "cgst_total": 7.65,
+        "sgst_total": 7.65,
+        "igst_total": 0.00,
+        "cess_total": 0.00,
+        "total_tax": 15.30,
+        "net_before_round": 100.34,
+        "round_off": -0.34,
+        "grand_total": 100.00
+      }
+    }
+  ]
+}

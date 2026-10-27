@@ -31,6 +31,16 @@ class Counter extends Model
         'last_sync_at',
         'last_synced_watermark',
         'revoke_reason',
+        'pairing_code',
+        'pairing_expires_at',
+        'device_token',
+        'device_token_hash',
+        'approved_at',
+        'approved_by',
+    ];
+
+    protected $hidden = [
+        'device_token_hash',
     ];
 
     protected $casts = [
@@ -45,6 +55,8 @@ class Counter extends Model
         'last_seen_at' => 'datetime',
         'last_sync_at' => 'datetime',
         'last_synced_watermark' => 'integer',
+        'pairing_expires_at' => 'datetime',
+        'approved_at' => 'datetime',
     ];
 
     public function store(): BelongsTo
@@ -67,6 +79,11 @@ class Counter extends Model
         return $this->hasMany(Invoice::class);
     }
 
+    public function approver(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'approved_by');
+    }
+
     public function isPendingApproval(): bool
     {
         return $this->status === 'pending_approval';
@@ -80,5 +97,40 @@ class Counter extends Model
     public function isRevoked(): bool
     {
         return $this->status === 'revoked';
+    }
+
+    /**
+     * Generate a fresh 6-character pairing code e.g. "LK-8421" valid for 15 minutes.
+     */
+    public function generatePairingCode(): string
+    {
+        $letters = chr(random_int(65, 90)) . chr(random_int(65, 90));
+        $digits = str_pad((string)random_int(1000, 9999), 4, '0', STR_PAD_LEFT);
+        $code = "{$letters}-{$digits}";
+        
+        $this->update([
+            'pairing_code' => $code,
+            'pairing_expires_at' => now()->addMinutes(15),
+            'status' => 'pending_approval',
+        ]);
+
+        return $code;
+    }
+
+    /**
+     * Issue and persist a device access token.
+     */
+    public function issueDeviceToken(): string
+    {
+        $rawToken = 'lsd_' . \Illuminate\Support\Str::random(40);
+        $this->update([
+            'device_token' => $rawToken,
+            'device_token_hash' => hash('sha256', $rawToken),
+            'pairing_code' => null,
+            'pairing_expires_at' => null,
+            'status' => 'active',
+            'approved_at' => now(),
+        ]);
+        return $rawToken;
     }
 }

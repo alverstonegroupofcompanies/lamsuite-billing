@@ -16,6 +16,7 @@ import { hsnSummaryReport } from "./gst/hsn-summary";
 import { gstr3bSummaryReport } from "./gst/gstr-3b-summary";
 import { gstr2ItcReport } from "./gst/gstr-2-itc";
 import { gstSlabReport } from "./gst/gst-slab-report";
+import { taxReconciliationReport } from "./gst/tax-reconciliation";
 
 // 3. Inventory & Warehouse
 import { stockSummaryReport } from "./inventory/stock-summary";
@@ -121,6 +122,7 @@ export class ReportRegistry {
     this.register(gstr3bSummaryReport);
     this.register(gstr2ItcReport);
     this.register(gstSlabReport);
+    this.register(taxReconciliationReport);
 
     // 3. Inventory
     this.register(stockSummaryReport);

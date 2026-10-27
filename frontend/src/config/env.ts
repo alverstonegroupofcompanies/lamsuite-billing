@@ -7,9 +7,14 @@ export const API_BASE_URL: string = (
   import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000"
 ).replace(/\/+$/, "");
 
-export const ADMIN_PORTAL_URL: string = (
-  import.meta.env.VITE_ADMIN_PORTAL_URL || "https://admin.lamstonehealthcare.com"
+export const PANEL_PORTAL_URL: string = (
+  import.meta.env.VITE_PANEL_PORTAL_URL ||
+  import.meta.env.VITE_ADMIN_PORTAL_URL ||
+  "https://panel.example.com"
 ).replace(/\/+$/, "");
+
+// Alias for backward compatibility while enforcing "panel"
+export const ADMIN_PORTAL_URL = PANEL_PORTAL_URL;
 
 export const DEFAULT_LAN_PORT: number =
   Number(import.meta.env.VITE_DEFAULT_LAN_PORT) || 8000;

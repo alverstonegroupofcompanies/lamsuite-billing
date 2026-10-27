@@ -195,7 +195,9 @@ export class SalesMetricsService {
       if (invItems.length > 0) {
         for (const item of invItems) {
           const signItem = isReturn ? -1 : 1;
-          const taxable = ((Number(item.total_amount) || 0) - (Number(item.cgst_amount) || 0) - (Number(item.sgst_amount) || 0) - (Number(item.igst_amount) || 0)) * signItem;
+          const taxable = (item.taxable_amount !== undefined && item.taxable_amount !== null
+            ? Number(item.taxable_amount)
+            : ((Number(item.total_amount) || 0) - (Number(item.cgst_amount) || 0) - (Number(item.sgst_amount) || 0) - (Number(item.igst_amount) || 0))) * signItem;
           const cgst = (Number(item.cgst_amount) || 0) * signItem;
           const sgst = (Number(item.sgst_amount) || 0) * signItem;
           const igst = (Number(item.igst_amount) || 0) * signItem;
@@ -218,11 +220,14 @@ export class SalesMetricsService {
       } else {
         // Fallback to invoice header tax
         const signItem = isReturn ? -1 : 1;
-        const sub = (Number(inv.subtotal) || (gTotal - (Number(inv.tax_total) || 0))) * signItem;
-        const tax = (Number(inv.tax_total) || 0) * signItem;
+        const sub = (Number(inv.taxable_subtotal ?? inv.subtotal) || (gTotal - (Number(inv.tax_total) || 0))) * signItem;
+        const cgst = (Number(inv.cgst_total ?? (inv.tax_type === "inter_state" ? 0 : (Number(inv.tax_total) || 0) / 2))) * signItem;
+        const sgst = (Number(inv.sgst_total ?? (inv.tax_type === "inter_state" ? 0 : (Number(inv.tax_total) || 0) / 2))) * signItem;
+        const igst = (Number(inv.igst_total ?? (inv.tax_type === "inter_state" ? (Number(inv.tax_total) || 0) : 0))) * signItem;
         totalTaxable += sub;
-        totalCgst += (tax / 2);
-        totalSgst += (tax / 2);
+        totalCgst += cgst;
+        totalSgst += sgst;
+        totalIgst += igst;
       }
     }
 
@@ -354,16 +359,18 @@ export class SalesMetricsService {
 
       if (invItems.length > 0) {
         for (const item of invItems) {
-          taxable += (Number(item.total_amount) || 0) - (Number(item.cgst_amount) || 0) - (Number(item.sgst_amount) || 0) - (Number(item.igst_amount) || 0);
+          taxable += item.taxable_amount !== undefined && item.taxable_amount !== null
+            ? Number(item.taxable_amount)
+            : ((Number(item.total_amount) || 0) - (Number(item.cgst_amount) || 0) - (Number(item.sgst_amount) || 0) - (Number(item.igst_amount) || 0));
           cgst += Number(item.cgst_amount) || 0;
           sgst += Number(item.sgst_amount) || 0;
           igst += Number(item.igst_amount) || 0;
         }
       } else {
-        taxable = Number(inv.subtotal) || 0;
-        const taxTot = Number(inv.tax_total) || 0;
-        cgst = taxTot / 2;
-        sgst = taxTot / 2;
+        taxable = Number(inv.taxable_subtotal ?? inv.subtotal) || 0;
+        cgst = Number(inv.cgst_total ?? (inv.tax_type === "inter_state" ? 0 : (Number(inv.tax_total) || 0) / 2));
+        sgst = Number(inv.sgst_total ?? (inv.tax_type === "inter_state" ? 0 : (Number(inv.tax_total) || 0) / 2));
+        igst = Number(inv.igst_total ?? (inv.tax_type === "inter_state" ? (Number(inv.tax_total) || 0) : 0));
       }
 
       return {
@@ -543,7 +550,10 @@ export class SalesMetricsService {
       const cgst = (Number(item.cgst_amount) || 0) * sign;
       const sgst = (Number(item.sgst_amount) || 0) * sign;
       const igst = (Number(item.igst_amount) || 0) * sign;
-      const taxable = totalVal - cgst - sgst - igst;
+      const cess = (Number((item as any).cess_amount) || 0) * sign;
+      const taxable = (item.taxable_amount !== undefined && item.taxable_amount !== null
+        ? Number(item.taxable_amount) * sign
+        : totalVal - cgst - sgst - igst - cess);
       const qty = ((Number(item.qty) || 0) + (Number(item.loose_qty) || 0)) * sign;
 
       if (!map.has(key)) {
