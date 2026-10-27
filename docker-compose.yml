@@ -411,6 +411,10 @@ services:
     image: lamsuite-web:latest
     container_name: lamsuite-web
     restart: unless-stopped
+    environment:
+      - VITE_API_BASE_URL=https://${SUBDOMAIN_API:-api}.${DOMAIN}
+      - VITE_WS_URL=wss://${SUBDOMAIN_WS:-ws}.${DOMAIN}
+      - VITE_PANEL_PORTAL_URL=https://${SUBDOMAIN_PANEL:-panel}.${DOMAIN}
     networks:
       - lamsuite-public
     labels:

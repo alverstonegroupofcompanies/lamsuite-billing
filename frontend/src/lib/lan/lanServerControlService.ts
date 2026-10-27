@@ -2,6 +2,7 @@ import { sqliteStorage } from "../db/sqliteStorage";
 import { lanPeerService } from "./lanPeerService";
 import { storeDeviceService } from "../auth/storeDeviceService";
 import { lanDiscoveryService, type NetworkInterfaceInfo } from "./lanDiscoveryService";
+import { isTauri } from "../ipc/ipcBridge";
 
 export interface ConnectedCounterClient {
   id: string;
@@ -208,6 +209,10 @@ class LanServerControlService {
   async setPairingMode(durationMinutes: number): Promise<boolean> {
     this.pairingMode = durationMinutes > 0;
     this.pairingExpiresIn = durationMinutes * 60;
+    if (typeof window !== "undefined" && !isTauri()) {
+      this.notify();
+      return true;
+    }
     try {
       await fetch(`http://127.0.0.1:${this.apiPort}/api/lan/v1/hub/config`, {
         method: "POST",
@@ -220,6 +225,9 @@ class LanServerControlService {
   }
 
   async fetchHubStatus(): Promise<void> {
+    if (typeof window !== "undefined" && !isTauri()) {
+      return;
+    }
     try {
       const res = await fetch(`http://127.0.0.1:${this.apiPort}/lan/v1/health`);
       if (res.ok) {
@@ -234,6 +242,9 @@ class LanServerControlService {
   }
 
   async refreshActiveClients(): Promise<ConnectedCounterClient[]> {
+    if (typeof window !== "undefined" && !isTauri()) {
+      return this.activeClients;
+    }
     await this.fetchHubStatus();
     try {
       const res = await fetch(`http://127.0.0.1:${this.apiPort}/api/lan/v1/clients`);
@@ -250,6 +261,9 @@ class LanServerControlService {
   }
 
   async updateClientStatus(clientId: string, status: "active" | "blocked" | "disconnected"): Promise<boolean> {
+    if (typeof window !== "undefined" && !isTauri()) {
+      return false;
+    }
     try {
       const res = await fetch(`http://127.0.0.1:${this.apiPort}/api/lan/v1/clients/${clientId}/status`, {
         method: "POST",
