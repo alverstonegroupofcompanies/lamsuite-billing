@@ -238,7 +238,6 @@ jobs:
             echo "--> Warming application caches..."
             docker compose run --rm --no-deps api php artisan config:cache
             docker compose run --rm --no-deps api php artisan route:cache
-            docker compose run --rm --no-deps api php artisan view:cache
 
             DEPLOY_PHASE="service-start"
             echo "--> Starting application services..."
