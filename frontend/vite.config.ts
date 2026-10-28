@@ -5,7 +5,7 @@ import path from "path";
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), "");
-  const apiTarget = env.VITE_API_BASE_URL || "http://127.0.0.1:8000";
+  const apiTarget = env.VITE_API_BASE_URL || "http://127.0.0.1:8001";
 
   return {
     plugins: [react()],

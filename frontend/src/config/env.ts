@@ -64,7 +64,7 @@ function resolveApiBaseUrl(): string {
     return buildTimeEnv.replace(/\/+$/, "");
   }
 
-  return "http://127.0.0.1:8000";
+  return "http://127.0.0.1:8001";
 }
 
 export const API_BASE_URL: string = resolveApiBaseUrl();

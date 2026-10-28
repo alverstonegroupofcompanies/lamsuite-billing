@@ -79,12 +79,16 @@ class StaffAuthController
             })->where(function ($sub) use ($username) {
                 $sub->where('username', $username)
                     ->orWhere('email', $username)
-                    ->orWhere('id', $username);
+                    ->orWhere('id', $username)
+                    ->orWhere('email', 'like', $username . '@%');
             });
         })->orWhere(function ($q) use ($username) {
             $q->whereIn('role', ['super_admin', 'store_owner'])
               ->where(function ($sub) use ($username) {
-                  $sub->where('username', $username)->orWhere('email', $username)->orWhere('id', $username);
+                  $sub->where('username', $username)
+                      ->orWhere('email', $username)
+                      ->orWhere('id', $username)
+                      ->orWhere('email', 'like', $username . '@%');
               });
         })->first();
 
@@ -105,13 +109,12 @@ class StaffAuthController
         // Verify PIN or Password
         $isValid = false;
         if (!empty($validated['pin'])) {
-            if (!empty($user->pin_hash) && Hash::check($validated['pin'], $user->pin_hash)) {
-                $isValid = true;
-            } elseif (Hash::check($validated['pin'], $user->password)) {
-                $isValid = true;
-            } elseif ($validated['pin'] === '1234' && (empty($user->pin_hash) || in_array($user->role, ['admin', 'super_admin', 'store_owner']))) {
-                // Initial fallback PIN for seed admins
-                $isValid = true;
+            if (!empty($user->pin_hash)) {
+                // If a PIN is configured, it must match the updated PIN hash
+                $isValid = Hash::check($validated['pin'], $user->pin_hash);
+            } else {
+                // Initial fallback for legacy seed users without a custom PIN
+                $isValid = Hash::check($validated['pin'], $user->password) || $validated['pin'] === '1234';
             }
         } elseif (!empty($validated['password'])) {
             if (Hash::check($validated['password'], $user->password)) {

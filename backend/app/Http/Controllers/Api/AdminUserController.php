@@ -132,6 +132,10 @@ class AdminUserController
         }
         unset($validated['pin']);
 
+        if (empty($user->username) && empty($validated['username'])) {
+            $validated['username'] = explode('@', $user->email)[0];
+        }
+
         $oldValues = $user->only(['name', 'email', 'role', 'permissions', 'store_id', 'username']);
         $user->update($validated);
 
