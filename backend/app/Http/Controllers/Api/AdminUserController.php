@@ -136,12 +136,35 @@ class AdminUserController
             $validated['username'] = explode('@', $user->email)[0];
         }
 
+        // Updating a user in admin panel clears any active lockout and resets failed attempts
+        $validated['failed_login_attempts'] = 0;
+        $validated['locked_until'] = null;
+
         $oldValues = $user->only(['name', 'email', 'role', 'permissions', 'store_id', 'username']);
         $user->update($validated);
 
         AuditLog::log('update_user', 'User', (string)$user->id, $oldValues, $user->only(['name', 'email', 'role', 'permissions', 'store_id', 'username']), $user->store_id);
 
         return response()->json($user->fresh());
+    }
+
+    public function unlock(Request $request, string $id): JsonResponse
+    {
+        $currentUser = $request->user();
+        $user = User::findOrFail($id);
+
+        $user->update([
+            'failed_login_attempts' => 0,
+            'locked_until' => null,
+        ]);
+
+        AuditLog::log('unlock_user', 'User', (string)$user->id, null, ['unlocked_by' => $currentUser->email], $user->store_id);
+
+        return response()->json([
+            'success' => true,
+            'message' => "User account '{$user->name}' unlocked successfully.",
+            'user' => $user->fresh(),
+        ]);
     }
 
     public function destroy(Request $request, string $id): JsonResponse

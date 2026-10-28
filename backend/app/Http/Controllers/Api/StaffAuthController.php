@@ -98,9 +98,9 @@ class StaffAuthController
 
         // Check Lockout
         if ($user->locked_until && $user->locked_until->isFuture()) {
-            $remainingMinutes = now()->diffInMinutes($user->locked_until) + 1;
+            $remainingMinutes = (int) ceil(now()->diffInSeconds($user->locked_until) / 60);
             return response()->json([
-                'message' => "Account is temporarily locked. Try again in {$remainingMinutes} minute(s).",
+                'message' => "Account is temporarily locked due to consecutive failed attempts. Try again in {$remainingMinutes} minute(s) or request Admin Unlock.",
                 'locked' => true,
                 'locked_until' => $user->locked_until->toIso8601String(),
             ], 423);

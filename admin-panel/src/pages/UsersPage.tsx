@@ -16,6 +16,8 @@ import {
   Pencil,
   Trash2,
   Building2,
+  Lock,
+  LockOpen,
 } from "lucide-react";
 
 export const UsersPage: React.FC = () => {
@@ -260,6 +262,16 @@ export const UsersPage: React.FC = () => {
     }
   };
 
+  const handleUnlockUser = async (u: User) => {
+    try {
+      await api.post(`/admin/users/${u.id}/unlock`);
+      alert(`User account '${u.name}' unlocked successfully. PIN/Password login is now active.`);
+      await fetchUsers();
+    } catch (err: any) {
+      alert(err?.message || "Failed to unlock user account.");
+    }
+  };
+
   const handleForceLogout = async (u: User) => {
     if (!confirm(`Are you sure you want to terminate all active sessions for ${u.name}?`)) return;
     try {
@@ -458,10 +470,30 @@ export const UsersPage: React.FC = () => {
                             🔒 2FA
                           </span>
                         )}
+                        {u.locked_until && new Date(u.locked_until) > new Date() && (
+                          <span
+                            title={`Account locked until ${new Date(u.locked_until).toLocaleTimeString()} due to failed login attempts`}
+                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 dark:bg-rose-950/60 text-rose-700 dark:text-rose-400 animate-pulse"
+                          >
+                            <Lock className="w-2.5 h-2.5" />
+                            <span>Locked</span>
+                          </span>
+                        )}
                       </div>
                     </td>
                     <td className="px-4 py-3 text-right">
                       <div className="flex items-center justify-end gap-1.5">
+                        {/* Unlock Account Button */}
+                        {u.locked_until && new Date(u.locked_until) > new Date() && (
+                          <button
+                            onClick={() => handleUnlockUser(u)}
+                            title="Unlock Account (Clear Lockout & Reset Failed Attempts)"
+                            className="p-1.5 text-rose-600 hover:text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 rounded-lg cursor-pointer transition-colors"
+                          >
+                            <LockOpen className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+
                         {/* Impersonation action for Super Admin */}
                         {currentUser?.role === "super_admin" && u.id !== currentUser.id && (
                           <button
@@ -617,6 +649,7 @@ export const UsersPage: React.FC = () => {
                 <input
                   type="password"
                   minLength={6}
+                  autoComplete="new-password"
                   value={newPassword}
                   onChange={(e) => setNewPassword(e.target.value)}
                   placeholder="Leave blank to keep unchanged (Min 6 chars)"
@@ -632,6 +665,7 @@ export const UsersPage: React.FC = () => {
                   type="text"
                   maxLength={6}
                   pattern="[0-9]{4,6}"
+                  autoComplete="off"
                   value={newPin}
                   onChange={(e) => setNewPin(e.target.value.replace(/\D/g, ""))}
                   placeholder="e.g. 1234 (Used on terminal numpad)"
@@ -764,6 +798,7 @@ export const UsersPage: React.FC = () => {
                   <input
                     type="password"
                     minLength={6}
+                    autoComplete="new-password"
                     value={editFormData.password || ""}
                     onChange={(e) => setEditFormData({ ...editFormData, password: e.target.value })}
                     placeholder="Leave empty to keep current"
@@ -784,6 +819,7 @@ export const UsersPage: React.FC = () => {
                     type="text"
                     maxLength={6}
                     pattern="[0-9]{4,6}"
+                    autoComplete="off"
                     value={editFormData.pin || ""}
                     onChange={(e) => setEditFormData({ ...editFormData, pin: e.target.value.replace(/\D/g, "") })}
                     placeholder="Leave blank to keep unchanged (e.g. 5678)"
@@ -895,6 +931,7 @@ export const UsersPage: React.FC = () => {
                     type="password"
                     required
                     minLength={6}
+                    autoComplete="new-password"
                     value={newUser.password}
                     onChange={(e) => setNewUser({ ...newUser, password: e.target.value })}
                     placeholder="Min 6 characters"
@@ -910,6 +947,7 @@ export const UsersPage: React.FC = () => {
                     type="text"
                     maxLength={6}
                     pattern="[0-9]{4,6}"
+                    autoComplete="off"
                     value={newUser.pin}
                     onChange={(e) => setNewUser({ ...newUser, pin: e.target.value.replace(/\D/g, "") })}
                     placeholder="e.g. 1234 (4-6 digits)"

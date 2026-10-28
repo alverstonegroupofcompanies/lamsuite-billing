@@ -210,6 +210,7 @@ Route::middleware(['auth:sanctum', 'session.timeout', 'ip.allowlist', 'scope.sto
     Route::delete('/users/{id}', [AdminUserController::class, 'destroy'])->middleware('rbac:users,delete');
     Route::post('/users/{id}/toggle-biometric', [AdminUserController::class, 'toggleBiometric'])->middleware('rbac:users,edit');
     Route::post('/users/{id}/force-logout', [AdminUserController::class, 'forceLogout'])->middleware('rbac:users,edit');
+    Route::post('/users/{id}/unlock', [AdminUserController::class, 'unlock'])->middleware('rbac:users,edit');
 
     // Module 6: Master Data
     Route::get('/products', [AdminMasterController::class, 'products'])->middleware('rbac:masters,view');
