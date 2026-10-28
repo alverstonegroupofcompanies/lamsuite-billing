@@ -37,6 +37,7 @@ export interface StoreDeviceProfile {
   is_active: boolean;
   disabled_reason?: string;
   admin_staff_present?: boolean;
+  device_token?: string;
 }
 
 export interface FirstAdminInput {

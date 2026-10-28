@@ -326,7 +326,6 @@ export const StaffLoginPage: React.FC<StaffLoginPageProps> = ({
                   </p>
                 </div>
               </div>
-              </div>
             ) : (
               staffList.map((user, idx) => {
                 const isSelected = selectedUser?.id === user.id;
