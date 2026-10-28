@@ -83,7 +83,12 @@ export const StaffLoginPage: React.FC<StaffLoginPageProps> = ({
     const list = await staffAuthService.listActiveStaff(targetStoreId, activeStore || undefined);
     setStaffList(list);
     if (list.length > 0) {
-      setSelectedUser(list[0]);
+      // Prefer selecting an unlocked operator who has a PIN configured
+      const preferred =
+        list.find((u) => u.pin_hash && (!u.locked_until || Date.now() >= u.locked_until)) ||
+        list.find((u) => !u.locked_until || Date.now() >= u.locked_until) ||
+        list[0];
+      setSelectedUser(preferred);
     } else {
       setSelectedUser(null);
       setIsPasswordMode(true);

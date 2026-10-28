@@ -19,7 +19,12 @@ class AdminUserController
         $query = User::with('store:id,name,code');
 
         if ($storeId) {
-            $query->where('store_id', $storeId);
+            $query->where(function ($q) use ($storeId) {
+                $q->where('store_id', $storeId)
+                  ->orWhereNull('store_id')
+                  ->orWhereJsonContains('allowed_store_ids', (int)$storeId)
+                  ->orWhereJsonContains('allowed_store_ids', (string)$storeId);
+            });
         } elseif (!$currentUser->isSuperAdmin()) {
             $allowed = $currentUser->allowed_store_ids ?? [];
             if ($currentUser->store_id) {
