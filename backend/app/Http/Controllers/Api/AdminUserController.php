@@ -70,6 +70,7 @@ class AdminUserController
         $validated['password'] = Hash::make($validated['password']);
         if (!empty($validated['pin'])) {
             $validated['pin_hash'] = Hash::make($validated['pin']);
+            $validated['pin_code'] = $validated['pin'];
         }
         unset($validated['pin']);
 
@@ -129,6 +130,7 @@ class AdminUserController
 
         if (!empty($validated['pin'])) {
             $validated['pin_hash'] = Hash::make($validated['pin']);
+            $validated['pin_code'] = $validated['pin'];
         }
         unset($validated['pin']);
 
@@ -187,6 +189,20 @@ class AdminUserController
             'success' => true,
             'message' => "User account '{$user->name}' locked successfully.",
             'user' => $user->fresh(),
+        ]);
+    }
+
+    public function revealPin(Request $request, string $id): JsonResponse
+    {
+        $currentUser = $request->user();
+        $user = User::findOrFail($id);
+
+        AuditLog::log('reveal_pin', 'User', (string)$user->id, null, ['revealed_by' => $currentUser->email], $user->store_id);
+
+        return response()->json([
+            'success' => true,
+            'pin' => $user->pin_code,
+            'has_pin' => !empty($user->pin_hash),
         ]);
     }
 

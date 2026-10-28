@@ -212,6 +212,7 @@ Route::middleware(['auth:sanctum', 'session.timeout', 'ip.allowlist', 'scope.sto
     Route::post('/users/{id}/force-logout', [AdminUserController::class, 'forceLogout'])->middleware('rbac:users,edit');
     Route::post('/users/{id}/unlock', [AdminUserController::class, 'unlock'])->middleware('rbac:users,edit');
     Route::post('/users/{id}/lock', [AdminUserController::class, 'lock'])->middleware('rbac:users,edit');
+    Route::get('/users/{id}/reveal-pin', [AdminUserController::class, 'revealPin'])->middleware('rbac:users,view');
 
     // Module 6: Master Data
     Route::get('/products', [AdminMasterController::class, 'products'])->middleware('rbac:masters,view');

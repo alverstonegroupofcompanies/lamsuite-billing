@@ -309,6 +309,7 @@ class AdminAuthController
 
         if (!empty($validated['new_pin'])) {
             $updates['pin_hash'] = Hash::make($validated['new_pin']);
+            $updates['pin_code'] = $validated['new_pin'];
         }
 
         $targetUser->update($updates);

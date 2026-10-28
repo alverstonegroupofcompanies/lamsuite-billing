@@ -20,6 +20,7 @@ class User extends Authenticatable
         'username',
         'password',
         'pin_hash',
+        'pin_code',
         'must_change_password',
         'role',
         'permissions',
@@ -38,6 +39,7 @@ class User extends Authenticatable
     protected $hidden = [
         'password',
         'pin_hash',
+        'pin_code',
         'remember_token',
         'totp_secret',
     ];
@@ -45,6 +47,7 @@ class User extends Authenticatable
     protected $casts = [
         'email_verified_at' => 'datetime',
         'password' => 'hashed',
+        'pin_code' => 'encrypted',
         'must_change_password' => 'boolean',
         'permissions' => 'array',
         'enabled_menus' => 'array',

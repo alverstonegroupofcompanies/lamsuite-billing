@@ -19,6 +19,8 @@ import {
   Lock,
   LockOpen,
   ShieldCheck,
+  Eye,
+  EyeOff,
 } from "lucide-react";
 
 export const UsersPage: React.FC = () => {
@@ -79,6 +81,38 @@ export const UsersPage: React.FC = () => {
   const [passwordResetUser, setPasswordResetUser] = useState<User | null>(null);
   const [newPassword, setNewPassword] = useState("");
   const [newPin, setNewPin] = useState("");
+  const [showNewPin, setShowNewPin] = useState(false);
+  const [showNewPassword, setShowNewPassword] = useState(false);
+
+  // Reveal PIN state
+  const [revealedPins, setRevealedPins] = useState<Record<number, string | null>>({});
+  const [isRevealingPin, setIsRevealingPin] = useState<Record<number, boolean>>({});
+
+  const handleToggleRevealPin = async (userId: number) => {
+    if (revealedPins[userId] !== undefined) {
+      const updated = { ...revealedPins };
+      delete updated[userId];
+      setRevealedPins(updated);
+      return;
+    }
+    setIsRevealingPin((prev) => ({ ...prev, [userId]: true }));
+    try {
+      const res = await api.get<{ success: boolean; pin: string | null; has_pin: boolean }>(
+        `/admin/users/${userId}/reveal-pin`
+      );
+      if (res.pin) {
+        setRevealedPins((prev) => ({ ...prev, [userId]: res.pin }));
+      } else if (res.has_pin) {
+        alert("This PIN was saved under a legacy one-way hash. Reset or update the PIN once to make it viewable.");
+      } else {
+        alert("No Quick PIN configured for this user.");
+      }
+    } catch (err: any) {
+      alert(err?.message || "Failed to reveal PIN.");
+    } finally {
+      setIsRevealingPin((prev) => ({ ...prev, [userId]: false }));
+    }
+  };
 
   // Impersonation state
   const [impersonateTarget, setImpersonateTarget] = useState<User | null>(null);
@@ -458,11 +492,34 @@ export const UsersPage: React.FC = () => {
                       <div className="flex items-center justify-center gap-2 text-[11px]">
                         {u.has_pin ? (
                           <span
-                            title="Quick PIN is active on POS terminal"
-                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-400"
+                            title="Quick PIN is active on POS terminal. Click eye icon to view."
+                            className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800"
                           >
                             <KeyRound className="w-2.5 h-2.5" />
-                            <span>PIN Set</span>
+                            {revealedPins[u.id] ? (
+                              <span className="font-mono tracking-widest font-extrabold text-emerald-900 dark:text-emerald-100 bg-white/70 dark:bg-black/30 px-1 rounded-xs">
+                                {revealedPins[u.id]}
+                              </span>
+                            ) : (
+                              <span>PIN Set</span>
+                            )}
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleToggleRevealPin(u.id);
+                              }}
+                              title={revealedPins[u.id] ? "Hide PIN" : "See PIN"}
+                              className="p-0.5 hover:text-emerald-950 dark:hover:text-emerald-100 cursor-pointer"
+                            >
+                              {isRevealingPin[u.id] ? (
+                                <RefreshCw className="w-2.5 h-2.5 animate-spin" />
+                              ) : revealedPins[u.id] ? (
+                                <EyeOff className="w-2.5 h-2.5" />
+                              ) : (
+                                <Eye className="w-2.5 h-2.5" />
+                              )}
+                            </button>
                           </span>
                         ) : (
                           <span
@@ -673,10 +730,39 @@ export const UsersPage: React.FC = () => {
 
             <form onSubmit={handleResetCredentials} className="space-y-4 text-xs">
               <div className="text-[11px] px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700/60 flex items-center justify-between">
-                <span className="text-slate-500">Current Quick PIN:</span>
-                <span className={passwordResetUser.has_pin ? "font-bold text-emerald-600 dark:text-emerald-400" : "font-bold text-amber-600 dark:text-amber-400"}>
-                  {passwordResetUser.has_pin ? "✓ Active / Set" : "⚠️ None (Password only)"}
-                </span>
+                <span className="text-slate-500 font-medium">Current Quick PIN:</span>
+                <div className="flex items-center gap-2">
+                  <span className={passwordResetUser.has_pin ? "font-bold text-emerald-600 dark:text-emerald-400 font-mono" : "font-bold text-amber-600 dark:text-amber-400"}>
+                    {revealedPins[passwordResetUser.id] ? (
+                      <span className="text-sm bg-emerald-100 dark:bg-emerald-950 px-2 py-0.5 rounded-md text-emerald-800 dark:text-emerald-200 border border-emerald-300 dark:border-emerald-700 font-extrabold tracking-widest">
+                        {revealedPins[passwordResetUser.id]}
+                      </span>
+                    ) : passwordResetUser.has_pin ? (
+                      "•••• (Active / Set)"
+                    ) : (
+                      "⚠️ None (Password only)"
+                    )}
+                  </span>
+                  {passwordResetUser.has_pin && (
+                    <button
+                      type="button"
+                      onClick={() => handleToggleRevealPin(passwordResetUser.id)}
+                      className="px-2.5 py-1 text-[10px] font-bold rounded-lg bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 text-slate-700 dark:text-slate-200 hover:bg-slate-100 flex items-center gap-1 cursor-pointer shadow-2xs"
+                    >
+                      {revealedPins[passwordResetUser.id] ? (
+                        <>
+                          <EyeOff className="w-3 h-3" />
+                          <span>Hide PIN</span>
+                        </>
+                      ) : (
+                        <>
+                          <Eye className="w-3 h-3" />
+                          <span>See PIN</span>
+                        </>
+                      )}
+                    </button>
+                  )}
+                </div>
               </div>
 
               <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700/60 flex items-center justify-between">
@@ -732,31 +818,49 @@ export const UsersPage: React.FC = () => {
                 <label className="block font-medium text-slate-700 dark:text-slate-300 mb-1">
                   New Password (Optional if PIN provided)
                 </label>
-                <input
-                  type="password"
-                  minLength={6}
-                  autoComplete="new-password"
-                  value={newPassword}
-                  onChange={(e) => setNewPassword(e.target.value)}
-                  placeholder="Leave blank to keep unchanged (Min 6 chars)"
-                  className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
-                />
+                <div className="relative">
+                  <input
+                    type={showNewPassword ? "text" : "password"}
+                    minLength={6}
+                    autoComplete="new-password"
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                    placeholder="Leave blank to keep unchanged (Min 6 chars)"
+                    className="w-full px-3 py-2 pr-10 rounded-xl border border-slate-200 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowNewPassword(!showNewPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 cursor-pointer"
+                  >
+                    {showNewPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
               </div>
 
               <div>
                 <label className="block font-medium text-slate-700 dark:text-slate-300 mb-1">
                   New Quick PIN for POS Terminal (4-6 Digits)
                 </label>
-                <input
-                  type="text"
-                  maxLength={6}
-                  pattern="[0-9]{4,6}"
-                  autoComplete="off"
-                  value={newPin}
-                  onChange={(e) => setNewPin(e.target.value.replace(/\D/g, ""))}
-                  placeholder="e.g. 1234 (Used on terminal numpad)"
-                  className="w-full px-3 py-2 rounded-xl font-mono border border-slate-200 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
-                />
+                <div className="relative">
+                  <input
+                    type={showNewPin ? "text" : "password"}
+                    maxLength={6}
+                    pattern="[0-9]{4,6}"
+                    autoComplete="off"
+                    value={newPin}
+                    onChange={(e) => setNewPin(e.target.value.replace(/\D/g, ""))}
+                    placeholder="e.g. 5000 (Used on terminal numpad)"
+                    className="w-full px-3 py-2 pr-10 rounded-xl font-mono border border-slate-200 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowNewPin(!showNewPin)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 cursor-pointer"
+                  >
+                    {showNewPin ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
                 <span className="text-[10px] text-slate-400 mt-1 block">
                   Quick PIN allows instant login from the terminal numpad without typing full password.
                 </span>
@@ -897,9 +1001,29 @@ export const UsersPage: React.FC = () => {
                     <label className="block font-medium text-slate-700 dark:text-slate-300">
                       Change Quick PIN (Optional, 4-6 Digits)
                     </label>
-                    <span className={`text-[10px] font-bold ${editingUser.has_pin ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-400'}`}>
-                      {editingUser.has_pin ? '✓ Current PIN Active' : 'No PIN Set'}
-                    </span>
+                    <div className="flex items-center gap-1.5">
+                      <span className={`text-[10px] font-bold ${editingUser.has_pin ? 'text-emerald-600 dark:text-emerald-400 font-mono' : 'text-slate-400'}`}>
+                        {revealedPins[editingUser.id] ? (
+                          <span className="bg-emerald-100 dark:bg-emerald-950 px-1.5 py-0.5 rounded-sm text-emerald-800 dark:text-emerald-200 tracking-wider">
+                            PIN: {revealedPins[editingUser.id]}
+                          </span>
+                        ) : editingUser.has_pin ? (
+                          '✓ Current PIN Active'
+                        ) : (
+                          'No PIN Set'
+                        )}
+                      </span>
+                      {editingUser.has_pin && (
+                        <button
+                          type="button"
+                          onClick={() => handleToggleRevealPin(editingUser.id)}
+                          title={revealedPins[editingUser.id] ? "Hide PIN" : "See PIN"}
+                          className="text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 cursor-pointer"
+                        >
+                          {revealedPins[editingUser.id] ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                        </button>
+                      )}
+                    </div>
                   </div>
                   <input
                     type="text"
