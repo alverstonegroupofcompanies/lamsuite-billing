@@ -56,11 +56,17 @@ class User extends Authenticatable
 
     protected $appends = [
         'has_pin',
+        'is_locked',
     ];
 
     public function getHasPinAttribute(): bool
     {
         return !empty($this->pin_hash);
+    }
+
+    public function getIsLockedAttribute(): bool
+    {
+        return !empty($this->locked_until) && $this->locked_until->isFuture();
     }
 
     public function store(): BelongsTo

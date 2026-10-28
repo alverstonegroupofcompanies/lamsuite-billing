@@ -470,10 +470,10 @@ export const UsersPage: React.FC = () => {
                             🔒 2FA
                           </span>
                         )}
-                        {u.locked_until && new Date(u.locked_until) > new Date() && (
+                        {(u.is_locked || (u.locked_until && new Date(u.locked_until) > new Date())) && (
                           <span
-                            title={`Account locked until ${new Date(u.locked_until).toLocaleTimeString()} due to failed login attempts`}
-                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 dark:bg-rose-950/60 text-rose-700 dark:text-rose-400 animate-pulse"
+                            title={`Account locked until ${u.locked_until ? new Date(u.locked_until).toLocaleTimeString() : 'admin unlock'} due to failed login attempts`}
+                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 dark:bg-rose-950/60 text-rose-700 dark:text-rose-400 animate-pulse border border-rose-300 dark:border-rose-800"
                           >
                             <Lock className="w-2.5 h-2.5" />
                             <span>Locked</span>
@@ -484,13 +484,14 @@ export const UsersPage: React.FC = () => {
                     <td className="px-4 py-3 text-right">
                       <div className="flex items-center justify-end gap-1.5">
                         {/* Unlock Account Button */}
-                        {u.locked_until && new Date(u.locked_until) > new Date() && (
+                        {(u.is_locked || (u.locked_until && new Date(u.locked_until) > new Date())) && (
                           <button
                             onClick={() => handleUnlockUser(u)}
-                            title="Unlock Account (Clear Lockout & Reset Failed Attempts)"
-                            className="p-1.5 text-rose-600 hover:text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 rounded-lg cursor-pointer transition-colors"
+                            title="Account Locked! Click to Unlock & Reset Failed Attempts"
+                            className="px-2.5 py-1 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-lg text-[10px] flex items-center gap-1 cursor-pointer shadow-xs transition-colors"
                           >
                             <LockOpen className="w-3.5 h-3.5" />
+                            <span>Unlock</span>
                           </button>
                         )}
 
@@ -641,6 +642,25 @@ export const UsersPage: React.FC = () => {
                   {passwordResetUser.has_pin ? "✓ Active / Set" : "⚠️ None (Password only)"}
                 </span>
               </div>
+
+              {(passwordResetUser.is_locked || (passwordResetUser.locked_until && new Date(passwordResetUser.locked_until) > new Date())) && (
+                <div className="p-3 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 rounded-xl flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-rose-700 dark:text-rose-400">
+                    <Lock className="w-4 h-4 shrink-0" />
+                    <span className="font-semibold text-xs">Account is currently locked out</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      await handleUnlockUser(passwordResetUser);
+                      setPasswordResetUser(null);
+                    }}
+                    className="px-2.5 py-1 bg-rose-600 hover:bg-rose-700 text-white text-[11px] font-bold rounded-lg cursor-pointer"
+                  >
+                    Unlock Now
+                  </button>
+                </div>
+              )}
 
               <div>
                 <label className="block font-medium text-slate-700 dark:text-slate-300 mb-1">

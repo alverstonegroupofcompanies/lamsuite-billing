@@ -24,6 +24,7 @@ export interface User {
   max_failed_logins?: number;
   failed_login_attempts?: number;
   locked_until?: string | null;
+  is_locked?: boolean;
   has_pin?: boolean;
   store?: Store;
 }
