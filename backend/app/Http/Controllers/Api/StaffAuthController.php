@@ -113,8 +113,8 @@ class StaffAuthController
                 // If a PIN is configured, it must match the updated PIN hash
                 $isValid = Hash::check($validated['pin'], $user->pin_hash);
             } else {
-                // Initial fallback for legacy seed users without a custom PIN
-                $isValid = Hash::check($validated['pin'], $user->password) || $validated['pin'] === '1234';
+                // No Quick PIN is configured for this user; reject any PIN attempt (never allow 1234 fallback)
+                $isValid = false;
             }
         } elseif (!empty($validated['password'])) {
             if (Hash::check($validated['password'], $user->password)) {
@@ -234,7 +234,7 @@ class StaffAuthController
                 'full_name' => $u->name,
                 'role' => $u->role,
                 'password_hash' => $u->password,
-                'pin_hash' => $u->pin_hash ?: $u->password, // Salted bcrypt hash
+                'pin_hash' => $u->pin_hash ?: null, // Salted bcrypt hash
                 'is_active' => true,
                 'must_change_password' => (bool)$u->must_change_password,
                 'biometric_registered' => (bool)$u->is_biometric_enabled,

@@ -141,7 +141,7 @@ class AdminUserController
 
         AuditLog::log('update_user', 'User', (string)$user->id, $oldValues, $user->only(['name', 'email', 'role', 'permissions', 'store_id', 'username']), $user->store_id);
 
-        return response()->json($user);
+        return response()->json($user->fresh());
     }
 
     public function destroy(Request $request, string $id): JsonResponse

@@ -22,6 +22,7 @@ export interface User {
   is_biometric_enabled?: boolean;
   idle_timeout_minutes: number;
   max_failed_logins?: number;
+  has_pin?: boolean;
   store?: Store;
 }
 

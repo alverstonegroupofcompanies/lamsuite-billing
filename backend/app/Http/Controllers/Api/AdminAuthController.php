@@ -319,7 +319,11 @@ class AdminAuthController
             'pin_changed' => !empty($validated['new_pin']),
         ], $targetUser->store_id);
 
-        return response()->json(['success' => true, 'message' => 'Password / Quick PIN reset successfully.']);
+        return response()->json([
+            'success' => true,
+            'message' => 'Password / Quick PIN reset successfully.',
+            'user' => $targetUser->fresh(),
+        ]);
     }
 
     /**

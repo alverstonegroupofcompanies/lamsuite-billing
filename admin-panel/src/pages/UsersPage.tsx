@@ -43,7 +43,7 @@ export const UsersPage: React.FC = () => {
     username: "",
     email: "",
     password: "password123",
-    pin: "1234",
+    pin: "",
     role: "manager",
     store_id: "",
     idle_timeout_minutes: 15,
@@ -126,8 +126,13 @@ export const UsersPage: React.FC = () => {
         idle_timeout_minutes: newUser.idle_timeout_minutes,
         max_failed_logins: newUser.max_failed_logins,
       };
-      if (newUser.pin) {
-        payload.pin = newUser.pin;
+      if (newUser.pin && newUser.pin.trim()) {
+        const trimmed = newUser.pin.trim();
+        if (trimmed.length < 4 || trimmed.length > 6) {
+          alert("Quick PIN must be between 4 and 6 numeric digits.");
+          return;
+        }
+        payload.pin = trimmed;
       }
 
       await api.post("/admin/users", payload);
@@ -137,7 +142,7 @@ export const UsersPage: React.FC = () => {
         username: "",
         email: "",
         password: "password123",
-        pin: "1234",
+        pin: "",
         role: "manager",
         store_id: "",
         idle_timeout_minutes: 15,
@@ -180,7 +185,12 @@ export const UsersPage: React.FC = () => {
         payload.password = editFormData.password.trim();
       }
       if (editFormData.pin && editFormData.pin.trim()) {
-        payload.pin = editFormData.pin.trim();
+        const trimmedPin = editFormData.pin.trim();
+        if (trimmedPin.length < 4 || trimmedPin.length > 6) {
+          alert("Quick PIN must be between 4 and 6 numeric digits.");
+          return;
+        }
+        payload.pin = trimmedPin;
       }
 
       await api.put(`/admin/users/${editingUser.id}`, payload);
@@ -220,11 +230,16 @@ export const UsersPage: React.FC = () => {
       alert("Please provide at least a new password or a new PIN.");
       return;
     }
+    const cleanPin = newPin.trim();
+    if (cleanPin && (cleanPin.length < 4 || cleanPin.length > 6)) {
+      alert("Quick PIN must be between 4 and 6 numeric digits.");
+      return;
+    }
     try {
       await api.post("/admin/password-reset", {
         user_id: passwordResetUser.id,
         new_password: newPassword.trim() || undefined,
-        new_pin: newPin.trim() || undefined,
+        new_pin: cleanPin || undefined,
       });
       alert(`Credentials for '${passwordResetUser.name}' updated successfully.`);
       setPasswordResetUser(null);
@@ -411,6 +426,23 @@ export const UsersPage: React.FC = () => {
                     </td>
                     <td className="px-4 py-3 text-center">
                       <div className="flex items-center justify-center gap-2 text-[11px]">
+                        {u.has_pin ? (
+                          <span
+                            title="Quick PIN is active on POS terminal"
+                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-400"
+                          >
+                            <KeyRound className="w-2.5 h-2.5" />
+                            <span>PIN Set</span>
+                          </span>
+                        ) : (
+                          <span
+                            title="No Quick PIN configured (Login requires Password)"
+                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400"
+                          >
+                            <KeyRound className="w-2.5 h-2.5" />
+                            <span>No PIN</span>
+                          </span>
+                        )}
                         <span title="Idle timeout">⏱️ {u.idle_timeout_minutes}m</span>
                         <span
                           title={u.is_biometric_enabled ? "Biometric enabled" : "Biometric disabled"}
@@ -571,6 +603,13 @@ export const UsersPage: React.FC = () => {
             </div>
 
             <form onSubmit={handleResetCredentials} className="space-y-4 text-xs">
+              <div className="text-[11px] px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700/60 flex items-center justify-between">
+                <span className="text-slate-500">Current Quick PIN:</span>
+                <span className={passwordResetUser.has_pin ? "font-bold text-emerald-600 dark:text-emerald-400" : "font-bold text-amber-600 dark:text-amber-400"}>
+                  {passwordResetUser.has_pin ? "✓ Active / Set" : "⚠️ None (Password only)"}
+                </span>
+              </div>
+
               <div>
                 <label className="block font-medium text-slate-700 dark:text-slate-300 mb-1">
                   New Password (Optional if PIN provided)
@@ -733,16 +772,21 @@ export const UsersPage: React.FC = () => {
                 </div>
 
                 <div>
-                  <label className="block font-medium text-slate-700 dark:text-slate-300 mb-1">
-                    Change Quick PIN (Optional, 4-6 Digits)
-                  </label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block font-medium text-slate-700 dark:text-slate-300">
+                      Change Quick PIN (Optional, 4-6 Digits)
+                    </label>
+                    <span className={`text-[10px] font-bold ${editingUser.has_pin ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-400'}`}>
+                      {editingUser.has_pin ? '✓ Current PIN Active' : 'No PIN Set'}
+                    </span>
+                  </div>
                   <input
                     type="text"
                     maxLength={6}
                     pattern="[0-9]{4,6}"
                     value={editFormData.pin || ""}
                     onChange={(e) => setEditFormData({ ...editFormData, pin: e.target.value.replace(/\D/g, "") })}
-                    placeholder="e.g. 1234"
+                    placeholder="Leave blank to keep unchanged (e.g. 5678)"
                     className="w-full px-3 py-2 rounded-xl font-mono border border-slate-200 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                   />
                 </div>

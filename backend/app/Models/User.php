@@ -54,6 +54,15 @@ class User extends Authenticatable
         'locked_until' => 'datetime',
     ];
 
+    protected $appends = [
+        'has_pin',
+    ];
+
+    public function getHasPinAttribute(): bool
+    {
+        return !empty($this->pin_hash);
+    }
+
     public function store(): BelongsTo
     {
         return $this->belongsTo(Store::class);
