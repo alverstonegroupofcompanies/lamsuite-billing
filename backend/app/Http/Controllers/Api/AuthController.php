@@ -34,7 +34,7 @@ class AuthController
         $deviceUuid = (string)$request->input('device_uuid', '');
         $deviceName = (string)$request->input('device_name', 'Counter Station');
         $isHub = (bool)$request->input('is_hub', false);
-        $clientIp = $request->ip() ?: '127.0.0.1';
+        $clientIp = substr($request->ip() ?: '127.0.0.1', 0, 45);
 
         // 1. Basic format / requirement validation
         if (empty(trim($deviceUuid))) {
@@ -173,22 +173,18 @@ class AuthController
             ]
         );
 
-        // 8. Persist counter record
-        $counter = Counter::updateOrCreate(
-            ['device_uuid' => $deviceUuid, 'store_id' => $store->id],
-            [
-                'counter_code' => $counterCode,
-                'counter_name' => $deviceName,
-                'device_name' => $deviceName,
-                'location_name' => $request->input('location_name', 'Workstation Desk'),
-                'is_hub' => $isHub,
-                'status' => $status,
-                'ip_address' => $clientIp,
-                'device_token' => $rawDeviceToken,
-                'device_token_hash' => $deviceTokenHash,
-                'approved_at' => $status === 'active' ? now() : null,
-                'last_seen_at' => now(),
-            ]
+        // 8. Persist counter record with conflict-free matching
+        $counter = $this->resolveCounterForDevice(
+            $store,
+            $deviceUuid,
+            $deviceName,
+            $counterCode,
+            $request->input('location_name', 'Workstation Desk'),
+            $isHub,
+            $status,
+            $clientIp,
+            $rawDeviceToken,
+            $deviceTokenHash
         );
 
         $device->update(['counter_id' => (string)$counter->id]);
@@ -214,7 +210,7 @@ class AuthController
             [
                 'device_uuid' => $deviceUuid,
                 'device_name' => $deviceName,
-                'counter_code' => $counterCode,
+                'counter_code' => $counter->counter_code,
                 'status' => $status,
                 'key_prefix' => $activationKey->key_prefix,
                 'registered_via' => 'activation_key',
@@ -230,21 +226,21 @@ class AuthController
             'success' => true,
             'device_id' => 'dev_' . $device->id,
             'counter_id' => 'cntr_' . $counter->id,
-            'counter_name' => $deviceName,
-            'counter_code' => $counterCode,
+            'counter_name' => $counter->counter_name,
+            'counter_code' => $counter->counter_code,
             'store_id' => (string)$store->id,
             'store_name' => $store->name,
             'store_code' => $store->code,
-            'is_hub' => $isHub,
+            'is_hub' => (bool)$counter->is_hub,
             'device_token' => $rawDeviceToken,
             'refresh_token' => $rawRefreshToken,
             'license_plan' => $store->license_plan ?? 'Enterprise Retail & Pharmacy Chain',
             'license_status' => $store->is_active ? 'active' : 'revoked',
-            'license_expires_at' => $store->license_expires_at ? $store->license_expires_at->toDateString() : '2027-12-31',
+            'license_expires_at' => $store->license_expires_at ? ($store->license_expires_at instanceof \Carbon\CarbonInterface ? $store->license_expires_at->toDateString() : (string)$store->license_expires_at) : '2027-12-31',
             'status' => $status,
             'requires_approval' => $status === 'pending_approval',
             'admin_staff_present' => $hasAdminStaff,
-            'registered_at' => $device->created_at->toIso8601String(),
+            'registered_at' => $device->created_at ? $device->created_at->toIso8601String() : now()->toIso8601String(),
         ]);
     }
 
@@ -327,6 +323,8 @@ class AuthController
         $num = preg_replace('/[^0-9]/', '', $deviceName);
         $counterCode = $num ? 'C' . str_pad($num, 2, '0', STR_PAD_LEFT) : 'C01';
 
+        $clientIp = substr($request->ip() ?: '127.0.0.1', 0, 45);
+
         $device = Device::updateOrCreate(
             ['device_uuid' => $validated['device_uuid']],
             [
@@ -338,27 +336,23 @@ class AuthController
                 'status' => 'active',
                 'approved_at' => now(),
                 'approved_by' => $user->id,
-                'ip_address' => $request->ip(),
+                'ip_address' => $clientIp,
                 'last_seen_at' => now(),
             ]
         );
 
-        $counter = Counter::updateOrCreate(
-            ['device_uuid' => $validated['device_uuid'], 'store_id' => $store->id],
-            [
-                'counter_code' => $counterCode,
-                'counter_name' => $deviceName,
-                'device_name' => $deviceName,
-                'location_name' => 'Owner Provisioned Counter',
-                'is_hub' => (bool)($validated['is_hub'] ?? false),
-                'status' => 'active',
-                'approved_at' => now(),
-                'approved_by' => $user->id,
-                'ip_address' => $request->ip(),
-                'device_token' => $rawDeviceToken,
-                'device_token_hash' => $deviceTokenHash,
-                'last_seen_at' => now(),
-            ]
+        $counter = $this->resolveCounterForDevice(
+            $store,
+            $validated['device_uuid'],
+            $deviceName,
+            $counterCode,
+            'Owner Provisioned Counter',
+            (bool)($validated['is_hub'] ?? false),
+            'active',
+            $clientIp,
+            $rawDeviceToken,
+            $deviceTokenHash,
+            $user->id
         );
 
         $device->update(['counter_id' => (string)$counter->id]);
@@ -377,8 +371,8 @@ class AuthController
             'success' => true,
             'device_id' => 'dev_' . $device->id,
             'counter_id' => 'cntr_' . $counter->id,
-            'counter_name' => $deviceName,
-            'counter_code' => $counterCode,
+            'counter_name' => $counter->counter_name,
+            'counter_code' => $counter->counter_code,
             'store_id' => (string)$store->id,
             'store_name' => $store->name,
             'store_code' => $store->code,
@@ -387,10 +381,10 @@ class AuthController
             'refresh_token' => $rawRefreshToken,
             'license_plan' => $store->license_plan ?? 'Enterprise Retail & Pharmacy Chain',
             'license_status' => $store->is_active ? 'active' : 'revoked',
-            'license_expires_at' => $store->license_expires_at ? $store->license_expires_at->toDateString() : '2027-12-31',
+            'license_expires_at' => $store->license_expires_at ? ($store->license_expires_at instanceof \Carbon\CarbonInterface ? $store->license_expires_at->toDateString() : (string)$store->license_expires_at) : '2027-12-31',
             'status' => 'active',
             'admin_staff_present' => true,
-            'registered_at' => $device->created_at->toIso8601String(),
+            'registered_at' => $device->created_at ? $device->created_at->toIso8601String() : now()->toIso8601String(),
         ]);
     }
 
@@ -546,5 +540,83 @@ class AuthController
             'license_expires_at' => '2027-12-31T23:59:59Z',
             'features' => ['pos', 'purchases', 'stock', 'reports', 'multi_counter', 'lan_sync'],
         ]);
+    }
+
+    /**
+     * Resolve or allocate a counter record without violating unique constraints.
+     */
+    protected function resolveCounterForDevice(
+        Store $store,
+        string $deviceUuid,
+        string $deviceName,
+        string $counterCode,
+        string $locationName,
+        bool $isHub,
+        string $status,
+        string $clientIp,
+        string $rawDeviceToken,
+        string $deviceTokenHash,
+        ?int $approvedByUserId = null
+    ): Counter {
+        // 1. Locate existing counter by device_uuid within store
+        $counter = Counter::where('store_id', $store->id)
+            ->where('device_uuid', $deviceUuid)
+            ->first();
+
+        // 2. If not found by device_uuid, match by (store_id, counter_code)
+        if (!$counter) {
+            $counter = Counter::where('store_id', $store->id)
+                ->where('counter_code', $counterCode)
+                ->first();
+        }
+
+        // 3. Clear this device_uuid from any other counter in the system to avoid global unique violation
+        Counter::where('device_uuid', $deviceUuid)
+            ->when($counter, fn($q) => $q->where('id', '!=', $counter->id))
+            ->update(['device_uuid' => null]);
+
+        // 4. If no existing counter found, allocate a unique counter code if requested is taken
+        if (!$counter) {
+            $codeCandidate = $counterCode;
+            $counterNum = 2;
+            while (Counter::where('store_id', $store->id)->where('counter_code', $codeCandidate)->exists()) {
+                $codeCandidate = sprintf('C%02d', $counterNum++);
+            }
+            $counterCode = $codeCandidate;
+
+            $counter = Counter::create([
+                'store_id' => $store->id,
+                'counter_code' => $counterCode,
+                'counter_name' => $deviceName,
+                'device_name' => $deviceName,
+                'location_name' => $locationName,
+                'is_hub' => $isHub,
+                'status' => $status,
+                'ip_address' => $clientIp,
+                'device_uuid' => $deviceUuid,
+                'device_token' => $rawDeviceToken,
+                'device_token_hash' => $deviceTokenHash,
+                'approved_at' => $status === 'active' ? now() : null,
+                'approved_by' => $approvedByUserId,
+                'last_seen_at' => now(),
+            ]);
+        } else {
+            $counter->update([
+                'counter_name' => $deviceName,
+                'device_name' => $deviceName,
+                'location_name' => $locationName ?: $counter->location_name,
+                'is_hub' => $isHub,
+                'status' => $status,
+                'ip_address' => $clientIp,
+                'device_uuid' => $deviceUuid,
+                'device_token' => $rawDeviceToken,
+                'device_token_hash' => $deviceTokenHash,
+                'approved_at' => $status === 'active' ? ($counter->approved_at ?: now()) : null,
+                'approved_by' => $approvedByUserId ?? $counter->approved_by,
+                'last_seen_at' => now(),
+            ]);
+        }
+
+        return $counter;
     }
 }

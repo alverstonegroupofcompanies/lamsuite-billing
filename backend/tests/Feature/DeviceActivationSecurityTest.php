@@ -264,6 +264,41 @@ class DeviceActivationSecurityTest extends TestCase
         ]);
     }
 
+    public function test_register_resolves_existing_counter_code_without_constraint_violation(): void
+    {
+        // Pre-create counter C01 in the store without a device_uuid
+        Counter::create([
+            'store_id' => $this->store->id,
+            'counter_code' => 'C01',
+            'counter_name' => 'Existing Pre-Created Counter',
+            'status' => 'pending_approval',
+        ]);
+
+        $keyResult = ActivationKey::generateKey($this->store);
+
+        // Register a device that will derive 'C01'
+        $response = $this->postJson('/api/devices/register', [
+            'activation_key' => $keyResult['raw_key'],
+            'device_uuid' => 'dev_brand_new_uuid_9876',
+            'device_name' => 'Counter 01',
+            'is_hub' => true,
+        ]);
+
+        $response->assertStatus(200)
+            ->assertJson([
+                'success' => true,
+                'status' => 'active',
+                'counter_code' => 'C01',
+            ]);
+
+        $this->assertDatabaseHas('counters', [
+            'store_id' => $this->store->id,
+            'counter_code' => 'C01',
+            'device_uuid' => 'dev_brand_new_uuid_9876',
+            'status' => 'active',
+        ]);
+    }
+
     public function test_device_validation_endpoint_locks_unrecognized_or_revoked_device(): void
     {
         // 1. Unrecognized token
