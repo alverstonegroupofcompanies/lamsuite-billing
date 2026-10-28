@@ -18,6 +18,7 @@ import {
   Building2,
   Lock,
   LockOpen,
+  ShieldCheck,
 } from "lucide-react";
 
 export const UsersPage: React.FC = () => {
@@ -262,11 +263,28 @@ export const UsersPage: React.FC = () => {
     }
   };
 
+  const handleLockUser = async (u: User) => {
+    if (!confirm(`Are you sure you want to lock the account for ${u.name}? Login will be blocked until unlocked.`)) return;
+    try {
+      await api.post(`/admin/users/${u.id}/lock`);
+      alert(`User account '${u.name}' has been LOCKED.`);
+      await fetchUsers();
+      if (passwordResetUser && passwordResetUser.id === u.id) {
+        setPasswordResetUser({ ...passwordResetUser, is_locked: true });
+      }
+    } catch (err: any) {
+      alert(err?.message || "Failed to lock user account.");
+    }
+  };
+
   const handleUnlockUser = async (u: User) => {
     try {
       await api.post(`/admin/users/${u.id}/unlock`);
       alert(`User account '${u.name}' unlocked successfully. PIN/Password login is now active.`);
       await fetchUsers();
+      if (passwordResetUser && passwordResetUser.id === u.id) {
+        setPasswordResetUser({ ...passwordResetUser, is_locked: false, locked_until: null });
+      }
     } catch (err: any) {
       alert(err?.message || "Failed to unlock user account.");
     }
@@ -470,29 +488,47 @@ export const UsersPage: React.FC = () => {
                             🔒 2FA
                           </span>
                         )}
-                        {(u.is_locked || (u.locked_until && new Date(u.locked_until) > new Date())) && (
+                        {u.is_locked ? (
                           <span
-                            title={`Account locked until ${u.locked_until ? new Date(u.locked_until).toLocaleTimeString() : 'admin unlock'} due to failed login attempts`}
+                            title={`Account is LOCKED until ${u.locked_until ? new Date(u.locked_until).toLocaleTimeString() : 'admin unlock'}`}
                             className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 dark:bg-rose-950/60 text-rose-700 dark:text-rose-400 animate-pulse border border-rose-300 dark:border-rose-800"
                           >
                             <Lock className="w-2.5 h-2.5" />
                             <span>Locked</span>
+                          </span>
+                        ) : (
+                          <span
+                            title="Account access: Active & Unlocked"
+                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400"
+                          >
+                            <ShieldCheck className="w-2.5 h-2.5" />
+                            <span>Active</span>
                           </span>
                         )}
                       </div>
                     </td>
                     <td className="px-4 py-3 text-right">
                       <div className="flex items-center justify-end gap-1.5">
-                        {/* Unlock Account Button */}
-                        {(u.is_locked || (u.locked_until && new Date(u.locked_until) > new Date())) && (
+                        {/* Lock / Unlock Account Button */}
+                        {u.is_locked ? (
                           <button
                             onClick={() => handleUnlockUser(u)}
-                            title="Account Locked! Click to Unlock & Reset Failed Attempts"
+                            title="Account is LOCKED! Click to unlock immediately"
                             className="px-2.5 py-1 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-lg text-[10px] flex items-center gap-1 cursor-pointer shadow-xs transition-colors"
                           >
-                            <LockOpen className="w-3.5 h-3.5" />
+                            <LockOpen className="w-3 h-3" />
                             <span>Unlock</span>
                           </button>
+                        ) : (
+                          currentUser?.id !== u.id && (
+                            <button
+                              onClick={() => handleLockUser(u)}
+                              title="Lock Account (Block Login)"
+                              className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-lg cursor-pointer transition-colors"
+                            >
+                              <Lock className="w-3.5 h-3.5" />
+                            </button>
+                          )
                         )}
 
                         {/* Impersonation action for Super Admin */}
@@ -643,24 +679,54 @@ export const UsersPage: React.FC = () => {
                 </span>
               </div>
 
-              {(passwordResetUser.is_locked || (passwordResetUser.locked_until && new Date(passwordResetUser.locked_until) > new Date())) && (
-                <div className="p-3 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 rounded-xl flex items-center justify-between">
-                  <div className="flex items-center gap-2 text-rose-700 dark:text-rose-400">
-                    <Lock className="w-4 h-4 shrink-0" />
-                    <span className="font-semibold text-xs">Account is currently locked out</span>
-                  </div>
+              <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700/60 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  {passwordResetUser.is_locked ? (
+                    <>
+                      <Lock className="w-4 h-4 text-rose-600 shrink-0" />
+                      <div>
+                        <span className="font-bold text-rose-600 block">Account Status: Locked</span>
+                        <span className="text-[10px] text-slate-500">Logins blocked due to failed attempts</span>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" />
+                      <div>
+                        <span className="font-bold text-emerald-600 block">Account Status: Active & Unlocked</span>
+                        <span className="text-[10px] text-slate-500">Normal login access is enabled</span>
+                      </div>
+                    </>
+                  )}
+                </div>
+                {passwordResetUser.is_locked ? (
                   <button
                     type="button"
                     onClick={async () => {
                       await handleUnlockUser(passwordResetUser);
-                      setPasswordResetUser(null);
+                      setPasswordResetUser({ ...passwordResetUser, is_locked: false, locked_until: null });
                     }}
-                    className="px-2.5 py-1 bg-rose-600 hover:bg-rose-700 text-white text-[11px] font-bold rounded-lg cursor-pointer"
+                    className="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-lg cursor-pointer text-xs flex items-center gap-1 shadow-sm"
                   >
-                    Unlock Now
+                    <LockOpen className="w-3.5 h-3.5" />
+                    <span>Unlock Account</span>
                   </button>
-                </div>
-              )}
+                ) : (
+                  currentUser?.id !== passwordResetUser.id && (
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        await handleLockUser(passwordResetUser);
+                        setPasswordResetUser({ ...passwordResetUser, is_locked: true });
+                      }}
+                      className="px-3 py-1.5 bg-slate-200 hover:bg-rose-100 text-slate-700 hover:text-rose-700 dark:bg-slate-700 dark:hover:bg-rose-950 font-bold rounded-lg cursor-pointer text-xs flex items-center gap-1 transition-colors"
+                    >
+                      <Lock className="w-3.5 h-3.5" />
+                      <span>Lock Account</span>
+                    </button>
+                  )
+                )}
+              </div>
 
               <div>
                 <label className="block font-medium text-slate-700 dark:text-slate-300 mb-1">

@@ -167,6 +167,29 @@ class AdminUserController
         ]);
     }
 
+    public function lock(Request $request, string $id): JsonResponse
+    {
+        $currentUser = $request->user();
+        $user = User::findOrFail($id);
+
+        if ($currentUser && $currentUser->id === $user->id) {
+            return response()->json(['message' => 'You cannot lock your own account.'], 400);
+        }
+
+        $user->update([
+            'locked_until' => now()->addMinutes(60),
+            'failed_login_attempts' => $user->max_failed_logins ?? 5,
+        ]);
+
+        AuditLog::log('lock_user', 'User', (string)$user->id, null, ['locked_by' => $currentUser->email], $user->store_id);
+
+        return response()->json([
+            'success' => true,
+            'message' => "User account '{$user->name}' locked successfully.",
+            'user' => $user->fresh(),
+        ]);
+    }
+
     public function destroy(Request $request, string $id): JsonResponse
     {
         $currentUser = $request->user();
