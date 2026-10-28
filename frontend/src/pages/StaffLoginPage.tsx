@@ -14,6 +14,8 @@ import {
   HelpCircle,
   UserPlus,
   ArrowRight,
+  Eye,
+  EyeOff,
 } from "lucide-react";
 import { staffAuthService, type StaffUser } from "../lib/auth/staffAuthService";
 import { storeDeviceService, type StoreDeviceProfile } from "../lib/auth/storeDeviceService";
@@ -37,6 +39,8 @@ export const StaffLoginPage: React.FC<StaffLoginPageProps> = ({
   const [manualUsername, setManualUsername] = useState("");
   const [pin, setPin] = useState("");
   const [password, setPassword] = useState("");
+  const [showPin, setShowPin] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
   const [isPasswordMode, setIsPasswordMode] = useState(false);
   const [hasBiometrics, setHasBiometrics] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
@@ -227,9 +231,12 @@ export const StaffLoginPage: React.FC<StaffLoginPageProps> = ({
       setShowAdminUnlockModal(false);
       setErrorMsg("");
       setAdminCredentials("");
+      if (selectedUser) {
+        setSelectedUser({ ...selectedUser, locked_until: null, failed_attempts: 0 });
+      }
       const updated = await staffAuthService.listActiveStaff();
       setStaffList(updated);
-      const cur = updated.find((u) => u.id === selectedUser.id);
+      const cur = updated.find((u) => u.id === selectedUser?.id);
       if (cur) setSelectedUser(cur);
     } else {
       setAdminUnlockMsg(res.error || "Failed to unlock account.");
@@ -366,7 +373,15 @@ export const StaffLoginPage: React.FC<StaffLoginPageProps> = ({
                       <div>
                         <div className="text-xs font-semibold text-text-main flex items-center gap-1.5">
                           <span>{user.full_name}</span>
-                          {isLocked && <Lock className="w-3 h-3 text-status-danger" />}
+                          {isLocked ? (
+                            <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-rose-500/20 text-rose-500 border border-rose-500/30 flex items-center gap-1">
+                              <Lock className="w-2.5 h-2.5" /> Locked
+                            </span>
+                          ) : (
+                            <span className="px-1.5 py-0.5 rounded text-[9px] font-medium bg-emerald-500/10 text-emerald-500 border border-emerald-500/20">
+                              Active
+                            </span>
+                          )}
                         </div>
                         <div className="text-[11px] text-text-muted capitalize">
                           {user.role} • @{user.username}
@@ -396,20 +411,39 @@ export const StaffLoginPage: React.FC<StaffLoginPageProps> = ({
             </p>
           </div>
 
-          {errorMsg && (
+          {/* Prominent Lockout Alert with Instant Unlock Button */}
+          {isUserLocked && (
+            <div className="mb-4 bg-rose-500/10 border border-rose-500/30 rounded-xl p-3.5 flex items-center justify-between text-xs text-rose-500 shadow-xs">
+              <div className="flex items-center gap-2.5">
+                <Lock className="w-4 h-4 shrink-0 text-rose-500" />
+                <div>
+                  <span className="font-bold block">Account Temporarily Locked</span>
+                  <span className="text-[11px] text-rose-400">
+                    {selectedUser?.locked_until
+                      ? `Locked until ${new Date(selectedUser.locked_until).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} due to failed attempts`
+                      : "Locked due to failed attempts"}
+                  </span>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setAdminUnlockMsg("");
+                  setShowAdminUnlockModal(true);
+                }}
+                className="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs rounded-lg shadow-sm transition-all cursor-pointer flex items-center gap-1.5"
+              >
+                <Shield className="w-3.5 h-3.5" />
+                <span>Unlock Now</span>
+              </button>
+            </div>
+          )}
+
+          {errorMsg && !isUserLocked && (
             <div className="mb-4 bg-status-danger/10 border border-status-danger/20 rounded-btn p-3 text-xs text-status-danger flex items-start gap-2.5">
               <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
               <div className="flex-1">
                 <span>{errorMsg}</span>
-                {isUserLocked && (
-                  <button
-                    type="button"
-                    onClick={() => setShowAdminUnlockModal(true)}
-                    className="block mt-1 text-xs text-accent hover:underline font-bold"
-                  >
-                    Request Administrator Unlock
-                  </button>
-                )}
               </div>
             </div>
           )}
@@ -434,35 +468,60 @@ export const StaffLoginPage: React.FC<StaffLoginPageProps> = ({
             {!isPasswordMode && selectedUser ? (
               /* Quick PIN Field */
               <div>
-                <label className="block text-[11px] font-semibold text-text-muted uppercase tracking-wider mb-1.5">
-                  Quick PIN (Numpad Friendly)
-                </label>
-                <input
-                  ref={pinInputRef}
-                  type="password"
-                  maxLength={6}
-                  required
-                  value={pin}
-                  onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))}
-                  placeholder="••••"
-                  className="w-full tracking-widest text-center text-xl font-mono py-2.5 bg-canvas border border-border-main rounded-btn text-text-main focus:border-accent focus:outline-none tabular-nums"
-                />
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="block text-[11px] font-semibold text-text-muted uppercase tracking-wider">
+                    Quick PIN (Numpad Friendly)
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setShowPin(!showPin)}
+                    className="text-[11px] text-accent hover:underline flex items-center gap-1 cursor-pointer font-medium"
+                  >
+                    {showPin ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                    <span>{showPin ? "Hide PIN" : "See PIN"}</span>
+                  </button>
+                </div>
+                <div className="relative">
+                  <input
+                    ref={pinInputRef}
+                    type={showPin ? "text" : "password"}
+                    inputMode="numeric"
+                    maxLength={6}
+                    required
+                    value={pin}
+                    onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))}
+                    placeholder="••••"
+                    className="w-full tracking-widest text-center text-xl font-mono py-2.5 bg-canvas border border-border-main rounded-btn text-text-main focus:border-accent focus:outline-none tabular-nums"
+                  />
+                </div>
               </div>
             ) : (
               /* Password Field */
               <div>
-                <label className="block text-[11px] font-semibold text-text-muted uppercase tracking-wider mb-1.5">
-                  Account Password
-                </label>
-                <input
-                  ref={pinInputRef}
-                  type="password"
-                  required
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="••••••••••••"
-                  className="w-full text-xs py-2.5 px-3 bg-canvas border border-border-main rounded-btn text-text-main focus:border-accent focus:outline-none"
-                />
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="block text-[11px] font-semibold text-text-muted uppercase tracking-wider">
+                    Account Password
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="text-[11px] text-accent hover:underline flex items-center gap-1 cursor-pointer font-medium"
+                  >
+                    {showPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                    <span>{showPassword ? "Hide" : "See Password"}</span>
+                  </button>
+                </div>
+                <div className="relative">
+                  <input
+                    ref={pinInputRef}
+                    type={showPassword ? "text" : "password"}
+                    required
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder="••••••••••••"
+                    className="w-full text-xs py-2.5 px-3 bg-canvas border border-border-main rounded-btn text-text-main focus:border-accent focus:outline-none"
+                  />
+                </div>
               </div>
             )}
 

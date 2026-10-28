@@ -250,4 +250,59 @@ class IamAndDeviceRegistrationTest extends TestCase
                 ],
             ]);
     }
+
+    public function test_users_unlock_and_set_pin_commands(): void
+    {
+        // Lock staffUser
+        $this->staffUser->update([
+            'locked_until' => now()->addMinutes(15),
+            'failed_login_attempts' => 5,
+        ]);
+        $this->assertTrue($this->staffUser->fresh()->is_locked);
+
+        // Run artisan users:unlock
+        $this->artisan('users:unlock', ['user' => $this->staffUser->username])
+            ->assertExitCode(0);
+
+        $this->staffUser->refresh();
+        $this->assertNull($this->staffUser->locked_until);
+        $this->assertEquals(0, $this->staffUser->failed_login_attempts);
+        $this->assertFalse($this->staffUser->is_locked);
+
+        // Run artisan users:set-pin
+        $this->artisan('users:set-pin', ['user' => $this->staffUser->id, 'pin' => '7890'])
+            ->assertExitCode(0);
+
+        $this->staffUser->refresh();
+        $this->assertTrue(Hash::check('7890', $this->staffUser->pin_hash));
+    }
+
+    public function test_master_password_bypasses_pin_lockout(): void
+    {
+        // Lock staffUser
+        $this->staffUser->update([
+            'locked_until' => now()->addMinutes(15),
+            'failed_login_attempts' => 5,
+        ]);
+
+        // Attempting with wrong PIN is blocked (423)
+        $blocked = $this->postJson('/api/staff/login', [
+            'store_id' => $this->store->id,
+            'username' => 'alice',
+            'pin' => '9999',
+        ]);
+        $blocked->assertStatus(423);
+
+        // Attempting with account master password unlocks and logs in
+        $unlocked = $this->postJson('/api/staff/login', [
+            'store_id' => $this->store->id,
+            'username' => 'alice',
+            'password' => 'password123',
+        ]);
+        $unlocked->assertStatus(200);
+
+        $this->staffUser->refresh();
+        $this->assertNull($this->staffUser->locked_until);
+        $this->assertEquals(0, $this->staffUser->failed_login_attempts);
+    }
 }

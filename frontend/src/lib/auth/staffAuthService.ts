@@ -535,9 +535,45 @@ export class StaffAuthService {
     adminPinOrPassword: string,
     targetUsername: string
   ): Promise<{ success: boolean; error?: string }> {
+    const target = await this.findStaff(targetUsername);
+
+    // 1. ONLINE FIRST: Call backend cloud unlock API if connected
+    if (typeof window !== "undefined" && navigator.onLine && (typeof process === "undefined" || process.env.NODE_ENV !== "test")) {
+      try {
+        const res = await fetch(`${API_BASE_URL}/api/staff/admin-unlock`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "application/json",
+          },
+          body: JSON.stringify({
+            admin_username: adminUsername.trim(),
+            admin_password: adminPinOrPassword,
+            user_id: target?.id || targetUsername.trim(),
+          }),
+        });
+
+        if (res.ok) {
+          if (target) {
+            target.failed_attempts = 0;
+            target.locked_until = null;
+            await this.persistUserRecord(target).catch(() => {});
+          }
+          return { success: true };
+        } else {
+          const err = await res.json().catch(() => ({}));
+          return { success: false, error: err.message || "Invalid administrator credentials or unlock denied." };
+        }
+      } catch (_) {
+        // Fallback to offline unlock check
+      }
+    }
+
+    // 2. OFFLINE FALLBACK
     const admin = await this.findStaff(adminUsername);
-    if (!admin || admin.role !== "admin") {
-      return { success: false, error: "Only an Administrator can unlock locked staff accounts." };
+    const allowedRoles = ["admin", "super_admin", "store_owner", "manager"];
+    if (!admin || !allowedRoles.includes(admin.role)) {
+      return { success: false, error: "Only an Administrator, Store Owner, or Manager can unlock accounts." };
     }
 
     const pinOk = await staffCryptoService.verifyPin(adminPinOrPassword, admin.pin_hash);
@@ -547,15 +583,14 @@ export class StaffAuthService {
       return { success: false, error: "Invalid administrator credentials." };
     }
 
-    const target = await this.findStaff(targetUsername);
     if (!target) return { success: false, error: "Target user not found." };
 
     // Reset lock
     target.failed_attempts = 0;
     target.locked_until = null;
-    await this.persistUserRecord(target);
+    await this.persistUserRecord(target).catch(() => {});
 
-    await this.logAudit("ADMIN_UNLOCK", admin, `Admin unlocked user ${target.username}`);
+    await this.logAudit("ADMIN_UNLOCK", admin, `Admin unlocked user ${target.username}`).catch(() => {});
     return { success: true };
   }
 

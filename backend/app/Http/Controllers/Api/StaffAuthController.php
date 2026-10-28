@@ -70,40 +70,42 @@ class StaffAuthController
 
         // Find user by username, email, or id within this store (or super admin / multi-store owner)
         $username = trim($validated['username']);
-        $user = User::where(function ($q) use ($store, $username) {
-            $q->where(function ($sub) use ($store) {
-                $sub->where('store_id', $store->id)
-                    ->orWhereNull('store_id')
-                    ->orWhereJsonContains('allowed_store_ids', (int)$store->id)
-                    ->orWhereJsonContains('allowed_store_ids', (string)$store->id);
-            })->where(function ($sub) use ($username) {
-                $sub->where('username', $username)
-                    ->orWhere('email', $username)
-                    ->orWhere('id', $username)
-                    ->orWhere('email', 'like', $username . '@%');
-            });
-        })->orWhere(function ($q) use ($username) {
-            $q->whereIn('role', ['super_admin', 'store_owner'])
-              ->where(function ($sub) use ($username) {
-                  $sub->where('username', $username)
-                      ->orWhere('email', $username)
-                      ->orWhere('id', $username)
-                      ->orWhere('email', 'like', $username . '@%');
-              });
-        })->first();
+        $user = User::where(function ($q) use ($username) {
+                $q->where('username', $username)
+                  ->orWhere('email', $username);
+                if (is_numeric($username)) {
+                    $q->orWhere('id', (int)$username);
+                }
+            })
+            ->where(function ($q) use ($store) {
+                $q->where('store_id', $store->id)
+                  ->orWhereNull('store_id')
+                  ->orWhereJsonContains('allowed_store_ids', (int)$store->id)
+                  ->orWhereJsonContains('allowed_store_ids', (string)$store->id)
+                  ->orWhereIn('role', ['super_admin', 'store_owner']);
+            })
+            ->first();
 
         if (!$user) {
             return response()->json(['message' => 'Staff user not found in this store.'], 401);
         }
 
         // Check Lockout
-        if ($user->locked_until && $user->locked_until->isFuture()) {
-            $remainingMinutes = (int) ceil(now()->diffInSeconds($user->locked_until) / 60);
-            return response()->json([
-                'message' => "Account is temporarily locked due to consecutive failed attempts. Try again in {$remainingMinutes} minute(s) or request Admin Unlock.",
-                'locked' => true,
-                'locked_until' => $user->locked_until->toIso8601String(),
-            ], 423);
+        if ($user->locked_until) {
+            if ($user->locked_until->isPast()) {
+                // Auto-clear expired lockout
+                $user->update(['locked_until' => null, 'failed_login_attempts' => 0]);
+            } elseif (!empty($validated['password']) && Hash::check($validated['password'], $user->password)) {
+                // Master account password unlocks the account immediately
+                $user->update(['locked_until' => null, 'failed_login_attempts' => 0]);
+            } else {
+                $remainingMinutes = (int) ceil(now()->diffInSeconds($user->locked_until) / 60);
+                return response()->json([
+                    'message' => "Account is temporarily locked due to consecutive failed attempts. Try again in {$remainingMinutes} minute(s) or request Admin Unlock.",
+                    'locked' => true,
+                    'locked_until' => $user->locked_until->toIso8601String(),
+                ], 423);
+            }
         }
 
         // Verify PIN or Password
@@ -227,6 +229,7 @@ class StaffAuthController
             ->get();
 
         $staffData = $users->map(function (User $u) use ($store) {
+            $isLocked = !empty($u->locked_until) && $u->locked_until->isFuture();
             return [
                 'id' => (string)$u->id,
                 'store_id' => (string)$store->id,
@@ -235,11 +238,13 @@ class StaffAuthController
                 'role' => $u->role,
                 'password_hash' => $u->password,
                 'pin_hash' => $u->pin_hash ?: null, // Salted bcrypt hash
+                'has_pin' => !empty($u->pin_hash),
                 'is_active' => true,
                 'must_change_password' => (bool)$u->must_change_password,
                 'biometric_registered' => (bool)$u->is_biometric_enabled,
-                'failed_attempts' => $u->failed_login_attempts,
-                'locked_until' => $u->locked_until ? $u->locked_until->getTimestamp() * 1000 : null,
+                'failed_attempts' => $isLocked ? ($u->failed_login_attempts ?? 0) : 0,
+                'locked_until' => $isLocked ? $u->locked_until->getTimestamp() * 1000 : null,
+                'is_locked' => $isLocked,
                 'permissions' => $u->permissions ?? ['*'],
                 'enabled_menus' => $u->enabled_menus ?? ['dashboard', 'pos', 'bills', 'stock'],
             ];
@@ -302,7 +307,7 @@ class StaffAuthController
     }
 
     /**
-     * Store Admin or Manager unlocks a locked staff member.
+     * Store Admin, Store Owner, or Manager unlocks a locked staff member.
      */
     public function adminUnlock(Request $request): JsonResponse
     {
@@ -312,16 +317,37 @@ class StaffAuthController
             'admin_password' => 'required|string',
         ]);
 
-        $admin = User::where(function ($q) use ($validated) {
-            $q->where('username', $validated['admin_username'])
-              ->orWhere('email', $validated['admin_username']);
-        })->whereIn('role', ['super_admin', 'owner', 'admin', 'manager'])->first();
+        $adminUsername = trim($validated['admin_username']);
+        $admin = User::where(function ($q) use ($adminUsername) {
+            $q->where('username', $adminUsername)
+              ->orWhere('email', $adminUsername);
+            if (is_numeric($adminUsername)) {
+                $q->orWhere('id', (int)$adminUsername);
+            }
+        })->whereIn('role', ['super_admin', 'store_owner', 'owner', 'admin', 'manager'])->first();
 
-        if (!$admin || !Hash::check($validated['admin_password'], $admin->password)) {
+        if (!$admin) {
+            return response()->json(['message' => 'Admin user not found or insufficient privileges.'], 403);
+        }
+
+        $isValid = Hash::check($validated['admin_password'], $admin->password);
+        if (!$isValid && !empty($admin->pin_hash)) {
+            $isValid = Hash::check($validated['admin_password'], $admin->pin_hash);
+        }
+
+        if (!$isValid) {
             return response()->json(['message' => 'Invalid administrative credentials.'], 403);
         }
 
-        $targetUser = User::findOrFail($validated['user_id']);
+        $targetUserId = trim((string)$validated['user_id']);
+        $targetUser = is_numeric($targetUserId)
+            ? User::find($targetUserId)
+            : User::where('username', $targetUserId)->orWhere('email', $targetUserId)->first();
+
+        if (!$targetUser) {
+            return response()->json(['message' => 'Target user not found.'], 404);
+        }
+
         $targetUser->update([
             'failed_login_attempts' => 0,
             'locked_until' => null,
@@ -332,7 +358,7 @@ class StaffAuthController
             'User',
             (string)$targetUser->id,
             null,
-            ['unlocked_by' => $admin->id],
+            ['unlocked_by' => $admin->id, 'admin_username' => $admin->username],
             $targetUser->store_id,
             $admin->id
         );
@@ -340,6 +366,12 @@ class StaffAuthController
         return response()->json([
             'success' => true,
             'message' => "User '{$targetUser->name}' has been unlocked.",
+            'user' => [
+                'id' => (string)$targetUser->id,
+                'name' => $targetUser->name,
+                'is_locked' => false,
+                'locked_until' => null,
+            ],
         ]);
     }
 }
