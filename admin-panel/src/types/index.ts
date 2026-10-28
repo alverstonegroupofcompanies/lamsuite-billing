@@ -1,9 +1,19 @@
-export type UserRole = "super_admin" | "store_owner" | "manager" | "accountant" | "support";
+export type UserRole =
+  | "super_admin"
+  | "store_owner"
+  | "manager"
+  | "cashier"
+  | "operator"
+  | "pharmacist"
+  | "accountant"
+  | "support"
+  | "admin";
 
 export interface User {
   id: number;
   name: string;
   email: string;
+  username?: string;
   role: UserRole;
   store_id: number | null;
   allowed_store_ids?: number[];

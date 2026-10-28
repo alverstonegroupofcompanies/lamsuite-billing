@@ -283,25 +283,43 @@ class AdminAuthController
     {
         $validated = $request->validate([
             'user_id' => 'required|exists:users,id',
-            'new_password' => 'required|min:6',
+            'new_password' => 'nullable|string|min:6',
+            'new_pin' => 'nullable|string|min:4|max:6',
         ]);
+
+        if (empty($validated['new_password']) && empty($validated['new_pin'])) {
+            return response()->json(['message' => 'Either new password or new PIN is required.'], 422);
+        }
 
         $currentUser = $request->user();
         $targetUser = User::findOrFail($validated['user_id']);
 
-        if (!$currentUser->isSuperAdmin() && $currentUser->id !== $targetUser->id && $currentUser->role !== 'store_owner') {
+        if (!$currentUser->isSuperAdmin() && $currentUser->id !== $targetUser->id && $currentUser->role !== 'store_owner' && $currentUser->role !== 'manager') {
             return response()->json(['message' => 'Unauthorized to reset this user password.'], 403);
         }
 
-        $targetUser->update([
-            'password' => Hash::make($validated['new_password']),
+        $updates = [
             'failed_login_attempts' => 0,
             'locked_until' => null,
-        ]);
+        ];
 
-        AuditLog::log('password_reset', 'User', (string)$targetUser->id, null, ['reset_by' => $currentUser->email], $targetUser->store_id);
+        if (!empty($validated['new_password'])) {
+            $updates['password'] = Hash::make($validated['new_password']);
+        }
 
-        return response()->json(['success' => true, 'message' => 'Password reset successfully.']);
+        if (!empty($validated['new_pin'])) {
+            $updates['pin_hash'] = Hash::make($validated['new_pin']);
+        }
+
+        $targetUser->update($updates);
+
+        AuditLog::log('password_reset', 'User', (string)$targetUser->id, null, [
+            'reset_by' => $currentUser->email,
+            'password_changed' => !empty($validated['new_password']),
+            'pin_changed' => !empty($validated['new_pin']),
+        ], $targetUser->store_id);
+
+        return response()->json(['success' => true, 'message' => 'Password / Quick PIN reset successfully.']);
     }
 
     /**

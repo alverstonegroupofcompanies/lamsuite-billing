@@ -54,8 +54,10 @@ class AdminUserController
         $validated = $request->validate([
             'name' => 'required|string|max:255',
             'email' => 'required|email|unique:users,email',
+            'username' => 'nullable|string|max:50|unique:users,username',
             'password' => 'required|string|min:6',
-            'role' => 'required|in:super_admin,store_owner,manager,accountant,support',
+            'pin' => 'nullable|string|min:4|max:6',
+            'role' => 'required|in:super_admin,store_owner,manager,cashier,operator,pharmacist,accountant,support,admin',
             'store_id' => 'nullable|exists:stores,id',
             'allowed_store_ids' => 'nullable|array',
             'permissions' => 'nullable|array',
@@ -66,6 +68,15 @@ class AdminUserController
         ]);
 
         $validated['password'] = Hash::make($validated['password']);
+        if (!empty($validated['pin'])) {
+            $validated['pin_hash'] = Hash::make($validated['pin']);
+        }
+        unset($validated['pin']);
+
+        if (empty($validated['username'])) {
+            $validated['username'] = explode('@', $validated['email'])[0];
+        }
+
         $validated['idle_timeout_minutes'] = $validated['idle_timeout_minutes'] ?? 15;
         $validated['max_failed_logins'] = $validated['max_failed_logins'] ?? 5;
 
@@ -93,8 +104,11 @@ class AdminUserController
         $validated = $request->validate([
             'name' => 'sometimes|required|string|max:255',
             'email' => 'sometimes|required|email|unique:users,email,' . $user->id,
-            'role' => 'sometimes|required|in:super_admin,store_owner,manager,accountant,support',
-            'store_id' => 'nullable|exists:stores,id',
+            'username' => 'nullable|string|max:50|unique:users,username,' . $user->id,
+            'password' => 'nullable|string|min:6',
+            'pin' => 'nullable|string|min:4|max:6',
+            'role' => 'sometimes|required|in:super_admin,store_owner,manager,cashier,operator,pharmacist,accountant,support,admin',
+            'store_id' => 'nullable',
             'allowed_store_ids' => 'nullable|array',
             'permissions' => 'nullable|array',
             'idle_timeout_minutes' => 'nullable|integer|min:1|max:120',
@@ -103,12 +117,57 @@ class AdminUserController
             'is_biometric_enabled' => 'nullable|boolean',
         ]);
 
-        $oldValues = $user->only(['name', 'email', 'role', 'permissions', 'store_id']);
+        if (array_key_exists('store_id', $validated)) {
+            $validated['store_id'] = empty($validated['store_id']) ? null : (int)$validated['store_id'];
+        }
+
+        if (!empty($validated['password'])) {
+            $validated['password'] = Hash::make($validated['password']);
+        } else {
+            unset($validated['password']);
+        }
+
+        if (!empty($validated['pin'])) {
+            $validated['pin_hash'] = Hash::make($validated['pin']);
+        }
+        unset($validated['pin']);
+
+        $oldValues = $user->only(['name', 'email', 'role', 'permissions', 'store_id', 'username']);
         $user->update($validated);
 
-        AuditLog::log('update_user', 'User', (string)$user->id, $oldValues, $user->only(['name', 'email', 'role', 'permissions', 'store_id']), $user->store_id);
+        AuditLog::log('update_user', 'User', (string)$user->id, $oldValues, $user->only(['name', 'email', 'role', 'permissions', 'store_id', 'username']), $user->store_id);
 
         return response()->json($user);
+    }
+
+    public function destroy(Request $request, string $id): JsonResponse
+    {
+        $currentUser = $request->user();
+        $user = User::findOrFail($id);
+
+        if ($currentUser && $currentUser->id === $user->id) {
+            return response()->json(['message' => 'You cannot delete your own account.'], 422);
+        }
+
+        if ($currentUser && !$currentUser->isSuperAdmin() && $user->role === 'super_admin') {
+            return response()->json(['message' => 'Only Super Admins can delete Super Admin accounts.'], 403);
+        }
+
+        $user->tokens()->delete();
+        UserSession::where('user_id', $user->id)->delete();
+
+        $userName = $user->name;
+        $userEmail = $user->email;
+        $storeId = $user->store_id;
+
+        $user->delete();
+
+        AuditLog::log('delete_user', 'User', (string)$id, ['name' => $userName, 'email' => $userEmail], null, $storeId);
+
+        return response()->json([
+            'success' => true,
+            'message' => "User '{$userName}' has been deleted successfully.",
+        ]);
     }
 
     public function toggleBiometric(Request $request, string $id): JsonResponse

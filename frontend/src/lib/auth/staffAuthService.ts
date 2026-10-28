@@ -321,6 +321,7 @@ export class StaffAuthService {
     // 1. ONLINE FIRST: Authenticate with Cloud Backend API if in browser and online
     if (typeof window !== "undefined" && navigator.onLine) {
       try {
+        const targetUsername = localUser?.username || usernameOrId;
         const res = await fetch(`${API_BASE_URL}/api/staff/login`, {
           method: "POST",
           headers: {
@@ -330,7 +331,7 @@ export class StaffAuthService {
           },
           body: JSON.stringify({
             store_id: activeStore,
-            username: usernameOrId,
+            username: targetUsername,
             pin: pin,
             counter_id: profile?.counter_name || "C01",
           }),
@@ -360,7 +361,7 @@ export class StaffAuthService {
             }
             return await this.establishSession(staffUser);
           }
-        } else if (!localUser && (res.status === 401 || res.status === 403 || res.status === 422 || res.status === 423)) {
+        } else if (res.status === 401 || res.status === 403 || res.status === 422 || res.status === 423) {
           const err = await res.json().catch(() => ({}));
           return { success: false, error: err.message || "Invalid PIN." };
         }
@@ -402,6 +403,7 @@ export class StaffAuthService {
     // 1. ONLINE FIRST: Authenticate with Cloud Backend API if in browser and online
     if (typeof window !== "undefined" && navigator.onLine) {
       try {
+        const targetUsername = localUser?.username || usernameOrId;
         const res = await fetch(`${API_BASE_URL}/api/staff/login`, {
           method: "POST",
           headers: {
@@ -411,7 +413,7 @@ export class StaffAuthService {
           },
           body: JSON.stringify({
             store_id: activeStore,
-            username: usernameOrId,
+            username: targetUsername,
             password: password,
             counter_id: profile?.counter_name || "C01",
           }),
@@ -441,7 +443,7 @@ export class StaffAuthService {
             }
             return await this.establishSession(staffUser);
           }
-        } else if (!localUser && (res.status === 401 || res.status === 403 || res.status === 422 || res.status === 423)) {
+        } else if (res.status === 401 || res.status === 403 || res.status === 422 || res.status === 423) {
           const err = await res.json().catch(() => ({}));
           return { success: false, error: err.message || "Invalid credentials." };
         }

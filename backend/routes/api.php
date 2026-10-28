@@ -207,6 +207,7 @@ Route::middleware(['auth:sanctum', 'session.timeout', 'ip.allowlist', 'scope.sto
     Route::post('/users', [AdminUserController::class, 'store'])->middleware('rbac:users,create');
     Route::get('/users/{id}', [AdminUserController::class, 'show'])->middleware('rbac:users,view');
     Route::put('/users/{id}', [AdminUserController::class, 'update'])->middleware('rbac:users,edit');
+    Route::delete('/users/{id}', [AdminUserController::class, 'destroy'])->middleware('rbac:users,delete');
     Route::post('/users/{id}/toggle-biometric', [AdminUserController::class, 'toggleBiometric'])->middleware('rbac:users,edit');
     Route::post('/users/{id}/force-logout', [AdminUserController::class, 'forceLogout'])->middleware('rbac:users,edit');
 
