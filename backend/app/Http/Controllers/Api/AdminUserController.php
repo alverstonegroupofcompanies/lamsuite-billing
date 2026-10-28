@@ -61,7 +61,7 @@ class AdminUserController
             'email' => 'required|email|unique:users,email',
             'username' => 'nullable|string|max:50|unique:users,username',
             'password' => 'required|string|min:6',
-            'pin' => 'nullable|string|min:4|max:6',
+            'pin' => 'nullable|string',
             'role' => 'required|in:super_admin,store_owner,manager,cashier,operator,pharmacist,accountant,support,admin',
             'store_id' => 'nullable|exists:stores,id',
             'allowed_store_ids' => 'nullable|array',
@@ -72,16 +72,30 @@ class AdminUserController
             'is_biometric_enabled' => 'nullable|boolean',
         ]);
 
-        $validated['password'] = Hash::make($validated['password']);
-        if (!empty($validated['pin'])) {
-            $validated['pin_hash'] = Hash::make($validated['pin']);
-            $validated['pin_code'] = $validated['pin'];
-        }
-        unset($validated['pin']);
-
         if (empty($validated['username'])) {
             $validated['username'] = explode('@', $validated['email'])[0];
         }
+
+        // Cross-uniqueness check: username cannot collide with any user's email, and email cannot collide with any username
+        $usernameExistsAsEmail = User::where('email', $validated['username'])->exists();
+        if ($usernameExistsAsEmail) {
+            return response()->json(['message' => "Username '{$validated['username']}' cannot match an existing user's email."], 422);
+        }
+
+        $emailExistsAsUsername = User::where('username', $validated['email'])->exists();
+        if ($emailExistsAsUsername) {
+            return response()->json(['message' => "Email '{$validated['email']}' cannot match an existing user's username/handle."], 422);
+        }
+
+        $validated['password'] = Hash::make($validated['password']);
+        if (!empty($validated['pin'])) {
+            $pinError = User::validatePinPolicy($validated['pin']);
+            if ($pinError) {
+                return response()->json(['message' => $pinError], 422);
+            }
+            $validated['pin_hash'] = Hash::make($validated['pin']);
+        }
+        unset($validated['pin']);
 
         $validated['idle_timeout_minutes'] = $validated['idle_timeout_minutes'] ?? 15;
         $validated['max_failed_logins'] = $validated['max_failed_logins'] ?? 5;
@@ -90,6 +104,7 @@ class AdminUserController
 
         AuditLog::log('create_user', 'User', (string)$user->id, null, [
             'email' => $user->email,
+            'username' => $user->username,
             'role' => $user->role,
             'store_id' => $user->store_id,
         ], $user->store_id);
@@ -112,7 +127,7 @@ class AdminUserController
             'email' => 'sometimes|required|email|unique:users,email,' . $user->id,
             'username' => 'nullable|string|max:50|unique:users,username,' . $user->id,
             'password' => 'nullable|string|min:6',
-            'pin' => 'nullable|string|min:4|max:6',
+            'pin' => 'nullable|string',
             'role' => 'sometimes|required|in:super_admin,store_owner,manager,cashier,operator,pharmacist,accountant,support,admin',
             'store_id' => 'nullable',
             'allowed_store_ids' => 'nullable|array',
@@ -127,6 +142,24 @@ class AdminUserController
             $validated['store_id'] = empty($validated['store_id']) ? null : (int)$validated['store_id'];
         }
 
+        $checkUsername = $validated['username'] ?? $user->username;
+        $checkEmail = $validated['email'] ?? $user->email;
+
+        // Cross-uniqueness check
+        if (!empty($checkUsername)) {
+            $usernameExistsAsEmail = User::where('email', $checkUsername)->where('id', '!=', $user->id)->exists();
+            if ($usernameExistsAsEmail) {
+                return response()->json(['message' => "Username '{$checkUsername}' cannot match an existing user's email."], 422);
+            }
+        }
+
+        if (!empty($checkEmail)) {
+            $emailExistsAsUsername = User::where('username', $checkEmail)->where('id', '!=', $user->id)->exists();
+            if ($emailExistsAsUsername) {
+                return response()->json(['message' => "Email '{$checkEmail}' cannot match an existing user's username/handle."], 422);
+            }
+        }
+
         if (!empty($validated['password'])) {
             $validated['password'] = Hash::make($validated['password']);
         } else {
@@ -134,8 +167,11 @@ class AdminUserController
         }
 
         if (!empty($validated['pin'])) {
+            $pinError = User::validatePinPolicy($validated['pin']);
+            if ($pinError) {
+                return response()->json(['message' => $pinError], 422);
+            }
             $validated['pin_hash'] = Hash::make($validated['pin']);
-            $validated['pin_code'] = $validated['pin'];
         }
         unset($validated['pin']);
 
@@ -153,6 +189,75 @@ class AdminUserController
         AuditLog::log('update_user', 'User', (string)$user->id, $oldValues, $user->only(['name', 'email', 'role', 'permissions', 'store_id', 'username']), $user->store_id);
 
         return response()->json($user->fresh());
+    }
+
+    public function resetPin(Request $request, string $id): JsonResponse
+    {
+        $currentUser = $request->user();
+        $user = User::findOrFail($id);
+
+        $validated = $request->validate([
+            'pin' => 'required|string',
+        ]);
+
+        $pinError = User::validatePinPolicy($validated['pin']);
+        if ($pinError) {
+            return response()->json(['message' => $pinError], 422);
+        }
+
+        $user->update([
+            'pin_hash' => Hash::make($validated['pin']),
+            'failed_login_attempts' => 0,
+            'locked_until' => null,
+        ]);
+
+        AuditLog::log('reset_user_pin', 'User', (string)$user->id, null, ['reset_by' => $currentUser->email], $user->store_id);
+
+        return response()->json([
+            'success' => true,
+            'message' => "PIN for user '{$user->name}' has been reset successfully. It will never be shown again.",
+            'user' => $user->fresh(),
+        ]);
+    }
+
+    public function loginDiagnostics(Request $request): JsonResponse
+    {
+        $currentUser = $request->user();
+        $query = AuditLog::with('user:id,name,username,email,role', 'store:id,name,code')
+            ->whereIn('action', ['staff_login_failed', 'staff_account_locked', 'staff_login_success', 'staff_unlocked_by_admin'])
+            ->orderBy('id', 'desc');
+
+        if (!$currentUser->isSuperAdmin() && $currentUser->store_id) {
+            $query->where('store_id', $currentUser->store_id);
+        }
+
+        $logs = $query->limit(50)->get()->map(function ($log) {
+            return [
+                'id' => $log->id,
+                'action' => $log->action,
+                'timestamp' => $log->created_at?->toIso8601String(),
+                'user' => $log->user ? [
+                    'id' => $log->user->id,
+                    'name' => $log->user->name,
+                    'username' => $log->user->username,
+                    'email' => $log->user->email,
+                    'role' => $log->user->role,
+                ] : null,
+                'store' => $log->store ? [
+                    'id' => $log->store->id,
+                    'name' => $log->store->name,
+                    'code' => $log->store->code,
+                ] : null,
+                'reason' => $log->new_values['reason'] ?? $log->new_values['diagnostic'] ?? ($log->action === 'staff_login_success' ? 'Authorized' : 'failed'),
+                'counter' => $log->new_values['counter_id'] ?? $log->new_values['counter_name'] ?? 'Counter Station',
+                'ip' => $log->ip_address,
+            ];
+        });
+
+        return response()->json([
+            'success' => true,
+            'diagnostics' => $logs,
+        ]);
     }
 
     public function unlock(Request $request, string $id): JsonResponse
@@ -194,20 +299,6 @@ class AdminUserController
             'success' => true,
             'message' => "User account '{$user->name}' locked successfully.",
             'user' => $user->fresh(),
-        ]);
-    }
-
-    public function revealPin(Request $request, string $id): JsonResponse
-    {
-        $currentUser = $request->user();
-        $user = User::findOrFail($id);
-
-        AuditLog::log('reveal_pin', 'User', (string)$user->id, null, ['revealed_by' => $currentUser->email], $user->store_id);
-
-        return response()->json([
-            'success' => true,
-            'pin' => $user->pin_code,
-            'has_pin' => !empty($user->pin_hash),
         ]);
     }
 

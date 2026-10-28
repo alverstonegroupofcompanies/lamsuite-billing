@@ -31,6 +31,8 @@ export interface ActiveStaffSession {
   lastActivityAt: number;
 }
 
+const isNumericId = (val: string) => /^\d+$/.test(val);
+
 export class StaffAuthService {
   private currentSession: ActiveStaffSession | null = null;
   private maxFailedAttempts = 5;
@@ -339,7 +341,10 @@ export class StaffAuthService {
       let onlineToken: string | null = null;
 
       try {
-        const targetUsername = localUser?.username || usernameOrId;
+        const targetUserId = localUser?.id || (isNumericId(usernameOrId) ? usernameOrId : undefined);
+        const targetUsername = localUser?.username || (!isNumericId(usernameOrId) ? usernameOrId : undefined);
+        const resolvedCounterId = profile?.counter_id || profile?.counter_code || "C01";
+
         const res = await fetch(`${API_BASE_URL}/api/staff/login`, {
           method: "POST",
           headers: {
@@ -349,9 +354,10 @@ export class StaffAuthService {
           },
           body: JSON.stringify({
             store_id: activeStore,
+            user_id: targetUserId,
             username: targetUsername,
             pin: pin,
-            counter_id: profile?.counter_name || "C01",
+            counter_id: resolvedCounterId,
           }),
         });
 
@@ -430,7 +436,10 @@ export class StaffAuthService {
       let onlineToken: string | null = null;
 
       try {
-        const targetUsername = localUser?.username || usernameOrId;
+        const targetUserId = localUser?.id || (isNumericId(usernameOrId) ? usernameOrId : undefined);
+        const targetUsername = localUser?.username || (!isNumericId(usernameOrId) ? usernameOrId : undefined);
+        const resolvedCounterId = profile?.counter_id || profile?.counter_code || "C01";
+
         const res = await fetch(`${API_BASE_URL}/api/staff/login`, {
           method: "POST",
           headers: {
@@ -440,9 +449,10 @@ export class StaffAuthService {
           },
           body: JSON.stringify({
             store_id: activeStore,
+            user_id: targetUserId,
             username: targetUsername,
             password: password,
-            counter_id: profile?.counter_name || "C01",
+            counter_id: resolvedCounterId,
           }),
         });
 
@@ -667,6 +677,7 @@ export class StaffAuthService {
       try {
         const profile = await storeDeviceService.getDeviceProfile();
         const activeStore = profile?.store_id || "1";
+        const resolvedCounterId = profile?.counter_id || profile?.counter_code || "C01";
         const res = await fetch(`${API_BASE_URL}/api/staff/login`, {
           method: "POST",
           headers: {
@@ -676,9 +687,10 @@ export class StaffAuthService {
           },
           body: JSON.stringify({
             store_id: activeStore,
+            user_id: user.id,
             username: user.username,
             pin: pin,
-            counter_id: profile?.counter_name || "C01",
+            counter_id: resolvedCounterId,
           }),
         });
 

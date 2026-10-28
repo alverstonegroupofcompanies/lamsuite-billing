@@ -16,12 +16,14 @@ class StaffAuthController
 {
     /**
      * Authenticate store staff member at terminal via PIN or Password.
+     * Enforces strict user ID lookup, store & counter scoping, and generic client errors.
      */
     public function login(Request $request): JsonResponse
     {
         $validated = $request->validate([
             'store_id' => 'required',
-            'username' => 'required|string',
+            'user_id' => 'nullable',
+            'username' => 'nullable|string',
             'pin' => 'nullable|string',
             'password' => 'nullable|string',
             'counter_id' => 'nullable',
@@ -29,26 +31,6 @@ class StaffAuthController
 
         if (empty($validated['pin']) && empty($validated['password'])) {
             return response()->json(['message' => 'Either PIN or password is required.'], 422);
-        }
-
-        // Verify Device Token if header is provided
-        $deviceToken = $request->header('X-Device-Token');
-        if ($deviceToken) {
-            $counter = Counter::where('device_token', $deviceToken)->first();
-            if ($counter) {
-                if ($counter->status === 'revoked') {
-                    return response()->json([
-                        'message' => 'This terminal has been revoked by store administrator.',
-                        'device_revoked' => true,
-                    ], 403);
-                }
-                if ($counter->status === 'locked') {
-                    return response()->json([
-                        'message' => 'This terminal is temporarily locked.',
-                        'device_locked' => true,
-                    ], 423);
-                }
-            }
         }
 
         // Find store
@@ -68,29 +50,102 @@ class StaffAuthController
             ], 403);
         }
 
-        // Find user by username, email, or id within this store (or super admin / multi-store owner)
-        $username = trim($validated['username']);
-        $user = User::where(function ($q) use ($username) {
-                $q->where('username', $username)
-                  ->orWhere('email', $username);
-                if (is_numeric($username)) {
-                    $q->orWhere('id', (int)$username);
-                }
-            })
-            ->where(function ($q) use ($store) {
-                $q->where('store_id', $store->id)
-                  ->orWhereNull('store_id')
-                  ->orWhereJsonContains('allowed_store_ids', (int)$store->id)
-                  ->orWhereJsonContains('allowed_store_ids', (string)$store->id)
-                  ->orWhereIn('role', ['super_admin', 'store_owner']);
-            })
-            ->first();
-
-        if (!$user) {
-            return response()->json(['message' => 'Staff user not found in this store.'], 401);
+        // 1. Strict User Resolution: prefer user_id, fallback to exact username/email
+        $user = null;
+        if (!empty($validated['user_id'])) {
+            $user = User::find($validated['user_id']);
+        } elseif (!empty($validated['username'])) {
+            $identifier = trim($validated['username']);
+            $user = User::where('username', $identifier)
+                ->orWhere('email', $identifier)
+                ->first();
         }
 
-        // Check Lockout
+        if (!$user) {
+            AuditLog::log(
+                'staff_login_failed',
+                'User',
+                null,
+                null,
+                [
+                    'reason' => 'user_not_found',
+                    'identifier' => $validated['user_id'] ?? $validated['username'] ?? 'unknown',
+                    'store_id' => $store->id,
+                    'counter_id' => $validated['counter_id'] ?? null,
+                ],
+                $store->id
+            );
+            return response()->json(['message' => 'Invalid credentials.'], 401);
+        }
+
+        // 2. Strict Store Scoping: verify user has access to this store
+        if (!$user->canAccessStore($store->id)) {
+            AuditLog::log(
+                'staff_login_failed',
+                'User',
+                (string)$user->id,
+                null,
+                [
+                    'reason' => 'wrong_store',
+                    'user_id' => $user->id,
+                    'user_store_id' => $user->store_id,
+                    'attempted_store_id' => $store->id,
+                    'counter_id' => $validated['counter_id'] ?? null,
+                ],
+                $store->id,
+                $user->id
+            );
+            return response()->json(['message' => 'Invalid credentials.'], 401);
+        }
+
+        // 3. Counter Scoping & Status Check
+        if (!empty($validated['counter_id'])) {
+            $counterIdentifier = trim((string)$validated['counter_id']);
+            $counter = Counter::where('store_id', $store->id)
+                ->where(function ($q) use ($counterIdentifier) {
+                    $q->where('counter_code', $counterIdentifier)
+                      ->orWhere('counter_name', $counterIdentifier);
+                    if (is_numeric($counterIdentifier)) {
+                        $q->orWhere('id', (int)$counterIdentifier);
+                    }
+                })->first();
+
+            if ($counter) {
+                if ($counter->status === 'revoked') {
+                    AuditLog::log('staff_login_failed', 'User', (string)$user->id, null, [
+                        'reason' => 'counter_revoked',
+                        'counter_id' => $counter->id,
+                        'counter_code' => $counter->counter_code,
+                    ], $store->id, $user->id);
+                    return response()->json(['message' => 'This terminal has been revoked by store administrator.'], 403);
+                }
+
+                if ($counter->status === 'locked') {
+                    AuditLog::log('staff_login_failed', 'User', (string)$user->id, null, [
+                        'reason' => 'counter_locked',
+                        'counter_id' => $counter->id,
+                        'counter_code' => $counter->counter_code,
+                    ], $store->id, $user->id);
+                    return response()->json(['message' => 'This terminal is temporarily locked.'], 423);
+                }
+
+                // If allowed_user_ids is configured, check assignment (Super Admin bypasses)
+                if (!$user->isSuperAdmin() && !empty($counter->allowed_user_ids) && is_array($counter->allowed_user_ids)) {
+                    $allowed = array_map('strval', $counter->allowed_user_ids);
+                    if (!in_array((string)$user->id, $allowed, true)) {
+                        AuditLog::log('staff_login_failed', 'User', (string)$user->id, null, [
+                            'reason' => 'counter_not_allowed',
+                            'counter_id' => $counter->id,
+                            'counter_code' => $counter->counter_code,
+                            'user_id' => $user->id,
+                        ], $store->id, $user->id);
+                        return response()->json(['message' => 'Invalid credentials.'], 401);
+                    }
+                }
+            }
+        }
+
+        // 4. Check Lockout State strictly on this user
         if ($user->locked_until) {
             if ($user->locked_until->isPast()) {
                 // Auto-clear expired lockout
@@ -100,32 +155,46 @@ class StaffAuthController
                 $user->update(['locked_until' => null, 'failed_login_attempts' => 0]);
             } else {
                 $remainingMinutes = (int) ceil(now()->diffInSeconds($user->locked_until) / 60);
+                AuditLog::log('staff_login_failed', 'User', (string)$user->id, null, [
+                    'reason' => 'account_locked',
+                    'locked_until' => $user->locked_until->toIso8601String(),
+                    'store_id' => $store->id,
+                    'counter_id' => $validated['counter_id'] ?? null,
+                ], $store->id, $user->id);
+
                 return response()->json([
-                    'message' => "Account is temporarily locked due to consecutive failed attempts. Try again in {$remainingMinutes} minute(s) or request Admin Unlock.",
+                    'message' => 'Account is temporarily locked due to consecutive failed attempts. Please try again later or contact your administrator.',
                     'locked' => true,
                     'locked_until' => $user->locked_until->toIso8601String(),
                 ], 423);
             }
         }
 
-        // Verify PIN or Password
+        // 5. Credential Verification
         $isValid = false;
+        $failReason = 'invalid_credentials';
+
         if (!empty($validated['pin'])) {
-            if (!empty($user->pin_hash)) {
-                // If a PIN is configured, it must match the updated PIN hash
-                $isValid = Hash::check($validated['pin'], $user->pin_hash);
-            } else {
-                // No Quick PIN is configured for this user; reject any PIN attempt (never allow 1234 fallback)
+            if (empty($user->pin_hash)) {
                 $isValid = false;
+                $failReason = 'no_pin_configured';
+            } else {
+                $isValid = Hash::check($validated['pin'], $user->pin_hash);
+                if (!$isValid) {
+                    $failReason = 'wrong_pin';
+                }
             }
         } elseif (!empty($validated['password'])) {
             if (Hash::check($validated['password'], $user->password)) {
                 $isValid = true;
             } elseif (!empty($user->pin_hash) && Hash::check($validated['password'], $user->pin_hash)) {
                 $isValid = true;
+            } else {
+                $failReason = 'wrong_password';
             }
         }
 
+        // 6. Handle Failed Attempt strictly on this user
         if (!$isValid) {
             $user->increment('failed_login_attempts');
             $maxAttempts = $user->max_failed_logins ?? 5;
@@ -141,25 +210,47 @@ class StaffAuthController
                     'User',
                     (string)$user->id,
                     null,
-                    ['reason' => 'max_failed_attempts_exceeded', 'store_id' => $store->id],
+                    [
+                        'reason' => 'max_failed_attempts_exceeded',
+                        'last_fail_reason' => $failReason,
+                        'store_id' => $store->id,
+                        'counter_id' => $validated['counter_id'] ?? null,
+                    ],
                     $store->id,
                     $user->id
                 );
 
                 return response()->json([
-                    'message' => 'Account locked for 15 minutes due to consecutive failed attempts.',
+                    'message' => 'Account is temporarily locked due to consecutive failed attempts. Please try again later or contact your administrator.',
                     'locked' => true,
+                    'locked_until' => now()->addMinutes(15)->toIso8601String(),
                 ], 423);
             }
 
             $remaining = $maxAttempts - $user->failed_login_attempts;
+
+            AuditLog::log(
+                'staff_login_failed',
+                'User',
+                (string)$user->id,
+                null,
+                [
+                    'reason' => $failReason,
+                    'remaining_attempts' => $remaining,
+                    'store_id' => $store->id,
+                    'counter_id' => $validated['counter_id'] ?? null,
+                ],
+                $store->id,
+                $user->id
+            );
+
             return response()->json([
-                'message' => "Invalid credentials. {$remaining} attempt(s) remaining before lockout.",
+                'message' => "Invalid credentials. {$remaining} attempt(s) remaining.",
                 'remaining_attempts' => $remaining,
             ], 401);
         }
 
-        // Successful validation: reset failed attempts
+        // 7. Successful Validation: reset failed attempts on this user
         $user->update([
             'failed_login_attempts' => 0,
             'locked_until' => null,
@@ -176,7 +267,7 @@ class StaffAuthController
         ]);
 
         AuditLog::log(
-            'staff_login',
+            'staff_login_success',
             'User',
             (string)$user->id,
             null,
@@ -196,6 +287,7 @@ class StaffAuthController
                 'permissions' => $user->permissions ?? ['*'],
                 'enabled_menus' => $user->enabled_menus ?? ['pos', 'bills'],
                 'must_change_password' => (bool)$user->must_change_password,
+                'has_pin' => !empty($user->pin_hash),
                 'store_id' => (string)$store->id,
             ],
             'store' => [

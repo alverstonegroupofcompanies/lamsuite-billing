@@ -205,6 +205,7 @@ Route::middleware(['auth:sanctum', 'session.timeout', 'ip.allowlist', 'scope.sto
     // Module 5: Users & Roles
     Route::get('/users', [AdminUserController::class, 'index'])->middleware('rbac:users,view');
     Route::post('/users', [AdminUserController::class, 'store'])->middleware('rbac:users,create');
+    Route::get('/users/login-diagnostics', [AdminUserController::class, 'loginDiagnostics'])->middleware('rbac:users,view');
     Route::get('/users/{id}', [AdminUserController::class, 'show'])->middleware('rbac:users,view');
     Route::put('/users/{id}', [AdminUserController::class, 'update'])->middleware('rbac:users,edit');
     Route::delete('/users/{id}', [AdminUserController::class, 'destroy'])->middleware('rbac:users,delete');
@@ -212,7 +213,7 @@ Route::middleware(['auth:sanctum', 'session.timeout', 'ip.allowlist', 'scope.sto
     Route::post('/users/{id}/force-logout', [AdminUserController::class, 'forceLogout'])->middleware('rbac:users,edit');
     Route::post('/users/{id}/unlock', [AdminUserController::class, 'unlock'])->middleware('rbac:users,edit');
     Route::post('/users/{id}/lock', [AdminUserController::class, 'lock'])->middleware('rbac:users,edit');
-    Route::get('/users/{id}/reveal-pin', [AdminUserController::class, 'revealPin'])->middleware('rbac:users,view');
+    Route::post('/users/{id}/reset-pin', [AdminUserController::class, 'resetPin'])->middleware('rbac:users,edit');
 
     // Module 6: Master Data
     Route::get('/products', [AdminMasterController::class, 'products'])->middleware('rbac:masters,view');

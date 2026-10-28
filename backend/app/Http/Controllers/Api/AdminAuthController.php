@@ -308,8 +308,11 @@ class AdminAuthController
         }
 
         if (!empty($validated['new_pin'])) {
+            $pinError = User::validatePinPolicy($validated['new_pin']);
+            if ($pinError) {
+                return response()->json(['message' => $pinError], 422);
+            }
             $updates['pin_hash'] = Hash::make($validated['new_pin']);
-            $updates['pin_code'] = $validated['new_pin'];
         }
 
         $targetUser->update($updates);

@@ -126,6 +126,9 @@ export const StaffLoginPage: React.FC<StaffLoginPageProps> = ({
     setPin("");
     setPassword("");
     setErrorMsg("");
+    if (selectedUser && !selectedUser.pin_hash) {
+      setIsPasswordMode(true);
+    }
     setTimeout(() => {
       pinInputRef.current?.focus();
     }, 50);
@@ -377,6 +380,10 @@ export const StaffLoginPage: React.FC<StaffLoginPageProps> = ({
                             <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-rose-500/20 text-rose-500 border border-rose-500/30 flex items-center gap-1">
                               <Lock className="w-2.5 h-2.5" /> Locked
                             </span>
+                          ) : !user.pin_hash ? (
+                            <span className="px-1.5 py-0.5 rounded text-[9px] font-medium bg-slate-500/10 text-slate-400 border border-slate-500/20">
+                              Password Only
+                            </span>
                           ) : (
                             <span className="px-1.5 py-0.5 rounded text-[9px] font-medium bg-emerald-500/10 text-emerald-500 border border-emerald-500/20">
                               Active
@@ -406,7 +413,9 @@ export const StaffLoginPage: React.FC<StaffLoginPageProps> = ({
             </h3>
             <p className="text-xs text-text-muted mt-0.5">
               {selectedUser
-                ? `Enter your ${isPasswordMode ? "account password" : "quick 4-digit PIN"} to open the terminal.`
+                ? !selectedUser.pin_hash
+                  ? "No Quick PIN configured for this account. Enter your password to open the terminal."
+                  : `Enter your ${isPasswordMode ? "account password" : "quick 4-digit PIN"} to open the terminal.`
                 : "Enter your username and password to open the store workstation."}
             </p>
           </div>

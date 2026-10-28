@@ -20,7 +20,6 @@ class User extends Authenticatable
         'username',
         'password',
         'pin_hash',
-        'pin_code',
         'must_change_password',
         'role',
         'permissions',
@@ -39,7 +38,6 @@ class User extends Authenticatable
     protected $hidden = [
         'password',
         'pin_hash',
-        'pin_code',
         'remember_token',
         'totp_secret',
     ];
@@ -47,7 +45,6 @@ class User extends Authenticatable
     protected $casts = [
         'email_verified_at' => 'datetime',
         'password' => 'hashed',
-        'pin_code' => 'encrypted',
         'must_change_password' => 'boolean',
         'permissions' => 'array',
         'enabled_menus' => 'array',
@@ -61,6 +58,32 @@ class User extends Authenticatable
         'has_pin',
         'is_locked',
     ];
+
+    /**
+     * Enforce strict PIN policy:
+     * - Must be 4 to 6 numeric digits
+     * - Cannot be all repeated digits (e.g. 1111, 2222, 0000)
+     * - Cannot be trivial sequential patterns (e.g. 1234, 4321, 12345, 54321)
+     */
+    public static function validatePinPolicy(string $pin): ?string
+    {
+        if (!preg_match('/^\d{4,6}$/', $pin)) {
+            return 'PIN must be between 4 and 6 numeric digits.';
+        }
+
+        // Check all repeated digits
+        if (preg_match('/^(.)\1+$/', $pin)) {
+            return 'PIN cannot consist of repeated digits (e.g. 1111).';
+        }
+
+        // Check trivial sequential patterns
+        $trivialPatterns = ['1234', '4321', '0123', '3210', '12345', '54321', '123456', '654321'];
+        if (in_array($pin, $trivialPatterns, true)) {
+            return 'Trivial sequential PINs are not allowed for security reasons.';
+        }
+
+        return null; // Valid
+    }
 
     public function getHasPinAttribute(): bool
     {

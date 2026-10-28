@@ -16,8 +16,9 @@ class SetUserPinCommand extends Command
         $target = $this->argument('user');
         $pin = (string)$this->argument('pin');
 
-        if (!preg_match('/^\d{4,6}$/', $pin)) {
-            $this->error("PIN must be 4 to 6 numeric digits.");
+        $pinError = User::validatePinPolicy($pin);
+        if ($pinError) {
+            $this->error($pinError);
             return 1;
         }
 
@@ -32,7 +33,6 @@ class SetUserPinCommand extends Command
 
         $user->update([
             'pin_hash' => Hash::make($pin),
-            'pin_code' => $pin,
             'locked_until' => null,
             'failed_login_attempts' => 0,
         ]);

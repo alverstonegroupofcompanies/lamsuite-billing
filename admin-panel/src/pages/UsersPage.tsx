@@ -19,6 +19,7 @@ import {
   Lock,
   LockOpen,
   ShieldCheck,
+  ShieldAlert,
   Eye,
   EyeOff,
 } from "lucide-react";
@@ -84,33 +85,20 @@ export const UsersPage: React.FC = () => {
   const [showNewPin, setShowNewPin] = useState(false);
   const [showNewPassword, setShowNewPassword] = useState(false);
 
-  // Reveal PIN state
-  const [revealedPins, setRevealedPins] = useState<Record<number, string | null>>({});
-  const [isRevealingPin, setIsRevealingPin] = useState<Record<number, boolean>>({});
+  // Diagnostics state
+  const [showDiagnostics, setShowDiagnostics] = useState(false);
+  const [diagnosticsLogs, setDiagnosticsLogs] = useState<any[]>([]);
+  const [isLoadingDiagnostics, setIsLoadingDiagnostics] = useState(false);
 
-  const handleToggleRevealPin = async (userId: number) => {
-    if (revealedPins[userId] !== undefined) {
-      const updated = { ...revealedPins };
-      delete updated[userId];
-      setRevealedPins(updated);
-      return;
-    }
-    setIsRevealingPin((prev) => ({ ...prev, [userId]: true }));
+  const fetchDiagnostics = async () => {
+    setIsLoadingDiagnostics(true);
     try {
-      const res = await api.get<{ success: boolean; pin: string | null; has_pin: boolean }>(
-        `/admin/users/${userId}/reveal-pin`
-      );
-      if (res.pin) {
-        setRevealedPins((prev) => ({ ...prev, [userId]: res.pin }));
-      } else if (res.has_pin) {
-        alert("This PIN was saved under a legacy one-way hash. Reset or update the PIN once to make it viewable.");
-      } else {
-        alert("No Quick PIN configured for this user.");
-      }
+      const res = await api.get<{ success: boolean; diagnostics: any[] }>("/admin/users/login-diagnostics");
+      setDiagnosticsLogs(res.diagnostics || []);
     } catch (err: any) {
-      alert(err?.message || "Failed to reveal PIN.");
+      alert(err?.message || "Failed to fetch login diagnostics.");
     } finally {
-      setIsRevealingPin((prev) => ({ ...prev, [userId]: false }));
+      setIsLoadingDiagnostics(false);
     }
   };
 
@@ -223,8 +211,16 @@ export const UsersPage: React.FC = () => {
       }
       if (editFormData.pin && editFormData.pin.trim()) {
         const trimmedPin = editFormData.pin.trim();
-        if (trimmedPin.length < 4 || trimmedPin.length > 6) {
+        if (!/^\d{4,6}$/.test(trimmedPin)) {
           alert("Quick PIN must be between 4 and 6 numeric digits.");
+          return;
+        }
+        if (/^(.)\1+$/.test(trimmedPin)) {
+          alert("PIN cannot consist of repeated digits (e.g. 1111). Choose a stronger PIN.");
+          return;
+        }
+        if (['1234', '4321', '0123', '3210', '12345', '54321', '123456', '654321'].includes(trimmedPin)) {
+          alert("Trivial sequential PINs are not allowed for security reasons.");
           return;
         }
         payload.pin = trimmedPin;
@@ -268,9 +264,19 @@ export const UsersPage: React.FC = () => {
       return;
     }
     const cleanPin = newPin.trim();
-    if (cleanPin && (cleanPin.length < 4 || cleanPin.length > 6)) {
-      alert("Quick PIN must be between 4 and 6 numeric digits.");
-      return;
+    if (cleanPin) {
+      if (!/^\d{4,6}$/.test(cleanPin)) {
+        alert("Quick PIN must be between 4 and 6 numeric digits.");
+        return;
+      }
+      if (/^(.)\1+$/.test(cleanPin)) {
+        alert("PIN cannot consist of repeated digits (e.g. 1111). Choose a stronger PIN.");
+        return;
+      }
+      if (['1234', '4321', '0123', '3210', '12345', '54321', '123456', '654321'].includes(cleanPin)) {
+        alert("Trivial sequential PINs are not allowed for security reasons.");
+        return;
+      }
     }
     try {
       await api.post("/admin/password-reset", {
@@ -358,15 +364,29 @@ export const UsersPage: React.FC = () => {
           </p>
         </div>
 
-        {hasPermission("users", "create") && (
+        <div className="flex items-center gap-2">
           <button
-            onClick={() => setIsCreateModalOpen(true)}
-            className="flex items-center gap-1.5 px-3.5 py-2 bg-brand-600 hover:bg-brand-500 text-white text-xs font-bold rounded-xl shadow-sm transition-all cursor-pointer"
+            onClick={() => {
+              fetchDiagnostics();
+              setShowDiagnostics(true);
+            }}
+            title="View why login attempts failed (diagnostic audit reasons)"
+            className="flex items-center gap-1.5 px-3 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-semibold rounded-xl border border-slate-300 dark:border-slate-700 transition-all cursor-pointer shadow-2xs"
           >
-            <Plus className="w-4 h-4" />
-            <span>Create Staff Account</span>
+            <ShieldAlert className="w-4 h-4 text-amber-500" />
+            <span>Login Diagnostics</span>
           </button>
-        )}
+
+          {hasPermission("users", "create") && (
+            <button
+              onClick={() => setIsCreateModalOpen(true)}
+              className="flex items-center gap-1.5 px-3.5 py-2 bg-brand-600 hover:bg-brand-500 text-white text-xs font-bold rounded-xl shadow-sm transition-all cursor-pointer"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Create Staff Account</span>
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Toolbar */}
@@ -492,34 +512,11 @@ export const UsersPage: React.FC = () => {
                       <div className="flex items-center justify-center gap-2 text-[11px]">
                         {u.has_pin ? (
                           <span
-                            title="Quick PIN is active on POS terminal. Click eye icon to view."
+                            title="Quick PIN is configured (Hashed securely, never readable)"
                             className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800"
                           >
                             <KeyRound className="w-2.5 h-2.5" />
-                            {revealedPins[u.id] ? (
-                              <span className="font-mono tracking-widest font-extrabold text-emerald-900 dark:text-emerald-100 bg-white/70 dark:bg-black/30 px-1 rounded-xs">
-                                {revealedPins[u.id]}
-                              </span>
-                            ) : (
-                              <span>PIN Set</span>
-                            )}
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleToggleRevealPin(u.id);
-                              }}
-                              title={revealedPins[u.id] ? "Hide PIN" : "See PIN"}
-                              className="p-0.5 hover:text-emerald-950 dark:hover:text-emerald-100 cursor-pointer"
-                            >
-                              {isRevealingPin[u.id] ? (
-                                <RefreshCw className="w-2.5 h-2.5 animate-spin" />
-                              ) : revealedPins[u.id] ? (
-                                <EyeOff className="w-2.5 h-2.5" />
-                              ) : (
-                                <Eye className="w-2.5 h-2.5" />
-                              )}
-                            </button>
+                            <span>PIN Configured</span>
                           </span>
                         ) : (
                           <span
@@ -527,7 +524,7 @@ export const UsersPage: React.FC = () => {
                             className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400"
                           >
                             <KeyRound className="w-2.5 h-2.5" />
-                            <span>No PIN</span>
+                            <span>No PIN Set</span>
                           </span>
                         )}
                         <span title="Idle timeout">⏱️ {u.idle_timeout_minutes}m</span>
@@ -730,39 +727,11 @@ export const UsersPage: React.FC = () => {
 
             <form onSubmit={handleResetCredentials} className="space-y-4 text-xs">
               <div className="text-[11px] px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700/60 flex items-center justify-between">
-                <span className="text-slate-500 font-medium">Current Quick PIN:</span>
-                <div className="flex items-center gap-2">
-                  <span className={passwordResetUser.has_pin ? "font-bold text-emerald-600 dark:text-emerald-400 font-mono" : "font-bold text-amber-600 dark:text-amber-400"}>
-                    {revealedPins[passwordResetUser.id] ? (
-                      <span className="text-sm bg-emerald-100 dark:bg-emerald-950 px-2 py-0.5 rounded-md text-emerald-800 dark:text-emerald-200 border border-emerald-300 dark:border-emerald-700 font-extrabold tracking-widest">
-                        {revealedPins[passwordResetUser.id]}
-                      </span>
-                    ) : passwordResetUser.has_pin ? (
-                      "•••• (Active / Set)"
-                    ) : (
-                      "⚠️ None (Password only)"
-                    )}
-                  </span>
-                  {passwordResetUser.has_pin && (
-                    <button
-                      type="button"
-                      onClick={() => handleToggleRevealPin(passwordResetUser.id)}
-                      className="px-2.5 py-1 text-[10px] font-bold rounded-lg bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 text-slate-700 dark:text-slate-200 hover:bg-slate-100 flex items-center gap-1 cursor-pointer shadow-2xs"
-                    >
-                      {revealedPins[passwordResetUser.id] ? (
-                        <>
-                          <EyeOff className="w-3 h-3" />
-                          <span>Hide PIN</span>
-                        </>
-                      ) : (
-                        <>
-                          <Eye className="w-3 h-3" />
-                          <span>See PIN</span>
-                        </>
-                      )}
-                    </button>
-                  )}
-                </div>
+                <span className="text-slate-500 font-medium">Quick PIN Status:</span>
+                <span className={passwordResetUser.has_pin ? "font-bold text-emerald-600 dark:text-emerald-400 flex items-center gap-1" : "font-bold text-amber-600 dark:text-amber-400 flex items-center gap-1"}>
+                  <KeyRound className="w-3.5 h-3.5" />
+                  <span>{passwordResetUser.has_pin ? "Configured (Salted Hash)" : "None (Password Only)"}</span>
+                </span>
               </div>
 
               <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700/60 flex items-center justify-between">
@@ -1001,29 +970,9 @@ export const UsersPage: React.FC = () => {
                     <label className="block font-medium text-slate-700 dark:text-slate-300">
                       Change Quick PIN (Optional, 4-6 Digits)
                     </label>
-                    <div className="flex items-center gap-1.5">
-                      <span className={`text-[10px] font-bold ${editingUser.has_pin ? 'text-emerald-600 dark:text-emerald-400 font-mono' : 'text-slate-400'}`}>
-                        {revealedPins[editingUser.id] ? (
-                          <span className="bg-emerald-100 dark:bg-emerald-950 px-1.5 py-0.5 rounded-sm text-emerald-800 dark:text-emerald-200 tracking-wider">
-                            PIN: {revealedPins[editingUser.id]}
-                          </span>
-                        ) : editingUser.has_pin ? (
-                          '✓ Current PIN Active'
-                        ) : (
-                          'No PIN Set'
-                        )}
-                      </span>
-                      {editingUser.has_pin && (
-                        <button
-                          type="button"
-                          onClick={() => handleToggleRevealPin(editingUser.id)}
-                          title={revealedPins[editingUser.id] ? "Hide PIN" : "See PIN"}
-                          className="text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 cursor-pointer"
-                        >
-                          {revealedPins[editingUser.id] ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-                        </button>
-                      )}
-                    </div>
+                    <span className={`text-[10px] font-bold ${editingUser.has_pin ? 'text-emerald-600 dark:text-emerald-400 font-mono' : 'text-slate-400'}`}>
+                      {editingUser.has_pin ? '✓ Current PIN Active (Hashed)' : 'No PIN Set'}
+                    </span>
                   </div>
                   <input
                     type="text"
@@ -1234,6 +1183,141 @@ export const UsersPage: React.FC = () => {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Login Diagnostics Modal */}
+      {showDiagnostics && (
+        <div className="fixed inset-0 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl max-w-3xl w-full p-6 shadow-2xl space-y-4 max-h-[85vh] flex flex-col">
+            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
+              <div className="flex items-center gap-2">
+                <ShieldAlert className="w-5 h-5 text-amber-500" />
+                <div>
+                  <h3 className="font-bold text-sm text-slate-900 dark:text-white">
+                    Why Did My Login Fail? (Staff Login Diagnostics)
+                  </h3>
+                  <p className="text-[11px] text-slate-500">
+                    Live security audit logs showing recent terminal login attempts and exact diagnostic reasons.
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={fetchDiagnostics}
+                  disabled={isLoadingDiagnostics}
+                  className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 cursor-pointer"
+                  title="Refresh Diagnostics"
+                >
+                  <RefreshCw className={`w-4 h-4 ${isLoadingDiagnostics ? "animate-spin" : ""}`} />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowDiagnostics(false)}
+                  className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-1 cursor-pointer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+
+            <div className="overflow-y-auto flex-1 pr-1 space-y-2">
+              {isLoadingDiagnostics ? (
+                <div className="py-12 text-center text-xs text-slate-400">Loading diagnostic events...</div>
+              ) : diagnosticsLogs.length === 0 ? (
+                <div className="py-12 text-center text-xs text-slate-400">
+                  No failed login attempts recorded in recent audit history.
+                </div>
+              ) : (
+                <div className="border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden">
+                  <table className="w-full text-xs text-left">
+                    <thead className="bg-slate-50 dark:bg-slate-800/60 text-slate-500 text-[10px] uppercase font-semibold border-b border-slate-200 dark:border-slate-800">
+                      <tr>
+                        <th className="px-3 py-2">Time</th>
+                        <th className="px-3 py-2">User / Target</th>
+                        <th className="px-3 py-2">Store & Counter</th>
+                        <th className="px-3 py-2">Status</th>
+                        <th className="px-3 py-2">Diagnostic Reason</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800 text-[11px]">
+                      {diagnosticsLogs.map((log) => {
+                        const isSuccess = log.action === "staff_login_success";
+                        const isLocked = log.action === "staff_account_locked";
+                        return (
+                          <tr key={log.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/40">
+                            <td className="px-3 py-2 text-slate-400 text-[10px] whitespace-nowrap">
+                              {log.timestamp ? new Date(log.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : "-"}
+                            </td>
+                            <td className="px-3 py-2">
+                              {log.user ? (
+                                <div>
+                                  <span className="font-semibold text-slate-900 dark:text-white block">{log.user.name}</span>
+                                  <span className="text-[10px] text-slate-400 font-mono">@{log.user.username} (ID: {log.user.id})</span>
+                                </div>
+                              ) : (
+                                <span className="text-slate-400 italic">Unknown Identifier</span>
+                              )}
+                            </td>
+                            <td className="px-3 py-2 text-slate-600 dark:text-slate-300">
+                              <div>{log.store?.code || "STORE-01"}</div>
+                              <div className="text-[10px] text-slate-400">{log.counter || "Station"}</div>
+                            </td>
+                            <td className="px-3 py-2">
+                              {isSuccess ? (
+                                <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-400">
+                                  SUCCESS
+                                </span>
+                              ) : isLocked ? (
+                                <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-rose-100 text-rose-700 dark:bg-rose-950/60 dark:text-rose-400">
+                                  LOCKED
+                                </span>
+                              ) : (
+                                <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-100 text-amber-700 dark:bg-amber-950/60 dark:text-amber-400">
+                                  FAILED
+                                </span>
+                              )}
+                            </td>
+                            <td className="px-3 py-2">
+                              <span className="font-mono text-[10px] font-bold text-slate-800 dark:text-slate-200">
+                                {log.reason === "wrong_pin"
+                                  ? "❌ Incorrect PIN"
+                                  : log.reason === "no_pin_configured"
+                                  ? "⚠️ No PIN Set for Account (Password Required)"
+                                  : log.reason === "wrong_store"
+                                  ? "🚫 Staff not assigned to this store"
+                                  : log.reason === "counter_not_allowed"
+                                  ? "🚫 Counter access restricted"
+                                  : log.reason === "account_locked"
+                                  ? "🔒 Blocked: Account Locked (Exceeded failed attempts)"
+                                  : log.reason === "max_failed_attempts_exceeded"
+                                  ? "🔒 Locked out: 5 consecutive failed attempts"
+                                  : log.reason || "Authentication failed"}
+                              </span>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+
+            <div className="flex justify-between items-center pt-2 border-t border-slate-100 dark:border-slate-800 text-xs">
+              <span className="text-[11px] text-slate-400">
+                Audit logs are immutable and traceable to the exact user ID and IP address.
+              </span>
+              <button
+                type="button"
+                onClick={() => setShowDiagnostics(false)}
+                className="px-4 py-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-semibold rounded-xl cursor-pointer"
+              >
+                Close
+              </button>
+            </div>
           </div>
         </div>
       )}
