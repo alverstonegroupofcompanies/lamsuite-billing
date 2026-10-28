@@ -39,7 +39,17 @@ export class StaffAuthService {
   private sessionListeners: Array<(session: ActiveStaffSession | null) => void> = [];
 
   constructor() {
-    // Online-first: do not auto-seed dummy demo users. Real users are managed via Central Admin.
+    try {
+      if (typeof localStorage !== "undefined") {
+        const saved = localStorage.getItem("active_staff_session");
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (parsed && parsed.sessionId && parsed.user) {
+            this.currentSession = parsed;
+          }
+        }
+      }
+    } catch (_) {}
   }
 
   async cleanupSyntheticDemoUsers(): Promise<void> {
@@ -325,6 +335,9 @@ export class StaffAuthService {
 
     // 1. ONLINE FIRST: Authenticate with Cloud Backend API if in browser and online (skip in unit test runner)
     if (typeof window !== "undefined" && navigator.onLine && (typeof process === "undefined" || process.env.NODE_ENV !== "test")) {
+      let onlineSuccessStaff: StaffUser | null = null;
+      let onlineToken: string | null = null;
+
       try {
         const targetUsername = localUser?.username || usernameOrId;
         const res = await fetch(`${API_BASE_URL}/api/staff/login`, {
@@ -345,7 +358,7 @@ export class StaffAuthService {
         if (res.ok) {
           const body = await res.json();
           if (body.success && body.user) {
-            const staffUser: StaffUser = {
+            onlineSuccessStaff = {
               id: String(body.user.id),
               store_id: String(body.user.store_id || activeStore),
               username: body.user.username,
@@ -362,9 +375,8 @@ export class StaffAuthService {
               enabled_menus: body.user.enabled_menus || ["pos", "bills"],
             };
             if (body.token) {
-              localStorage.setItem("staff_token", body.token);
+              onlineToken = body.token;
             }
-            return await this.establishSession(staffUser);
           }
         } else if (res.status === 401 || res.status === 403 || res.status === 422 || res.status === 423) {
           const err = await res.json().catch(() => ({}));
@@ -372,6 +384,13 @@ export class StaffAuthService {
         }
       } catch (_) {
         // Cloud unreachable: fallback to local offline cache
+      }
+
+      if (onlineSuccessStaff) {
+        if (onlineToken) {
+          try { localStorage.setItem("staff_token", onlineToken); } catch (_) {}
+        }
+        return await this.establishSession(onlineSuccessStaff);
       }
     }
 
@@ -407,6 +426,9 @@ export class StaffAuthService {
 
     // 1. ONLINE FIRST: Authenticate with Cloud Backend API if in browser and online (skip in unit test runner)
     if (typeof window !== "undefined" && navigator.onLine && (typeof process === "undefined" || process.env.NODE_ENV !== "test")) {
+      let onlineSuccessStaff: StaffUser | null = null;
+      let onlineToken: string | null = null;
+
       try {
         const targetUsername = localUser?.username || usernameOrId;
         const res = await fetch(`${API_BASE_URL}/api/staff/login`, {
@@ -427,7 +449,7 @@ export class StaffAuthService {
         if (res.ok) {
           const body = await res.json();
           if (body.success && body.user) {
-            const staffUser: StaffUser = {
+            onlineSuccessStaff = {
               id: String(body.user.id),
               store_id: String(body.user.store_id || activeStore),
               username: body.user.username,
@@ -444,9 +466,8 @@ export class StaffAuthService {
               enabled_menus: body.user.enabled_menus || ["pos", "bills"],
             };
             if (body.token) {
-              localStorage.setItem("staff_token", body.token);
+              onlineToken = body.token;
             }
-            return await this.establishSession(staffUser);
           }
         } else if (res.status === 401 || res.status === 403 || res.status === 422 || res.status === 423) {
           const err = await res.json().catch(() => ({}));
@@ -454,6 +475,13 @@ export class StaffAuthService {
         }
       } catch (_) {
         // Cloud unreachable: fallback to local offline cache
+      }
+
+      if (onlineSuccessStaff) {
+        if (onlineToken) {
+          try { localStorage.setItem("staff_token", onlineToken); } catch (_) {}
+        }
+        return await this.establishSession(onlineSuccessStaff);
       }
     }
 
@@ -651,6 +679,10 @@ export class StaffAuthService {
     if (this.currentSession) {
       this.logAudit("LOGOUT", this.currentSession.user, "Cashier logged out");
       this.currentSession = null;
+      try {
+        localStorage.removeItem("active_staff_session");
+        localStorage.removeItem("staff_token");
+      } catch (_) {}
       this.notifySessionChange();
     }
   }
@@ -706,9 +738,9 @@ export class StaffAuthService {
   ): Promise<{ success: boolean; mustChangePassword?: boolean; user: StaffUser }> {
     user.failed_attempts = 0;
     user.locked_until = null;
-    await this.persistUserRecord(user);
+    await this.persistUserRecord(user).catch(() => {});
 
-    const device = await storeDeviceService.getDeviceProfile();
+    const device = await storeDeviceService.getDeviceProfile().catch(() => null);
     const counterId = device?.counter_id || "cntr_default_01";
     const counterName = device?.counter_name || "Counter 01";
     const counterCode = device?.counter_code || "C01";
@@ -725,6 +757,10 @@ export class StaffAuthService {
       lastActivityAt: Date.now(),
     };
 
+    try {
+      localStorage.setItem("active_staff_session", JSON.stringify(this.currentSession));
+    } catch (_) {}
+
     // Record session in counter_sessions
     await sqliteStorage.insertRecord("counter_sessions", sessionId, {
       id: sessionId,
@@ -735,9 +771,9 @@ export class StaffAuthService {
       started_at: Date.now(),
       status: "active",
       opening_cash: 0,
-    });
+    }).catch(() => {});
 
-    await this.logAudit("LOGIN_SUCCESS", user, `Cashier signed in on ${counterName}`);
+    await this.logAudit("LOGIN_SUCCESS", user, `Cashier signed in on ${counterName}`).catch(() => {});
     this.notifySessionChange();
 
     return {
@@ -748,23 +784,35 @@ export class StaffAuthService {
   }
 
   private async persistUserRecord(user: StaffUser): Promise<void> {
-    await sqliteStorage.insertRecord("staff_users", user.id, {
-      id: user.id,
-      store_id: user.store_id,
-      username: user.username,
-      full_name: user.full_name,
-      role: user.role,
-      password_hash: user.password_hash,
-      pin_hash: user.pin_hash,
-      is_active: user.is_active ? 1 : 0,
-      must_change_password: user.must_change_password ? 1 : 0,
-      biometric_registered: user.biometric_registered ? 1 : 0,
-      failed_attempts: user.failed_attempts,
-      locked_until: user.locked_until,
-      permissions_json: JSON.stringify(user.permissions),
-      enabled_menus_json: JSON.stringify(user.enabled_menus || []),
-      updated_at: Date.now(),
-    });
+    try {
+      // Find if user already exists by username or id and delete to prevent UNIQUE constraint violation
+      const all = await sqliteStorage.findAll<any>("staff_users").catch(() => []);
+      for (const u of all || []) {
+        if (u.username === user.username || String(u.id) === String(user.id)) {
+          await sqliteStorage.deleteRecord("staff_users", u.id).catch(() => {});
+        }
+      }
+
+      await sqliteStorage.insertRecord("staff_users", user.id, {
+        id: user.id,
+        store_id: user.store_id,
+        username: user.username,
+        full_name: user.full_name,
+        role: user.role,
+        password_hash: user.password_hash || "",
+        pin_hash: user.pin_hash || "",
+        is_active: user.is_active ? 1 : 0,
+        must_change_password: user.must_change_password ? 1 : 0,
+        biometric_registered: user.biometric_registered ? 1 : 0,
+        failed_attempts: user.failed_attempts || 0,
+        locked_until: user.locked_until,
+        permissions_json: JSON.stringify(user.permissions || ["*"]),
+        enabled_menus_json: JSON.stringify(user.enabled_menus || []),
+        updated_at: Date.now(),
+      });
+    } catch (e) {
+      console.warn("Could not persist staff user record:", e);
+    }
   }
 
   private async logAudit(eventType: string, user: StaffUser | { id: string; full_name?: string; username?: string }, details: string): Promise<void> {
