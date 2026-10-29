@@ -1,6 +1,7 @@
 import { sqliteStorage } from "../db/sqliteStorage";
 import { staffCryptoService } from "./staffCryptoService";
 import { storeDeviceService } from "./storeDeviceService";
+import { deviceSessionService } from "../devices/deviceSessionService";
 import { API_BASE_URL } from "../../config/env";
 
 export interface StaffUser {
@@ -730,6 +731,7 @@ export class StaffAuthService {
         localStorage.removeItem("active_staff_session");
         localStorage.removeItem("staff_token");
       } catch (_) {}
+      deviceSessionService.notifyLogout().catch(() => {});
       this.notifySessionChange();
     }
   }

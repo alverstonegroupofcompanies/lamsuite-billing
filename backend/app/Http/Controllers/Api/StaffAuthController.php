@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Models\AuditLog;
 use App\Models\Counter;
+use App\Models\DeviceSession;
 use App\Models\Store;
 use App\Models\User;
 use App\Models\UserSession;
@@ -99,6 +100,7 @@ class StaffAuthController
         }
 
         // 3. Counter Scoping & Status Check
+        $counter = null;
         if (!empty($validated['counter_id'])) {
             $counterIdentifier = trim((string)$validated['counter_id']);
             $counter = Counter::where('store_id', $store->id)
@@ -265,6 +267,25 @@ class StaffAuthController
             'last_activity' => now(),
             'is_active' => true,
         ]);
+
+        $deviceUuid = $request->header('X-Device-UUID')
+            ?: $request->input('device_uuid')
+            ?: ($counter?->device_uuid ?: ('dev_counter_' . ($counter?->id ?: 'main')));
+
+        $deviceName = $request->input('device_name') ?: ($counter?->device_name ?: null);
+
+        DeviceSession::recordLogin(
+            $store->id,
+            $deviceUuid,
+            $deviceName,
+            $counter?->id,
+            $counter?->counter_name,
+            $counter?->counter_code,
+            $user->id,
+            $request->ip(),
+            $counter?->location_name,
+            $request->userAgent()
+        );
 
         AuditLog::log(
             'staff_login_success',
@@ -465,5 +486,28 @@ class StaffAuthController
                 'locked_until' => null,
             ],
         ]);
+    }
+
+    /**
+     * Terminate staff session and mark device session as expired.
+     */
+    public function logout(Request $request): JsonResponse
+    {
+        $deviceUuid = $request->header('X-Device-UUID') ?: $request->input('device_uuid');
+        $user = $request->user();
+
+        if ($deviceUuid) {
+            DeviceSession::recordLogout($deviceUuid);
+        } elseif ($user) {
+            DeviceSession::where('user_id', $user->id)
+                ->where('is_active', true)
+                ->update(['is_active' => false, 'status' => 'expired', 'last_active_at' => now()]);
+        }
+
+        if ($user && $user->currentAccessToken()) {
+            $user->currentAccessToken()->delete();
+        }
+
+        return response()->json(['success' => true, 'message' => 'Logged out successfully.']);
     }
 }

@@ -52,7 +52,7 @@ export const StaffLoginPage: React.FC<StaffLoginPageProps> = ({
     let mounted = true;
     const checkOnline = async () => {
       try {
-        const res = await fetch(`${API_BASE_URL}/api/lan/v1/health`, { method: "GET" });
+        const res = await fetch(`${API_BASE_URL}/api/license/check`, { method: "GET" });
         if (mounted) setIsOnline(res.ok);
       } catch {
         if (mounted) setIsOnline(false);

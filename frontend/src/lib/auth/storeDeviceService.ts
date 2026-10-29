@@ -168,9 +168,8 @@ export class StoreDeviceService {
       });
     } catch (networkErr: any) {
       console.error("[Activation] Network error during device registration:", networkErr, "Target URL:", `${API_BASE_URL}/api/devices/register`);
-      const detail = networkErr?.message ? ` (${networkErr.message})` : "";
       // NO OFFLINE ACTIVATION: If backend cannot be reached, abort immediately!
-      throw new Error(`Cannot reach server at ${API_BASE_URL}${detail}. Online verification is required to activate this workstation.`);
+      throw new Error("Cannot reach server. Online verification is required to activate this workstation.");
     }
 
     if (!response.ok) {

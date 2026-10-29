@@ -1,6 +1,5 @@
 import { sqliteStorage } from "../db/sqliteStorage";
 import { cloudDeltaSyncService } from "./cloudDeltaSyncService";
-import { lanPeerService } from "../lan/lanPeerService";
 import { syncQueueService, defaultBackendApiClient } from "./syncQueueService";
 import { multiCounterStockService } from "../stock/multiCounterStockService";
 import { storeDeviceService } from "../auth/storeDeviceService";
@@ -104,27 +103,10 @@ export class RemoteSyncManager {
         return this.transportMode;
       }
     } catch {
-      // Cloud unreachable
+      // Cloud server momentarily unreachable
     }
 
-    // 2. Second layer: LAN Hub / mesh if reachable on local shop network
-    const lanConfig = lanPeerService.getStationConfig();
-    const isMain = lanConfig.role === "main_station";
-
-    if (!isMain) {
-      try {
-        const lanPeer = await lanPeerService.discoverMainStation();
-        if (lanPeer) {
-          this.transportMode = "lan_mesh";
-          this.notify();
-          return "lan_mesh";
-        }
-      } catch {
-        // LAN peer discovery failed
-      }
-    }
-
-    // 3. Fallback to offline polling / standalone mode
+    // Fallback to offline polling / queued sync mode
     this.startPollingFallback(baseUrl);
     return "cloud_poll";
   }

@@ -170,7 +170,7 @@ services:
       - "traefik.http.routers.api.entrypoints=web"
       - "traefik.http.services.api.loadbalancer.server.port=8000"
       # Anti-Brute-Force Rate Limiting for Authentication & Activation Endpoints
-      - "traefik.http.routers.api-auth.rule=Host(`${SUBDOMAIN_API:-api}.${DOMAIN}`) && (PathPrefix(`/api/login`) || PathPrefix(`/api/auth/login`) || PathPrefix(`/api/staff/login`) || PathPrefix(`/api/devices/register`) || PathPrefix(`/api/lan/v1/pair`))"
+      - "traefik.http.routers.api-auth.rule=Host(`${SUBDOMAIN_API:-api}.${DOMAIN}`) && (PathPrefix(`/api/login`) || PathPrefix(`/api/auth/login`) || PathPrefix(`/api/staff/login`) || PathPrefix(`/api/devices/register`))"
       - "traefik.http.routers.api-auth.entrypoints=web"
       - "traefik.http.routers.api-auth.middlewares=rate-limit-auth@file"
       - "traefik.http.routers.api-auth.service=api"

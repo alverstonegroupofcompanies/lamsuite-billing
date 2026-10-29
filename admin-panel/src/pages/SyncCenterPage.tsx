@@ -259,11 +259,11 @@ export const SyncCenterPage: React.FC = () => {
             </div>
 
             <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs space-y-2">
-              <span className="text-xs font-semibold text-slate-500">Local Area Network (Mesh)</span>
+              <span className="text-xs font-semibold text-slate-500">Centralized Server</span>
               <div className="text-xl font-bold text-slate-900 dark:text-white">
-                {diagnostics.lan_websocket_status}
+                {diagnostics.server_connection_status || diagnostics.lan_websocket_status || "Online (Centralized Server)"}
               </div>
-              <div className="text-[11px] text-slate-400">Offline P2P sync bridge active</div>
+              <div className="text-[11px] text-slate-400">Online-first central sync bridge active</div>
             </div>
 
             <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs space-y-2">

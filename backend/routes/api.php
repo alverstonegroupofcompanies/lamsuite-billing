@@ -30,6 +30,7 @@ use App\Http\Controllers\Api\MigrationController;
 use App\Http\Controllers\Api\CounterController;
 use App\Http\Controllers\Api\HeldBillController;
 use App\Http\Controllers\Api\StaffAuthController;
+use App\Http\Controllers\Api\DeviceSessionController;
 
 /*
 |--------------------------------------------------------------------------
@@ -63,12 +64,16 @@ Route::post('/sync/push/adjustments', [SyncController::class, 'pushAdjustments']
 Route::post('/sync/push/transfers', [SyncController::class, 'pushTransfers']);
 Route::post('/sync/push/staff', [SyncController::class, 'pushStaff']);
 Route::get('/sync/pull/deltas', [SyncController::class, 'pullDeltas']);
-Route::get('/lan/v1/health', [SyncController::class, 'lanHealth']);
-Route::get('/lan/v1/pull', [SyncController::class, 'lanPullSnapshot']);
-Route::post('/lan/v1/pair', [SyncController::class, 'lanPairCounter']);
-Route::get('/lan/v1/clients', [SyncController::class, 'lanGetClients']);
-Route::post('/lan/v1/clients/{id}/status', [SyncController::class, 'lanUpdateClientStatus']);
-Route::post('/lan/v1/hub/config', [SyncController::class, 'lanUpdateHubConfig']);
+
+// Centralized Device Session Tracking & Logged-In Devices
+Route::get('/devices/logged-in', [DeviceSessionController::class, 'index']);
+Route::get('/devices/connected', [DeviceSessionController::class, 'index']);
+Route::post('/devices/heartbeat', [DeviceSessionController::class, 'heartbeat']);
+Route::post('/devices/logout', [DeviceSessionController::class, 'logout']);
+Route::post('/devices/sessions/{id}/expire', [DeviceSessionController::class, 'expireSession']);
+Route::post('/devices/sessions/{id}/logout', [DeviceSessionController::class, 'expireSession']);
+Route::post('/staff/logout', [StaffAuthController::class, 'logout']);
+
 Route::get('/sync/stream', [SyncController::class, 'streamSSE']);
 Route::post('/invoices/{id}/lock', [SyncController::class, 'lockInvoice']);
 Route::post('/invoices/{id}/unlock', [SyncController::class, 'unlockInvoice']);

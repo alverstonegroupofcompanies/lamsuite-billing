@@ -144,7 +144,7 @@ class AdminSyncController
             'active_devices_count' => $activeDevices->where('status', 'active')->count(),
             'devices' => $activeDevices,
             'recent_events' => $recentSyncs,
-            'lan_websocket_status' => 'Connected (Local Mesh)',
+            'server_connection_status' => 'Online (Centralized Server)',
             'cloud_sync_latency_ms' => rand(45, 120),
             'last_sync_heartbeat' => now()->toIso8601String(),
         ]);

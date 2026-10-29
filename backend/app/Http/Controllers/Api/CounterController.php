@@ -6,6 +6,7 @@ use App\Models\AuditLog;
 use App\Models\Counter;
 use App\Models\CounterSequence;
 use App\Models\CounterShift;
+use App\Models\DeviceSession;
 use App\Models\Store;
 use App\Models\StoreDayClose;
 use Illuminate\Http\JsonResponse;
@@ -600,6 +601,15 @@ class CounterController
             'last_seen_at' => now(),
             'ip_address' => $request->ip(),
         ]);
+
+        if ($counter->device_uuid) {
+            DeviceSession::recordHeartbeat(
+                $counter->device_uuid,
+                $request->ip(),
+                $counter->device_name,
+                $counter->counter_name
+            );
+        }
 
         return response()->json([
             'success' => true,

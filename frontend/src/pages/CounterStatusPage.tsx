@@ -184,7 +184,7 @@ export const CounterStatusPage: React.FC = () => {
     setActionMsg(
       !hubFailoverActive
         ? "Simulated Hub Crash: Secondary counters switched automatically to Autonomous Offline Mode!"
-        : "Hub Restored: Local LAN broadcast resumed and pending queues flushed."
+        : "Hub Restored: Centralized sync resumed and pending queues flushed."
     );
     setTimeout(() => setActionMsg(""), 5000);
   };
@@ -199,7 +199,7 @@ export const CounterStatusPage: React.FC = () => {
             <span>Store Multi-Counter Workstation Monitor</span>
           </h2>
           <p className="text-xs text-text-muted mt-0.5">
-            Real-time LAN sync heartbeat, active cashier tracking, cash drawer status & failover control.
+            Real-time sync heartbeat, active cashier tracking, cash drawer status & failover control.
           </p>
         </div>
 

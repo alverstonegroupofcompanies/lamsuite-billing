@@ -28,9 +28,9 @@ import { StoreGatewayPage } from "./pages/StoreGatewayPage";
 import { storeRegistryService, type RegisteredStoreRecord } from "./lib/auth/storeRegistryService";
 import { autoUpdateService, type UpdateInfo } from "./lib/settings/autoUpdateService";
 import { UpdateNotificationModal } from "./components/UpdateNotificationModal";
-import { API_BASE_URL, DEFAULT_LAN_PORT } from "./config/env";
+import { API_BASE_URL } from "./config/env";
 import { cloudDeltaSyncService } from "./lib/sync/cloudDeltaSyncService";
-import { lanPeerService } from "./lib/lan/lanPeerService";
+import { deviceSessionService } from "./lib/devices/deviceSessionService";
 import { productsStore } from "./lib/masters/productsStore";
 
 const LandingRedirect: React.FC = () => {
@@ -139,6 +139,9 @@ export const App: React.FC = () => {
       }).catch(() => {});
     }, 5 * 60 * 1000);
 
+    // Continuous device session presence heartbeat for logged-in devices tracking
+    const stopDeviceHeartbeat = deviceSessionService.startHeartbeatTimer(45000);
+
     const unsubStaff = staffAuthService.onSessionChange((session) => {
       setHasStaffSession(Boolean(session));
     });
@@ -150,6 +153,7 @@ export const App: React.FC = () => {
 
     return () => {
       clearInterval(heartbeatTimer);
+      stopDeviceHeartbeat();
       unsubStaff();
       unsubReg();
     };
@@ -207,28 +211,8 @@ export const App: React.FC = () => {
             const currentProducts = await productsStore.getAllProducts();
             const activeProfile = await storeDeviceService.getDeviceProfile();
 
-            // Check if secondary LAN counter
-            const isLanClient = !activeStore?.is_hub && (
-              activeProfile?.store_id?.startsWith("store_lan") ||
-              activeStore?.db_path?.includes("lan") ||
-              activeProfile?.license_plan?.includes("LAN") ||
-              activeProfile?.counter_code !== "C01"
-            );
-
-            if (isLanClient) {
-              // Fetch only from LAN Server Hub, not from backend server
-              const hubIp = localStorage.getItem("lamsuite_hub_ip");
-              const hubPort = Number(localStorage.getItem("lamsuite_hub_port")) || DEFAULT_LAN_PORT;
-              const deviceToken = localStorage.getItem("lamsuite_device_token") || undefined;
-              if (hubIp) {
-                await lanPeerService.pullMasterSnapshotFromMain(hubIp, hubPort, undefined, deviceToken).catch(async () => {
-                  if (hubPort !== 8000) {
-                    await lanPeerService.pullMasterSnapshotFromMain(hubIp, 8000, undefined, deviceToken).catch(() => {});
-                  }
-                });
-              }
-            } else if (currentProducts.length <= 1) {
-              // Master station / first sign in: check backend server for catalog data
+            if (currentProducts.length <= 1) {
+              // Online cloud sync: check backend server for catalog data
               const storeId = activeStore?.id || activeProfile?.store_id || "1";
               await cloudDeltaSyncService.pullMasterDelta({
                 fetchMasterDeltas: async (wm) => {

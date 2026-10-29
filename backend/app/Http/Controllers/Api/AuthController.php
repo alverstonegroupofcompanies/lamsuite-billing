@@ -7,6 +7,7 @@ use App\Models\AuditLog;
 use App\Models\Counter;
 use App\Models\Device;
 use App\Models\DeviceActivationAttempt;
+use App\Models\DeviceSession;
 use App\Models\Store;
 use App\Models\User;
 use Illuminate\Http\JsonResponse;
@@ -202,6 +203,19 @@ class AuthController
             'success' => true,
         ]);
 
+        DeviceSession::recordLogin(
+            $store->id,
+            $deviceUuid,
+            $deviceName,
+            $counter->id,
+            $counter->counter_name,
+            $counter->counter_code,
+            null,
+            $clientIp,
+            $counter->location_name,
+            $request->userAgent()
+        );
+
         AuditLog::log(
             'device_activated',
             'Device',
@@ -357,6 +371,19 @@ class AuthController
 
         $device->update(['counter_id' => (string)$counter->id]);
 
+        DeviceSession::recordLogin(
+            $store->id,
+            $validated['device_uuid'],
+            $device->device_name,
+            $counter->id,
+            $counter->counter_name,
+            $counter->counter_code,
+            $user->id,
+            $clientIp,
+            $counter->location_name,
+            $request->userAgent()
+        );
+
         AuditLog::log(
             'device_activated_by_owner',
             'Device',
@@ -475,6 +502,16 @@ class AuthController
                 'last_seen_at' => now(),
                 'ip_address' => $request->ip(),
             ]);
+        }
+
+        $activeUuid = $device?->device_uuid ?: $counter?->device_uuid ?: $deviceUuid;
+        if ($activeUuid) {
+            DeviceSession::recordHeartbeat(
+                $activeUuid,
+                $request->ip(),
+                $device?->device_name,
+                $counter?->counter_name
+            );
         }
 
         return response()->json([

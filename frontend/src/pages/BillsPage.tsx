@@ -43,7 +43,6 @@ import { isTauri } from "../lib/ipc/ipcBridge";
 import { posCartService } from "../lib/billing/posCartService";
 import { productsStore, type ProductBatch, type ProductItem } from "../lib/masters/productsStore";
 import { companySettingsService } from "../lib/settings/companySettingsService";
-import { lanPeerService } from "../lib/lan/lanPeerService";
 import { sqliteStorage } from "../lib/db/sqliteStorage";
 import { onlineTransactionService } from "../lib/sync/onlineTransactionService";
 import { storeRegistryService, type RegisteredStoreRecord } from "../lib/auth/storeRegistryService";
@@ -140,7 +139,7 @@ export const BillsPage: React.FC = () => {
     setTimeout(() => setNotification(null), actions && actions.length > 0 ? 8000 : 3500);
   };
 
-  const [isRefreshingFromLan, setIsRefreshingFromLan] = useState(false);
+  const [isRefreshingServer, setIsRefreshingServer] = useState(false);
 
   // Subscribe to store registry changes
   useEffect(() => {
@@ -474,14 +473,14 @@ export const BillsPage: React.FC = () => {
   };
 
   const handleRefreshSync = async () => {
-    setIsRefreshingFromLan(true);
+    setIsRefreshingServer(true);
     try {
       await loadInvoices(currentPage, true);
       showNotification("Refreshed invoice register from server.", "success");
     } catch {
       await loadInvoices(currentPage, false);
     } finally {
-      setIsRefreshingFromLan(false);
+      setIsRefreshingServer(false);
     }
   };
 
@@ -1033,12 +1032,12 @@ export const BillsPage: React.FC = () => {
 
           <button
             onClick={handleRefreshSync}
-            disabled={isRefreshingFromLan}
+            disabled={isRefreshingServer}
             className="flex items-center gap-1.5 rounded-[8px] border border-[var(--color-border)] px-2.5 py-1 text-xs text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)] cursor-pointer disabled:opacity-50"
-            title="Refresh & Pull from LAN Hub"
+            title="Refresh & Pull from Server"
           >
-            <RefreshCw className={`h-3.5 w-3.5 ${isRefreshingFromLan ? "animate-spin text-emerald-500" : ""}`} />
-            <span>Sync Hub</span>
+            <RefreshCw className={`h-3.5 w-3.5 ${isRefreshingServer ? "animate-spin text-emerald-500" : ""}`} />
+            <span>Sync</span>
           </button>
         </div>
       </div>

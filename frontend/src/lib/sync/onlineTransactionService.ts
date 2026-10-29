@@ -139,37 +139,25 @@ export class OnlineTransactionService {
     let isConnected = false;
     let latency = 0;
 
-    const urlsToTry = [this.getEffectiveBaseUrl()];
-    const hubIp = localStorage.getItem("lamsuite_hub_ip");
-    const hubPort = localStorage.getItem("lamsuite_hub_port") || "8000";
-    if (hubIp && !urlsToTry.includes(`http://${hubIp}:${hubPort}`)) {
-      urlsToTry.push(`http://${hubIp}:${hubPort}`);
-    }
+    const baseUrl = this.getEffectiveBaseUrl();
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 2500);
 
-    for (const url of urlsToTry) {
-      try {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 2500);
+      const res = await fetch(`${baseUrl}/api/license/check`, {
+        method: "GET",
+        headers: { Accept: "application/json" },
+        cache: "no-store",
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
 
-        const res = await fetch(`${url}/api/lan/v1/health`, {
-          method: "GET",
-          headers: { Accept: "application/json" },
-          cache: "no-store",
-          signal: controller.signal,
-        });
-        clearTimeout(timeoutId);
-
-        latency = Date.now() - start;
-        if (res.ok) {
-          isConnected = true;
-          if (url !== this.getEffectiveBaseUrl()) {
-            this.activeBaseUrl = url;
-          }
-          break;
-        }
-      } catch {
-        // try next
+      latency = Date.now() - start;
+      if (res.ok) {
+        isConnected = true;
       }
+    } catch {
+      // Server unreachable
     }
 
     if (!isConnected) {
