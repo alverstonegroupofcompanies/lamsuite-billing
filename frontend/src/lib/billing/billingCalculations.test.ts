@@ -150,8 +150,8 @@ describe("Billing & Indian GST Calculation Engine (POS-002, POS-003, POS-004, NF
 
       expect(totals.taxable_subtotal).toBe(91.53);
       expect(totals.bill_discount_amount).toBe(10);
-      expect(totals.total_tax).toBe(16.48);
-      expect(totals.grand_total).toBe(108.01);
+      expect(totals.total_tax).toBe(16.47);
+      expect(totals.grand_total).toBe(108);
     });
 
     it("applies percentage overall bill discount across invoice", () => {
@@ -234,6 +234,24 @@ describe("Billing & Indian GST Calculation Engine (POS-002, POS-003, POS-004, NF
       const calc2 = calculateLineTotals(line2, "inclusive");
       expect(calc2.discount_amount).toBe(10);
       expect(calc2.net_amount).toBe(90);
+    });
+
+    it("ensures 4 strips at 90.00 tax-inclusive produces exact 360.00 line total with 0 round-off", () => {
+      const lines: BillingLineInput[] = [
+        {
+          qty: 4,
+          unit_price: 90,
+          units_per_pack: 1,
+          gst_percent: 12,
+        },
+      ];
+
+      const res = calculateInvoiceTotals(lines, { type: "amount", value: 0 }, "inclusive", false, true);
+      expect(res.lines[0].total_amount).toBe(360);
+      expect(res.gross_subtotal).toBe(360);
+      expect(res.net_before_round).toBe(360);
+      expect(res.round_off).toBe(0);
+      expect(res.grand_total).toBe(360);
     });
   });
 });

@@ -324,7 +324,7 @@ export class InterStoreTransferService {
       line_no: lineNo,
       product_id: product.id,
       product_name: product.name,
-      barcode: product.barcode,
+      barcode: product.barcode || undefined,
       hsn_code: product.hsn_sac_code || "30049099",
       batch_id: batch.id,
       batch_no: batch.batch_no,
@@ -970,9 +970,9 @@ export class InterStoreTransferService {
       // Match product by barcode or name
       const matchedProduct = allProducts.find(
         (p) =>
-          p.barcode.toLowerCase() === identifier.toLowerCase() ||
-          p.name.toLowerCase() === identifier.toLowerCase() ||
-          p.id.toLowerCase() === identifier.toLowerCase()
+          (p.barcode && p.barcode.toLowerCase() === identifier.toLowerCase()) ||
+          (p.name && p.name.toLowerCase() === identifier.toLowerCase()) ||
+          (p.id && p.id.toLowerCase() === identifier.toLowerCase())
       );
 
       if (!matchedProduct) {

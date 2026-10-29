@@ -40,6 +40,7 @@ export const MIGRATIONS: Migration[] = [
         grand_total REAL NOT NULL DEFAULT 0,
         paid_amount REAL NOT NULL DEFAULT 0,
         payment_mode TEXT NOT NULL DEFAULT 'cash',
+        payment_status TEXT NOT NULL DEFAULT 'paid',
         status TEXT NOT NULL DEFAULT 'issued',
         store_state_code TEXT DEFAULT '32',
         patient_name TEXT,
@@ -598,6 +599,29 @@ export const MIGRATIONS: Migration[] = [
         payment_date TEXT NOT NULL,
         created_at INTEGER NOT NULL
       );
+
+      CREATE TABLE IF NOT EXISTS invoice_payments (
+        id TEXT PRIMARY KEY,
+        invoice_id TEXT NOT NULL,
+        store_id TEXT,
+        counter_id TEXT,
+        counter_code TEXT,
+        shift_id TEXT,
+        payment_mode TEXT NOT NULL DEFAULT 'Cash',
+        amount REAL NOT NULL DEFAULT 0,
+        reference_no TEXT,
+        status TEXT NOT NULL DEFAULT 'received',
+        extra_fields TEXT,
+        notes TEXT,
+        received_by TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_invoice_payments_inv ON invoice_payments(invoice_id);
+      CREATE INDEX IF NOT EXISTS idx_invoice_payments_ref ON invoice_payments(reference_no);
+      CREATE INDEX IF NOT EXISTS idx_invoice_payments_mode ON invoice_payments(payment_mode);
+      CREATE INDEX IF NOT EXISTS idx_invoice_payments_status ON invoice_payments(status);
     `,
   },
 ];

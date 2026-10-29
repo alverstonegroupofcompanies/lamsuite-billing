@@ -174,17 +174,18 @@ export const MastersPage: React.FC = () => {
     if (!searchQuery) return true;
     const q = searchQuery.toLowerCase();
     return (
-      p.name.toLowerCase().includes(q) ||
-      p.barcode.includes(q) ||
-      (p.generic_name && p.generic_name.toLowerCase().includes(q)) ||
-      (p.hsn_sac_code && p.hsn_sac_code.includes(q))
+      (p.name?.toLowerCase().includes(q) ?? false) ||
+      (p.barcode?.toLowerCase().includes(q) ?? false) ||
+      (p.secondary_barcodes?.some((b) => b?.toLowerCase().includes(q)) ?? false) ||
+      (p.generic_name?.toLowerCase().includes(q) ?? false) ||
+      (p.hsn_sac_code?.toLowerCase().includes(q) ?? false)
     );
   });
 
   const filteredBatches = batches.filter((b) => {
     if (selectedProductIdForBatches && b.product_id !== selectedProductIdForBatches) return false;
     if (!searchQuery) return true;
-    return b.batch_no.toLowerCase().includes(searchQuery.toLowerCase());
+    return b.batch_no?.toLowerCase().includes(searchQuery.toLowerCase()) ?? false;
   });
 
   const filteredParties = parties.filter((p) => {
@@ -192,9 +193,9 @@ export const MastersPage: React.FC = () => {
     if (!searchQuery) return true;
     const q = searchQuery.toLowerCase();
     return (
-      p.name.toLowerCase().includes(q) ||
-      (p.phone && p.phone.includes(q)) ||
-      (p.gstin && p.gstin.toLowerCase().includes(q))
+      (p.name?.toLowerCase().includes(q) ?? false) ||
+      (p.phone?.toLowerCase().includes(q) ?? false) ||
+      (p.gstin?.toLowerCase().includes(q) ?? false)
     );
   });
 
@@ -202,8 +203,8 @@ export const MastersPage: React.FC = () => {
     if (!searchQuery) return true;
     const q = searchQuery.toLowerCase();
     return (
-      u.name.toLowerCase().includes(q) ||
-      u.symbol.toLowerCase().includes(q)
+      (u.name?.toLowerCase().includes(q) ?? false) ||
+      (u.symbol?.toLowerCase().includes(q) ?? false)
     );
   });
 
@@ -744,11 +745,11 @@ export const MastersPage: React.FC = () => {
                         <div className="text-[10px] text-text-muted italic">{p.generic_name}</div>
                       )}
                     </td>
-                    <td className="px-4 py-2.5 font-mono tabular-nums text-text-muted">{p.barcode}</td>
+                    <td className="px-4 py-2.5 font-mono tabular-nums text-text-muted">{p.barcode || "—"}</td>
                     <td className="px-4 py-2.5 font-mono tabular-nums text-text-muted">{p.hsn_sac_code || "—"}</td>
-                    <td className="px-4 py-2.5 text-right font-mono tabular-nums font-medium text-text-main">₹{p.mrp.toFixed(2)}</td>
-                    <td className="px-4 py-2.5 text-right font-mono tabular-nums font-semibold text-accent">₹{p.sel_rate.toFixed(2)}</td>
-                    <td className="px-4 py-2.5 text-right font-mono tabular-nums text-text-muted">{p.gst_percent}%</td>
+                    <td className="px-4 py-2.5 text-right font-mono tabular-nums font-medium text-text-main">₹{(p.mrp ?? 0).toFixed(2)}</td>
+                    <td className="px-4 py-2.5 text-right font-mono tabular-nums font-semibold text-accent">₹{(p.sel_rate ?? 0).toFixed(2)}</td>
+                    <td className="px-4 py-2.5 text-right font-mono tabular-nums text-text-muted">{p.gst_percent ?? 0}%</td>
                     <td className="px-4 py-2.5 text-text-muted">
                       {p.rack_location ? `${p.rack_location} / ${p.shelf_location || ""}` : "—"}
                     </td>
@@ -1292,7 +1293,7 @@ export const MastersPage: React.FC = () => {
                 >
                   <option value="">Select Product...</option>
                   {products.map((p) => (
-                    <option key={p.id} value={p.id}>{p.name} ({p.barcode})</option>
+                    <option key={p.id} value={p.id}>{p.name} ({p.barcode || "No barcode"})</option>
                   ))}
                 </select>
               </div>

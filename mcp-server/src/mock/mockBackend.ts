@@ -318,9 +318,9 @@ export class MockLamSuiteBackend {
         const q = query.toLowerCase();
         list = list.filter(
           (p) =>
-            p.name.toLowerCase().includes(q) ||
-            p.barcode.includes(q) ||
-            p.generic_name?.toLowerCase().includes(q)
+            (p.name?.toLowerCase().includes(q) ?? false) ||
+            (p.barcode?.toLowerCase().includes(q) ?? false) ||
+            (p.generic_name?.toLowerCase().includes(q) ?? false)
         );
       }
       res.json({ data: list, total: list.length, current_page: 1 });

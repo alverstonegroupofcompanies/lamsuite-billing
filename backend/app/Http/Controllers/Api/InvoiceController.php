@@ -11,6 +11,7 @@ use App\Models\FinancialYear;
 use App\Models\GstLockPeriod;
 use App\Models\Invoice;
 use App\Models\InvoiceItem;
+use App\Models\InvoicePayment;
 use App\Models\Party;
 use App\Models\Product;
 use App\Models\ProductBatch;
@@ -26,23 +27,26 @@ class InvoiceController
 {
     private function resolveStoreId(Request $request, array $payload = []): int
     {
-        if (!empty($payload['store_id'])) {
-            if (is_numeric($payload['store_id'])) return (int)$payload['store_id'];
-            $store = Store::where('code', $payload['store_id'])->first();
-            if ($store) return $store->id;
+        $candidate = $payload['store_id'] ?? $payload['store_code'] ?? null;
+        if (!$candidate) {
+            $candidate = $request->header('X-Store-Id') ?: $request->header('Store-Id');
+        }
+        if (!$candidate) {
+            $candidate = $request->query('store_id');
+        }
+        if (!$candidate && $request->user()) {
+            $candidate = $request->user()->store_id;
         }
 
-        $headerStore = $request->header('X-Store-Id') ?: $request->header('Store-Id');
-        if ($headerStore) {
-            if (is_numeric($headerStore)) return (int)$headerStore;
-            $store = Store::where('code', $headerStore)->first();
-            if ($store) return $store->id;
-        }
-
-        $queryStore = $request->query('store_id');
-        if ($queryStore) {
-            if (is_numeric($queryStore)) return (int)$queryStore;
-            $store = Store::where('code', $queryStore)->first();
+        if ($candidate !== null && $candidate !== '') {
+            if (is_numeric($candidate)) {
+                $store = Store::find((int)$candidate);
+                if ($store) return $store->id;
+            }
+            $store = Store::where('code', $candidate)
+                ->orWhere('id', $candidate)
+                ->orWhere('name', $candidate)
+                ->first();
             if ($store) return $store->id;
         }
 
@@ -69,36 +73,68 @@ class InvoiceController
         $endDate = $request->query('end_date');
         $status = $request->query('status');
         $counterCode = $request->query('counter_code');
+        $paymentMode = $request->query('payment_mode');
         $search = $request->query('search');
 
+        $totalStoreInvoices = Invoice::where('store_id', $storeId)->count();
+
         $builder = Invoice::where('store_id', $storeId)
-            ->with('items')
+            ->with(['items', 'payments'])
             ->orderBy('id', 'desc');
 
         if ($startDate && $endDate) {
-            $builder->whereBetween('invoice_date', [$startDate, $endDate]);
+            $s = strlen($startDate) === 10 ? $startDate . ' 00:00:00' : $startDate;
+            $e = strlen($endDate) === 10 ? $endDate . ' 23:59:59' : $endDate;
+            $builder->whereBetween('invoice_date', [$s, $e]);
         } elseif ($startDate) {
-            $builder->where('invoice_date', '>=', $startDate);
+            $s = strlen($startDate) === 10 ? $startDate . ' 00:00:00' : $startDate;
+            $builder->where('invoice_date', '>=', $s);
+        } elseif ($endDate) {
+            $e = strlen($endDate) === 10 ? $endDate . ' 23:59:59' : $endDate;
+            $builder->where('invoice_date', '<=', $e);
         }
 
-        if ($status) {
-            $builder->where('status', $status);
+        if ($status && strtolower($status) !== 'all') {
+            $builder->whereRaw('LOWER(status) = ?', [strtolower($status)]);
         }
 
-        if ($counterCode) {
+        if ($paymentMode && strtolower($paymentMode) !== 'all') {
+            $pm = strtolower($paymentMode);
+            $builder->where(function ($q) use ($pm) {
+                $q->whereRaw('LOWER(payment_mode) = ?', [$pm])
+                  ->orWhereHas('payments', function ($pq) use ($pm) {
+                      $pq->whereRaw('LOWER(payment_mode) = ?', [$pm]);
+                  });
+            });
+        }
+
+        if ($counterCode && strtolower($counterCode) !== 'all') {
             $builder->where('counter_code', $counterCode);
         }
 
         if ($search) {
-            $builder->where(function ($q) use ($search) {
-                $q->where('invoice_number', 'like', "%{$search}%")
-                  ->orWhere('customer_name', 'like', "%{$search}%")
-                  ->orWhere('customer_phone', 'like', "%{$search}%");
+            $searchTrimmed = trim($search);
+            $builder->where(function ($q) use ($searchTrimmed) {
+                $q->where('invoice_number', 'like', "%{$searchTrimmed}%")
+                  ->orWhere('customer_name', 'like', "%{$searchTrimmed}%")
+                  ->orWhere('customer_phone', 'like', "%{$searchTrimmed}%")
+                  ->orWhere('patient_name', 'like', "%{$searchTrimmed}%")
+                  ->orWhere('doctor_name', 'like', "%{$searchTrimmed}%")
+                  ->orWhereHas('items', function ($iq) use ($searchTrimmed) {
+                      $iq->where('product_name', 'like', "%{$searchTrimmed}%")
+                        ->orWhere('batch_no', 'like', "%{$searchTrimmed}%");
+                  });
             });
         }
 
-        $perPage = min(100, max(10, (int)$request->query('per_page', 20)));
-        return response()->json($builder->paginate($perPage));
+        $perPage = min(500, max(1, (int)$request->query('per_page', 20)));
+        $paginated = $builder->paginate($perPage);
+
+        $response = $paginated->toArray();
+        $response['total_store_invoices'] = $totalStoreInvoices;
+        $response['store_id'] = $storeId;
+
+        return response()->json($response);
     }
 
     /**
@@ -117,6 +153,8 @@ class InvoiceController
         $storeId = $this->resolveStoreId($request, $request->all());
 
         $validated = $request->validate([
+            'store_id' => 'nullable',
+            'store_code' => 'nullable|string|max:50',
             'idempotency_key' => 'nullable|string|max:100',
             'external_id' => 'nullable|string|max:100',
             'invoice_number' => 'nullable|string|max:50',
@@ -129,6 +167,13 @@ class InvoiceController
             'place_of_supply' => 'nullable|string|max:50',
             'payment_mode' => 'nullable|string|max:30',
             'paid_amount' => 'nullable|numeric',
+            'payments' => 'nullable|array',
+            'payments.*.mode' => 'nullable|string|max:40',
+            'payments.*.amount' => 'required_with:payments|numeric|min:0',
+            'payments.*.reference_no' => 'nullable|string|max:100',
+            'payments.*.status' => 'nullable|string|max:30',
+            'payments.*.extra_fields' => 'nullable|array',
+            'payments.*.notes' => 'nullable|string',
             'counter_id' => 'nullable',
             'counter_code' => 'nullable|string|max:20',
             'location_name' => 'nullable|string|max:100',
@@ -168,7 +213,7 @@ class InvoiceController
                 return response()->json([
                     'success' => true,
                     'is_idempotent_replay' => true,
-                    'invoice' => $existing,
+                    'invoice' => $existing->load(['items', 'payments']),
                     'message' => 'Invoice retrieved via idempotency token.',
                 ], 200);
             }
@@ -210,6 +255,12 @@ class InvoiceController
             $party = is_numeric($customerId)
                 ? Party::where('store_id', $storeId)->find($customerId)
                 : Party::where('store_id', $storeId)->where('external_id', $customerId)->first();
+
+            if (!$party) {
+                $party = is_numeric($customerId)
+                    ? Party::find($customerId)
+                    : Party::where('external_id', $customerId)->first();
+            }
         }
 
         // 4. Check Store Settings (e.g. Negative Stock Allowed)
@@ -236,7 +287,13 @@ class InvoiceController
                 $counter = Counter::where('store_id', $storeId)
                     ->where('counter_code', $counterCode)
                     ->first();
-                $counterId = $counter ? $counter->id : null;
+                if (!$counter) {
+                    $counter = Counter::firstOrCreate(
+                        ['store_id' => $storeId, 'counter_code' => $counterCode],
+                        ['counter_name' => 'Counter ' . $counterCode, 'is_hub' => false]
+                    );
+                }
+                $counterId = $counter ? $counter->id : 1;
 
                 // Document Numbering
                 $clientInvoiceNumber = $validated['invoice_number'] ?? null;
@@ -322,7 +379,24 @@ class InvoiceController
                     }
 
                     if (!$product) {
-                        throw new \InvalidArgumentException("Product not found: " . ($item['product_name'] ?? $productId));
+                        // Master catalog fallback if product was registered under main store
+                        $product = is_numeric($productId)
+                            ? Product::find($productId)
+                            : Product::where('external_id', $productId)->first();
+                    }
+
+                    if (!$product && !empty($item['product_name'])) {
+                        $product = Product::where('name', $item['product_name'])->first();
+                    }
+
+                    if (!$product) {
+                        $product = Product::create([
+                            'store_id' => $storeId,
+                            'name' => $item['product_name'] ?? ('Product #' . $productId),
+                            'unit_price' => (float)$item['unit_price'],
+                            'current_stock' => 100,
+                            'units_per_pack' => 1,
+                        ]);
                     }
 
                     $qty = (float)$item['qty'];
@@ -344,14 +418,21 @@ class InvoiceController
                             ->where('batch_no', $item['batch_no'])
                             ->lockForUpdate()
                             ->first();
+
+                        if (!$batch) {
+                            $batch = ProductBatch::where('product_id', $product->id)
+                                ->where('batch_no', $item['batch_no'])
+                                ->lockForUpdate()
+                                ->first();
+                        }
                     }
 
                     if (!$batch) {
-                        // Fallback to first batch or create adhoc batch
+                        // Fallback to first batch or master batch
                         $batch = ProductBatch::where('store_id', $storeId)
                             ->where('product_id', $product->id)
                             ->lockForUpdate()
-                            ->first();
+                            ->first() ?: ProductBatch::where('product_id', $product->id)->lockForUpdate()->first();
                     }
 
                     if (!$batch) {
@@ -460,13 +541,96 @@ class InvoiceController
                 $roundOff = $taxDoc['round_off'];
                 $grandTotal = $taxDoc['grand_total'];
 
-                // Check Customer Credit Limit
-                $paymentMode = $validated['payment_mode'] ?? 'Cash';
-                if ($paymentMode === 'Credit' && $party && (float)$party->credit_limit > 0) {
-                    $newBalance = (float)$party->current_balance + $grandTotal;
-                    if ($newBalance > (float)$party->credit_limit) {
-                        throw new \DomainException("Customer '{$party->name}' credit limit of ₹{$party->credit_limit} exceeded (New balance would be ₹{$newBalance}).");
+                // Safety net: server-level check rejecting save if totals do not equal sum of lines
+                if (isset($validated['grand_total']) && $validated['grand_total'] !== null) {
+                    $clientGrandTotal = (float)$validated['grand_total'];
+                    if (abs($clientGrandTotal - $grandTotal) > 0.05) {
+                        throw new \Exception("Invoice integrity check failed: Request grand total ({$clientGrandTotal}) does not match line item total ({$grandTotal})");
                     }
+                }
+
+                // Resolve Payment Lines and Credit
+                $rawPayments = $validated['payments'] ?? null;
+                $paymentLines = [];
+                $creditPortion = 0.0;
+                $cashPortion = 0.0;
+                $digitalPortion = 0.0;
+                $totalPaid = 0.0;
+
+                if (!empty($rawPayments) && is_array($rawPayments)) {
+                    foreach ($rawPayments as $p) {
+                        $pMode = ucfirst(trim($p['mode'] ?? 'Cash'));
+                        $pAmt = (float)($p['amount'] ?? 0);
+                        if ($pAmt <= 0) continue;
+
+                        $paymentLines[] = [
+                            'mode' => $pMode,
+                            'amount' => $pAmt,
+                            'reference_no' => $p['reference_no'] ?? null,
+                            'status' => $p['status'] ?? 'received',
+                            'extra_fields' => $p['extra_fields'] ?? null,
+                            'notes' => $p['notes'] ?? null,
+                        ];
+
+                        $upperMode = strtoupper($pMode);
+                        if ($upperMode === 'CREDIT' || $upperMode === 'UDHARI') {
+                            $creditPortion += $pAmt;
+                        } else {
+                            $totalPaid += $pAmt;
+                            if ($upperMode === 'CASH') {
+                                $cashPortion += $pAmt;
+                            } else {
+                                $digitalPortion += $pAmt;
+                            }
+                        }
+                    }
+                } else {
+                    // Legacy single mode fallback
+                    $legacyMode = ucfirst(trim($validated['payment_mode'] ?? 'Cash'));
+                    $legacyPaid = isset($validated['paid_amount']) ? (float)$validated['paid_amount'] : $grandTotal;
+                    $paymentLines[] = [
+                        'mode' => $legacyMode,
+                        'amount' => $legacyPaid,
+                        'reference_no' => null,
+                        'status' => 'received',
+                        'extra_fields' => null,
+                        'notes' => null,
+                    ];
+                    if (strtoupper($legacyMode) === 'CREDIT') {
+                        $creditPortion = $grandTotal;
+                    } else {
+                        $totalPaid = $legacyPaid;
+                        if (strtoupper($legacyMode) === 'CASH') {
+                            $cashPortion = $legacyPaid;
+                        } else {
+                            $digitalPortion = $legacyPaid;
+                        }
+                    }
+                }
+
+                // Credit (Udhari) Rules Enforcement:
+                if ($creditPortion > 0.001) {
+                    if (!$party || strtolower($party->name) === 'walk-in customer') {
+                        throw new \DomainException("Credit sale is not allowed for Walk-in Customers. Please select or create a registered customer.");
+                    }
+                    if ((float)$party->credit_limit > 0) {
+                        $newBalance = (float)$party->current_balance + $creditPortion;
+                        if ($newBalance > (float)$party->credit_limit) {
+                            throw new \DomainException("Customer '{$party->name}' credit limit of ₹{$party->credit_limit} exceeded (New balance would be ₹{$newBalance}).");
+                        }
+                    }
+                }
+
+                // Determine primary payment mode & status
+                $primaryPaymentMode = count($paymentLines) > 1
+                    ? 'Split'
+                    : ($paymentLines[0]['mode'] ?? ($validated['payment_mode'] ?? 'Cash'));
+
+                $paymentStatus = 'paid';
+                if ($creditPortion >= ($grandTotal - 0.01)) {
+                    $paymentStatus = 'unpaid';
+                } elseif ($creditPortion > 0.001 || $totalPaid < ($grandTotal - 0.01)) {
+                    $paymentStatus = 'partially_paid';
                 }
 
                 // Create Invoice Record
@@ -495,8 +659,9 @@ class InvoiceController
                     'round_off' => $roundOff,
                     'grand_total' => $grandTotal,
                     'store_state_code' => $storeStateCode,
-                    'paid_amount' => $validated['paid_amount'] ?? $grandTotal,
-                    'payment_mode' => $paymentMode,
+                    'paid_amount' => $totalPaid,
+                    'payment_mode' => $primaryPaymentMode,
+                    'payment_status' => $paymentStatus,
                     'status' => 'issued',
                     'patient_name' => $validated['patient_name'] ?? null,
                     'doctor_name' => $validated['doctor_name'] ?? null,
@@ -550,12 +715,29 @@ class InvoiceController
                     ]);
                 }
 
-                // If Credit sale, update party current_balance
-                if ($paymentMode === 'Credit' && $party) {
-                    $party->increment('current_balance', $grandTotal);
+                // Insert Invoice Payments
+                foreach ($paymentLines as $pLine) {
+                    InvoicePayment::create([
+                        'store_id' => $storeId,
+                        'invoice_id' => $invoice->id,
+                        'counter_id' => $counterId,
+                        'counter_code' => $counterCode,
+                        'payment_mode' => $pLine['mode'],
+                        'amount' => $pLine['amount'],
+                        'reference_no' => $pLine['reference_no'],
+                        'status' => $pLine['status'],
+                        'extra_fields' => $pLine['extra_fields'],
+                        'notes' => $pLine['notes'],
+                        'received_by' => $request->user()?->name ?? ('Counter ' . $counterCode),
+                    ]);
                 }
 
-                // Update active Counter Shift if open
+                // If Credit portion exists, update party current_balance
+                if ($creditPortion > 0 && $party) {
+                    $party->increment('current_balance', $creditPortion);
+                }
+
+                // Update active Counter Shift if open: physical cash vs digital sales
                 if ($counterId) {
                     $activeShift = CounterShift::where('counter_id', $counterId)
                         ->where('status', 'open')
@@ -563,10 +745,11 @@ class InvoiceController
                         ->first();
 
                     if ($activeShift) {
-                        if (strtolower($paymentMode) === 'cash') {
-                            $activeShift->increment('cash_sales', $grandTotal);
-                        } else {
-                            $activeShift->increment('digital_sales', $grandTotal);
+                        if ($cashPortion > 0) {
+                            $activeShift->increment('cash_sales', $cashPortion);
+                        }
+                        if ($digitalPortion > 0) {
+                            $activeShift->increment('digital_sales', $digitalPortion);
                         }
                     }
                 }
@@ -620,7 +803,7 @@ class InvoiceController
                 );
 
                 return [
-                    'invoice' => $invoice->load('items'),
+                    'invoice' => $invoice->load(['items', 'payments']),
                     'affected_batches' => $affectedBatchStockUpdates,
                     'temp_mapped_from' => $tempMappedFrom,
                 ];
@@ -648,7 +831,7 @@ class InvoiceController
 
     public function show(string $id): JsonResponse
     {
-        $invoice = Invoice::with('items')->findOrFail($id);
+        $invoice = Invoice::with(['items', 'payments'])->findOrFail($id);
         return response()->json($invoice);
     }
 
@@ -678,6 +861,21 @@ class InvoiceController
                 'cancel_reason' => $reason,
                 'cancelled_at' => now(),
             ]);
+
+            // Revert customer credit balance if any
+            $creditRefund = $invoice->payments()->where('payment_mode', 'Credit')->sum('amount');
+            if ($creditRefund <= 0 && strtolower($invoice->payment_mode) === 'credit') {
+                $creditRefund = (float)$invoice->grand_total;
+            }
+            if ($creditRefund > 0 && $invoice->customer_id) {
+                $customer = Party::find($invoice->customer_id);
+                if ($customer) {
+                    $customer->decrement('current_balance', $creditRefund);
+                }
+            }
+
+            // Mark associated payments refunded
+            $invoice->payments()->update(['status' => 'refunded']);
 
             // Revert stock for each item
             foreach ($invoice->items as $item) {

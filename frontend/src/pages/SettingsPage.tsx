@@ -67,6 +67,8 @@ export const SettingsPage: React.FC = () => {
     "general" | "billing" | "sequences" | "printing" | "columns" | "security" | "integrations" | "sync_lan" | "backup_reset" | "tools"
   >("general");
 
+  const [billingSubTab, setBillingSubTab] = useState<"taxes" | "payments">("taxes");
+
   const [notification, setNotification] = useState<{ message: string; type: "success" | "error" } | null>(null);
 
   // Core settings state
@@ -653,11 +655,40 @@ export const SettingsPage: React.FC = () => {
 
           {/* TAB 2: Billing & Taxes */}
           {activeTab === "billing" && (
-            <div className="max-w-2xl space-y-6">
-              <div>
-                <h2 className="text-sm font-bold text-slate-800">Billing Policies & Indian GST</h2>
-                <p className="text-xs text-slate-500">Tax modes, default discount, round-off, and credit periods.</p>
+            <div className="max-w-3xl space-y-6">
+              <div className="flex items-center justify-between border-b border-slate-200 pb-3">
+                <div>
+                  <h2 className="text-sm font-bold text-slate-800">Billing Policies & Payment Modes</h2>
+                  <p className="text-xs text-slate-500">Tax policies, payment tenders, split rules, and reference capture.</p>
+                </div>
+                <div className="flex items-center gap-1.5 rounded-lg bg-slate-100 p-1 border border-slate-200">
+                  <button
+                    type="button"
+                    onClick={() => setBillingSubTab("taxes")}
+                    className={`rounded-md px-3 py-1 text-xs font-semibold transition-all cursor-pointer ${
+                      billingSubTab === "taxes"
+                        ? "bg-white text-blue-700 shadow-xs"
+                        : "text-slate-600 hover:text-slate-900"
+                    }`}
+                  >
+                    GST & General
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setBillingSubTab("payments")}
+                    className={`rounded-md px-3 py-1 text-xs font-semibold transition-all cursor-pointer ${
+                      billingSubTab === "payments"
+                        ? "bg-white text-blue-700 shadow-xs"
+                        : "text-slate-600 hover:text-slate-900"
+                    }`}
+                  >
+                    Payments & References
+                  </button>
+                </div>
               </div>
+
+              {billingSubTab === "taxes" && (
+                <div className="space-y-6">
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
@@ -864,8 +895,432 @@ export const SettingsPage: React.FC = () => {
                   </label>
                 </div>
               </div>
+
+              {/* Keyboard & Product Entry Workflow */}
+              <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm space-y-4">
+                <h3 className="text-sm font-semibold text-slate-900 border-b pb-2 flex items-center justify-between">
+                  <span>Product Entry & Keyboard Navigation</span>
+                  <span className="text-[11px] font-normal text-slate-500">POS High-Speed Billing Workflow</span>
+                </h3>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700">Product Entry Style</label>
+                    <select
+                      value={settings.keyboard?.productEntryStyle || "inline_row"}
+                      onChange={(e) =>
+                        setSettings({
+                          ...settings,
+                          keyboard: {
+                            ...settings.keyboard,
+                            productEntryStyle: e.target.value as "inline_row" | "search_bar",
+                            enterAfterQty: settings.keyboard?.enterAfterQty || "search",
+                            autoFocusQtyAfterAdd: settings.keyboard?.autoFocusQtyAfterAdd ?? true,
+                            selectAllOnFocus: settings.keyboard?.selectAllOnFocus ?? true,
+                            quickDeleteWithoutConfirm: settings.keyboard?.quickDeleteWithoutConfirm ?? true,
+                            scannerSpeedThresholdMs: settings.keyboard?.scannerSpeedThresholdMs || 45,
+                          },
+                        })
+                      }
+                      className="mt-1 w-full rounded border border-slate-300 p-2 text-xs focus:border-blue-500 focus:outline-none"
+                    >
+                      <option value="inline_row">Inline row inside grid (Default - Continuous rapid billing)</option>
+                      <option value="search_bar">Search bar above grid (Legacy layout)</option>
+                    </select>
+                    <p className="text-[11px] text-slate-500 mt-1">
+                      Inline row shares table columns directly beneath items for an uninterrupted keyboard flow.
+                    </p>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700">Inline Row Position</label>
+                    <select
+                      value={settings.keyboard?.entryRowPosition || "bottom"}
+                      onChange={(e) =>
+                        setSettings({
+                          ...settings,
+                          keyboard: {
+                            ...settings.keyboard,
+                            entryRowPosition: e.target.value as "bottom" | "top",
+                            enterAfterQty: settings.keyboard?.enterAfterQty || "search",
+                            autoFocusQtyAfterAdd: settings.keyboard?.autoFocusQtyAfterAdd ?? true,
+                            selectAllOnFocus: settings.keyboard?.selectAllOnFocus ?? true,
+                            quickDeleteWithoutConfirm: settings.keyboard?.quickDeleteWithoutConfirm ?? true,
+                            scannerSpeedThresholdMs: settings.keyboard?.scannerSpeedThresholdMs || 45,
+                          },
+                        })
+                      }
+                      disabled={(settings.keyboard?.productEntryStyle || "inline_row") === "search_bar"}
+                      className="mt-1 w-full rounded border border-slate-300 p-2 text-xs focus:border-blue-500 focus:outline-none disabled:bg-slate-100 disabled:text-slate-400"
+                    >
+                      <option value="bottom">Bottom of grid (Pinned below cart items)</option>
+                      <option value="top">Top of grid (Pinned above cart items)</option>
+                    </select>
+                    <p className="text-[11px] text-slate-500 mt-1">
+                      Pinned row stays permanently visible even when the cart contains 100+ items.
+                    </p>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700">Add Line Behavior</label>
+                    <select
+                      value={settings.keyboard?.addLineMode || "immediate"}
+                      onChange={(e) =>
+                        setSettings({
+                          ...settings,
+                          keyboard: {
+                            ...settings.keyboard,
+                            addLineMode: e.target.value as "immediate" | "after_enter",
+                            enterAfterQty: settings.keyboard?.enterAfterQty || "search",
+                            autoFocusQtyAfterAdd: settings.keyboard?.autoFocusQtyAfterAdd ?? true,
+                            selectAllOnFocus: settings.keyboard?.selectAllOnFocus ?? true,
+                            quickDeleteWithoutConfirm: settings.keyboard?.quickDeleteWithoutConfirm ?? true,
+                            scannerSpeedThresholdMs: settings.keyboard?.scannerSpeedThresholdMs || 45,
+                          },
+                        })
+                      }
+                      className="mt-1 w-full rounded border border-slate-300 p-2 text-xs focus:border-blue-500 focus:outline-none"
+                    >
+                      <option value="immediate">Immediately on selection (default)</option>
+                      <option value="after_enter">After Enter</option>
+                    </select>
+                    <p className="text-[11px] text-slate-500 mt-1">
+                      Immediately adds line and updates totals on product selection; Enter confirms line quantity.
+                    </p>
+                  </div>
+                </div>
+              </div>
             </div>
           )}
+
+          {billingSubTab === "payments" && (
+            <div className="space-y-6">
+              {/* UPI & Global Payment Settings */}
+              <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-xs space-y-4">
+                <h3 className="text-xs font-bold uppercase tracking-wider text-slate-800 border-b pb-2">
+                  UPI VPA & Instant QR Settlement
+                </h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-[11px] font-semibold uppercase text-slate-600">Store UPI VPA / Handle</label>
+                    <input
+                      type="text"
+                      value={settings.payments?.upiVpa || ""}
+                      onChange={(e) =>
+                        setSettings({
+                          ...settings,
+                          payments: { ...settings.payments, upiVpa: e.target.value },
+                        })
+                      }
+                      placeholder="e.g. pharmacy@icici or 9876543210@paytm"
+                      className="mt-1 w-full rounded border border-slate-300 p-2 text-xs font-mono focus:border-blue-500 focus:outline-none"
+                    />
+                    <p className="text-[11px] text-slate-500 mt-1">
+                      Used to render dynamic Bharat QR codes directly on checkout for the exact bill amount.
+                    </p>
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-semibold uppercase text-slate-600">Payee Merchant Name</label>
+                    <input
+                      type="text"
+                      value={settings.payments?.upiPayeeName || ""}
+                      onChange={(e) =>
+                        setSettings({
+                          ...settings,
+                          payments: { ...settings.payments, upiPayeeName: e.target.value },
+                        })
+                      }
+                      placeholder="e.g. LamStone Medicos"
+                      className="mt-1 w-full rounded border border-slate-300 p-2 text-xs focus:border-blue-500 focus:outline-none"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-2">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={settings.payments?.enableDynamicUpiQr ?? true}
+                      onChange={(e) =>
+                        setSettings({
+                          ...settings,
+                          payments: { ...settings.payments, enableDynamicUpiQr: e.target.checked },
+                        })
+                      }
+                      className="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                    />
+                    <span className="text-xs font-medium text-slate-700">
+                      Show Dynamic UPI QR code in checkout dialog
+                    </span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={settings.payments?.enableQuickDenominations ?? true}
+                      onChange={(e) =>
+                        setSettings({
+                          ...settings,
+                          payments: { ...settings.payments, enableQuickDenominations: e.target.checked },
+                        })
+                      }
+                      className="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                    />
+                    <span className="text-xs font-medium text-slate-700">
+                      Show Cash Denomination quick buttons (+₹100, +₹200, +₹500, +₹2000)
+                    </span>
+                  </label>
+                </div>
+              </div>
+
+              {/* Credit & Security Policies */}
+              <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-xs space-y-4">
+                <h3 className="text-xs font-bold uppercase tracking-wider text-slate-800 border-b pb-2">
+                  Customer Credit (Udhari) & Print Rules
+                </h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-[11px] font-semibold uppercase text-slate-600">Credit Limit Breach Action</label>
+                    <select
+                      value={settings.payments?.creditPolicy || "warn_on_exceed"}
+                      onChange={(e) =>
+                        setSettings({
+                          ...settings,
+                          payments: { ...settings.payments, creditPolicy: e.target.value as any },
+                        })
+                      }
+                      className="mt-1 w-full rounded border border-slate-300 p-2 text-xs focus:border-blue-500 focus:outline-none"
+                    >
+                      <option value="warn_on_exceed">Warn but allow cashier to proceed</option>
+                      <option value="block_on_exceed">Block checkout strictly when limit is exceeded</option>
+                      <option value="allow_with_limit">Always allow without warnings</option>
+                    </select>
+                  </div>
+                  <div className="flex items-center pt-5">
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={settings.payments?.printShowReferences ?? false}
+                        onChange={(e) =>
+                          setSettings({
+                            ...settings,
+                            payments: { ...settings.payments, printShowReferences: e.target.checked },
+                          })
+                        }
+                        className="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                      />
+                      <span className="text-xs font-medium text-slate-700">
+                        Print payment references (masked) on customer receipts
+                      </span>
+                    </label>
+                  </div>
+                </div>
+              </div>
+
+              {/* Payment Tender Modes & Reference Rules */}
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="text-xs font-bold uppercase tracking-wider text-slate-800">
+                      Payment Modes & Reference Rules
+                    </h3>
+                    <p className="text-[11px] text-slate-500">
+                      Configure requirement rules, formats, duplicate checks, and captured fields per tender.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="space-y-3">
+                  {(settings.payments?.modes || []).map((modeCfg, idx) => {
+                    const updateMode = (patch: Partial<typeof modeCfg>) => {
+                      const updatedModes = [...settings.payments.modes];
+                      updatedModes[idx] = { ...modeCfg, ...patch };
+                      setSettings({
+                        ...settings,
+                        payments: { ...settings.payments, modes: updatedModes },
+                      });
+                    };
+
+                    return (
+                      <div
+                        key={modeCfg.id}
+                        className={`rounded-lg border p-4 transition-all ${
+                          modeCfg.enabled ? "border-slate-300 bg-white" : "border-slate-200 bg-slate-50 opacity-70"
+                        }`}
+                      >
+                        <div className="flex items-center justify-between border-b pb-2 mb-3">
+                          <div className="flex items-center gap-2">
+                            <span className="font-bold text-xs text-slate-800">{modeCfg.name}</span>
+                            <span
+                              className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
+                                modeCfg.referenceRequirement === "required"
+                                  ? "bg-red-100 text-red-700"
+                                  : modeCfg.referenceRequirement === "optional"
+                                  ? "bg-blue-100 text-blue-700"
+                                  : "bg-slate-100 text-slate-600"
+                              }`}
+                            >
+                              Ref: {modeCfg.referenceRequirement}
+                            </span>
+                          </div>
+                          <label className="flex items-center gap-1.5 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={modeCfg.enabled}
+                              onChange={(e) => updateMode({ enabled: e.target.checked })}
+                              className="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                            />
+                            <span className="text-[11px] font-medium text-slate-600">Enabled</span>
+                          </label>
+                        </div>
+
+                        {modeCfg.enabled && (
+                          <div className="space-y-3">
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                              <div>
+                                <label className="block text-[11px] font-medium text-slate-600">Reference Requirement</label>
+                                <select
+                                  value={modeCfg.referenceRequirement}
+                                  onChange={(e) => updateMode({ referenceRequirement: e.target.value as any })}
+                                  className="mt-1 w-full rounded border border-slate-300 p-1.5 text-xs focus:border-blue-500 focus:outline-none"
+                                >
+                                  <option value="off">Off (No reference field)</option>
+                                  <option value="optional">Optional (Cashier may fill)</option>
+                                  <option value="required">Required (Cannot save without reference)</option>
+                                </select>
+                              </div>
+
+                              {modeCfg.referenceRequirement !== "off" && (
+                                <>
+                                  <div>
+                                    <label className="block text-[11px] font-medium text-slate-600">Field Label</label>
+                                    <input
+                                      type="text"
+                                      value={modeCfg.referenceLabel}
+                                      onChange={(e) => updateMode({ referenceLabel: e.target.value })}
+                                      className="mt-1 w-full rounded border border-slate-300 p-1.5 text-xs focus:border-blue-500 focus:outline-none"
+                                    />
+                                  </div>
+                                  <div>
+                                    <label className="block text-[11px] font-medium text-slate-600">Duplicate Check</label>
+                                    <select
+                                      value={modeCfg.duplicateCheck || "off"}
+                                      onChange={(e) => updateMode({ duplicateCheck: e.target.value as any })}
+                                      className="mt-1 w-full rounded border border-slate-300 p-1.5 text-xs focus:border-blue-500 focus:outline-none"
+                                    >
+                                      <option value="off">Off (Allow same reference)</option>
+                                      <option value="warn">Warn on duplicate</option>
+                                      <option value="block">Block duplicate reference</option>
+                                    </select>
+                                  </div>
+                                </>
+                              )}
+                            </div>
+
+                            {/* Extra Field Toggles */}
+                            <div className="border-t border-slate-100 pt-2">
+                              <span className="text-[11px] font-semibold text-slate-500 block mb-1.5">Optional Extra Fields</span>
+                              <div className="flex flex-wrap gap-4 text-xs">
+                                {modeCfg.id === "upi" && (
+                                  <label className="flex items-center gap-1.5 cursor-pointer">
+                                    <input
+                                      type="checkbox"
+                                      checked={modeCfg.extraFields?.payerVpa ?? true}
+                                      onChange={(e) =>
+                                        updateMode({
+                                          extraFields: { ...modeCfg.extraFields, payerVpa: e.target.checked },
+                                        })
+                                      }
+                                      className="rounded border-slate-300 text-blue-600"
+                                    />
+                                    <span>Payer UPI ID</span>
+                                  </label>
+                                )}
+                                {modeCfg.id === "card" && (
+                                  <>
+                                    <label className="flex items-center gap-1.5 cursor-pointer">
+                                      <input
+                                        type="checkbox"
+                                        checked={modeCfg.extraFields?.cardLastFour ?? true}
+                                        onChange={(e) =>
+                                          updateMode({
+                                            extraFields: { ...modeCfg.extraFields, cardLastFour: e.target.checked },
+                                          })
+                                        }
+                                        className="rounded border-slate-300 text-blue-600"
+                                      />
+                                      <span>Masked Last 4 Digits</span>
+                                    </label>
+                                    <label className="flex items-center gap-1.5 cursor-pointer">
+                                      <input
+                                        type="checkbox"
+                                        checked={modeCfg.extraFields?.cardNetwork ?? true}
+                                        onChange={(e) =>
+                                          updateMode({
+                                            extraFields: { ...modeCfg.extraFields, cardNetwork: e.target.checked },
+                                          })
+                                        }
+                                        className="rounded border-slate-300 text-blue-600"
+                                      />
+                                      <span>Card Network</span>
+                                    </label>
+                                  </>
+                                )}
+                                {(modeCfg.id === "bank_transfer" || modeCfg.id === "cheque") && (
+                                  <label className="flex items-center gap-1.5 cursor-pointer">
+                                    <input
+                                      type="checkbox"
+                                      checked={modeCfg.extraFields?.bankName ?? true}
+                                      onChange={(e) =>
+                                        updateMode({
+                                          extraFields: { ...modeCfg.extraFields, bankName: e.target.checked },
+                                        })
+                                      }
+                                      className="rounded border-slate-300 text-blue-600"
+                                    />
+                                    <span>Bank Name</span>
+                                  </label>
+                                )}
+                                {modeCfg.id === "cheque" && (
+                                  <label className="flex items-center gap-1.5 cursor-pointer">
+                                    <input
+                                      type="checkbox"
+                                      checked={modeCfg.extraFields?.chequeDate ?? true}
+                                      onChange={(e) =>
+                                        updateMode({
+                                          extraFields: { ...modeCfg.extraFields, chequeDate: e.target.checked },
+                                        })
+                                      }
+                                      className="rounded border-slate-300 text-blue-600"
+                                    />
+                                    <span>Cheque Date (Post-dated)</span>
+                                  </label>
+                                )}
+                                <label className="flex items-center gap-1.5 cursor-pointer">
+                                  <input
+                                    type="checkbox"
+                                    checked={modeCfg.extraFields?.notes ?? true}
+                                    onChange={(e) =>
+                                      updateMode({
+                                        extraFields: { ...modeCfg.extraFields, notes: e.target.checked },
+                                      })
+                                    }
+                                    className="rounded border-slate-300 text-blue-600"
+                                  />
+                                  <span>Remarks / Note</span>
+                                </label>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
           {/* TAB 3: Document Sequences */}
           {activeTab === "sequences" && (

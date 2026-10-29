@@ -154,7 +154,43 @@ export interface BillingKeyboardSettings {
   selectAllOnFocus: boolean;
   quickDeleteWithoutConfirm: boolean;
   scannerSpeedThresholdMs: number;
+  productEntryStyle?: "inline_row" | "search_bar";
+  entryRowPosition?: "bottom" | "top";
+  addLineMode?: "immediate" | "after_enter";
   keyBindings?: Record<string, string>;
+}
+
+export type ReferenceRequirement = "off" | "optional" | "required";
+
+export interface PaymentModeConfig {
+  id: string;
+  name: string;
+  enabled: boolean;
+  referenceRequirement: ReferenceRequirement;
+  referenceLabel: string;
+  referencePlaceholder?: string;
+  referenceRegex?: string;
+  referenceMinLength?: number;
+  referenceMaxLength?: number;
+  duplicateCheck: "off" | "warn" | "block";
+  extraFields: {
+    payerVpa?: boolean;
+    cardNetwork?: boolean;
+    cardLastFour?: boolean;
+    bankName?: boolean;
+    chequeDate?: boolean;
+    notes?: boolean;
+  };
+}
+
+export interface PaymentSettingsConfig {
+  modes: PaymentModeConfig[];
+  upiVpa?: string;
+  upiPayeeName?: string;
+  enableDynamicUpiQr: boolean;
+  enableQuickDenominations: boolean;
+  creditPolicy: "allow_with_limit" | "warn_on_exceed" | "block_on_exceed";
+  printShowReferences: boolean;
 }
 
 export interface CompanySettings {
@@ -193,6 +229,7 @@ export interface CompanySettings {
   wallet: WalletConfig;
   smtp: EmailSmtpConfig;
   keyboard: BillingKeyboardSettings;
+  payments: PaymentSettingsConfig;
   invoice_columns: ColumnSetting[];
   header_fields: HeaderFieldSetting[];
   active_billing_preset: string;
@@ -276,6 +313,100 @@ export const BUILTIN_BILLING_PRESETS: BillingScreenPreset[] = [
     })),
   },
 ];
+
+export const DEFAULT_PAYMENT_MODES: PaymentModeConfig[] = [
+  {
+    id: "cash",
+    name: "Cash",
+    enabled: true,
+    referenceRequirement: "off",
+    referenceLabel: "N/A",
+    duplicateCheck: "off",
+    extraFields: { notes: true },
+  },
+  {
+    id: "upi",
+    name: "UPI",
+    enabled: true,
+    referenceRequirement: "optional",
+    referenceLabel: "UPI Transaction ID / UTR",
+    referencePlaceholder: "12-digit UTR or txn ID",
+    referenceRegex: "^[0-9A-Za-z_-]{6,35}$",
+    referenceMinLength: 6,
+    referenceMaxLength: 35,
+    duplicateCheck: "warn",
+    extraFields: { payerVpa: true, notes: true },
+  },
+  {
+    id: "card",
+    name: "Card",
+    enabled: true,
+    referenceRequirement: "optional",
+    referenceLabel: "Card Approval Code / Auth Code",
+    referencePlaceholder: "Approval code or last 4",
+    duplicateCheck: "warn",
+    extraFields: { cardLastFour: true, cardNetwork: true, notes: true },
+  },
+  {
+    id: "bank_transfer",
+    name: "Bank Transfer",
+    enabled: true,
+    referenceRequirement: "optional",
+    referenceLabel: "Bank Reference / UTR",
+    referencePlaceholder: "NEFT/RTGS/IMPS ref",
+    duplicateCheck: "warn",
+    extraFields: { bankName: true, notes: true },
+  },
+  {
+    id: "cheque",
+    name: "Cheque",
+    enabled: true,
+    referenceRequirement: "required",
+    referenceLabel: "Cheque Number",
+    referencePlaceholder: "6-digit cheque number",
+    referenceMinLength: 6,
+    referenceMaxLength: 20,
+    duplicateCheck: "block",
+    extraFields: { bankName: true, chequeDate: true, notes: true },
+  },
+  {
+    id: "wallet",
+    name: "Wallet / Store Credit",
+    enabled: true,
+    referenceRequirement: "optional",
+    referenceLabel: "Wallet Ref / Mobile",
+    duplicateCheck: "warn",
+    extraFields: { notes: true },
+  },
+  {
+    id: "gift_voucher",
+    name: "Gift Voucher",
+    enabled: true,
+    referenceRequirement: "required",
+    referenceLabel: "Voucher Code",
+    duplicateCheck: "block",
+    extraFields: { notes: true },
+  },
+  {
+    id: "credit",
+    name: "Credit (Udhari)",
+    enabled: true,
+    referenceRequirement: "off",
+    referenceLabel: "Credit Agreement Ref",
+    duplicateCheck: "off",
+    extraFields: { notes: true },
+  },
+];
+
+export const DEFAULT_PAYMENT_SETTINGS: PaymentSettingsConfig = {
+  modes: [...DEFAULT_PAYMENT_MODES],
+  upiVpa: "store@upi",
+  upiPayeeName: "LamStone Retail Store",
+  enableDynamicUpiQr: true,
+  enableQuickDenominations: true,
+  creditPolicy: "warn_on_exceed",
+  printShowReferences: false,
+};
 
 export const DEFAULT_SETTINGS: CompanySettings = {
   store_id: "store_main",
@@ -379,12 +510,17 @@ export const DEFAULT_SETTINGS: CompanySettings = {
     replyTo: "support@lamstone.in",
   },
 
+  payments: { ...DEFAULT_PAYMENT_SETTINGS },
+
   keyboard: {
     enterAfterQty: "search",
     autoFocusQtyAfterAdd: true,
     selectAllOnFocus: true,
     quickDeleteWithoutConfirm: true,
     scannerSpeedThresholdMs: 45,
+    productEntryStyle: "inline_row",
+    entryRowPosition: "bottom",
+    addLineMode: "immediate",
     keyBindings: {
       focusSearch: "F1",
       checkout: "F12",
@@ -447,6 +583,12 @@ export class CompanySettingsService {
         inventory: { ...DEFAULT_SETTINGS.inventory, ...(record.inventory || {}) },
         wallet: { ...DEFAULT_SETTINGS.wallet, ...(record.wallet || {}) },
         smtp: { ...DEFAULT_SETTINGS.smtp, ...(record.smtp || {}) },
+        keyboard: { ...DEFAULT_SETTINGS.keyboard, ...(record.keyboard || {}) },
+        payments: {
+          ...DEFAULT_SETTINGS.payments,
+          ...(record.payments || {}),
+          modes: record.payments?.modes?.length ? record.payments.modes : [...DEFAULT_PAYMENT_MODES],
+        },
         invoice_columns: record.invoice_columns?.length ? record.invoice_columns : [...DEFAULT_COLUMNS],
         header_fields: record.header_fields?.length ? record.header_fields : [...DEFAULT_HEADER_FIELDS],
         active_billing_preset: record.active_billing_preset || "pharmacy",

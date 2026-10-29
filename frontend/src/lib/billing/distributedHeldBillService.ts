@@ -120,7 +120,11 @@ export class DistributedHeldBillService {
 
       if (res.status === 409) {
         const data = await res.json();
-        return { success: false, error: data.message || "This bill has already been recalled or claimed by another counter." };
+        const msg = data.message || "This bill has already been recalled or claimed by another counter.";
+        return {
+          success: false,
+          error: msg.includes("recalled") ? msg : msg.replace("already been claimed", "already been recalled or claimed"),
+        };
       }
 
       if (res.ok) {

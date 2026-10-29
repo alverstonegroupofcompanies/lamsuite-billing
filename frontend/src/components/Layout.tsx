@@ -376,15 +376,21 @@ export const Layout: React.FC<LayoutProps> = ({ children, onOpenGateway, onAddNe
           <button
             type="button"
             onClick={() => setIsStoreSwitcherOpen(true)}
-            title="Switch Company / Store (Alt + S)"
+            title={`Active Store: ${activeStore?.name || "Main Store"} (Store ID: ${activeStore?.id || "1"}, Code: ${activeStore?.code || "STORE-01"}). Press Alt + S to switch.`}
             className="flex items-center gap-2 px-2.5 py-1 rounded-btn bg-[var(--color-surface-subtle)] hover:bg-[var(--color-surface-hover)] border border-[var(--color-border)] text-xs font-semibold cursor-pointer transition-colors shadow-2xs"
           >
             <span
               className="w-2.5 h-2.5 rounded-full shrink-0"
               style={{ backgroundColor: storeColorHex }}
             />
-            <span className="font-bold text-[var(--color-text)] max-w-[160px] truncate">
+            <span className="font-bold text-[var(--color-text)] max-w-[130px] truncate">
               {activeStore?.alias || activeStore?.name || "Main Store"}
+            </span>
+            <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-[var(--color-surface)] border border-[var(--color-border)] text-[var(--color-text)]">
+              {activeStore?.code || `STORE-${String(activeStore?.id || "01").padStart(2, "0")}`}
+            </span>
+            <span className="text-[9px] text-[var(--color-text-muted)] font-mono font-medium">
+              ID:{activeStore?.id || "1"}
             </span>
             <span className="text-[10px] text-[var(--color-text-muted)] font-mono px-1 rounded bg-[var(--color-canvas)] border border-[var(--color-border)]">
               Alt+S

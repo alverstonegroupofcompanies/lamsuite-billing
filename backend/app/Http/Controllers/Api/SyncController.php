@@ -27,18 +27,26 @@ class SyncController
      */
     private function resolveStoreId(Request $request, $itemData = []): int
     {
-        if (!empty($itemData['store_id'])) {
-            if (is_numeric($itemData['store_id'])) {
-                return (int)$itemData['store_id'];
-            }
-            $store = Store::where('code', $itemData['store_id'])->first();
-            if ($store) return $store->id;
+        $candidate = is_array($itemData) ? ($itemData['store_id'] ?? $itemData['store_code'] ?? null) : null;
+        if (!$candidate) {
+            $candidate = $request->header('X-Store-Id') ?: $request->header('Store-Id');
+        }
+        if (!$candidate) {
+            $candidate = $request->input('store_id') ?: $request->query('store_id');
+        }
+        if (!$candidate && $request->user()) {
+            $candidate = $request->user()->store_id;
         }
 
-        $headerStore = $request->header('X-Store-Id') ?: $request->header('Store-Id');
-        if ($headerStore) {
-            if (is_numeric($headerStore)) return (int)$headerStore;
-            $store = Store::where('code', $headerStore)->first();
+        if ($candidate !== null && $candidate !== '') {
+            if (is_numeric($candidate)) {
+                $store = Store::find((int)$candidate);
+                if ($store) return $store->id;
+            }
+            $store = Store::where('code', $candidate)
+                ->orWhere('id', $candidate)
+                ->orWhere('name', $candidate)
+                ->first();
             if ($store) return $store->id;
         }
 

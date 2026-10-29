@@ -23,7 +23,7 @@ class PurchaseController
             $query->where('supplier_id', $request->query('supplier_id'));
         }
 
-        if ($request->has('status')) {
+        if ($request->has('status') && strtolower($request->query('status')) !== 'all') {
             $query->where('status', $request->query('status'));
         }
 

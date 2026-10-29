@@ -11,6 +11,9 @@ import { sqliteStorage } from "../db/sqliteStorage";
 import { syncQueueService } from "../sync/syncQueueService";
 import { onlineTransactionService } from "../sync/onlineTransactionService";
 import { staffAuthService } from "../auth/staffAuthService";
+import { storeRegistryService } from "../auth/storeRegistryService";
+import { storeDeviceService } from "../auth/storeDeviceService";
+import type { PaymentTenderLine } from "./billingTenderService";
 import { cashShiftService } from "./cashShiftService";
 
 export interface PosCartLine {
@@ -488,12 +491,14 @@ export class PosCartService {
 
   async finalizeInvoice(
     invoiceNumber: string,
-    paymentMode = "Cash",
+    paymentModeOrPayments: string | PaymentTenderLine[] = "Cash",
     options?: {
       autoClear?: boolean;
       linesSnapshot?: PosCartLine[];
       totalsSnapshot?: InvoiceTotals;
       operatorId?: string;
+      cashChange?: number;
+      payments?: PaymentTenderLine[];
     }
   ): Promise<{ success: boolean; invoiceId: string; invoiceNumber?: string; isOfflineQueued?: boolean; isTempNumber?: boolean }> {
     const linesToFinalize = options?.linesSnapshot && options.linesSnapshot.length > 0
@@ -505,13 +510,39 @@ export class PosCartService {
     }
 
     const totals = options?.totalsSnapshot || this.getTotals();
+
+    // Safety net: integrity check verifying invoice totals equal sum of lines
+    const sumLineTotals = linesToFinalize.reduce((acc, l) => acc + (l.calculated?.total_amount || 0), 0);
+    const billDiscount = totals.bill_discount_amount || 0;
+    const expectedNet = sumLineTotals - billDiscount + (totals.round_off || 0);
+    if (Math.abs(expectedNet - totals.grand_total) > 0.05) {
+      throw new Error(
+        `Invoice integrity violation: Line sum (₹${sumLineTotals.toFixed(2)}) minus discount (₹${billDiscount.toFixed(2)}) plus round-off (₹${(totals.round_off || 0).toFixed(2)}) does not match grand total (₹${totals.grand_total.toFixed(2)})`
+      );
+    }
     const externalId = `ext_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`;
 
     const currentSession = staffAuthService.getCurrentSession();
     const activeCounterId = currentSession?.counterId || "Counter 01";
+    const activeStore = storeRegistryService.getActiveStore();
+    const deviceProfile = await storeDeviceService.getDeviceProfile();
+    const activeStoreId = String(activeStore?.id || currentSession?.user?.store_id || deviceProfile?.store_id || "1");
+    const activeStoreCode = String(activeStore?.code || deviceProfile?.store_code || "STORE-01");
+
+    const resolvedPayments: PaymentTenderLine[] = Array.isArray(paymentModeOrPayments)
+      ? paymentModeOrPayments
+      : options?.payments && options.payments.length > 0
+      ? options.payments
+      : [{ mode: typeof paymentModeOrPayments === "string" ? paymentModeOrPayments : "Cash", amount: totals.grand_total }];
+
+    const primaryPaymentMode = resolvedPayments.length > 1
+      ? "Split"
+      : (resolvedPayments[0]?.mode || (typeof paymentModeOrPayments === "string" ? paymentModeOrPayments : "Cash"));
 
     // 1. Submit through Online Transaction Service (Online-First with offline fallback)
     const txRes = await onlineTransactionService.submitAuthoritativeInvoice({
+      store_id: activeStoreId,
+      store_code: activeStoreCode,
       external_id: externalId,
       idempotency_key: externalId,
       invoice_number: invoiceNumber,
@@ -521,8 +552,9 @@ export class PosCartService {
       customer_phone: this.customerPhone,
       customer_gstin: this.customerGstin,
       place_of_supply: this.placeOfSupply,
-      payment_mode: paymentMode,
+      payment_mode: primaryPaymentMode,
       paid_amount: totals.grand_total,
+      payments: resolvedPayments,
       counter_id: activeCounterId,
       patient_name: this.prescriptionMeta.patient_name,
       doctor_name: this.prescriptionMeta.doctor_name,
@@ -563,7 +595,7 @@ export class PosCartService {
     const finalDocNumber = finalizedInvoice.invoice_number || invoiceNumber;
 
     // Record tender in active counter shift
-    await cashShiftService.recordSaleTender(activeCounterId, paymentMode, totals.grand_total);
+    await cashShiftService.recordSaleTenders(activeCounterId, resolvedPayments, options?.cashChange || 0);
 
     // Reset Cart only if autoClear is not explicitly disabled
     if (options?.autoClear !== false) {

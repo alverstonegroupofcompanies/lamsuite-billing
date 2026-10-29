@@ -301,3 +301,5 @@ export function packLooseToBaseUnits(
   const upp = Math.max(1, Number(unitsPerPack) || 1);
   return Math.max(0, packs) * upp + Math.max(0, loose);
 }
+
+export { formatExpiryDisplay, parseExpiryDateParts } from "../masters/productsStore";

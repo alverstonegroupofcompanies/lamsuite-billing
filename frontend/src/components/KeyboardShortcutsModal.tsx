@@ -21,7 +21,8 @@ export const KeyboardShortcutsModal: React.FC<KeyboardShortcutsModalProps> = ({ 
     {
       category: "POS Counter & Billing",
       shortcuts: [
-        { key: "F1 or /", description: "Focus Product Search / Barcode" },
+        { key: "F1 or /", description: "Focus Product Entry Row / Barcode" },
+        { key: "3*<name/code>", description: "Quantity prefix multiplier (e.g. 3*Paracetamol)" },
         { key: "F12 or Ctrl+Enter", description: "Open Settlement / Checkout" },
         { key: "Ctrl+F2 or Shift+F2", description: "Overall Bill Discount (% or ₹)" },
         { key: "Alt+R", description: "Edit Round-Off / Net Payable Amount" },
@@ -34,10 +35,12 @@ export const KeyboardShortcutsModal: React.FC<KeyboardShortcutsModalProps> = ({ 
     {
       category: "Cart Grid & Line Actions",
       shortcuts: [
-        { key: "Ctrl+↓ or ↓ (empty search)", description: "Enter Cart Grid Navigation" },
+        { key: "↑ (from entry row)", description: "Jump to last cart line" },
+        { key: "↓ (from last line)", description: "Return to product entry row" },
         { key: "↑ / ↓", description: "Navigate between items in grid" },
         { key: "Tab or +", description: "Jump between Pack & Loose quantity" },
-        { key: "Enter (in Qty)", description: "Confirm line & jump back to Search" },
+        { key: "Enter (in Qty)", description: "Confirm line & focus entry row for next item" },
+        { key: "Esc (in Qty)", description: "Remove freshly added line & return to entry row" },
         { key: "F2", description: "Quick Edit Item Discount (% or ₹)" },
         { key: "F3", description: "Quick Edit Selling Price" },
         { key: "F4 or Ctrl+M", description: "Quick Edit Product Name, Batch, Expiry & Tax" },

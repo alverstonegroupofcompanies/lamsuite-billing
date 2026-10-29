@@ -22,6 +22,9 @@ import {
   RefreshCw,
   FolderOpen,
   ExternalLink,
+  CreditCard,
+  PlusCircle,
+  Check,
 } from "lucide-react";
 import {
   invoiceManagementService,
@@ -41,6 +44,10 @@ import { posCartService } from "../lib/billing/posCartService";
 import { productsStore, type ProductBatch, type ProductItem } from "../lib/masters/productsStore";
 import { companySettingsService } from "../lib/settings/companySettingsService";
 import { lanPeerService } from "../lib/lan/lanPeerService";
+import { sqliteStorage } from "../lib/db/sqliteStorage";
+import { onlineTransactionService } from "../lib/sync/onlineTransactionService";
+import { storeRegistryService, type RegisteredStoreRecord } from "../lib/auth/storeRegistryService";
+import { storeDeviceService, type StoreDeviceProfile } from "../lib/auth/storeDeviceService";
 import { PrintPreviewModal } from "../components/PrintPreviewModal";
 import { useModalEscape } from "../lib/ui/modalEscapeManager";
 
@@ -51,6 +58,28 @@ export const BillsPage: React.FC = () => {
   const [invoices, setInvoices] = useState<InvoiceRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedIndex, setSelectedIndex] = useState(0);
+
+  // Store & Device Diagnostics State
+  const [activeStore, setActiveStore] = useState<RegisteredStoreRecord | null>(storeRegistryService.getActiveStore());
+  const [isOnline, setIsOnline] = useState<boolean>(true);
+  const [lastSyncTime, setLastSyncTime] = useState<string>("");
+  const [serverTotalCount, setServerTotalCount] = useState<number | null>(null);
+  const [serverTotalStoreInvoices, setServerTotalStoreInvoices] = useState<number | null>(null);
+  const [isOfflineCache, setIsOfflineCache] = useState<boolean>(false);
+  const [pendingSyncCount, setPendingSyncCount] = useState<number>(0);
+
+  // Pagination State
+  const [currentPage, setCurrentPage] = useState<number>(1);
+  const [perPage, setPerPage] = useState<number>(50);
+  const [totalPages, setTotalPages] = useState<number>(1);
+
+  // History Sync Modal State
+  const [isSyncingHistory, setIsSyncingHistory] = useState<boolean>(false);
+  const [syncHistoryProgress, setSyncHistoryProgress] = useState<{ current: number; total: number; step: string }>({
+    current: 0,
+    total: 0,
+    step: "",
+  });
 
   // Filters
   const [searchQuery, setSearchQuery] = useState("");
@@ -78,6 +107,15 @@ export const BillsPage: React.FC = () => {
   const [editPin, setEditPin] = useState("");
   const [editPinError, setEditPinError] = useState("");
 
+  // Receive Payment Dialog
+  const [isReceivePaymentModalOpen, setIsReceivePaymentModalOpen] = useState(false);
+  useModalEscape(isReceivePaymentModalOpen, () => setIsReceivePaymentModalOpen(false));
+  const [receiptMode, setReceiptMode] = useState("Cash");
+  const [receiptAmount, setReceiptAmount] = useState(0);
+  const [receiptReference, setReceiptReference] = useState("");
+  const [receiptNotes, setReceiptNotes] = useState("");
+  const [isSubmittingReceipt, setIsSubmittingReceipt] = useState(false);
+
   // Notification Toast
   interface NotificationAction {
     label: string;
@@ -104,37 +142,226 @@ export const BillsPage: React.FC = () => {
 
   const [isRefreshingFromLan, setIsRefreshingFromLan] = useState(false);
 
-  const loadInvoices = async () => {
+  // Subscribe to store registry changes
+  useEffect(() => {
+    const unsub = storeRegistryService.onRegistryChange(() => {
+      setActiveStore(storeRegistryService.getActiveStore());
+    });
+    return unsub;
+  }, []);
+
+  const loadInvoices = async (page = currentPage, forceServer = false) => {
     setLoading(true);
     try {
-      const criteria: InvoiceFilterCriteria = {
-        searchQuery,
-        dateRange,
-        paymentMode: paymentModeFilter,
-        status: statusFilter,
-      };
-      let list = await invoiceManagementService.listInvoices(criteria);
+      const reg = storeRegistryService.getActiveStore();
+      setActiveStore(reg);
+      const activeStoreId = reg?.id || "1";
 
-      // If empty or if secondary LAN counter, check LAN Hub for latest snapshot
-      const activeStoreId = localStorage.getItem("lamsuite_active_store_id") || "default";
-      const isLanClient = localStorage.getItem("lamsuite_device_token") || localStorage.getItem("lamsuite_hub_ip");
-      if (isLanClient && (list.length === 0 || criteria.dateRange === "all" || criteria.dateRange === "today")) {
+      const now = new Date();
+      const formatYmdKolkata = (d: Date) => {
         try {
-          const hubIp = localStorage.getItem("lamsuite_hub_ip");
-          const hubPort = Number(localStorage.getItem("lamsuite_hub_port")) || 8000;
-          const deviceToken = localStorage.getItem("lamsuite_device_token") || undefined;
-          if (hubIp) {
-            await lanPeerService.pullMasterSnapshotFromMain(hubIp, hubPort, undefined, deviceToken).catch(async () => {
-              if (hubPort !== 8000) {
-                await lanPeerService.pullMasterSnapshotFromMain(hubIp, 8000, undefined, deviceToken).catch(() => {});
-              }
-            });
-            list = await invoiceManagementService.listInvoices(criteria);
-          }
-        } catch (_) {}
+          return d.toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+        } catch {
+          return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+        }
+      };
+      const todayStr = formatYmdKolkata(now);
+      const yesterdayDate = new Date(now);
+      yesterdayDate.setDate(yesterdayDate.getDate() - 1);
+      const yesterdayStr = formatYmdKolkata(yesterdayDate);
+      const sevenDaysAgoDate = new Date(now);
+      sevenDaysAgoDate.setDate(sevenDaysAgoDate.getDate() - 7);
+      const sevenDaysAgoStr = formatYmdKolkata(sevenDaysAgoDate);
+      const monthStartStr = `${todayStr.slice(0, 7)}-01`;
+      const lastDayOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+      const monthEndStr = `${todayStr.slice(0, 7)}-${String(lastDayOfMonth).padStart(2, "0")}`;
+
+      let startDate: string | undefined;
+      let endDate: string | undefined;
+
+      if (dateRange === "today") {
+        startDate = todayStr;
+        endDate = todayStr;
+      } else if (dateRange === "yesterday") {
+        startDate = yesterdayStr;
+        endDate = yesterdayStr;
+      } else if (dateRange === "last7days") {
+        startDate = sevenDaysAgoStr;
+        endDate = todayStr;
+      } else if (dateRange === "month") {
+        startDate = monthStartStr;
+        endDate = monthEndStr;
       }
 
-      setInvoices(list);
+      const health = await onlineTransactionService.getHealthSnapshot();
+      const online = health.state !== "offline";
+      setIsOnline(online);
+
+      // Check unsynced local bills
+      const localInvoices = await sqliteStorage.findAll<InvoiceRecord>("invoices");
+      const unsyncedBills = localInvoices.filter(
+        (inv) => inv.sync_state === "pending" || (inv as any).sync_status === "pending"
+      );
+      setPendingSyncCount(unsyncedBills.length);
+
+      let loadedInvoices: InvoiceRecord[] = [];
+      let totalCount = 0;
+      let storeTotalCount = 0;
+      let pagesCount = 1;
+      let loadedFromLiveServer = false;
+
+      if (online || forceServer) {
+        try {
+          const baseUrl = onlineTransactionService.getEffectiveBaseUrl();
+          const queryParams = new URLSearchParams();
+          queryParams.set("store_id", activeStoreId);
+          queryParams.set("page", String(page));
+          queryParams.set("per_page", String(perPage));
+          if (startDate) queryParams.set("start_date", startDate);
+          if (endDate) queryParams.set("end_date", endDate);
+          if (statusFilter && statusFilter.toLowerCase() !== "all") {
+            queryParams.set("status", statusFilter);
+          }
+          if (paymentModeFilter && paymentModeFilter.toLowerCase() !== "all") {
+            queryParams.set("payment_mode", paymentModeFilter);
+          }
+          if (searchQuery.trim()) {
+            queryParams.set("search", searchQuery.trim());
+          }
+
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 4000);
+          const res = await fetch(`${baseUrl}/api/invoices?${queryParams.toString()}`, {
+            headers: {
+              Accept: "application/json",
+              "X-Store-Id": activeStoreId,
+              "Store-Id": activeStoreId,
+            },
+            cache: "no-store",
+            signal: controller.signal,
+          });
+          clearTimeout(timeoutId);
+
+          if (res.ok) {
+            const json = await res.json();
+            const serverList = json.data || (Array.isArray(json) ? json : []);
+            totalCount = json.total !== undefined ? json.total : serverList.length;
+            storeTotalCount = json.total_store_invoices !== undefined ? json.total_store_invoices : totalCount;
+            pagesCount = json.last_page || 1;
+
+            // Ingest server bills into local SQLite cache
+            for (const sinv of serverList) {
+              const rec: InvoiceRecord = {
+                id: String(sinv.id),
+                module_key: "invoice",
+                invoice_number: sinv.invoice_number,
+                invoice_date: sinv.invoice_date,
+                customer_name: sinv.customer_name || "Walk-in Customer",
+                customer_phone: sinv.customer_phone || "",
+                customer_gstin: sinv.customer_gstin || "",
+                subtotal: Number(sinv.subtotal) || 0,
+                discount_total: Number(sinv.discount_total) || 0,
+                tax_total: Number(sinv.tax_total) || 0,
+                round_off: Number(sinv.round_off) || 0,
+                grand_total: Number(sinv.grand_total) || 0,
+                paid_amount: Number(sinv.paid_amount) || Number(sinv.grand_total) || 0,
+                payment_mode: sinv.payment_mode || "Cash",
+                payment_status: sinv.payment_status || "paid",
+                status: sinv.status || "issued",
+                user_counter: sinv.counter_code ? `Counter ${sinv.counter_code}` : (sinv.user_counter || "Counter 01"),
+                sync_state: "synced",
+                created_at: sinv.created_at ? new Date(sinv.created_at).getTime() : Date.now(),
+                updated_at: sinv.updated_at ? new Date(sinv.updated_at).getTime() : Date.now(),
+              };
+              await sqliteStorage.insertRecord("invoices", String(sinv.id), rec);
+              if (Array.isArray(sinv.items)) {
+                for (const item of sinv.items) {
+                  await sqliteStorage.insertRecord("invoice_items", `item_${item.id || Math.random()}`, {
+                    id: String(item.id || `item_${Math.random()}`),
+                    invoice_id: String(sinv.id),
+                    product_id: String(item.product_id),
+                    product_name: item.product_name,
+                    batch_no: item.batch_no,
+                    expiry_date: item.expiry_date,
+                    qty: Number(item.qty || 0),
+                    loose_qty: Number(item.loose_qty || 0),
+                    units_per_pack: Number(item.units_per_pack || 1),
+                    unit_price: Number(item.unit_price || 0),
+                    mrp: Number(item.mrp || item.unit_price || 0),
+                    discount_percent: Number(item.discount_percent || 0),
+                    discount_amount: Number(item.discount_amount || 0),
+                    gst_percent: Number(item.gst_percent || 0),
+                    tax_amount: Number(item.tax_amount || 0),
+                    total_amount: Number(item.total_amount || 0),
+                  });
+                }
+              }
+            }
+
+            loadedInvoices = serverList.map((sinv: any) => ({
+              id: String(sinv.id),
+              module_key: "invoice",
+              invoice_number: sinv.invoice_number,
+              invoice_date: sinv.invoice_date,
+              customer_name: sinv.customer_name || "Walk-in Customer",
+              customer_phone: sinv.customer_phone || "",
+              customer_gstin: sinv.customer_gstin || "",
+              subtotal: Number(sinv.subtotal) || 0,
+              discount_total: Number(sinv.discount_total) || 0,
+              tax_total: Number(sinv.tax_total) || 0,
+              round_off: Number(sinv.round_off) || 0,
+              grand_total: Number(sinv.grand_total) || 0,
+              paid_amount: Number(sinv.paid_amount) || Number(sinv.grand_total) || 0,
+              payment_mode: sinv.payment_mode || "Cash",
+              payment_status: sinv.payment_status || "paid",
+              status: sinv.status || "issued",
+              user_counter: sinv.counter_code ? `Counter ${sinv.counter_code}` : (sinv.user_counter || "Counter 01"),
+              sync_state: "synced",
+              created_at: sinv.created_at ? new Date(sinv.created_at).getTime() : Date.now(),
+              updated_at: sinv.updated_at ? new Date(sinv.updated_at).getTime() : Date.now(),
+            }));
+
+            // Prepend unsynced local bills matching criteria
+            if (unsyncedBills.length > 0) {
+              const matchedUnsynced = unsyncedBills.filter((ub) => {
+                const ubDate = (ub.invoice_date || "").slice(0, 10);
+                if (startDate && ubDate < startDate) return false;
+                if (endDate && ubDate > endDate) return false;
+                return true;
+              });
+              loadedInvoices = [...matchedUnsynced, ...loadedInvoices];
+            }
+
+            loadedFromLiveServer = true;
+            setIsOfflineCache(false);
+            setLastSyncTime(new Date().toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata" }));
+          }
+        } catch (serverErr) {
+          console.warn("Failed to load from server API, falling back to SQLite cache:", serverErr);
+        }
+      }
+
+      // Offline fallback: load from local SQLite cache
+      if (!loadedFromLiveServer) {
+        const criteria: InvoiceFilterCriteria = {
+          searchQuery,
+          dateRange,
+          paymentMode: paymentModeFilter,
+          status: statusFilter,
+        };
+        const localList = await invoiceManagementService.listInvoices(criteria);
+        loadedInvoices = localList;
+        totalCount = localList.length;
+        storeTotalCount = localList.length;
+        pagesCount = Math.max(1, Math.ceil(localList.length / perPage));
+        setIsOfflineCache(true);
+      }
+
+      setInvoices(loadedInvoices);
+      setServerTotalCount(totalCount);
+      setServerTotalStoreInvoices(storeTotalCount);
+      setTotalPages(pagesCount);
+      setCurrentPage(page);
       setSelectedIndex(0);
     } catch (err) {
       showNotification("Failed to load invoices", "error");
@@ -143,25 +370,149 @@ export const BillsPage: React.FC = () => {
     }
   };
 
+  const downloadStoreInvoiceHistory = async (months = 12) => {
+    setIsSyncingHistory(true);
+    setSyncHistoryProgress({ current: 0, total: 1, step: "Connecting to server..." });
+    try {
+      const activeStore = storeRegistryService.getActiveStore();
+      const activeStoreId = activeStore?.id || "1";
+      const baseUrl = onlineTransactionService.getEffectiveBaseUrl();
+
+      let page = 1;
+      let totalPages = 1;
+      let totalDownloaded = 0;
+
+      while (page <= totalPages) {
+        setSyncHistoryProgress({
+          current: page,
+          total: totalPages,
+          step: `Fetching batch ${page} of ${totalPages}...`,
+        });
+
+        const res = await fetch(`${baseUrl}/api/invoices?store_id=${activeStoreId}&page=${page}&per_page=100`, {
+          headers: {
+            Accept: "application/json",
+            "X-Store-Id": activeStoreId,
+            "Store-Id": activeStoreId,
+          },
+          cache: "no-store",
+        });
+
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const json = await res.json();
+        const serverInvoices = json.data || (Array.isArray(json) ? json : []);
+        totalPages = json.last_page || 1;
+
+        for (const sinv of serverInvoices) {
+          await sqliteStorage.insertRecord("invoices", String(sinv.id), {
+            id: String(sinv.id),
+            module_key: "invoice",
+            invoice_number: sinv.invoice_number,
+            invoice_date: sinv.invoice_date,
+            customer_name: sinv.customer_name || "Walk-in Customer",
+            customer_phone: sinv.customer_phone || "",
+            customer_gstin: sinv.customer_gstin || "",
+            subtotal: Number(sinv.subtotal) || 0,
+            discount_total: Number(sinv.discount_total) || 0,
+            tax_total: Number(sinv.tax_total) || 0,
+            round_off: Number(sinv.round_off) || 0,
+            grand_total: Number(sinv.grand_total) || 0,
+            paid_amount: Number(sinv.paid_amount) || Number(sinv.grand_total) || 0,
+            payment_mode: sinv.payment_mode || "Cash",
+            payment_status: sinv.payment_status || "paid",
+            status: sinv.status || "issued",
+            user_counter: sinv.counter_code ? `Counter ${sinv.counter_code}` : (sinv.user_counter || "Counter 01"),
+            sync_state: "synced",
+            created_at: sinv.created_at ? new Date(sinv.created_at).getTime() : Date.now(),
+            updated_at: sinv.updated_at ? new Date(sinv.updated_at).getTime() : Date.now(),
+          });
+          if (Array.isArray(sinv.items)) {
+            for (const item of sinv.items) {
+              await sqliteStorage.insertRecord("invoice_items", `item_${item.id || Math.random()}`, {
+                id: String(item.id || `item_${Math.random()}`),
+                invoice_id: String(sinv.id),
+                product_id: String(item.product_id),
+                product_name: item.product_name,
+                batch_no: item.batch_no,
+                expiry_date: item.expiry_date,
+                qty: Number(item.qty || 0),
+                loose_qty: Number(item.loose_qty || 0),
+                units_per_pack: Number(item.units_per_pack || 1),
+                unit_price: Number(item.unit_price || 0),
+                mrp: Number(item.mrp || item.unit_price || 0),
+                discount_percent: Number(item.discount_percent || 0),
+                discount_amount: Number(item.discount_amount || 0),
+                gst_percent: Number(item.gst_percent || 0),
+                tax_amount: Number(item.tax_amount || 0),
+                total_amount: Number(item.total_amount || 0),
+              });
+            }
+          }
+          totalDownloaded++;
+        }
+        page++;
+      }
+
+      showNotification(`Successfully synchronized ${totalDownloaded} historical store invoices!`, "success");
+      await loadInvoices(1, true);
+    } catch (err: any) {
+      showNotification(`History sync stopped: ${err.message || "Network issue"}`, "error");
+    } finally {
+      setIsSyncingHistory(false);
+    }
+  };
+
+  const handleSwitchStore = async (storeId: string) => {
+    try {
+      await storeRegistryService.switchActiveStore(storeId, true);
+      setActiveStore(storeRegistryService.getActiveStore());
+      showNotification(`Switched active store to STORE-01`, "success");
+      loadInvoices(1, true);
+    } catch (err: any) {
+      showNotification(`Failed to switch store: ${err.message}`, "error");
+    }
+  };
+
   const handleRefreshSync = async () => {
     setIsRefreshingFromLan(true);
     try {
-      const hubIp = localStorage.getItem("lamsuite_hub_ip");
-      const hubPort = Number(localStorage.getItem("lamsuite_hub_port")) || 8000;
-      const deviceToken = localStorage.getItem("lamsuite_device_token") || undefined;
-      if (hubIp) {
-        const res = await lanPeerService.pullMasterSnapshotFromMain(hubIp, hubPort, undefined, deviceToken).catch(async () => {
-          return await lanPeerService.pullMasterSnapshotFromMain(hubIp, 8000, undefined, deviceToken);
-        });
-        showNotification(`Synced ${res.appliedCount} records from Store Hub!`, "success");
-      }
-      await loadInvoices();
-    } catch (e: any) {
-      await loadInvoices();
-      showNotification("Refreshed local records.", "success");
+      await loadInvoices(currentPage, true);
+      showNotification("Refreshed invoice register from server.", "success");
+    } catch {
+      await loadInvoices(currentPage, false);
     } finally {
       setIsRefreshingFromLan(false);
     }
+  };
+
+  const formatDisplayDate = (inv: InvoiceRecord) => {
+    const raw = inv.invoice_date || "";
+    if (raw) {
+      try {
+        const d = new Date(raw);
+        if (!isNaN(d.getTime())) {
+          return d.toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "2-digit", month: "short", year: "numeric" });
+        }
+      } catch {}
+      return raw.slice(0, 10);
+    }
+    if (inv.created_at) {
+      return new Date(inv.created_at).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "2-digit", month: "short", year: "numeric" });
+    }
+    return "-";
+  };
+
+  const formatDisplayTime = (inv: InvoiceRecord) => {
+    const timestamp = inv.created_at || (inv.invoice_date ? new Date(inv.invoice_date).getTime() : 0);
+    if (timestamp) {
+      try {
+        const d = new Date(timestamp);
+        if (!isNaN(d.getTime())) {
+          return d.toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit" });
+        }
+      } catch {}
+    }
+    return "";
   };
 
   useEffect(() => {
@@ -282,8 +633,63 @@ export const BillsPage: React.FC = () => {
       tax_total: invoice.tax_total,
       round_off: invoice.round_off,
       grand_total: invoice.grand_total,
+      payments: invoice.payments?.map((p) => ({
+        mode: p.payment_mode,
+        amount: p.amount,
+        reference: p.reference_no,
+        status: p.status,
+      })),
       upi_vpa: "pharmacy@upi",
     };
+  };
+
+  const handleOpenReceivePayment = () => {
+    if (!selectedInvoice) return;
+    const paidSoFar = (selectedInvoice.payments || []).reduce(
+      (sum, p) => (p.status !== "refunded" ? sum + p.amount : sum),
+      0
+    );
+    const balanceRemaining = Math.max(
+      0,
+      Math.round((selectedInvoice.grand_total - paidSoFar + Number.EPSILON) * 100) / 100
+    );
+    setReceiptAmount(balanceRemaining);
+    setReceiptMode("Cash");
+    setReceiptReference("");
+    setReceiptNotes("");
+    setIsReceivePaymentModalOpen(true);
+  };
+
+  const handleRecordReceipt = async () => {
+    if (!selectedInvoice) return;
+    if (receiptAmount <= 0) {
+      showNotification("Receipt amount must be greater than 0", "error");
+      return;
+    }
+    setIsSubmittingReceipt(true);
+    try {
+      const res = await invoiceManagementService.recordInvoiceReceipt(selectedInvoice.id, {
+        mode: receiptMode,
+        amount: receiptAmount,
+        reference_no: receiptReference || undefined,
+        notes: receiptNotes || undefined,
+      });
+      if (res.success) {
+        showNotification("Payment receipt recorded successfully!", "success");
+        setIsReceivePaymentModalOpen(false);
+        const updated = await invoiceManagementService.getInvoiceWithDetails(selectedInvoice.id);
+        if (updated) {
+          setSelectedInvoice(updated.invoice);
+          setSelectedInvoiceItems(updated.items);
+          setSelectedInvoiceAudit(updated.auditLog);
+        }
+        loadInvoices();
+      }
+    } catch (e: any) {
+      showNotification(e.message || "Failed to record payment", "error");
+    } finally {
+      setIsSubmittingReceipt(false);
+    }
   };
 
   // Print Preview Modal State
@@ -637,6 +1043,84 @@ export const BillsPage: React.FC = () => {
         </div>
       </div>
 
+      {/* Offline Mode Warning Banner */}
+      {isOfflineCache && (
+        <div className="flex items-center justify-between rounded-[10px] border border-amber-500/40 bg-amber-500/10 px-4 py-2.5 text-xs text-amber-800 dark:text-amber-200">
+          <div className="flex items-center gap-2">
+            <AlertCircle className="h-4 w-4 text-amber-500 shrink-0" />
+            <span>
+              <strong>Showing cached bills</strong>, last updated {lastSyncTime || "earlier"}. Some bills may be missing ({pendingSyncCount} bills waiting to sync).
+            </span>
+          </div>
+          <button
+            onClick={() => loadInvoices(currentPage, true)}
+            className="text-[11px] font-bold underline hover:no-underline ml-2 cursor-pointer"
+          >
+            Retry Connection
+          </button>
+        </div>
+      )}
+
+      {/* Diagnostics & Store Identification Bar */}
+      <div className="flex flex-wrap items-center justify-between gap-2 rounded-[10px] border border-[var(--color-border)] bg-[var(--color-surface-subtle)] px-3 py-1.5 text-[11px] text-[var(--color-text-muted)] shadow-2xs">
+        <div className="flex flex-wrap items-center gap-2.5">
+          <span className="font-semibold text-[var(--color-text)] flex items-center gap-1.5">
+            <span>🏪 Store:</span>
+            <strong className="font-mono">{activeStore?.alias || activeStore?.name || "Store 01"}</strong>
+            <span className="text-[10px] px-1.5 py-0.2 rounded bg-[var(--color-surface)] border border-[var(--color-border)] text-[var(--color-text)] font-mono font-bold">
+              {activeStore?.code || `STORE-${String(activeStore?.id || "01").padStart(2, "0")}`}
+            </span>
+            <span className="text-[10px] font-mono text-[var(--color-text-muted)]">
+              (Store ID: {activeStore?.id || "1"})
+            </span>
+          </span>
+          <span>•</span>
+          <span>Counter: <strong className="font-mono text-[var(--color-text)]">{activeStore?.counter_code || "C01"}</strong></span>
+          <span>•</span>
+          <span className="flex items-center gap-1">
+            <span className={`w-2 h-2 rounded-full ${isOnline && !isOfflineCache ? "bg-emerald-500" : "bg-amber-500"}`} />
+            <strong className={isOnline && !isOfflineCache ? "text-emerald-700 dark:text-emerald-400" : "text-amber-700 dark:text-amber-400"}>
+              {isOnline && !isOfflineCache ? "Live Cloud Mode" : "Offline Cache Mode"}
+            </strong>
+          </span>
+          {lastSyncTime && (
+            <>
+              <span>•</span>
+              <span>Last Sync: <span className="font-mono">{lastSyncTime}</span></span>
+            </>
+          )}
+        </div>
+
+        <div className="flex items-center gap-2">
+          {serverTotalCount !== null && (
+            <span className="font-mono text-[11px]">
+              Showing <strong>{invoices.length}</strong> of <strong>{serverTotalCount}</strong> matching bills ({serverTotalStoreInvoices ?? serverTotalCount} in store)
+            </span>
+          )}
+          {serverTotalCount !== null && serverTotalCount !== invoices.length && !loading && (
+            <span className="text-[10px] font-bold text-amber-600 bg-amber-50 dark:bg-amber-950/40 px-1.5 py-0.5 rounded border border-amber-200 dark:border-amber-800">
+              Filtered / Paged View
+            </span>
+          )}
+          <button
+            onClick={() => loadInvoices(currentPage, true)}
+            title="Reload live from server"
+            className="flex items-center gap-1 px-2.5 py-1 rounded bg-[var(--color-surface)] hover:bg-[var(--color-surface-hover)] border border-[var(--color-border)] text-[11px] font-semibold text-[var(--color-text)] cursor-pointer transition-colors"
+          >
+            <RefreshCw className="h-3 w-3" />
+            <span>Reload</span>
+          </button>
+          <button
+            onClick={() => downloadStoreInvoiceHistory(12)}
+            title="Download full 12-month store invoice history for offline cache"
+            className="flex items-center gap-1 px-2.5 py-1 rounded bg-[var(--color-surface)] hover:bg-[var(--color-surface-hover)] border border-[var(--color-border)] text-[11px] font-semibold text-[var(--color-accent)] cursor-pointer transition-colors"
+          >
+            <Download className="h-3 w-3" />
+            <span>Sync History</span>
+          </button>
+        </div>
+      </div>
+
       {/* Invoices List Table */}
       <div className="flex-1 rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-2xs overflow-hidden flex flex-col">
         <div className="overflow-y-auto flex-1">
@@ -659,15 +1143,75 @@ export const BillsPage: React.FC = () => {
                 <tr>
                   <td colSpan={9} className="py-12 text-center text-[var(--color-text-muted)]">
                     <RefreshCw className="mx-auto h-6 w-6 animate-spin text-[var(--color-accent)] mb-2" />
-                    <span>Loading invoices...</span>
+                    <span>Loading invoices from server...</span>
                   </td>
                 </tr>
               ) : invoices.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="py-12 text-center text-[var(--color-text-muted)]">
-                    <Receipt className="mx-auto h-8 w-8 text-[var(--color-text-faint)] mb-2" />
-                    <p className="font-semibold text-[var(--color-text)]">No invoices found matching criteria</p>
-                    <p className="text-[11px] text-[var(--color-text-muted)] mt-0.5">Try adjusting date range or clearing search query</p>
+                  <td colSpan={9} className="py-12 text-center">
+                    <div className="max-w-md mx-auto p-4 flex flex-col items-center">
+                      <Receipt className="h-10 w-10 text-[var(--color-text-faint)] mb-3" />
+                      <h4 className="text-sm font-bold text-[var(--color-text)]">No invoices found matching criteria</h4>
+
+                      {isOfflineCache ? (
+                        <p className="text-xs text-[var(--color-warning-text)] bg-[var(--color-warning-bg)]/20 border border-[var(--color-warning-border)]/40 p-2.5 rounded-lg mt-2 mb-3">
+                          Device is currently in <strong>Offline Mode</strong>. The local SQLite cache has no bills matching <strong>{dateRange}</strong>.
+                        </p>
+                      ) : activeStore?.id === "4" || (serverTotalStoreInvoices === 0 && activeStore?.id !== "1") ? (
+                        <div className="text-xs text-[var(--color-text-muted)] bg-[var(--color-surface-subtle)] border border-[var(--color-border)] p-3 rounded-lg mt-2 mb-3 text-left w-full space-y-1.5">
+                          <p className="font-semibold text-[var(--color-text)]">
+                            Active Store is &ldquo;{activeStore?.name}&rdquo; (ID: {activeStore?.id}, Code: {activeStore?.code}).
+                          </p>
+                          <p>This store currently has 0 invoices on the cloud server. Active store bills belong to <strong>LamStone Pharmacy & Retail (STORE-01)</strong>.</p>
+                        </div>
+                      ) : (
+                        <p className="text-xs text-[var(--color-text-muted)] mt-1.5 mb-3">
+                          No bills found for Period: <strong>{dateRange}</strong>, Payment: <strong>{paymentModeFilter}</strong>, Status: <strong>{statusFilter}</strong>.
+                        </p>
+                      )}
+
+                      <div className="flex flex-wrap gap-2 justify-center">
+                        {dateRange !== "all" && (
+                          <button
+                            type="button"
+                            onClick={() => setDateRange("all")}
+                            className="px-3 py-1.5 text-xs font-semibold rounded-btn bg-[var(--color-accent)] text-white hover:opacity-90 transition-opacity cursor-pointer"
+                          >
+                            View All Time
+                          </button>
+                        )}
+                        {activeStore?.id !== "1" && (
+                          <button
+                            type="button"
+                            onClick={() => handleSwitchStore("1")}
+                            className="px-3 py-1.5 text-xs font-semibold rounded-btn bg-blue-600 text-white hover:bg-blue-700 transition-colors cursor-pointer"
+                          >
+                            Switch to STORE-01 (ID: 1)
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setDateRange("all");
+                            setPaymentModeFilter("all");
+                            setStatusFilter("all");
+                            setSearchQuery("");
+                            loadInvoices(1, true);
+                          }}
+                          className="px-3 py-1.5 text-xs font-semibold rounded-btn bg-[var(--color-surface-subtle)] border border-[var(--color-border)] text-[var(--color-text)] hover:bg-[var(--color-surface-hover)] transition-colors cursor-pointer"
+                        >
+                          Reset All Filters
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => loadInvoices(1, true)}
+                          className="px-3 py-1.5 text-xs font-semibold rounded-btn bg-[var(--color-surface-subtle)] border border-[var(--color-border)] text-[var(--color-text)] hover:bg-[var(--color-surface-hover)] transition-colors flex items-center gap-1.5 cursor-pointer"
+                        >
+                          <RefreshCw className="h-3.5 w-3.5" />
+                          <span>Reload From Server</span>
+                        </button>
+                      </div>
+                    </div>
                   </td>
                 </tr>
               ) : (
@@ -700,10 +1244,10 @@ export const BillsPage: React.FC = () => {
                         </div>
                       </td>
                       <td className="px-4 py-2.5 text-slate-600">
-                        {inv.invoice_date}
-                        {inv.created_at ? (
-                          <span className="ml-1 text-[10px] text-slate-400">
-                            {new Date(inv.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                        <span>{formatDisplayDate(inv)}</span>
+                        {formatDisplayTime(inv) ? (
+                          <span className="ml-1 text-[10px] text-slate-400 font-mono">
+                            {formatDisplayTime(inv)}
                           </span>
                         ) : null}
                       </td>
@@ -715,7 +1259,7 @@ export const BillsPage: React.FC = () => {
                       </td>
                       <td className="px-4 py-2.5 text-right font-mono font-bold text-slate-900">
                         <span className={isCancelled ? "line-through text-red-400" : ""}>
-                          ₹ {inv.grand_total.toFixed(2)}
+                          ₹ {Number(inv.grand_total || 0).toFixed(2)}
                         </span>
                       </td>
                       <td className="px-4 py-2.5 text-slate-600">
@@ -738,7 +1282,7 @@ export const BillsPage: React.FC = () => {
                         {inv.sync_state === "pending" ? (
                           <span className="inline-flex items-center gap-1 rounded-full bg-[var(--color-warning-bg)] px-2 py-0.5 text-[10px] font-medium text-[var(--color-warning-text)] border border-[var(--color-warning-border)]">
                             <Clock className="h-3 w-3" />
-                            <span>Local</span>
+                            <span>Unsynced</span>
                           </span>
                         ) : (
                           <span className="inline-flex items-center gap-1 rounded-full bg-[var(--color-success-bg)] px-2 py-0.5 text-[10px] font-medium text-[var(--color-success-text)] border border-[var(--color-success-border)]">
@@ -766,18 +1310,59 @@ export const BillsPage: React.FC = () => {
           </table>
         </div>
 
-        {/* Footer shortcuts hint */}
-        <div className="flex items-center justify-between border-t border-[var(--color-border)] bg-[var(--color-canvas)] px-4 py-2 text-[11px] text-[var(--color-text-muted)] font-medium">
+        {/* Footer shortcuts & Pagination Bar */}
+        <div className="flex flex-wrap items-center justify-between border-t border-[var(--color-border)] bg-[var(--color-canvas)] px-4 py-2 text-[11px] text-[var(--color-text-muted)] font-medium gap-2">
           <div className="flex items-center gap-4">
             <span><kbd className="rounded-[6px] border border-[var(--color-border)] bg-[var(--color-surface)] px-1.5 py-0.5 shadow-2xs font-mono">↑/↓</kbd> Select Invoice</span>
             <span><kbd className="rounded-[6px] border border-[var(--color-border)] bg-[var(--color-surface)] px-1.5 py-0.5 shadow-2xs font-mono">Enter</kbd> Open Details</span>
             <span><kbd className="rounded-[6px] border border-[var(--color-border)] bg-[var(--color-surface)] px-1.5 py-0.5 shadow-2xs font-mono">Esc</kbd> Return to POS</span>
           </div>
-          <div>
-            <span>Total Invoices: <strong className="font-mono text-[var(--color-text)]">{invoices.length}</strong></span>
+
+          <div className="flex items-center gap-3">
+            <span>Total Shown: <strong className="font-mono text-[var(--color-text)]">{invoices.length}</strong></span>
+            {totalPages > 1 && (
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  disabled={currentPage <= 1 || loading}
+                  onClick={() => loadInvoices(currentPage - 1)}
+                  className="px-2 py-0.5 rounded border border-[var(--color-border)] bg-[var(--color-surface)] hover:bg-[var(--color-surface-hover)] disabled:opacity-40 cursor-pointer"
+                >
+                  Prev
+                </button>
+                <span className="font-mono font-medium">Page {currentPage} of {totalPages}</span>
+                <button
+                  type="button"
+                  disabled={currentPage >= totalPages || loading}
+                  onClick={() => loadInvoices(currentPage + 1)}
+                  className="px-2 py-0.5 rounded border border-[var(--color-border)] bg-[var(--color-surface)] hover:bg-[var(--color-surface-hover)] disabled:opacity-40 cursor-pointer"
+                >
+                  Next
+                </button>
+              </div>
+            )}
           </div>
         </div>
       </div>
+
+      {/* History Sync Progress Modal */}
+      {isSyncingHistory && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+          <div className="bg-[var(--color-surface)] border border-[var(--color-border)] rounded-card p-5 max-w-sm w-full shadow-2xl text-center space-y-3">
+            <RefreshCw className="h-8 w-8 animate-spin text-[var(--color-accent)] mx-auto" />
+            <h3 className="text-sm font-bold text-[var(--color-text)]">Synchronizing Invoice History</h3>
+            <p className="text-xs text-[var(--color-text-muted)]">{syncHistoryProgress.step}</p>
+            <div className="w-full bg-[var(--color-surface-subtle)] rounded-full h-2 overflow-hidden border border-[var(--color-border)]">
+              <div
+                className="bg-[var(--color-accent)] h-full transition-all duration-300"
+                style={{
+                  width: `${syncHistoryProgress.total > 0 ? (syncHistoryProgress.current / syncHistoryProgress.total) * 100 : 0}%`,
+                }}
+              />
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Invoice Detail Modal */}
       {isDetailModalOpen && selectedInvoice && (
@@ -908,6 +1493,108 @@ export const BillsPage: React.FC = () => {
                     <span>Grand Total:</span>
                     <span className="font-mono text-[var(--color-accent)] tabular-nums">₹ {selectedInvoice.grand_total.toFixed(2)}</span>
                   </div>
+                </div>
+              </div>
+
+              {/* Payment Tenders & Receipts Breakdown */}
+              <div className="rounded-[10px] border border-[var(--color-border)] bg-[var(--color-surface)] p-3">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-1.5 font-bold text-[var(--color-text)] text-xs uppercase tracking-wider">
+                    <CreditCard className="h-4 w-4 text-[var(--color-accent)]" />
+                    <span>Payment Tenders & Receipts ({selectedInvoice.payments?.length || 1})</span>
+                  </div>
+                  {(() => {
+                    const totalPaid = (selectedInvoice.payments || []).reduce(
+                      (sum, p) => (p.status !== "refunded" ? sum + p.amount : sum),
+                      0
+                    );
+                    const balDue = Math.max(0, Math.round((selectedInvoice.grand_total - totalPaid + Number.EPSILON) * 100) / 100);
+                    if (selectedInvoice.status !== "cancelled" && balDue > 0) {
+                      return (
+                        <button
+                          type="button"
+                          onClick={handleOpenReceivePayment}
+                          className="flex items-center gap-1 px-2.5 py-1 rounded bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[11px] cursor-pointer transition-colors shadow-xs"
+                        >
+                          <PlusCircle className="h-3.5 w-3.5" />
+                          <span>Receive Payment (₹{balDue.toFixed(2)} due)</span>
+                        </button>
+                      );
+                    }
+                    return null;
+                  })()}
+                </div>
+
+                <div className="overflow-hidden rounded border border-[var(--color-border)]">
+                  <table className="w-full text-left text-[11px]">
+                    <thead className="bg-[var(--color-canvas)] text-[var(--color-text-muted)] border-b border-[var(--color-border)] uppercase tracking-wider font-bold">
+                      <tr>
+                        <th className="px-3 py-1.5">Mode</th>
+                        <th className="px-3 py-1.5 text-right">Amount</th>
+                        <th className="px-3 py-1.5">Reference / Txn ID</th>
+                        <th className="px-3 py-1.5">Status</th>
+                        <th className="px-3 py-1.5">Details</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-[var(--color-border)]">
+                      {selectedInvoice.payments && selectedInvoice.payments.length > 0 ? (
+                        selectedInvoice.payments.map((p, idx) => {
+                          let extra: any = {};
+                          try {
+                            extra = typeof p.extra_fields === "string" ? JSON.parse(p.extra_fields) : p.extra_fields || {};
+                          } catch {
+                            // ignore
+                          }
+                          return (
+                            <tr key={p.id || idx} className="hover:bg-[var(--color-surface-hover)]">
+                              <td className="px-3 py-1.5 font-bold text-[var(--color-text)]">{p.payment_mode}</td>
+                              <td className="px-3 py-1.5 text-right font-mono font-bold tabular-nums text-[var(--color-text)]">
+                                ₹ {p.amount.toFixed(2)}
+                              </td>
+                              <td className="px-3 py-1.5 font-mono text-[var(--color-text-muted)]">
+                                {p.reference_no || "—"}
+                              </td>
+                              <td className="px-3 py-1.5">
+                                <span
+                                  className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
+                                    p.status === "refunded"
+                                      ? "bg-rose-100 text-rose-800"
+                                      : p.status === "pending_clearance"
+                                      ? "bg-amber-100 text-amber-800"
+                                      : "bg-emerald-100 text-emerald-800"
+                                  }`}
+                                >
+                                  {p.status || "received"}
+                                </span>
+                              </td>
+                              <td className="px-3 py-1.5 text-[var(--color-text-muted)]">
+                                {extra.bank_name ? `Bank: ${extra.bank_name} ` : ""}
+                                {extra.card_last_four ? `Card: •••• ${extra.card_last_four} ` : ""}
+                                {extra.card_network ? `(${extra.card_network}) ` : ""}
+                                {extra.payer_vpa ? `VPA: ${extra.payer_vpa} ` : ""}
+                                {p.notes ? `Note: ${p.notes}` : ""}
+                                {!extra.bank_name && !extra.card_last_four && !extra.payer_vpa && !p.notes && "—"}
+                              </td>
+                            </tr>
+                          );
+                        })
+                      ) : (
+                        <tr>
+                          <td className="px-3 py-1.5 font-bold text-[var(--color-text)]">{selectedInvoice.payment_mode || "Cash"}</td>
+                          <td className="px-3 py-1.5 text-right font-mono font-bold tabular-nums text-[var(--color-text)]">
+                            ₹ {selectedInvoice.grand_total.toFixed(2)}
+                          </td>
+                          <td className="px-3 py-1.5 font-mono text-[var(--color-text-muted)]">—</td>
+                          <td className="px-3 py-1.5">
+                            <span className="inline-block px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-emerald-100 text-emerald-800">
+                              received
+                            </span>
+                          </td>
+                          <td className="px-3 py-1.5 text-[var(--color-text-muted)]">—</td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
                 </div>
               </div>
 
@@ -1101,6 +1788,110 @@ export const BillsPage: React.FC = () => {
                 className="rounded-[10px] bg-[var(--color-danger-bg)] border border-[var(--color-danger-border)] px-4 py-1.5 text-xs font-bold text-[var(--color-danger-text)] hover:bg-red-700 hover:text-white cursor-pointer transition-colors"
               >
                 Confirm Cancellation
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Receive Payment Modal */}
+      {isReceivePaymentModalOpen && selectedInvoice && (
+        <div className="fixed inset-0 z-60 flex items-center justify-center bg-black/50 p-4 font-sans animate-in fade-in duration-100">
+          <div className="w-full max-w-md rounded-[14px] bg-[var(--color-surface)] shadow-modal overflow-hidden border border-[var(--color-border)]">
+            <div className="flex items-center justify-between border-b border-[var(--color-border)] px-5 py-3.5 bg-[var(--color-canvas)]">
+              <div>
+                <h3 className="text-sm font-bold text-[var(--color-text)] flex items-center gap-1.5">
+                  <CreditCard className="h-4 w-4 text-emerald-600" />
+                  <span>Receive Payment - #{selectedInvoice.invoice_number}</span>
+                </h3>
+                <p className="text-[11px] text-[var(--color-text-muted)]">
+                  Customer: {selectedInvoice.customer_name || "Walk-in Customer"}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsReceivePaymentModalOpen(false)}
+                className="text-[var(--color-text-muted)] hover:text-[var(--color-text)] p-1 rounded-btn hover:bg-[var(--color-surface-hover)] transition-colors cursor-pointer"
+              >
+                <XCircle className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-3.5 text-xs">
+              <div>
+                <label className="text-[11px] font-semibold text-[var(--color-text-muted)] block mb-1">
+                  Payment Mode
+                </label>
+                <select
+                  value={receiptMode}
+                  onChange={(e) => setReceiptMode(e.target.value)}
+                  className="w-full rounded-[8px] border border-[var(--color-border)] bg-[var(--color-surface)] px-2.5 py-1.5 text-xs font-semibold text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none"
+                >
+                  {["Cash", "UPI", "Card", "Bank Transfer", "Cheque"].map((m) => (
+                    <option key={m} value={m}>
+                      {m}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="text-[11px] font-semibold text-[var(--color-text-muted)] block mb-1">
+                  Receipt Amount (₹)
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  value={receiptAmount === 0 ? "" : receiptAmount}
+                  onChange={(e) => setReceiptAmount(parseFloat(e.target.value) || 0)}
+                  className="w-full rounded-[8px] border border-[var(--color-border)] bg-[var(--color-surface)] px-2.5 py-1.5 text-sm font-mono font-bold text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none"
+                  placeholder="0.00"
+                />
+              </div>
+
+              <div>
+                <label className="text-[11px] font-semibold text-[var(--color-text-muted)] block mb-1">
+                  Transaction ID / Reference (Optional)
+                </label>
+                <input
+                  type="text"
+                  value={receiptReference}
+                  onChange={(e) => setReceiptReference(e.target.value)}
+                  placeholder="e.g. UTR / Approval code / Cheque No."
+                  className="w-full rounded-[8px] border border-[var(--color-border)] bg-[var(--color-surface)] px-2.5 py-1.5 text-xs text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="text-[11px] font-semibold text-[var(--color-text-muted)] block mb-1">
+                  Receipt Note
+                </label>
+                <input
+                  type="text"
+                  value={receiptNotes}
+                  onChange={(e) => setReceiptNotes(e.target.value)}
+                  placeholder="Optional memo"
+                  className="w-full rounded-[8px] border border-[var(--color-border)] bg-[var(--color-surface)] px-2.5 py-1.5 text-xs text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none"
+                />
+              </div>
+            </div>
+
+            <div className="border-t border-[var(--color-border)] bg-[var(--color-canvas)] px-5 py-3 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setIsReceivePaymentModalOpen(false)}
+                className="rounded-[8px] border border-[var(--color-border)] bg-[var(--color-surface)] px-3.5 py-1.5 text-xs font-semibold text-[var(--color-text)] hover:bg-[var(--color-surface-hover)] cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isSubmittingReceipt || receiptAmount <= 0}
+                onClick={handleRecordReceipt}
+                className="flex items-center gap-1.5 rounded-[8px] bg-emerald-600 px-4 py-1.5 text-xs font-bold text-white shadow-xs hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+              >
+                <Check className="h-3.5 w-3.5" />
+                <span>{isSubmittingReceipt ? "Recording..." : "Record Payment Receipt"}</span>
               </button>
             </div>
           </div>

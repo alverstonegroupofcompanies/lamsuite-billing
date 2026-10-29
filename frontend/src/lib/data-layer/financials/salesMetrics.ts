@@ -1,5 +1,6 @@
 import { sqliteStorage } from "../../db/sqliteStorage";
 import type { InvoiceRecord, InvoiceItemRecord } from "../../billing/invoiceManagementService";
+import type { InvoicePaymentRecord } from "../../billing/billingTenderService";
 
 export interface DateRangeFilter {
   startDate: string; // YYYY-MM-DD
@@ -122,6 +123,7 @@ export class SalesMetricsService {
   async calculateFinancialMetrics(filter: DateRangeFilter): Promise<FinancialMetricsSummary> {
     const allInvoices = await sqliteStorage.findAll<InvoiceRecord>("invoices");
     const allItems = await sqliteStorage.findAll<InvoiceItemRecord>("invoice_items");
+    const allPayments = await sqliteStorage.findAll<InvoicePaymentRecord>("invoice_payments").catch(() => []);
 
     // Group items by invoice_id
     const itemsByInvoice = new Map<string, InvoiceItemRecord[]>();
@@ -130,6 +132,15 @@ export class SalesMetricsService {
         itemsByInvoice.set(item.invoice_id, []);
       }
       itemsByInvoice.get(item.invoice_id)!.push(item);
+    }
+
+    // Group payments by invoice_id
+    const paymentsByInvoice = new Map<string, InvoicePaymentRecord[]>();
+    for (const p of allPayments) {
+      if (!paymentsByInvoice.has(p.invoice_id)) {
+        paymentsByInvoice.set(p.invoice_id, []);
+      }
+      paymentsByInvoice.get(p.invoice_id)!.push(p);
     }
 
     // Filter active invoices in range
@@ -177,17 +188,34 @@ export class SalesMetricsService {
       totalRoundOff += Number(inv.round_off) || 0;
 
       // Tender calculation (sales positive, returns negative)
-      const tenderCategory = this.normalizeTender(inv.payment_mode);
       const sign = isReturn ? -1 : 1;
-      const tenderAmt = gTotal * sign;
+      const invPayments = paymentsByInvoice.get(inv.id) || [];
 
-      switch (tenderCategory) {
-        case "cash": cashAmount += tenderAmt; break;
-        case "upi": upiAmount += tenderAmt; break;
-        case "card": cardAmount += tenderAmt; break;
-        case "bankTransfer": bankTransferAmount += tenderAmt; break;
-        case "credit": creditAmount += tenderAmt; break;
-        default: otherAmount += tenderAmt; break;
+      if (invPayments.length > 0) {
+        for (const p of invPayments) {
+          if (p.status === "refunded" || p.status === "bounced") continue;
+          const cat = this.normalizeTender(p.payment_mode);
+          const pAmt = (Number(p.amount) || 0) * sign;
+          switch (cat) {
+            case "cash": cashAmount += pAmt; break;
+            case "upi": upiAmount += pAmt; break;
+            case "card": cardAmount += pAmt; break;
+            case "bankTransfer": bankTransferAmount += pAmt; break;
+            case "credit": creditAmount += pAmt; break;
+            default: otherAmount += pAmt; break;
+          }
+        }
+      } else {
+        const tenderCategory = this.normalizeTender(inv.payment_mode);
+        const tenderAmt = gTotal * sign;
+        switch (tenderCategory) {
+          case "cash": cashAmount += tenderAmt; break;
+          case "upi": upiAmount += tenderAmt; break;
+          case "card": cardAmount += tenderAmt; break;
+          case "bankTransfer": bankTransferAmount += tenderAmt; break;
+          case "credit": creditAmount += tenderAmt; break;
+          default: otherAmount += tenderAmt; break;
+        }
       }
 
       // Process invoice items for tax breakdown

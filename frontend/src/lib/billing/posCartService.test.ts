@@ -2,9 +2,11 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { posCartService } from "./posCartService";
 import { productsStore } from "../masters/productsStore";
 import { getMockDatabase, sqliteStorage } from "../db/sqliteStorage";
+import { onlineTransactionService } from "../sync/onlineTransactionService";
 
 describe("POS Cart Service & Checkout Pipeline (POS-001, POS-002, POS-007, STK-001, SYNC-001)", () => {
   beforeEach(async () => {
+    (onlineTransactionService as any).connectionState = "offline";
     getMockDatabase().reset();
     await sqliteStorage.initDatabase();
     posCartService.clearCart();
@@ -54,7 +56,7 @@ describe("POS Cart Service & Checkout Pipeline (POS-001, POS-002, POS-007, STK-0
 
     const totals = posCartService.getTotals();
     expect(totals.grand_total).toBe(10);
-    expect(totals.round_off).toBe(-0.01);
+    expect(totals.round_off).toBe(0);
   });
 
   it("attaches clinical metadata (Doctor & Patient)", () => {

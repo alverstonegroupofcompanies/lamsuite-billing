@@ -20,6 +20,19 @@ const InvoiceLineSchema = z.object({
   discount_percent: z.number().min(0).max(100).default(0).describe("Item level percentage discount"),
 });
 
+const PaymentLineSchema = z.object({
+  payment_mode: z.string().describe("Payment tender mode (Cash, UPI, Card, Bank Transfer, Cheque, Wallet, Gift Voucher, Credit)"),
+  amount: z.number().positive().describe("Amount tendered in this payment line"),
+  reference_no: z.string().optional().describe("Transaction ID, UTR, approval code, or cheque number"),
+  status: z.enum(["received", "pending_clearance", "cleared", "bounced", "refunded"]).default("received"),
+  card_last_four: z.string().optional(),
+  card_network: z.string().optional(),
+  bank_name: z.string().optional(),
+  cheque_date: z.string().optional(),
+  payer_vpa: z.string().optional(),
+  notes: z.string().optional(),
+});
+
 export const createInvoiceTool: ToolDefinition = {
   name: "lamsuite_create_invoice",
   description:
@@ -36,6 +49,10 @@ export const createInvoiceTool: ToolDefinition = {
       .enum(["Cash", "UPI", "Card", "Credit", "Split"])
       .default("Cash")
       .describe("Tender payment mode"),
+    payments: z
+      .array(PaymentLineSchema)
+      .optional()
+      .describe("List of payment tender lines for split payment. If omitted, single payment_mode is used with grand_total."),
     counter_id: z.string().optional().describe("Counter identifier (e.g. C01, C02)"),
     patient_name: z.string().optional().describe("Patient name (for prescription records)"),
     doctor_name: z.string().optional().describe("Prescribing doctor name"),
@@ -244,6 +261,13 @@ export const createInvoiceTool: ToolDefinition = {
       grand_total: totals.grand_total,
       paid_amount: totals.grand_total,
       payment_mode: args.payment_mode,
+      payments: args.payments || [
+        {
+          payment_mode: args.payment_mode,
+          amount: totals.grand_total,
+          status: "received",
+        },
+      ],
       counter_id: args.counter_id || "C01",
       patient_name: args.patient_name,
       doctor_name: args.doctor_name,

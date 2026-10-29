@@ -1,8 +1,11 @@
 import { sqliteStorage } from "../db/sqliteStorage";
 import { productsStore, type ProductBatch, type ProductItem } from "../masters/productsStore";
 import { syncQueueService } from "../sync/syncQueueService";
+import { storeRegistryService } from "../auth/storeRegistryService";
 import type { PosCartLine } from "./posCartService";
 import { calculateInvoiceTotals, type BillingLineInput, type InvoiceTotals } from "./billingCalculations";
+import type { InvoicePaymentRecord, PaymentTenderLine } from "./billingTenderService";
+import { cashShiftService } from "./cashShiftService";
 
 export interface InvoiceAuditEntry {
   timestamp: number;
@@ -16,6 +19,8 @@ export interface InvoiceAuditEntry {
 
 export interface InvoiceRecord {
   id: string;
+  store_id?: string | number;
+  store_code?: string;
   module_key: string;
   invoice_number: string;
   invoice_date: string; // YYYY-MM-DD
@@ -39,6 +44,8 @@ export interface InvoiceRecord {
   grand_total: number;
   paid_amount: number;
   payment_mode: string;
+  payment_status?: "paid" | "partially_paid" | "unpaid";
+  payments?: InvoicePaymentRecord[];
   status: "issued" | "cancelled";
   cancel_reason?: string;
   is_revised?: boolean | number;
@@ -124,16 +131,28 @@ export class InvoiceManagementService {
       itemsByInvoice.get(item.invoice_id)!.push(item);
     }
 
-    const todayStr = new Date().toISOString().slice(0, 10);
-    const yesterdayDate = new Date();
-    yesterdayDate.setDate(yesterdayDate.getDate() - 1);
-    const yesterdayStr = yesterdayDate.toISOString().slice(0, 10);
+    const now = new Date();
+    const formatYmdKolkata = (d: Date) => {
+      try {
+        return d.toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+      } catch {
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+      }
+    };
 
-    const sevenDaysAgoDate = new Date();
+    const todayStr = formatYmdKolkata(now);
+
+    const yesterdayDate = new Date(now);
+    yesterdayDate.setDate(yesterdayDate.getDate() - 1);
+    const yesterdayStr = formatYmdKolkata(yesterdayDate);
+
+    const sevenDaysAgoDate = new Date(now);
     sevenDaysAgoDate.setDate(sevenDaysAgoDate.getDate() - 7);
-    const sevenDaysAgoStr = sevenDaysAgoDate.toISOString().slice(0, 10);
+    const sevenDaysAgoStr = formatYmdKolkata(sevenDaysAgoDate);
 
     const monthStartStr = `${todayStr.slice(0, 7)}-01`;
+    const lastDayOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+    const monthEndStr = `${todayStr.slice(0, 7)}-${String(lastDayOfMonth).padStart(2, "0")}`;
 
     let startFilter = filters?.startDate;
     let endFilter = filters?.endDate;
@@ -149,7 +168,7 @@ export class InvoiceManagementService {
       endFilter = todayStr;
     } else if (filters?.dateRange === "month") {
       startFilter = monthStartStr;
-      endFilter = todayStr;
+      endFilter = monthEndStr;
     } else if (filters?.dateRange === "all") {
       startFilter = undefined;
       endFilter = undefined;
@@ -161,24 +180,46 @@ export class InvoiceManagementService {
 
     const query = filters?.searchQuery?.trim().toLowerCase();
 
+    const parseInvoiceDate = (inv: InvoiceRecord): string => {
+      const raw = (inv.invoice_date || "").trim();
+      if (!raw && inv.created_at) {
+        return formatYmdKolkata(new Date(inv.created_at));
+      }
+      if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+        return raw;
+      }
+      try {
+        const d = new Date(raw);
+        if (!isNaN(d.getTime())) {
+          return formatYmdKolkata(d);
+        }
+      } catch {
+        // fallback
+      }
+      return raw.slice(0, 10);
+    };
+
     const filtered = allInvoices.filter((inv) => {
-      // Date filter
-      if (startFilter && inv.invoice_date < startFilter) return false;
-      if (endFilter && inv.invoice_date > endFilter) return false;
+      // Date filter (compare date-only part in Asia/Kolkata store timezone)
+      const invDateOnly = parseInvoiceDate(inv);
+      if (startFilter && invDateOnly < startFilter) return false;
+      if (endFilter && invDateOnly > endFilter) return false;
 
       // Status filter
-      if (filters?.status && filters.status !== "all") {
-        if (inv.status?.toLowerCase() !== filters.status.toLowerCase()) return false;
+      if (filters?.status && filters.status.toLowerCase() !== "all") {
+        if ((inv.status || "issued").toLowerCase() !== filters.status.toLowerCase()) return false;
       }
 
       // Payment mode filter
-      if (filters?.paymentMode && filters.paymentMode !== "all") {
-        if (inv.payment_mode?.toLowerCase() !== filters.paymentMode.toLowerCase()) return false;
+      if (filters?.paymentMode && filters.paymentMode.toLowerCase() !== "all") {
+        const targetPm = filters.paymentMode.toLowerCase();
+        const invPm = (inv.payment_mode || "").toLowerCase();
+        if (invPm !== targetPm && !invPm.includes(targetPm)) return false;
       }
 
       // User / Counter filter
-      if (filters?.user && filters.user !== "all") {
-        const u = inv.user_counter || "Counter 01";
+      if (filters?.user && filters.user.toLowerCase() !== "all") {
+        const u = inv.user_counter || (inv as any).counter_code || (inv as any).counter_name || "Counter 01";
         if (!u.toLowerCase().includes(filters.user.toLowerCase())) return false;
       }
 
@@ -221,6 +262,10 @@ export class InvoiceManagementService {
 
     const allItems = await sqliteStorage.findAll<InvoiceItemRecord>("invoice_items");
     const items = allItems.filter((it) => it.invoice_id === invoice.id);
+
+    const allPayments = await sqliteStorage.findAll<InvoicePaymentRecord>("invoice_payments").catch(() => []);
+    const payments = allPayments.filter((p) => p.invoice_id === invoice.id);
+    invoice.payments = payments;
 
     let auditLog: InvoiceAuditEntry[] = [];
     if (typeof invoice.edit_history === "string") {
@@ -458,8 +503,10 @@ export class InvoiceManagementService {
     const updatedAuditLog = [...auditLog, auditEntry];
 
     // 5. UPDATE INVOICE RECORD
+    const activeStoreId = String(originalInvoice.store_id || storeRegistryService.getActiveStore()?.id || "1");
     const updatedInvoiceRow: InvoiceRecord = {
       ...originalInvoice,
+      store_id: activeStoreId,
       external_id: originalInvoice.external_id || originalInvoice.id,
       customer_name: payload.customerName || originalInvoice.customer_name,
       customer_phone: payload.customerPhone || originalInvoice.customer_phone,
@@ -577,9 +624,39 @@ export class InvoiceManagementService {
     };
     const updatedAuditLog = [...auditLog, auditEntry];
 
-    // 3. MARK INVOICE CANCELLED
+    // 3. REVERSE CUSTOMER CREDIT AND REFUND PAYMENT LINES
+    const allPayments = await sqliteStorage.findAll<InvoicePaymentRecord>("invoice_payments").catch(() => []);
+    const invPayments = allPayments.filter((p) => p.invoice_id === invoice.id);
+    const creditRefund = invPayments
+      .filter((p) => p.payment_mode.toLowerCase() === "credit")
+      .reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+
+    if (creditRefund > 0 && invoice.customer_id) {
+      const cust = await sqliteStorage.findById<any>("customers", invoice.customer_id);
+      if (cust) {
+        await sqliteStorage.insertRecord("customers", invoice.customer_id, {
+          ...cust,
+          current_balance: Math.max(0, (Number(cust.current_balance) || 0) - creditRefund),
+          outstanding_balance: Math.max(0, (Number(cust.outstanding_balance) || 0) - creditRefund),
+          updated_at: now,
+        });
+      }
+    }
+
+    for (const p of invPayments) {
+      await sqliteStorage.insertRecord("invoice_payments", p.id, {
+        ...p,
+        status: "refunded",
+        notes: (p.notes ? p.notes + " | " : "") + `Cancelled: ${reason.trim()}`,
+        updated_at: now,
+      });
+    }
+
+    // 4. MARK INVOICE CANCELLED
+    const activeStoreId = String(invoice.store_id || storeRegistryService.getActiveStore()?.id || "1");
     const updatedInvoiceRow: InvoiceRecord = {
       ...invoice,
+      store_id: activeStoreId,
       status: "cancelled",
       cancel_reason: reason.trim(),
       edit_history: JSON.stringify(updatedAuditLog),
@@ -592,6 +669,7 @@ export class InvoiceManagementService {
     // 4. ENQUEUE CANCEL ACTION
     await syncQueueService.enqueue("invoice", invoice.id, "update", {
       id: invoice.id,
+      store_id: activeStoreId,
       invoice_number: invoice.invoice_number,
       status: "cancelled",
       cancel_reason: reason.trim(),
@@ -599,6 +677,75 @@ export class InvoiceManagementService {
     });
 
     return { success: true };
+  }
+
+  /**
+   * Receive payment against a credit or partially-paid invoice.
+   */
+  async recordInvoiceReceipt(
+    invoiceId: string,
+    payment: PaymentTenderLine,
+    operator = "Counter 01",
+    counterId = "Counter 01"
+  ): Promise<{ success: boolean; newPaidAmount: number; newStatus: string }> {
+    const existing = await this.getInvoiceWithDetails(invoiceId);
+    if (!existing) throw new Error("Invoice not found");
+    const { invoice } = existing;
+
+    const amt = Number(payment.amount) || 0;
+    if (amt <= 0) throw new Error("Payment amount must be greater than zero");
+
+    const now = Date.now();
+    const paymentId = payment.id || `rcpt_${now}_${Math.random().toString(16).slice(2, 6)}`;
+    const storeId = String(invoice.store_id || storeRegistryService.getActiveStore()?.id || "1");
+
+    // 1. Insert payment record
+    const pRec: any = {
+      id: paymentId,
+      store_id: storeId,
+      invoice_id: invoice.id,
+      counter_id: counterId,
+      payment_mode: payment.mode,
+      amount: amt,
+      reference_no: payment.reference_no,
+      status: payment.status || "received",
+      extra_fields: payment.extra_fields ? JSON.stringify(payment.extra_fields) : undefined,
+      notes: payment.notes || "Receipt against pending balance",
+      received_by: operator,
+      created_at: now,
+      updated_at: now,
+    };
+    await sqliteStorage.insertRecord("invoice_payments", paymentId, pRec as unknown as Record<string, unknown>);
+
+    // 2. Update Invoice paid_amount and payment_status
+    const newPaid = Math.round(((Number(invoice.paid_amount) || 0) + amt + Number.EPSILON) * 100) / 100;
+    const gTotal = Math.round(((Number(invoice.grand_total) || 0) + Number.EPSILON) * 100) / 100;
+    const newStatus = newPaid >= gTotal - 0.01 ? "paid" : "partially_paid";
+
+    await sqliteStorage.insertRecord("invoices", invoice.id, {
+      ...invoice,
+      paid_amount: newPaid,
+      payment_status: newStatus,
+      updated_at: now,
+    });
+
+    // 3. Update customer outstanding if registered
+    if (invoice.customer_id) {
+      const cust = await sqliteStorage.findById<any>("customers", invoice.customer_id);
+      if (cust) {
+        await sqliteStorage.insertRecord("customers", invoice.customer_id, {
+          ...cust,
+          current_balance: Math.max(0, (Number(cust.current_balance) || 0) - amt),
+          outstanding_balance: Math.max(0, (Number(cust.outstanding_balance) || 0) - amt),
+          updated_at: now,
+        });
+      }
+    }
+
+    // 4. Record tender in active counter shift
+    await cashShiftService.recordSaleTenders(counterId, [payment], 0);
+
+    return { success: true, newPaidAmount: newPaid, newStatus };
   }
 
   /**

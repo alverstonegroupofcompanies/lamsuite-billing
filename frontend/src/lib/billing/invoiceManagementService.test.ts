@@ -120,6 +120,10 @@ describe("InvoiceManagementService", () => {
     const resUPI = await invoiceManagementService.listInvoices({ paymentMode: "UPI" });
     expect(resUPI.length).toBe(1);
     expect(resUPI[0].invoice_number).toBe("INV-1002");
+
+    // Filter by dateRange: 'month'
+    const resMonth = await invoiceManagementService.listInvoices({ dateRange: "month" });
+    expect(resMonth.length).toBe(2);
   });
 
   it("computes structured diffs between original items and revised cart lines", () => {

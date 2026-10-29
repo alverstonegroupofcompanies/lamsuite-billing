@@ -154,8 +154,11 @@ export const StoreSwitcherModal: React.FC<StoreSwitcherModalProps> = ({
                       <span className="text-xs font-bold text-text-main">
                         {s.alias || s.name}
                       </span>
-                      <span className="text-[10px] font-mono uppercase text-text-muted bg-canvas px-1.5 py-0.5 rounded border border-border-main">
+                      <span className="text-[10px] font-mono uppercase font-bold text-text-muted bg-canvas px-1.5 py-0.5 rounded border border-border-main">
                         {s.code}
+                      </span>
+                      <span className="text-[10px] font-mono text-text-muted">
+                        (Store ID: {s.id})
                       </span>
                     </div>
                     <div className="flex items-center gap-2 text-[11px] text-text-muted mt-0.5">

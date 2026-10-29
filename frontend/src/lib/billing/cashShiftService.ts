@@ -1,4 +1,5 @@
 import { sqliteStorage } from "../db/sqliteStorage";
+import type { PaymentTenderLine } from "./billingTenderService";
 
 export interface CashShift {
   id: string;
@@ -110,29 +111,49 @@ export class CashShiftService {
     };
   }
 
-  async recordSaleTender(counterId: string, paymentMode: string, amount: number): Promise<void> {
+  async recordSaleTenders(
+    counterId: string,
+    payments: PaymentTenderLine[],
+    cashChange = 0
+  ): Promise<void> {
     const shift = await this.getActiveShift(counterId);
     if (!shift) return;
 
-    const upper = (paymentMode || "").trim().toUpperCase();
-    const normalizedMode =
-      upper === "UPI" ? "UPI" :
-      upper === "CASH" ? "Cash" :
-      upper === "CARD" ? "Card" :
-      upper === "CREDIT" ? "Credit" :
-      upper === "CHEQUE" ? "Cheque" :
-      paymentMode.charAt(0).toUpperCase() + paymentMode.slice(1).toLowerCase();
+    for (const line of payments) {
+      const mode = line.mode || "Cash";
+      const upper = mode.trim().toUpperCase();
+      const normalizedMode =
+        upper === "UPI" ? "UPI" :
+        upper === "CASH" ? "Cash" :
+        upper === "CARD" ? "Card" :
+        upper === "CREDIT" || upper === "UDHARI" ? "Credit" :
+        upper === "CHEQUE" ? "Cheque" :
+        upper === "WALLET" ? "Wallet" :
+        upper === "GIFT VOUCHER" || upper === "GIFT_VOUCHER" ? "Gift Voucher" :
+        upper === "BANK TRANSFER" || upper === "BANK_TRANSFER" ? "Bank Transfer" :
+        mode.charAt(0).toUpperCase() + mode.slice(1);
 
-    shift.payment_totals[normalizedMode] = (shift.payment_totals[normalizedMode] || 0) + Number(amount);
+      const rawAmt = Number(line.amount) || 0;
+      if (rawAmt <= 0) continue;
 
-    if (normalizedMode === "Cash") {
-      shift.expected_cash = (shift.expected_cash || shift.opening_cash) + Number(amount);
+      if (normalizedMode === "Cash") {
+        // Physical net cash tendered in drawer after returning change
+        const netCash = Math.max(0, rawAmt - Number(cashChange || 0));
+        shift.payment_totals["Cash"] = (shift.payment_totals["Cash"] || 0) + netCash;
+        shift.expected_cash = (shift.expected_cash || shift.opening_cash) + netCash;
+      } else {
+        shift.payment_totals[normalizedMode] = (shift.payment_totals[normalizedMode] || 0) + rawAmt;
+      }
     }
 
     await sqliteStorage.insertRecord("cash_shifts", shift.id, {
       ...shift,
       payment_totals_json: JSON.stringify(shift.payment_totals),
     });
+  }
+
+  async recordSaleTender(counterId: string, paymentMode: string, amount: number): Promise<void> {
+    await this.recordSaleTenders(counterId, [{ mode: paymentMode, amount }]);
   }
 
   async recordCashMovement(

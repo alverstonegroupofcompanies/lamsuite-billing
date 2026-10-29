@@ -364,6 +364,22 @@ export class DotMatrixRenderer {
     footerLines.push(leftMargin + this.padLeft(grandTotalStr, cols));
     footerLines.push(divDouble);
 
+    if (data.payments && data.payments.length > 0) {
+      for (const p of data.payments) {
+        const pStr = `Paid via ${p.mode}${p.reference_no ? ` [${p.reference_no}]` : ""}: ${curr} ` + this.padLeft(this.formatAmount(p.amount), 11);
+        footerLines.push(leftMargin + this.padLeft(pStr, cols));
+      }
+      if (data.change_due && data.change_due > 0) {
+        const chgStr = `Change Returned   : ${curr} ` + this.padLeft(this.formatAmount(data.change_due), 11);
+        footerLines.push(leftMargin + this.padLeft(chgStr, cols));
+      }
+      if (data.balance_due && data.balance_due > 0) {
+        const balStr = `Balance (Credit)  : ${curr} ` + this.padLeft(this.formatAmount(data.balance_due), 11);
+        footerLines.push(leftMargin + this.padLeft(balStr, cols));
+      }
+      footerLines.push(divSingle);
+    }
+
     // Amount in Words
     const words = data.amount_in_words || numberToWordsIndian(data.grand_total);
     const wordsLines = this.wrapText(`Amount in Words: ${words}`, cols);

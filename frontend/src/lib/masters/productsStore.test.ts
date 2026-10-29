@@ -3,6 +3,8 @@ import {
   productsStore,
   isBatchExpired,
   isBatchSelectable,
+  formatExpiryDisplay,
+  parseExpiryDateParts,
   type ProductItem,
   type ProductBatch,
 } from "./productsStore";
@@ -105,6 +107,30 @@ describe("ProductsStore & FEFO Batch Engine (MST-001, POS-001, POS-002)", () => 
     // Search by HSN
     const byHsn = await productsStore.searchProducts("30041010");
     expect(byHsn.length).toBe(1);
+
+    // Product with null / undefined barcode does not throw error during search
+    await productsStore.upsertProduct({
+      id: "prod_no_barcode",
+      name: "Product Without Barcode",
+      barcode: null as any,
+      mrp: 50,
+      sel_rate: 45,
+      gst_percent: 5,
+      units_per_pack: 1,
+      is_active: true,
+    });
+
+    const searchNullBarcode = await productsStore.searchProducts("Without Barcode");
+    expect(searchNullBarcode.length).toBe(1);
+    expect(searchNullBarcode[0].id).toBe("prod_no_barcode");
+
+    // Search query for something else should safely filter without TypeError
+    const searchNoMatch = await productsStore.searchProducts("NonExistentItem999");
+    expect(searchNoMatch.length).toBe(0);
+
+    // findProductByBarcode safely handles null barcode in stored products
+    const foundByBarcode = await productsStore.findProductByBarcode("8902002");
+    expect(foundByBarcode?.id).toBe("prod_1");
   });
 
   it("accurately detects expired and selectable batches", () => {
@@ -147,5 +173,22 @@ describe("ProductsStore & FEFO Batch Engine (MST-001, POS-001, POS-002)", () => 
     };
     expect(isBatchSelectable(expiredBatch, refDate)).toBe(false);
     expect(isBatchSelectable(expiredBatch, refDate, true, true)).toBe(true);
+  });
+
+  it("formats raw ISO expiry timestamps as MM/YY without 1-day UTC conversion shift", () => {
+    // 2027-10-09T18:30:00.000000Z is midnight Oct 10 2027 in India (+5:30)
+    const rawIsoTimestamp = "2027-10-09T18:30:00.000000Z";
+    expect(formatExpiryDisplay(rawIsoTimestamp)).toBe("10/27");
+
+    const parts = parseExpiryDateParts(rawIsoTimestamp);
+    expect(parts?.month).toBe("10");
+    expect(parts?.year).toBe("27");
+    expect(parts?.fullDateStr).toBe("2027-10-10");
+
+    // Other standard formats
+    expect(formatExpiryDisplay("2027-12-31")).toBe("12/27");
+    expect(formatExpiryDisplay("2028-05")).toBe("05/28");
+    expect(formatExpiryDisplay("06/29")).toBe("06/29");
+    expect(formatExpiryDisplay(null)).toBe("—");
   });
 });

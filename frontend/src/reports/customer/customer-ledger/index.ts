@@ -135,10 +135,19 @@ export const customerLedgerReport: ReportModule<any, CustomerLedgerRow> = {
       ? { startDate: params.filters.startDate, endDate: params.filters.endDate }
       : (params.filters as any).date_range || { startDate: startOfMonth, endDate: today };
 
-    const [allInvoices, partyEntries] = await Promise.all([
+    const [allInvoices, partyEntries, allPayments] = await Promise.all([
       sqliteStorage.findAll<InvoiceRecord>("invoices").catch(() => []),
       sqliteStorage.findAll<any>("party_ledger_entries").catch(() => []),
+      sqliteStorage.findAll<any>("invoice_payments").catch(() => []),
     ]);
+
+    const paymentsByInvoice = new Map<string, any[]>();
+    for (const p of allPayments) {
+      if (!paymentsByInvoice.has(p.invoice_id)) {
+        paymentsByInvoice.set(p.invoice_id, []);
+      }
+      paymentsByInvoice.get(p.invoice_id)!.push(p);
+    }
 
     const rows: CustomerLedgerRow[] = [];
 
@@ -204,8 +213,30 @@ export const customerLedgerReport: ReportModule<any, CustomerLedgerRow> = {
             notes: inv.payment_mode ? `Payment mode: ${inv.payment_mode}` : undefined,
           });
 
-          // Immediate payment received is credit
-          if (paid > 0) {
+          // Immediate payments received are credited to reduce balance
+          const invPayments = (paymentsByInvoice.get(inv.id) || []).filter(
+            (p) => p.status !== "refunded" && p.payment_mode.toLowerCase() !== "credit"
+          );
+
+          if (invPayments.length > 0) {
+            for (const p of invPayments) {
+              const pAmt = Number(p.amount) || 0;
+              if (pAmt > 0) {
+                rows.push({
+                  entry_date: inv.invoice_date,
+                  customer_name: inv.customer_name || "Counter Customer",
+                  phone: inv.customer_phone,
+                  voucher_type: "PAYMENT",
+                  voucher_no: p.reference_no ? `RCPT-${p.reference_no}` : `RCPT-${inv.invoice_number}`,
+                  debit_amount: 0,
+                  credit_amount: pAmt,
+                  running_balance: 0,
+                  payment_mode: p.payment_mode,
+                  notes: `Paid via ${p.payment_mode}${p.reference_no ? ` [Ref: ${p.reference_no}]` : ""}`,
+                });
+              }
+            }
+          } else if (paid > 0 && inv.payment_mode?.toLowerCase() !== "credit") {
             rows.push({
               entry_date: inv.invoice_date,
               customer_name: inv.customer_name || "Counter Customer",
@@ -215,6 +246,7 @@ export const customerLedgerReport: ReportModule<any, CustomerLedgerRow> = {
               debit_amount: 0,
               credit_amount: paid,
               running_balance: 0,
+              payment_mode: inv.payment_mode,
               notes: inv.payment_mode ? `Paid via ${inv.payment_mode}` : "Payment received",
             });
           }

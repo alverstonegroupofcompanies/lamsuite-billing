@@ -1,5 +1,6 @@
 import { sqliteStorage } from "../db/sqliteStorage";
 import { getResolvedApiBaseUrl } from "../../config/env";
+import { storeRegistryService } from "../auth/storeRegistryService";
 
 export interface SyncQueueItem {
   id: string;
@@ -56,14 +57,17 @@ export class BackendHttpApiClient implements SyncApiClient {
     success: boolean;
     results: { total: number; processed: number; failed: number };
   }> {
+    const activeStoreId = String(storeRegistryService.getActiveStore()?.id || "1");
     const url = `${this.getEffectiveBaseUrl()}/api/sync/push/batch`;
     const res = await fetch(url, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Accept: "application/json",
+        "X-Store-Id": activeStoreId,
+        "Store-Id": activeStoreId,
       },
-      body: JSON.stringify({ items }),
+      body: JSON.stringify({ items, store_id: activeStoreId }),
     });
 
     if (!res.ok) {
@@ -74,14 +78,17 @@ export class BackendHttpApiClient implements SyncApiClient {
   }
 
   async pushInvoices(items: Record<string, unknown>[]): Promise<{ success: boolean; ingested_count: number }> {
+    const activeStoreId = String(storeRegistryService.getActiveStore()?.id || "1");
     const url = `${this.getEffectiveBaseUrl()}/api/sync/push/invoices`;
     const res = await fetch(url, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Accept: "application/json",
+        "X-Store-Id": activeStoreId,
+        "Store-Id": activeStoreId,
       },
-      body: JSON.stringify({ invoices: items }),
+      body: JSON.stringify({ invoices: items, store_id: activeStoreId }),
     });
 
     if (!res.ok) {
@@ -92,14 +99,17 @@ export class BackendHttpApiClient implements SyncApiClient {
   }
 
   async pushStockEvents(items: Record<string, unknown>[]): Promise<{ success: boolean; ingested_count: number }> {
+    const activeStoreId = String(storeRegistryService.getActiveStore()?.id || "1");
     const url = `${this.getEffectiveBaseUrl()}/api/sync/push/stock-events`;
     const res = await fetch(url, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Accept: "application/json",
+        "X-Store-Id": activeStoreId,
+        "Store-Id": activeStoreId,
       },
-      body: JSON.stringify({ events: items }),
+      body: JSON.stringify({ events: items, store_id: activeStoreId }),
     });
 
     if (!res.ok) {
@@ -258,11 +268,15 @@ export class SyncQueueService {
 
       // If client supports unified pushBatch, send all items in a single atomic batch
       if (typeof apiClient.pushBatch === "function") {
+        const activeStoreId = String(storeRegistryService.getActiveStore()?.id || "1");
         const batchPayload = items.map((it) => {
           let payload: Record<string, unknown> = {};
           try {
             payload = JSON.parse(it.payload_json);
           } catch (_) {}
+          if (!payload.store_id) {
+            payload.store_id = activeStoreId;
+          }
           return {
             id: it.id,
             entity_type: it.entity_type,

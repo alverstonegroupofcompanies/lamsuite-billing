@@ -38,8 +38,11 @@ export const PosShortcutHintBar: React.FC<PosShortcutHintBarProps> = ({
   switch (context) {
     case "search":
       hints = [
-        { key: "Enter", label: "Select / Add Product" },
-        { key: "↓", label: "Go to Grid" },
+        { key: "F1", label: "Entry Row", onClick: onFocusSearch },
+        { key: "Enter", label: "Select & Auto-Add" },
+        { key: "↵ in Qty", label: "Confirm Line" },
+        { key: "Esc in Qty", label: "Remove Line" },
+        { key: "↑", label: "Cart Lines" },
         { key: "Alt+C", label: "Customer" },
         { key: "Ctrl+F2", label: "Bill Disc" },
         { key: "Alt+R", label: "Round-off" },
@@ -54,18 +57,17 @@ export const PosShortcutHintBar: React.FC<PosShortcutHintBarProps> = ({
     case "grid":
       hints = [
         { key: "↑ / ↓", label: "Select Row" },
+        { key: "↓ (last)", label: "Entry Row" },
         { key: "Enter", label: "Edit Qty" },
+        { key: "Esc", label: "Remove Line" },
         { key: "F2", label: "Item Disc" },
         { key: "Ctrl+F2", label: "Bill Disc" },
         { key: "Alt+R", label: "Round-off" },
         { key: "Del / Ctrl+D", label: "Delete Line" },
         { key: "Ctrl+Z", label: "Undo Delete" },
-        { key: "Ctrl+B", label: "Batch" },
-        { key: "Ctrl+U", label: "Toggle Rate" },
-        { key: "F4", label: "Edit Product/Batch" },
+        { key: "F4", label: "Batch / Expiry" },
         { key: "Ctrl+E", label: "Packaging" },
-        { key: "Alt+↑/↓", label: "Reorder" },
-        { key: "F1", label: "Back to Search", onClick: onFocusSearch },
+        { key: "F1", label: "Entry Row", onClick: onFocusSearch },
         { key: "F12", label: "Checkout", highlight: true, onClick: onCheckout },
       ];
       break;
@@ -74,7 +76,7 @@ export const PosShortcutHintBar: React.FC<PosShortcutHintBarProps> = ({
       hints = [
         { key: "Enter", label: "Confirm & Next Item" },
         { key: "Tab / +", label: "Loose Qty" },
-        { key: "Esc", label: "Cancel Edit" },
+        { key: "Esc", label: "Remove Just-Added Line" },
         { key: "↑ / ↓", label: "Adjust Step" },
         { key: "F12", label: "Quick Checkout", highlight: true, onClick: onCheckout },
       ];

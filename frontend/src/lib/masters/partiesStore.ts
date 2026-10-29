@@ -13,7 +13,10 @@ export interface Customer {
   price_list?: string;
   default_discount_percent?: number;
   outstanding_balance?: number;
+  current_balance?: number;
   credit_limit?: number;
+  credit_days?: number;
+  email?: string;
   is_active: boolean;
   created_at?: number;
   updated_at?: number;

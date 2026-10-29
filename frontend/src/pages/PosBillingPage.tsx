@@ -13,6 +13,7 @@ import {
   Minus,
   CheckCircle,
   AlertCircle,
+  AlertTriangle,
   X,
   UserCheck,
   MessageCircle,
@@ -25,6 +26,10 @@ import {
   FolderOpen,
   ExternalLink,
   Save,
+  ChevronDown,
+  ChevronUp,
+  QrCode,
+  RefreshCw,
 } from "lucide-react";
 import { posCartService, type PosCartLine } from "../lib/billing/posCartService";
 import {
@@ -39,10 +44,11 @@ import {
   printingEngine,
   generateWhatsAppShareUrl,
   generateEmailShareUrl,
+  generateQrCodeSvg,
   type InvoicePrintData,
 } from "../lib/printing/printingEngine";
 import { isTauri } from "../lib/ipc/ipcBridge";
-import { companySettingsService, DEFAULT_COLUMNS, type ColumnSetting, type HeaderFieldSetting } from "../lib/settings/companySettingsService";
+import { companySettingsService, DEFAULT_COLUMNS, DEFAULT_PAYMENT_MODES, type ColumnSetting, type HeaderFieldSetting, type PaymentModeConfig } from "../lib/settings/companySettingsService";
 import type { InvoiceTotals } from "../lib/billing/billingCalculations";
 import {
   invoiceManagementService,
@@ -53,6 +59,7 @@ import {
 import { PrintPreviewModal } from "../components/PrintPreviewModal";
 import { CustomerCombobox } from "../components/CustomerCombobox";
 import { SmartQtyInput } from "../components/SmartQtyInput";
+import { PosGridRow, type PosRateBasis } from "../components/PosGridRow";
 import { BillingColumnsModal } from "../components/BillingColumnsModal";
 import { ConversionModal } from "../components/ConversionModal";
 import { PosShortcutHintBar, type PosFocusContext } from "../components/PosShortcutHintBar";
@@ -62,10 +69,26 @@ import { KeyboardShortcutsModal } from "../components/KeyboardShortcutsModal";
 import { storeRegistryService } from "../lib/auth/storeRegistryService";
 import { BillDiscountModal } from "../components/BillDiscountModal";
 import { RoundOffModal } from "../components/RoundOffModal";
-import { calculateDerivedLooseRate, formatQuantityDisplay } from "../lib/billing/unitConversion";
+import { calculateDerivedLooseRate, formatQuantityDisplay, formatExpiryDisplay } from "../lib/billing/unitConversion";
 import { partiesStore, type Customer, normalizeIndianPhone } from "../lib/masters/partiesStore";
 import { unitsStore } from "../lib/masters/unitsStore";
 import { useModalEscape } from "../lib/ui/modalEscapeManager";
+
+/**
+ * Parses prefix multiplier for quantity entry e.g. "3*890123" or "5*Augmentin"
+ */
+export function parseQuantityPrefix(input: string): { qty: number; query: string } {
+  const trimmed = input.trim();
+  const match = trimmed.match(/^(\d+(?:\.\d+)?)\s*[*xX]\s*(.+)$/);
+  if (match) {
+    const qty = parseFloat(match[1]);
+    const query = match[2].trim();
+    if (!isNaN(qty) && qty > 0 && query.length > 0) {
+      return { qty, query };
+    }
+  }
+  return { qty: 1, query: trimmed };
+}
 
 export const PosBillingPage: React.FC = () => {
   const navigate = useNavigate();
@@ -117,6 +140,85 @@ export const PosBillingPage: React.FC = () => {
   const [selectedProductForBatch, setSelectedProductForBatch] = useState<ProductItem | null>(null);
   const [productBatches, setProductBatches] = useState<ProductBatch[]>([]);
   const [selectedBatchIndex, setSelectedBatchIndex] = useState(0);
+  const [pendingPrefixQty, setPendingPrefixQty] = useState<number>(1);
+
+  // Product Entry Style & Inline Entry Row State
+  const [appSettingsState, setAppSettingsState] = useState(() => companySettingsService.getSettings());
+  const productEntryStyle = appSettingsState.keyboard?.productEntryStyle || "inline_row";
+  const entryRowPosition = appSettingsState.keyboard?.entryRowPosition || "bottom";
+  const addLineMode = appSettingsState.keyboard?.addLineMode || "immediate";
+  const [justAddedLineId, setJustAddedLineId] = useState<string | null>(null);
+
+  const [entryDraftProduct, setEntryDraftProduct] = useState<ProductItem | null>(null);
+  const [entryDraftBatch, setEntryDraftBatch] = useState<ProductBatch | null>(null);
+  const [entryPacks, setEntryPacks] = useState<number | string>(1);
+  const [entryLoose, setEntryLoose] = useState<number | string>(0);
+  const [entryRate, setEntryRate] = useState<number | string>("");
+  const [entryDiscount, setEntryDiscount] = useState<number | string>("");
+  const [entryRateBasis, setEntryRateBasis] = useState<PosRateBasis>("sel_rate");
+
+  const draftLine: PosCartLine | null = useMemo(() => {
+    if (!entryDraftProduct || !entryDraftBatch) return null;
+    const packs = Math.max(0, Number(entryPacks) || 0);
+    const loose = Math.max(0, Number(entryLoose) || 0);
+    const price = entryRate !== "" && !isNaN(Number(entryRate))
+      ? Number(entryRate)
+      : (entryDraftBatch.selling_rate || entryDraftProduct.sel_rate || entryDraftProduct.mrp);
+
+    const discountVal = Number(entryDiscount) || 0;
+
+    const baseLine = {
+      id: "draft_preview",
+      product: entryDraftProduct,
+      selectedBatch: entryDraftBatch,
+      qty: packs,
+      loose_qty: loose,
+      unit_price: price,
+      rate_basis: entryRateBasis,
+      discount_percent: discountVal,
+      discount_amount: 0,
+      discount_manual: discountVal > 0,
+      isNegativeStock: (entryDraftBatch.stock_qty || 0) <= 0,
+      availableStockSnapshot: entryDraftBatch.stock_qty,
+    };
+
+    const calculated = posCartService.calculateLine(baseLine);
+
+    return {
+      ...baseLine,
+      calculated,
+    };
+  }, [entryDraftProduct, entryDraftBatch, entryPacks, entryLoose, entryRate, entryDiscount, entryRateBasis]);
+
+  const displayTotals = useMemo(() => {
+    if (addLineMode === "after_enter" && draftLine) {
+      const pendingTaxable = totals.taxable_subtotal + draftLine.calculated.taxable_amount;
+      const pendingTax = totals.total_tax + draftLine.calculated.total_tax;
+      const netBeforeRound =
+        (totals.net_before_round ||
+          totals.taxable_subtotal + totals.total_tax - totals.bill_discount_amount) +
+        draftLine.calculated.total_amount;
+      const grandTotal = Math.round(netBeforeRound);
+      const roundOff = Number((grandTotal - netBeforeRound).toFixed(2));
+      return {
+        ...totals,
+        taxable_subtotal: pendingTaxable,
+        total_tax: pendingTax,
+        grand_total: grandTotal,
+        round_off: roundOff,
+        pendingLineCount: 1,
+      };
+    }
+    return { ...totals, pendingLineCount: 0 };
+  }, [totals, addLineMode, draftLine]);
+
+  // Inline entry row refs
+  const entryProductInputRef = useRef<HTMLInputElement>(null);
+  const entryPackInputRef = useRef<HTMLInputElement>(null);
+  const entryLooseInputRef = useRef<HTMLInputElement>(null);
+  const entryRateInputRef = useRef<HTMLInputElement>(null);
+  const entryDiscInputRef = useRef<HTMLInputElement>(null);
+  const entryRowRef = useRef<HTMLTableRowElement>(null);
 
   // Billing Layout & Columns Modal
   const [posColumns, setPosColumns] = useState<ColumnSetting[]>(() => companySettingsService.getBillingColumns());
@@ -141,9 +243,37 @@ export const PosBillingPage: React.FC = () => {
   } | null>(null);
 
   // Tender form state
-  const [tenders, setTenders] = useState<PaymentTenderLine[]>([{ mode: "Cash", amount: 0 }]);
-  const [receivedCash, setReceivedCash] = useState<number>(0);
-  const [printFormat, setPrintFormat] = useState<"thermal" | "a4" | "pdf">("thermal");
+  type PosPrintFormat = "thermal" | "a4" | "pdf" | "none" | "ask";
+  const [tenders, setTenders] = useState<PaymentTenderLine[]>([
+    { id: "pay_1", mode: "Cash", amount: 0, status: "received" },
+  ]);
+  const [activeTenderIndex, setActiveTenderIndex] = useState<number>(0);
+  const [expandedTenderExtras, setExpandedTenderExtras] = useState<Record<number, boolean>>({});
+  const [printFormat, setPrintFormatState] = useState<PosPrintFormat>(() => {
+    try {
+      const activeStore = storeRegistryService.getActiveStore();
+      const storeKey = activeStore?.id || "default";
+      return (localStorage.getItem(`lamsuite_print_fmt_${storeKey}`) as PosPrintFormat) || "thermal";
+    } catch {
+      return "thermal";
+    }
+  });
+
+  const setPrintFormat = (fmt: PosPrintFormat) => {
+    setPrintFormatState(fmt);
+    try {
+      const activeStore = storeRegistryService.getActiveStore();
+      const storeKey = activeStore?.id || "default";
+      localStorage.setItem(`lamsuite_print_fmt_${storeKey}`, fmt);
+    } catch {
+      // ignore
+    }
+  };
+
+  const tenderCalc = useMemo(() => {
+    return billingTenderService.calculateTenderBalance(totals.grand_total, tenders);
+  }, [totals.grand_total, tenders]);
+
   const [isFinalizing, setIsFinalizing] = useState(false);
   const isFinalizingRef = useRef(false);
 
@@ -165,6 +295,74 @@ export const PosBillingPage: React.FC = () => {
   const doctorInputRef = useRef<HTMLInputElement>(null);
   const patientInputRef = useRef<HTMLInputElement>(null);
   const tenderCashInputRef = useRef<HTMLInputElement>(null);
+  const tenderAmountInputRefs = useRef<(HTMLInputElement | null)[]>([]);
+
+  const handleAddPaymentLine = (mode: string = "Cash") => {
+    const currentRemaining = billingTenderService.calculateTenderBalance(totals.grand_total, tenders).balanceDue;
+    const remaining = currentRemaining > 0 ? currentRemaining : 0;
+    const newLine: PaymentTenderLine = {
+      id: `pay_${Date.now()}_${tenders.length}`,
+      mode,
+      amount: remaining,
+      status: mode === "Cheque" || mode === "Bank Transfer" ? "pending_clearance" : "received",
+    };
+    const nextTenders = [...tenders, newLine];
+    setTenders(nextTenders);
+    const newIdx = nextTenders.length - 1;
+    setActiveTenderIndex(newIdx);
+    setTimeout(() => {
+      tenderAmountInputRefs.current[newIdx]?.focus();
+      tenderAmountInputRefs.current[newIdx]?.select();
+    }, 50);
+  };
+
+  const handleRemovePaymentLine = (index: number) => {
+    if (tenders.length <= 1) return;
+    setTenders((prev) => prev.filter((_, i) => i !== index));
+    setActiveTenderIndex((prev) => Math.max(0, prev - 1));
+  };
+
+  const handleUpdatePaymentLine = (index: number, updates: Partial<PaymentTenderLine>) => {
+    setTenders((prev) => {
+      const next = [...prev];
+      const current = next[index] || { mode: "Cash", amount: 0 };
+      const updatedRef = updates.reference !== undefined ? updates.reference : updates.reference_no !== undefined ? updates.reference_no : current.reference_no;
+      next[index] = {
+        ...current,
+        ...updates,
+        reference_no: updatedRef,
+        reference: updatedRef,
+        extra_fields: {
+          ...current.extra_fields,
+          card_last_four: updates.card_last_four !== undefined ? updates.card_last_four : current.card_last_four,
+          card_network: updates.card_network !== undefined ? updates.card_network : current.card_network,
+          bank_name: updates.bank_name !== undefined ? updates.bank_name : current.bank_name,
+          cheque_date: updates.cheque_date !== undefined ? updates.cheque_date : current.cheque_date,
+          payer_vpa: updates.payer_vpa !== undefined ? updates.payer_vpa : current.payer_vpa,
+          notes: updates.notes !== undefined ? updates.notes : current.notes,
+          ...updates.extra_fields,
+        },
+      };
+      return next;
+    });
+  };
+
+  const handleFillRemainder = (index: number) => {
+    const remainder = billingTenderService.calculateRemainderForLine(totals.grand_total, tenders, index);
+    handleUpdatePaymentLine(index, { amount: remainder });
+  };
+
+  const handleSplitHalf = () => {
+    const split = billingTenderService.splitEvenly(totals.grand_total, ["Cash", "UPI"]);
+    setTenders(split);
+    setActiveTenderIndex(0);
+  };
+
+  const handleAddDenomination = (denom: number, index: number) => {
+    const current = tenders[index]?.amount || 0;
+    handleUpdatePaymentLine(index, { amount: Math.round((current + denom) * 100) / 100 });
+  };
+
   const dropdownRef = useRef<HTMLDivElement>(null);
   const batchListRef = useRef<HTMLDivElement>(null);
   const lastKeyTimeRef = useRef<number>(0);
@@ -311,7 +509,11 @@ export const PosBillingPage: React.FC = () => {
     setSelectedProductForBatch(null);
     setSelectedBatchIndex(0);
     setTimeout(() => {
-      searchInputRef.current?.focus();
+      if (productEntryStyle === "inline_row") {
+        entryProductInputRef.current?.focus();
+      } else {
+        searchInputRef.current?.focus();
+      }
     }, 50);
   };
 
@@ -321,12 +523,16 @@ export const PosBillingPage: React.FC = () => {
   useModalEscape(isDiffModalOpen, () => setIsDiffModalOpen(false));
 
   const updateDropdownPosition = () => {
-    if (searchInputRef.current) {
-      const rect = searchInputRef.current.getBoundingClientRect();
+    const el = productEntryStyle === "inline_row" ? entryProductInputRef.current : searchInputRef.current;
+    if (el) {
+      const rect = el.getBoundingClientRect();
+      const dropdownHeight = 280;
+      // If opening downwards overflows the viewport, anchor upwards
+      const shouldOpenUp = rect.bottom + dropdownHeight > window.innerHeight && rect.top > dropdownHeight;
       setDropdownPosition({
-        top: rect.bottom + 4,
-        left: rect.left,
-        width: rect.width,
+        top: shouldOpenUp ? Math.max(10, rect.top - dropdownHeight - 6) : rect.bottom + 4,
+        left: Math.max(10, rect.left),
+        width: Math.max(480, Math.min(rect.width, window.innerWidth - rect.left - 20)),
       });
     }
   };
@@ -334,15 +540,24 @@ export const PosBillingPage: React.FC = () => {
   const handleFocusSearch = () => {
     setSelectedRowIndex(null);
     setFocusContext("search");
-    searchInputRef.current?.focus();
-    searchInputRef.current?.select();
+    if (productEntryStyle === "inline_row") {
+      entryProductInputRef.current?.focus();
+      entryProductInputRef.current?.select();
+    } else {
+      searchInputRef.current?.focus();
+      searchInputRef.current?.select();
+    }
   };
 
   const handleSelectRow = (idx: number) => {
     if (idx >= 0 && idx < lines.length) {
       setSelectedRowIndex(idx);
       setFocusContext("grid");
-      searchInputRef.current?.blur();
+      if (productEntryStyle === "inline_row") {
+        entryProductInputRef.current?.blur();
+      } else {
+        searchInputRef.current?.blur();
+      }
       setTimeout(() => {
         const line = lines[idx];
         if (line) {
@@ -350,10 +565,18 @@ export const PosBillingPage: React.FC = () => {
           rowEl?.scrollIntoView({ block: "nearest", behavior: "smooth" });
         }
       }, 20);
+    } else if (idx >= lines.length && productEntryStyle === "inline_row") {
+      handleFocusSearch();
     }
   };
 
   const handleQtyEnterAdvance = (currentIdx: number) => {
+    // If this line was freshly added, confirm it by clearing justAddedLineId
+    const currentLine = lines[currentIdx];
+    if (currentLine && justAddedLineId === currentLine.id) {
+      setJustAddedLineId(null);
+    }
+
     if (currentIdx < lines.length - 1) {
       const nextIdx = currentIdx + 1;
       handleSelectRow(nextIdx);
@@ -528,14 +751,17 @@ export const PosBillingPage: React.FC = () => {
         scanBufferRef.current = "";
         e.preventDefault();
         e.stopPropagation();
-        productsStore.findProductByBarcode(scanned).then(async (matched) => {
+        const { qty, query } = parseQuantityPrefix(scanned);
+        productsStore.findProductByBarcode(query).then(async (matched) => {
           if (matched) {
-            await selectProductAndAddToCart(matched);
-            setSearchQuery("");
-            setSearchResults([]);
+            await quickScanAddToCart(matched, qty);
           } else {
-            setSearchQuery(scanned);
-            searchInputRef.current?.focus();
+            setSearchQuery(query);
+            if (productEntryStyle === "inline_row") {
+              entryProductInputRef.current?.focus();
+            } else {
+              searchInputRef.current?.focus();
+            }
           }
         });
         return;
@@ -623,7 +849,7 @@ export const PosBillingPage: React.FC = () => {
         return;
       }
 
-      // If tender modal is open, handle settlement mode keys (1-5, C, U, D, R, S, T, F12, Enter, Escape)
+      // If tender modal is open, handle settlement mode keys (1-8, C, U, D, B, Q, W, V, R, F, H, +, Alt+A, T, F12, Enter, Escape)
       if (isTenderModalOpen) {
         if (e.key === "Escape") {
           e.preventDefault();
@@ -636,35 +862,99 @@ export const PosBillingPage: React.FC = () => {
         }
         if (e.key === "F12" || (isCmdOrCtrl && e.key === "Enter")) {
           e.preventDefault();
-          handleFinalizeAndPrint();
+          handleFinalizeAndPrint(true);
+          return;
+        }
+        if (isCmdOrCtrl && (keyLower === "s" || code === "KeyS")) {
+          e.preventDefault();
+          handleFinalizeAndPrint(false);
           return;
         }
 
         const activeTag = (document.activeElement?.tagName || "").toLowerCase();
         const isTypingField = activeTag === "input" || activeTag === "textarea";
 
-        if (!isTypingField || (e.ctrlKey || e.altKey || e.metaKey)) {
-          if (e.key === "1" || keyLower === "c" || code === "KeyC") {
+        const modeMap: Record<string, string> = {
+          "1": "Cash", c: "Cash",
+          "2": "UPI", u: "UPI",
+          "3": "Card", d: "Card",
+          "4": "Bank Transfer", b: "Bank Transfer",
+          "5": "Cheque", q: "Cheque",
+          "6": "Wallet", w: "Wallet",
+          "7": "Gift Voucher", v: "Gift Voucher",
+          "8": "Credit", r: "Credit",
+        };
+
+        if (e.altKey) {
+          if (keyLower === "a") {
             e.preventDefault();
-            setTenders([{ mode: "Cash", amount: totals.grand_total }]);
-          } else if (e.key === "2" || keyLower === "u" || code === "KeyU") {
+            handleAddPaymentLine();
+            return;
+          }
+          if (keyLower === "f") {
             e.preventDefault();
-            setTenders([{ mode: "UPI", amount: totals.grand_total }]);
-          } else if (e.key === "3" || keyLower === "d" || code === "KeyD") {
+            handleFillRemainder(activeTenderIndex);
+            return;
+          }
+          if (keyLower === "h") {
             e.preventDefault();
-            setTenders([{ mode: "Card", amount: totals.grand_total }]);
-          } else if (e.key === "4" || keyLower === "r" || code === "KeyR") {
+            handleSplitHalf();
+            return;
+          }
+          if (modeMap[keyLower] || modeMap[e.key]) {
             e.preventDefault();
-            setTenders([{ mode: "Credit", amount: totals.grand_total }]);
-          } else if (e.key === "5" || keyLower === "s" || code === "KeyS") {
+            const targetMode = modeMap[keyLower] || modeMap[e.key];
+            if (tenders.length === 1 && tenders[0].amount >= totals.grand_total) {
+              handleUpdatePaymentLine(0, { mode: targetMode });
+            } else if (tenderCalc.balanceRemaining > 0) {
+              handleAddPaymentLine(targetMode);
+            } else {
+              handleUpdatePaymentLine(activeTenderIndex, { mode: targetMode });
+            }
+            return;
+          }
+        }
+
+        if (!isTypingField) {
+          if (modeMap[keyLower] || modeMap[e.key]) {
             e.preventDefault();
-            setTenders([
-              { mode: "Cash", amount: Math.round(totals.grand_total / 2) },
-              { mode: "UPI", amount: totals.grand_total - Math.round(totals.grand_total / 2) },
-            ]);
-          } else if (keyLower === "t" || code === "KeyT") {
+            const targetMode = modeMap[keyLower] || modeMap[e.key];
+            if (tenders.length === 1 && tenders[0].amount >= totals.grand_total) {
+              handleUpdatePaymentLine(0, { mode: targetMode });
+            } else if (tenderCalc.balanceRemaining > 0) {
+              handleAddPaymentLine(targetMode);
+            } else {
+              handleUpdatePaymentLine(activeTenderIndex, { mode: targetMode });
+            }
+            return;
+          }
+          if (keyLower === "f") {
             e.preventDefault();
-            setPrintFormat((prev) => (prev === "thermal" ? "a4" : prev === "a4" ? "pdf" : "thermal"));
+            handleFillRemainder(activeTenderIndex);
+            return;
+          }
+          if (keyLower === "h" || keyLower === "s") {
+            e.preventDefault();
+            handleSplitHalf();
+            return;
+          }
+          if (e.key === "+" || keyLower === "a") {
+            e.preventDefault();
+            handleAddPaymentLine();
+            return;
+          }
+          if (keyLower === "t" || code === "KeyT") {
+            e.preventDefault();
+            const sequence: PosPrintFormat[] = ["thermal", "a4", "pdf", "none", "ask"];
+            const currentIdx = sequence.indexOf(printFormat);
+            const nextFmt = sequence[(currentIdx + 1) % sequence.length];
+            setPrintFormat(nextFmt);
+            return;
+          }
+          if (e.key === "Enter") {
+            e.preventDefault();
+            handleFinalizeAndPrint(true);
+            return;
           }
         }
         return;
@@ -773,6 +1063,15 @@ export const PosBillingPage: React.FC = () => {
       // Ctrl+N / Cmd+N: Start New Bill
       if (isCmdOrCtrl && (keyLower === "n" || code === "KeyN")) {
         e.preventDefault();
+        if (addLineMode === "after_enter" && draftLine) {
+          const ok = window.confirm(`Add "${entryDraftProduct?.name || "product"}" to the bill before starting a new bill?`);
+          if (ok) {
+            commitEntryRow();
+          } else {
+            setEntryDraftProduct(null);
+            setEntryDraftBatch(null);
+          }
+        }
         cancelEditingMode();
         return;
       }
@@ -956,7 +1255,11 @@ export const PosBillingPage: React.FC = () => {
         if (!isInputFocused) {
           if (e.key === "ArrowDown") {
             e.preventDefault();
-            handleSelectRow(Math.min(lines.length - 1, selectedRowIndex + 1));
+            if (selectedRowIndex === lines.length - 1 && productEntryStyle === "inline_row") {
+              handleFocusSearch();
+            } else {
+              handleSelectRow(Math.min(lines.length - 1, selectedRowIndex + 1));
+            }
             return;
           }
           if (e.key === "ArrowUp") {
@@ -991,6 +1294,20 @@ export const PosBillingPage: React.FC = () => {
         if (searchResults.length > 0) {
           e.preventDefault();
           setSearchResults([]);
+          return;
+        }
+        if (justAddedLineId) {
+          e.preventDefault();
+          removeLine(justAddedLineId);
+          setJustAddedLineId(null);
+          handleFocusSearch();
+          return;
+        }
+        if (entryDraftProduct) {
+          e.preventDefault();
+          setEntryDraftProduct(null);
+          setEntryDraftBatch(null);
+          handleFocusSearch();
           return;
         }
         if (selectedRowIndex !== null) {
@@ -1184,7 +1501,7 @@ export const PosBillingPage: React.FC = () => {
       e.preventDefault();
       if (searchResults.length > 0) {
         setSelectedSearchIndex((prev) => (prev < searchResults.length - 1 ? prev + 1 : prev));
-      } else if (lines.length > 0) {
+      } else if (lines.length > 0 && productEntryStyle === "search_bar") {
         handleSelectRow(0);
       }
       return;
@@ -1194,27 +1511,40 @@ export const PosBillingPage: React.FC = () => {
       e.preventDefault();
       if (searchResults.length > 0) {
         setSelectedSearchIndex((prev) => (prev > 0 ? prev - 1 : 0));
+      } else if (productEntryStyle === "inline_row" && lines.length > 0) {
+        handleSelectRow(lines.length - 1);
       }
       return;
     }
 
     if (e.key === "Escape") {
+      e.preventDefault();
       if (searchResults.length > 0) {
-        e.preventDefault();
         setSearchResults([]);
+        return;
+      }
+      if (entryDraftProduct) {
+        setEntryDraftProduct(null);
+        setEntryDraftBatch(null);
+        setEntryPacks(1);
+        setEntryLoose(0);
+        setEntryRate("");
+        setEntryDiscount("");
         return;
       }
     }
 
     if (e.key === "Enter") {
       e.preventDefault();
-      const code = searchQuery.trim();
-      if (!code) return;
+      const raw = searchQuery.trim();
+      if (!raw) return;
+
+      const { qty, query } = parseQuantityPrefix(raw);
 
       // 1. First check if input matches exact barcode
-      const productByBarcode = await productsStore.findProductByBarcode(code);
+      const productByBarcode = await productsStore.findProductByBarcode(query);
       if (productByBarcode) {
-        await selectProductAndAddToCart(productByBarcode);
+        await selectProductAndAddToCart(productByBarcode, qty);
         setSearchQuery("");
         setSearchResults([]);
         return;
@@ -1223,14 +1553,239 @@ export const PosBillingPage: React.FC = () => {
       // 2. Otherwise pick selected or first matching search result if available
       if (searchResults.length > 0) {
         const itemToSelect = searchResults[selectedSearchIndex] || searchResults[0];
-        await selectProductAndAddToCart(itemToSelect);
+        await selectProductAndAddToCart(itemToSelect, qty);
         setSearchQuery("");
         setSearchResults([]);
+      } else if (query.length > 0) {
+        const found = await productsStore.searchProducts(query);
+        if (found.length > 0) {
+          await selectProductAndAddToCart(found[0], qty);
+          setSearchQuery("");
+          setSearchResults([]);
+        }
       }
     }
   };
 
-  const selectProductAndAddToCart = async (product: ProductItem) => {
+  const quickScanAddToCart = async (product: ProductItem, qty = 1) => {
+    const batches = await productsStore.getBatchesForProduct(product.id, false);
+    const unexpired = batches.filter((b) => !isBatchExpired(b.expiry_date));
+    const targetBatch = unexpired[0] || batches[0];
+    if (targetBatch) {
+      posCartService.addProductToCart(product, targetBatch, qty, 0);
+    } else {
+      const adhoc: ProductBatch = {
+        id: `batch_adhoc_${product.id}_${Date.now()}`,
+        product_id: product.id,
+        batch_no: "NO_BATCH",
+        expiry_date: new Date(Date.now() + 365 * 86400000).toISOString().slice(0, 10),
+        stock_qty: 0,
+        mrp: product.mrp,
+        selling_rate: product.sel_rate,
+        purchase_rate: product.sel_rate * 0.7,
+      };
+      posCartService.addProductToCart(product, adhoc, qty, 0, { isAdhocBatch: true });
+    }
+    refreshCartState();
+    setAriaAnnouncement(`Scanned & added ${product.name}, Quantity ${qty}. Total: ₹${posCartService.getTotals().grand_total.toFixed(2)}`);
+    setSearchQuery("");
+    setSearchResults([]);
+    setEntryDraftProduct(null);
+    setEntryDraftBatch(null);
+    setJustAddedLineId(null);
+    setTimeout(() => {
+      if (productEntryStyle === "inline_row") {
+        entryProductInputRef.current?.focus();
+      } else {
+        searchInputRef.current?.focus();
+      }
+    }, 40);
+  };
+
+  const handleSelectProductForEntryRow = async (product: ProductItem, prefixQty = 1) => {
+    const batches = await productsStore.getBatchesForProduct(product.id, false);
+    const allowSellingOutOfStock = companySettingsService.getSettings().inventory?.allowSellingOutOfStock || "always";
+
+    setSearchQuery("");
+    setSearchResults([]);
+
+    if (batches.length === 0) {
+      if (allowSellingOutOfStock === "never") {
+        showNotification(`No stock batches available for ${product.name} (Selling out-of-stock is disabled)`, "error");
+        return;
+      }
+
+      // Ad-hoc batch on the fly
+      const adhocBatch: ProductBatch = {
+        id: `batch_adhoc_${product.id}_${Date.now()}`,
+        product_id: product.id,
+        batch_no: "NO_BATCH",
+        expiry_date: new Date(Date.now() + 365 * 86400000).toISOString().slice(0, 10),
+        stock_qty: 0,
+        mrp: product.mrp,
+        selling_rate: product.sel_rate,
+        purchase_rate: product.sel_rate * 0.7,
+      };
+
+      if (addLineMode === "immediate") {
+        const res = posCartService.addProductToCart(product, adhocBatch, prefixQty || 1, 0, {
+          isAdhocBatch: true,
+        });
+        refreshCartState();
+        setAriaAnnouncement(
+          `Added ${product.name}, Quantity ${prefixQty || 1}. Total: ₹${posCartService.getTotals().grand_total.toFixed(2)}`
+        );
+        if (res.line) {
+          setJustAddedLineId(res.line.id);
+          const newLines = posCartService.getLines();
+          const targetIdx = newLines.findIndex((l) => l.id === res.line!.id);
+          setSelectedRowIndex(targetIdx >= 0 ? targetIdx : newLines.length - 1);
+          setFocusContext("cell_edit");
+          setTimeout(() => {
+            const el = (document.getElementById(`qty-input-${res.line!.id}-pack`) ||
+              document.getElementById(`qty-input-${res.line!.id}`)) as HTMLInputElement | null;
+            if (el) {
+              el.focus();
+              el.select();
+            }
+          }, 40);
+        }
+        return;
+      }
+
+      setEntryDraftProduct(product);
+      setEntryDraftBatch(adhocBatch);
+      setEntryPacks(prefixQty);
+      setEntryLoose(0);
+      setEntryRate(product.sel_rate || product.mrp);
+      setEntryDiscount(0);
+      setEntryRateBasis("sel_rate");
+      setFocusContext("cell_edit");
+      setTimeout(() => {
+        entryPackInputRef.current?.focus();
+        entryPackInputRef.current?.select();
+      }, 50);
+      return;
+    }
+
+    const unexpiredBatches = batches.filter((b) => !isBatchExpired(b.expiry_date));
+
+    // If only 1 batch, auto-select batch and advance to Quantity
+    if (batches.length === 1 && unexpiredBatches.length === 1) {
+      const b = batches[0];
+      const isOutOfStock = (b.stock_qty || 0) <= 0;
+
+      if (isOutOfStock && allowSellingOutOfStock === "never") {
+        showNotification(`Batch ${b.batch_no} is out of stock`, "error");
+        return;
+      }
+
+      if (isOutOfStock && allowSellingOutOfStock === "ask") {
+        const confirmed = window.confirm(`Batch ${b.batch_no} is out of stock (0 available). Add anyway?`);
+        if (!confirmed) return;
+      }
+
+      if (addLineMode === "immediate") {
+        const res = posCartService.addProductToCart(product, b, prefixQty || 1, 0);
+        refreshCartState();
+        setAriaAnnouncement(
+          `Added ${product.name}, Quantity ${prefixQty || 1}. Total: ₹${posCartService.getTotals().grand_total.toFixed(2)}`
+        );
+        if (res.line) {
+          setJustAddedLineId(res.line.id);
+          const newLines = posCartService.getLines();
+          const targetIdx = newLines.findIndex((l) => l.id === res.line!.id);
+          setSelectedRowIndex(targetIdx >= 0 ? targetIdx : newLines.length - 1);
+          setFocusContext("cell_edit");
+          setTimeout(() => {
+            const el = (document.getElementById(`qty-input-${res.line!.id}-pack`) ||
+              document.getElementById(`qty-input-${res.line!.id}`)) as HTMLInputElement | null;
+            if (el) {
+              el.focus();
+              el.select();
+            }
+          }, 40);
+        }
+        return;
+      }
+
+      setEntryDraftProduct(product);
+      setEntryDraftBatch(b);
+      setEntryPacks(prefixQty);
+      setEntryLoose(0);
+      setEntryRate(b.selling_rate || product.sel_rate || product.mrp);
+      setEntryDiscount(0);
+      setEntryRateBasis("sel_rate");
+      setFocusContext("cell_edit");
+      setTimeout(() => {
+        entryPackInputRef.current?.focus();
+        entryPackInputRef.current?.select();
+      }, 50);
+    } else {
+      // Multiple batches: display FEFO batch picker
+      setSelectedProductForBatch(product);
+      setProductBatches(batches);
+      setSelectedBatchIndex(0);
+      setPendingPrefixQty(prefixQty);
+    }
+  };
+
+  const commitEntryRow = () => {
+    if (!entryDraftProduct || !entryDraftBatch) return;
+    const packs = Math.max(0, Number(entryPacks) || 0);
+    const loose = Math.max(0, Number(entryLoose) || 0);
+    if (packs === 0 && loose === 0) {
+      showNotification("Quantity must be at least 1", "warning");
+      entryPackInputRef.current?.focus();
+      return;
+    }
+
+    const customPrice = entryRate !== "" && !isNaN(Number(entryRate)) ? Number(entryRate) : undefined;
+    const res = posCartService.addProductToCart(
+      entryDraftProduct,
+      entryDraftBatch,
+      packs,
+      loose,
+      {
+        isAdhocBatch: entryDraftBatch.batch_no === "NO_BATCH",
+      }
+    );
+
+    if (customPrice !== undefined && res.line) {
+      posCartService.updateLinePrice(res.line.id, customPrice, entryRateBasis);
+    }
+
+    if (entryDiscount && Number(entryDiscount) > 0 && res.line) {
+      posCartService.updateLineDiscount(res.line.id, Number(entryDiscount), 0);
+    }
+
+    refreshCartState();
+    setAriaAnnouncement(
+      `Added ${entryDraftProduct.name}, Quantity ${packs}${loose > 0 ? ` + ${loose} loose` : ""}. Total: ₹${posCartService.getTotals().grand_total.toFixed(2)}`
+    );
+
+    // Reset entry row
+    setEntryDraftProduct(null);
+    setEntryDraftBatch(null);
+    setEntryPacks(1);
+    setEntryLoose(0);
+    setEntryRate("");
+    setEntryDiscount("");
+    setSearchQuery("");
+    setSearchResults([]);
+
+    // Keep focus in the Product cell of the entry row!
+    setTimeout(() => {
+      entryProductInputRef.current?.focus();
+    }, 40);
+  };
+
+  const selectProductAndAddToCart = async (product: ProductItem, prefixQty = 1) => {
+    if (productEntryStyle === "inline_row") {
+      await handleSelectProductForEntryRow(product, prefixQty);
+      return;
+    }
+
     // Retrieve all batches in FEFO order (including out-of-stock batches)
     const batches = await productsStore.getBatchesForProduct(product.id, false);
     const appSettings = companySettingsService.getSettings();
@@ -1254,7 +1809,7 @@ export const PosBillingPage: React.FC = () => {
         purchase_rate: product.sel_rate * 0.7,
       };
 
-      const res = posCartService.addProductToCart(product, adhocBatch, 1, 0, { isAdhocBatch: true });
+      const res = posCartService.addProductToCart(product, adhocBatch, prefixQty, 0, { isAdhocBatch: true });
       refreshCartState();
       setSearchQuery("");
       setSearchResults([]);
@@ -1274,7 +1829,7 @@ export const PosBillingPage: React.FC = () => {
           }
         }, 50);
       }
-      setAriaAnnouncement(`Added ${product.name}, Quantity 1. Total: ₹${posCartService.getTotals().grand_total.toFixed(2)}`);
+      setAriaAnnouncement(`Added ${product.name}, Quantity ${prefixQty}. Total: ₹${posCartService.getTotals().grand_total.toFixed(2)}`);
       if (appSettings.inventory?.warnOnNegativeStock ?? true) {
         showNotification(`${product.name} added without existing batch (Stock 0)`, "info");
       }
@@ -1297,7 +1852,7 @@ export const PosBillingPage: React.FC = () => {
         if (!confirmed) return;
       }
 
-      const res = posCartService.addProductToCart(product, b, 1, 0);
+      const res = posCartService.addProductToCart(product, b, prefixQty, 0);
       refreshCartState();
       setSearchQuery("");
       setSearchResults([]);
@@ -1317,12 +1872,13 @@ export const PosBillingPage: React.FC = () => {
           }
         }, 50);
       }
-      setAriaAnnouncement(`Added ${product.name}, Quantity 1. Total: ₹${posCartService.getTotals().grand_total.toFixed(2)}`);
+      setAriaAnnouncement(`Added ${product.name}, Quantity ${prefixQty}. Total: ₹${posCartService.getTotals().grand_total.toFixed(2)}`);
     } else {
       // Multiple batches or expired batch: display batch picker modal
       setSelectedProductForBatch(product);
       setProductBatches(batches);
       setSelectedBatchIndex(0);
+      setPendingPrefixQty(prefixQty);
     }
   };
 
@@ -1362,10 +1918,60 @@ export const PosBillingPage: React.FC = () => {
       }
     }
 
-    const res = posCartService.addProductToCart(selectedProductForBatch, batch, 1, 0);
+    if (productEntryStyle === "inline_row") {
+      if (addLineMode === "immediate") {
+        const res = posCartService.addProductToCart(selectedProductForBatch, batch, pendingPrefixQty || 1, 0);
+        refreshCartState();
+        setSelectedProductForBatch(null);
+        setSelectedBatchIndex(0);
+        setPendingPrefixQty(1);
+        setSearchQuery("");
+        setSearchResults([]);
+        if (res.line) {
+          setJustAddedLineId(res.line.id);
+          const newLines = posCartService.getLines();
+          const targetIdx = newLines.findIndex((l) => l.id === res.line!.id);
+          setSelectedRowIndex(targetIdx >= 0 ? targetIdx : newLines.length - 1);
+          setFocusContext("cell_edit");
+          setAriaAnnouncement(
+            `Added ${selectedProductForBatch.name}, Quantity ${pendingPrefixQty || 1}. Total: ₹${posCartService.getTotals().grand_total.toFixed(2)}`
+          );
+          setTimeout(() => {
+            const el = (document.getElementById(`qty-input-${res.line!.id}-pack`) ||
+              document.getElementById(`qty-input-${res.line!.id}`)) as HTMLInputElement | null;
+            if (el) {
+              el.focus();
+              el.select();
+            }
+          }, 40);
+        }
+        return;
+      }
+
+      setEntryDraftProduct(selectedProductForBatch);
+      setEntryDraftBatch(batch);
+      setEntryPacks(pendingPrefixQty || 1);
+      setEntryLoose(0);
+      setEntryRate(batch.selling_rate || selectedProductForBatch.sel_rate || selectedProductForBatch.mrp);
+      setEntryDiscount(0);
+      setEntryRateBasis("sel_rate");
+      setSelectedProductForBatch(null);
+      setSelectedBatchIndex(0);
+      setSearchQuery("");
+      setSearchResults([]);
+      setFocusContext("cell_edit");
+      setTimeout(() => {
+        entryPackInputRef.current?.focus();
+        entryPackInputRef.current?.select();
+      }, 50);
+      return;
+    }
+
+    const res = posCartService.addProductToCart(selectedProductForBatch, batch, pendingPrefixQty || 1, 0);
     refreshCartState();
     setSelectedProductForBatch(null);
     setSelectedBatchIndex(0);
+    setPendingPrefixQty(1);
     setSearchQuery("");
     setSearchResults([]);
     if (res.line) {
@@ -1396,11 +2002,17 @@ export const PosBillingPage: React.FC = () => {
   };
 
   const removeLine = (lineId: string) => {
+    if (justAddedLineId === lineId) {
+      setJustAddedLineId(null);
+    }
     posCartService.removeLine(lineId);
     refreshCartState();
   };
 
   const handleHoldBill = () => {
+    if (addLineMode === "after_enter" && draftLine) {
+      commitEntryRow();
+    }
     const currentLines = posCartService.getLines();
     if (currentLines.length === 0) {
       showNotification("Cart is empty. Nothing to hold.", "error");
@@ -1462,6 +2074,10 @@ export const PosBillingPage: React.FC = () => {
   };
 
   const openTenderModal = () => {
+    if (addLineMode === "after_enter" && draftLine) {
+      commitEntryRow();
+    }
+
     // Validate empty cart before opening modal
     const currentLines = posCartService.getLines().length > 0 ? posCartService.getLines() : lines;
     if (currentLines.length === 0) {
@@ -1478,10 +2094,15 @@ export const PosBillingPage: React.FC = () => {
     }
 
     const t = posCartService.getTotals();
-    setTenders([{ mode: "Cash", amount: t.grand_total }]);
-    setReceivedCash(t.grand_total);
+    const gTotal = Math.round(((t.grand_total || 0) + Number.EPSILON) * 100) / 100;
+    setTenders([{ id: `pay_${Date.now()}_0`, mode: "Cash", amount: gTotal, status: "received" }]);
+    setActiveTenderIndex(0);
+    setExpandedTenderExtras({});
     setIsTenderModalOpen(true);
-    setTimeout(() => tenderCashInputRef.current?.focus(), 100);
+    setTimeout(() => {
+      tenderAmountInputRefs.current[0]?.focus();
+      tenderAmountInputRefs.current[0]?.select();
+    }, 100);
   };
 
   const handleSaveEditedInvoice = async () => {
@@ -1589,18 +2210,15 @@ export const PosBillingPage: React.FC = () => {
   };
 
   const calculatedBalanceChange = useMemo(() => {
-    const cashTender = tenders.find((t) => t.mode === "Cash");
-    if (cashTender && receivedCash > cashTender.amount) {
-      return Math.round((receivedCash - cashTender.amount) * 100) / 100;
-    }
-    return 0;
-  }, [tenders, receivedCash]);
+    return tenderCalc.changeDue;
+  }, [tenderCalc]);
 
   const preparePrintData = (linesSource?: PosCartLine[], totalsSource?: InvoiceTotals): InvoicePrintData => {
     const activeLines = linesSource || (posCartService.getLines().length > 0 ? posCartService.getLines() : lines);
     const activeTotals = totalsSource || (posCartService.getLines().length > 0 ? posCartService.getTotals() : totals);
 
     const settings = companySettingsService.getSettings();
+    const tenderCalcSnapshot = billingTenderService.calculateTenderBalance(activeTotals.grand_total, tenders);
 
     return {
       invoice_number: invoiceNumber,
@@ -1618,8 +2236,23 @@ export const PosBillingPage: React.FC = () => {
       customer_gstin: customerGstin || undefined,
       doctor_name: doctorName || undefined,
       patient_name: patientName || undefined,
-      payment_mode: tenders[0]?.mode || "Cash",
-      payment_status: "Paid",
+      payment_mode: tenders.length > 1 ? "Split" : (tenders[0]?.mode || "Cash"),
+      payment_status: tenderCalcSnapshot.creditAmount >= activeTotals.grand_total - 0.01
+        ? "Unpaid"
+        : tenderCalcSnapshot.creditAmount > 0.001
+        ? "Partial"
+        : "Paid",
+      payments: tenders.map((t) => ({
+        mode: t.mode,
+        amount: Number(t.amount) || 0,
+        reference_no: settings.payments?.printShowReferences
+          ? t.reference_no
+          : t.reference_no
+          ? `••••${t.reference_no.slice(-4)}`
+          : undefined,
+      })),
+      change_due: tenderCalcSnapshot.changeDue,
+      balance_due: tenderCalcSnapshot.creditAmount > 0 ? tenderCalcSnapshot.creditAmount : 0,
       lines: activeLines.map((l) => ({
         description: l.product.name,
         hsn_code: (l.product as any).hsn_code || "300490",
@@ -1697,49 +2330,89 @@ export const PosBillingPage: React.FC = () => {
         customerPhone || ""
       );
 
-      // 3. Prepare snapshot of print data BEFORE saving or clearing
-      const printData = preparePrintData(cartSnapshot, totalsSnapshot);
-      const primaryPaymentMode = tenders[0]?.mode || "Cash";
+      const appSettings = companySettingsService.getSettings();
 
-      // 4. Save invoice without auto-clearing the cart yet
-      const res = await posCartService.finalizeInvoice(invoiceNumber, primaryPaymentMode, {
+      // Validate payment lines
+      const validation = await billingTenderService.validatePaymentLines(
+        totalsSnapshot.grand_total,
+        tenders,
+        selectedCustomer
+          ? {
+              id: selectedCustomer.id,
+              name: selectedCustomer.name,
+              credit_limit: selectedCustomer.credit_limit,
+              current_balance: selectedCustomer.current_balance,
+            }
+          : customerName
+          ? { name: customerName }
+          : null,
+        appSettings.payments
+      );
+
+      if (!validation.valid) {
+        showNotification(validation.error || "Payment validation failed", "error");
+        if (validation.focusIndex !== undefined) {
+          setActiveTenderIndex(validation.focusIndex);
+        }
+        return;
+      }
+
+      if (validation.warning) {
+        showNotification(validation.warning, "warning");
+      }
+
+      const tenderCalcSnapshot = billingTenderService.calculateTenderBalance(totalsSnapshot.grand_total, tenders);
+      const printData = preparePrintData(cartSnapshot, totalsSnapshot);
+
+      // 4. Save invoice with payment lines
+      const res = await posCartService.finalizeInvoice(invoiceNumber, tenders, {
         autoClear: false,
         linesSnapshot: cartSnapshot,
         totalsSnapshot,
+        cashChange: tenderCalcSnapshot.changeDue,
+        payments: tenders,
       });
 
       if (res.success) {
         let savedPdfPath: string | undefined;
 
         // 5. Check if printing was requested
-        if (shouldPrint) {
-          const appSettings = companySettingsService.getSettings();
-          const previewMode = appSettings.printing.previewMode || "always";
-          const isThermal = printFormat === "thermal";
-          const shouldDirectPrint = previewMode === "never" || (previewMode === "skip_thermal" && isThermal);
-
-          if (shouldDirectPrint) {
-            if (printFormat === "thermal") {
-              await printingEngine.printThermalReceipt(printData);
-            } else if (printFormat === "a4") {
-              await printingEngine.printA4TaxInvoice(printData);
-            } else if (printFormat === "pdf") {
-              const exportRes = await printingEngine.exportToPdf(printData);
-              if (exportRes.cancelled) return;
-              if (!exportRes.success) {
-                showNotification(exportRes.error || "Failed to save PDF file", "error");
-                return;
-              }
-              savedPdfPath = exportRes.file_path;
-            }
-          } else {
-            // Open Print Preview Modal with snapshot
+        if (shouldPrint && printFormat !== "none") {
+          if (printFormat === "ask") {
             setPreviewModalState({
               isOpen: true,
               data: printData,
-              initialFormat: printFormat === "a4" ? "a4" : "thermal_80mm",
+              initialFormat: "thermal_80mm",
               title: `Tax Invoice Preview - #${invoiceNumber}`,
             });
+          } else {
+            const previewMode = appSettings.printing.previewMode || "always";
+            const isThermal = printFormat === "thermal";
+            const shouldDirectPrint = previewMode === "never" || (previewMode === "skip_thermal" && isThermal);
+
+            if (shouldDirectPrint) {
+              if (printFormat === "thermal") {
+                await printingEngine.printThermalReceipt(printData);
+              } else if (printFormat === "a4") {
+                await printingEngine.printA4TaxInvoice(printData);
+              } else if (printFormat === "pdf") {
+                const exportRes = await printingEngine.exportToPdf(printData);
+                if (exportRes.cancelled) return;
+                if (!exportRes.success) {
+                  showNotification(exportRes.error || "Failed to save PDF file", "error");
+                  return;
+                }
+                savedPdfPath = exportRes.file_path;
+              }
+            } else {
+              // Open Print Preview Modal with snapshot
+              setPreviewModalState({
+                isOpen: true,
+                data: printData,
+                initialFormat: printFormat === "a4" ? "a4" : "thermal_80mm",
+                title: `Tax Invoice Preview - #${invoiceNumber}`,
+              });
+            }
           }
         }
 
@@ -2023,21 +2696,159 @@ export const PosBillingPage: React.FC = () => {
 
       {/* Main Billing Workspace: Search & High-Speed Items Grid */}
       <div className="flex flex-1 flex-col rounded-card border border-border-main bg-surface shadow-2xs overflow-hidden">
-        {/* Product / Barcode Search Bar */}
-        <div className="relative border-b border-border-main p-3 bg-canvas">
-          <div className="relative flex items-center">
-            <Search className="absolute left-3.5 h-4 w-4 text-[var(--color-text-faint)]" />
-            <input
-              ref={searchInputRef}
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              onKeyDown={handleBarcodeOrEnter}
-              onFocus={() => {
+        {/* Product / Barcode Search Bar (only in search_bar mode) */}
+        {productEntryStyle === "search_bar" && (
+          <div className="relative border-b border-border-main p-3 bg-canvas">
+            <div className="relative flex items-center">
+              <Search className="absolute left-3.5 h-4 w-4 text-[var(--color-text-faint)]" />
+              <input
+                ref={searchInputRef}
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                onKeyDown={handleBarcodeOrEnter}
+                onFocus={() => {
+                  setFocusContext("search");
+                  setSelectedRowIndex(null);
+                  if (searchQuery.trim().length > 0 && searchResults.length === 0) {
+                    const { query } = parseQuantityPrefix(searchQuery.trim());
+                    productsStore.searchProducts(query).then((res) => {
+                      setSearchResults(res);
+                      setSelectedSearchIndex(0);
+                      updateDropdownPosition();
+                    });
+                  } else if (searchResults.length > 0) {
+                    updateDropdownPosition();
+                  }
+                }}
+                onBlur={(e) => {
+                  const related = e.relatedTarget as Node | null;
+                  if (dropdownRef.current && related && dropdownRef.current.contains(related)) {
+                    return;
+                  }
+                  setTimeout(() => {
+                    setSearchResults([]);
+                  }, 180);
+                }}
+                placeholder="Scan barcode or type medicine / product name (Press Enter)... [F1]"
+                className="w-full rounded-[10px] border border-[var(--color-border)] bg-[var(--color-surface)] pl-10 pr-24 py-2 text-xs font-medium text-[var(--color-text)] placeholder-[var(--color-text-muted)] focus:border-[var(--color-accent)] focus:outline-none shadow-2xs transition-colors"
+              />
+              <div className="absolute right-3 flex items-center gap-1.5 text-[11px] text-[var(--color-text-muted)]">
+                <Barcode className="h-4 w-4 text-[var(--color-text-faint)]" />
+                <span>Scanner Ready</span>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Search Dropdown Results rendered in React Portal */}
+        {searchResults.length > 0 && dropdownPosition && createPortal(
+          <div
+            ref={dropdownRef}
+            style={{
+              position: "fixed",
+              top: `${dropdownPosition.top}px`,
+              left: `${dropdownPosition.left}px`,
+              width: `${dropdownPosition.width}px`,
+              zIndex: 9999,
+            }}
+            className="max-h-72 overflow-y-auto rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-dropdown divide-y divide-[var(--color-border-subtle)]"
+          >
+            {searchResults.map((prod, index) => {
+              const isSelected = index === selectedSearchIndex;
+              const isOutOfStock = (prod.current_stock || 0) <= 0;
+              return (
+                <div
+                  key={prod.id}
+                  onMouseEnter={() => setSelectedSearchIndex(index)}
+                  onClick={() => {
+                    const { qty } = parseQuantityPrefix(searchQuery);
+                    selectProductAndAddToCart(prod, qty);
+                    setSearchQuery("");
+                    setSearchResults([]);
+                  }}
+                  className={`flex cursor-pointer items-center justify-between px-4 py-2.5 text-xs transition-colors ${
+                    isSelected
+                      ? "bg-[var(--color-accent-soft)] text-[var(--color-text)] border-l-4 border-l-[var(--color-accent)] pl-3"
+                      : "hover:bg-[var(--color-surface-hover)] text-[var(--color-text)]"
+                  }`}
+                >
+                  <div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <p className={`font-semibold ${isSelected ? "text-[var(--color-accent)] font-bold" : "text-[var(--color-text)]"}`}>
+                        {prod.name}
+                      </p>
+                      {prod.generic_name && (
+                        <span className="rounded-[4px] bg-[var(--color-surface-subtle)] px-1.5 py-0.5 text-[10px] text-[var(--color-text-muted)] font-normal border border-[var(--color-border)]">
+                          {prod.generic_name}
+                        </span>
+                      )}
+                      {prod.units_per_pack > 1 && (
+                        <span className="rounded-[4px] bg-accent-soft px-1.5 py-0.5 text-[10px] text-accent font-medium">
+                          Pack of {prod.units_per_pack} {prod.sub_unit_name || "pcs"}
+                        </span>
+                      )}
+                      {isOutOfStock && (
+                        <span className="rounded bg-[var(--color-danger-bg)] text-[var(--color-danger-text)] text-[10px] font-bold px-1.5 py-0.2">
+                          Out of Stock
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-[11px] text-[var(--color-text-muted)] mt-0.5 font-mono">
+                      Barcode: <span>{prod.barcode || "—"}</span>{" "}
+                      {prod.hsn_sac_code ? `| HSN: ${prod.hsn_sac_code}` : ""} | GST: {prod.gst_percent}%
+                    </p>
+                  </div>
+                  <div className="text-right shrink-0 ml-4 font-mono">
+                    <p className="font-bold text-[var(--color-text)] text-sm tabular-nums">
+                      ₹ {(prod.sel_rate || prod.mrp).toFixed(2)}
+                      <span className="text-[10px] text-[var(--color-text-muted)] font-normal ml-0.5">
+                        /{prod.units_per_pack > 1 ? (prod.unit_name || "Strip") : (prod.unit_name || "pc")}
+                      </span>
+                    </p>
+                    <p className="text-[10px] text-[var(--color-text-muted)]">
+                      MRP: ₹{prod.mrp.toFixed(2)}
+                      {(prod as any).nearest_expiry ? ` • Exp: ${formatExpiryDisplay((prod as any).nearest_expiry)}` : ""}
+                    </p>
+                    <p
+                      className={`text-[10px] font-medium ${
+                        !isOutOfStock ? "text-[var(--color-success-text)]" : "text-[var(--color-danger-text)] font-bold"
+                      }`}
+                    >
+                      Stock: {prod.current_stock || 0}
+                    </p>
+                  </div>
+                </div>
+              );
+            })}
+          </div>,
+          document.body
+        )}
+
+        {/* Dynamic POS Grid Table */}
+        {(() => {
+          const visibleCols: ColumnSetting[] = (posColumns && posColumns.length > 0 ? posColumns : DEFAULT_COLUMNS)
+            .filter((c: ColumnSetting) => c.visible !== false)
+            .sort((a: ColumnSetting, b: ColumnSetting) => (a.order || 0) - (b.order || 0));
+
+          const renderInlineEntryRow = () => (
+            <PosGridRow
+              idx={lines.length}
+              line={draftLine}
+              isDraft={true}
+              isSelected={selectedRowIndex === null && focusContext === "search"}
+              visibleCols={visibleCols}
+              doctorName={doctorName}
+              searchQuery={searchQuery}
+              onSearchChange={(val) => {
+                setSearchQuery(val);
+                updateDropdownPosition();
+              }}
+              onSearchFocus={() => {
                 setFocusContext("search");
-                setSelectedRowIndex(null);
                 if (searchQuery.trim().length > 0 && searchResults.length === 0) {
-                  productsStore.searchProducts(searchQuery.trim()).then((res) => {
+                  const { query } = parseQuantityPrefix(searchQuery.trim());
+                  productsStore.searchProducts(query).then((res) => {
                     setSearchResults(res);
                     setSelectedSearchIndex(0);
                     updateDropdownPosition();
@@ -2046,7 +2857,7 @@ export const PosBillingPage: React.FC = () => {
                   updateDropdownPosition();
                 }
               }}
-              onBlur={(e) => {
+              onSearchBlur={(e) => {
                 const related = e.relatedTarget as Node | null;
                 if (dropdownRef.current && related && dropdownRef.current.contains(related)) {
                   return;
@@ -2055,84 +2866,54 @@ export const PosBillingPage: React.FC = () => {
                   setSearchResults([]);
                 }, 180);
               }}
-              placeholder="Scan barcode or type medicine / product name (Press Enter)... [F1]"
-              className="w-full rounded-[10px] border border-[var(--color-border)] bg-[var(--color-surface)] pl-10 pr-24 py-2 text-xs font-medium text-[var(--color-text)] placeholder-[var(--color-text-muted)] focus:border-[var(--color-accent)] focus:outline-none shadow-2xs transition-colors"
-            />
-            <div className="absolute right-3 flex items-center gap-1.5 text-[11px] text-[var(--color-text-muted)]">
-              <Barcode className="h-4 w-4 text-[var(--color-text-faint)]" />
-              <span>Scanner Ready</span>
-            </div>
-          </div>
-
-          {/* Search Dropdown Results rendered in React Portal */}
-          {searchResults.length > 0 && dropdownPosition && createPortal(
-            <div
-              ref={dropdownRef}
-              style={{
-                position: "fixed",
-                top: `${dropdownPosition.top}px`,
-                left: `${dropdownPosition.left}px`,
-                width: `${dropdownPosition.width}px`,
-                zIndex: 9999,
+              onSearchKeyDown={handleBarcodeOrEnter}
+              searchInputRef={entryProductInputRef}
+              isDropdownOpen={searchResults.length > 0}
+              onSelectRow={() => handleFocusSearch()}
+              onQtyChange={(newPacks, newLoose) => {
+                setEntryPacks(newPacks);
+                setEntryLoose(newLoose);
               }}
-              className="max-h-72 overflow-y-auto rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-dropdown divide-y divide-[var(--color-border-subtle)]"
-            >
-              {searchResults.map((prod, index) => {
-                const isSelected = index === selectedSearchIndex;
-                return (
-                  <div
-                    key={prod.id}
-                    onMouseEnter={() => setSelectedSearchIndex(index)}
-                    onClick={() => {
-                      selectProductAndAddToCart(prod);
-                      setSearchQuery("");
-                      setSearchResults([]);
-                    }}
-                    className={`flex cursor-pointer items-center justify-between px-4 py-2.5 text-xs transition-colors ${
-                      isSelected
-                        ? "bg-[var(--color-accent-soft)] text-[var(--color-text)] border-l-4 border-l-[var(--color-accent)] pl-3"
-                        : "hover:bg-[var(--color-surface-hover)] text-[var(--color-text)]"
-                    }`}
-                  >
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <p className={`font-semibold ${isSelected ? "text-[var(--color-accent)] font-bold" : "text-[var(--color-text)]"}`}>
-                          {prod.name}
-                        </p>
-                        {prod.generic_name && (
-                          <span className="rounded-[4px] bg-[var(--color-surface-subtle)] px-1.5 py-0.5 text-[10px] text-[var(--color-text-muted)] font-normal border border-[var(--color-border)]">
-                            {prod.generic_name}
-                          </span>
-                        )}
-                      </div>
-                      <p className="text-[11px] text-[var(--color-text-muted)] mt-0.5 font-mono">
-                        Barcode: <span>{prod.barcode}</span>{" "}
-                        {prod.hsn_sac_code ? `| HSN: ${prod.hsn_sac_code}` : ""} | GST: {prod.gst_percent}%
-                      </p>
-                    </div>
-                    <div className="text-right shrink-0 ml-4">
-                      <p className="font-bold text-[var(--color-text)] text-sm font-mono tabular-nums">₹ {(prod.sel_rate || prod.mrp).toFixed(2)}</p>
-                      <p
-                        className={`text-[10px] font-mono font-medium ${
-                          (prod.current_stock || 0) > 0 ? "text-[var(--color-success-text)]" : "text-[var(--color-danger-text)] font-bold"
-                        }`}
-                      >
-                        Stock: {prod.current_stock || 0}
-                      </p>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>,
-            document.body
-          )}
-        </div>
-
-        {/* Dynamic POS Grid Table */}
-        {(() => {
-          const visibleCols: ColumnSetting[] = (posColumns && posColumns.length > 0 ? posColumns : DEFAULT_COLUMNS)
-            .filter((c: ColumnSetting) => c.visible !== false)
-            .sort((a: ColumnSetting, b: ColumnSetting) => (a.order || 0) - (b.order || 0));
+              onQtyEnter={() => commitEntryRow()}
+              onRateChange={(newPrice, basis) => {
+                setEntryRate(newPrice);
+                setEntryRateBasis(basis);
+              }}
+              onDiscountClick={() => {
+                const cur = Number(entryDiscount) || 0;
+                const next = cur === 0 ? 5 : cur === 5 ? 10 : 0;
+                setEntryDiscount(next);
+              }}
+              onEditProductBatch={() => {
+                if (entryDraftProduct) {
+                  setSelectedProductForBatch(entryDraftProduct);
+                  productsStore.getBatchesForProduct(entryDraftProduct.id, false).then((b) => {
+                    setProductBatches(b);
+                  });
+                }
+              }}
+              onEditConversion={() => {
+                if (entryDraftProduct && draftLine) {
+                  setSelectedLineForConversion(draftLine);
+                }
+              }}
+              onClearDraft={() => {
+                setEntryDraftProduct(null);
+                setEntryDraftBatch(null);
+                setSearchQuery("");
+                setSearchResults([]);
+                setTimeout(() => entryProductInputRef.current?.focus(), 40);
+              }}
+              onCommitDraft={() => commitEntryRow()}
+              onRemoveLine={() => {
+                setEntryDraftProduct(null);
+                setEntryDraftBatch(null);
+                setSearchQuery("");
+                setSearchResults([]);
+                setTimeout(() => entryProductInputRef.current?.focus(), 40);
+              }}
+            />
+          );
 
           return (
             <div className="flex-1 overflow-auto">
@@ -2161,328 +2942,65 @@ export const PosBillingPage: React.FC = () => {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[var(--color-border-subtle)]">
+                  {productEntryStyle === "inline_row" && entryRowPosition === "top" && renderInlineEntryRow()}
                   {lines.length === 0 ? (
-                    <tr>
-                      <td colSpan={visibleCols.length} className="py-16 text-center text-[var(--color-text-muted)]">
-                        <Barcode className="mx-auto h-8 w-8 text-[var(--color-text-faint)] mb-2" />
-                        <p className="font-semibold text-sm text-[var(--color-text)]">Billing cart is empty</p>
-                        <p className="text-[11px] text-[var(--color-text-muted)] mt-0.5">Scan a barcode or type a product name to begin billing</p>
-                      </td>
-                    </tr>
-                  ) : (
-                    lines.map((line, idx) => {
-                      const isRowSelected = selectedRowIndex === idx;
-                      const isWarningRow = (line.selectedBatch.stock_qty || 0) <= 0;
-                      return (
-                        <tr
-                          key={line.id}
-                          id={`cart-row-${line.id}`}
-                          role="row"
-                          aria-selected={isRowSelected}
-                          onClick={() => handleSelectRow(idx)}
-                          className={`transition-all cursor-pointer ${
-                            isRowSelected
-                              ? "bg-[var(--color-accent-soft)] ring-2 ring-inset ring-[var(--color-accent)] font-semibold shadow-2xs"
-                              : isWarningRow
-                              ? "bg-[var(--color-warning-bg)]/40 hover:bg-[var(--color-warning-bg)]/70 text-[var(--color-text)]"
-                              : "hover:bg-[var(--color-surface-hover)] text-[var(--color-text)]"
-                          }`}
-                        >
-                        {visibleCols.map((col: ColumnSetting) => {
-                          switch (col.id) {
-                            case "idx":
-                              return (
-                                <td key="idx" className="px-3 py-2 text-center text-text-muted font-mono text-[11px]">
-                                  {idx + 1}
-                                </td>
-                              );
-
-                            case "product_name":
-                              return (
-                                <td key="product_name" className="px-3 py-2 font-semibold text-text-main">
-                                  <div className="flex flex-col">
-                                    <div className="flex items-center gap-1.5 flex-wrap">
-                                      <span className="font-bold">{line.product.name}</span>
-                                      <button
-                                        type="button"
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          setSelectedLineForConversion(line);
-                                        }}
-                                        className={`inline-flex items-center gap-1 rounded-[6px] border px-1.5 py-0.5 text-[10px] font-medium transition-colors cursor-pointer ${
-                                          line.product.units_per_pack > 1
-                                            ? "border-accent-soft bg-accent-soft text-accent hover:opacity-90"
-                                            : "border-border-main bg-canvas text-text-muted hover:bg-surface"
-                                        }`}
-                                        title="Click or press Ctrl+E to adjust packaging & unit conversion"
-                                      >
-                                        <span>
-                                          {line.product.units_per_pack > 1
-                                            ? `1 ${line.product.unit_name || "pack"} = ${line.product.units_per_pack} ${line.product.sub_unit_name || "pcs"}`
-                                            : (line.product.unit_name || "pc")}
-                                        </span>
-                                        <span className="text-[9px] text-text-muted">✏️</span>
-                                      </button>
-                                      <button
-                                        type="button"
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          setSelectedRowIndex(idx);
-                                          setSelectedLineForProductBatchEdit(line);
-                                        }}
-                                        className="inline-flex items-center gap-1 rounded-[6px] border border-border-main bg-canvas hover:bg-surface px-1.5 py-0.5 text-[10px] font-medium text-text-muted hover:text-accent transition-colors cursor-pointer"
-                                        title="Click or press F4 to edit product, batch, expiry & rate"
-                                      >
-                                        <span>Edit F4</span>
-                                      </button>
-                                      {line.isAdhocBatch && (
-                                        <span className="rounded-btn bg-accent-soft text-accent border border-accent/20 px-1.5 py-0.2 text-[10px] font-bold">
-                                          Ad-hoc
-                                        </span>
-                                      )}
-                                      {(line.product.schedule_type === "H" || line.product.schedule_type === "H1" || line.product.schedule_type === "X") && (
-                                        <span
-                                          className={`rounded-btn px-1.5 py-0.2 text-[10px] font-black border ${
-                                            doctorName.trim()
-                                              ? "bg-accent-soft text-accent border-accent/30"
-                                              : "bg-[var(--color-danger-bg)] text-[var(--color-danger-text)] border-[var(--color-danger-border)] animate-pulse"
-                                          }`}
-                                          title={
-                                            doctorName.trim()
-                                              ? `Prescription drug (Schedule ${line.product.schedule_type}) - Doctor recorded`
-                                              : `Schedule ${line.product.schedule_type}: Doctor details required by law!`
-                                          }
-                                        >
-                                          Rx Sch-{line.product.schedule_type} {!doctorName.trim() ? "⚠️" : ""}
-                                        </span>
-                                      )}
-                                    </div>
-                                    {(line.product.generic_name || line.product.strength) && (
-                                      <div
-                                        className="text-[11px] font-normal text-text-muted truncate max-w-[280px]"
-                                        title={`${line.product.generic_name || ""} ${line.product.strength || ""}`.trim()}
-                                      >
-                                        {[line.product.generic_name, line.product.strength].filter(Boolean).join(" • ")}
-                                      </div>
-                                    )}
-                                    {line.isNegativeStock && (
-                                      <div className="mt-0.5 flex items-center gap-1 text-[11px] font-medium text-[var(--color-warning-text)]">
-                                        <span className="inline-block w-1.5 h-1.5 rounded-full bg-[var(--color-warning-text)] animate-pulse" />
-                                        {(line.availableStockSnapshot ?? 0) <= 0
-                                          ? "Stock 0 (Selling beyond available)"
-                                          : `Short by ${line.shortageQty || Math.max(1, line.qty - (line.availableStockSnapshot ?? 0))}`}
-                                      </div>
-                                    )}
-                                  </div>
-                                </td>
-                              );
-
-                            case "batch_no":
-                              return (
-                                <td
-                                  key="batch_no"
-                                  className="px-3 py-2 font-mono text-[11px] text-text-muted"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setSelectedRowIndex(idx);
-                                    setSelectedLineForProductBatchEdit(line);
-                                  }}
-                                >
-                                  <button
-                                    type="button"
-                                    className="hover:underline hover:text-accent font-semibold flex items-center gap-1 cursor-pointer"
-                                    title="Click or press F4 to edit product & batch details"
-                                  >
-                                    <span>{line.selectedBatch.batch_no}</span>
-                                    <span className="text-[9px] text-text-muted opacity-70">✏️</span>
-                                  </button>
-                                </td>
-                              );
-
-                            case "expiry_date":
-                              return (
-                                <td
-                                  key="expiry_date"
-                                  className="px-3 py-2 font-mono text-[11px] text-text-muted"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setSelectedRowIndex(idx);
-                                    setSelectedLineForProductBatchEdit(line);
-                                  }}
-                                >
-                                  <button
-                                    type="button"
-                                    className="hover:underline hover:text-accent font-semibold flex items-center gap-1 cursor-pointer"
-                                    title="Click or press F4 to edit product & batch details"
-                                  >
-                                    <span>{line.selectedBatch.expiry_date}</span>
-                                    <span className="text-[9px] text-text-muted opacity-70">✏️</span>
-                                  </button>
-                                </td>
-                              );
-
-                            case "qty":
-                              return (
-                                <td key="qty" className="px-3 py-2 text-center" onClick={(e) => e.stopPropagation()}>
-                                  <SmartQtyInput
-                                    inputId={`qty-input-${line.id}`}
-                                    packs={line.qty}
-                                    loose={line.loose_qty || 0}
-                                    unitsPerPack={line.product.units_per_pack || 1}
-                                    packName={line.product.unit_name || (line.product.units_per_pack > 1 ? "pack" : "pc")}
-                                    looseName={line.product.sub_unit_name || (line.product.units_per_pack > 1 ? "pc" : "unit")}
-                                    allowLoose={line.product.allow_loose_sale ?? ((line.product.units_per_pack || 1) > 1)}
-                                    onFocusInput={() => {
-                                      setSelectedRowIndex(idx);
-                                      setFocusContext("cell_edit");
-                                    }}
-                                    onEnter={() => {
-                                      handleQtyEnterAdvance(idx);
-                                    }}
-                                    onChange={(newPacks, newLoose) => {
-                                      posCartService.updateLineQuantity(line.id, newPacks, newLoose);
-                                      refreshCartState();
-                                    }}
-                                  />
-                                </td>
-                              );
-
-                            case "mrp":
-                              return (
-                                <td key="mrp" className="px-3 py-2 text-right font-mono text-text-muted">
-                                  ₹ {line.product.mrp.toFixed(2)}
-                                </td>
-                              );
-
-                            case "rate":
-                              return (
-                                <td key="rate" className="px-3 py-2 text-right">
-                                  <div className="flex flex-col items-end">
-                                    <span className="font-mono font-medium text-text-main">
-                                      ₹ {line.unit_price.toFixed(2)}
-                                      <span className="text-[10px] text-text-muted ml-0.5 font-normal">
-                                        /{line.rate_basis === "loose_rate"
-                                          ? (line.product.sub_unit_name || "pc")
-                                          : (line.product.unit_name || (line.product.units_per_pack > 1 ? "pack" : "pc"))}
-                                      </span>
-                                    </span>
-                                    {line.product.units_per_pack > 1 && (
-                                      <button
-                                        type="button"
-                                        tabIndex={-1}
-                                        onClick={() => {
-                                          const nextBasis = line.rate_basis === "loose_rate" ? "sel_rate" : "loose_rate";
-                                          const newPrice = nextBasis === "loose_rate"
-                                            ? calculateDerivedLooseRate(line.product.sel_rate, line.product.units_per_pack, line.product.loose_selling_rate)
-                                            : (line.selectedBatch.selling_rate || line.product.sel_rate);
-                                          posCartService.updateLinePrice(line.id, newPrice, nextBasis);
-                                          refreshCartState();
-                                        }}
-                                        className="text-[9px] text-accent hover:underline mt-0.5 cursor-pointer font-medium"
-                                      >
-                                        {line.rate_basis === "loose_rate" ? "switch to pack rate" : "switch to unit rate"}
-                                      </button>
-                                    )}
-                                  </div>
-                                </td>
-                              );
-
-                            case "discount":
-                              return (
-                                <td
-                                  key="discount"
-                                  className="px-3 py-2 text-center"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setSelectedRowIndex(idx);
-                                    handleQuickDiscount(line);
-                                  }}
-                                >
-                                  <button
-                                    type="button"
-                                    tabIndex={-1}
-                                    className={`group inline-flex items-center gap-1 px-2 py-0.5 rounded-[6px] text-xs font-mono font-semibold cursor-pointer transition-colors ${
-                                      line.discount_percent > 0 || line.discount_amount > 0
-                                        ? "bg-[var(--color-warning-bg)] text-[var(--color-warning-text)] hover:opacity-90 border border-[var(--color-warning-border)]"
-                                        : "text-text-muted hover:bg-canvas hover:text-text-main"
-                                    }`}
-                                    title="Click or press F2 to edit item discount"
-                                  >
-                                    <span>
-                                      {line.discount_percent > 0
-                                        ? `${line.discount_percent}%`
-                                        : line.discount_amount > 0
-                                        ? `₹${line.discount_amount.toFixed(2)}`
-                                        : "-"}
-                                    </span>
-                                  </button>
-                                </td>
-                              );
-
-                            case "gst":
-                              return (
-                                <td key="gst" className="px-3 py-2 text-center font-mono text-text-muted">
-                                  {line.product.gst_percent}%
-                                </td>
-                              );
-
-                            case "hsn":
-                              return (
-                                <td key="hsn" className="px-3 py-2 text-center font-mono text-[11px] text-text-muted">
-                                  {line.product.hsn_sac_code || "-"}
-                                </td>
-                              );
-
-                            case "free_qty":
-                              return (
-                                <td key="free_qty" className="px-3 py-2 text-center font-mono text-text-muted">
-                                  -
-                                </td>
-                              );
-
-                            case "rack_shelf":
-                              return (
-                                <td key="rack_shelf" className="px-3 py-2 text-center text-text-muted">
-                                  {line.selectedBatch.rack_location || line.product.rack_location || "-"}
-                                </td>
-                              );
-
-                            case "current_stock":
-                              return (
-                                <td key="current_stock" className="px-3 py-2 text-right font-mono font-semibold text-text-main">
-                                  {line.selectedBatch.stock_qty ?? line.product.current_stock ?? 0}
-                                </td>
-                              );
-
-                            case "total":
-                              return (
-                                <td key="total" className="px-3 py-2 text-right font-bold font-mono text-text-main">
-                                  ₹ {line.calculated.total_amount.toFixed(2)}
-                                </td>
-                              );
-
-                            case "actions":
-                              return (
-                                <td key="actions" className="px-3 py-2 text-center">
-                                  <button
-                                    onClick={() => removeLine(line.id)}
-                                    className="rounded-[6px] p-1 text-text-muted hover:bg-[var(--color-danger-bg)] hover:text-[var(--color-danger-text)] cursor-pointer transition-colors"
-                                    title="Delete line"
-                                  >
-                                    <Trash2 className="h-3.5 w-3.5" />
-                                  </button>
-                                </td>
-                              );
-
-                            default:
-                              return null;
-                          }
-                        })}
+                    productEntryStyle === "search_bar" ? (
+                      <tr>
+                        <td colSpan={visibleCols.length} className="py-16 text-center text-[var(--color-text-muted)]">
+                          <Barcode className="mx-auto h-8 w-8 text-[var(--color-text-faint)] mb-2" />
+                          <p className="font-semibold text-sm text-[var(--color-text)]">Billing cart is empty</p>
+                          <p className="text-[11px] text-[var(--color-text-muted)] mt-0.5">Scan a barcode or type a product name to begin billing</p>
+                        </td>
                       </tr>
-                    );
-                  })
-                )}
+                    ) : entryRowPosition === "bottom" ? (
+                      <tr>
+                        <td colSpan={visibleCols.length} className="py-12 text-center text-[var(--color-text-muted)]">
+                          <Barcode className="mx-auto h-7 w-7 text-[var(--color-text-faint)] mb-1.5" />
+                          <p className="font-medium text-xs text-[var(--color-text-muted)]">Enter products in the row below or scan barcode</p>
+                        </td>
+                      </tr>
+                    ) : null
+                  ) : (
+                    lines.map((line, idx) => (
+                      <PosGridRow
+                        key={line.id}
+                        idx={idx}
+                        line={line}
+                        isJustAdded={line.id === justAddedLineId}
+                        isSelected={selectedRowIndex === idx}
+                        visibleCols={visibleCols}
+                        doctorName={doctorName}
+                        onSelectRow={() => handleSelectRow(idx)}
+                        onQtyChange={(newPacks, newLoose) => {
+                          posCartService.updateLineQuantity(line.id, newPacks, newLoose);
+                          refreshCartState();
+                        }}
+                        onQtyEnter={() => handleQtyEnterAdvance(idx)}
+                        onRateChange={(newPrice, basis) => {
+                          posCartService.updateLinePrice(line.id, newPrice, basis);
+                          refreshCartState();
+                        }}
+                        onDiscountClick={() => {
+                          setSelectedRowIndex(idx);
+                          handleQuickDiscount(line);
+                        }}
+                        onEditProductBatch={() => {
+                          setSelectedRowIndex(idx);
+                          setSelectedLineForProductBatchEdit(line);
+                        }}
+                        onEditConversion={() => {
+                          setSelectedLineForConversion(line);
+                        }}
+                        onRemoveLine={() => removeLine(line.id)}
+                      />
+                    ))
+                  )}
                 </tbody>
+                {productEntryStyle === "inline_row" && entryRowPosition === "bottom" && (
+                  <tfoot className="sticky bottom-0 bg-[var(--color-surface)] z-10 border-t-2 border-accent/40 shadow-[0_-2px_8px_rgba(0,0,0,0.06)]">
+                    {renderInlineEntryRow()}
+                  </tfoot>
+                )}
               </table>
             </div>
           );
@@ -2491,22 +3009,32 @@ export const PosBillingPage: React.FC = () => {
         {/* Bottom Totals & Settlement Bar */}
         <div className="flex flex-wrap items-center justify-between border-t border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-3 gap-3">
           <div className="flex flex-wrap items-center gap-4 sm:gap-6 text-xs text-[var(--color-text-muted)]">
-            <div>
+            <div className="flex items-center gap-1.5">
               <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--color-text-muted)]">Items: </span>
-              <span className="font-bold font-mono text-[var(--color-text)]">{lines.length}</span>
+              <span className="font-bold font-mono text-[var(--color-text)]">
+                {lines.length}
+                {displayTotals.pendingLineCount > 0 && (
+                  <span className="ml-1 text-xs text-amber-600 font-semibold">(+1 pending)</span>
+                )}
+              </span>
+              {displayTotals.pendingLineCount > 0 && (
+                <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 text-[10px] font-bold border border-amber-300">
+                  Pending line (1)
+                </span>
+              )}
             </div>
             <div>
               <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--color-text-muted)]">Subtotal: </span>
-              <span className="font-bold font-mono text-[var(--color-text)]">₹ {totals.taxable_subtotal.toFixed(2)}</span>
+              <span className="font-bold font-mono text-[var(--color-text)]">₹ {displayTotals.taxable_subtotal.toFixed(2)}</span>
             </div>
-            {totals.line_discount_total > 0 && (
+            {displayTotals.line_discount_total > 0 && (
               <div className="text-[var(--color-warning-text)]">
                 <span className="text-[11px] font-bold uppercase tracking-wider">Line Disc: </span>
-                <span className="font-bold font-mono">-₹ {totals.line_discount_total.toFixed(2)}</span>
+                <span className="font-bold font-mono">-₹ {displayTotals.line_discount_total.toFixed(2)}</span>
               </div>
             )}
             <div>
-              {totals.bill_discount_amount > 0 ? (
+              {displayTotals.bill_discount_amount > 0 ? (
                 <button
                   type="button"
                   tabIndex={-1}
@@ -2514,7 +3042,7 @@ export const PosBillingPage: React.FC = () => {
                   className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-[8px] bg-[var(--color-warning-bg)] hover:opacity-90 text-[var(--color-warning-text)] font-bold border border-[var(--color-warning-border)] shadow-2xs transition-colors cursor-pointer"
                   title="Edit Overall Bill Discount (Ctrl+F2)"
                 >
-                  <span className="font-mono">Bill Disc: -₹{totals.bill_discount_amount.toFixed(2)}</span>
+                  <span className="font-mono">Bill Disc: -₹{displayTotals.bill_discount_amount.toFixed(2)}</span>
                   <span className="text-[10px] text-[var(--color-warning-text)] font-mono opacity-80">Ctrl+F2</span>
                 </button>
               ) : (
@@ -2532,9 +3060,9 @@ export const PosBillingPage: React.FC = () => {
             </div>
             <div>
               <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--color-text-muted)]">
-                {totals.igst_total > 0 || posCartService.getIsInterState() ? "IGST Tax: " : "GST Tax: "}
+                {displayTotals.igst_total > 0 || posCartService.getIsInterState() ? "IGST Tax: " : "GST Tax: "}
               </span>
-              <span className="font-bold font-mono text-[var(--color-text)]">₹ {totals.total_tax.toFixed(2)}</span>
+              <span className="font-bold font-mono text-[var(--color-text)]">₹ {displayTotals.total_tax.toFixed(2)}</span>
             </div>
             <div>
               <button
@@ -2549,7 +3077,7 @@ export const PosBillingPage: React.FC = () => {
                 title="Adjust Round-Off / Net Payable (Alt+R)"
               >
                 <span className="font-mono">
-                  Round-off: {totals.round_off >= 0 ? `+₹${totals.round_off.toFixed(2)}` : `-₹${Math.abs(totals.round_off).toFixed(2)}`}
+                  Round-off: {displayTotals.round_off >= 0 ? `+₹${displayTotals.round_off.toFixed(2)}` : `-₹${Math.abs(displayTotals.round_off).toFixed(2)}`}
                 </span>
                 <span className="text-[10px] font-mono text-[var(--color-text-muted)]">Alt+R</span>
               </button>
@@ -2566,13 +3094,13 @@ export const PosBillingPage: React.FC = () => {
                 Net Payable
               </span>
               <p className="text-[38px] lg:text-[44px] font-bold font-mono leading-none tracking-tight text-[var(--color-accent)] tabular-nums">
-                ₹ {totals.grand_total.toFixed(2)}
+                ₹ {displayTotals.grand_total.toFixed(2)}
               </p>
             </div>
 
             <button
               onClick={openTenderModal}
-              disabled={lines.length === 0}
+              disabled={lines.length === 0 && !draftLine}
               className="flex items-center gap-2 rounded-[10px] bg-[var(--color-accent)] px-6 py-3 text-sm font-bold text-white shadow-xs hover:bg-[var(--color-accent-hover)] disabled:opacity-40 transition-all cursor-pointer h-[48px]"
             >
               <CreditCard className="h-4 w-4" />
@@ -2699,7 +3227,7 @@ export const PosBillingPage: React.FC = () => {
                         </div>
                         <div className="flex items-center gap-3 text-[11px] mt-0.5">
                           <span className={isExpired ? "text-rose-600 font-semibold" : "text-slate-500"}>
-                            Exp: {b.expiry_date}
+                            Exp: {formatExpiryDisplay(b.expiry_date)}
                           </span>
                           {b.rack_location && (
                             <span className="text-slate-400">Rack: {b.rack_location}</span>
@@ -2803,197 +3331,699 @@ export const PosBillingPage: React.FC = () => {
       })()}
 
       {/* Tender / Settlement Modal (F12) */}
-      {isTenderModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 select-none font-sans animate-in fade-in duration-100">
-          <div className="w-full max-w-md rounded-card bg-surface shadow-modal overflow-hidden border border-border-main">
-            <div className="flex items-center justify-between border-b border-border-main px-5 py-3.5 bg-canvas">
-              <div>
-                <div className="flex items-center gap-2 mb-0.5">
-                  <h3 className="text-sm font-bold text-text-main">Bill Settlement</h3>
-                  {(() => {
-                    const activeStore = storeRegistryService.getActiveStore();
-                    if (!activeStore) return null;
-                    return (
-                      <span
-                        className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-bold border"
-                        style={{
-                          backgroundColor: `${activeStore.color}15`,
-                          borderColor: `${activeStore.color}40`,
-                          color: activeStore.color,
-                        }}
+      {isTenderModalOpen && (() => {
+        const appSettings = companySettingsService.getSettings();
+        const rawModes: PaymentModeConfig[] = appSettings.payments?.modes?.length ? appSettings.payments.modes : DEFAULT_PAYMENT_MODES;
+        const modeConfigs: Record<string, PaymentModeConfig> = {};
+        for (const m of rawModes) {
+          modeConfigs[m.name] = m;
+        }
+        const upiLine = tenders.find((t) => t.mode === "UPI" && t.amount > 0);
+        const creditLine = tenders.find((t) => t.mode === "Credit" && t.amount > 0);
+        const hasNamedCustomer = Boolean(selectedCustomer || (customerName && customerName.trim() !== "Walk-in Customer"));
+        const availableModes = [
+          "Cash",
+          "UPI",
+          "Card",
+          "Bank Transfer",
+          "Cheque",
+          "Wallet",
+          "Gift Voucher",
+          "Credit",
+        ].filter((m) => modeConfigs[m]?.enabled !== false);
+
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 select-none font-sans animate-in fade-in duration-100">
+            <div className="w-full max-w-3xl max-h-[92vh] flex flex-col rounded-card bg-surface shadow-modal overflow-hidden border border-border-main">
+              {/* Modal Header */}
+              <div className="flex items-center justify-between border-b border-border-main px-5 py-3.5 bg-canvas shrink-0">
+                <div>
+                  <div className="flex items-center gap-2 mb-0.5">
+                    <h3 className="text-sm font-bold text-text-main">Bill Settlement (F12)</h3>
+                    {(() => {
+                      const activeStore = storeRegistryService.getActiveStore();
+                      if (!activeStore) return null;
+                      return (
+                        <span
+                          className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-bold border"
+                          style={{
+                            backgroundColor: `${activeStore.color}15`,
+                            borderColor: `${activeStore.color}40`,
+                            color: activeStore.color,
+                          }}
+                        >
+                          <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: activeStore.color }} />
+                          {activeStore.alias || activeStore.name}
+                        </span>
+                      );
+                    })()}
+                  </div>
+                  <p className="text-[11px] text-text-muted font-mono">Invoice: {invoiceNumber}</p>
+                </div>
+                <button
+                  onClick={() => setIsTenderModalOpen(false)}
+                  className="text-text-muted hover:text-text-main p-1.5 rounded-btn hover:bg-surface transition-colors cursor-pointer"
+                  title="Close (Esc)"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+
+              {/* Scrollable Body */}
+              <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-4">
+                {/* 1. Live Totals Summary */}
+                <div className="grid grid-cols-3 gap-3">
+                  <div className="rounded-lg bg-slate-50 border border-slate-200 p-3 text-center">
+                    <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide">Total Due</span>
+                    <p className="text-xl font-black text-slate-900 mt-0.5">₹ {totals.grand_total.toFixed(2)}</p>
+                  </div>
+                  <div className="rounded-lg bg-blue-50 border border-blue-200 p-3 text-center">
+                    <span className="text-[11px] font-semibold text-blue-600 uppercase tracking-wide">Paid So Far</span>
+                    <p className="text-xl font-black text-blue-900 mt-0.5">₹ {tenderCalc.totalPaid.toFixed(2)}</p>
+                  </div>
+                  <div
+                    className={`rounded-lg border p-3 text-center transition-colors ${
+                      tenderCalc.nonCashOverpaid
+                        ? "bg-rose-50 border-rose-300 text-rose-900"
+                        : tenderCalc.isFullyPaid
+                        ? "bg-emerald-50 border-emerald-300 text-emerald-900"
+                        : "bg-amber-50 border-amber-300 text-amber-900"
+                    }`}
+                  >
+                    <span className="text-[11px] font-semibold uppercase tracking-wide">
+                      {tenderCalc.nonCashOverpaid
+                        ? "Non-Cash Overpaid"
+                        : tenderCalc.isFullyPaid
+                        ? tenderCalc.changeDue > 0
+                          ? "Change Due"
+                          : "Settlement Status"
+                        : "Balance Remaining"}
+                    </span>
+                    <p className="text-xl font-black mt-0.5">
+                      {tenderCalc.nonCashOverpaid
+                        ? "Blocked"
+                        : tenderCalc.isFullyPaid
+                        ? tenderCalc.changeDue > 0
+                          ? `₹ ${tenderCalc.changeDue.toFixed(2)}`
+                          : "Fully Paid"
+                        : `₹ ${tenderCalc.balanceRemaining.toFixed(2)}`}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Non-cash Overpayment Error Alert */}
+                {tenderCalc.nonCashOverpaid && (
+                  <div className="flex items-center gap-2 rounded-lg bg-rose-50 border border-rose-200 p-2.5 text-xs text-rose-800">
+                    <AlertCircle className="h-4 w-4 shrink-0 text-rose-600" />
+                    <span>Non-cash tender (UPI, Card, Bank) cannot exceed the bill amount. Change is only returned for Cash tenders.</span>
+                  </div>
+                )}
+
+                {/* 2. Quick Mode & Helper Actions */}
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="text-xs font-semibold text-slate-700">Quick Tender / Add Mode</label>
+                    <div className="flex items-center gap-1.5 text-[11px]">
+                      <button
+                        type="button"
+                        onClick={handleSplitHalf}
+                        className="px-2 py-0.5 rounded border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 font-medium cursor-pointer"
+                        title="Split bill 50/50 between Cash and UPI (Hotkey: H)"
                       >
-                        <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: activeStore.color }} />
-                        {activeStore.alias || activeStore.name}
-                      </span>
-                    );
-                  })()}
-                </div>
-                <p className="text-[11px] text-text-muted font-mono">Invoice: {invoiceNumber}</p>
-              </div>
-              <button
-                onClick={() => setIsTenderModalOpen(false)}
-                className="text-text-muted hover:text-text-main p-1 rounded-btn hover:bg-surface transition-colors cursor-pointer"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-
-            <div className="p-5 space-y-4">
-              <div className="rounded-lg bg-blue-50 p-3 text-center">
-                <span className="text-xs font-semibold text-blue-600">Total Amount Due</span>
-                <p className="text-2xl font-black text-blue-800">₹ {totals.grand_total.toFixed(2)}</p>
-              </div>
-
-              {/* Payment Mode Selector */}
-              <div>
-                <label className="text-xs font-semibold text-slate-700 block mb-1.5">Payment Tender Mode</label>
-                <div className="grid grid-cols-3 gap-2">
-                  {(["Cash", "UPI", "Card", "Credit"] as const).map((mode) => (
-                    <button
-                      key={mode}
-                      type="button"
-                      disabled={isFinalizing}
-                      onClick={() => setTenders([{ mode, amount: totals.grand_total }])}
-                      className={`rounded-lg py-2 text-xs font-semibold border transition-all disabled:opacity-50 disabled:cursor-not-allowed ${
-                        tenders[0]?.mode === mode
-                          ? "border-blue-600 bg-blue-600 text-white shadow-sm"
-                          : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
-                      }`}
-                    >
-                      {mode}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Cash Received & Change Return Calculation */}
-              {tenders[0]?.mode === "Cash" && (
-                <div className="space-y-3 rounded-lg border border-slate-200 bg-slate-50/50 p-3">
-                  <div>
-                    <label className="text-[11px] font-semibold text-slate-600 block mb-1">Cash Received from Customer</label>
-                    <input
-                      ref={tenderCashInputRef}
-                      type="number"
-                      disabled={isFinalizing}
-                      value={receivedCash}
-                      onChange={(e) => setReceivedCash(parseFloat(e.target.value) || 0)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") {
-                          e.preventDefault();
-                          handleFinalizeAndPrint();
-                        }
-                      }}
-                      className="w-full rounded border border-slate-300 bg-white px-3 py-1.5 text-sm font-bold text-slate-800 focus:border-blue-600 focus:outline-none disabled:bg-slate-100 disabled:cursor-not-allowed"
-                    />
+                        Split 50/50 <span className="text-slate-400 font-mono">[H]</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleFillRemainder(activeTenderIndex)}
+                        className="px-2 py-0.5 rounded border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 font-medium cursor-pointer"
+                        title="Fill remaining balance into current line (Hotkey: F)"
+                      >
+                        Fill Remainder <span className="text-slate-400 font-mono">[F]</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleAddPaymentLine("Cash")}
+                        className="px-2 py-0.5 rounded border border-blue-300 bg-blue-50 hover:bg-blue-100 text-blue-700 font-semibold cursor-pointer"
+                        title="Add another payment line (Hotkey: Alt+A or +)"
+                      >
+                        + Add Payment <span className="text-blue-400 font-mono">[Alt+A]</span>
+                      </button>
+                    </div>
                   </div>
-                  <div className="flex justify-between items-center text-xs">
-                    <span className="font-semibold text-slate-500">Change Due to Customer:</span>
-                    <span className="text-sm font-bold text-emerald-700">₹ {calculatedBalanceChange.toFixed(2)}</span>
+                  <div className="grid grid-cols-4 sm:grid-cols-8 gap-1.5">
+                    {availableModes.map((mode, idx) => {
+                      const shortcutKey = idx < 8 ? idx + 1 : "";
+                      return (
+                        <button
+                          key={mode}
+                          type="button"
+                          disabled={isFinalizing}
+                          onClick={() => {
+                            if (tenders.length === 1 && (tenders[0].amount >= totals.grand_total || tenders[0].amount === 0)) {
+                              handleUpdatePaymentLine(0, { mode });
+                            } else if (tenderCalc.balanceRemaining > 0) {
+                              handleAddPaymentLine(mode);
+                            } else {
+                              handleUpdatePaymentLine(activeTenderIndex, { mode });
+                            }
+                          }}
+                          className={`rounded-lg py-1.5 px-1 text-center border transition-all text-xs font-semibold cursor-pointer disabled:opacity-50 ${
+                            tenders[activeTenderIndex]?.mode === mode
+                              ? "border-blue-600 bg-blue-600 text-white shadow-xs"
+                              : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                          }`}
+                        >
+                          <div className="truncate">{mode}</div>
+                          {shortcutKey && (
+                            <div className={`text-[10px] font-mono ${tenders[activeTenderIndex]?.mode === mode ? "text-blue-100" : "text-slate-400"}`}>
+                              [{shortcutKey}]
+                            </div>
+                          )}
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
-              )}
 
-              {/* Print Output Format Selector */}
-              <div>
-                <label className="text-xs font-semibold text-slate-700 block mb-1.5">Print Output Format</label>
-                <div className="grid grid-cols-3 gap-2">
+                {/* Cash Quick Denominations */}
+                {(appSettings.payments?.enableQuickDenominations ?? true) && tenders[activeTenderIndex]?.mode === "Cash" && (
+                  <div className="flex items-center gap-2 p-2 rounded-lg bg-emerald-50/60 border border-emerald-200">
+                    <span className="text-[11px] font-semibold text-emerald-800 shrink-0">Cash Denominations:</span>
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      {[100, 200, 500, 2000].map((denom) => (
+                        <button
+                          key={denom}
+                          type="button"
+                          onClick={() => handleAddDenomination(denom, activeTenderIndex)}
+                          className="px-2 py-0.5 rounded bg-white border border-emerald-300 text-emerald-800 text-[11px] font-bold hover:bg-emerald-100 transition-colors cursor-pointer"
+                        >
+                          +₹{denom}
+                        </button>
+                      ))}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const rem = billingTenderService.calculateRemainderForLine(totals.grand_total, tenders, activeTenderIndex);
+                          handleUpdatePaymentLine(activeTenderIndex, { amount: rem });
+                        }}
+                        className="px-2 py-0.5 rounded bg-emerald-600 text-white text-[11px] font-bold hover:bg-emerald-700 transition-colors cursor-pointer"
+                      >
+                        Exact Amount
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* 3. Payment Lines List */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-semibold text-slate-700">
+                      Payment Tender Lines ({tenders.length})
+                    </span>
+                    <span className="text-[11px] text-slate-500">
+                      Enter on last line saves | Tab moves next
+                    </span>
+                  </div>
+
+                  <div className="space-y-2">
+                    {tenders.map((line, idx) => {
+                      const modeCfg = modeConfigs[line.mode] || {
+                        id: line.mode.toLowerCase(),
+                        name: line.mode,
+                        enabled: true,
+                        referenceRequirement: "off",
+                        referenceLabel: "Ref",
+                        duplicateCheck: "off",
+                      };
+                      const isRefRequired = modeCfg.referenceRequirement === "required";
+                      const showRefField = modeCfg.referenceRequirement !== "off";
+                      const isExtrasOpen = Boolean(expandedTenderExtras[idx]);
+                      const hasExtraFields =
+                        Boolean(modeCfg.extraFields?.cardLastFour) ||
+                        Boolean(modeCfg.extraFields?.cardNetwork) ||
+                        Boolean(modeCfg.extraFields?.bankName) ||
+                        Boolean(modeCfg.extraFields?.chequeDate) ||
+                        Boolean(modeCfg.extraFields?.payerVpa) ||
+                        Boolean(modeCfg.extraFields?.notes) ||
+                        line.mode === "Cheque" ||
+                        line.mode === "Bank Transfer";
+
+                      return (
+                        <div
+                          key={line.id || `tender_${idx}`}
+                          className={`rounded-lg border p-3 transition-colors ${
+                            idx === activeTenderIndex
+                              ? "border-blue-400 bg-blue-50/20 shadow-xs"
+                              : "border-slate-200 bg-white"
+                          }`}
+                          onClick={() => setActiveTenderIndex(idx)}
+                        >
+                          <div className="flex items-center gap-2">
+                            <span className="w-5 text-center text-xs font-mono font-bold text-slate-400">
+                              #{idx + 1}
+                            </span>
+
+                            {/* Mode Dropdown */}
+                            <div className="w-32 shrink-0">
+                              <select
+                                value={line.mode}
+                                onChange={(e) => handleUpdatePaymentLine(idx, { mode: e.target.value })}
+                                className="w-full rounded border border-slate-300 bg-white px-2 py-1.5 text-xs font-semibold text-slate-800 focus:border-blue-600 focus:outline-none"
+                              >
+                                {availableModes.map((m) => (
+                                  <option key={m} value={m}>
+                                    {m}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+
+                            {/* Amount Input */}
+                            <div className="w-36 shrink-0 relative">
+                              <div className="absolute left-2.5 top-1.5 text-xs font-bold text-slate-400 pointer-events-none">
+                                ₹
+                              </div>
+                              <input
+                                ref={(el) => {
+                                  tenderAmountInputRefs.current[idx] = el;
+                                  if (idx === 0) tenderCashInputRef.current = el;
+                                }}
+                                type="number"
+                                step="0.01"
+                                disabled={isFinalizing}
+                                value={line.amount === 0 ? "" : line.amount}
+                                placeholder="0.00"
+                                onFocus={() => setActiveTenderIndex(idx)}
+                                onChange={(e) => {
+                                  const val = parseFloat(e.target.value);
+                                  handleUpdatePaymentLine(idx, { amount: isNaN(val) ? 0 : val });
+                                }}
+                                onKeyDown={(e) => {
+                                  if (e.key === "ArrowUp") {
+                                    e.preventDefault();
+                                    const step = e.shiftKey ? 10 : 1;
+                                    handleUpdatePaymentLine(idx, {
+                                      amount: Math.round(((line.amount || 0) + step) * 100) / 100,
+                                    });
+                                  } else if (e.key === "ArrowDown") {
+                                    e.preventDefault();
+                                    const step = e.shiftKey ? 10 : 1;
+                                    handleUpdatePaymentLine(idx, {
+                                      amount: Math.max(0, Math.round(((line.amount || 0) - step) * 100) / 100),
+                                    });
+                                  } else if (e.key === "Enter") {
+                                    e.preventDefault();
+                                    const rem = billingTenderService.calculateRemainderForLine(totals.grand_total, tenders, idx);
+                                    if (rem > 0 && idx === tenders.length - 1) {
+                                      handleAddPaymentLine(line.mode === "Cash" ? "UPI" : "Cash");
+                                    } else if (idx < tenders.length - 1) {
+                                      tenderAmountInputRefs.current[idx + 1]?.focus();
+                                      tenderAmountInputRefs.current[idx + 1]?.select();
+                                    } else {
+                                      handleFinalizeAndPrint(false);
+                                    }
+                                  }
+                                }}
+                                className="w-full rounded border border-slate-300 bg-white pl-6 pr-2 py-1.5 text-sm font-bold font-mono text-right text-slate-900 focus:border-blue-600 focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                              />
+                            </div>
+
+                            {/* Reference / Txn ID */}
+                            {showRefField ? (
+                              <div className="flex-1 relative">
+                                <input
+                                  type="text"
+                                  disabled={isFinalizing}
+                                  value={line.reference || ""}
+                                  placeholder={
+                                    modeCfg.referencePlaceholder ||
+                                    `${modeCfg.referenceLabel || "Ref ID"}${isRefRequired ? " *" : " (optional)"}`
+                                  }
+                                  onChange={(e) => handleUpdatePaymentLine(idx, { reference: e.target.value })}
+                                  className={`w-full rounded border px-2.5 py-1.5 text-xs text-slate-800 placeholder-slate-400 focus:outline-none ${
+                                    isRefRequired && !line.reference?.trim()
+                                      ? "border-amber-300 bg-amber-50/30 focus:border-blue-600"
+                                      : "border-slate-300 bg-white focus:border-blue-600"
+                                  }`}
+                                />
+                              </div>
+                            ) : (
+                              <div className="flex-1 text-[11px] text-slate-400 italic">No reference required</div>
+                            )}
+
+                            {/* Extras toggle button */}
+                            {hasExtraFields && (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setExpandedTenderExtras((prev) => ({
+                                    ...prev,
+                                    [idx]: !prev[idx],
+                                  }))
+                                }
+                                className={`p-1.5 rounded border text-xs cursor-pointer transition-colors ${
+                                  isExtrasOpen
+                                    ? "border-blue-400 bg-blue-50 text-blue-700"
+                                    : "border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100"
+                                }`}
+                                title="Extra details (Card last 4, Bank, Cheque Date, Notes)"
+                              >
+                                {isExtrasOpen ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+                              </button>
+                            )}
+
+                            {/* Remove Line Button */}
+                            <button
+                              type="button"
+                              disabled={tenders.length <= 1 || isFinalizing}
+                              onClick={() => handleRemovePaymentLine(idx)}
+                              className="p-1.5 rounded text-slate-400 hover:text-rose-600 hover:bg-rose-50 disabled:opacity-30 disabled:cursor-not-allowed transition-colors cursor-pointer"
+                              title="Delete payment line"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+
+                          {/* Expandable Extras Tray */}
+                          {isExtrasOpen && (
+                            <div className="mt-2.5 pt-2.5 border-t border-slate-200/80 grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px] animate-in fade-in duration-100">
+                              {(line.mode === "Cheque" || line.mode === "Bank Transfer") && (
+                                <div className="col-span-2 sm:col-span-4 flex items-center gap-2 p-1.5 rounded bg-amber-50/60 border border-amber-200 text-amber-900">
+                                  <input
+                                    type="checkbox"
+                                    id={`pending_clear_${idx}`}
+                                    checked={line.status === "pending_clearance"}
+                                    onChange={(e) =>
+                                      handleUpdatePaymentLine(idx, {
+                                        status: e.target.checked ? "pending_clearance" : "received",
+                                      })
+                                    }
+                                    className="rounded border-amber-300 text-blue-600 focus:ring-0 cursor-pointer"
+                                  />
+                                  <label htmlFor={`pending_clear_${idx}`} className="cursor-pointer font-medium">
+                                    Mark as pending clearance (Receipt report will track clearance)
+                                  </label>
+                                </div>
+                              )}
+
+                              {Boolean(modeCfg.extraFields?.cardLastFour) && (
+                                <div>
+                                  <label className="text-slate-500 block mb-0.5">Card Last 4 Digits</label>
+                                  <input
+                                    type="text"
+                                    maxLength={4}
+                                    placeholder="•••• 1234"
+                                    value={line.card_last_four || ""}
+                                    onChange={(e) =>
+                                      handleUpdatePaymentLine(idx, {
+                                        card_last_four: e.target.value.replace(/\D/g, "").slice(0, 4),
+                                      })
+                                    }
+                                    className="w-full rounded border border-slate-300 px-2 py-1 text-xs font-mono text-slate-800"
+                                  />
+                                </div>
+                              )}
+
+                              {Boolean(modeCfg.extraFields?.cardNetwork) && (
+                                <div>
+                                  <label className="text-slate-500 block mb-0.5">Card Network</label>
+                                  <select
+                                    value={line.card_network || ""}
+                                    onChange={(e) => handleUpdatePaymentLine(idx, { card_network: e.target.value })}
+                                    className="w-full rounded border border-slate-300 px-2 py-1 text-xs text-slate-800"
+                                  >
+                                    <option value="">Select network</option>
+                                    <option value="Visa">Visa</option>
+                                    <option value="Mastercard">Mastercard</option>
+                                    <option value="RuPay">RuPay</option>
+                                    <option value="Amex">Amex</option>
+                                  </select>
+                                </div>
+                              )}
+
+                              {Boolean(modeCfg.extraFields?.bankName) && (
+                                <div>
+                                  <label className="text-slate-500 block mb-0.5">Bank Name</label>
+                                  <input
+                                    type="text"
+                                    placeholder="e.g. HDFC / SBI"
+                                    value={line.bank_name || ""}
+                                    onChange={(e) => handleUpdatePaymentLine(idx, { bank_name: e.target.value })}
+                                    className="w-full rounded border border-slate-300 px-2 py-1 text-xs text-slate-800"
+                                  />
+                                </div>
+                              )}
+
+                              {Boolean(modeCfg.extraFields?.chequeDate) && (
+                                <div>
+                                  <label className="text-slate-500 block mb-0.5">Cheque Date</label>
+                                  <input
+                                    type="date"
+                                    value={line.cheque_date || ""}
+                                    onChange={(e) => handleUpdatePaymentLine(idx, { cheque_date: e.target.value })}
+                                    className="w-full rounded border border-slate-300 px-2 py-1 text-xs text-slate-800"
+                                  />
+                                </div>
+                              )}
+
+                              {Boolean(modeCfg.extraFields?.payerVpa) && (
+                                <div>
+                                  <label className="text-slate-500 block mb-0.5">Customer UPI VPA</label>
+                                  <input
+                                    type="text"
+                                    placeholder="customer@okhdfcbank"
+                                    value={line.payer_vpa || ""}
+                                    onChange={(e) => handleUpdatePaymentLine(idx, { payer_vpa: e.target.value })}
+                                    className="w-full rounded border border-slate-300 px-2 py-1 text-xs text-slate-800"
+                                  />
+                                </div>
+                              )}
+
+                              {Boolean(modeCfg.extraFields?.notes) && (
+                                <div className="col-span-2">
+                                  <label className="text-slate-500 block mb-0.5">Payment Memo / Note</label>
+                                  <input
+                                    type="text"
+                                    placeholder="Optional note"
+                                    value={line.notes || ""}
+                                    onChange={(e) => handleUpdatePaymentLine(idx, { notes: e.target.value })}
+                                    className="w-full rounded border border-slate-300 px-2 py-1 text-xs text-slate-800"
+                                  />
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* 4. Dynamic UPI QR Panel */}
+                {upiLine && (appSettings.payments?.enableDynamicUpiQr ?? true) && (
+                  <div className="rounded-lg border border-indigo-200 bg-indigo-50/40 p-3 flex flex-col sm:flex-row items-center gap-4">
+                    <div className="shrink-0 bg-white p-2 rounded-lg border border-indigo-200 shadow-xs flex items-center justify-center">
+                      {(() => {
+                        const upiUri = `upi://pay?pa=${encodeURIComponent(
+                          appSettings.payments?.upiVpa || "store@upi"
+                        )}&pn=${encodeURIComponent(
+                          appSettings.payments?.upiPayeeName || "LamSuite Billing"
+                        )}&am=${upiLine.amount.toFixed(2)}&cu=INR&tn=${encodeURIComponent(`Inv ${invoiceNumber}`)}`;
+                        const svg = generateQrCodeSvg(upiUri, 110);
+                        return <div dangerouslySetInnerHTML={{ __html: svg }} />;
+                      })()}
+                    </div>
+                    <div className="flex-1 space-y-1.5 text-xs text-slate-700">
+                      <div className="flex items-center gap-1.5">
+                        <QrCode className="h-4 w-4 text-indigo-600" />
+                        <span className="font-bold text-indigo-900">Dynamic UPI Payment QR</span>
+                      </div>
+                      <p className="text-[11px] text-slate-600">
+                        Scan with GPay, PhonePe, Paytm or BHIM for exact bill amount of{" "}
+                        <strong className="text-indigo-900 font-bold">₹ {upiLine.amount.toFixed(2)}</strong>.
+                      </p>
+                      <div className="flex items-center gap-3 text-[11px] text-slate-500">
+                        <span>VPA: <strong className="text-slate-700 font-mono">{appSettings.payments?.upiVpa || "store@upi"}</strong></span>
+                        <span>Ref: <strong className="text-slate-700 font-mono">Inv #{invoiceNumber}</strong></span>
+                      </div>
+                      <div className="pt-1">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const idx = tenders.indexOf(upiLine);
+                            if (idx >= 0) handleUpdatePaymentLine(idx, { status: "received" });
+                            showNotification("UPI payment marked as received!", "success");
+                          }}
+                          className="px-2.5 py-1 rounded bg-indigo-600 text-white text-[11px] font-semibold hover:bg-indigo-700 transition-colors cursor-pointer inline-flex items-center gap-1.5"
+                        >
+                          <CheckCircle className="h-3.5 w-3.5" />
+                          <span>Mark as Received</span>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* 5. Credit (Udhari) Rules Panel */}
+                {creditLine && (
+                  <div
+                    className={`rounded-lg border p-3 text-xs space-y-2 ${
+                      !hasNamedCustomer
+                        ? "border-rose-300 bg-rose-50/60 text-rose-900"
+                        : "border-amber-300 bg-amber-50/50 text-amber-900"
+                    }`}
+                  >
+                    <div className="flex items-center gap-2 font-bold">
+                      <AlertTriangle className="h-4 w-4 shrink-0 text-amber-600" />
+                      <span>Credit Sale (Udhari) Check</span>
+                    </div>
+
+                    {!hasNamedCustomer ? (
+                      <p className="text-xs text-rose-700 font-semibold">
+                        Credit sales require a registered customer. Please select or add a customer to put ₹{" "}
+                        {creditLine.amount.toFixed(2)} on credit.
+                      </p>
+                    ) : (
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px] pt-1">
+                        <div>
+                          <span className="text-slate-500 block">Customer</span>
+                          <span className="font-bold text-slate-800">{selectedCustomer?.name || customerName}</span>
+                        </div>
+                        <div>
+                          <span className="text-slate-500 block">Current Balance</span>
+                          <span className="font-bold text-slate-800">
+                            ₹ {(selectedCustomer?.current_balance || 0).toFixed(2)}
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-slate-500 block">Credit Limit</span>
+                          <span className="font-bold text-slate-800">
+                            {selectedCustomer?.credit_limit ? `₹ ${selectedCustomer.credit_limit.toFixed(2)}` : "No limit"}
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-slate-500 block">New Balance After Sale</span>
+                          <span className="font-bold text-amber-950">
+                            ₹ {((selectedCustomer?.current_balance || 0) + creditLine.amount).toFixed(2)}
+                          </span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* 6. Print Output Format Selector */}
+                <div>
+                  <label className="text-xs font-semibold text-slate-700 block mb-1.5">
+                    Print Output Format (Saved per Counter)
+                  </label>
+                  <div className="grid grid-cols-3 sm:grid-cols-5 gap-1.5">
+                    {[
+                      { key: "thermal" as const, label: "Thermal 80mm", icon: Printer },
+                      { key: "a4" as const, label: "A4 Tax Invoice", icon: FileText },
+                      { key: "pdf" as const, label: "Save PDF", icon: Download },
+                      { key: "none" as const, label: "No Print", icon: X },
+                      { key: "ask" as const, label: "Ask Each Time", icon: Sliders },
+                    ].map((item) => {
+                      const Icon = item.icon;
+                      const isSelected = printFormat === item.key;
+                      return (
+                        <button
+                          key={item.key}
+                          type="button"
+                          disabled={isFinalizing}
+                          onClick={() => setPrintFormat(item.key)}
+                          className={`flex items-center justify-center gap-1.5 rounded-lg py-1.5 px-2 text-xs font-medium border transition-all cursor-pointer disabled:opacity-50 ${
+                            isSelected
+                              ? "border-blue-600 bg-blue-50 text-blue-700 font-bold shadow-xs"
+                              : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                          }`}
+                        >
+                          <Icon className="h-3.5 w-3.5 shrink-0" />
+                          <span className="truncate">{item.label}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* 7. Electronic Dispatch Actions */}
+                <div className="flex items-center gap-2 pt-1">
+                  <button
+                    type="button"
+                    disabled={isFinalizing || !customerPhone || customerPhone.trim().length < 10}
+                    onClick={handleShareWhatsApp}
+                    title={
+                      customerPhone && customerPhone.trim().length >= 10
+                        ? `Share via WhatsApp to ${customerPhone}`
+                        : "Enter a valid 10-digit customer phone to enable WhatsApp"
+                    }
+                    className="flex-1 flex items-center justify-center gap-1.5 rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-800 hover:bg-emerald-100 transition-colors disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                  >
+                    <MessageCircle className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
+                    <span>WhatsApp Bill {customerPhone ? `(${customerPhone.slice(-4)})` : ""}</span>
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isFinalizing || !selectedCustomer?.email}
+                    onClick={handleShareEmail}
+                    title={
+                      selectedCustomer?.email
+                        ? `Email invoice to ${selectedCustomer.email}`
+                        : "Customer has no email address on file"
+                    }
+                    className="flex-1 flex items-center justify-center gap-1.5 rounded-lg border border-slate-300 bg-slate-50 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100 transition-colors disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                  >
+                    <Mail className="h-3.5 w-3.5 text-slate-500 shrink-0" />
+                    <span>Email Invoice {selectedCustomer?.email ? `(${selectedCustomer.email.split("@")[0]})` : ""}</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Modal Footer (Sized cleanly on 1 line at >= 1366px screen width) */}
+              <div className="border-t border-slate-200 bg-slate-50 px-4 sm:px-5 py-3 flex items-center justify-between gap-3 shrink-0">
+                <div className="text-[11px] text-slate-500 font-mono hidden sm:block">
+                  Esc: Cancel | Ctrl+S: Save | F12: Save & Print
+                </div>
+                <div className="flex items-center gap-2 ml-auto">
                   <button
                     type="button"
                     disabled={isFinalizing}
-                    onClick={() => setPrintFormat("thermal")}
-                    className={`flex items-center justify-center gap-1.5 rounded-lg py-1.5 text-xs font-medium border disabled:opacity-50 disabled:cursor-not-allowed ${
-                      printFormat === "thermal"
-                        ? "border-blue-600 bg-blue-50 text-blue-700 font-bold"
-                        : "border-slate-200 text-slate-600 hover:bg-slate-50"
-                    }`}
+                    onClick={() => setIsTenderModalOpen(false)}
+                    className="rounded-lg border border-slate-200 bg-white px-3.5 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer whitespace-nowrap"
+                  >
+                    Cancel (Esc)
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isFinalizing || tenderCalc.nonCashOverpaid}
+                    onClick={() => handleFinalizeAndPrint(false)}
+                    className="flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3.5 py-1.5 text-xs font-bold text-slate-700 shadow-xs hover:bg-slate-50 hover:border-slate-400 disabled:opacity-50 disabled:cursor-not-allowed transition-all cursor-pointer whitespace-nowrap"
+                    title="Save bill without printing (Ctrl+S)"
+                  >
+                    <Save className="h-3.5 w-3.5 text-slate-600" />
+                    <span>{isFinalizing ? "Saving..." : "Save (Ctrl+S)"}</span>
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isFinalizing || tenderCalc.nonCashOverpaid}
+                    onClick={() => handleFinalizeAndPrint(true)}
+                    className="flex items-center gap-1.5 rounded-lg bg-emerald-600 px-4 py-1.5 text-xs font-bold text-white shadow-md hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all cursor-pointer whitespace-nowrap"
+                    title="Save and print bill (F12 or Enter)"
                   >
                     <Printer className="h-3.5 w-3.5" />
-                    <span>Thermal 80mm</span>
-                  </button>
-                  <button
-                    type="button"
-                    disabled={isFinalizing}
-                    onClick={() => setPrintFormat("a4")}
-                    className={`flex items-center justify-center gap-1.5 rounded-lg py-1.5 text-xs font-medium border disabled:opacity-50 disabled:cursor-not-allowed ${
-                      printFormat === "a4"
-                        ? "border-blue-600 bg-blue-50 text-blue-700 font-bold"
-                        : "border-slate-200 text-slate-600 hover:bg-slate-50"
-                    }`}
-                  >
-                    <FileText className="h-3.5 w-3.5" />
-                    <span>A4 Tax Invoice</span>
-                  </button>
-                  <button
-                    type="button"
-                    disabled={isFinalizing}
-                    onClick={() => setPrintFormat("pdf")}
-                    className={`flex items-center justify-center gap-1.5 rounded-lg py-1.5 text-xs font-medium border disabled:opacity-50 disabled:cursor-not-allowed ${
-                      printFormat === "pdf"
-                        ? "border-blue-600 bg-blue-50 text-blue-700 font-bold"
-                        : "border-slate-200 text-slate-600 hover:bg-slate-50"
-                    }`}
-                  >
-                    <Download className="h-3.5 w-3.5" />
-                    <span>Save PDF</span>
+                    <span>
+                      {isFinalizing
+                        ? "Saving..."
+                        : `Save & Print (${printFormat.toUpperCase()}) [F12]`}
+                    </span>
                   </button>
                 </div>
               </div>
-
-              {/* Electronic Dispatch Actions */}
-              <div className="flex items-center gap-2 pt-1">
-                <button
-                  type="button"
-                  disabled={isFinalizing}
-                  onClick={handleShareWhatsApp}
-                  className="flex-1 flex items-center justify-center gap-1.5 rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-800 hover:bg-emerald-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  <MessageCircle className="h-3.5 w-3.5 text-emerald-600" />
-                  <span>WhatsApp Bill</span>
-                </button>
-                <button
-                  type="button"
-                  disabled={isFinalizing}
-                  onClick={handleShareEmail}
-                  className="flex-1 flex items-center justify-center gap-1.5 rounded-lg border border-slate-300 bg-slate-50 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  <Mail className="h-3.5 w-3.5 text-slate-500" />
-                  <span>Email Invoice</span>
-                </button>
-              </div>
-            </div>
-
-            <div className="border-t border-slate-200 bg-slate-50 px-5 py-3.5 flex justify-end items-center gap-2">
-              <button
-                type="button"
-                disabled={isFinalizing}
-                onClick={() => setIsTenderModalOpen(false)}
-                className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                Cancel (Esc)
-              </button>
-              <button
-                type="button"
-                disabled={isFinalizing}
-                onClick={() => handleFinalizeAndPrint(false)}
-                className="flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-xs font-bold text-slate-700 shadow-xs hover:bg-slate-50 hover:border-slate-400 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
-                title="Save bill without printing"
-              >
-                <Save className="h-4 w-4 text-slate-600" />
-                <span>{isFinalizing ? "Saving..." : "Save"}</span>
-              </button>
-              <button
-                type="button"
-                disabled={isFinalizing}
-                onClick={() => handleFinalizeAndPrint(true)}
-                className="flex items-center gap-2 rounded-lg bg-emerald-600 px-5 py-2 text-xs font-bold text-white shadow-md hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
-              >
-                <Printer className="h-4 w-4" />
-                <span>{isFinalizing ? "Saving & Printing..." : `Save & Print (${printFormat.toUpperCase()})`}</span>
-              </button>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* Recall Held Bills Modal (F9) */}
       {isRecallModalOpen && (

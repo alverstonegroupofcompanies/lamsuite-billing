@@ -255,13 +255,21 @@ export class RemoteSyncManager {
       }
     } else if (syncEvt.entity_type === "invoice") {
       const payload = typeof syncEvt.client_data === "string" ? JSON.parse(syncEvt.client_data) : syncEvt.client_data;
-      if (payload && payload.id) {
-        const localId = `inv_${payload.id}`;
-        await sqliteStorage.insertRecord("invoices", localId, {
+      if (payload && (payload.id || payload.invoice_number)) {
+        const idKey = String(payload.id || payload.invoice_number);
+        await sqliteStorage.insertRecord("invoices", idKey, {
           ...payload,
-          id: localId,
+          id: idKey,
           sync_state: "synced",
         });
+        if (Array.isArray(payload.items)) {
+          for (const item of payload.items) {
+            await sqliteStorage.insertRecord("invoice_items", `item_${item.id || Math.random()}`, {
+              ...item,
+              invoice_id: idKey,
+            });
+          }
+        }
       }
     } else if (syncEvt.entity_type === "product" || syncEvt.entity_type === "party") {
       // Pull fresh deltas

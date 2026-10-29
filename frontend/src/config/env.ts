@@ -64,7 +64,7 @@ function resolveApiBaseUrl(): string {
     return buildTimeEnv.replace(/\/+$/, "");
   }
 
-  return "http://127.0.0.1:8001";
+  return "http://127.0.0.1:8000";
 }
 
 export const API_BASE_URL: string = resolveApiBaseUrl();
@@ -128,7 +128,7 @@ export const DEFAULT_LAN_PORT: number =
   ) || 8000;
 
 export function getResolvedApiBaseUrl(): string {
-  if (typeof localStorage !== "undefined") {
+  if (typeof localStorage !== "undefined" && typeof localStorage.getItem === "function") {
     const hubIp = localStorage.getItem("lamsuite_hub_ip");
     const hubPort = localStorage.getItem("lamsuite_hub_port") || "8000";
     if (

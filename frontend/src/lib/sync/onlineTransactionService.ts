@@ -2,8 +2,11 @@ import { sqliteStorage } from "../db/sqliteStorage";
 import { getResolvedApiBaseUrl } from "../../config/env";
 import { counterSequenceService, type DocType } from "../auth/counterSequenceService";
 import { storeDeviceService } from "../auth/storeDeviceService";
+import { storeRegistryService } from "../auth/storeRegistryService";
+import { staffAuthService } from "../auth/staffAuthService";
 import { syncQueueService } from "./syncQueueService";
 import { calculateDocumentTaxes } from "../tax-engine/taxEngine";
+import type { PaymentTenderLine } from "../billing/billingTenderService";
 
 export type ConnectionState = "online" | "slow" | "offline";
 
@@ -35,6 +38,8 @@ export interface OnlineInvoiceLinePayload {
 }
 
 export interface OnlineInvoicePayload {
+  store_id?: string | number;
+  store_code?: string;
   idempotency_key?: string;
   external_id?: string;
   invoice_number?: string;
@@ -47,6 +52,7 @@ export interface OnlineInvoicePayload {
   place_of_supply?: string;
   payment_mode?: string;
   paid_amount?: number;
+  payments?: PaymentTenderLine[];
   counter_id?: string;
   counter_code?: string;
   location_name?: string;
@@ -99,7 +105,11 @@ export class OnlineTransactionService {
     this.activeBaseUrl = url;
   }
 
-  private getEffectiveBaseUrl(): string {
+  setConnectionState(state: ConnectionState) {
+    this.connectionState = state;
+  }
+
+  getEffectiveBaseUrl(): string {
     return this.activeBaseUrl || getResolvedApiBaseUrl();
   }
 
@@ -129,22 +139,38 @@ export class OnlineTransactionService {
     let isConnected = false;
     let latency = 0;
 
-    try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 3000);
+    const urlsToTry = [this.getEffectiveBaseUrl()];
+    if (!urlsToTry.includes("http://127.0.0.1:8000")) {
+      urlsToTry.push("http://127.0.0.1:8000");
+    }
 
-      const res = await fetch(`${this.getEffectiveBaseUrl()}/api/lan/v1/health`, {
-        method: "GET",
-        signal: controller.signal,
-      });
-      clearTimeout(timeoutId);
+    for (const url of urlsToTry) {
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 2500);
 
-      latency = Date.now() - start;
-      if (res.ok) {
-        isConnected = true;
+        const res = await fetch(`${url}/api/lan/v1/health`, {
+          method: "GET",
+          headers: { Accept: "application/json" },
+          cache: "no-store",
+          signal: controller.signal,
+        });
+        clearTimeout(timeoutId);
+
+        latency = Date.now() - start;
+        if (res.ok) {
+          isConnected = true;
+          if (url !== this.getEffectiveBaseUrl()) {
+            this.activeBaseUrl = url;
+          }
+          break;
+        }
+      } catch {
+        // try next
       }
-    } catch {
-      isConnected = false;
+    }
+
+    if (!isConnected) {
       latency = Date.now() - start;
     }
 
@@ -253,11 +279,17 @@ export class OnlineTransactionService {
    */
   async replenishLeasedBlock(counterCode: string, docType: DocType = "invoice", blockSize = 50): Promise<boolean> {
     try {
+      const activeStore = storeRegistryService.getActiveStore();
+      const profile = await storeDeviceService.getDeviceProfile();
+      const storeId = String(activeStore?.id || profile?.store_id || "1");
+
       const res = await fetch(`${this.getEffectiveBaseUrl()}/api/counters/${counterCode}/lease-sequence`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Accept: "application/json",
+          "X-Store-Id": storeId,
+          "Store-Id": storeId,
         },
         body: JSON.stringify({
           doc_type: docType,
@@ -300,11 +332,17 @@ export class OnlineTransactionService {
    */
   async submitAuthoritativeInvoice(payload: OnlineInvoicePayload): Promise<AuthoritativeInvoiceResponse> {
     const profile = await storeDeviceService.getDeviceProfile();
+    const activeStore = storeRegistryService.getActiveStore();
+    const session = staffAuthService.getCurrentSession();
+    const resolvedStoreId = String(payload.store_id || activeStore?.id || session?.user?.store_id || profile?.store_id || "1");
+    const resolvedStoreCode = String(payload.store_code || activeStore?.code || profile?.store_code || "STORE-01");
     const counterCode = payload.counter_code || profile?.counter_code || "C01";
     const idempotencyKey = payload.idempotency_key || payload.external_id || `tx_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`;
 
     const effectivePayload: OnlineInvoicePayload = {
       ...payload,
+      store_id: resolvedStoreId,
+      store_code: resolvedStoreCode,
       idempotency_key: idempotencyKey,
       counter_code: counterCode,
     };
@@ -320,6 +358,8 @@ export class OnlineTransactionService {
           headers: {
             "Content-Type": "application/json",
             Accept: "application/json",
+            "X-Store-Id": resolvedStoreId,
+            "Store-Id": resolvedStoreId,
           },
           body: JSON.stringify(effectivePayload),
           signal: controller.signal,
@@ -377,6 +417,10 @@ export class OnlineTransactionService {
     idempotencyKey: string
   ): Promise<AuthoritativeInvoiceResponse> {
     const profile = await storeDeviceService.getDeviceProfile();
+    const activeStore = storeRegistryService.getActiveStore();
+    const session = staffAuthService.getCurrentSession();
+    const resolvedStoreId = String(payload.store_id || activeStore?.id || session?.user?.store_id || profile?.store_id || "1");
+    const resolvedStoreCode = String(payload.store_code || activeStore?.code || profile?.store_code || "STORE-01");
     const counterId = profile?.counter_code || counterCode || "C01";
 
     let assignedDocNumber = payload.invoice_number || "";
@@ -464,9 +508,33 @@ export class OnlineTransactionService {
     const finalRoundOff = docTaxes.round_off;
     const finalGrandTotal = docTaxes.grand_total;
 
+    const paymentLines = payload.payments && payload.payments.length > 0
+      ? payload.payments
+      : [{ mode: payload.payment_mode || "Cash", amount: payload.paid_amount ?? finalGrandTotal }];
+
+    let creditPortion = 0;
+    let totalPaid = 0;
+    for (const p of paymentLines) {
+      const upper = (p.mode || "").trim().toUpperCase();
+      if (upper === "CREDIT" || upper === "UDHARI") {
+        creditPortion += Number(p.amount) || 0;
+      } else {
+        totalPaid += Number(p.amount) || 0;
+      }
+    }
+    const primaryMode = paymentLines.length > 1 ? "Split" : (paymentLines[0]?.mode || "Cash");
+    let paymentStatus = "paid";
+    if (creditPortion >= finalGrandTotal - 0.01) {
+      paymentStatus = "unpaid";
+    } else if (creditPortion > 0.001 || totalPaid < finalGrandTotal - 0.01) {
+      paymentStatus = "partially_paid";
+    }
+
     // Build local invoice record
     const invoiceRecord = {
       id: invoiceId,
+      store_id: resolvedStoreId,
+      store_code: resolvedStoreCode,
       module_key: "invoice",
       invoice_number: assignedDocNumber,
       invoice_date: payload.invoice_date || new Date().toISOString().slice(0, 10),
@@ -486,8 +554,9 @@ export class OnlineTransactionService {
       store_state_code: docTaxes.store_state,
       round_off: finalRoundOff,
       grand_total: finalGrandTotal,
-      paid_amount: payload.paid_amount ?? finalGrandTotal,
-      payment_mode: payload.payment_mode || "Cash",
+      paid_amount: totalPaid,
+      payment_mode: primaryMode,
+      payment_status: paymentStatus,
       status: "issued",
       counter_id: counterId,
       counter_code: counterCode,
@@ -506,10 +575,13 @@ export class OnlineTransactionService {
     // 1. Write to Durable Write-Ahead Queue (WAL) on disk/SQLite to survive crashes
     await sqliteStorage.insertRecord("offline_durable_queue", idempotencyKey, {
       id: idempotencyKey,
+      store_id: resolvedStoreId,
       entity_type: "invoice",
       document_number: assignedDocNumber,
       payload_json: JSON.stringify({
         ...payload,
+        store_id: resolvedStoreId,
+        store_code: resolvedStoreCode,
         invoice_number: assignedDocNumber,
         is_offline_temp: isTempNumber,
       }),
@@ -523,6 +595,40 @@ export class OnlineTransactionService {
     // Commit line items
     for (const lineRec of lineRecords) {
       await sqliteStorage.insertRecord("invoice_items", lineRec.id, lineRec);
+    }
+
+    // Commit invoice payments
+    for (let pIdx = 0; pIdx < paymentLines.length; pIdx++) {
+      const p = paymentLines[pIdx];
+      const pId = p.id || `pay_${now}_${pIdx}_${Math.random().toString(16).slice(2, 6)}`;
+      await sqliteStorage.insertRecord("invoice_payments", pId, {
+        id: pId,
+        store_id: resolvedStoreId,
+        invoice_id: invoiceId,
+        counter_id: counterId,
+        counter_code: counterCode,
+        payment_mode: p.mode || "Cash",
+        amount: Number(p.amount) || 0,
+        reference_no: p.reference_no || null,
+        status: p.status || "received",
+        extra_fields: p.extra_fields ? JSON.stringify(p.extra_fields) : null,
+        notes: p.notes || null,
+        received_by: "Counter " + counterCode,
+        created_at: now,
+        updated_at: now,
+      });
+    }
+
+    if (creditPortion > 0 && payload.customer_id) {
+      const existingCust = await sqliteStorage.findById<any>("customers", payload.customer_id);
+      if (existingCust) {
+        await sqliteStorage.insertRecord("customers", payload.customer_id, {
+          ...existingCust,
+          current_balance: (Number(existingCust.current_balance) || 0) + creditPortion,
+          outstanding_balance: (Number(existingCust.outstanding_balance) || 0) + creditPortion,
+          updated_at: now,
+        });
+      }
     }
 
     // 3. Update local batch stock cache and write stock transactions
@@ -553,6 +659,7 @@ export class OnlineTransactionService {
       const stockTxId = `stk_tx_${now}_${Math.random().toString(16).slice(2, 6)}`;
       await sqliteStorage.insertRecord("stock_transactions", stockTxId, {
         id: stockTxId,
+        store_id: resolvedStoreId,
         product_id: item.product_id,
         batch_id: batchKey || "batch_default",
         event_type: "SALE",
@@ -567,6 +674,8 @@ export class OnlineTransactionService {
     // 4. Enqueue in sync queue service for background sync-back
     await syncQueueService.enqueue("invoice", invoiceId, "create", {
       ...payload,
+      store_id: resolvedStoreId,
+      store_code: resolvedStoreCode,
       invoice_number: assignedDocNumber,
       is_offline_temp: isTempNumber,
       external_id: idempotencyKey,
@@ -589,15 +698,92 @@ export class OnlineTransactionService {
     affectedBatches?: Array<{ product_id: any; batch_id: any; batch_no: string; remaining_stock: number }>
   ): Promise<void> {
     const localId = serverInvoice.external_id || `inv_${serverInvoice.id}`;
+    const activeStore = storeRegistryService.getActiveStore();
+    const storeId = String(serverInvoice.store_id || activeStore?.id || "1");
 
-    // Upsert invoice in local cache
-    await sqliteStorage.insertRecord("invoices", localId, {
+    // Upsert invoice in local cache under both localId and server numeric ID
+    const invRow = {
       ...serverInvoice,
+      store_id: storeId,
       id: localId,
       server_id: serverInvoice.id,
       sync_state: "synced",
       updated_at: Date.now(),
-    });
+    };
+    await sqliteStorage.insertRecord("invoices", localId, invRow);
+    const serverIdStr = String(serverInvoice.id);
+    if (serverIdStr && serverIdStr !== localId) {
+      await sqliteStorage.insertRecord("invoices", serverIdStr, {
+        ...invRow,
+        id: serverIdStr,
+      });
+    }
+
+    // Upsert line items in local cache
+    if (serverInvoice.items && Array.isArray(serverInvoice.items)) {
+      for (let i = 0; i < serverInvoice.items.length; i++) {
+        const it = serverInvoice.items[i];
+        const itemId = String(it.id || `srv_item_${localId}_${i}`);
+        await sqliteStorage.insertRecord("invoice_items", itemId, {
+          ...it,
+          id: itemId,
+          invoice_id: localId,
+          store_id: storeId,
+        });
+
+        // Write stock transaction
+        const stockTxId = `srv_stk_${localId}_${i}`;
+        const qtyDeducted = Number(it.qty || 1);
+        await sqliteStorage.insertRecord("stock_transactions", stockTxId, {
+          id: stockTxId,
+          store_id: storeId,
+          product_id: it.product_id,
+          batch_id: it.batch_id || it.batch_no || "default",
+          event_type: "SALE",
+          qty_delta: -qtyDeducted,
+          reference_type: "INVOICE",
+          reference_id: localId,
+          counter_id: serverInvoice.counter_id,
+          created_at: Date.now(),
+        });
+
+        // Deduct from local batch stock in mock/local SQLite if present
+        const bKey = it.batch_id || it.batch_no;
+        if (bKey) {
+          const locBatch = await sqliteStorage.findById<any>("product_batches", String(bKey));
+          if (locBatch) {
+            await sqliteStorage.insertRecord("product_batches", String(bKey), {
+              ...locBatch,
+              stock_qty: (Number(locBatch.stock_qty) || 0) - qtyDeducted,
+              updated_at: Date.now(),
+            });
+          }
+        }
+      }
+    }
+
+    // Upsert payments in local cache
+    if (serverInvoice.payments && Array.isArray(serverInvoice.payments)) {
+      for (const p of serverInvoice.payments) {
+        const payId = String(p.id || `srv_pay_${localId}_${Math.random().toString(16).slice(2, 6)}`);
+        await sqliteStorage.insertRecord("invoice_payments", payId, {
+          id: payId,
+          store_id: storeId,
+          invoice_id: localId,
+          counter_id: serverInvoice.counter_id,
+          counter_code: serverInvoice.counter_code,
+          payment_mode: p.payment_mode || p.mode || "Cash",
+          amount: Number(p.amount) || 0,
+          reference_no: p.reference_no || null,
+          status: p.status || "received",
+          extra_fields: typeof p.extra_fields === "object" ? JSON.stringify(p.extra_fields) : p.extra_fields,
+          notes: p.notes || null,
+          received_by: p.received_by || "Server",
+          created_at: p.created_at ? new Date(p.created_at).getTime() : Date.now(),
+          updated_at: p.updated_at ? new Date(p.updated_at).getTime() : Date.now(),
+        });
+      }
+    }
 
     // Update affected batch stock in local cache
     if (affectedBatches && Array.isArray(affectedBatches)) {

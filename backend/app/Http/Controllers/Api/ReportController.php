@@ -26,17 +26,54 @@ class ReportController
             $query->where('counter_id', $counterId);
         }
 
-        $invoices = $query->get();
+        $invoices = $query->with('payments')->get();
 
         $grossSales = $invoices->where('module_key', 'invoice')->sum('grand_total');
         $returns = $invoices->where('module_key', 'credit_note')->sum('grand_total');
         $netSales = $grossSales - $returns;
 
+        $cashTender = 0.0;
+        $upiTender = 0.0;
+        $cardTender = 0.0;
+        $bankTender = 0.0;
+        $creditTender = 0.0;
+        $otherTender = 0.0;
+
+        foreach ($invoices as $inv) {
+            $isReturn = $inv->module_key === 'credit_note';
+            $sign = $isReturn ? -1 : 1;
+
+            if ($inv->payments && $inv->payments->isNotEmpty()) {
+                foreach ($inv->payments as $p) {
+                    if ($p->status === 'refunded' || $p->status === 'bounced') continue;
+                    $m = strtolower(trim($p->payment_mode));
+                    $amt = (float)$p->amount * $sign;
+                    if (str_contains($m, 'cash')) $cashTender += $amt;
+                    elseif (str_contains($m, 'upi')) $upiTender += $amt;
+                    elseif (str_contains($m, 'card')) $cardTender += $amt;
+                    elseif (str_contains($m, 'bank') || str_contains($m, 'neft') || str_contains($m, 'imps')) $bankTender += $amt;
+                    elseif (str_contains($m, 'credit') || str_contains($m, 'udhari')) $creditTender += $amt;
+                    else $otherTender += $amt;
+                }
+            } else {
+                $m = strtolower(trim($inv->payment_mode ?: 'cash'));
+                $amt = (float)$inv->grand_total * $sign;
+                if (str_contains($m, 'cash')) $cashTender += $amt;
+                elseif (str_contains($m, 'upi')) $upiTender += $amt;
+                elseif (str_contains($m, 'card')) $cardTender += $amt;
+                elseif (str_contains($m, 'bank') || str_contains($m, 'neft') || str_contains($m, 'imps')) $bankTender += $amt;
+                elseif (str_contains($m, 'credit') || str_contains($m, 'udhari')) $creditTender += $amt;
+                else $otherTender += $amt;
+            }
+        }
+
         $byTender = [
-            'cash' => $invoices->where('payment_mode', 'Cash')->sum('grand_total'),
-            'upi' => $invoices->where('payment_mode', 'UPI')->sum('grand_total'),
-            'card' => $invoices->where('payment_mode', 'Card')->sum('grand_total'),
-            'credit' => $invoices->where('payment_mode', 'Credit')->sum('grand_total'),
+            'cash' => round($cashTender, 2),
+            'upi' => round($upiTender, 2),
+            'card' => round($cardTender, 2),
+            'bank_transfer' => round($bankTender, 2),
+            'credit' => round($creditTender, 2),
+            'other' => round($otherTender, 2),
         ];
 
         return response()->json([
@@ -60,11 +97,18 @@ class ReportController
         $startDate = $request->query('start_date', date('Y-m-01'));
         $endDate = $request->query('end_date', date('Y-m-t'));
         $storeState = $request->query('store_state_code', '32');
+        $storeId = $request->query('store_id');
 
-        $invoices = Invoice::with('items')
-            ->whereBetween('invoice_date', [$startDate, $endDate])
-            ->where('status', '!=', 'cancelled')
-            ->get();
+        $s = strlen($startDate) === 10 ? $startDate . ' 00:00:00' : $startDate;
+        $e = strlen($endDate) === 10 ? $endDate . ' 23:59:59' : $endDate;
+
+        $invoicesQuery = Invoice::with('items')
+            ->whereBetween('invoice_date', [$s, $e])
+            ->where('status', '!=', 'cancelled');
+        if ($storeId) {
+            $invoicesQuery->where('store_id', $storeId);
+        }
+        $invoices = $invoicesQuery->get();
 
         $table4B2b = [];
         $table5B2cLarge = [];
@@ -167,11 +211,18 @@ class ReportController
     {
         $startDate = $request->query('start_date', date('Y-m-d'));
         $endDate = $request->query('end_date', date('Y-m-d'));
+        $storeId = $request->query('store_id');
 
-        $invoices = Invoice::with('items')
-            ->whereBetween('invoice_date', [$startDate, $endDate])
-            ->where('status', '!=', 'cancelled')
-            ->get();
+        $s = strlen($startDate) === 10 ? $startDate . ' 00:00:00' : $startDate;
+        $e = strlen($endDate) === 10 ? $endDate . ' 23:59:59' : $endDate;
+
+        $invoicesQuery = Invoice::with(['items', 'payments'])
+            ->whereBetween('invoice_date', [$s, $e])
+            ->where('status', '!=', 'cancelled');
+        if ($storeId) {
+            $invoicesQuery->where('store_id', $storeId);
+        }
+        $invoices = $invoicesQuery->get();
 
         $grossSales = 0;
         $totalReturns = 0;
@@ -198,12 +249,25 @@ class ReportController
                 $totalReturns += $val;
             }
 
-            $mode = strtolower(trim($inv->payment_mode ?? 'cash'));
-            if (str_contains($mode, 'cash')) $cash += ($sign * $val);
-            elseif (str_contains($mode, 'upi')) $upi += ($sign * $val);
-            elseif (str_contains($mode, 'card')) $card += ($sign * $val);
-            elseif (str_contains($mode, 'credit')) $credit += ($sign * $val);
-            else $other += ($sign * $val);
+            if ($inv->payments && $inv->payments->isNotEmpty()) {
+                foreach ($inv->payments as $p) {
+                    if ($p->status === 'refunded' || $p->status === 'bounced') continue;
+                    $mode = strtolower(trim($p->payment_mode ?? 'cash'));
+                    $pVal = (float)$p->amount * $sign;
+                    if (str_contains($mode, 'cash')) $cash += $pVal;
+                    elseif (str_contains($mode, 'upi')) $upi += $pVal;
+                    elseif (str_contains($mode, 'card')) $card += $pVal;
+                    elseif (str_contains($mode, 'credit') || str_contains($mode, 'udhari')) $credit += $pVal;
+                    else $other += $pVal;
+                }
+            } else {
+                $mode = strtolower(trim($inv->payment_mode ?? 'cash'));
+                if (str_contains($mode, 'cash')) $cash += ($sign * $val);
+                elseif (str_contains($mode, 'upi')) $upi += ($sign * $val);
+                elseif (str_contains($mode, 'card')) $card += ($sign * $val);
+                elseif (str_contains($mode, 'credit')) $credit += ($sign * $val);
+                else $other += ($sign * $val);
+            }
 
             foreach ($inv->items as $item) {
                 $rate = (int) $item->gst_percent;
@@ -260,11 +324,18 @@ class ReportController
         $startDate = $request->query('start_date', date('Y-m-01'));
         $endDate = $request->query('end_date', date('Y-m-t'));
         $storeStateCode = $request->query('store_state_code', '32');
+        $storeId = $request->query('store_id');
 
-        $invoices = Invoice::with('items')
-            ->whereBetween('invoice_date', [$startDate, $endDate])
-            ->where('status', '!=', 'cancelled')
-            ->get();
+        $s = strlen($startDate) === 10 ? $startDate . ' 00:00:00' : $startDate;
+        $e = strlen($endDate) === 10 ? $endDate . ' 23:59:59' : $endDate;
+
+        $invoicesQuery = Invoice::with('items')
+            ->whereBetween('invoice_date', [$s, $e])
+            ->where('status', '!=', 'cancelled');
+        if ($storeId) {
+            $invoicesQuery->where('store_id', $storeId);
+        }
+        $invoices = $invoicesQuery->get();
 
         $statutoryRates = [0, 0.25, 3, 5, 12, 18, 28];
         $gstinChars = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";

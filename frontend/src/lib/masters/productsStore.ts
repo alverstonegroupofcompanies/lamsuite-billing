@@ -15,12 +15,68 @@ export interface ProductBatch {
   shelf_location?: string;
 }
 
+/**
+ * Parses any expiry string (ISO timestamp, YYYY-MM-DD, YYYY-MM, or MM/YY)
+ * without time-zone shifting (e.g. 18:30Z UTC which represents midnight IST is preserved as intended day).
+ */
+export function parseExpiryDateParts(raw: string | null | undefined): { month: string; year: string; fullDateStr: string } | null {
+  if (!raw) return null;
+  const s = String(raw).trim();
+  if (!s) return null;
+
+  // Case: MM/YY or MM/YYYY (e.g. 10/27, 05/2028)
+  const slashMatch = s.match(/^(\d{1,2})\/(\d{2,4})$/);
+  if (slashMatch) {
+    const m = slashMatch[1].padStart(2, "0");
+    const y = slashMatch[2].length === 4 ? slashMatch[2].slice(-2) : slashMatch[2];
+    const fullYear = slashMatch[2].length === 4 ? slashMatch[2] : `20${slashMatch[2]}`;
+    return { month: m, year: y, fullDateStr: `${fullYear}-${m}-01` };
+  }
+
+  // Case: ISO timestamp with T, e.g. 2027-10-09T18:30:00.000000Z
+  if (s.includes("T")) {
+    const d = new Date(s);
+    if (!isNaN(d.getTime())) {
+      // Adding 5.5 hours (+05:30 IST) gives the intended calendar date in India
+      const istTime = new Date(d.getTime() + 5.5 * 3600 * 1000);
+      const m = String(istTime.getUTCMonth() + 1).padStart(2, "0");
+      const y = String(istTime.getUTCFullYear()).slice(-2);
+      const fullYear = String(istTime.getUTCFullYear());
+      const day = String(istTime.getUTCDate()).padStart(2, "0");
+      return { month: m, year: y, fullDateStr: `${fullYear}-${m}-${day}` };
+    }
+  }
+
+  // Case: YYYY-MM-DD or YYYY-MM
+  const dashMatch = s.match(/^(\d{4})-(\d{1,2})(?:-(\d{1,2}))?/);
+  if (dashMatch) {
+    const fullYear = dashMatch[1];
+    const y = fullYear.slice(-2);
+    const m = dashMatch[2].padStart(2, "0");
+    const day = dashMatch[3] ? dashMatch[3].padStart(2, "0") : "01";
+    return { month: m, year: y, fullDateStr: `${fullYear}-${m}-${day}` };
+  }
+
+  return null;
+}
+
+/** Formats an expiry date string as MM/YY for display */
+export function formatExpiryDisplay(raw: string | null | undefined): string {
+  const parts = parseExpiryDateParts(raw);
+  if (!parts) return raw ? String(raw) : "—";
+  return `${parts.month}/${parts.year}`;
+}
+
 /** Check if batch expiry date is in the past relative to reference date */
 export const isBatchExpired = (expiryDate: string, referenceDate: Date = new Date()): boolean => {
   if (!expiryDate) return false;
+  const parts = parseExpiryDateParts(expiryDate);
   const todayStr = referenceDate.toISOString().slice(0, 10);
-  if (expiryDate.length === 7) {
-    return expiryDate < todayStr.slice(0, 7);
+  if (parts) {
+    if (parts.fullDateStr.endsWith("-01") && (expiryDate.length === 7 || expiryDate.includes("/"))) {
+      return `${parts.fullDateStr.slice(0, 7)}` < todayStr.slice(0, 7);
+    }
+    return parts.fullDateStr < todayStr;
   }
   return expiryDate < todayStr;
 };
@@ -43,7 +99,7 @@ export interface ProductItem {
   id: string;
   name: string;
   print_name?: string;
-  barcode: string;
+  barcode?: string | null;
   secondary_barcodes?: string[];
   hsn_sac_code?: string;
   category_id?: string;
@@ -96,8 +152,8 @@ export class ProductsStore {
 
     const all = await sqliteStorage.findAll<ProductItem>("products");
     for (const item of all) {
-      if (item.barcode === cleanBarcode) return item;
-      if (item.secondary_barcodes && item.secondary_barcodes.includes(cleanBarcode)) {
+      if (item.barcode && item.barcode.trim() === cleanBarcode) return item;
+      if (item.secondary_barcodes && item.secondary_barcodes.some((b) => b && b.trim() === cleanBarcode)) {
         return item;
       }
     }
@@ -111,11 +167,14 @@ export class ProductsStore {
     const all = await sqliteStorage.findAll<ProductItem>("products");
     return all.filter((item) => {
       if (!item.is_active) return false;
-      const nameMatch = item.name.toLowerCase().includes(q);
-      const genericMatch = item.generic_name?.toLowerCase().includes(q);
-      const barcodeMatch = item.barcode.includes(q);
-      const hsnMatch = item.hsn_sac_code?.includes(q);
-      return nameMatch || genericMatch || barcodeMatch || hsnMatch;
+      const nameMatch = item.name ? item.name.toLowerCase().includes(q) : false;
+      const genericMatch = item.generic_name ? item.generic_name.toLowerCase().includes(q) : false;
+      const barcodeMatch = item.barcode ? item.barcode.toLowerCase().includes(q) : false;
+      const secondaryBarcodeMatch = item.secondary_barcodes
+        ? item.secondary_barcodes.some((b) => b && b.toLowerCase().includes(q))
+        : false;
+      const hsnMatch = item.hsn_sac_code ? item.hsn_sac_code.toLowerCase().includes(q) : false;
+      return Boolean(nameMatch || genericMatch || barcodeMatch || secondaryBarcodeMatch || hsnMatch);
     });
   }
 

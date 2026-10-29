@@ -31,6 +31,13 @@ export interface InvoicePrintData {
   doctor_reg_no?: string;
   payment_mode?: string;
   payment_status?: string;
+  payments?: Array<{
+    mode: string;
+    amount: number;
+    reference_no?: string;
+  }>;
+  change_due?: number;
+  balance_due?: number;
   lines: Array<{
     description: string;
     hsn_code?: string;
@@ -818,6 +825,28 @@ export class PrintingEngine {
                 <div class="total-line"><span>Total Tax:</span><span style="font-weight: 600;">₹ ${data.tax_total.toFixed(2)}</span></div>
                 ${data.round_off ? `<div class="total-line"><span>Round Off:</span><span style="font-weight: 600;">${data.round_off > 0 ? "+" : ""}₹ ${data.round_off.toFixed(2)}</span></div>` : ""}
                 <div class="grand-total-line"><span>Grand Total:</span><span>₹ ${data.grand_total.toFixed(2)}</span></div>
+                ${data.payments && data.payments.length > 0 ? `
+                <div style="border-top: 1px dashed #cbd5e1; margin-top: 5px; padding-top: 4px; font-size: 8.5px;">
+                  ${data.payments.map((p) => `
+                    <div style="display: flex; justify-content: space-between; color: #475569; margin-bottom: 1.5px;">
+                      <span>Paid via ${p.mode}${p.reference_no ? ` [${p.reference_no}]` : ""}:</span>
+                      <span style="font-weight: 600;">₹ ${Number(p.amount).toFixed(2)}</span>
+                    </div>
+                  `).join("")}
+                  ${data.change_due && data.change_due > 0 ? `
+                    <div style="display: flex; justify-content: space-between; color: #047857; font-weight: 600;">
+                      <span>Change Returned:</span>
+                      <span>₹ ${Number(data.change_due).toFixed(2)}</span>
+                    </div>
+                  ` : ""}
+                  ${data.balance_due && data.balance_due > 0 ? `
+                    <div style="display: flex; justify-content: space-between; color: #b45309; font-weight: 700;">
+                      <span>Balance Due (Credit):</span>
+                      <span>₹ ${Number(data.balance_due).toFixed(2)}</span>
+                    </div>
+                  ` : ""}
+                </div>
+                ` : ""}
               </div>
             </div>
 
@@ -1158,6 +1187,30 @@ export class PrintingEngine {
       <span>₹${data.grand_total.toFixed(2)}</span>
     </div>
     <div class="double-divider"></div>
+
+    ${data.payments && data.payments.length > 0 ? `
+    <div style="font-size: ${is58 ? "8.5px" : "9.5px"}; margin: 4px 0;">
+      ${data.payments.map((p) => `
+        <div class="flex-between">
+          <span>Paid ${p.mode}${p.reference_no ? ` (${p.reference_no})` : ""}:</span>
+          <span class="bold">₹${Number(p.amount).toFixed(2)}</span>
+        </div>
+      `).join("")}
+      ${data.change_due && data.change_due > 0 ? `
+        <div class="flex-between bold" style="color: #047857;">
+          <span>Change Returned:</span>
+          <span>₹${Number(data.change_due).toFixed(2)}</span>
+        </div>
+      ` : ""}
+      ${data.balance_due && data.balance_due > 0 ? `
+        <div class="flex-between bold" style="color: #b45309;">
+          <span>Balance Due (Credit):</span>
+          <span>₹${Number(data.balance_due).toFixed(2)}</span>
+        </div>
+      ` : ""}
+    </div>
+    <div class="divider"></div>
+    ` : ""}
 
     ${showQr && qrSvg ? `
     <div class="center" style="margin: 8px 0;">

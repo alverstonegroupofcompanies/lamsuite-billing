@@ -34,6 +34,7 @@ class Invoice extends Model
         'grand_total',
         'paid_amount',
         'payment_mode',
+        'payment_status',
         'status',
         'cancel_reason',
         'cancelled_at',
@@ -89,5 +90,10 @@ class Invoice extends Model
     public function items(): HasMany
     {
         return $this->hasMany(InvoiceItem::class);
+    }
+
+    public function payments(): HasMany
+    {
+        return $this->hasMany(InvoicePayment::class);
     }
 }
