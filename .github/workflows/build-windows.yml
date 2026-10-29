@@ -39,7 +39,7 @@ jobs:
         working-directory: frontend
         env:
           VITE_API_BASE_URL: https://api.lamstonehealthcare.com
-          VITE_ADMIN_PORTAL_URL: https://admin.lamstonehealthcare.com
+          VITE_ADMIN_PORTAL_URL: https://panel.lamstonehealthcare.com
         run: npm run build
 
       - name: Build & Publish Tauri Release (with Updater Manifest)

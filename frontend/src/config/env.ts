@@ -64,6 +64,11 @@ function resolveApiBaseUrl(): string {
     return buildTimeEnv.replace(/\/+$/, "");
   }
 
+  // In production builds, default to production domain if no env specified
+  if (import.meta.env.PROD) {
+    return "https://api.lamstonehealthcare.com";
+  }
+
   return "http://127.0.0.1:8000";
 }
 

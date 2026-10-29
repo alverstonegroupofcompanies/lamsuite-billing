@@ -140,8 +140,10 @@ export class OnlineTransactionService {
     let latency = 0;
 
     const urlsToTry = [this.getEffectiveBaseUrl()];
-    if (!urlsToTry.includes("http://127.0.0.1:8000")) {
-      urlsToTry.push("http://127.0.0.1:8000");
+    const hubIp = localStorage.getItem("lamsuite_hub_ip");
+    const hubPort = localStorage.getItem("lamsuite_hub_port") || "8000";
+    if (hubIp && !urlsToTry.includes(`http://${hubIp}:${hubPort}`)) {
+      urlsToTry.push(`http://${hubIp}:${hubPort}`);
     }
 
     for (const url of urlsToTry) {
