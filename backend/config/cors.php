@@ -8,6 +8,8 @@ $defaultOrigins = [
     "https://app.{$domain}",
     "https://{$domain}",
     'tauri://localhost',
+    'https://tauri.localhost',
+    'http://tauri.localhost',
     'http://localhost:5173',
     'http://localhost:5174',
     'http://localhost:5175',
