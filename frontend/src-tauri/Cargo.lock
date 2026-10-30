@@ -1868,7 +1868,7 @@ dependencies = [
 
 [[package]]
 name = "lamsuite-billing"
-version = "2.0.6"
+version = "2.0.8"
 dependencies = [
  "chrono",
  "local-ip-address",
