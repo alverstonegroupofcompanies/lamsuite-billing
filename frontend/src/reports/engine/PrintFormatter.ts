@@ -312,9 +312,14 @@ export class PrintFormatter {
   }
 
   /**
-   * Generate Dot Matrix plain text ASCII representation (80 or 132 columns)
+   * Generate Dot Matrix plain text ASCII representation (60, 80, 120, or 132 columns)
+   * Supports automatic horizontal centering offset within wider printer carriages.
    */
-  generateDotMatrixText(doc: PrintableDocumentData, columns: number = 80): string {
+  generateDotMatrixText(
+    doc: PrintableDocumentData,
+    columns: number = 80,
+    options?: { printerColumns?: number; autoCenter?: boolean; leftMarginSpaces?: number }
+  ): string {
     const W = columns;
     const lines: string[] = [];
 
@@ -405,6 +410,18 @@ export class PrintFormatter {
     }
 
     lines.push(this.padField("*** END OF REPORT ***", W, "center"));
+
+    const manualMargin = Math.max(0, options?.leftMarginSpaces || 0);
+    const carriage = options?.printerColumns;
+    let offset = 0;
+    if (options?.autoCenter !== false && carriage && carriage > W) {
+      offset = Math.floor((carriage - W) / 2);
+    }
+    const totalMargin = offset + manualMargin;
+    if (totalMargin > 0) {
+      const pad = " ".repeat(totalMargin);
+      return lines.map((l) => pad + l).join("\n");
+    }
     return lines.join("\n");
   }
 
@@ -606,9 +623,16 @@ export class PrintFormatter {
           : layout === "dot-matrix-132"
           ? 132
           : 80;
-      const text = this.generateDotMatrixText(activeDoc, cols);
+      const carriageCols = options?.printerColumns || cols;
+      const text = this.generateDotMatrixText(activeDoc, cols, {
+        printerColumns: carriageCols,
+        autoCenter: options?.autoCenter !== false,
+        leftMarginSpaces: options?.leftMarginSpaces,
+      });
       return dotMatrixRenderer.generateMonospaceHtmlPreview(text, {
         columns: cols,
+        printerCarriageColumns: carriageCols,
+        autoCenterPaper: options?.autoCenter !== false,
         showRuler: true,
         showLineNumbers: true,
         showPageBreaks: true,

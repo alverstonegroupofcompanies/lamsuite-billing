@@ -109,6 +109,8 @@ export interface PrintingConfig {
   dotMatrixPageLength?: 66 | 72 | 33 | "continuous";
   dotMatrixCommandSet?: "esc_p" | "tvs_native" | "plain_ascii";
   dotMatrixDefaultPaperWidth?: "6in" | "10in" | "12in" | "15in";
+  dotMatrixCarriageWidth?: 80 | 120 | 132 | 136;
+  dotMatrixAutoCenter?: boolean;
 }
 
 export interface WorkspaceSettings {
@@ -478,6 +480,8 @@ export const DEFAULT_SETTINGS: CompanySettings = {
     dotMatrixPageLength: 66,
     dotMatrixCommandSet: "esc_p",
     dotMatrixDefaultPaperWidth: "10in",
+    dotMatrixCarriageWidth: 80,
+    dotMatrixAutoCenter: true,
   },
 
   workspace: {

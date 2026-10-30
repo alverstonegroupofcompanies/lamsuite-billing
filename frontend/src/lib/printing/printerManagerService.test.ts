@@ -5,6 +5,8 @@ import {
   isDotMatrixPaper,
   getDotMatrixColumns,
   getPaperWidthInches,
+  getPrinterCarriageColumns,
+  calculateHorizontalCenteringOffset,
   type SystemPrinterInfo,
   type PrinterProfileConfig,
 } from "./printerManagerService";
@@ -498,5 +500,48 @@ describe("PrinterManagerService Native Discovery & Profiles", () => {
     expect(history[0].hexDump).toBeDefined();
     expect(history[0].hexDump).toContain("00000000");
     expect(history[0].hexDump).toContain("1B 40 41 42 43 0D 0A");
+  });
+
+  it("resolves printer carriage columns and calculates horizontal centering offset", () => {
+    // 80 column standard printer
+    const p80 = DEFAULT_SYSTEM_PRINTERS.find((p) => p.name === "TVS MSP 240 Star");
+    expect(getPrinterCarriageColumns(p80)).toBe(80);
+
+    // 120 column wide printer (12-inch)
+    const p120 = DEFAULT_SYSTEM_PRINTERS.find((p) => p.name === "TVS MSP 245 Star");
+    expect(getPrinterCarriageColumns(p120)).toBe(120);
+
+    // 132 column wide printer (15-inch)
+    const p132 = DEFAULT_SYSTEM_PRINTERS.find((p) => p.name.includes("LQ-2090"));
+    expect(getPrinterCarriageColumns(p132)).toBe(132);
+
+    // Centering calculation:
+    // 60-col on 120-col carriage => 30
+    expect(calculateHorizontalCenteringOffset(120, 60)).toBe(30);
+    // 80-col on 120-col carriage => 20
+    expect(calculateHorizontalCenteringOffset(120, 80)).toBe(20);
+    // 60-col on 80-col carriage => 10
+    expect(calculateHorizontalCenteringOffset(80, 60)).toBe(10);
+    // 80-col on 80-col carriage => 0
+    expect(calculateHorizontalCenteringOffset(80, 80)).toBe(0);
+    // 120-col on 120-col carriage => 0
+    expect(calculateHorizontalCenteringOffset(120, 120)).toBe(0);
+  });
+
+  it("applies centering offset to calibration test print when paper is narrower than carriage", async () => {
+    let capturedBytes: number[] = [];
+    registerMockHandler("print_native_job", async (args: any) => {
+      capturedBytes = args?.raw_bytes || [];
+      return { success: true, job_id: "test_dm_centered" };
+    });
+
+    // Test print 6-inch paper on 120-column TVS MSP 245 Star
+    const res = await printerManagerService.sendTestPrint("TVS MSP 245 Star", "dot_matrix_6in");
+    expect(res.success).toBe(true);
+
+    const text = String.fromCharCode(...capturedBytes);
+    // Offset is (120 - 60) / 2 = 30 spaces
+    expect(text).toContain(" ".repeat(30) + "LamSuite Dot-Matrix Calibration Test");
+    expect(text).toContain("[Centered +30C]");
   });
 });

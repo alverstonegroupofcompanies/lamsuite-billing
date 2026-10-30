@@ -128,6 +128,9 @@ export interface ReportPrintFormattingOptions {
   showFilterSummary?: boolean;
   operatorName?: string;
   zoomScale?: number;
+  printerColumns?: number;
+  autoCenter?: boolean;
+  leftMarginSpaces?: number;
 }
 
 export interface ReportModule<TFilter = any, TRow = any, TSummary = any> {

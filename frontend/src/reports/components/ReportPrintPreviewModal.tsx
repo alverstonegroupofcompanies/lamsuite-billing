@@ -23,9 +23,11 @@ import type { ReportModule, PrintableDocumentData, ReportPrintFormattingOptions 
 import { printFormatter } from "../engine/PrintFormatter";
 import {
   printerManagerService,
+  getPrinterCarriageColumns,
   type SystemPrinterInfo,
   type PaperSize,
 } from "../../lib/printing/printerManagerService";
+import { dotMatrixRenderer } from "../../lib/printing/dotMatrixRenderer";
 import { isTauri, getIpcBridge } from "../../lib/ipc/ipcBridge";
 import { useModalEscape } from "../../lib/ui/modalEscapeManager";
 import { companySettingsService } from "../../lib/settings/companySettingsService";
@@ -188,6 +190,7 @@ export const ReportPrintPreviewModal: React.FC<ReportPrintPreviewModalProps> = (
 
   // Formatting options
   const formattingOptions: ReportPrintFormattingOptions = useMemo(() => {
+    const carriage = getPrinterCarriageColumns(selectedPrinterInfo);
     return {
       fontSize,
       margins,
@@ -196,8 +199,10 @@ export const ReportPrintPreviewModal: React.FC<ReportPrintPreviewModalProps> = (
       showFilterSummary,
       operatorName,
       zoomScale: typeof zoomMode === "number" ? zoomMode : zoomScale,
+      printerColumns: carriage,
+      autoCenter: true,
     };
-  }, [fontSize, margins, showHeader, showFooter, showFilterSummary, operatorName, zoomMode, zoomScale]);
+  }, [fontSize, margins, showHeader, showFooter, showFilterSummary, operatorName, zoomMode, zoomScale, selectedPrinterInfo]);
 
   // Generated preview HTML
   const previewHtml = useMemo(() => {
@@ -372,8 +377,17 @@ export const ReportPrintPreviewModal: React.FC<ReportPrintPreviewModalProps> = (
 
       let rawEscPosBytes: Uint8Array | undefined;
       if (isDot) {
-        const text = printFormatter.generateDotMatrixText(documentData, cols);
-        rawEscPosBytes = new TextEncoder().encode(text);
+        const carriageCols = getPrinterCarriageColumns(selectedPrinterInfo);
+        const text = printFormatter.generateDotMatrixText(documentData, cols, {
+          printerColumns: carriageCols,
+          autoCenter: true,
+        });
+        rawEscPosBytes = dotMatrixRenderer.generateEscPBytes(text, {
+          columns: cols,
+          printerCarriageColumns: carriageCols,
+          autoCenterPaper: true,
+          endOfJobAction: "stop_immediately",
+        });
       }
 
       const res = await printerManagerService.executePrintJob({
@@ -432,7 +446,11 @@ export const ReportPrintPreviewModal: React.FC<ReportPrintPreviewModalProps> = (
             : printLayout === "dot-matrix-132"
             ? 132
             : 80;
-        const text = printFormatter.generateDotMatrixText(documentData, cols);
+        const carriageCols = getPrinterCarriageColumns(selectedPrinterInfo);
+        const text = printFormatter.generateDotMatrixText(documentData, cols, {
+          printerColumns: carriageCols,
+          autoCenter: true,
+        });
         const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
         const url = URL.createObjectURL(blob);
         const link = document.createElement("a");

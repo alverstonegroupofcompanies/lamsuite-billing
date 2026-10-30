@@ -40,6 +40,8 @@ import {
   PrintJobRecord,
   isDotMatrixPaper,
   getDotMatrixColumns,
+  getPrinterCarriageColumns,
+  calculateHorizontalCenteringOffset,
 } from "../lib/printing/printerManagerService";
 import { isTauri } from "../lib/ipc/ipcBridge";
 import { dotMatrixRenderer, DotMatrixOptions } from "../lib/printing/dotMatrixRenderer";
@@ -238,6 +240,19 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
     return printerManagerService.validatePaperCompatibility(selectedPrinterInfo, paperSize);
   }, [selectedPrinterInfo, paperSize]);
 
+  // Printer Carriage Width & Centering Offset for Dot Matrix
+  const printerCarriageCols = useMemo(() => {
+    return getPrinterCarriageColumns(selectedPrinterInfo, printerProfile);
+  }, [selectedPrinterInfo, printerProfile]);
+
+  const centeringOffset = useMemo(() => {
+    const isDot = isDotMatrixPaper(paperSize);
+    if (!isDot) return 0;
+    const cols = getDotMatrixColumns(paperSize, printerProfile?.dotMatrixColumns);
+    if (printerProfile?.dotMatrixAutoCenter === false) return 0;
+    return calculateHorizontalCenteringOffset(printerCarriageCols, cols);
+  }, [paperSize, printerProfile, printerCarriageCols]);
+
   // Build Rendered HTML
   const renderedHtml = useMemo(() => {
     if (!isOpen || !data) return "";
@@ -246,6 +261,8 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
       const cols = getDotMatrixColumns(paperSize, printerProfile?.dotMatrixColumns);
       const dotOpts: DotMatrixOptions = {
         columns: cols,
+        printerCarriageColumns: printerCarriageCols,
+        autoCenterPaper: printerProfile?.dotMatrixAutoCenter ?? true,
         paperWidth: paperSize === "dot_matrix_6in" ? "6in" : paperSize === "dot_matrix_120col" ? "12in" : paperSize === "dot_matrix_132col" ? "15in" : "10in",
         linesPerPage: printerProfile?.linesPerPage ?? 66,
         commandSet: printerProfile?.dotMatrixCommandSet || "esc_p",
@@ -281,6 +298,8 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
       }
       return dotMatrixRenderer.generateMonospaceHtmlPreview(rawText, {
         columns: cols,
+        printerCarriageColumns: printerCarriageCols,
+        autoCenterPaper: printerProfile?.dotMatrixAutoCenter ?? true,
         paperWidth: dotOpts.paperWidth,
         showRuler,
         showLineNumbers,
@@ -335,6 +354,8 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
     const cols = getDotMatrixColumns(paperSize, printerProfile?.dotMatrixColumns);
     const dotOpts: DotMatrixOptions = {
       columns: cols,
+      printerCarriageColumns: printerCarriageCols,
+      autoCenterPaper: printerProfile?.dotMatrixAutoCenter ?? true,
       paperWidth: paperSize === "dot_matrix_6in" ? "6in" : paperSize === "dot_matrix_120col" ? "12in" : paperSize === "dot_matrix_132col" ? "15in" : "10in",
       linesPerPage: printerProfile?.linesPerPage ?? 66,
       commandSet: printerProfile?.dotMatrixCommandSet || "esc_p",
@@ -539,6 +560,8 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
         const cols = getDotMatrixColumns(paperSize, printerProfile?.dotMatrixColumns);
         const dotOpts: DotMatrixOptions = {
           columns: cols,
+          printerCarriageColumns: printerCarriageCols,
+          autoCenterPaper: printerProfile?.dotMatrixAutoCenter ?? true,
           paperWidth: paperSize === "dot_matrix_6in" ? "6in" : paperSize === "dot_matrix_120col" ? "12in" : paperSize === "dot_matrix_132col" ? "15in" : "10in",
           linesPerPage: printerProfile?.linesPerPage ?? 66,
           commandSet: printerProfile?.dotMatrixCommandSet || "esc_p",
@@ -697,6 +720,8 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
         const cols = getDotMatrixColumns(paperSize, printerProfile?.dotMatrixColumns);
         const dotOpts: DotMatrixOptions = {
           columns: cols,
+          printerCarriageColumns: printerCarriageCols,
+          autoCenterPaper: printerProfile?.dotMatrixAutoCenter ?? true,
           paperWidth: paperSize === "dot_matrix_6in" ? "6in" : paperSize === "dot_matrix_120col" ? "12in" : paperSize === "dot_matrix_132col" ? "15in" : "10in",
           linesPerPage: printerProfile?.linesPerPage || 66,
           isDuplicate,
@@ -910,14 +935,16 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
                     : "82mm"
                   : paperSize === "a5"
                   ? "155mm"
-                  : paperSize === "dot_matrix_132col"
-                  ? "350mm"
-                  : paperSize === "dot_matrix_120col"
-                  ? "320mm"
-                  : paperSize === "dot_matrix_80col"
-                  ? "230mm"
-                  : paperSize === "dot_matrix_6in"
-                  ? "175mm"
+                  : isDotMatrixPaper(paperSize)
+                  ? printerCarriageCols >= 125 || paperSize === "dot_matrix_132col"
+                    ? "350mm"
+                    : printerCarriageCols >= 100 || paperSize === "dot_matrix_120col"
+                    ? "320mm"
+                    : printerCarriageCols > 80
+                    ? "260mm"
+                    : paperSize === "dot_matrix_6in" && printerProfile?.dotMatrixAutoCenter === false
+                    ? "175mm"
+                    : "230mm"
                   : "215mm",
                 minHeight: isThermal ? "120mm" : paperSize === "a5" ? "210mm" : "297mm",
               }}
@@ -1205,6 +1232,64 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
                           </select>
                         </div>
                       </div>
+
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1" title="Physical printer platen/carriage width">
+                            Carriage Width
+                          </label>
+                          <select
+                            value={printerProfile?.dotMatrixCarriageWidth || printerCarriageCols}
+                            onChange={(e) => {
+                              if (printerProfile) {
+                                const updated = { ...printerProfile, dotMatrixCarriageWidth: parseInt(e.target.value) as any };
+                                setPrinterProfile(updated);
+                                printerManagerService.saveProfile(updated);
+                              }
+                            }}
+                            className="w-full text-xs bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded p-1.5 text-slate-800 dark:text-slate-100"
+                          >
+                            <option value={80}>80 Col (10" Platen)</option>
+                            <option value={120}>120 Col (12" Platen)</option>
+                            <option value={132}>132 Col (15" Platen)</option>
+                            <option value={136}>136 Col (15" Wide)</option>
+                          </select>
+                        </div>
+
+                        <div>
+                          <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">
+                            Paper Centering
+                          </label>
+                          <label className="flex items-center gap-1.5 pt-1.5 cursor-pointer text-xs text-slate-700 dark:text-slate-300">
+                            <input
+                              type="checkbox"
+                              checked={printerProfile?.dotMatrixAutoCenter !== false}
+                              onChange={(e) => {
+                                if (printerProfile) {
+                                  const updated = { ...printerProfile, dotMatrixAutoCenter: e.target.checked };
+                                  setPrinterProfile(updated);
+                                  printerManagerService.saveProfile(updated);
+                                }
+                              }}
+                              className="rounded border-slate-300 dark:border-slate-700 text-emerald-600 focus:ring-emerald-500"
+                            />
+                            <span>Auto-center</span>
+                          </label>
+                        </div>
+                      </div>
+
+                      {centeringOffset > 0 ? (
+                        <div className="text-[10px] bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 px-2 py-1 rounded border border-emerald-200 dark:border-emerald-800 flex items-center justify-between">
+                          <span>Horizontal Alignment:</span>
+                          <strong>Centered (+{centeringOffset} spc offset in {printerCarriageCols}c)</strong>
+                        </div>
+                      ) : (
+                        <div className="text-[10px] text-slate-500 dark:text-slate-400">
+                          {printerCarriageCols > (getDotMatrixColumns(paperSize, printerProfile?.dotMatrixColumns)) && printerProfile?.dotMatrixAutoCenter === false
+                            ? "Auto-centering disabled; prints from extreme left"
+                            : "Paper width matches carriage (0 offset)"}
+                        </div>
+                      )}
 
                       <div className="grid grid-cols-2 gap-2">
                         <div>

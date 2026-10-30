@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { dotMatrixRenderer, DotMatrixRenderer, type DotMatrixOptions } from "./dotMatrixRenderer";
+import { dotMatrixRenderer, DotMatrixRenderer, resolveLeftMargin, type DotMatrixOptions } from "./dotMatrixRenderer";
 import type { InvoicePrintData, CreditNotePrintData, DebitNotePrintData } from "./printingEngine";
 
 describe("Dot Matrix Plain-Text Renderer & ESC/P Generator", () => {
@@ -57,6 +57,57 @@ describe("Dot Matrix Plain-Text Renderer & ESC/P Generator", () => {
     grand_total: 718.0,
     amount_in_words: "Indian Seven Hundred Eighteen Rupees Only",
     terms_and_conditions: "Goods once sold will not be taken back without original bill.",
+  };
+
+  const sampleCreditNote: CreditNotePrintData = {
+    return_number: "CN-2026-0042",
+    return_date: "2026-10-08",
+    original_invoice_number: "INV-2026-8801",
+    store_name: "Alverstone MediCare",
+    customer_name: "Rahul Varma",
+    customer_phone: "9876543210",
+    refund_mode: "store_credit",
+    lines: [
+      {
+        description: "Augmentin 625 Duo Tablet",
+        hsn_code: "30042000",
+        batch_no: "AUG892",
+        qty: 1,
+        rate: 205.5,
+        gst_percent: 12,
+        amount: 205.5,
+      },
+    ],
+    subtotal: 205.5,
+    tax_total: 24.66,
+    round_off: 0,
+    grand_total: 230.16,
+  };
+
+  const sampleDebitNote: DebitNotePrintData = {
+    return_number: "PR-2026-0019",
+    return_date: "2026-10-08",
+    original_purchase_number: "PUR-2026-550",
+    supplier_invoice_no: "SUP-INV-9901",
+    store_name: "Alverstone MediCare",
+    supplier_name: "Cipla Healthcare Distribution",
+    supplier_gstin: "32ZZZZZ1111Z1Z2",
+    settlement_type: "supplier_credit",
+    lines: [
+      {
+        description: "Asthalin Inhaler 200 MDI",
+        hsn_code: "30049099",
+        batch_no: "AST554",
+        qty: 10,
+        rate: 120.0,
+        gst_percent: 12,
+        amount: 1200.0,
+      },
+    ],
+    subtotal: 1200.0,
+    tax_total: 144.0,
+    round_off: 0,
+    grand_total: 1344.0,
   };
 
   describe("Plain ASCII Formatting & Character ROM Safety", () => {
@@ -830,6 +881,108 @@ describe("Dot Matrix Plain-Text Renderer & ESC/P Generator", () => {
 
       const html120 = dotMatrixRenderer.generateMonospaceHtmlPreview("Wide content\n", { columns: 120 });
       expect(html120).toContain("min-width: 1072px");
+    });
+  });
+
+  describe("Horizontal Paper Alignment & Carriage Centering", () => {
+    it("calculates correct left offset spaces for various paper and carriage combinations", () => {
+      // 6-inch paper (60 cols) inside 12-inch printer (120 cols) => (120 - 60) / 2 = 30 spaces
+      expect(resolveLeftMargin({ printerCarriageColumns: 120, autoCenterPaper: true }, 60)).toBe(" ".repeat(30));
+
+      // 6-inch paper (60 cols) inside 10-inch printer (80 cols) => (80 - 60) / 2 = 10 spaces
+      expect(resolveLeftMargin({ printerCarriageColumns: 80, autoCenterPaper: true }, 60)).toBe(" ".repeat(10));
+
+      // 10-inch paper (80 cols) inside 12-inch printer (120 cols) => (120 - 80) / 2 = 20 spaces
+      expect(resolveLeftMargin({ printerCarriageColumns: 120, autoCenterPaper: true }, 80)).toBe(" ".repeat(20));
+
+      // 10-inch paper (80 cols) inside 15-inch printer (132 cols) => (132 - 80) / 2 = 26 spaces
+      expect(resolveLeftMargin({ printerCarriageColumns: 132, autoCenterPaper: true }, 80)).toBe(" ".repeat(26));
+
+      // Matching widths: 12-inch on 12-inch => 0 offset
+      expect(resolveLeftMargin({ printerCarriageColumns: 120, autoCenterPaper: true }, 120)).toBe("");
+
+      // Matching widths: 80-col on 80-col => 0 offset
+      expect(resolveLeftMargin({ printerCarriageColumns: 80, autoCenterPaper: true }, 80)).toBe("");
+
+      // When autoCenterPaper is disabled => 0 offset
+      expect(resolveLeftMargin({ printerCarriageColumns: 120, autoCenterPaper: false }, 60)).toBe("");
+
+      // Combines centering offset with manual leftMarginSpaces
+      expect(resolveLeftMargin({ printerCarriageColumns: 120, autoCenterPaper: true, leftMarginSpaces: 2 }, 60)).toBe(" ".repeat(32));
+    });
+
+    it("renders 6-inch invoice centered inside 12-inch carriage with exactly 30 spaces left offset on all lines", () => {
+      const rendered = dotMatrixRenderer.renderInvoice(sampleInvoice, {
+        paperWidth: "6in",
+        printerCarriageColumns: 120,
+        autoCenterPaper: true,
+      });
+
+      const lines = rendered.split("\n");
+      // All non-empty lines must start with exactly 30 spaces
+      for (const line of lines) {
+        if (line.trim().length > 0) {
+          expect(line.startsWith(" ".repeat(30))).toBe(true);
+          // And content after the 30 spaces must not exceed 60 characters (total length <= 90)
+          expect(line.length).toBeLessThanOrEqual(90);
+        }
+      }
+
+      // Divider line check: 30 spaces + 60 hyphens = 90 chars total
+      expect(lines.some((l) => l === " ".repeat(30) + "-".repeat(60))).toBe(true);
+      expect(lines.some((l) => l === " ".repeat(30) + "=".repeat(60))).toBe(true);
+    });
+
+    it("renders 10-inch invoice on 10-inch carriage with 0 offset (no unintended left spaces)", () => {
+      const rendered = dotMatrixRenderer.renderInvoice(sampleInvoice, {
+        paperWidth: "10in",
+        printerCarriageColumns: 80,
+        autoCenterPaper: true,
+      });
+
+      const lines = rendered.split("\n");
+      // Header divider should start at index 0 without leading spaces
+      expect(lines.some((l) => l === "-".repeat(80))).toBe(true);
+    });
+
+    it("renders credit notes and debit notes centered on wide carriages", () => {
+      const cn = dotMatrixRenderer.renderCreditNote(sampleCreditNote, {
+        columns: 60,
+        printerCarriageColumns: 120,
+        autoCenterPaper: true,
+      });
+
+      const cnLines = cn.split("\n");
+      for (const line of cnLines) {
+        if (line.trim().length > 0) {
+          expect(line.startsWith(" ".repeat(30))).toBe(true);
+        }
+      }
+
+      const dn = dotMatrixRenderer.renderDebitNote(sampleDebitNote, {
+        columns: 60,
+        printerCarriageColumns: 120,
+        autoCenterPaper: true,
+      });
+
+      const dnLines = dn.split("\n");
+      for (const line of dnLines) {
+        if (line.trim().length > 0) {
+          expect(line.startsWith(" ".repeat(30))).toBe(true);
+        }
+      }
+    });
+
+    it("expands HTML preview column ruler to span full carriage width when centering narrow paper", () => {
+      const preview = dotMatrixRenderer.generateMonospaceHtmlPreview(" ".repeat(30) + "Centered line\n", {
+        columns: 60,
+        printerCarriageColumns: 120,
+      });
+
+      // Ruler tens must reach 12 (120 cols)
+      expect(preview).toContain("12");
+      // Paper body min-width should accommodate 120 cols (120 * 8.6 + 40 = 1072px)
+      expect(preview).toContain("min-width: 1072px");
     });
   });
 });

@@ -8,6 +8,8 @@ export type DotMatrixPaperWidth = "6in" | "10in" | "12in" | "15in" | number;
 
 export interface DotMatrixOptions {
   columns?: number; // 60 (6"), 80 (10"), 120 (12"), 132 (15"/condensed) or custom
+  printerCarriageColumns?: number; // Physical carriage width of printer (e.g. 80, 120, 132, 136)
+  autoCenterPaper?: boolean; // Center smaller paper width relative to wider carriage (default true)
   paperWidth?: DotMatrixPaperWidth; // Physical paper width loaded in printer
   linesPerPage?: number; // default 66 lines for 11", 72 for 12", 33 for 6" half-page, 0 for Continuous
   cpi?: DotMatrixPitch;
@@ -30,6 +32,8 @@ export interface DotMatrixOptions {
 
 export interface DotMatrixPreviewOptions {
   columns?: number; // 60, 80, 120, 132 or custom
+  printerCarriageColumns?: number;
+  autoCenterPaper?: boolean;
   paperWidth?: DotMatrixPaperWidth;
   showRuler?: boolean;
   showLineNumbers?: boolean;
@@ -38,6 +42,24 @@ export interface DotMatrixPreviewOptions {
   enableBold?: boolean;
   endOfJobAction?: DotMatrixEndOfJob;
   feedLinesForTearOff?: number;
+}
+
+/**
+ * Resolves total left margin spaces, including automatic horizontal centering offset
+ * when smaller paper is used inside a wider printer carriage, plus any user-specified manual margin.
+ */
+export function resolveLeftMargin(options?: DotMatrixOptions, paperCols?: number): string {
+  const manualMargin = Math.max(0, options?.leftMarginSpaces || 0);
+  const carriageCols = options?.printerCarriageColumns;
+  const autoCenter = options?.autoCenterPaper !== false;
+
+  let autoOffset = 0;
+  if (autoCenter && carriageCols && paperCols && carriageCols > paperCols) {
+    autoOffset = Math.floor((carriageCols - paperCols) / 2);
+  }
+
+  const totalSpaces = autoOffset + manualMargin;
+  return totalSpaces > 0 ? " ".repeat(totalSpaces) : "";
 }
 
 /**
@@ -276,7 +298,7 @@ export class DotMatrixRenderer {
     const cols = customCols || 60;
     const linesPerPage = options?.linesPerPage !== undefined ? options.linesPerPage : 66;
     const curr = options?.currencyPrefix || "Rs.";
-    const leftMargin = " ".repeat(options?.leftMarginSpaces || 0);
+    const leftMargin = resolveLeftMargin(options, cols);
     const divDouble = leftMargin + "=".repeat(cols);
     const divSingle = leftMargin + "-".repeat(cols);
 
@@ -502,7 +524,7 @@ export class DotMatrixRenderer {
     const cols = customCols || 80;
     const linesPerPage = options?.linesPerPage !== undefined ? options.linesPerPage : 66;
     const curr = options?.currencyPrefix || "Rs.";
-    const leftMargin = " ".repeat(options?.leftMarginSpaces || 0);
+    const leftMargin = resolveLeftMargin(options, cols);
     const divDouble = leftMargin + "=".repeat(cols);
     const divSingle = leftMargin + "-".repeat(cols);
 
@@ -760,7 +782,7 @@ export class DotMatrixRenderer {
     const cols = customCols || 120;
     const linesPerPage = options?.linesPerPage !== undefined ? options.linesPerPage : 66;
     const curr = options?.currencyPrefix || "Rs.";
-    const leftMargin = " ".repeat(options?.leftMarginSpaces || 0);
+    const leftMargin = resolveLeftMargin(options, cols);
     const divDouble = leftMargin + "=".repeat(cols);
     const divSingle = leftMargin + "-".repeat(cols);
 
@@ -928,7 +950,7 @@ export class DotMatrixRenderer {
     const cols = customCols || 132;
     const linesPerPage = options?.linesPerPage !== undefined ? options.linesPerPage : 66;
     const curr = options?.currencyPrefix || "Rs.";
-    const leftMargin = " ".repeat(options?.leftMarginSpaces || 0);
+    const leftMargin = resolveLeftMargin(options, cols);
     const divDouble = leftMargin + "=".repeat(cols);
     const divSingle = leftMargin + "-".repeat(cols);
 
@@ -1106,7 +1128,7 @@ export class DotMatrixRenderer {
    */
   private renderPrePrintedInvoice(data: InvoicePrintData, options?: DotMatrixOptions): string {
     const cols = resolveDotMatrixColumns(options);
-    const leftMargin = " ".repeat(options?.leftMarginSpaces || 0);
+    const leftMargin = resolveLeftMargin(options, cols);
     const endOfJobAction = options?.endOfJobAction || "stop_immediately";
     const feedLines = Math.min(10, Math.max(0, options?.feedLinesForTearOff || 0));
     const outLines: string[] = [];
@@ -1160,7 +1182,7 @@ export class DotMatrixRenderer {
   renderCreditNote(data: CreditNotePrintData, options?: DotMatrixOptions): string {
     const cols = resolveDotMatrixColumns(options);
     const curr = options?.currencyPrefix || "Rs.";
-    const leftMargin = " ".repeat(options?.leftMarginSpaces || 0);
+    const leftMargin = resolveLeftMargin(options, cols);
     const divDouble = leftMargin + "=".repeat(cols);
     const divSingle = leftMargin + "-".repeat(cols);
 
@@ -1272,7 +1294,7 @@ export class DotMatrixRenderer {
   renderDebitNote(data: DebitNotePrintData, options?: DotMatrixOptions): string {
     const cols = resolveDotMatrixColumns(options);
     const curr = options?.currencyPrefix || "Rs.";
-    const leftMargin = " ".repeat(options?.leftMarginSpaces || 0);
+    const leftMargin = resolveLeftMargin(options, cols);
     const divDouble = leftMargin + "=".repeat(cols);
     const divSingle = leftMargin + "-".repeat(cols);
 
@@ -1613,17 +1635,19 @@ export class DotMatrixRenderer {
    */
   generateMonospaceHtmlPreview(text: string, options?: DotMatrixPreviewOptions): string {
     const cols = resolveDotMatrixColumns(options);
+    const carriageCols = options?.printerCarriageColumns || cols;
+    const rCols = Math.max(cols, carriageCols);
     const showRuler = options?.showRuler !== false;
     const showLineNumbers = options?.showLineNumbers !== false;
     const showPageBreaks = options?.showPageBreaks !== false;
-    const is132 = cols >= 125;
+    const is132 = rCols >= 125;
 
     const pages = text.split("\x0C").filter((p) => p.trim().length > 0);
 
-    // 1. Exact Column Ruler (Tens and Units align with 100% character grid accuracy)
+    // 1. Exact Column Ruler (Tens and Units align with 100% character grid accuracy across carriage)
     let rTens = "";
     let rUnits = "";
-    for (let i = 1; i <= cols; i++) {
+    for (let i = 1; i <= rCols; i++) {
       if (i % 10 === 0) {
         rTens += String(i / 10);
       } else {
@@ -1797,7 +1821,7 @@ export class DotMatrixRenderer {
     .paper-body {
       padding: 16px 20px;
       background-color: #fefdfa;
-      min-width: ${Math.max(480, Math.round(cols * 8.6 + 40))}px;
+      min-width: ${Math.max(480, Math.round(rCols * 8.6 + 40))}px;
     }
 
     .dot-line {

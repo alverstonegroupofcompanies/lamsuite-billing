@@ -1955,6 +1955,59 @@ export const SettingsPage: React.FC = () => {
                       Loaded continuous paper width. Printable width is also switchable per job in preview.
                     </p>
                   </div>
+
+                  <div>
+                    <label className="block text-[11px] font-semibold uppercase text-slate-600 mb-1">
+                      Printer Carriage Width (Hardware)
+                    </label>
+                    <select
+                      value={String(settings.printing.dotMatrixCarriageWidth || 80)}
+                      onChange={(e) =>
+                        setSettings({
+                          ...settings,
+                          printing: {
+                            ...settings.printing,
+                            dotMatrixCarriageWidth: parseInt(e.target.value) as 80 | 120 | 132 | 136,
+                          },
+                        })
+                      }
+                      className="w-full rounded-lg border border-slate-300 p-2 text-xs focus:border-blue-500 focus:outline-none bg-white font-mono"
+                    >
+                      <option value="80">80 Columns (10-inch Standard Platen)</option>
+                      <option value="120">120 Columns (12-inch Platen - TVS 245)</option>
+                      <option value="132">132 Columns (15-inch Wide Carriage)</option>
+                      <option value="136">136 Columns (15-inch Extended Platen)</option>
+                    </select>
+                    <p className="mt-1 text-[10px] text-slate-500">
+                      Physical width of printer platen. Narrow paper is dynamically centered against this width.
+                    </p>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-semibold uppercase text-slate-600 mb-1">
+                      Horizontal Paper Alignment
+                    </label>
+                    <label className="flex items-center gap-2 pt-2 cursor-pointer text-xs text-slate-700">
+                      <input
+                        type="checkbox"
+                        checked={settings.printing.dotMatrixAutoCenter !== false}
+                        onChange={(e) =>
+                          setSettings({
+                            ...settings,
+                            printing: {
+                              ...settings.printing,
+                              dotMatrixAutoCenter: e.target.checked,
+                            },
+                          })
+                        }
+                        className="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                      />
+                      <span className="font-medium">Auto-center narrow paper in wide carriage</span>
+                    </label>
+                    <p className="mt-1 text-[10px] text-slate-500">
+                      Centers 6&quot; or 10&quot; paper automatically (e.g. +30 cols for 6&quot; on 12&quot; printer).
+                    </p>
+                  </div>
                 </div>
               </div>
 

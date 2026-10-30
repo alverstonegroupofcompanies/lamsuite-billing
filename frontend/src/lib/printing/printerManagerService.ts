@@ -59,6 +59,57 @@ export function getPaperWidthInches(paperSize: PaperSize): number {
   }
 }
 
+/**
+ * Resolves the full physical carriage/printable width in columns (at standard 10 CPI) for a dot matrix printer.
+ * If not explicitly configured, infers from printer capabilities, model name, or supported paper sizes.
+ */
+export function getPrinterCarriageColumns(
+  printer?: SystemPrinterInfo | null,
+  profile?: PrinterProfileConfig | null
+): number {
+  if (profile?.dotMatrixCarriageWidth) {
+    return Number(profile.dotMatrixCarriageWidth);
+  }
+  if (printer?.carriageWidthCols) {
+    return printer.carriageWidthCols;
+  }
+  if (printer?.name || printer?.displayName) {
+    const name = `${printer.name} ${printer.displayName || ""}`.toLowerCase();
+    if (name.includes("12\"") || name.includes("12-inch") || name.includes("120") || name.includes("245") || name.includes("250")) {
+      return 120;
+    }
+    if (name.includes("15\"") || name.includes("15-inch") || name.includes("132") || name.includes("136") || name.includes("lq-2090") || name.includes("wide")) {
+      return 132;
+    }
+    if (name.includes("80") || name.includes("10\"") || name.includes("msp 240") || name.includes("lx-300") || name.includes("lx-310")) {
+      return 80;
+    }
+  }
+  if (printer?.supportedPaperSizes && printer.supportedPaperSizes.length > 0) {
+    if (printer.supportedPaperSizes.includes("dot_matrix_132col")) return 132;
+    if (printer.supportedPaperSizes.includes("dot_matrix_120col")) return 120;
+    if (printer.supportedPaperSizes.includes("dot_matrix_80col")) return 80;
+    if (printer.supportedPaperSizes.includes("dot_matrix_6in")) return 60;
+  }
+  // Default for standard dot matrix carriage
+  return 80;
+}
+
+/**
+ * Calculates horizontal left offset (in character spaces at standard pitch) to center a smaller paper
+ * width within the printer's full printable/carriage width.
+ * Returns 0 if paper width matches or exceeds printer carriage width.
+ */
+export function calculateHorizontalCenteringOffset(
+  printerCarriageCols: number,
+  paperWidthCols: number
+): number {
+  if (!printerCarriageCols || !paperWidthCols || paperWidthCols >= printerCarriageCols) {
+    return 0;
+  }
+  return Math.floor((printerCarriageCols - paperWidthCols) / 2);
+}
+
 export interface SystemPrinterInfo {
   name: string;
   displayName: string;
@@ -68,6 +119,7 @@ export interface SystemPrinterInfo {
   driverName?: string;
   portName?: string;
   printerType: PrinterType;
+  carriageWidthCols?: number;
   supportedPaperSizes: PaperSize[];
   isVirtual: boolean;
 }
@@ -93,6 +145,8 @@ export interface PrinterProfileConfig {
   cashDrawerPin?: "pin_2" | "pin_5";
   // Dot matrix specifics
   dotMatrixColumns?: 60 | 80 | 120 | 132;
+  dotMatrixCarriageWidth?: 80 | 120 | 132 | 136;
+  dotMatrixAutoCenter?: boolean;
   dotMatrixLoadedPaperWidth?: "6in" | "10in" | "12in" | "15in";
   dotMatrixCommandSet?: "esc_p" | "tvs_native" | "plain_ascii";
   dotMatrixPitch?: "10cpi" | "12cpi" | "17cpi_condensed";
@@ -162,17 +216,31 @@ export const DEFAULT_SYSTEM_PRINTERS: SystemPrinterInfo[] = [
     driverName: "Generic / Text Only",
     portName: "LPT1",
     printerType: "dot_matrix",
-    supportedPaperSizes: ["dot_matrix_6in", "dot_matrix_80col", "dot_matrix_120col", "half_a4"],
+    carriageWidthCols: 80,
+    supportedPaperSizes: ["dot_matrix_6in", "dot_matrix_80col", "half_a4"],
     isVirtual: false,
   },
   {
-    name: "Epson LQ-2090 Wide Carriage",
-    displayName: "Epson LQ-2090 (Dot Matrix 12\"/15\" Wide)",
+    name: "TVS MSP 245 Star",
+    displayName: "TVS MSP 245 (Dot Matrix 12\" / 120-Col)",
     isDefault: false,
     status: "ready",
     driverName: "Generic / Text Only",
     portName: "LPT1",
     printerType: "dot_matrix",
+    carriageWidthCols: 120,
+    supportedPaperSizes: ["dot_matrix_6in", "dot_matrix_80col", "dot_matrix_120col", "half_a4"],
+    isVirtual: false,
+  },
+  {
+    name: "Epson LQ-2090 Wide Carriage",
+    displayName: "Epson LQ-2090 (Dot Matrix 15\" / 132-Col Wide)",
+    isDefault: false,
+    status: "ready",
+    driverName: "Generic / Text Only",
+    portName: "LPT1",
+    printerType: "dot_matrix",
+    carriageWidthCols: 132,
     supportedPaperSizes: ["dot_matrix_6in", "dot_matrix_80col", "dot_matrix_120col", "dot_matrix_132col", "half_a4"],
     isVirtual: false,
   },
@@ -311,6 +379,8 @@ export class PrinterManagerService {
       enableCashDrawerKick: isThermal,
       cashDrawerPin: "pin_2",
       dotMatrixColumns: isDotMatrix ? 80 : undefined,
+      dotMatrixCarriageWidth: isDotMatrix ? ((printer.carriageWidthCols || 80) as any) : undefined,
+      dotMatrixAutoCenter: isDotMatrix ? true : undefined,
       dotMatrixCommandSet: isDotMatrix ? "esc_p" : undefined,
       dotMatrixPitch: isDotMatrix ? "10cpi" : undefined,
       linesPerPage: isDotMatrix ? 66 : undefined,
@@ -843,10 +913,18 @@ export class PrinterManagerService {
       // Exactly 3 lines, no form feed, stops immediately
       const cols = getDotMatrixColumns(paperSize);
       const widthIn = getPaperWidthInches(paperSize);
+      const printers = await this.getSystemPrinters();
+      const printer = printers.find((p) => p.name.toLowerCase() === printerName.toLowerCase());
+      const profile = await this.getProfileForPrinter(printerName);
+      const carriageCols = getPrinterCarriageColumns(printer, profile);
+      const offset = profile.dotMatrixAutoCenter !== false
+        ? calculateHorizontalCenteringOffset(carriageCols, cols)
+        : 0;
+      const leftPad = " ".repeat(offset);
       const encoder = new TextEncoder();
-      const text = "\x1B@LamSuite Dot-Matrix Calibration Test (" + cols + " Col / " + widthIn + "\")\r\n" +
-        "Printer: " + printerName + "\r\n" +
-        "Status: Ready - Head Stopped Immediately\r\n";
+      const text = "\x1B@" + leftPad + "LamSuite Dot-Matrix Calibration Test (" + cols + " Col / " + widthIn + "\")\r\n" +
+        leftPad + "Printer: " + printerName + (offset > 0 ? " [Centered +" + offset + "C]" : "") + "\r\n" +
+        leftPad + "Status: Ready - Head Stopped Immediately\r\n";
       rawEscPosBytes = encoder.encode(text);
     }
 
