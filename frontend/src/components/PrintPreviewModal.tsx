@@ -147,6 +147,8 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
 
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const printerSelectRef = useRef<HTMLSelectElement | null>(null);
+  const isExecutingPrintRef = useRef(false);
+  const lastClickTimeRef = useRef(0);
 
   // Load Printers & Last Used Mapping on Open
   useEffect(() => {
@@ -410,10 +412,16 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
 
   // Execute Print Job Action
   const handleExecutePrint = async () => {
-    if (isPrinting) return;
+    const now = Date.now();
+    if (now - lastClickTimeRef.current < 1000) return;
+    lastClickTimeRef.current = now;
 
-    if (selectedPrinterName === "Save as PDF" || selectedPrinterName === "Microsoft Print to PDF") {
+    if (isPrinting || isExecutingPrintRef.current) return;
+    isExecutingPrintRef.current = true;
+
+    if (selectedPrinterName === "Save as PDF") {
       await handleSavePdf();
+      isExecutingPrintRef.current = false;
       return;
     }
 
@@ -422,6 +430,7 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
       iframeRef.current.contentWindow.print();
       setStatusMessage({ text: "Sent to OS system print dialog", type: "success" });
       onAfterPrint?.({ success: true, mode: "system_dialog" });
+      isExecutingPrintRef.current = false;
       return;
     }
 
@@ -431,6 +440,7 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
         iframeRef.current.contentWindow.print();
         setStatusMessage({ text: "Sent to browser print dialog", type: "success" });
         onAfterPrint?.({ success: true, mode: paperSize });
+        isExecutingPrintRef.current = false;
         return;
       }
     }
@@ -505,10 +515,21 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
         pdfBytes,
         rawEscPosBytes,
         useSystemDialog,
+        skipWebviewFallback: true,
       });
 
       if (res.success) {
-        setStatusMessage({ text: `Print job queued to ${selectedPrinterName}!`, type: "success" });
+        if (res.fallbackToWebview) {
+          if (iframeRef.current && iframeRef.current.contentWindow) {
+            iframeRef.current.contentWindow.focus();
+            iframeRef.current.contentWindow.print();
+            setStatusMessage({ text: `Document dispatched to ${selectedPrinterName}!`, type: "success" });
+            onAfterPrint?.({ success: true, mode: paperSize });
+            setTimeout(() => onClose(), 1500);
+            return;
+          }
+        }
+        setStatusMessage({ text: `Print job accepted by ${selectedPrinterName}!`, type: "success" });
         onAfterPrint?.({ success: true, mode: paperSize });
         setTimeout(() => onClose(), 1200);
       } else {
@@ -519,6 +540,9 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
       setStatusMessage({ text: `Print error: ${err?.message || "Communication failed"}`, type: "error" });
     } finally {
       setIsPrinting(false);
+      setTimeout(() => {
+        isExecutingPrintRef.current = false;
+      }, 500);
     }
   };
 
@@ -1335,7 +1359,7 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
             {/* Status Notifications */}
             {statusMessage && (
               <div
-                className={`mx-5 mb-3 p-3 rounded-lg text-xs font-semibold flex items-center gap-2 border animate-in fade-in ${
+                className={`mx-5 mb-3 p-3 rounded-lg text-xs font-semibold flex items-start gap-2 border animate-in fade-in ${
                   statusMessage.type === "success"
                     ? "bg-emerald-50 text-emerald-800 border-emerald-300 dark:bg-emerald-950 dark:text-emerald-300"
                     : statusMessage.type === "error"
@@ -1344,11 +1368,34 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
                 }`}
               >
                 {statusMessage.type === "success" ? (
-                  <CheckCircle2 className="w-4 h-4 shrink-0" />
+                  <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5" />
                 ) : (
-                  <AlertCircle className="w-4 h-4 shrink-0" />
+                  <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
                 )}
-                <span className="truncate">{statusMessage.text}</span>
+                <div className="flex-1 min-w-0">
+                  <div className="break-words">{statusMessage.text}</div>
+                  {statusMessage.type === "error" && (
+                    <div className="mt-2 flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => handleExecutePrint()}
+                        disabled={isPrinting}
+                        className="px-2.5 py-1 bg-rose-600 hover:bg-rose-700 text-white font-bold text-[11px] rounded shadow-sm transition disabled:opacity-50"
+                      >
+                        Retry
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          printerSelectRef.current?.focus();
+                        }}
+                        className="px-2.5 py-1 bg-white dark:bg-slate-800 border border-rose-300 dark:border-rose-700 text-rose-700 dark:text-rose-300 font-bold text-[11px] rounded shadow-sm hover:bg-rose-50 transition"
+                      >
+                        Choose another printer
+                      </button>
+                    </div>
+                  )}
+                </div>
               </div>
             )}
 

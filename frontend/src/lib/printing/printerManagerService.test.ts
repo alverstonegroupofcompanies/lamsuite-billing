@@ -34,6 +34,27 @@ describe("PrinterManagerService Native Discovery & Profiles", () => {
       return t ? Array.from(t.values()) : [];
     });
 
+    registerMockHandler("db:delete", async (args: any) => {
+      const { table, id } = args || {};
+      if (memoryDb.has(table)) {
+        memoryDb.get(table)!.delete(id);
+      }
+      return { success: true };
+    });
+
+    registerMockHandler("db:execute", async (args: any) => {
+      const { sql } = args || {};
+      const match = sql?.match(/DELETE\s+FROM\s+([a-zA-Z0-9_]+)/i);
+      if (match && memoryDb.has(match[1])) {
+        memoryDb.get(match[1])!.clear();
+      }
+      return { success: true };
+    });
+
+    registerMockHandler("get_system_printers", async () => {
+      return DEFAULT_SYSTEM_PRINTERS;
+    });
+
     registerMockHandler("print_native_job", async (args: any) => {
       const printerName = args?.printer_name || args?.printerName;
       return { success: true, job_id: `spool_job_${Date.now()}`, printer_name: printerName };
@@ -170,5 +191,182 @@ describe("PrinterManagerService Native Discovery & Profiles", () => {
     expect(retrieved.currencySymbolFormat).toBe("rs_text");
     expect(retrieved.enableAutoCut).toBe(true);
     expect(retrieved.enableCashDrawerKick).toBe(true);
+  });
+
+  it("prints an A4 invoice, thermal bill, and dot-matrix bill with exactly one spooler job each", async () => {
+    let jobCallCount = 0;
+    const dispatchedPrinters: string[] = [];
+
+    registerMockHandler("print_native_job", async (args: any) => {
+      jobCallCount++;
+      dispatchedPrinters.push(args?.printer_name);
+      return {
+        success: true,
+        job_id: `spool_win32_${jobCallCount}`,
+        printer_name: args?.printer_name,
+      };
+    });
+
+    // 1. A4 invoice on Microsoft Print to PDF
+    const a4Res = await printerManagerService.executePrintJob({
+      printerName: "Microsoft Print to PDF",
+      paperSize: "a4",
+      docType: "tax_invoice",
+      docNumber: "INV-2026-001",
+      pdfBytes: new Uint8Array([37, 80, 68, 70, 45]), // %PDF-
+      skipWebviewFallback: true,
+    });
+    expect(a4Res.success).toBe(true);
+    expect(jobCallCount).toBe(1);
+    expect(dispatchedPrinters[0]).toBe("Microsoft Print to PDF");
+
+    // 2. Thermal bill on EPSON TM-T82
+    const thermalRes = await printerManagerService.executePrintJob({
+      printerName: "EPSON TM-T82 Thermal",
+      paperSize: "thermal_80mm",
+      docType: "tax_invoice",
+      docNumber: "INV-2026-002",
+      rawEscPosBytes: new Uint8Array([27, 64, 27, 97, 1]), // ESC/POS
+    });
+    expect(thermalRes.success).toBe(true);
+    expect(jobCallCount).toBe(2);
+    expect(dispatchedPrinters[1]).toBe("EPSON TM-T82 Thermal");
+
+    // 3. Dot-matrix text bill on TVS MSP 240
+    const dotRes = await printerManagerService.executePrintJob({
+      printerName: "TVS MSP 240 Star",
+      paperSize: "dot_matrix_80col",
+      docType: "tax_invoice",
+      docNumber: "INV-2026-003",
+      rawEscPosBytes: new Uint8Array([27, 64, 65, 66, 67]), // ESC/P
+    });
+    expect(dotRes.success).toBe(true);
+    expect(jobCallCount).toBe(3);
+    expect(dispatchedPrinters[2]).toBe("TVS MSP 240 Star");
+  });
+
+  it("supports printer names and file paths containing spaces and unicode characters", async () => {
+    let capturedPrinterName = "";
+
+    registerMockHandler("print_native_job", async (args: any) => {
+      capturedPrinterName = args?.printer_name;
+      return {
+        success: true,
+        job_id: "spool_unicode_101",
+        printer_name: capturedPrinterName,
+      };
+    });
+
+    const spacePrinterName = "HP LaserJet Pro MFP 4104 (Pharmacy Back Office)";
+    registerMockHandler("get_system_printers", async () => {
+      return [
+        ...DEFAULT_SYSTEM_PRINTERS,
+        {
+          name: spacePrinterName,
+          displayName: spacePrinterName,
+          isDefault: false,
+          status: "ready",
+          printerType: "laser_inkjet",
+          supportedPaperSizes: ["a4"],
+          isVirtual: false,
+        },
+      ];
+    });
+
+    const res = await printerManagerService.executePrintJob({
+      printerName: spacePrinterName,
+      paperSize: "a4",
+      docType: "tax_invoice",
+      docNumber: "DOC 2026 / 999",
+      pdfBytes: new Uint8Array([37, 80, 68, 70, 45]),
+      skipWebviewFallback: true,
+    });
+
+    expect(res.success).toBe(true);
+    expect(capturedPrinterName).toBe(spacePrinterName);
+  });
+
+  it("prevents double triggers: clicking Print and pressing F9 together generates exactly one spooler job", async () => {
+    let jobExecutionCount = 0;
+
+    registerMockHandler("print_native_job", async () => {
+      jobExecutionCount++;
+      // Simulate spooler processing latency
+      await new Promise((r) => setTimeout(r, 80));
+      return {
+        success: true,
+        job_id: `spool_lock_${jobExecutionCount}`,
+      };
+    });
+
+    // Simulate clicking Print and pressing F9 concurrently (two dispatches of the same document)
+    const [clickRes, f9Res] = await Promise.all([
+      printerManagerService.executePrintJob({
+        printerName: "EPSON TM-T82 Thermal",
+        paperSize: "thermal_80mm",
+        docType: "tax_invoice",
+        docNumber: "INV-DUP-TEST",
+        rawEscPosBytes: new Uint8Array([27, 64]),
+      }),
+      printerManagerService.executePrintJob({
+        printerName: "EPSON TM-T82 Thermal",
+        paperSize: "thermal_80mm",
+        docType: "tax_invoice",
+        docNumber: "INV-DUP-TEST",
+        rawEscPosBytes: new Uint8Array([27, 64]),
+      }),
+    ]);
+
+    // Exactly one job was sent to the spooler
+    expect(jobExecutionCount).toBe(1);
+    expect(clickRes.success !== f9Res.success).toBe(true);
+    const failureRes = !clickRes.success ? clickRes : f9Res;
+    expect(failureRes.error).toMatch(/spooling|progress|Duplicate/i);
+  });
+
+  it("supports clean Windows machine fallback without extra tools installed", async () => {
+    registerMockHandler("print_native_job", async () => {
+      return {
+        success: true,
+        fallback_to_webview: true,
+        job_id: "job_webview_fallback",
+        printer_name: "Microsoft Print to PDF",
+      };
+    });
+
+    const res = await printerManagerService.executePrintJob({
+      printerName: "Microsoft Print to PDF",
+      paperSize: "a4",
+      docType: "tax_invoice",
+      docNumber: "INV-CLEAN-WIN",
+      htmlContent: "<html><body>Invoice Content</body></html>",
+      skipWebviewFallback: true,
+    });
+
+    expect(res.success).toBe(true);
+    expect(res.fallbackToWebview).toBe(true);
+  });
+
+  it("stores, audits, and clears print history records correctly", async () => {
+    await printerManagerService.clearPrintHistory();
+    let history = await printerManagerService.getPrintHistory();
+    expect(history.length).toBe(0);
+
+    await printerManagerService.executePrintJob({
+      printerName: "EPSON TM-T82 Thermal",
+      paperSize: "thermal_80mm",
+      docType: "tax_invoice",
+      docNumber: "INV-AUDIT-01",
+      rawEscPosBytes: new Uint8Array([27, 64]),
+    });
+
+    history = await printerManagerService.getPrintHistory();
+    expect(history.length).toBe(1);
+    expect(history[0].documentNumber).toBe("INV-AUDIT-01");
+    expect(history[0].status).toBe("success");
+
+    await printerManagerService.clearPrintHistory();
+    history = await printerManagerService.getPrintHistory();
+    expect(history.length).toBe(0);
   });
 });

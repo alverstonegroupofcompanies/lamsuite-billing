@@ -132,6 +132,8 @@ export const DEFAULT_SYSTEM_PRINTERS: SystemPrinterInfo[] = [
 export class PrinterManagerService {
   private cachedPrinters: SystemPrinterInfo[] | null = null;
   private isSpoolingJob: boolean = false;
+  private lastJobSignature: string = "";
+  private lastJobTimestamp: number = 0;
 
   constructor() {
     this.registerMockIpcHandlers();
@@ -152,10 +154,9 @@ export class PrinterManagerService {
         };
       }
 
-      // If running in browser window and not in Vitest/Node, trigger browser print/download
+      // If running in browser window and target is strictly "Save as PDF", trigger browser download
       if (typeof window !== "undefined" && typeof document !== "undefined") {
-        const isPdf = printerName.toLowerCase().includes("pdf") || printerName === "Save as PDF";
-        if (isPdf && args?.pdf_base64) {
+        if (printerName === "Save as PDF" && args?.pdf_base64) {
           try {
             const binary = atob(args.pdf_base64);
             const bytes = new Uint8Array(binary.length);
@@ -470,10 +471,20 @@ export class PrinterManagerService {
     pdfBytes?: Uint8Array;
     rawEscPosBytes?: Uint8Array;
     useSystemDialog?: boolean;
-  }): Promise<{ success: boolean; error?: string; jobId?: string }> {
+    skipWebviewFallback?: boolean;
+  }): Promise<{ success: boolean; error?: string; jobId?: string; fallbackToWebview?: boolean }> {
     if (this.isSpoolingJob) {
-      return { success: false, error: "Another print job is currently spooling. Please wait a moment." };
+      return { success: false, error: "Another print job is currently in progress. Please wait for the spooler." };
     }
+
+    // Debounce duplicate clicks/keys within 1200ms
+    const signature = `${params.docType}_${params.docNumber}_${params.printerName}_${params.paperSize}`;
+    const now = Date.now();
+    if (now - this.lastJobTimestamp < 1200 && this.lastJobSignature === signature) {
+      return { success: false, error: "Duplicate print request ignored." };
+    }
+    this.lastJobTimestamp = now;
+    this.lastJobSignature = signature;
 
     this.isSpoolingJob = true;
     const startTime = Date.now();
@@ -483,7 +494,7 @@ export class PrinterManagerService {
       const targetPrinter = printers.find((p) => p.name.toLowerCase() === params.printerName.toLowerCase());
 
       if (!targetPrinter && params.printerName !== "Save as PDF" && params.printerName !== "Microsoft Print to PDF") {
-        const errMsg = `Selected printer '${params.printerName}' was not found in system devices.`;
+        const errMsg = `Selected printer '${params.printerName}' was not found in system devices. It may have been disconnected or removed.`;
         await this.recordPrintJob({
           documentType: params.docType,
           documentNumber: params.docNumber,
@@ -500,7 +511,24 @@ export class PrinterManagerService {
       }
 
       if (targetPrinter && targetPrinter.status === "offline") {
-        const errMsg = `Printer '${targetPrinter.displayName}' is currently offline. Please check power and cable.`;
+        const errMsg = `Printer '${targetPrinter.displayName}' is currently offline or disconnected. Please check power and cable.`;
+        await this.recordPrintJob({
+          documentType: params.docType,
+          documentNumber: params.docNumber,
+          printerName: params.printerName,
+          paperSize: params.paperSize,
+          copies: params.copies || 1,
+          isDuplicate: Boolean(params.isDuplicate),
+          status: "failed",
+          errorMessage: errMsg,
+          operatorName: params.operatorName,
+          executionTimeMs: Date.now() - startTime,
+        });
+        return { success: false, error: errMsg };
+      }
+
+      if (targetPrinter && targetPrinter.status === "paper_out") {
+        const errMsg = `Printer '${targetPrinter.displayName}' is out of paper. Please reload paper into the tray.`;
         await this.recordPrintJob({
           documentType: params.docType,
           documentNumber: params.docNumber,
@@ -518,7 +546,12 @@ export class PrinterManagerService {
 
       // Invoke native print command
       const profile = await this.getProfileForPrinter(params.printerName);
-      const res = await invokeCommand<{ success: boolean; job_id?: string; error?: string }>("print_native_job", {
+      const res = await invokeCommand<{
+        success: boolean;
+        job_id?: string;
+        error?: string;
+        fallback_to_webview?: boolean;
+      }>("print_native_job", {
         printerName: params.printerName,
         printer_name: params.printerName,
         paperSize: params.paperSize,
@@ -554,7 +587,17 @@ export class PrinterManagerService {
           operatorName: params.operatorName,
           executionTimeMs: Date.now() - startTime,
         });
-        return { success: true, jobId: res.job_id };
+
+        // If fallback_to_webview is returned and caller did not suppress fallback
+        if (res.fallback_to_webview && !params.skipWebviewFallback && params.htmlContent) {
+          await this.printHtmlViaWebview(params.htmlContent);
+        }
+
+        return {
+          success: true,
+          jobId: res.job_id,
+          fallbackToWebview: res.fallback_to_webview,
+        };
       } else {
         const err = res?.error || "Print spooler rejected job";
         await this.recordPrintJob({
@@ -589,6 +632,132 @@ export class PrinterManagerService {
     } finally {
       this.isSpoolingJob = false;
     }
+  }
+
+  /**
+   * Helper to print HTML directly using WebView native print call
+   */
+  printHtmlViaWebview(html: string): Promise<boolean> {
+    return new Promise((resolve) => {
+      if (typeof window === "undefined" || typeof document === "undefined") {
+        resolve(false);
+        return;
+      }
+      try {
+        const frame = document.createElement("iframe");
+        frame.style.position = "fixed";
+        frame.style.right = "0";
+        frame.style.bottom = "0";
+        frame.style.width = "0";
+        frame.style.height = "0";
+        frame.style.border = "0";
+        document.body.appendChild(frame);
+
+        const doc = frame.contentWindow?.document;
+        if (!doc) {
+          if (document.body.contains(frame)) document.body.removeChild(frame);
+          resolve(false);
+          return;
+        }
+
+        doc.open();
+        doc.write(html);
+        doc.close();
+
+        setTimeout(() => {
+          try {
+            frame.contentWindow?.focus();
+            frame.contentWindow?.print();
+          } catch (e) {
+            console.warn("Webview native print error:", e);
+          }
+          setTimeout(() => {
+            if (document.body.contains(frame)) {
+              document.body.removeChild(frame);
+            }
+            resolve(true);
+          }, 3000);
+        }, 250);
+      } catch (err) {
+        console.error("Failed to trigger webview native print:", err);
+        resolve(false);
+      }
+    });
+  }
+
+  /**
+   * Retrieves the print audit history log.
+   */
+  async getPrintHistory(limit = 100): Promise<PrintJobRecord[]> {
+    const history = await sqliteStorage.findAll<PrintJobRecord>("print_history");
+    return history
+      .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+      .slice(0, limit);
+  }
+
+  /**
+   * Clears the print audit history log.
+   */
+  async clearPrintHistory(): Promise<void> {
+    const records = await this.getPrintHistory(1000);
+    for (const r of records) {
+      await sqliteStorage.deleteRecord("print_history", r.id);
+    }
+    await sqliteStorage.clearTable("print_history");
+  }
+
+  /**
+   * Dispatches a test slip/invoice to the selected printer.
+   */
+  async sendTestPrint(printerName: string, paperSize: PaperSize): Promise<{ success: boolean; error?: string; jobId?: string }> {
+    const isThermal = paperSize.startsWith("thermal");
+    const isDot = paperSize.startsWith("dot_matrix");
+
+    let rawEscPosBytes: Uint8Array | undefined;
+    if (isThermal) {
+      const encoder = new TextEncoder();
+      const text = "\x1B@\x1Ba\x01LamSuite Hardware Calibration Test\n" +
+        "Printer: " + printerName + "\n" +
+        "Date: " + new Date().toLocaleString() + "\n" +
+        "Status: SPOOLER READY\n" +
+        "--------------------------------\n\n\n\x1DV\x42\x00";
+      rawEscPosBytes = encoder.encode(text);
+    } else if (isDot) {
+      const encoder = new TextEncoder();
+      const text = "\x1B@LamSuite Dot-Matrix Calibration Test\r\n" +
+        "Printer: " + printerName + "\r\n" +
+        "Date: " + new Date().toLocaleString() + "\r\n" +
+        "Spooler Test Successful\r\n\x0C";
+      rawEscPosBytes = encoder.encode(text);
+    }
+
+    const testHtml = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>LamSuite Test Print</title>
+        <style>body { font-family: sans-serif; padding: 24px; color: #1e293b; }</style>
+      </head>
+      <body>
+        <h2 style="color: #2563eb;">LamSuite Printer Calibration Test</h2>
+        <p><strong>Printer:</strong> ${printerName}</p>
+        <p><strong>Paper Size:</strong> ${paperSize}</p>
+        <p><strong>Timestamp:</strong> ${new Date().toLocaleString()}</p>
+        <hr style="margin: 20px 0; border: none; border-top: 1px solid #cbd5e1;"/>
+        <p style="color: #16a34a; font-weight: bold;">✓ Windows Print Spooler communication is verified and functional.</p>
+      </body>
+      </html>
+    `;
+
+    return this.executePrintJob({
+      printerName,
+      paperSize,
+      docType: "test_print",
+      docNumber: `TEST-${Date.now().toString().slice(-4)}`,
+      copies: 1,
+      htmlContent: testHtml,
+      rawEscPosBytes,
+    });
   }
 
   private uint8ArrayToBase64(bytes: Uint8Array): string {

@@ -52,6 +52,12 @@ import { cloudDeltaSyncService } from "../lib/sync/cloudDeltaSyncService";
 import { LoggedInDevicesTable } from "../components/devices/LoggedInDevicesTable";
 import { backupService, type BackupPackage } from "../lib/backup/backupService";
 import { printingEngine } from "../lib/printing/printingEngine";
+import {
+  printerManagerService,
+  type SystemPrinterInfo,
+  type PrintJobRecord,
+  type PaperSize,
+} from "../lib/printing/printerManagerService";
 import { sqliteStorage } from "../lib/db/sqliteStorage";
 import { productsStore } from "../lib/masters/productsStore";
 import { partiesStore } from "../lib/masters/partiesStore";
@@ -90,6 +96,84 @@ export const SettingsPage: React.FC = () => {
   const [isTestingPrinter, setIsTestingPrinter] = useState(false);
   const [isCheckingUpdate, setIsCheckingUpdate] = useState(false);
   const [foundUpdate, setFoundUpdate] = useState<UpdateInfo | null>(null);
+
+  // Native Print Spooler Diagnostics & Audit
+  const [detectedPrinters, setDetectedPrinters] = useState<SystemPrinterInfo[]>([]);
+  const [selectedTestPrinter, setSelectedTestPrinter] = useState<string>("");
+  const [selectedTestPaper, setSelectedTestPaper] = useState<PaperSize>("thermal_80mm");
+  const [printLogs, setPrintLogs] = useState<PrintJobRecord[]>([]);
+  const [isScanningPrinters, setIsScanningPrinters] = useState(false);
+  const [testPrintFeedback, setTestPrintFeedback] = useState<{ text: string; success: boolean } | null>(null);
+
+  useEffect(() => {
+    if (activeTab === "printing") {
+      printerManagerService.getSystemPrinters().then((printers) => {
+        setDetectedPrinters(printers);
+        if (printers.length > 0 && !selectedTestPrinter) {
+          const def = printers.find((p) => p.isDefault)?.name || printers[0].name;
+          setSelectedTestPrinter(def);
+        }
+      });
+      printerManagerService.getPrintHistory().then(setPrintLogs);
+    }
+  }, [activeTab]);
+
+  const handleRefreshPrinters = async () => {
+    setIsScanningPrinters(true);
+    try {
+      const printers = await printerManagerService.getSystemPrinters(true);
+      setDetectedPrinters(printers);
+      showNotification(`Discovered ${printers.length} printer(s) natively`, "success");
+    } catch {
+      showNotification("Failed to scan system printers", "error");
+    } finally {
+      setIsScanningPrinters(false);
+    }
+  };
+
+  const handleRefreshLogs = async () => {
+    const logs = await printerManagerService.getPrintHistory();
+    setPrintLogs(logs);
+    showNotification("Spooler audit log refreshed", "success");
+  };
+
+  const handleClearLogs = async () => {
+    await printerManagerService.clearPrintHistory();
+    setPrintLogs([]);
+    showNotification("Spooler audit log cleared", "success");
+  };
+
+  const handleSendHardwareTestPrint = async () => {
+    if (!selectedTestPrinter) return;
+    setIsTestingPrinter(true);
+    setTestPrintFeedback(null);
+    try {
+      const res = await printerManagerService.sendTestPrint(selectedTestPrinter, selectedTestPaper);
+      if (res.success) {
+        setTestPrintFeedback({
+          text: `Test job accepted by spooler for '${selectedTestPrinter}' (Job ID: ${res.jobId || "N/A"})`,
+          success: true,
+        });
+        showNotification("Test print job accepted by spooler", "success");
+      } else {
+        setTestPrintFeedback({
+          text: `Spooler error: ${res.error || "Printer rejected job"}`,
+          success: false,
+        });
+        showNotification(res.error || "Printer test failed", "error");
+      }
+      const logs = await printerManagerService.getPrintHistory();
+      setPrintLogs(logs);
+    } catch (err: any) {
+      setTestPrintFeedback({
+        text: `Error: ${err?.message || "Communication failed"}`,
+        success: false,
+      });
+      showNotification(err?.message || "Test print failed", "error");
+    } finally {
+      setIsTestingPrinter(false);
+    }
+  };
 
   const handleManualCheckUpdate = async () => {
     setIsCheckingUpdate(true);
@@ -1691,6 +1775,222 @@ export const SettingsPage: React.FC = () => {
                   />
                   <span>Print Store Drug Licenses (20B, 21B) & GSTIN</span>
                 </label>
+              </div>
+
+              {/* Native Printer Diagnostics & Hardware Test Print */}
+              <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm space-y-4">
+                <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                  <div>
+                    <h3 className="text-xs font-bold uppercase tracking-wider text-slate-800 flex items-center gap-2">
+                      <Printer className="h-4 w-4 text-blue-600" />
+                      <span>Hardware Printer Diagnostics & Test Spool</span>
+                    </h3>
+                    <p className="text-xs text-slate-500">
+                      Verify physical printer connectivity and test Windows print spooler acceptance directly.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleRefreshPrinters}
+                    disabled={isScanningPrinters}
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition disabled:opacity-50"
+                  >
+                    <RefreshCw className={`h-3.5 w-3.5 ${isScanningPrinters ? "animate-spin" : ""}`} />
+                    <span>Scan Printers</span>
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-[11px] font-semibold uppercase text-slate-600 mb-1">
+                      Target System Printer
+                    </label>
+                    <select
+                      value={selectedTestPrinter}
+                      onChange={(e) => setSelectedTestPrinter(e.target.value)}
+                      className="w-full rounded-lg border border-slate-300 p-2 text-xs focus:border-blue-500 focus:outline-none bg-white font-mono"
+                    >
+                      {detectedPrinters.length === 0 ? (
+                        <option value="">No printers detected</option>
+                      ) : (
+                        detectedPrinters.map((p) => (
+                          <option key={p.name} value={p.name}>
+                            {p.displayName} {p.isDefault ? "[Default]" : ""} ({p.status.toUpperCase()})
+                          </option>
+                        ))
+                      )}
+                    </select>
+                    {detectedPrinters.length > 0 && (
+                      <div className="mt-1 flex items-center gap-2 text-[11px] text-slate-500">
+                        <span>Status:</span>
+                        {(() => {
+                          const curr = detectedPrinters.find((p) => p.name === selectedTestPrinter);
+                          const st = curr?.status || "ready";
+                          return (
+                            <span
+                              className={`font-semibold px-1.5 py-0.5 rounded text-[10px] ${
+                                st === "ready"
+                                  ? "bg-emerald-100 text-emerald-800"
+                                  : st === "offline"
+                                  ? "bg-rose-100 text-rose-800"
+                                  : st === "paper_out"
+                                  ? "bg-amber-100 text-amber-800"
+                                  : "bg-slate-100 text-slate-800"
+                              }`}
+                            >
+                              {st.toUpperCase()}
+                            </span>
+                          );
+                        })()}
+                        {(() => {
+                          const curr = detectedPrinters.find((p) => p.name === selectedTestPrinter);
+                          return curr?.statusDetails ? (
+                            <span className="truncate">({curr.statusDetails})</span>
+                          ) : null;
+                        })()}
+                      </div>
+                    )}
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-semibold uppercase text-slate-600 mb-1">
+                      Test Format / Paper Size
+                    </label>
+                    <select
+                      value={selectedTestPaper}
+                      onChange={(e) => setSelectedTestPaper(e.target.value as PaperSize)}
+                      className="w-full rounded-lg border border-slate-300 p-2 text-xs focus:border-blue-500 focus:outline-none bg-white"
+                    >
+                      <option value="thermal_80mm">Thermal 80mm ESC/POS Receipt</option>
+                      <option value="thermal_58mm">Thermal 58mm ESC/POS Receipt</option>
+                      <option value="a4">Standard A4 Tax Invoice</option>
+                      <option value="dot_matrix_80col">Dot Matrix 80-Column ESC/P</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between pt-1">
+                  <div className="flex-1 min-w-0 pr-4">
+                    {testPrintFeedback && (
+                      <div
+                        className={`text-xs font-medium p-2 rounded-lg flex items-center gap-1.5 ${
+                          testPrintFeedback.success
+                            ? "bg-emerald-50 text-emerald-800 border border-emerald-200"
+                            : "bg-rose-50 text-rose-800 border border-rose-200"
+                        }`}
+                      >
+                        {testPrintFeedback.success ? (
+                          <CheckCircle className="h-4 w-4 shrink-0 text-emerald-600" />
+                        ) : (
+                          <AlertCircle className="h-4 w-4 shrink-0 text-rose-600" />
+                        )}
+                        <span className="truncate">{testPrintFeedback.text}</span>
+                      </div>
+                    )}
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={handleSendHardwareTestPrint}
+                    disabled={isTestingPrinter || !selectedTestPrinter}
+                    className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-lg transition shadow-sm disabled:opacity-50 shrink-0"
+                  >
+                    <Printer className={`h-4 w-4 ${isTestingPrinter ? "animate-bounce" : ""}`} />
+                    <span>{isTestingPrinter ? "Spooling Test..." : "Send Test Print"}</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Print Spooler Audit Log */}
+              <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm space-y-4">
+                <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                  <div>
+                    <h3 className="text-xs font-bold uppercase tracking-wider text-slate-800 flex items-center gap-2">
+                      <FileText className="h-4 w-4 text-purple-600" />
+                      <span>Print Spooler Audit Log</span>
+                    </h3>
+                    <p className="text-xs text-slate-500">
+                      Real-time log of spooler job IDs, target devices, status, and failure reasons.
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={handleRefreshLogs}
+                      className="flex items-center gap-1 px-2.5 py-1 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded transition"
+                    >
+                      <RefreshCw className="h-3 w-3" />
+                      <span>Refresh</span>
+                    </button>
+                    {printLogs.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={handleClearLogs}
+                        className="flex items-center gap-1 px-2.5 py-1 text-xs font-semibold text-rose-700 bg-rose-50 hover:bg-rose-100 rounded transition"
+                      >
+                        <Trash2 className="h-3 w-3" />
+                        <span>Clear Log</span>
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {printLogs.length === 0 ? (
+                  <div className="text-center py-6 text-xs text-slate-400">
+                    No print spooler records found yet. Dispatched print jobs will be logged here.
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto max-h-72 overflow-y-auto border border-slate-200 rounded-lg">
+                    <table className="w-full text-left text-[11px]">
+                      <thead className="bg-slate-50 text-slate-600 uppercase font-semibold sticky top-0 border-b border-slate-200">
+                        <tr>
+                          <th className="p-2">Timestamp</th>
+                          <th className="p-2">Document</th>
+                          <th className="p-2">Printer</th>
+                          <th className="p-2">Format</th>
+                          <th className="p-2">Status</th>
+                          <th className="p-2">Job ID / Error</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {printLogs.map((log) => (
+                          <tr key={log.id} className="hover:bg-slate-50/50">
+                            <td className="p-2 whitespace-nowrap text-slate-500 font-mono">
+                              {new Date(log.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+                            </td>
+                            <td className="p-2 font-medium text-slate-800">
+                              {log.documentNumber || log.documentType}
+                            </td>
+                            <td className="p-2 text-slate-700 max-w-[150px] truncate" title={log.printerName}>
+                              {log.printerName}
+                            </td>
+                            <td className="p-2 uppercase text-slate-500 font-mono text-[10px]">
+                              {log.paperSize}
+                            </td>
+                            <td className="p-2">
+                              <span
+                                className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                                  log.status === "success"
+                                    ? "bg-emerald-100 text-emerald-800"
+                                    : "bg-rose-100 text-rose-800"
+                                }`}
+                              >
+                                {log.status.toUpperCase()}
+                              </span>
+                            </td>
+                            <td className="p-2 text-slate-600 max-w-[200px] truncate" title={log.errorMessage || log.id}>
+                              {log.status === "success" ? (
+                                <span className="font-mono text-slate-500">{log.id}</span>
+                              ) : (
+                                <span className="text-rose-600 font-semibold">{log.errorMessage || "Spooler rejected job"}</span>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </div>
             </div>
           )}

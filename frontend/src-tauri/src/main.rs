@@ -1,5 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod print_spooler;
+
 use rusqlite::{params, Connection};
 use serde_json::{json, Value};
 use std::fs;
@@ -149,144 +151,10 @@ fn db_execute(sql: String, state: State<DbState>) -> Result<Value, String> {
 
 #[tauri::command]
 fn get_system_printers() -> Result<Value, String> {
-    let mut printers = Vec::new();
-
-    #[cfg(target_os = "windows")]
-    {
-        let ps_script = r#"
-            Get-Printer | Select-Object Name, Type, DriverName, PortName, PrinterStatus, Default | ConvertTo-Json -Compress
-        "#;
-        if let Ok(output) = std::process::Command::new("powershell")
-            .args(["-NoProfile", "-Command", ps_script])
-            .output()
-        {
-            if output.status.success() {
-                let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                if !stdout.is_empty() {
-                    if let Ok(val) = serde_json::from_str::<Value>(&stdout) {
-                        let printer_items = if let Some(arr) = val.as_array() {
-                            arr.clone()
-                        } else if val.is_object() {
-                            vec![val]
-                        } else {
-                            vec![]
-                        };
-
-                        for p in printer_items {
-                            let name = p["Name"].as_str().unwrap_or("").trim().to_string();
-                            if !name.is_empty() {
-                                let is_def = p["Default"].as_bool().unwrap_or(false);
-                                let driver = p["DriverName"].as_str().unwrap_or("Windows Printer Driver");
-                                let port = p["PortName"].as_str().unwrap_or("USB");
-                                let status_num = p["PrinterStatus"].as_u64().unwrap_or(0);
-                                let status_str = match status_num {
-                                    3 => "error",
-                                    7 => "offline",
-                                    _ => "ready",
-                                };
-
-                                let name_lower = name.to_lowercase();
-                                let is_thermal = name_lower.contains("pos") || name_lower.contains("thermal") || name_lower.contains("t82") || name_lower.contains("receipt") || name_lower.contains("rp80");
-                                let is_dot = name_lower.contains("msp") || name_lower.contains("dot") || name_lower.contains("lx") || name_lower.contains("fx");
-                                let is_virtual = name_lower.contains("pdf") || name_lower.contains("xps") || name_lower.contains("onenote");
-
-                                printers.push(json!({
-                                    "name": name,
-                                    "displayName": format!("{} ({})", name, if is_thermal { "Thermal POS" } else if is_dot { "Dot Matrix" } else if is_virtual { "Virtual" } else { "Laser/Inkjet" }),
-                                    "isDefault": is_def,
-                                    "status": status_str,
-                                    "driverName": driver,
-                                    "portName": port,
-                                    "printerType": if is_thermal { "thermal_pos" } else if is_dot { "dot_matrix" } else if is_virtual { "virtual_pdf" } else { "laser_inkjet" },
-                                    "supportedPaperSizes": if is_thermal { vec!["thermal_80mm", "thermal_58mm"] } else if is_dot { vec!["dot_matrix_80col", "half_a4"] } else { vec!["a4", "a5", "half_a4"] },
-                                    "isVirtual": is_virtual
-                                }));
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    #[cfg(any(target_os = "macos", target_os = "linux"))]
-    {
-        let mut default_printer = String::new();
-        if let Ok(output) = std::process::Command::new("lpstat").arg("-d").output() {
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            for line in stdout.lines() {
-                if line.starts_with("system default destination: ") {
-                    default_printer = line.trim_start_matches("system default destination: ").trim().to_string();
-                }
-            }
-        }
-
-        let mut found_names = Vec::new();
-        if let Ok(output) = std::process::Command::new("lpstat").arg("-e").output() {
-            if output.status.success() {
-                let stdout = String::from_utf8_lossy(&output.stdout);
-                for line in stdout.lines() {
-                    let name = line.trim().to_string();
-                    if !name.is_empty() && !found_names.contains(&name) {
-                        found_names.push(name);
-                    }
-                }
-            }
-        }
-
-        if found_names.is_empty() {
-            if let Ok(output) = std::process::Command::new("lpstat").arg("-p").output() {
-                let stdout = String::from_utf8_lossy(&output.stdout);
-                for line in stdout.lines() {
-                    if line.starts_with("printer ") {
-                        let parts: Vec<&str> = line.split_whitespace().collect();
-                        if parts.len() >= 2 {
-                            let name = parts[1].to_string();
-                            if !name.is_empty() && !found_names.contains(&name) {
-                                found_names.push(name);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        for name in found_names {
-            let name_lower = name.to_lowercase();
-            let is_def = !default_printer.is_empty() && name == default_printer;
-            let is_thermal = name_lower.contains("pos") || name_lower.contains("thermal") || name_lower.contains("t82") || name_lower.contains("receipt");
-            let is_dot = name_lower.contains("msp") || name_lower.contains("dot") || name_lower.contains("lx");
-            let is_virtual = name_lower.contains("pdf");
-
-            printers.push(json!({
-                "name": name,
-                "displayName": format!("{} ({})", name, if is_thermal { "Thermal POS" } else if is_dot { "Dot Matrix" } else if is_virtual { "Virtual" } else { "Laser/Inkjet" }),
-                "isDefault": is_def,
-                "status": "ready",
-                "driverName": "CUPS Native Driver",
-                "portName": "CUPS",
-                "printerType": if is_thermal { "thermal_pos" } else if is_dot { "dot_matrix" } else if is_virtual { "virtual_pdf" } else { "laser_inkjet" },
-                "supportedPaperSizes": if is_thermal { vec!["thermal_80mm", "thermal_58mm"] } else if is_dot { vec!["dot_matrix_80col", "half_a4"] } else { vec!["a4", "a5", "half_a4"] },
-                "isVirtual": is_virtual
-            }));
-        }
-    }
-
-    // Always ensure "Save as PDF" digital target is available
-    printers.push(json!({
-        "name": "Save as PDF",
-        "displayName": "Save as High-Fidelity PDF Document",
-        "isDefault": printers.is_empty(),
-        "status": "ready",
-        "driverName": "PDF Generator",
-        "portName": "FILE:",
-        "printerType": "virtual_pdf",
-        "supportedPaperSizes": ["a4", "a5", "half_a4", "thermal_80mm", "thermal_58mm", "barcode_label"],
-        "isVirtual": true
-    }));
-
-    Ok(json!(printers))
+    print_spooler::get_native_printers().map(|p| json!(p))
 }
+
+static PRINT_SPOOLER_LOCK: Mutex<()> = Mutex::new(());
 
 #[tauri::command]
 fn print_native_job(
@@ -302,6 +170,8 @@ fn print_native_job(
     auto_cut: Option<bool>,
     cash_drawer: Option<bool>,
 ) -> Result<Value, String> {
+    let _lock = PRINT_SPOOLER_LOCK.lock().map_err(|e| e.to_string())?;
+
     let printer_name = printer_name.unwrap_or_else(|| "Default".into());
     let paper_size = paper_size.unwrap_or_else(|| "a4".into());
     let document_type = document_type.unwrap_or_else(|| "invoice".into());
@@ -315,10 +185,8 @@ fn print_native_job(
         printer_name, document_type, document_number, paper_size, num_copies, is_silent, auto_cut, cash_drawer
     );
 
-    let is_pdf_virtual = printer_name.to_lowercase().contains("pdf") || printer_name == "Save as PDF" || printer_name == "Microsoft Print to PDF";
-
-    // 1. Digital PDF export target handling
-    if is_pdf_virtual {
+    // 1. Digital PDF export target handling (Strictly "Save as PDF")
+    if printer_name == "Save as PDF" {
         let clean_doc_no = document_number.replace('/', "_").replace('\\', "_");
         let home = std::env::var("HOME").or_else(|_| std::env::var("USERPROFILE")).unwrap_or_else(|_| ".".into());
         let downloads_dir = PathBuf::from(&home).join("Downloads");
@@ -341,7 +209,11 @@ fn print_native_job(
                     }
                     #[cfg(target_os = "windows")]
                     {
-                        let _ = std::process::Command::new("explorer").arg(format!("/select,\"{}\"", final_pdf_path.display())).spawn();
+                        let mut cmd = std::process::Command::new("explorer");
+                        cmd.arg(format!("/select,\"{}\"", final_pdf_path.display()));
+                        use std::os::windows::process::CommandExt;
+                        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+                        let _ = cmd.spawn();
                     }
 
                     return Ok(json!({
@@ -362,11 +234,25 @@ fn print_native_job(
     // 2. Raw ESC/POS bytes printing (Thermal roll printers / Dot Matrix)
     if let Some(ref bytes) = raw_bytes {
         if !bytes.is_empty() {
-            let temp_raw_file = temp_dir.join(format!("lamsuite_raw_{}.bin", job_id));
-            fs::write(&temp_raw_file, bytes).map_err(|e| format!("Failed to write temporary print buffer: {}", e))?;
+            #[cfg(target_os = "windows")]
+            {
+                let doc_title = format!("{}_{}", document_type, document_number);
+                let spool_job_id = print_spooler::print_raw_windows_spooler(&printer_name, &doc_title, bytes)?;
+
+                return Ok(json!({
+                    "success": true,
+                    "job_id": format!("spool_{}", spool_job_id),
+                    "printer_name": printer_name,
+                    "paper_size": paper_size,
+                    "bytes_printed": bytes.len()
+                }));
+            }
 
             #[cfg(any(target_os = "macos", target_os = "linux"))]
             {
+                let temp_raw_file = temp_dir.join(format!("lamsuite_raw_{}.bin", job_id));
+                fs::write(&temp_raw_file, bytes).map_err(|e| format!("Failed to write temporary print buffer: {}", e))?;
+
                 let mut cmd = std::process::Command::new("lp");
                 if !printer_name.is_empty() && !printer_name.starts_with("Default") {
                     cmd.args(["-d", &printer_name]);
@@ -399,49 +285,6 @@ fn print_native_job(
                     "bytes_printed": bytes.len()
                 }));
             }
-
-            #[cfg(target_os = "windows")]
-            {
-                let clean_p = printer_name.replace("'", "''");
-                let ps_cmd = if clean_p.is_empty() || clean_p.starts_with("Default") {
-                    format!(
-                        "[System.IO.File]::ReadAllBytes('{}') | Out-Printer",
-                        temp_raw_file.to_string_lossy().replace("'", "''")
-                    )
-                } else {
-                    format!(
-                        "[System.IO.File]::ReadAllBytes('{}') | Out-Printer -Name '{}'",
-                        temp_raw_file.to_string_lossy().replace("'", "''"),
-                        clean_p
-                    )
-                };
-
-                let output = std::process::Command::new("powershell")
-                    .args(["-NoProfile", "-Command", &ps_cmd])
-                    .output();
-
-                let _ = fs::remove_file(&temp_raw_file);
-
-                match output {
-                    Ok(out) => {
-                        if !out.status.success() {
-                            let err_str = String::from_utf8_lossy(&out.stderr).trim().to_string();
-                            return Err(format!("Windows Print Spooler error on printer '{}': {}", printer_name, if err_str.is_empty() { "Device rejected job" } else { &err_str }));
-                        }
-                    }
-                    Err(e) => {
-                        return Err(format!("Failed to invoke Windows print spooler: {}", e));
-                    }
-                }
-
-                return Ok(json!({
-                    "success": true,
-                    "job_id": job_id,
-                    "printer_name": printer_name,
-                    "paper_size": paper_size,
-                    "bytes_printed": bytes.len()
-                }));
-            }
         }
     }
 
@@ -451,6 +294,39 @@ fn print_native_job(
             if !bytes.is_empty() {
                 let temp_pdf_file = temp_dir.join(format!("lamsuite_print_{}.pdf", job_id));
                 fs::write(&temp_pdf_file, &bytes).map_err(|e| format!("Failed to write temporary PDF print buffer: {}", e))?;
+
+                #[cfg(target_os = "windows")]
+                {
+                    // Attempt silent print via bundled sidecar or print tool (with CREATE_NO_WINDOW)
+                    let tool_result = print_spooler::print_pdf_silent(&printer_name, &temp_pdf_file, num_copies);
+                    let _ = fs::remove_file(&temp_pdf_file);
+
+                    match tool_result {
+                        Ok(true) => {
+                            return Ok(json!({
+                                "success": true,
+                                "job_id": job_id,
+                                "printer_name": printer_name,
+                                "paper_size": paper_size,
+                                "copies": num_copies
+                            }));
+                        }
+                        Ok(false) => {
+                            // No sidecar installed on clean machine: instruct frontend to use native webview print call
+                            return Ok(json!({
+                                "success": true,
+                                "fallback_to_webview": true,
+                                "job_id": job_id,
+                                "printer_name": printer_name,
+                                "paper_size": paper_size,
+                                "copies": num_copies
+                            }));
+                        }
+                        Err(e) => {
+                            return Err(e);
+                        }
+                    }
+                }
 
                 #[cfg(any(target_os = "macos", target_os = "linux"))]
                 {
@@ -488,93 +364,19 @@ fn print_native_job(
                         "copies": num_copies
                     }));
                 }
-
-                #[cfg(target_os = "windows")]
-                {
-                    let clean_p = printer_name.replace("'", "''");
-                    let clean_path = temp_pdf_file.to_string_lossy().replace("'", "''");
-                    let ps_cmd = if clean_p.is_empty() || clean_p.starts_with("Default") {
-                        format!("Start-Process -FilePath '{}' -Verb Print -PassThru | Wait-Process -Timeout 15", clean_path)
-                    } else {
-                        format!("Start-Process -FilePath '{}' -Verb PrintTo -ArgumentList '\"{}\"' -PassThru | Wait-Process -Timeout 15", clean_path, clean_p)
-                    };
-
-                    let output = std::process::Command::new("powershell")
-                        .args(["-NoProfile", "-Command", &ps_cmd])
-                        .output();
-
-                    let _ = fs::remove_file(&temp_pdf_file);
-
-                    match output {
-                        Ok(out) => {
-                            if !out.status.success() {
-                                let err_str = String::from_utf8_lossy(&out.stderr).trim().to_string();
-                                return Err(format!("Windows Print error on printer '{}': {}", printer_name, if err_str.is_empty() { "Driver or PDF handler error" } else { &err_str }));
-                            }
-                        }
-                        Err(e) => {
-                            return Err(format!("Failed to invoke Windows print command: {}", e));
-                        }
-                    }
-
-                    return Ok(json!({
-                        "success": true,
-                        "job_id": job_id,
-                        "printer_name": printer_name,
-                        "paper_size": paper_size,
-                        "copies": num_copies
-                    }));
-                }
             }
         }
     }
 
     // 4. HTML Fallback Printing
-    if let Some(ref html) = html_content {
-        let temp_html_file = temp_dir.join(format!("lamsuite_print_{}.html", job_id));
-        fs::write(&temp_html_file, html).map_err(|e| format!("Failed to write temporary HTML print buffer: {}", e))?;
-
-        #[cfg(any(target_os = "macos", target_os = "linux"))]
-        {
-            let mut cmd = std::process::Command::new("lp");
-            if !printer_name.is_empty() && !printer_name.starts_with("Default") {
-                cmd.args(["-d", &printer_name]);
-            }
-            cmd.arg(&temp_html_file);
-
-            let output = cmd.output();
-            let _ = fs::remove_file(&temp_html_file);
-
-            match output {
-                Ok(out) => {
-                    if !out.status.success() {
-                        let err_str = String::from_utf8_lossy(&out.stderr).trim().to_string();
-                        return Err(format!("CUPS Spooler error on printer '{}': {}", printer_name, err_str));
-                    }
-                }
-                Err(e) => {
-                    return Err(format!("Failed to execute 'lp': {}", e));
-                }
-            }
-
-            return Ok(json!({
-                "success": true,
-                "job_id": job_id,
-                "printer_name": printer_name,
-                "paper_size": paper_size
-            }));
-        }
-
-        #[cfg(target_os = "windows")]
-        {
-            let _ = fs::remove_file(&temp_html_file);
-            return Ok(json!({
-                "success": true,
-                "job_id": job_id,
-                "printer_name": printer_name,
-                "paper_size": paper_size
-            }));
-        }
+    if html_content.is_some() {
+        return Ok(json!({
+            "success": true,
+            "fallback_to_webview": true,
+            "job_id": job_id,
+            "printer_name": printer_name,
+            "paper_size": paper_size
+        }));
     }
 
     Err("No printable content (PDF bytes, raw ESC/POS, or HTML) was provided in the print request.".into())

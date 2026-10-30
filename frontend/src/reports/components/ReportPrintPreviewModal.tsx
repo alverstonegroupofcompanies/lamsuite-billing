@@ -357,33 +357,37 @@ export const ReportPrintPreviewModal: React.FC<ReportPrintPreviewModalProps> = (
           ? "a4"
           : "a4";
 
-      if (isTauri()) {
-        const bridge = getIpcBridge();
-        await bridge.invoke("print_native_job", {
-          job_id: `rep_${Date.now()}`,
-          printer_name: selectedPrinterName,
-          paper_size: activePaperSize,
-          copies,
-          html_content: previewHtml,
-          raw_content: isDot
-            ? printFormatter.generateDotMatrixText(documentData, cols)
-            : undefined,
-        });
+      let rawEscPosBytes: Uint8Array | undefined;
+      if (isDot) {
+        const text = printFormatter.generateDotMatrixText(documentData, cols);
+        rawEscPosBytes = new TextEncoder().encode(text);
+      }
 
+      const res = await printerManagerService.executePrintJob({
+        printerName: selectedPrinterName || "Default",
+        paperSize: activePaperSize,
+        docType: "report",
+        docNumber: `REP-${report.id.toUpperCase()}-${Date.now().toString().slice(-4)}`,
+        copies,
+        htmlContent: previewHtml,
+        rawEscPosBytes,
+        skipWebviewFallback: true,
+      });
+
+      if (res.success) {
+        if (res.fallbackToWebview && iframeRef.current?.contentWindow) {
+          iframeRef.current.contentWindow.focus();
+          iframeRef.current.contentWindow.print();
+        }
         setStatusMessage({
           text: `✓ Report successfully printed to ${selectedPrinterName || "Printer"}`,
           type: "success",
         });
       } else {
-        // Web fallback
-        if (iframeRef.current?.contentWindow) {
-          iframeRef.current.contentWindow.focus();
-          iframeRef.current.contentWindow.print();
-          setStatusMessage({
-            text: "✓ Sent to browser print spooler",
-            type: "success",
-          });
-        }
+        setStatusMessage({
+          text: `✕ Print failed: ${res.error || "Could not complete print job"}`,
+          type: "error",
+        });
       }
     } catch (err: any) {
       console.error("Print execution failed:", err);

@@ -7,6 +7,7 @@ import {
   type LabelPrintConfig,
 } from "../../lib/purchases/barcodeLabelService";
 import { PrintPreviewModal } from "../PrintPreviewModal";
+import { printerManagerService } from "../../lib/printing/printerManagerService";
 import { useModalEscape } from "../../lib/ui/modalEscapeManager";
 
 interface BarcodePrintModalProps {
@@ -193,26 +194,16 @@ export const BarcodePrintModal: React.FC<BarcodePrintModalProps> = ({
               Cancel
             </button>
             <button
-              onClick={() => {
-                const printFrame = document.createElement("iframe");
-                printFrame.style.position = "fixed";
-                printFrame.style.right = "0";
-                printFrame.style.bottom = "0";
-                printFrame.style.width = "0";
-                printFrame.style.height = "0";
-                printFrame.style.border = "0";
-                document.body.appendChild(printFrame);
-                const frameDoc = printFrame.contentWindow?.document;
-                if (frameDoc) {
-                  frameDoc.open();
-                  frameDoc.write(generatedHtml);
-                  frameDoc.close();
-                  printFrame.contentWindow?.focus();
-                  printFrame.contentWindow?.print();
-                  setTimeout(() => {
-                    document.body.removeChild(printFrame);
-                  }, 2000);
-                }
+              onClick={async () => {
+                await printerManagerService.executePrintJob({
+                  printerName: "Default",
+                  paperSize: "barcode_label",
+                  docType: "barcode_labels",
+                  docNumber: `BARCODES-${Date.now().toString().slice(-4)}`,
+                  copies: 1,
+                  htmlContent: generatedHtml,
+                });
+                onClose();
               }}
               disabled={totalLabels === 0}
               className="flex items-center gap-1.5 rounded bg-purple-600 px-4 py-1.5 font-bold text-white shadow-sm hover:bg-purple-700 disabled:opacity-50"

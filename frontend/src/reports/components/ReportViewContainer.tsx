@@ -17,6 +17,7 @@ import { ReportTableGrid } from "./ReportTableGrid";
 import { ReportColumnManagerModal } from "./ReportColumnManagerModal";
 import { ReportPrintPreviewModal } from "./ReportPrintPreviewModal";
 import { isTauri, getIpcBridge } from "../../lib/ipc/ipcBridge";
+import { printerManagerService } from "../../lib/printing/printerManagerService";
 import { useModalEscape } from "../../lib/ui/modalEscapeManager";
 import { onlineTransactionService } from "../../lib/sync/onlineTransactionService";
 
@@ -163,36 +164,28 @@ export const ReportViewContainer: React.FC<ReportViewContainerProps> = ({ report
     const html = printFormatter.generatePrintHtml(printDoc, printLayout, isCompactColumns);
     const isDot = printLayout.startsWith("dot-matrix");
     const cols = printLayout === "dot-matrix-132" ? 132 : 80;
-    const isLandscape = printLayout === "a4-landscape" || (printLayout === "a4" && printDoc.headers.length >= 7);
 
-    if (isTauri()) {
-      const bridge = getIpcBridge();
-      bridge.invoke("print_native_job", {
-        job_id: `rep_${Date.now()}`,
-        paper_size: printLayout === "thermal"
-          ? "thermal_80mm"
-          : isDot
-          ? (cols === 132 ? "dot_matrix_132col" : "dot_matrix_80col")
-          : isLandscape
-          ? "a4_landscape"
-          : "a4",
-        html_content: html,
-        raw_content: isDot ? printFormatter.generateDotMatrixText(printDoc, cols) : undefined,
-      }).catch(() => {
-        window.print();
-      });
-    } else {
-      const printWin = window.open("", "_blank");
-      if (printWin) {
-        printWin.document.write(html);
-        printWin.document.close();
-        printWin.focus();
-        setTimeout(() => {
-          printWin.print();
-          printWin.close();
-        }, 250);
-      }
+    let rawEscPosBytes: Uint8Array | undefined;
+    if (isDot) {
+      const text = printFormatter.generateDotMatrixText(printDoc, cols);
+      rawEscPosBytes = new TextEncoder().encode(text);
     }
+
+    printerManagerService.executePrintJob({
+      printerName: "Default",
+      paperSize: printLayout === "thermal"
+        ? "thermal_80mm"
+        : isDot
+        ? (cols === 132 ? "dot_matrix_132col" : "dot_matrix_80col")
+        : "a4",
+      docType: "report",
+      docNumber: `REP-${report.id.toUpperCase()}-${Date.now().toString().slice(-4)}`,
+      copies: 1,
+      htmlContent: html,
+      rawEscPosBytes,
+    }).catch(() => {
+      window.print();
+    });
   };
 
   return (
