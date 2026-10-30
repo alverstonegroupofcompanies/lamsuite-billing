@@ -1928,6 +1928,33 @@ export const SettingsPage: React.FC = () => {
                       Clean mode reset without trailing paper ejects.
                     </p>
                   </div>
+
+                  <div>
+                    <label className="block text-[11px] font-semibold uppercase text-slate-600 mb-1">
+                      Default Loaded Paper Width
+                    </label>
+                    <select
+                      value={settings.printing.dotMatrixDefaultPaperWidth || "10in"}
+                      onChange={(e) =>
+                        setSettings({
+                          ...settings,
+                          printing: {
+                            ...settings.printing,
+                            dotMatrixDefaultPaperWidth: e.target.value as "6in" | "10in" | "12in" | "15in",
+                          },
+                        })
+                      }
+                      className="w-full rounded-lg border border-slate-300 p-2 text-xs focus:border-blue-500 focus:outline-none bg-white font-mono"
+                    >
+                      <option value="6in">6-inch (60 Columns - Narrow Slip)</option>
+                      <option value="10in">10-inch (80 Columns - Standard Fanfold)</option>
+                      <option value="12in">12-inch (120 Columns - Continuous Form)</option>
+                      <option value="15in">15-inch (132 Columns - Wide Carriage)</option>
+                    </select>
+                    <p className="mt-1 text-[10px] text-slate-500">
+                      Loaded continuous paper width. Printable width is also switchable per job in preview.
+                    </p>
+                  </div>
                 </div>
               </div>
 
@@ -2018,7 +2045,11 @@ export const SettingsPage: React.FC = () => {
                       <option value="thermal_80mm">Thermal 80mm ESC/POS Receipt</option>
                       <option value="thermal_58mm">Thermal 58mm ESC/POS Receipt</option>
                       <option value="a4">Standard A4 Tax Invoice</option>
-                      <option value="dot_matrix_80col">Dot Matrix 80-Column ESC/P</option>
+                      <option value="half_a4">Half-A4 (V-Cut)</option>
+                      <option value="dot_matrix_6in">Dot Matrix 6" (60-Column ESC/P)</option>
+                      <option value="dot_matrix_80col">Dot Matrix 10" (80-Column ESC/P)</option>
+                      <option value="dot_matrix_120col">Dot Matrix 12" (120-Column ESC/P)</option>
+                      <option value="dot_matrix_132col">Dot Matrix 15" (132-Column ESC/P)</option>
                     </select>
                   </div>
                 </div>

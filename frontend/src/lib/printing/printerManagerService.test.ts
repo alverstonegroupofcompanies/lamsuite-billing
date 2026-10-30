@@ -2,6 +2,9 @@ import { describe, it, expect, beforeEach } from "vitest";
 import {
   printerManagerService,
   DEFAULT_SYSTEM_PRINTERS,
+  isDotMatrixPaper,
+  getDotMatrixColumns,
+  getPaperWidthInches,
   type SystemPrinterInfo,
   type PrinterProfileConfig,
 } from "./printerManagerService";
@@ -151,6 +154,43 @@ describe("PrinterManagerService Native Discovery & Profiles", () => {
     // Laser with A4: Compatible
     const laserA4 = printerManagerService.validatePaperCompatibility(laserPrinter, "a4");
     expect(laserA4.compatible).toBe(true);
+
+    // Multi-width Dot Matrix support: 6", 10", 12", and 15" on the same dot matrix hardware
+    const dm6in = printerManagerService.validatePaperCompatibility(dotMatrixPrinter, "dot_matrix_6in");
+    expect(dm6in.compatible).toBe(true);
+    expect(dm6in.warning).toBeUndefined();
+
+    const dm120 = printerManagerService.validatePaperCompatibility(dotMatrixPrinter, "dot_matrix_120col");
+    expect(dm120.compatible).toBe(true);
+    expect(dm120.warning).toBeUndefined();
+
+    const dm132 = printerManagerService.validatePaperCompatibility(dotMatrixPrinter, "dot_matrix_132col");
+    expect(dm132.compatible).toBe(true);
+    expect(dm132.warning).toBeUndefined();
+
+    // Thermal POS with 6in or 120col Dot Matrix: Warns incompatibility
+    const thermalNarrow = printerManagerService.validatePaperCompatibility(thermalPrinter, "dot_matrix_6in");
+    expect(thermalNarrow.compatible).toBe(false);
+    expect(thermalNarrow.warning).toContain("thermal receipt printer");
+  });
+
+  it("resolves dynamic columns and paper width inches for multi-width continuous forms", () => {
+    expect(isDotMatrixPaper("dot_matrix_6in")).toBe(true);
+    expect(isDotMatrixPaper("dot_matrix_80col")).toBe(true);
+    expect(isDotMatrixPaper("dot_matrix_120col")).toBe(true);
+    expect(isDotMatrixPaper("dot_matrix_132col")).toBe(true);
+    expect(isDotMatrixPaper("thermal_80mm")).toBe(false);
+    expect(isDotMatrixPaper("a4")).toBe(false);
+
+    expect(getDotMatrixColumns("dot_matrix_6in")).toBe(60);
+    expect(getDotMatrixColumns("dot_matrix_80col")).toBe(80);
+    expect(getDotMatrixColumns("dot_matrix_120col")).toBe(120);
+    expect(getDotMatrixColumns("dot_matrix_132col")).toBe(132);
+
+    expect(getPaperWidthInches("dot_matrix_6in")).toBe(6.0);
+    expect(getPaperWidthInches("dot_matrix_80col")).toBe(10.0);
+    expect(getPaperWidthInches("dot_matrix_120col")).toBe(12.0);
+    expect(getPaperWidthInches("dot_matrix_132col")).toBe(15.0);
   });
 
   it("handles offline printer error gracefully without false success", async () => {

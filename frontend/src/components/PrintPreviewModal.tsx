@@ -38,6 +38,8 @@ import {
   PrinterProfileConfig,
   PaperSize,
   PrintJobRecord,
+  isDotMatrixPaper,
+  getDotMatrixColumns,
 } from "../lib/printing/printerManagerService";
 import { isTauri } from "../lib/ipc/ipcBridge";
 import { dotMatrixRenderer, DotMatrixOptions } from "../lib/printing/dotMatrixRenderer";
@@ -62,7 +64,7 @@ export interface PrintPreviewModalProps {
     | "report";
   title?: string;
   data: any;
-  initialFormat?: "a4" | "a5" | "half_a4" | "thermal_80mm" | "thermal_58mm" | "dot_matrix_80col" | "barcode_label";
+  initialFormat?: "a4" | "a5" | "half_a4" | "thermal_80mm" | "thermal_58mm" | "dot_matrix_6in" | "dot_matrix_80col" | "dot_matrix_120col" | "dot_matrix_132col" | "barcode_label";
   onAfterPrint?: (result: { success: boolean; mode: string }) => void;
   customerPhone?: string;
   customerEmail?: string;
@@ -239,10 +241,12 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
   // Build Rendered HTML
   const renderedHtml = useMemo(() => {
     if (!isOpen || !data) return "";
-    const isDot = paperSize === "dot_matrix_80col" || paperSize === "dot_matrix_132col";
+    const isDot = isDotMatrixPaper(paperSize);
     if (isDot) {
+      const cols = getDotMatrixColumns(paperSize, printerProfile?.dotMatrixColumns);
       const dotOpts: DotMatrixOptions = {
-        columns: paperSize === "dot_matrix_132col" ? 132 : 80,
+        columns: cols,
+        paperWidth: paperSize === "dot_matrix_6in" ? "6in" : paperSize === "dot_matrix_120col" ? "12in" : paperSize === "dot_matrix_132col" ? "15in" : "10in",
         linesPerPage: printerProfile?.linesPerPage ?? 66,
         commandSet: printerProfile?.dotMatrixCommandSet || "esc_p",
         endOfJobAction: printerProfile?.endOfJobAction || "stop_immediately",
@@ -276,7 +280,8 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
           break;
       }
       return dotMatrixRenderer.generateMonospaceHtmlPreview(rawText, {
-        columns: paperSize === "dot_matrix_132col" ? 132 : 80,
+        columns: cols,
+        paperWidth: dotOpts.paperWidth,
         showRuler,
         showLineNumbers,
         showPageBreaks,
@@ -325,10 +330,12 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
   // Compute Raw Spooler Hex Dump for Dot-Matrix inspection & audit
   const currentDotMatrixHexDump = useMemo(() => {
     if (!isOpen || !data) return "";
-    const isDot = paperSize === "dot_matrix_80col" || paperSize === "dot_matrix_132col";
+    const isDot = isDotMatrixPaper(paperSize);
     if (!isDot) return "";
+    const cols = getDotMatrixColumns(paperSize, printerProfile?.dotMatrixColumns);
     const dotOpts: DotMatrixOptions = {
-      columns: paperSize === "dot_matrix_132col" ? 132 : 80,
+      columns: cols,
+      paperWidth: paperSize === "dot_matrix_6in" ? "6in" : paperSize === "dot_matrix_120col" ? "12in" : paperSize === "dot_matrix_132col" ? "15in" : "10in",
       linesPerPage: printerProfile?.linesPerPage ?? 66,
       commandSet: printerProfile?.dotMatrixCommandSet || "esc_p",
       endOfJobAction: printerProfile?.endOfJobAction || "stop_immediately",
@@ -517,7 +524,7 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
     try {
       const docNo = data.invoice_number || data.return_number || data.purchase_number || "DOC";
       const isThermal = paperSize.startsWith("thermal");
-      const isDot = paperSize === "dot_matrix_80col" || paperSize === "dot_matrix_132col";
+      const isDot = isDotMatrixPaper(paperSize);
 
       let rawEscPosBytes: Uint8Array | undefined;
       let pdfBytes: Uint8Array | undefined;
@@ -529,8 +536,10 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
           cashDrawer: printerProfile?.enableCashDrawerKick ?? true,
         });
       } else if (isDot) {
+        const cols = getDotMatrixColumns(paperSize, printerProfile?.dotMatrixColumns);
         const dotOpts: DotMatrixOptions = {
-          columns: paperSize === "dot_matrix_132col" ? 132 : 80,
+          columns: cols,
+          paperWidth: paperSize === "dot_matrix_6in" ? "6in" : paperSize === "dot_matrix_120col" ? "12in" : paperSize === "dot_matrix_132col" ? "15in" : "10in",
           linesPerPage: printerProfile?.linesPerPage ?? 66,
           commandSet: printerProfile?.dotMatrixCommandSet || "esc_p",
           endOfJobAction: printerProfile?.endOfJobAction || "stop_immediately",
@@ -682,11 +691,13 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
     try {
       const invNo = data.invoice_number || data.return_number || data.purchase_number || "Document";
       const fileName = `${invNo.replace(/[^a-zA-Z0-9_-]/g, "_")}.pdf`;
-      const isDot = paperSize === "dot_matrix_80col" || paperSize === "dot_matrix_132col";
+      const isDot = isDotMatrixPaper(paperSize);
 
       if (isDot) {
+        const cols = getDotMatrixColumns(paperSize, printerProfile?.dotMatrixColumns);
         const dotOpts: DotMatrixOptions = {
-          columns: paperSize === "dot_matrix_132col" ? 132 : 80,
+          columns: cols,
+          paperWidth: paperSize === "dot_matrix_6in" ? "6in" : paperSize === "dot_matrix_120col" ? "12in" : paperSize === "dot_matrix_132col" ? "15in" : "10in",
           linesPerPage: printerProfile?.linesPerPage || 66,
           isDuplicate,
           copyMarker: copyMarker === "None" ? undefined : copyMarker,
@@ -900,9 +911,13 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
                   : paperSize === "a5"
                   ? "155mm"
                   : paperSize === "dot_matrix_132col"
+                  ? "350mm"
+                  : paperSize === "dot_matrix_120col"
                   ? "320mm"
                   : paperSize === "dot_matrix_80col"
-                  ? "220mm"
+                  ? "230mm"
+                  : paperSize === "dot_matrix_6in"
+                  ? "175mm"
                   : "215mm",
                 minHeight: isThermal ? "120mm" : paperSize === "a5" ? "210mm" : "297mm",
               }}
@@ -1076,8 +1091,10 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
                         { id: "half_a4", label: "Half-A4 (V-Cut)" },
                         { id: "thermal_80mm", label: "Thermal 80mm" },
                         { id: "thermal_58mm", label: "Thermal 58mm" },
-                        { id: "dot_matrix_80col", label: "Dot Matrix 80C" },
-                        { id: "dot_matrix_132col", label: "Dot Matrix 132C" },
+                        { id: "dot_matrix_6in", label: "Dot Matrix 6\" (60C)" },
+                        { id: "dot_matrix_80col", label: "Dot Matrix 10\" (80C)" },
+                        { id: "dot_matrix_120col", label: "Dot Matrix 12\" (120C)" },
+                        { id: "dot_matrix_132col", label: "Dot Matrix 15\" (132C)" },
                       ].map((p) => (
                         <button
                           key={p.id}
@@ -1096,13 +1113,50 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
                   </div>
 
                   {/* Dot Matrix Specific Controls */}
-                  {(paperSize === "dot_matrix_80col" || paperSize === "dot_matrix_132col") && (
+                  {isDotMatrixPaper(paperSize) && (
                     <div className="bg-emerald-50/70 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/60 rounded-lg p-3 space-y-3">
                       <div className="text-xs font-bold text-emerald-900 dark:text-emerald-300 flex items-center justify-between">
                         <span>Dot Matrix Text-Mode Settings</span>
                         <span className="text-[10px] font-mono uppercase bg-emerald-200 dark:bg-emerald-900 px-1.5 py-0.5 rounded">
                           Fixed-Width ASCII
                         </span>
+                      </div>
+
+                      {/* Loaded Paper Width Switcher */}
+                      <div>
+                        <div className="flex items-center justify-between mb-1.5">
+                          <label className="text-[11px] font-semibold text-slate-700 dark:text-slate-300">
+                            Loaded Paper Width
+                          </label>
+                          <span className="text-[10px] font-mono font-bold text-emerald-700 dark:text-emerald-400 bg-emerald-100 dark:bg-emerald-900/60 px-1.5 py-0.5 rounded">
+                            {getDotMatrixColumns(paperSize)} Columns
+                          </span>
+                        </div>
+                        <div className="grid grid-cols-4 gap-1">
+                          {[
+                            { id: "dot_matrix_6in", label: "6\" (60C)", desc: "6-inch Narrow Form" },
+                            { id: "dot_matrix_80col", label: "10\" (80C)", desc: "10-inch Standard" },
+                            { id: "dot_matrix_120col", label: "12\" (120C)", desc: "12-inch Continuous" },
+                            { id: "dot_matrix_132col", label: "15\" (132C)", desc: "15-inch Wide Carriage" },
+                          ].map((pw) => (
+                            <button
+                              key={pw.id}
+                              type="button"
+                              onClick={() => setPaperSize(pw.id as PaperSize)}
+                              className={`px-1.5 py-1.5 rounded text-center text-[11px] font-medium transition ${
+                                paperSize === pw.id
+                                  ? "bg-emerald-600 text-white font-bold shadow-xs"
+                                  : "bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 hover:bg-emerald-50 dark:hover:bg-emerald-950"
+                              }`}
+                              title={pw.desc}
+                            >
+                              {pw.label}
+                            </button>
+                          ))}
+                        </div>
+                        <p className="mt-1 text-[10px] text-slate-500">
+                          Dynamically adjusts table layout, borders, and margins to fit the currently loaded paper width without clipping.
+                        </p>
                       </div>
 
                       <div className="grid grid-cols-2 gap-2">

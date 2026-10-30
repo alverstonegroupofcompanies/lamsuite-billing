@@ -3,8 +3,61 @@ import { sqliteStorage } from "../db/sqliteStorage";
 import { dotMatrixRenderer } from "./dotMatrixRenderer";
 
 export type PrinterStatus = "ready" | "offline" | "paper_out" | "error" | "busy" | "unknown";
-export type PaperSize = "a4" | "a5" | "half_a4" | "thermal_80mm" | "thermal_58mm" | "dot_matrix_80col" | "dot_matrix_132col" | "barcode_label";
+export type PaperSize =
+  | "a4"
+  | "a5"
+  | "half_a4"
+  | "thermal_80mm"
+  | "thermal_58mm"
+  | "dot_matrix_6in"
+  | "dot_matrix_80col"
+  | "dot_matrix_120col"
+  | "dot_matrix_132col"
+  | "barcode_label";
 export type PrinterType = "laser_inkjet" | "thermal_pos" | "dot_matrix" | "virtual_pdf";
+
+export function isDotMatrixPaper(paperSize: PaperSize): boolean {
+  return paperSize.startsWith("dot_matrix");
+}
+
+export function getDotMatrixColumns(paperSize: PaperSize, fallback?: number): number {
+  switch (paperSize) {
+    case "dot_matrix_6in":
+      return 60;
+    case "dot_matrix_120col":
+      return 120;
+    case "dot_matrix_132col":
+      return 132;
+    case "dot_matrix_80col":
+    default:
+      return fallback || 80;
+  }
+}
+
+export function getPaperWidthInches(paperSize: PaperSize): number {
+  switch (paperSize) {
+    case "dot_matrix_6in":
+      return 6.0;
+    case "dot_matrix_80col":
+      return 10.0;
+    case "dot_matrix_120col":
+      return 12.0;
+    case "dot_matrix_132col":
+      return 15.0;
+    case "thermal_80mm":
+      return 3.15;
+    case "thermal_58mm":
+      return 2.28;
+    case "a4":
+      return 8.27;
+    case "a5":
+      return 5.83;
+    case "half_a4":
+      return 5.83;
+    default:
+      return 8.5;
+  }
+}
 
 export interface SystemPrinterInfo {
   name: string;
@@ -39,7 +92,8 @@ export interface PrinterProfileConfig {
   enableCashDrawerKick?: boolean;
   cashDrawerPin?: "pin_2" | "pin_5";
   // Dot matrix specifics
-  dotMatrixColumns?: 80 | 132;
+  dotMatrixColumns?: 60 | 80 | 120 | 132;
+  dotMatrixLoadedPaperWidth?: "6in" | "10in" | "12in" | "15in";
   dotMatrixCommandSet?: "esc_p" | "tvs_native" | "plain_ascii";
   dotMatrixPitch?: "10cpi" | "12cpi" | "17cpi_condensed";
   linesPerPage?: number;
@@ -102,13 +156,24 @@ export const DEFAULT_SYSTEM_PRINTERS: SystemPrinterInfo[] = [
   },
   {
     name: "TVS MSP 240 Star",
-    displayName: "TVS MSP 240 (Dot Matrix 80-Col)",
+    displayName: "TVS MSP 240 (Dot Matrix 80-Col / 10\")",
     isDefault: false,
     status: "ready",
     driverName: "Generic / Text Only",
     portName: "LPT1",
     printerType: "dot_matrix",
-    supportedPaperSizes: ["dot_matrix_80col", "half_a4"],
+    supportedPaperSizes: ["dot_matrix_6in", "dot_matrix_80col", "dot_matrix_120col", "half_a4"],
+    isVirtual: false,
+  },
+  {
+    name: "Epson LQ-2090 Wide Carriage",
+    displayName: "Epson LQ-2090 (Dot Matrix 12\"/15\" Wide)",
+    isDefault: false,
+    status: "ready",
+    driverName: "Generic / Text Only",
+    portName: "LPT1",
+    printerType: "dot_matrix",
+    supportedPaperSizes: ["dot_matrix_6in", "dot_matrix_80col", "dot_matrix_120col", "dot_matrix_132col", "half_a4"],
     isVirtual: false,
   },
   {
@@ -354,7 +419,7 @@ export class PrinterManagerService {
     if (paperSize === "thermal_80mm" || paperSize === "thermal_58mm") {
       const thermal = printers.find((p) => p.printerType === "thermal_pos");
       if (thermal) return thermal.name;
-    } else if (paperSize === "dot_matrix_80col") {
+    } else if (isDotMatrixPaper(paperSize)) {
       const dot = printers.find((p) => p.printerType === "dot_matrix");
       if (dot) return dot.name;
     } else {
@@ -417,11 +482,11 @@ export class PrinterManagerService {
     }
 
     const isThermalPaper = paperSize === "thermal_80mm" || paperSize === "thermal_58mm";
-    const isDotMatrixPaper = paperSize === "dot_matrix_80col" || paperSize === "dot_matrix_132col";
+    const isDotPaper = isDotMatrixPaper(paperSize);
     const isPagePaper = paperSize === "a4" || paperSize === "a5" || paperSize === "half_a4";
 
     if (printer.printerType === "thermal_pos") {
-      if (isDotMatrixPaper) {
+      if (isDotPaper) {
         return {
           compatible: false,
           warning: `'${printer.displayName}' is a thermal receipt printer and is not compatible with Dot Matrix profiles. ESC/P dot-matrix output will not format correctly on thermal paper.`,
@@ -455,7 +520,7 @@ export class PrinterManagerService {
           suggestedPaper: "a4",
         };
       }
-      if (isDotMatrixPaper) {
+      if (isDotPaper) {
         return {
           compatible: false,
           warning: `'${printer.displayName}' is a laser/inkjet printer and does not support native dot-matrix ESC/P continuous text streaming.`,
@@ -465,7 +530,7 @@ export class PrinterManagerService {
     }
 
     let driverWarning: string | undefined;
-    if (isDotMatrixPaper && printer.driverName) {
+    if (isDotPaper && printer.driverName) {
       const dLower = printer.driverName.toLowerCase();
       const isTextOrRaw = dLower.includes("generic") || dLower.includes("text") || dLower.includes("dot") || dLower.includes("raw");
       const isGraphical = dLower.includes("pcl") || dLower.includes("gdi") || dLower.includes("postscript") || dLower.includes("advanced") || dLower.includes("laser");
@@ -776,8 +841,10 @@ export class PrinterManagerService {
       rawEscPosBytes = encoder.encode(text);
     } else if (isDot) {
       // Exactly 3 lines, no form feed, stops immediately
+      const cols = getDotMatrixColumns(paperSize);
+      const widthIn = getPaperWidthInches(paperSize);
       const encoder = new TextEncoder();
-      const text = "\x1B@LamSuite Dot-Matrix Calibration Test\r\n" +
+      const text = "\x1B@LamSuite Dot-Matrix Calibration Test (" + cols + " Col / " + widthIn + "\")\r\n" +
         "Printer: " + printerName + "\r\n" +
         "Status: Ready - Head Stopped Immediately\r\n";
       rawEscPosBytes = encoder.encode(text);

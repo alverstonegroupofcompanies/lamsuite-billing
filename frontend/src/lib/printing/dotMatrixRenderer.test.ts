@@ -704,4 +704,132 @@ describe("Dot Matrix Plain-Text Renderer & ESC/P Generator", () => {
       expect(lastTwoEscp).not.toEqual([0x1b, 0x40]);
     });
   });
+
+  describe("Dynamic Multiple Paper Widths (6-inch, 10-inch, 12-inch, 15-inch)", () => {
+    it("renders 6-inch narrow paper (60 cols) with all lines <= 60 chars and exact table layout", () => {
+      const rendered = dotMatrixRenderer.renderInvoice(sampleInvoice, {
+        paperWidth: "6in",
+      });
+      const lines = rendered.split("\n");
+
+      // Verify no line exceeds 60 characters
+      for (const line of lines) {
+        expect(line.length).toBeLessThanOrEqual(60);
+      }
+
+      // Check header divider is exactly 60 characters
+      expect(lines.some((l) => l === "-".repeat(60))).toBe(true);
+
+      // Check 60-col table headers
+      expect(rendered).toContain("Item Description");
+      expect(rendered).toContain("Batch");
+      expect(rendered).toContain("Amount");
+
+      // Check store details and items fit without truncation corruption
+      expect(rendered).toContain("ALVERSTONE MEDICARE & SURGICAL STORE");
+      expect(rendered).toContain("Augmentin");
+      expect(rendered).toContain("Rs.");
+    });
+
+    it("renders 10-inch standard paper (80 cols) with all lines <= 80 chars", () => {
+      const rendered = dotMatrixRenderer.renderInvoice(sampleInvoice, {
+        paperWidth: "10in",
+      });
+      const lines = rendered.split("\n");
+      for (const line of lines) {
+        expect(line.length).toBeLessThanOrEqual(80);
+      }
+      expect(lines.some((l) => l === "-".repeat(80))).toBe(true);
+      expect(rendered).toContain("TAX INVOICE");
+    });
+
+    it("renders 12-inch continuous form (120 cols) with full tax breakdown and all lines <= 120 chars", () => {
+      const rendered = dotMatrixRenderer.renderInvoice(sampleInvoice, {
+        paperWidth: "12in",
+      });
+      const lines = rendered.split("\n");
+      for (const line of lines) {
+        if (line.length > 120) console.log("OVER 120:", line.length, line);
+        expect(line.length).toBeLessThanOrEqual(120);
+      }
+
+      // 120-column table includes HSN, Disc%, CGST/SGST tax columns
+      expect(lines.some((l) => l === "-".repeat(120))).toBe(true);
+      expect(rendered).toContain("HSN/SAC");
+      expect(rendered).toContain("Taxable");
+      expect(rendered).toContain("GST%");
+      expect(rendered).toContain("Amount (Rs.)");
+    });
+
+    it("renders 15-inch wide carriage (132 cols) with all lines <= 132 chars", () => {
+      const rendered = dotMatrixRenderer.renderInvoice(sampleInvoice, {
+        paperWidth: "15in",
+      });
+      const lines = rendered.split("\n");
+      for (const line of lines) {
+        expect(line.length).toBeLessThanOrEqual(132);
+      }
+      expect(lines.some((l) => l === "-".repeat(132))).toBe(true);
+    });
+
+    it("adapts credit notes and debit notes across 60, 80, and 120 columns without clipping", () => {
+      const creditNoteData: CreditNotePrintData = {
+        return_number: "CN-TEST-60",
+        return_date: "2026-10-29",
+        original_invoice_number: "INV-100",
+        store_name: "Test Store",
+        customer_name: "John Doe",
+        lines: [
+          {
+            description: "Amoxicillin 500mg Capsule",
+            qty: 2,
+            rate: 45.0,
+            amount: 90.0,
+          },
+        ],
+        grand_total: 90.0,
+      };
+
+      // 60-col Credit Note
+      const cn60 = dotMatrixRenderer.renderCreditNote(creditNoteData, { columns: 60 });
+      for (const line of cn60.split("\n")) {
+        expect(line.length).toBeLessThanOrEqual(60);
+      }
+      expect(cn60).toContain("CREDIT NOTE / SALES RETURN");
+
+      // 120-col Credit Note
+      const cn120 = dotMatrixRenderer.renderCreditNote(creditNoteData, { columns: 120 });
+      for (const line of cn120.split("\n")) {
+        expect(line.length).toBeLessThanOrEqual(120);
+      }
+      expect(cn120.split("\n").some((l) => l === "-".repeat(120))).toBe(true);
+    });
+
+    it("ESC/P binary generation sets 10 CPI cancellation for 60/80/120 and condensed for 132", () => {
+      // 60 col -> standard 10 CPI pitch (0x12 cancels condensed)
+      const bytes60 = dotMatrixRenderer.generateEscPBytes("Content\n", { columns: 60 });
+      expect(Array.from(bytes60)).toContain(0x12);
+      expect(Array.from(bytes60)).not.toContain(0x0f);
+
+      // 120 col -> standard 10 CPI pitch on 12-inch paper (0x12)
+      const bytes120 = dotMatrixRenderer.generateEscPBytes("Content\n", { columns: 120 });
+      expect(Array.from(bytes120)).toContain(0x12);
+      expect(Array.from(bytes120)).not.toContain(0x0f);
+
+      // 132 col -> condensed pitch (0x0F)
+      const bytes132 = dotMatrixRenderer.generateEscPBytes("Content\n", { columns: 132 });
+      expect(Array.from(bytes132)).toContain(0x0f);
+    });
+
+    it("generates monospace preview HTML with dynamic width based on loaded paper width", () => {
+      const html60 = dotMatrixRenderer.generateMonospaceHtmlPreview("Narrow content\n", { columns: 60 });
+      expect(html60).toContain("min-width: 556px");
+
+      const html80 = dotMatrixRenderer.generateMonospaceHtmlPreview("Standard content\n", { columns: 80 });
+      expect(html80).toContain("min-width: 728px");
+
+      const html120 = dotMatrixRenderer.generateMonospaceHtmlPreview("Wide content\n", { columns: 120 });
+      expect(html120).toContain("min-width: 1072px");
+    });
+  });
 });

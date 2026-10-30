@@ -86,7 +86,7 @@ export interface DocumentSequenceConfig {
 }
 
 export interface PrintingConfig {
-  paperSize: "thermal_80mm" | "thermal_58mm" | "a4" | "a5";
+  paperSize: "thermal_80mm" | "thermal_58mm" | "a4" | "a5" | "half_a4" | "dot_matrix_6in" | "dot_matrix_80col" | "dot_matrix_120col" | "dot_matrix_132col";
   copies: number;
   activeTemplate: "thermal_standard" | "thermal_compact" | "a4_tax_invoice" | "hospital_detailed";
   footerNote: string;
@@ -108,6 +108,7 @@ export interface PrintingConfig {
   dotMatrixTearOffFeedLines?: number;
   dotMatrixPageLength?: 66 | 72 | 33 | "continuous";
   dotMatrixCommandSet?: "esc_p" | "tvs_native" | "plain_ascii";
+  dotMatrixDefaultPaperWidth?: "6in" | "10in" | "12in" | "15in";
 }
 
 export interface WorkspaceSettings {
@@ -476,6 +477,7 @@ export const DEFAULT_SETTINGS: CompanySettings = {
     dotMatrixTearOffFeedLines: 0,
     dotMatrixPageLength: 66,
     dotMatrixCommandSet: "esc_p",
+    dotMatrixDefaultPaperWidth: "10in",
   },
 
   workspace: {

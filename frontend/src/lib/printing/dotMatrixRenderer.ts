@@ -4,9 +4,11 @@ import { jsPDF } from "jspdf";
 export type DotMatrixCommandSet = "esc_p" | "tvs_native" | "plain_ascii";
 export type DotMatrixPitch = "10cpi" | "12cpi" | "17cpi_condensed";
 export type DotMatrixEndOfJob = "stop_immediately" | "feed_tear_off" | "form_feed";
+export type DotMatrixPaperWidth = "6in" | "10in" | "12in" | "15in" | number;
 
 export interface DotMatrixOptions {
-  columns?: 80 | 132;
+  columns?: number; // 60 (6"), 80 (10"), 120 (12"), 132 (15"/condensed) or custom
+  paperWidth?: DotMatrixPaperWidth; // Physical paper width loaded in printer
   linesPerPage?: number; // default 66 lines for 11", 72 for 12", 33 for 6" half-page, 0 for Continuous
   cpi?: DotMatrixPitch;
   commandSet?: DotMatrixCommandSet;
@@ -27,7 +29,8 @@ export interface DotMatrixOptions {
 }
 
 export interface DotMatrixPreviewOptions {
-  columns?: 80 | 132;
+  columns?: number; // 60, 80, 120, 132 or custom
+  paperWidth?: DotMatrixPaperWidth;
   showRuler?: boolean;
   showLineNumbers?: boolean;
   showPageBreaks?: boolean;
@@ -35,6 +38,34 @@ export interface DotMatrixPreviewOptions {
   enableBold?: boolean;
   endOfJobAction?: DotMatrixEndOfJob;
   feedLinesForTearOff?: number;
+}
+
+/**
+ * Resolves effective columns based on explicit columns or paper width in inches.
+ */
+export function resolveDotMatrixColumns(options?: { columns?: number; paperWidth?: DotMatrixPaperWidth }): number {
+  if (options?.columns && options.columns > 0) {
+    return options.columns;
+  }
+  if (options?.paperWidth) {
+    if (typeof options.paperWidth === "number") {
+      if (options.paperWidth <= 7) return 60;
+      if (options.paperWidth <= 11) return 80;
+      if (options.paperWidth <= 13) return 120;
+      return 132;
+    }
+    switch (options.paperWidth) {
+      case "6in":
+        return 60;
+      case "10in":
+        return 80;
+      case "12in":
+        return 120;
+      case "15in":
+        return 132;
+    }
+  }
+  return 80;
 }
 
 export class DotMatrixRenderer {
@@ -218,24 +249,257 @@ export class DotMatrixRenderer {
   }
 
   /**
-   * Generates formatted continuous dot-matrix text for a Tax Invoice (80 or 132 columns).
+   * Generates formatted continuous dot-matrix text for a Tax Invoice (6-inch/60C, 10-inch/80C, 12-inch/120C, or 132C).
    */
   renderInvoice(data: InvoicePrintData, options?: DotMatrixOptions): string {
-    const cols = options?.columns === 132 ? 132 : 80;
+    const cols = resolveDotMatrixColumns(options);
     if (options?.prePrintedStationery) {
       return this.renderPrePrintedInvoice(data, options);
     }
-    if (cols === 132) {
-      return this.renderInvoice132(data, options);
+    if (cols <= 65) {
+      return this.renderInvoice60(data, options, cols);
     }
-    return this.renderInvoice80(data, options);
+    if (cols >= 125) {
+      return this.renderInvoice132(data, options, cols);
+    }
+    if (cols >= 100 && cols < 125) {
+      return this.renderInvoice120(data, options, cols);
+    }
+    return this.renderInvoice80(data, options, cols);
+  }
+
+  /**
+   * 6-Inch Compact Dot Matrix Format (~60 columns, e.g. 6-inch continuous forms / counter vouchers).
+   * Formats text, metadata, tables and totals so they fit neatly on narrow paper without clipping.
+   */
+  private renderInvoice60(data: InvoicePrintData, options?: DotMatrixOptions, customCols?: number): string {
+    const cols = customCols || 60;
+    const linesPerPage = options?.linesPerPage !== undefined ? options.linesPerPage : 66;
+    const curr = options?.currencyPrefix || "Rs.";
+    const leftMargin = " ".repeat(options?.leftMarginSpaces || 0);
+    const divDouble = leftMargin + "=".repeat(cols);
+    const divSingle = leftMargin + "-".repeat(cols);
+
+    // Build Header Section Lines
+    const headerLines: string[] = [];
+    if (options?.topMarginLines) {
+      for (let i = 0; i < options.topMarginLines; i++) headerLines.push("");
+    }
+
+    // 1. Store Details (Centered within 60 columns)
+    headerLines.push(leftMargin + this.center(data.store_name.toUpperCase(), cols));
+    if (data.store_address) {
+      const addrLines = this.wrapText(data.store_address, cols);
+      addrLines.forEach((l) => headerLines.push(leftMargin + this.center(l, cols)));
+    }
+
+    const contactParts: string[] = [];
+    if (data.store_phone) contactParts.push(`Ph: ${data.store_phone}`);
+    if (data.store_email) contactParts.push(`Email: ${data.store_email}`);
+    if (contactParts.length > 0) {
+      const lines = this.wrapText(contactParts.join(" | "), cols);
+      lines.forEach((l) => headerLines.push(leftMargin + this.center(l, cols)));
+    }
+
+    if (data.store_gstin) {
+      headerLines.push(leftMargin + this.center(`GSTIN: ${data.store_gstin}`, cols));
+    }
+
+    if (options?.showDrugLicenses !== false && data.drug_license_numbers && data.drug_license_numbers.length > 0) {
+      const dlStr = `DL: ${data.drug_license_numbers.join(", ")}`;
+      const lines = this.wrapText(dlStr, cols);
+      lines.forEach((l) => headerLines.push(leftMargin + this.center(l, cols)));
+    }
+
+    if (data.fssai_no) {
+      headerLines.push(leftMargin + this.center(`FSSAI: ${data.fssai_no}`, cols));
+    }
+
+    headerLines.push(divDouble);
+
+    // 2. Title & Copy Marker (Centered in 60 columns)
+    const isDup = options?.isDuplicate || options?.copyMarker;
+    const dupText = options?.copyMarker || "DUPLICATE COPY";
+    headerLines.push(leftMargin + this.center("TAX INVOICE", cols));
+    if (isDup) {
+      headerLines.push(leftMargin + this.center(`*** ${dupText} ***`, cols));
+    }
+
+    headerLines.push(divSingle);
+
+    // Document & Customer Meta Grid (2 Columns: Left 33 cols, Right 27 cols)
+    const leftColWidth = Math.min(34, Math.floor(cols * 0.55));
+    const rightColWidth = cols - leftColWidth;
+
+    const leftMeta: string[] = [];
+    leftMeta.push(`Customer : ${(data.customer_name || "Walk-in").substring(0, leftColWidth - 11)}`);
+    leftMeta.push(`Phone    : ${data.customer_phone || "-"}`);
+    if (data.customer_gstin) {
+      leftMeta.push(`GSTIN    : ${data.customer_gstin}`);
+    }
+    if (options?.showDoctorPatient !== false) {
+      if (data.patient_name) {
+        const pat = `Patient  : ${data.patient_name}${data.patient_age ? ` (${data.patient_age}Y/${data.patient_gender || ""})` : ""}`;
+        leftMeta.push(pat.substring(0, leftColWidth));
+      }
+      if (data.doctor_name) {
+        const doc = `Doctor   : ${data.doctor_name}${data.doctor_reg_no ? ` [${data.doctor_reg_no}]` : ""}`;
+        leftMeta.push(doc.substring(0, leftColWidth));
+      }
+    }
+
+    const rightMeta: string[] = [];
+    rightMeta.push(`Invoice No : #${data.invoice_number}`);
+    rightMeta.push(`Date       : ${this.formatInvoiceDate(data.invoice_date, data.invoice_time)}`);
+    rightMeta.push(`Payment    : ${data.payment_mode || "Cash"}`);
+    if (data.place_of_supply) {
+      rightMeta.push(`POS        : ${data.place_of_supply}`);
+    }
+
+    const maxMetaRows = Math.max(leftMeta.length, rightMeta.length);
+    for (let i = 0; i < maxMetaRows; i++) {
+      const l = this.padRight(leftMeta[i] || "", leftColWidth);
+      const r = this.padRight(rightMeta[i] || "", rightColWidth);
+      headerLines.push(leftMargin + l + r);
+    }
+
+    headerLines.push(divSingle);
+
+    // 60-Column Item Table Header
+    // #  Item Description     Batch   Exp    Qty    Rate    Amount (Exact 60 Cols: 2+1+20+1+7+1+5+1+4+1+7+1+9 = 60)
+    const itemTableHead = `${this.padRight("#", 2)} ${this.padRight("Item Description", 20)} ${this.padRight("Batch", 7)} ${this.padRight("Exp", 5)} ${this.padLeft("Qty", 4)} ${this.padLeft("Rate", 7)} ${this.padLeft("Amount", 9)}`;
+    headerLines.push(leftMargin + itemTableHead);
+    headerLines.push(divSingle);
+
+    // Build Item Rows
+    const itemLines: string[] = [];
+    data.lines.forEach((item, idx) => {
+      const num = this.padRight(idx + 1, 2);
+      const descFirst = item.description.substring(0, 20).padEnd(20);
+      const batch = this.padRight((item.batch_no || "-").substring(0, 7), 7);
+      const exp = this.padRight(this.formatExpiry(item.expiry_date), 5);
+      const qty = this.padLeft(this.formatQty(item.qty, item.loose_qty), 4);
+      const rate = this.padLeft(item.rate.toFixed(2), 7);
+      const amt = this.padLeft(this.formatAmount(item.amount), 9);
+
+      itemLines.push(`${leftMargin}${num} ${descFirst} ${batch} ${exp} ${qty} ${rate} ${amt}`);
+
+      // Indented secondary line if description was wrapped or to display HSN/GST
+      if (options?.truncateDescriptions !== true && item.description.length > 20) {
+        const remainingDesc = item.description.substring(20, 50).trim();
+        const taxNote = item.hsn_code ? ` [HSN:${item.hsn_code} GST:${item.gst_percent}%]` : ` [GST:${item.gst_percent}%]`;
+        const extraLine = ("   " + remainingDesc + taxNote).substring(0, cols);
+        itemLines.push(leftMargin + extraLine);
+      }
+    });
+
+    // Build Footer Section
+    const footerLines: string[] = [];
+    footerLines.push(divSingle);
+
+    // HSN Tax Summary (Compact for 60 cols)
+    if (options?.showHsnSummary !== false) {
+      const hsnRows = calculateHsnSummary(data.lines);
+      if (hsnRows.length > 0) {
+        // HSN/SAC  Taxable(Rs) CGST% CGST(Rs) SGST% SGST(Rs) TotalTax (Exact 60 Cols: 8+1+12+1+5+1+8+1+5+1+8+1+8 = 59-60)
+        const hsnHead = `${this.padRight("HSN/SAC", 8)} ${this.padLeft("Taxable(Rs)", 12)} ${this.padLeft("CGST%", 5)} ${this.padLeft("CGST(Rs)", 8)} ${this.padLeft("SGST%", 5)} ${this.padLeft("SGST(Rs)", 8)} ${this.padLeft("TotTax", 8)}`;
+        footerLines.push(leftMargin + hsnHead);
+        footerLines.push(divSingle);
+        hsnRows.forEach((h) => {
+          const hCode = this.padRight(h.hsnCode, 8);
+          const tVal = this.padLeft(this.formatAmount(h.taxableValue), 12);
+          const cRate = this.padLeft(`${h.cgstRate}%`, 5);
+          const cAmt = this.padLeft(this.formatAmount(h.cgstAmount), 8);
+          const sRate = this.padLeft(`${h.sgstRate}%`, 5);
+          const sAmt = this.padLeft(this.formatAmount(h.sgstAmount), 8);
+          const totTax = this.padLeft(this.formatAmount(h.totalTax), 8);
+          footerLines.push(`${leftMargin}${hCode} ${tVal} ${cRate} ${cAmt} ${sRate} ${sAmt} ${totTax}`);
+        });
+        footerLines.push(divSingle);
+      }
+    }
+
+    // Totals Box (Right Aligned to 60 cols)
+    const isInterState = (data.igst_total !== undefined && data.igst_total > 0);
+    const subtotalStr = `Taxable Subtotal  : ${curr} ` + this.padLeft(this.formatAmount(data.subtotal), 11);
+    footerLines.push(leftMargin + this.padLeft(subtotalStr, cols));
+
+    if (isInterState) {
+      const igstStr = `Integrated (IGST) : ${curr} ` + this.padLeft(this.formatAmount(data.igst_total || data.tax_total), 11);
+      footerLines.push(leftMargin + this.padLeft(igstStr, cols));
+    } else if (data.cgst_total !== undefined && data.sgst_total !== undefined) {
+      const cgstStr = `Central GST (CGST): ${curr} ` + this.padLeft(this.formatAmount(data.cgst_total), 11);
+      const sgstStr = `State GST (SGST)  : ${curr} ` + this.padLeft(this.formatAmount(data.sgst_total), 11);
+      footerLines.push(leftMargin + this.padLeft(cgstStr, cols));
+      footerLines.push(leftMargin + this.padLeft(sgstStr, cols));
+    } else if (data.tax_total > 0) {
+      const taxStr = `GST Tax Total     : ${curr} ` + this.padLeft(this.formatAmount(data.tax_total), 11);
+      footerLines.push(leftMargin + this.padLeft(taxStr, cols));
+    }
+
+    if (data.cess_total && data.cess_total > 0) {
+      const cessStr = `Cess Total        : ${curr} ` + this.padLeft(this.formatAmount(data.cess_total), 11);
+      footerLines.push(leftMargin + this.padLeft(cessStr, cols));
+    }
+
+    if (data.round_off && Math.abs(data.round_off) > 0.001) {
+      const roStr = `Round Off         : ${curr} ` + this.padLeft(this.formatAmount(data.round_off), 11);
+      footerLines.push(leftMargin + this.padLeft(roStr, cols));
+    }
+
+    footerLines.push(divDouble);
+    const grandTotalStr = `GRAND TOTAL       : ${curr} ` + this.padLeft(this.formatAmount(data.grand_total), 11);
+    footerLines.push(leftMargin + this.padLeft(grandTotalStr, cols));
+    footerLines.push(divDouble);
+
+    if (data.payments && data.payments.length > 0) {
+      for (const p of data.payments) {
+        const pStr = `Paid via ${p.mode}: ${curr} ` + this.padLeft(this.formatAmount(p.amount), 11);
+        footerLines.push(leftMargin + this.padLeft(pStr, cols));
+      }
+      if (data.change_due && data.change_due > 0) {
+        const chgStr = `Change Returned   : ${curr} ` + this.padLeft(this.formatAmount(data.change_due), 11);
+        footerLines.push(leftMargin + this.padLeft(chgStr, cols));
+      }
+      footerLines.push(divSingle);
+    }
+
+    // Amount in Words
+    const words = data.amount_in_words || numberToWordsIndian(data.grand_total);
+    const wordsLines = this.wrapText(`Amount in Words: ${words}`, cols);
+    wordsLines.forEach((w) => footerLines.push(leftMargin + w));
+
+    if (data.upi_vpa) {
+      footerLines.push(leftMargin + `UPI ID: ${data.upi_vpa}`);
+    }
+
+    if (options?.showTerms !== false && data.terms_and_conditions) {
+      const terms = this.wrapText(`Terms: ${data.terms_and_conditions}`, cols);
+      terms.forEach((t) => footerLines.push(leftMargin + t));
+    }
+
+    footerLines.push("");
+    const signRow = `Customer Signature` + " ".repeat(Math.max(2, cols - 18 - 20)) + `Authorised Signatory`;
+    footerLines.push(leftMargin + signRow);
+
+    return this.paginateDocument({
+      headerLines,
+      itemLines,
+      footerLines,
+      linesPerPage,
+      cols,
+      leftMargin,
+      documentNumber: data.invoice_number,
+      endOfJobAction: options?.endOfJobAction,
+      feedLinesForTearOff: options?.feedLinesForTearOff,
+    });
   }
 
   /**
    * 80-Column Standard Dot Matrix Format (for 9-pin/24-pin 80-column printers like Epson LX-310, TVS MSP).
    */
-  private renderInvoice80(data: InvoicePrintData, options?: DotMatrixOptions): string {
-    const cols = 80;
+  private renderInvoice80(data: InvoicePrintData, options?: DotMatrixOptions, customCols?: number): string {
+    const cols = customCols || 80;
     const linesPerPage = options?.linesPerPage !== undefined ? options.linesPerPage : 66;
     const curr = options?.currencyPrefix || "Rs.";
     const leftMargin = " ".repeat(options?.leftMarginSpaces || 0);
@@ -490,10 +754,178 @@ export class DotMatrixRenderer {
   }
 
   /**
+   * 120-Column Wide Dot Matrix Format (for 12-inch wide paper / 10 CPI wide fanfold).
+   */
+  private renderInvoice120(data: InvoicePrintData, options?: DotMatrixOptions, customCols?: number): string {
+    const cols = customCols || 120;
+    const linesPerPage = options?.linesPerPage !== undefined ? options.linesPerPage : 66;
+    const curr = options?.currencyPrefix || "Rs.";
+    const leftMargin = " ".repeat(options?.leftMarginSpaces || 0);
+    const divDouble = leftMargin + "=".repeat(cols);
+    const divSingle = leftMargin + "-".repeat(cols);
+
+    const headerLines: string[] = [];
+    if (options?.topMarginLines) {
+      for (let i = 0; i < options.topMarginLines; i++) headerLines.push("");
+    }
+
+    // 1. Store Details (Centered within 120 columns)
+    headerLines.push(leftMargin + this.center(data.store_name.toUpperCase(), cols));
+    if (data.store_address) {
+      headerLines.push(leftMargin + this.center(data.store_address, cols));
+    }
+
+    const subHeaders: string[] = [];
+    if (data.store_gstin) subHeaders.push(`GSTIN: ${data.store_gstin}`);
+    if (data.store_phone) subHeaders.push(`Ph: ${data.store_phone}`);
+    if (data.store_email) subHeaders.push(`Email: ${data.store_email}`);
+    if (options?.showDrugLicenses !== false && data.drug_license_numbers && data.drug_license_numbers.length > 0) {
+      subHeaders.push(`DL: ${data.drug_license_numbers.join(", ")}`);
+    }
+    if (subHeaders.length > 0) {
+      headerLines.push(leftMargin + this.center(subHeaders.join(" | "), cols));
+    }
+
+    headerLines.push(divDouble);
+
+    // 2. Title & Copy Marker Bar
+    const isDup = options?.isDuplicate || options?.copyMarker;
+    const dupText = options?.copyMarker || "DUPLICATE COPY";
+    if (isDup) {
+      const title = "TAX INVOICE";
+      const dupTag = `*** ${dupText} ***`;
+      headerLines.push(leftMargin + title + " ".repeat(Math.max(1, cols - title.length - dupTag.length)) + dupTag);
+    } else {
+      headerLines.push(leftMargin + this.center("TAX INVOICE", cols));
+    }
+
+    headerLines.push(divSingle);
+
+    // 3-Column Meta Grid in 120 columns (42 + 38 + 40 = 120)
+    const p1 = `Customer : ${data.customer_name || "Walk-in Customer"}`.padEnd(42);
+    const p2 = `Invoice No: #${data.invoice_number}`.padEnd(38);
+    const p3 = `Date: ${this.formatInvoiceDate(data.invoice_date, data.invoice_time)}`.padEnd(40);
+    headerLines.push(leftMargin + p1 + p2 + p3);
+
+    const g1 = `Phone    : ${data.customer_phone || "-"}`.padEnd(42);
+    const g2 = `Cust GSTIN: ${data.customer_gstin || "-"}`.padEnd(38);
+    const g3 = `POS : ${data.place_of_supply || "State"}`.padEnd(40);
+    headerLines.push(leftMargin + g1 + g2 + g3);
+
+    if (options?.showDoctorPatient !== false && (data.patient_name || data.doctor_name)) {
+      const d1 = `Patient  : ${data.patient_name || "-"}${data.patient_age ? ` (${data.patient_age}Y/${data.patient_gender || ""})` : ""}`.padEnd(42);
+      const d2 = `Doctor   : ${data.doctor_name || "-"}`.padEnd(38);
+      const d3 = `Payment : ${data.payment_mode || "Cash"}`.padEnd(40);
+      headerLines.push(leftMargin + d1 + d2 + d3);
+    }
+
+    headerLines.push(divSingle);
+
+    // 120-Column Item Table Header
+    // 2+1+36+1+8+1+8+1+5+1+5+1+10+1+7+1+10+1+4+1+15 = 120 cols
+    const itemHead120 = `${this.padRight("#", 2)} ${this.padRight("Item Description", 36)} ${this.padRight("HSN/SAC", 8)} ${this.padRight("Batch", 8)} ${this.padRight("Exp", 5)} ${this.padLeft("Qty", 5)} ${this.padLeft("Rate(Rs)", 10)} ${this.padLeft("Disc", 7)} ${this.padLeft("Taxable", 10)} ${this.padLeft("GST%", 4)} ${this.padLeft("Amount (Rs.)", 15)}`;
+    headerLines.push(leftMargin + itemHead120);
+    headerLines.push(divSingle);
+
+    const itemLines: string[] = [];
+    data.lines.forEach((item, idx) => {
+      const num = this.padRight(idx + 1, 2);
+      const desc = item.description.substring(0, 36).padEnd(36);
+      const hsn = this.padRight((item.hsn_code || "-").substring(0, 8), 8);
+      const batch = this.padRight((item.batch_no || "-").substring(0, 8), 8);
+      const exp = this.padRight(this.formatExpiry(item.expiry_date), 5);
+      const qty = this.padLeft(this.formatQty(item.qty, item.loose_qty), 5);
+      const rate = this.padLeft(item.rate.toFixed(2), 10);
+      const disc = this.padLeft(this.formatAmount(item.discount_amount || 0), 7);
+      const taxable = this.padLeft(this.formatAmount((item.amount || 0) * (1 - (item.gst_percent || 0) / 100)), 10);
+      const gst = this.padLeft(`${item.gst_percent}%`, 4);
+      const amt = this.padLeft(this.formatAmount(item.amount), 15);
+
+      itemLines.push(`${leftMargin}${num} ${desc} ${hsn} ${batch} ${exp} ${qty} ${rate} ${disc} ${taxable} ${gst} ${amt}`);
+
+      if (options?.truncateDescriptions !== true && item.description.length > 36) {
+        const wrap2 = item.description.substring(36, 72).trim();
+        itemLines.push(`${leftMargin}    ${wrap2}`);
+      }
+    });
+
+    const footerLines: string[] = [];
+    footerLines.push(divSingle);
+
+    // HSN Summary for 120 cols
+    if (options?.showHsnSummary !== false) {
+      const hsnRows = calculateHsnSummary(data.lines);
+      if (hsnRows.length > 0) {
+        const hsnHead = `${this.padRight("HSN/SAC", 10)} ${this.padLeft("Taxable Value (Rs)", 22)} ${this.padLeft("CGST Rate", 12)} ${this.padLeft("CGST (Rs)", 16)} ${this.padLeft("SGST Rate", 12)} ${this.padLeft("SGST (Rs)", 16)} ${this.padLeft("Total Tax (Rs)", 22)}`;
+        footerLines.push(leftMargin + hsnHead);
+        footerLines.push(divSingle);
+        hsnRows.forEach((h) => {
+          const hCode = this.padRight(h.hsnCode, 10);
+          const tVal = this.padLeft(this.formatAmount(h.taxableValue), 22);
+          const cRate = this.padLeft(`${h.cgstRate}%`, 12);
+          const cAmt = this.padLeft(this.formatAmount(h.cgstAmount), 16);
+          const sRate = this.padLeft(`${h.sgstRate}%`, 12);
+          const sAmt = this.padLeft(this.formatAmount(h.sgstAmount), 16);
+          const totTax = this.padLeft(this.formatAmount(h.totalTax), 22);
+          footerLines.push(`${leftMargin}${hCode} ${tVal} ${cRate} ${cAmt} ${sRate} ${sAmt} ${totTax}`);
+        });
+        footerLines.push(divSingle);
+      }
+    }
+
+    // Totals Box (Right Aligned to 120 cols)
+    const subtotalStr = `Taxable Subtotal  : ${curr} ` + this.padLeft(this.formatAmount(data.subtotal), 12);
+    footerLines.push(leftMargin + this.padLeft(subtotalStr, cols));
+
+    if (data.cgst_total !== undefined && data.sgst_total !== undefined) {
+      const cgstStr = `Central GST (CGST): ${curr} ` + this.padLeft(this.formatAmount(data.cgst_total), 12);
+      const sgstStr = `State GST (SGST)  : ${curr} ` + this.padLeft(this.formatAmount(data.sgst_total), 12);
+      footerLines.push(leftMargin + this.padLeft(cgstStr, cols));
+      footerLines.push(leftMargin + this.padLeft(sgstStr, cols));
+    } else if (data.tax_total > 0) {
+      const taxStr = `GST Tax Total     : ${curr} ` + this.padLeft(this.formatAmount(data.tax_total), 12);
+      footerLines.push(leftMargin + this.padLeft(taxStr, cols));
+    }
+
+    if (data.round_off && Math.abs(data.round_off) > 0.001) {
+      const roStr = `Round Off         : ${curr} ` + this.padLeft(this.formatAmount(data.round_off), 12);
+      footerLines.push(leftMargin + this.padLeft(roStr, cols));
+    }
+
+    footerLines.push(divDouble);
+    const grandTotalStr = `GRAND TOTAL       : ${curr} ` + this.padLeft(this.formatAmount(data.grand_total), 12);
+    footerLines.push(leftMargin + this.padLeft(grandTotalStr, cols));
+    footerLines.push(divDouble);
+
+    const words = data.amount_in_words || numberToWordsIndian(data.grand_total);
+    footerLines.push(leftMargin + `Amount in Words: ${words}`);
+    if (data.upi_vpa) footerLines.push(leftMargin + `UPI ID: ${data.upi_vpa}`);
+    if (options?.showTerms !== false && data.terms_and_conditions) {
+      footerLines.push(leftMargin + `Terms: ${data.terms_and_conditions}`);
+    }
+
+    footerLines.push("");
+    const signRow = `Customer Signature` + " ".repeat(Math.max(2, cols - 18 - 25)) + `Authorised Signatory`;
+    footerLines.push(leftMargin + signRow);
+
+    return this.paginateDocument({
+      headerLines,
+      itemLines,
+      footerLines,
+      linesPerPage,
+      cols,
+      leftMargin,
+      documentNumber: data.invoice_number,
+      endOfJobAction: options?.endOfJobAction,
+      feedLinesForTearOff: options?.feedLinesForTearOff,
+    });
+  }
+
+  /**
    * 132-Column Wide Dot Matrix Format (for wide carriage or 17 CPI condensed mode)
    */
-  private renderInvoice132(data: InvoicePrintData, options?: DotMatrixOptions): string {
-    const cols = 132;
+  private renderInvoice132(data: InvoicePrintData, options?: DotMatrixOptions, customCols?: number): string {
+    const cols = customCols || 132;
     const linesPerPage = options?.linesPerPage !== undefined ? options.linesPerPage : 66;
     const curr = options?.currencyPrefix || "Rs.";
     const leftMargin = " ".repeat(options?.leftMarginSpaces || 0);
@@ -558,28 +990,29 @@ export class DotMatrixRenderer {
     headerLines.push(divSingle);
 
     // 132-Column Item Table Header
-    const itemHead132 = `${this.padRight("#", 3)} ${this.padRight("Item Description", 46)} ${this.padRight("HSN Code", 10)} ${this.padRight("Batch No", 10)} ${this.padRight("Expiry", 7)} ${this.padLeft("Qty", 8)} ${this.padLeft("Rate(Rs)", 14)} ${this.padLeft("Disc(Rs)", 10)} ${this.padLeft("Taxable(Rs)", 13)} ${this.padLeft("GST%", 6)} ${this.padLeft("Amount(Rs)", 13)}`;
+    // 2+1+42+1+8+1+8+1+5+1+6+1+10+1+7+1+12+1+5+1+17 = 132 cols
+    const itemHead132 = `${this.padRight("#", 2)} ${this.padRight("Item Description", 42)} ${this.padRight("HSN/SAC", 8)} ${this.padRight("Batch", 8)} ${this.padRight("Exp", 5)} ${this.padLeft("Qty", 6)} ${this.padLeft("Rate(Rs)", 10)} ${this.padLeft("Disc", 7)} ${this.padLeft("Taxable", 12)} ${this.padLeft("GST%", 5)} ${this.padLeft("Amount (Rs.)", 17)}`;
     headerLines.push(leftMargin + itemHead132);
     headerLines.push(divSingle);
 
     const itemLines: string[] = [];
     data.lines.forEach((item, idx) => {
-      const num = this.padRight(idx + 1, 3);
-      const desc = item.description.substring(0, 46).padEnd(46);
-      const hsn = this.padRight((item.hsn_code || "-").substring(0, 10), 10);
-      const batch = this.padRight((item.batch_no || "-").substring(0, 10), 10);
-      const exp = this.padRight(this.formatExpiry(item.expiry_date), 7);
-      const qty = this.padLeft(this.formatQty(item.qty, item.loose_qty), 8);
-      const rate = this.padLeft(item.rate.toFixed(2), 14);
-      const disc = this.padLeft(this.formatAmount(item.discount_amount || 0), 10);
-      const taxable = this.padLeft(this.formatAmount(item.taxable_amount || (item.amount / (1 + item.gst_percent / 100))), 13);
-      const gst = this.padLeft(`${item.gst_percent}%`, 6);
-      const amt = this.padLeft(this.formatAmount(item.amount), 13);
+      const num = this.padRight(idx + 1, 2);
+      const desc = item.description.substring(0, 42).padEnd(42);
+      const hsn = this.padRight((item.hsn_code || "-").substring(0, 8), 8);
+      const batch = this.padRight((item.batch_no || "-").substring(0, 8), 8);
+      const exp = this.padRight(this.formatExpiry(item.expiry_date), 5);
+      const qty = this.padLeft(this.formatQty(item.qty, item.loose_qty), 6);
+      const rate = this.padLeft(item.rate.toFixed(2), 10);
+      const disc = this.padLeft(this.formatAmount(item.discount_amount || 0), 7);
+      const taxable = this.padLeft(this.formatAmount(item.taxable_amount || (item.amount / (1 + item.gst_percent / 100))), 12);
+      const gst = this.padLeft(`${item.gst_percent}%`, 5);
+      const amt = this.padLeft(this.formatAmount(item.amount), 17);
 
       itemLines.push(`${leftMargin}${num} ${desc} ${hsn} ${batch} ${exp} ${qty} ${rate} ${disc} ${taxable} ${gst} ${amt}`);
 
-      if (!options?.truncateDescriptions && item.description.length > 46) {
-        const rem = this.wrapText(item.description.substring(46), 90);
+      if (!options?.truncateDescriptions && item.description.length > 42) {
+        const rem = this.wrapText(item.description.substring(42), 90);
         rem.forEach((r) => itemLines.push(`${leftMargin}    ${r}`));
       }
     });
@@ -672,6 +1105,7 @@ export class DotMatrixRenderer {
    * Pre-printed stationery format (Prints values at fixed coordinates without borders).
    */
   private renderPrePrintedInvoice(data: InvoicePrintData, options?: DotMatrixOptions): string {
+    const cols = resolveDotMatrixColumns(options);
     const leftMargin = " ".repeat(options?.leftMarginSpaces || 0);
     const endOfJobAction = options?.endOfJobAction || "stop_immediately";
     const feedLines = Math.min(10, Math.max(0, options?.feedLinesForTearOff || 0));
@@ -683,25 +1117,27 @@ export class DotMatrixRenderer {
     }
 
     // Document Meta
-    outLines.push(leftMargin + `               ${data.invoice_number.padEnd(25)} ${this.formatInvoiceDate(data.invoice_date, data.invoice_time)}`);
-    outLines.push(leftMargin + `               ${(data.customer_name || "Cash").padEnd(25)} ${data.customer_phone || ""}`);
+    const metaIndent = Math.min(15, Math.floor(cols * 0.15));
+    outLines.push(leftMargin + " ".repeat(metaIndent) + `${data.invoice_number.padEnd(25)} ${this.formatInvoiceDate(data.invoice_date, data.invoice_time)}`);
+    outLines.push(leftMargin + " ".repeat(metaIndent) + `${(data.customer_name || "Cash").padEnd(25)} ${data.customer_phone || ""}`);
     outLines.push("");
 
     // Items
     data.lines.forEach((item, idx) => {
       const num = this.padRight(idx + 1, 3);
-      const desc = item.description.substring(0, 25).padEnd(25);
-      const batch = this.padRight(item.batch_no || "-", 8);
-      const qty = this.padLeft(item.qty, 5);
-      const rate = this.padLeft(item.rate.toFixed(2), 8);
-      const amt = this.padLeft(this.formatAmount(item.amount), 10);
+      const desc = item.description.substring(0, cols <= 65 ? 18 : 25).padEnd(cols <= 65 ? 18 : 25);
+      const batch = this.padRight(item.batch_no || "-", cols <= 65 ? 6 : 8);
+      const qty = this.padLeft(item.qty, cols <= 65 ? 4 : 5);
+      const rate = this.padLeft(item.rate.toFixed(2), cols <= 65 ? 7 : 8);
+      const amt = this.padLeft(this.formatAmount(item.amount), cols <= 65 ? 9 : 10);
       outLines.push(`${leftMargin}${num} ${desc} ${batch} ${qty} ${rate} ${amt}`);
     });
 
     // Totals at bottom (no artificial padding of empty lines)
-    outLines.push(leftMargin + " ".repeat(55) + this.padLeft(this.formatAmount(data.subtotal), 12));
-    outLines.push(leftMargin + " ".repeat(55) + this.padLeft(this.formatAmount(data.tax_total), 12));
-    outLines.push(leftMargin + " ".repeat(55) + this.padLeft(this.formatAmount(data.grand_total), 12));
+    const totIndent = Math.max(10, cols - 20);
+    outLines.push(leftMargin + " ".repeat(totIndent) + this.padLeft(this.formatAmount(data.subtotal), cols - totIndent));
+    outLines.push(leftMargin + " ".repeat(totIndent) + this.padLeft(this.formatAmount(data.tax_total), cols - totIndent));
+    outLines.push(leftMargin + " ".repeat(totIndent) + this.padLeft(this.formatAmount(data.grand_total), cols - totIndent));
 
     // Trim any trailing blank lines
     while (outLines.length > 0 && outLines[outLines.length - 1].trim() === "") {
@@ -722,7 +1158,7 @@ export class DotMatrixRenderer {
    * Generates Dot Matrix text for Credit Notes / Sales Returns
    */
   renderCreditNote(data: CreditNotePrintData, options?: DotMatrixOptions): string {
-    const cols = options?.columns === 132 ? 132 : 80;
+    const cols = resolveDotMatrixColumns(options);
     const curr = options?.currencyPrefix || "Rs.";
     const leftMargin = " ".repeat(options?.leftMarginSpaces || 0);
     const divDouble = leftMargin + "=".repeat(cols);
@@ -738,28 +1174,70 @@ export class DotMatrixRenderer {
     headerLines.push(leftMargin + this.center(`*** CREDIT NOTE / SALES RETURN ***`, cols));
     headerLines.push(divSingle);
 
-    headerLines.push(leftMargin + `CREDIT NOTE NO : #${data.return_number}`.padEnd(42) + `Date: ${this.formatInvoiceDate(data.return_date)}`);
-    if (data.original_invoice_number) {
-      headerLines.push(leftMargin + `Orig Invoice   : #${data.original_invoice_number}`.padEnd(42) + `Inv Date: ${this.formatInvoiceDate(data.original_invoice_date)}`);
-    }
-    const cName = this.padRight(`Customer       : ${data.customer_name.substring(0, 25)}`, 42);
-    headerLines.push(leftMargin + cName + `Phone: ${data.customer_phone || "-"}`);
-    headerLines.push(divSingle);
+    if (cols <= 65) {
+      const leftW = Math.min(32, Math.floor(cols * 0.53));
+      const rightW = cols - leftW;
+      headerLines.push(leftMargin + this.padRight(`CREDIT NOTE : #${data.return_number}`, leftW) + this.padRight(`Date: ${this.formatInvoiceDate(data.return_date)}`, rightW));
+      if (data.original_invoice_number) {
+        headerLines.push(leftMargin + this.padRight(`Orig Invoice: #${data.original_invoice_number}`, leftW) + this.padRight(`Inv Date: ${this.formatInvoiceDate(data.original_invoice_date)}`, rightW));
+      }
+      headerLines.push(leftMargin + this.padRight(`Customer    : ${(data.customer_name || "").substring(0, leftW - 14)}`, leftW) + this.padRight(`Phone: ${data.customer_phone || "-"}`, rightW));
+      headerLines.push(divSingle);
 
-    headerLines.push(leftMargin + `${this.padRight("#", 2)} ${this.padRight("Item Description", 25)} ${this.padRight("HSN", 8)} ${this.padRight("Batch", 8)} ${this.padLeft("Qty", 4)} ${this.padLeft("Rate", 7)} ${this.padLeft("GST", 4)} ${this.padLeft("Amount", 9)}`);
-    headerLines.push(divSingle);
+      headerLines.push(leftMargin + `${this.padRight("#", 2)} ${this.padRight("Item Description", 20)} ${this.padRight("Batch", 7)} ${this.padRight("Exp", 5)} ${this.padLeft("Qty", 4)} ${this.padLeft("Rate", 7)} ${this.padLeft("Amount", 9)}`);
+      headerLines.push(divSingle);
+    } else {
+      const leftW = cols >= 120 ? 60 : 42;
+      headerLines.push(leftMargin + `CREDIT NOTE NO : #${data.return_number}`.padEnd(leftW) + `Date: ${this.formatInvoiceDate(data.return_date)}`);
+      if (data.original_invoice_number) {
+        headerLines.push(leftMargin + `Orig Invoice   : #${data.original_invoice_number}`.padEnd(leftW) + `Inv Date: ${this.formatInvoiceDate(data.original_invoice_date)}`);
+      }
+      const cName = this.padRight(`Customer       : ${data.customer_name.substring(0, leftW - 17)}`, leftW);
+      headerLines.push(leftMargin + cName + `Phone: ${data.customer_phone || "-"}`);
+      headerLines.push(divSingle);
+
+      if (cols >= 120) {
+        headerLines.push(leftMargin + `${this.padRight("#", 2)} ${this.padRight("Item Description", 38)} ${this.padRight("HSN/SAC", 8)} ${this.padRight("Batch", 8)} ${this.padRight("Exp", 5)} ${this.padLeft("Qty", 5)} ${this.padLeft("Rate(Rs)", 10)} ${this.padLeft("Taxable", 11)} ${this.padLeft("GST%", 5)} ${this.padLeft("Amount (Rs.)", 19)}`);
+      } else {
+        headerLines.push(leftMargin + `${this.padRight("#", 2)} ${this.padRight("Item Description", 25)} ${this.padRight("HSN", 8)} ${this.padRight("Batch", 8)} ${this.padLeft("Qty", 4)} ${this.padLeft("Rate", 7)} ${this.padLeft("GST", 4)} ${this.padLeft("Amount", 9)}`);
+      }
+      headerLines.push(divSingle);
+    }
 
     const itemLines: string[] = [];
     data.lines.forEach((l, idx) => {
-      const num = this.padRight(idx + 1, 2);
-      const desc = l.description.substring(0, 25).padEnd(25);
-      const hsn = this.padRight((l.hsn_code || "-").substring(0, 8), 8);
-      const batch = this.padRight((l.batch_no || "-").substring(0, 8), 8);
-      const qty = this.padLeft(l.qty, 4);
-      const rate = this.padLeft(l.rate.toFixed(2), 7);
-      const gst = this.padLeft(`${l.gst_percent}%`, 4);
-      const amt = this.padLeft(this.formatAmount(l.amount), 9);
-      itemLines.push(`${leftMargin}${num} ${desc} ${hsn} ${batch} ${qty} ${rate} ${gst} ${amt}`);
+      if (cols <= 65) {
+        const num = this.padRight(idx + 1, 2);
+        const desc = l.description.substring(0, 20).padEnd(20);
+        const batch = this.padRight((l.batch_no || "-").substring(0, 7), 7);
+        const exp = this.padRight(this.formatExpiry((l as any).expiry_date), 5);
+        const qty = this.padLeft(l.qty, 4);
+        const rate = this.padLeft(l.rate.toFixed(2), 7);
+        const amt = this.padLeft(this.formatAmount(l.amount), 9);
+        itemLines.push(`${leftMargin}${num} ${desc} ${batch} ${exp} ${qty} ${rate} ${amt}`);
+      } else if (cols >= 120) {
+        const num = this.padRight(idx + 1, 2);
+        const desc = l.description.substring(0, 38).padEnd(38);
+        const hsn = this.padRight((l.hsn_code || "-").substring(0, 8), 8);
+        const batch = this.padRight((l.batch_no || "-").substring(0, 8), 8);
+        const exp = this.padRight(this.formatExpiry((l as any).expiry_date), 5);
+        const qty = this.padLeft(l.qty, 5);
+        const rate = this.padLeft(l.rate.toFixed(2), 10);
+        const taxable = this.padLeft(this.formatAmount(l.amount * (1 - (l.gst_percent || 0)/100)), 11);
+        const gst = this.padLeft(`${l.gst_percent}%`, 5);
+        const amt = this.padLeft(this.formatAmount(l.amount), 19);
+        itemLines.push(`${leftMargin}${num} ${desc} ${hsn} ${batch} ${exp} ${qty} ${rate} ${taxable} ${gst} ${amt}`);
+      } else {
+        const num = this.padRight(idx + 1, 2);
+        const desc = l.description.substring(0, 25).padEnd(25);
+        const hsn = this.padRight((l.hsn_code || "-").substring(0, 8), 8);
+        const batch = this.padRight((l.batch_no || "-").substring(0, 8), 8);
+        const qty = this.padLeft(l.qty, 4);
+        const rate = this.padLeft(l.rate.toFixed(2), 7);
+        const gst = this.padLeft(`${l.gst_percent}%`, 4);
+        const amt = this.padLeft(this.formatAmount(l.amount), 9);
+        itemLines.push(`${leftMargin}${num} ${desc} ${hsn} ${batch} ${qty} ${rate} ${gst} ${amt}`);
+      }
     });
 
     const footerLines: string[] = [];
@@ -772,7 +1250,8 @@ export class DotMatrixRenderer {
     footerLines.push(leftMargin + `Amount in Words: ${data.amount_in_words || numberToWordsIndian(data.grand_total)}`);
     footerLines.push(leftMargin + `Refund Mode: ${data.refund_mode}`);
     footerLines.push("");
-    footerLines.push(leftMargin + `Customer Signature` + " ".repeat(cols - 18 - 25) + `Authorised Signatory`);
+    const signRow = `Customer Signature` + " ".repeat(Math.max(2, cols - 18 - 20)) + `Authorised Signatory`;
+    footerLines.push(leftMargin + signRow);
 
     return this.paginateDocument({
       headerLines,
@@ -791,7 +1270,7 @@ export class DotMatrixRenderer {
    * Generates Dot Matrix text for Debit Notes / Purchase Returns
    */
   renderDebitNote(data: DebitNotePrintData, options?: DotMatrixOptions): string {
-    const cols = options?.columns === 132 ? 132 : 80;
+    const cols = resolveDotMatrixColumns(options);
     const curr = options?.currencyPrefix || "Rs.";
     const leftMargin = " ".repeat(options?.leftMarginSpaces || 0);
     const divDouble = leftMargin + "=".repeat(cols);
@@ -807,28 +1286,70 @@ export class DotMatrixRenderer {
     headerLines.push(leftMargin + this.center(`*** DEBIT NOTE / PURCHASE RETURN ***`, cols));
     headerLines.push(divSingle);
 
-    headerLines.push(leftMargin + `DEBIT NOTE NO  : #${data.return_number}`.padEnd(42) + `Date: ${this.formatInvoiceDate(data.return_date)}`);
-    if (data.supplier_invoice_no) {
-      headerLines.push(leftMargin + `Supplier Inv   : #${data.supplier_invoice_no}`.padEnd(42) + `Purch No: ${data.original_purchase_number || "-"}`);
-    }
-    const sName = this.padRight(`Supplier       : ${data.supplier_name.substring(0, 25)}`, 42);
-    headerLines.push(leftMargin + sName + `GSTIN: ${data.supplier_gstin || "-"}`);
-    headerLines.push(divSingle);
+    if (cols <= 65) {
+      const leftW = Math.min(32, Math.floor(cols * 0.53));
+      const rightW = cols - leftW;
+      headerLines.push(leftMargin + this.padRight(`DEBIT NOTE  : #${data.return_number}`, leftW) + this.padRight(`Date: ${this.formatInvoiceDate(data.return_date)}`, rightW));
+      if (data.supplier_invoice_no) {
+        headerLines.push(leftMargin + this.padRight(`Supplier Inv: #${data.supplier_invoice_no}`, leftW) + this.padRight(`Purch: ${data.original_purchase_number || "-"}`, rightW));
+      }
+      headerLines.push(leftMargin + this.padRight(`Supplier    : ${(data.supplier_name || "").substring(0, leftW - 14)}`, leftW) + this.padRight(`GST: ${data.supplier_gstin || "-"}`, rightW));
+      headerLines.push(divSingle);
 
-    headerLines.push(leftMargin + `${this.padRight("#", 2)} ${this.padRight("Item Description", 25)} ${this.padRight("HSN", 8)} ${this.padRight("Batch", 8)} ${this.padLeft("Qty", 4)} ${this.padLeft("Rate", 7)} ${this.padLeft("GST", 4)} ${this.padLeft("Amount", 9)}`);
-    headerLines.push(divSingle);
+      headerLines.push(leftMargin + `${this.padRight("#", 2)} ${this.padRight("Item Description", 20)} ${this.padRight("Batch", 7)} ${this.padRight("Exp", 5)} ${this.padLeft("Qty", 4)} ${this.padLeft("Rate", 7)} ${this.padLeft("Amount", 9)}`);
+      headerLines.push(divSingle);
+    } else {
+      const leftW = cols >= 120 ? 60 : 42;
+      headerLines.push(leftMargin + `DEBIT NOTE NO  : #${data.return_number}`.padEnd(leftW) + `Date: ${this.formatInvoiceDate(data.return_date)}`);
+      if (data.supplier_invoice_no) {
+        headerLines.push(leftMargin + `Supplier Inv   : #${data.supplier_invoice_no}`.padEnd(leftW) + `Purch No: ${data.original_purchase_number || "-"}`);
+      }
+      const sName = this.padRight(`Supplier       : ${data.supplier_name.substring(0, leftW - 17)}`, leftW);
+      headerLines.push(leftMargin + sName + `GSTIN: ${data.supplier_gstin || "-"}`);
+      headerLines.push(divSingle);
+
+      if (cols >= 120) {
+        headerLines.push(leftMargin + `${this.padRight("#", 2)} ${this.padRight("Item Description", 38)} ${this.padRight("HSN/SAC", 8)} ${this.padRight("Batch", 8)} ${this.padRight("Exp", 5)} ${this.padLeft("Qty", 5)} ${this.padLeft("Rate(Rs)", 10)} ${this.padLeft("Taxable", 11)} ${this.padLeft("GST%", 5)} ${this.padLeft("Amount (Rs.)", 19)}`);
+      } else {
+        headerLines.push(leftMargin + `${this.padRight("#", 2)} ${this.padRight("Item Description", 25)} ${this.padRight("HSN", 8)} ${this.padRight("Batch", 8)} ${this.padLeft("Qty", 4)} ${this.padLeft("Rate", 7)} ${this.padLeft("GST", 4)} ${this.padLeft("Amount", 9)}`);
+      }
+      headerLines.push(divSingle);
+    }
 
     const itemLines: string[] = [];
     data.lines.forEach((l, idx) => {
-      const num = this.padRight(idx + 1, 2);
-      const desc = l.description.substring(0, 25).padEnd(25);
-      const hsn = this.padRight((l.hsn_code || "-").substring(0, 8), 8);
-      const batch = this.padRight((l.batch_no || "-").substring(0, 8), 8);
-      const qty = this.padLeft(l.qty, 4);
-      const rate = this.padLeft(l.rate.toFixed(2), 7);
-      const gst = this.padLeft(`${l.gst_percent}%`, 4);
-      const amt = this.padLeft(this.formatAmount(l.amount), 9);
-      itemLines.push(`${leftMargin}${num} ${desc} ${hsn} ${batch} ${qty} ${rate} ${gst} ${amt}`);
+      if (cols <= 65) {
+        const num = this.padRight(idx + 1, 2);
+        const desc = l.description.substring(0, 20).padEnd(20);
+        const batch = this.padRight((l.batch_no || "-").substring(0, 7), 7);
+        const exp = this.padRight(this.formatExpiry((l as any).expiry_date), 5);
+        const qty = this.padLeft(l.qty, 4);
+        const rate = this.padLeft(l.rate.toFixed(2), 7);
+        const amt = this.padLeft(this.formatAmount(l.amount), 9);
+        itemLines.push(`${leftMargin}${num} ${desc} ${batch} ${exp} ${qty} ${rate} ${amt}`);
+      } else if (cols >= 120) {
+        const num = this.padRight(idx + 1, 2);
+        const desc = l.description.substring(0, 38).padEnd(38);
+        const hsn = this.padRight((l.hsn_code || "-").substring(0, 8), 8);
+        const batch = this.padRight((l.batch_no || "-").substring(0, 8), 8);
+        const exp = this.padRight(this.formatExpiry((l as any).expiry_date), 5);
+        const qty = this.padLeft(l.qty, 5);
+        const rate = this.padLeft(l.rate.toFixed(2), 10);
+        const taxable = this.padLeft(this.formatAmount(l.amount * (1 - (l.gst_percent || 0)/100)), 11);
+        const gst = this.padLeft(`${l.gst_percent}%`, 5);
+        const amt = this.padLeft(this.formatAmount(l.amount), 19);
+        itemLines.push(`${leftMargin}${num} ${desc} ${hsn} ${batch} ${exp} ${qty} ${rate} ${taxable} ${gst} ${amt}`);
+      } else {
+        const num = this.padRight(idx + 1, 2);
+        const desc = l.description.substring(0, 25).padEnd(25);
+        const hsn = this.padRight((l.hsn_code || "-").substring(0, 8), 8);
+        const batch = this.padRight((l.batch_no || "-").substring(0, 8), 8);
+        const qty = this.padLeft(l.qty, 4);
+        const rate = this.padLeft(l.rate.toFixed(2), 7);
+        const gst = this.padLeft(`${l.gst_percent}%`, 4);
+        const amt = this.padLeft(this.formatAmount(l.amount), 9);
+        itemLines.push(`${leftMargin}${num} ${desc} ${hsn} ${batch} ${qty} ${rate} ${gst} ${amt}`);
+      }
     });
 
     const footerLines: string[] = [];
@@ -841,7 +1362,8 @@ export class DotMatrixRenderer {
     footerLines.push(leftMargin + `Amount in Words: ${data.amount_in_words || numberToWordsIndian(data.grand_total)}`);
     footerLines.push(leftMargin + `Settlement: ${data.settlement_type}`);
     footerLines.push("");
-    footerLines.push(leftMargin + `Supplier Signature` + " ".repeat(cols - 18 - 25) + `Authorised Signatory`);
+    const signRow = `Supplier Signature` + " ".repeat(Math.max(2, cols - 18 - 20)) + `Authorised Signatory`;
+    footerLines.push(leftMargin + signRow);
 
     return this.paginateDocument({
       headerLines,
@@ -1019,11 +1541,13 @@ export class DotMatrixRenderer {
     bytes.push(0x1B, 0x78, 0x00);
 
     // 3. Set Pitch / CPI
-    if (options?.columns === 132 || options?.cpi === "17cpi_condensed") {
+    const cols = resolveDotMatrixColumns(options);
+    if (cols >= 125 || options?.columns === 132 || options?.cpi === "17cpi_condensed") {
       bytes.push(0x0F); // Condensed mode (17.14 CPI)
     } else if (options?.cpi === "12cpi") {
       bytes.push(0x1B, 0x4D); // 12 CPI Elite
     } else {
+      bytes.push(0x12); // Cancel condensed mode (DC2 = 0x12)
       bytes.push(0x1B, 0x50); // 10 CPI Pica
     }
 
@@ -1064,7 +1588,7 @@ export class DotMatrixRenderer {
     if (options?.doubleStrikeCarbon) {
       bytes.push(0x1B, 0x48); // Cancel double strike (ESC H)
     }
-    if (options?.columns === 132 || options?.cpi === "17cpi_condensed") {
+    if (cols >= 125 || options?.columns === 132 || options?.cpi === "17cpi_condensed") {
       bytes.push(0x12); // Cancel condensed mode (DC2)
     }
 
@@ -1088,11 +1612,11 @@ export class DotMatrixRenderer {
    * exact character grid, column ruler, line numbers gutter, and page boundaries.
    */
   generateMonospaceHtmlPreview(text: string, options?: DotMatrixPreviewOptions): string {
-    const cols = options?.columns || 80;
+    const cols = resolveDotMatrixColumns(options);
     const showRuler = options?.showRuler !== false;
     const showLineNumbers = options?.showLineNumbers !== false;
     const showPageBreaks = options?.showPageBreaks !== false;
-    const is132 = cols === 132;
+    const is132 = cols >= 125;
 
     const pages = text.split("\x0C").filter((p) => p.trim().length > 0);
 
@@ -1273,7 +1797,7 @@ export class DotMatrixRenderer {
     .paper-body {
       padding: 16px 20px;
       background-color: #fefdfa;
-      min-width: ${is132 ? "1050px" : "680px"};
+      min-width: ${Math.max(480, Math.round(cols * 8.6 + 40))}px;
     }
 
     .dot-line {
@@ -1376,16 +1900,17 @@ export class DotMatrixRenderer {
    * Generates a Monospace PDF document for Dot Matrix preview saving.
    */
   generateMonospacePdf(text: string, options?: DotMatrixOptions): Uint8Array {
-    const is132 = options?.columns === 132;
+    const cols = resolveDotMatrixColumns(options);
+    const isWide = cols >= 100;
     const doc = new jsPDF({
-      orientation: is132 ? "landscape" : "portrait",
+      orientation: isWide ? "landscape" : "portrait",
       unit: "mm",
       format: "a4",
     });
 
     const pages = text.split("\x0C").filter((p) => p.trim().length > 0);
-    const fontSize = is132 ? 6.5 : 8.5;
-    const lineHeight = is132 ? 3.0 : 3.8;
+    const fontSize = isWide ? 6.5 : (cols <= 65 ? 9.5 : 8.5);
+    const lineHeight = isWide ? 3.0 : (cols <= 65 ? 4.2 : 3.8);
     const startX = 10;
     const startY = 12;
 

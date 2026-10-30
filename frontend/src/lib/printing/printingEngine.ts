@@ -1,5 +1,5 @@
 import { getIpcBridge, isTauri, invokeCommand } from "../ipc/ipcBridge";
-import { printerManagerService } from "./printerManagerService";
+import { printerManagerService, PaperSize } from "./printerManagerService";
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
 import * as QRCodeModule from "qrcode";
@@ -74,7 +74,7 @@ export interface InvoicePrintData {
 }
 
 export interface PrintRenderOptions {
-  paperSize?: "a4" | "a5" | "half_a4" | "thermal_80mm" | "thermal_58mm" | "dot_matrix_80col" | "dot_matrix_132col" | "barcode_label";
+  paperSize?: PaperSize;
   copies?: number;
   orientation?: "portrait" | "landscape";
   showHsnSummary?: boolean;
@@ -3368,11 +3368,13 @@ export class PrintingEngine {
    * Unified dispatcher to render HTML preview for any document type
    */
   renderDocumentHtml(docType: string, data: any, options?: PrintRenderOptions): string {
-    const isDotMatrix = options?.paperSize === "dot_matrix_80col" || options?.paperSize === "dot_matrix_132col";
+    const isDotMatrix = Boolean(options?.paperSize && options.paperSize.startsWith("dot_matrix"));
     if (isDotMatrix) {
       let rawText = "";
+      const cols = options?.paperSize === "dot_matrix_6in" ? 60 : options?.paperSize === "dot_matrix_120col" ? 120 : options?.paperSize === "dot_matrix_132col" ? 132 : 80;
       const dotOpts: DotMatrixOptions = {
-        columns: options?.paperSize === "dot_matrix_132col" ? 132 : 80,
+        columns: cols,
+        paperWidth: options?.paperSize === "dot_matrix_6in" ? "6in" : options?.paperSize === "dot_matrix_120col" ? "12in" : options?.paperSize === "dot_matrix_132col" ? "15in" : "10in",
         isDuplicate: options?.isDuplicate,
         copyMarker: options?.copyMarker,
         showHsnSummary: options?.showHsnSummary,
@@ -3397,7 +3399,7 @@ export class PrintingEngine {
           break;
       }
       return dotMatrixRenderer.generateMonospaceHtmlPreview(rawText, {
-        columns: options?.paperSize === "dot_matrix_132col" ? 132 : 80,
+        columns: cols,
         showRuler: true,
         showPageBreaks: true,
       });
@@ -3579,10 +3581,12 @@ export class PrintingEngine {
    * Unified dispatcher to render Vector / Monospace PDF for any document type
    */
   renderDocumentPdf(docType: string, data: any, options?: PrintRenderOptions): Uint8Array {
-    const isDotMatrix = options?.paperSize === "dot_matrix_80col" || options?.paperSize === "dot_matrix_132col";
+    const isDotMatrix = Boolean(options?.paperSize && options.paperSize.startsWith("dot_matrix"));
     if (isDotMatrix) {
+      const cols = options?.paperSize === "dot_matrix_6in" ? 60 : options?.paperSize === "dot_matrix_120col" ? 120 : options?.paperSize === "dot_matrix_132col" ? 132 : 80;
       const dotOpts: DotMatrixOptions = {
-        columns: options?.paperSize === "dot_matrix_132col" ? 132 : 80,
+        columns: cols,
+        paperWidth: options?.paperSize === "dot_matrix_6in" ? "6in" : options?.paperSize === "dot_matrix_120col" ? "12in" : options?.paperSize === "dot_matrix_132col" ? "15in" : "10in",
         isDuplicate: options?.isDuplicate,
         copyMarker: options?.copyMarker,
         showHsnSummary: options?.showHsnSummary,

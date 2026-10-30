@@ -590,15 +590,22 @@ export class PrintFormatter {
    */
   generatePrintHtml(
     doc: PrintableDocumentData,
-    layout: "a4" | "a4-landscape" | "a4-portrait" | "a4-compact" | "thermal" | "dot-matrix" | "dot-matrix-132" = "a4",
+    layout: "a4" | "a4-landscape" | "a4-portrait" | "a4-compact" | "thermal" | "dot-matrix" | "dot-matrix-60" | "dot-matrix-120" | "dot-matrix-132" = "a4",
     isCompact: boolean = false,
     options?: ReportPrintFormattingOptions
   ): string {
     const shouldCompact = isCompact || layout === "a4-compact";
     const activeDoc = shouldCompact ? this.createCompactDocument(doc) : doc;
 
-    if (layout === "dot-matrix" || layout === "dot-matrix-132") {
-      const cols = layout === "dot-matrix-132" ? 132 : 80;
+    if (layout.startsWith("dot-matrix")) {
+      const cols =
+        layout === "dot-matrix-60"
+          ? 60
+          : layout === "dot-matrix-120"
+          ? 120
+          : layout === "dot-matrix-132"
+          ? 132
+          : 80;
       const text = this.generateDotMatrixText(activeDoc, cols);
       return dotMatrixRenderer.generateMonospaceHtmlPreview(text, {
         columns: cols,

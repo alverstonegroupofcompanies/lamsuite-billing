@@ -36,7 +36,7 @@ export interface ReportPrintPreviewModalProps {
   onClose: () => void;
   report: ReportModule;
   documentData: PrintableDocumentData;
-  initialLayout?: "a4" | "a4-landscape" | "a4-portrait" | "thermal" | "dot-matrix" | "dot-matrix-132";
+  initialLayout?: "a4" | "a4-landscape" | "a4-portrait" | "thermal" | "dot-matrix" | "dot-matrix-60" | "dot-matrix-120" | "dot-matrix-132";
 }
 
 export const ReportPrintPreviewModal: React.FC<ReportPrintPreviewModalProps> = ({
@@ -56,7 +56,7 @@ export const ReportPrintPreviewModal: React.FC<ReportPrintPreviewModalProps> = (
 
   // Layout mode state
   const [printLayout, setPrintLayout] = useState<
-    "a4-portrait" | "a4-landscape" | "thermal" | "dot-matrix" | "dot-matrix-132"
+    "a4-portrait" | "a4-landscape" | "thermal" | "dot-matrix" | "dot-matrix-60" | "dot-matrix-120" | "dot-matrix-132"
   >(() => {
     if (initialLayout === "a4") {
       return isWideReport ? "a4-landscape" : "a4-portrait";
@@ -347,12 +347,25 @@ export const ReportPrintPreviewModal: React.FC<ReportPrintPreviewModalProps> = (
 
     try {
       const isDot = printLayout.startsWith("dot-matrix");
-      const cols = printLayout === "dot-matrix-132" ? 132 : 80;
+      const cols =
+        printLayout === "dot-matrix-60"
+          ? 60
+          : printLayout === "dot-matrix-120"
+          ? 120
+          : printLayout === "dot-matrix-132"
+          ? 132
+          : 80;
       const activePaperSize: PaperSize =
         printLayout === "thermal"
           ? "thermal_80mm"
           : isDot
-          ? (cols === 132 ? "dot_matrix_132col" : "dot_matrix_80col")
+          ? cols === 60
+            ? "dot_matrix_6in"
+            : cols === 120
+            ? "dot_matrix_120col"
+            : cols === 132
+            ? "dot_matrix_132col"
+            : "dot_matrix_80col"
           : printLayout === "a4-landscape"
           ? "a4"
           : "a4";
@@ -411,17 +424,24 @@ export const ReportPrintPreviewModal: React.FC<ReportPrintPreviewModalProps> = (
       const defaultFileName = `${cleanTitle}_${new Date().toISOString().slice(0, 10)}.pdf`;
 
       if (printLayout.startsWith("dot-matrix")) {
-        const cols = printLayout === "dot-matrix-132" ? 132 : 80;
+        const cols =
+          printLayout === "dot-matrix-60"
+            ? 60
+            : printLayout === "dot-matrix-120"
+            ? 120
+            : printLayout === "dot-matrix-132"
+            ? 132
+            : 80;
         const text = printFormatter.generateDotMatrixText(documentData, cols);
         const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
         const url = URL.createObjectURL(blob);
         const link = document.createElement("a");
         link.href = url;
-        link.download = `${cleanTitle}_dotmatrix.txt`;
+        link.download = `${cleanTitle}_dotmatrix_${cols}c.txt`;
         link.click();
         URL.revokeObjectURL(url);
         setStatusMessage({
-          text: `✓ Text file exported successfully: ${cleanTitle}_dotmatrix.txt`,
+          text: `✓ Text file exported successfully: ${cleanTitle}_dotmatrix_${cols}c.txt`,
           type: "success",
         });
         return;
@@ -532,15 +552,39 @@ export const ReportPrintPreviewModal: React.FC<ReportPrintPreviewModalProps> = (
               </button>
               <button
                 type="button"
+                onClick={() => setPrintLayout("dot-matrix-60")}
+                className={`flex items-center gap-1 px-2 py-1 rounded-md transition-all ${
+                  printLayout === "dot-matrix-60"
+                    ? "bg-white text-blue-600 shadow-xs font-semibold"
+                    : "text-gray-600 hover:text-gray-900"
+                }`}
+                title="Dot Matrix 60-Column (6-inch Narrow)"
+              >
+                <span>60C (6")</span>
+              </button>
+              <button
+                type="button"
                 onClick={() => setPrintLayout("dot-matrix")}
                 className={`flex items-center gap-1 px-2 py-1 rounded-md transition-all ${
                   printLayout === "dot-matrix"
                     ? "bg-white text-blue-600 shadow-xs font-semibold"
                     : "text-gray-600 hover:text-gray-900"
                 }`}
-                title="Dot Matrix 80-Column ASCII"
+                title="Dot Matrix 80-Column (10-inch Standard)"
               >
-                <span>DotMatrix 80C</span>
+                <span>80C (10")</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setPrintLayout("dot-matrix-120")}
+                className={`flex items-center gap-1 px-2 py-1 rounded-md transition-all ${
+                  printLayout === "dot-matrix-120"
+                    ? "bg-white text-blue-600 shadow-xs font-semibold"
+                    : "text-gray-600 hover:text-gray-900"
+                }`}
+                title="Dot Matrix 120-Column (12-inch Form)"
+              >
+                <span>120C (12")</span>
               </button>
               <button
                 type="button"
@@ -550,9 +594,9 @@ export const ReportPrintPreviewModal: React.FC<ReportPrintPreviewModalProps> = (
                     ? "bg-white text-blue-600 shadow-xs font-semibold"
                     : "text-gray-600 hover:text-gray-900"
                 }`}
-                title="Dot Matrix 132-Column ASCII"
+                title="Dot Matrix 132-Column (15-inch Wide)"
               >
-                <span>132C</span>
+                <span>132C (15")</span>
               </button>
             </div>
 
