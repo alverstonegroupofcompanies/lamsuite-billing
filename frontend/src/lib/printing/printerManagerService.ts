@@ -1,5 +1,6 @@
 import { isTauri, invokeCommand, registerMockHandler } from "../ipc/ipcBridge";
 import { sqliteStorage } from "../db/sqliteStorage";
+import { dotMatrixRenderer } from "./dotMatrixRenderer";
 
 export type PrinterStatus = "ready" | "offline" | "paper_out" | "error" | "busy" | "unknown";
 export type PaperSize = "a4" | "a5" | "half_a4" | "thermal_80mm" | "thermal_58mm" | "dot_matrix_80col" | "dot_matrix_132col" | "barcode_label";
@@ -46,6 +47,9 @@ export interface PrinterProfileConfig {
   prePrintedStationery?: boolean;
   leftMarginSpaces?: number;
   topMarginLines?: number;
+  endOfJobAction?: "stop_immediately" | "feed_tear_off" | "form_feed";
+  feedLinesForTearOff?: number; // 0 to 10 lines
+  logRawHexDump?: boolean;
   // Document type mapping
   assignedDocTypes?: string[];
   isDefaultForPaperSize?: boolean;
@@ -65,6 +69,8 @@ export interface PrintJobRecord {
   operatorName?: string;
   filePath?: string;
   executionTimeMs?: number;
+  hexDump?: string;
+  rawBytesLength?: number;
 }
 
 const STORAGE_PROFILES_KEY = "printer_profiles_master";
@@ -247,6 +253,9 @@ export class PrinterManagerService {
       prePrintedStationery: false,
       leftMarginSpaces: 0,
       topMarginLines: 0,
+      endOfJobAction: isDotMatrix ? "stop_immediately" : undefined,
+      feedLinesForTearOff: isDotMatrix ? 0 : undefined,
+      logRawHexDump: false,
       assignedDocTypes: isThermal
         ? ["tax_invoice", "sales_return", "bill"]
         : isDotMatrix
@@ -402,13 +411,24 @@ export class PrinterManagerService {
   /**
    * Validates whether a printer is capable of printing the target paper size.
    */
-  validatePaperCompatibility(printer: SystemPrinterInfo, paperSize: PaperSize): { compatible: boolean; warning?: string; suggestedPaper?: PaperSize } {
+  validatePaperCompatibility(printer: SystemPrinterInfo, paperSize: PaperSize): { compatible: boolean; warning?: string; suggestedPaper?: PaperSize; driverWarning?: string } {
     if (printer.isVirtual) {
       return { compatible: true };
     }
 
+    const isThermalPaper = paperSize === "thermal_80mm" || paperSize === "thermal_58mm";
+    const isDotMatrixPaper = paperSize === "dot_matrix_80col" || paperSize === "dot_matrix_132col";
+    const isPagePaper = paperSize === "a4" || paperSize === "a5" || paperSize === "half_a4";
+
     if (printer.printerType === "thermal_pos") {
-      if (paperSize === "a4" || paperSize === "a5") {
+      if (isDotMatrixPaper) {
+        return {
+          compatible: false,
+          warning: `'${printer.displayName}' is a thermal receipt printer and is not compatible with Dot Matrix profiles. ESC/P dot-matrix output will not format correctly on thermal paper.`,
+          suggestedPaper: "thermal_80mm",
+        };
+      }
+      if (isPagePaper) {
         return {
           compatible: false,
           warning: `'${printer.displayName}' is a thermal receipt printer and cannot print full ${paperSize.toUpperCase()} invoices.`,
@@ -417,17 +437,44 @@ export class PrinterManagerService {
       }
     }
 
-    if (printer.printerType === "laser_inkjet" || printer.printerType === "dot_matrix") {
-      if (paperSize === "thermal_80mm" || paperSize === "thermal_58mm") {
+    if (printer.printerType === "dot_matrix") {
+      if (isThermalPaper) {
+        return {
+          compatible: false,
+          warning: `'${printer.displayName}' is a dot-matrix tractor-feed printer and cannot print continuous thermal roll formats.`,
+          suggestedPaper: "dot_matrix_80col",
+        };
+      }
+    }
+
+    if (printer.printerType === "laser_inkjet") {
+      if (isThermalPaper) {
         return {
           compatible: false,
           warning: `'${printer.displayName}' is a page printer and cannot print continuous thermal rolls.`,
           suggestedPaper: "a4",
         };
       }
+      if (isDotMatrixPaper) {
+        return {
+          compatible: false,
+          warning: `'${printer.displayName}' is a laser/inkjet printer and does not support native dot-matrix ESC/P continuous text streaming.`,
+          suggestedPaper: "a4",
+        };
+      }
     }
 
-    return { compatible: true };
+    let driverWarning: string | undefined;
+    if (isDotMatrixPaper && printer.driverName) {
+      const dLower = printer.driverName.toLowerCase();
+      const isTextOrRaw = dLower.includes("generic") || dLower.includes("text") || dLower.includes("dot") || dLower.includes("raw");
+      const isGraphical = dLower.includes("pcl") || dLower.includes("gdi") || dLower.includes("postscript") || dLower.includes("advanced") || dLower.includes("laser");
+      if (isGraphical && !isTextOrRaw) {
+        driverWarning = `Selected printer uses graphical driver ('${printer.driverName}'). A 'Generic / Text Only' driver or RAW spooler is recommended to avoid driver-added page ejects.`;
+      }
+    }
+
+    return { compatible: true, driverWarning };
   }
 
   /**
@@ -546,6 +593,7 @@ export class PrinterManagerService {
 
       // Invoke native print command
       const profile = await this.getProfileForPrinter(params.printerName);
+      const hexDump = params.rawEscPosBytes ? dotMatrixRenderer.formatHexDump(params.rawEscPosBytes) : undefined;
       const res = await invokeCommand<{
         success: boolean;
         job_id?: string;
@@ -586,6 +634,8 @@ export class PrinterManagerService {
           status: "success",
           operatorName: params.operatorName,
           executionTimeMs: Date.now() - startTime,
+          hexDump,
+          rawBytesLength: params.rawEscPosBytes?.length,
         });
 
         // If fallback_to_webview is returned and caller did not suppress fallback
@@ -611,6 +661,8 @@ export class PrinterManagerService {
           errorMessage: err,
           operatorName: params.operatorName,
           executionTimeMs: Date.now() - startTime,
+          hexDump,
+          rawBytesLength: params.rawEscPosBytes?.length,
         });
         return { success: false, error: err };
       }
@@ -723,11 +775,11 @@ export class PrinterManagerService {
         "--------------------------------\n\n\n\x1DV\x42\x00";
       rawEscPosBytes = encoder.encode(text);
     } else if (isDot) {
+      // Exactly 3 lines, no form feed, stops immediately
       const encoder = new TextEncoder();
       const text = "\x1B@LamSuite Dot-Matrix Calibration Test\r\n" +
         "Printer: " + printerName + "\r\n" +
-        "Date: " + new Date().toLocaleString() + "\r\n" +
-        "Spooler Test Successful\r\n\x0C";
+        "Status: Ready - Head Stopped Immediately\r\n";
       rawEscPosBytes = encoder.encode(text);
     }
 
@@ -756,6 +808,37 @@ export class PrinterManagerService {
       docNumber: `TEST-${Date.now().toString().slice(-4)}`,
       copies: 1,
       htmlContent: testHtml,
+      rawEscPosBytes,
+    });
+  }
+
+  /**
+   * Advances dot-matrix tractor paper by exactly one line (CRLF) for manual alignment.
+   */
+  async feedOneLine(printerName: string): Promise<{ success: boolean; error?: string; jobId?: string }> {
+    const encoder = new TextEncoder();
+    const rawEscPosBytes = encoder.encode("\r\n");
+    return this.executePrintJob({
+      printerName,
+      paperSize: "dot_matrix_80col",
+      docType: "feed_line",
+      docNumber: `FEED-${Date.now().toString().slice(-4)}`,
+      copies: 1,
+      rawEscPosBytes,
+    });
+  }
+
+  /**
+   * Advances dot-matrix tractor paper to the next page Top-of-Form boundary (Form Feed 0x0C).
+   */
+  async formFeed(printerName: string): Promise<{ success: boolean; error?: string; jobId?: string }> {
+    const rawEscPosBytes = new Uint8Array([0x0C]);
+    return this.executePrintJob({
+      printerName,
+      paperSize: "dot_matrix_80col",
+      docType: "form_feed",
+      docNumber: `FF-${Date.now().toString().slice(-4)}`,
+      copies: 1,
       rawEscPosBytes,
     });
   }

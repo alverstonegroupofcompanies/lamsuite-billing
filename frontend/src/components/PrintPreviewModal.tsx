@@ -135,6 +135,7 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
   const [showRuler, setShowRuler] = useState<boolean>(true);
   const [showLineNumbers, setShowLineNumbers] = useState<boolean>(true);
   const [showPageBreaks, setShowPageBreaks] = useState<boolean>(true);
+  const [showHexDumpModal, setShowHexDumpModal] = useState<boolean>(false);
 
   // Zoom & Action State
   const [zoomScale, setZoomScale] = useState<number>(100);
@@ -242,7 +243,15 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
     if (isDot) {
       const dotOpts: DotMatrixOptions = {
         columns: paperSize === "dot_matrix_132col" ? 132 : 80,
-        linesPerPage: printerProfile?.linesPerPage || 66,
+        linesPerPage: printerProfile?.linesPerPage ?? 66,
+        commandSet: printerProfile?.dotMatrixCommandSet || "esc_p",
+        endOfJobAction: printerProfile?.endOfJobAction || "stop_immediately",
+        feedLinesForTearOff: printerProfile?.feedLinesForTearOff ?? 0,
+        cpi: printerProfile?.dotMatrixPitch || "10cpi",
+        doubleStrikeCarbon: printerProfile?.doubleStrikeCarbon || false,
+        prePrintedStationery: printerProfile?.prePrintedStationery || false,
+        leftMarginSpaces: printerProfile?.leftMarginSpaces || 0,
+        topMarginLines: printerProfile?.topMarginLines || 0,
         isDuplicate,
         copyMarker: copyMarker === "None" ? undefined : copyMarker,
         showHsnSummary,
@@ -271,6 +280,8 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
         showRuler,
         showLineNumbers,
         showPageBreaks,
+        endOfJobAction: printerProfile?.endOfJobAction || "stop_immediately",
+        feedLinesForTearOff: printerProfile?.feedLinesForTearOff ?? 0,
       });
     }
 
@@ -309,6 +320,61 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
     showRuler,
     showLineNumbers,
     showPageBreaks,
+  ]);
+
+  // Compute Raw Spooler Hex Dump for Dot-Matrix inspection & audit
+  const currentDotMatrixHexDump = useMemo(() => {
+    if (!isOpen || !data) return "";
+    const isDot = paperSize === "dot_matrix_80col" || paperSize === "dot_matrix_132col";
+    if (!isDot) return "";
+    const dotOpts: DotMatrixOptions = {
+      columns: paperSize === "dot_matrix_132col" ? 132 : 80,
+      linesPerPage: printerProfile?.linesPerPage ?? 66,
+      commandSet: printerProfile?.dotMatrixCommandSet || "esc_p",
+      endOfJobAction: printerProfile?.endOfJobAction || "stop_immediately",
+      feedLinesForTearOff: printerProfile?.feedLinesForTearOff ?? 0,
+      cpi: printerProfile?.dotMatrixPitch || "10cpi",
+      doubleStrikeCarbon: printerProfile?.doubleStrikeCarbon || false,
+      prePrintedStationery: printerProfile?.prePrintedStationery || false,
+      leftMarginSpaces: printerProfile?.leftMarginSpaces || 0,
+      topMarginLines: printerProfile?.topMarginLines || 0,
+      showHsnSummary,
+      showDoctorPatient,
+      showDrugLicenses,
+      showTerms,
+      isDuplicate,
+      copyMarker: copyMarker === "None" ? undefined : copyMarker,
+      currencyPrefix: "Rs.",
+    };
+    let rawText = "";
+    switch (docType) {
+      case "sales_return":
+      case "credit_note":
+      case "customer_debit_note":
+        rawText = dotMatrixRenderer.renderCreditNote(data as CreditNotePrintData, dotOpts);
+        break;
+      case "purchase_return":
+      case "debit_note":
+        rawText = dotMatrixRenderer.renderDebitNote(data as DebitNotePrintData, dotOpts);
+        break;
+      default:
+        rawText = dotMatrixRenderer.renderInvoice(data as InvoicePrintData, dotOpts);
+        break;
+    }
+    const bytes = dotMatrixRenderer.generateEscPBytes(rawText, dotOpts);
+    return dotMatrixRenderer.formatHexDump(bytes);
+  }, [
+    isOpen,
+    data,
+    paperSize,
+    printerProfile,
+    docType,
+    showHsnSummary,
+    showDoctorPatient,
+    showDrugLicenses,
+    showTerms,
+    isDuplicate,
+    copyMarker,
   ]);
 
   // Register global modal escape handler to close and prevent fullscreen exit
@@ -465,7 +531,10 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
       } else if (isDot) {
         const dotOpts: DotMatrixOptions = {
           columns: paperSize === "dot_matrix_132col" ? 132 : 80,
-          linesPerPage: printerProfile?.linesPerPage || 66,
+          linesPerPage: printerProfile?.linesPerPage ?? 66,
+          commandSet: printerProfile?.dotMatrixCommandSet || "esc_p",
+          endOfJobAction: printerProfile?.endOfJobAction || "stop_immediately",
+          feedLinesForTearOff: printerProfile?.feedLinesForTearOff ?? 0,
           cpi: printerProfile?.dotMatrixPitch || "10cpi",
           doubleStrikeCarbon: printerProfile?.doubleStrikeCarbon || false,
           prePrintedStationery: printerProfile?.prePrintedStationery || false,
@@ -477,6 +546,7 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
           showTerms,
           isDuplicate,
           copyMarker: copyMarker === "None" ? undefined : copyMarker,
+          currencyPrefix: "Rs.",
         };
 
         let rawText = "";
@@ -573,11 +643,12 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
       const isDot = paperSize === "dot_matrix_80col" || paperSize === "dot_matrix_132col";
       let rawBytes: Uint8Array | undefined;
       if (isDot) {
-        const text = dotMatrixRenderer.renderInvoice(testData, {
-          columns: paperSize === "dot_matrix_132col" ? 132 : 80,
-          linesPerPage: 66,
-        });
-        rawBytes = dotMatrixRenderer.generateEscPBytes(text);
+        // 3-line calibration test print: stops immediately, no extra paper feed
+        const encoder = new TextEncoder();
+        const text = "\x1B@LamSuite Dot-Matrix Calibration Test\r\n" +
+          `Printer: ${selectedPrinterName}\r\n` +
+          "Status: Ready - Head Stopped Immediately\r\n";
+        rawBytes = encoder.encode(text);
       }
 
       const res = await printerManagerService.executePrintJob({
@@ -970,6 +1041,16 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
                     </div>
                   )}
 
+                  {/* Graphical Driver Warning */}
+                  {paperCompatibility.driverWarning && (
+                    <div className="bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-700/60 rounded-lg p-2.5 text-xs text-amber-800 dark:text-amber-200 flex items-start gap-2">
+                      <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                      <div className="text-[11px] leading-tight font-medium">
+                        {paperCompatibility.driverWarning}
+                      </div>
+                    </div>
+                  )}
+
                   {/* Dot Matrix on Non-Dot Matrix Printer Notice */}
                   {paperSize.startsWith("dot_matrix") && selectedPrinterInfo && selectedPrinterInfo.printerType !== "dot_matrix" && (
                     <div className="bg-blue-50 dark:bg-blue-950/40 border border-blue-300 dark:border-blue-700/60 rounded-lg p-3 text-xs text-blue-900 dark:text-blue-200 flex items-start gap-2">
@@ -1047,8 +1128,8 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
                         </div>
 
                         <div>
-                          <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">
-                            Lines / Page (Dot Matrix Forms Only)
+                          <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1" title="Used only for paging long bills and form feed, never to pad short bills">
+                            Lines / Page
                           </label>
                           <select
                             value={printerProfile?.linesPerPage ?? 66}
@@ -1069,6 +1150,71 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
                             <option value={0}>Continuous (No Page Breaks / Roll)</option>
                           </select>
                         </div>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">
+                            After Last Line
+                          </label>
+                          <select
+                            value={printerProfile?.endOfJobAction || "stop_immediately"}
+                            onChange={(e) => {
+                              if (printerProfile) {
+                                const updated = { ...printerProfile, endOfJobAction: e.target.value as any };
+                                setPrinterProfile(updated);
+                                printerManagerService.saveProfile(updated);
+                              }
+                            }}
+                            className="w-full text-xs bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded p-1.5 text-slate-800 dark:text-slate-100"
+                          >
+                            <option value="stop_immediately">Stop immediately (default)</option>
+                            <option value="feed_tear_off">Feed N lines for tear-off</option>
+                            <option value="form_feed">Form feed to the top of next page</option>
+                          </select>
+                        </div>
+
+                        {printerProfile?.endOfJobAction === "feed_tear_off" ? (
+                          <div>
+                            <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">
+                              Tear-Off Lines (0–10)
+                            </label>
+                            <input
+                              type="number"
+                              min={0}
+                              max={10}
+                              value={printerProfile?.feedLinesForTearOff ?? 0}
+                              onChange={(e) => {
+                                if (printerProfile) {
+                                  const val = Math.max(0, Math.min(10, parseInt(e.target.value) || 0));
+                                  const updated = { ...printerProfile, feedLinesForTearOff: val };
+                                  setPrinterProfile(updated);
+                                  printerManagerService.saveProfile(updated);
+                                }
+                              }}
+                              className="w-full text-xs bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded p-1.5 text-slate-800 dark:text-slate-100"
+                            />
+                          </div>
+                        ) : (
+                          <div className="text-[10px] text-slate-500 dark:text-slate-400 flex items-center pt-5">
+                            {printerProfile?.endOfJobAction === "form_feed"
+                              ? "Ejects sheet to next form boundary"
+                              : "Stops head immediately after last line"}
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="pt-2 border-t border-emerald-200/60 dark:border-emerald-800/40 flex items-center justify-between">
+                        <span className="text-[11px] font-semibold text-emerald-800 dark:text-emerald-300">
+                          Diagnostics & Hex Dump
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setShowHexDumpModal(true)}
+                          className="px-2 py-1 text-[11px] font-mono font-bold bg-emerald-100 dark:bg-emerald-900 text-emerald-800 dark:text-emerald-200 rounded hover:bg-emerald-200 transition"
+                        >
+                          View Raw Hex Dump
+                        </button>
                       </div>
 
                       <div className="space-y-1.5 pt-1 border-t border-emerald-200/60 dark:border-emerald-800/40">
@@ -1431,6 +1577,46 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
         </div>
 
       </div>
+
+      {/* Hex Dump Diagnostics Modal */}
+      {showHexDumpModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <div className="bg-slate-900 border border-slate-700 rounded-xl shadow-2xl max-w-4xl w-full max-h-[85vh] flex flex-col text-slate-100">
+            <div className="p-4 border-b border-slate-800 flex items-center justify-between">
+              <div>
+                <h3 className="text-sm font-bold font-mono text-emerald-400 flex items-center gap-2">
+                  <span>Raw Spooler Hex Dump Inspection</span>
+                </h3>
+                <p className="text-xs text-slate-400">
+                  Exact byte stream dispatched to &apos;{selectedPrinterName}&apos; (check trailing bytes for 0x0C / form feed).
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowHexDumpModal(false)}
+                className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="p-4 overflow-y-auto flex-1 font-mono text-xs text-emerald-300 bg-slate-950 rounded-b-xl whitespace-pre">
+              {currentDotMatrixHexDump || "// No raw dot matrix bytes generated."}
+            </div>
+
+            <div className="p-3 border-t border-slate-800 bg-slate-900/90 flex items-center justify-between text-xs text-slate-400">
+              <span>End of job setting: <strong className="text-white">{printerProfile?.endOfJobAction || "stop_immediately"}</strong></span>
+              <button
+                type="button"
+                onClick={() => setShowHexDumpModal(false)}
+                className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-white rounded font-semibold transition"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

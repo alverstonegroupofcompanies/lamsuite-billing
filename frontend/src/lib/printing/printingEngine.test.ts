@@ -595,8 +595,12 @@ describe("Printing Engine & Document Layouts (PRN-001, PRN-002, PRN-005)", () =>
       expect(text).toContain("TAX INVOICE");
       expect(text).toContain("INV-DOT-001");
       expect(text).toContain("Paracetamol 500mg");
-      // Check for ASCII form feed character (\x0C)
-      expect(text).toContain("\x0C");
+      // Default stop_immediately must NOT have trailing \x0C (avoids empty page eject bug)
+      expect(text).not.toContain("\x0C");
+
+      // Appends \x0C only when form_feed is explicitly chosen
+      const textWithFF = printingEngine.generateDotMatrixText(sampleData, { endOfJobAction: "form_feed" });
+      expect(textWithFF).toContain("\x0C");
     });
 
     it("renders clean multi-item batches for 1, 2, 40, and 100+ items", () => {

@@ -114,6 +114,35 @@ describe("PrinterManagerService Native Discovery & Profiles", () => {
     const thermal80 = printerManagerService.validatePaperCompatibility(thermalPrinter, "thermal_80mm");
     expect(thermal80.compatible).toBe(true);
 
+    // Thermal with Dot Matrix 80C: Incompatible, warns and suggests thermal_80mm
+    const thermalDotMatrix = printerManagerService.validatePaperCompatibility(thermalPrinter, "dot_matrix_80col");
+    expect(thermalDotMatrix.compatible).toBe(false);
+    expect(thermalDotMatrix.warning).toContain("thermal receipt printer");
+    expect(thermalDotMatrix.warning).toContain("Dot Matrix profiles");
+    expect(thermalDotMatrix.suggestedPaper).toBe("thermal_80mm");
+
+    const dotMatrixPrinter: SystemPrinterInfo = {
+      name: "TVS MSP 240 Star",
+      displayName: "TVS MSP 240 Star Dot Matrix",
+      isDefault: false,
+      status: "ready",
+      printerType: "dot_matrix",
+      supportedPaperSizes: ["dot_matrix_80col", "dot_matrix_132col"],
+      isVirtual: false,
+      driverName: "TVS MSP 240 GDI Driver",
+    };
+
+    // Dot Matrix with Thermal: Incompatible, suggests dot_matrix_80col
+    const dmThermal = printerManagerService.validatePaperCompatibility(dotMatrixPrinter, "thermal_80mm");
+    expect(dmThermal.compatible).toBe(false);
+    expect(dmThermal.suggestedPaper).toBe("dot_matrix_80col");
+
+    // Dot Matrix with Dot Matrix 80C: Compatible, but flags graphical driver warning
+    const dmDotMatrix = printerManagerService.validatePaperCompatibility(dotMatrixPrinter, "dot_matrix_80col");
+    expect(dmDotMatrix.compatible).toBe(true);
+    expect(dmDotMatrix.driverWarning).toContain("graphical driver");
+    expect(dmDotMatrix.driverWarning).toContain("Generic / Text Only");
+
     // Laser with Thermal 80mm: Incompatible
     const laserThermal = printerManagerService.validatePaperCompatibility(laserPrinter, "thermal_80mm");
     expect(laserThermal.compatible).toBe(false);
@@ -368,5 +397,66 @@ describe("PrinterManagerService Native Discovery & Profiles", () => {
     await printerManagerService.clearPrintHistory();
     history = await printerManagerService.getPrintHistory();
     expect(history.length).toBe(0);
+  });
+
+  it("calibrates dot matrix paper: feedOneLine sends CRLF, formFeed sends 0x0C", async () => {
+    let capturedBytes: number[] = [];
+    registerMockHandler("print_native_job", async (args: any) => {
+      capturedBytes = args?.raw_bytes || [];
+      return { success: true, job_id: "calib_job" };
+    });
+
+    // 1. Feed one line
+    const feedRes = await printerManagerService.feedOneLine("TVS MSP 240 Star");
+    expect(feedRes.success).toBe(true);
+    // CRLF: 0x0D, 0x0A
+    expect(capturedBytes).toEqual([0x0d, 0x0a]);
+
+    // 2. Form Feed
+    const ffRes = await printerManagerService.formFeed("TVS MSP 240 Star");
+    expect(ffRes.success).toBe(true);
+    // Form feed: 0x0C
+    expect(capturedBytes).toEqual([0x0c]);
+  });
+
+  it("sends dot matrix test print with exactly 3 lines and NO trailing form feed (0x0C)", async () => {
+    let capturedBytes: number[] = [];
+    registerMockHandler("print_native_job", async (args: any) => {
+      capturedBytes = args?.raw_bytes || [];
+      return { success: true, job_id: "test_dm_job" };
+    });
+
+    const res = await printerManagerService.sendTestPrint("TVS MSP 240 Star", "dot_matrix_80col");
+    expect(res.success).toBe(true);
+
+    // Verify raw bytes do NOT end with 0x0C
+    expect(capturedBytes[capturedBytes.length - 1]).not.toBe(0x0c);
+    expect(capturedBytes).not.toContain(0x0c);
+
+    // Decode and verify 3 lines
+    const text = String.fromCharCode(...capturedBytes);
+    expect(text).toContain("LamSuite Dot-Matrix Calibration Test");
+    expect(text).toContain("Printer: TVS MSP 240 Star");
+    expect(text).toContain("Status: Ready - Head Stopped Immediately");
+  });
+
+  it("captures hex dump and raw byte length in audit log for dot-matrix jobs", async () => {
+    await printerManagerService.clearPrintHistory();
+
+    const sampleEscP = new Uint8Array([0x1b, 0x40, 0x41, 0x42, 0x43, 0x0d, 0x0a]);
+    await printerManagerService.executePrintJob({
+      printerName: "TVS MSP 240 Star",
+      paperSize: "dot_matrix_80col",
+      docType: "tax_invoice",
+      docNumber: "INV-HEX-001",
+      rawEscPosBytes: sampleEscP,
+    });
+
+    const history = await printerManagerService.getPrintHistory();
+    expect(history.length).toBe(1);
+    expect(history[0].rawBytesLength).toBe(7);
+    expect(history[0].hexDump).toBeDefined();
+    expect(history[0].hexDump).toContain("00000000");
+    expect(history[0].hexDump).toContain("1B 40 41 42 43 0D 0A");
   });
 });

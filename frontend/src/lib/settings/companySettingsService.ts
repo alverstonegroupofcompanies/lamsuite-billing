@@ -104,6 +104,10 @@ export interface PrintingConfig {
   defaultCopyMarker?: string;
   silentPrinting: boolean;
   selectedPrinterName?: string;
+  dotMatrixEndOfJob?: "stop_immediately" | "feed_tear_off" | "form_feed";
+  dotMatrixTearOffFeedLines?: number;
+  dotMatrixPageLength?: 66 | 72 | 33 | "continuous";
+  dotMatrixCommandSet?: "esc_p" | "tvs_native" | "plain_ascii";
 }
 
 export interface WorkspaceSettings {
@@ -468,6 +472,10 @@ export const DEFAULT_SETTINGS: CompanySettings = {
     defaultCopyMarker: "Original for Recipient",
     silentPrinting: true,
     selectedPrinterName: "Default System Thermal Printer",
+    dotMatrixEndOfJob: "stop_immediately",
+    dotMatrixTearOffFeedLines: 0,
+    dotMatrixPageLength: 66,
+    dotMatrixCommandSet: "esc_p",
   },
 
   workspace: {

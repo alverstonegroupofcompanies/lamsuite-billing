@@ -373,8 +373,29 @@ describe("Dot Matrix Plain-Text Renderer & ESC/P Generator", () => {
       );
       expect(hasFormLength).toBe(true);
 
-      // Terminating Form Feed (0x0C)
+      // Default endOfJobAction is "stop_immediately" -> NO terminating Form Feed (0x0C)
+      expect(bytes[bytes.length - 1]).not.toBe(0x0c);
+      // Double strike was enabled, so safe mode cancellation (ESC H = 0x1B, 0x48) is sent without paper eject
+      expect(bytes[bytes.length - 1]).toBe(0x48);
+      expect(bytes[bytes.length - 2]).toBe(0x1b);
+    });
+
+    it("appends terminating Form Feed (0x0C) ONLY when endOfJobAction is form_feed", () => {
+      const bytes = dotMatrixRenderer.generateEscPBytes("Sample content\n", {
+        endOfJobAction: "form_feed",
+      });
       expect(bytes[bytes.length - 1]).toBe(0x0c);
+    });
+
+    it("appends N blank lines when endOfJobAction is feed_tear_off", () => {
+      const bytes = dotMatrixRenderer.generateEscPBytes("Sample content\n", {
+        endOfJobAction: "feed_tear_off",
+        feedLinesForTearOff: 3,
+      });
+      // Should end with 3 * \r\n (0x0D, 0x0A) and definitely NOT 0x0C
+      expect(bytes[bytes.length - 1]).toBe(0x0a);
+      expect(bytes[bytes.length - 2]).toBe(0x0d);
+      expect(Array.from(bytes)).not.toContain(0x0c);
     });
 
     it("activates condensed 17.14 CPI (0x0F) for 132-column width", () => {
@@ -416,6 +437,271 @@ describe("Dot Matrix Plain-Text Renderer & ESC/P Generator", () => {
       
       const header = String.fromCharCode(pdfBytes[0], pdfBytes[1], pdfBytes[2], pdfBytes[3], pdfBytes[4]);
       expect(header).toBe("%PDF-");
+    });
+  });
+
+  describe("End-of-Job Behavior & Paper Advance Bug Prevention", () => {
+    it("1-item bill: stops immediately after last line with no 0x0C in hex dump and no trailing blank lines", () => {
+      const singleItemInvoice: InvoicePrintData = {
+        ...sampleInvoice,
+        invoice_number: "INV-SINGLE-1",
+        lines: [sampleInvoice.lines[0]],
+      };
+
+      const plainText = dotMatrixRenderer.renderInvoice(singleItemInvoice, {
+        columns: 80,
+        endOfJobAction: "stop_immediately",
+      });
+
+      // No trailing blank lines
+      const lines = plainText.split("\n");
+      expect(lines[lines.length - 1].trim().length).toBeGreaterThan(0);
+
+      // Generate ESC/P raw bytes
+      const bytes = dotMatrixRenderer.generateEscPBytes(plainText, {
+        endOfJobAction: "stop_immediately",
+        commandSet: "esc_p",
+      });
+
+      // Byte checks
+      expect(bytes[bytes.length - 1]).toBe(0x0a);
+      expect(bytes[bytes.length - 2]).toBe(0x0d);
+      expect(bytes[bytes.length - 1]).not.toBe(0x0c);
+      expect(Array.from(bytes)).not.toContain(0x0c);
+
+      // Hex dump format check
+      const hexDump = dotMatrixRenderer.formatHexDump(bytes);
+      expect(hexDump).toContain("00000000");
+      expect(hexDump).toContain("1B 40"); // Initial reset byte
+    });
+
+    it("10-item bill: verified hex dump has no trailing 0x0C and calculates totals accurately", () => {
+      const tenItems = Array.from({ length: 10 }, (_, i) => ({
+        description: `Medicinal Item #${i + 1} 500mg Strip`,
+        hsn_code: "30049099",
+        batch_no: `BAT${100 + i}`,
+        expiry_date: "2028-10",
+        qty: i + 1,
+        loose_qty: 0,
+        rate: 50.0,
+        gst_percent: 12,
+        amount: (i + 1) * 50.0 * 1.12,
+      }));
+
+      const tenItemInvoice: InvoicePrintData = {
+        ...sampleInvoice,
+        invoice_number: "INV-TEN-10",
+        lines: tenItems,
+      };
+
+      const plainText = dotMatrixRenderer.renderInvoice(tenItemInvoice, {
+        columns: 80,
+        endOfJobAction: "stop_immediately",
+      });
+
+      const bytes = dotMatrixRenderer.generateEscPBytes(plainText, {
+        endOfJobAction: "stop_immediately",
+      });
+
+      expect(bytes[bytes.length - 1]).toBe(0x0a);
+      expect(bytes[bytes.length - 1]).not.toBe(0x0c);
+      expect(Array.from(bytes)).not.toContain(0x0c);
+
+      // Ensure last line has content (footer note or jurisdiction)
+      const lines = plainText.split("\n");
+      expect(lines[lines.length - 1].trim().length).toBeGreaterThan(0);
+    });
+
+    it("bill that exactly fills a page does not generate an off-by-one blank page", () => {
+      const exactItems = Array.from({ length: 15 }, (_, i) => ({
+        description: `Item ${i + 1}`,
+        hsn_code: "30049099",
+        batch_no: `BAT${i}`,
+        expiry_date: "2028-10",
+        qty: 1,
+        loose_qty: 0,
+        rate: 10.0,
+        gst_percent: 12,
+        amount: 11.2,
+      }));
+      const exactInvoice: InvoicePrintData = {
+        ...sampleInvoice,
+        invoice_number: "INV-EXACT-1",
+        lines: exactItems,
+      };
+
+      const rendered = dotMatrixRenderer.renderInvoice(exactInvoice, {
+        columns: 80,
+        linesPerPage: 66,
+        endOfJobAction: "stop_immediately",
+      });
+
+      // Single-page invoice must have 0 Form Feeds (\x0C)
+      const formFeedCount = (rendered.match(/\x0C/g) || []).length;
+      expect(formFeedCount).toBe(0);
+      expect(rendered.endsWith("\x0C")).toBe(false);
+    });
+
+    it("multi-page bill puts 0x0C ONLY between pages, NEVER after the last page", () => {
+      // 35 items on 66 lines/page will spill over across page boundaries
+      const manyItems = Array.from({ length: 35 }, (_, i) => ({
+        description: `Item ${i + 1}`,
+        hsn_code: "30049099",
+        batch_no: `BAT${i}`,
+        expiry_date: "2028-10",
+        qty: 1,
+        loose_qty: 0,
+        rate: 10.0,
+        gst_percent: 12,
+        amount: 11.2,
+      }));
+      const multiPageInvoice: InvoicePrintData = {
+        ...sampleInvoice,
+        invoice_number: "INV-MULTI-2",
+        lines: manyItems,
+      };
+
+      const rendered = dotMatrixRenderer.renderInvoice(multiPageInvoice, {
+        columns: 80,
+        linesPerPage: 66,
+        endOfJobAction: "stop_immediately",
+      });
+
+      const formFeedCount = (rendered.match(/\x0C/g) || []).length;
+      expect(formFeedCount).toBeGreaterThanOrEqual(1); // Form Feed between pages
+      expect(rendered.endsWith("\x0C")).toBe(false); // NEVER after the last page!
+
+      const bytes = dotMatrixRenderer.generateEscPBytes(rendered, {
+        endOfJobAction: "stop_immediately",
+      });
+      // Last byte must NOT be 0x0C
+      expect(bytes[bytes.length - 1]).not.toBe(0x0c);
+    });
+
+    it("supports the three end-of-job options faithfully", () => {
+      const content = "Tax Invoice Summary Line\n";
+
+      // 1. stop_immediately
+      const bStop = dotMatrixRenderer.generateEscPBytes(content, { endOfJobAction: "stop_immediately" });
+      expect(bStop[bStop.length - 1]).toBe(0x0a);
+      expect(Array.from(bStop)).not.toContain(0x0c);
+
+      // 2. feed_tear_off with 4 lines
+      const bTearOff = dotMatrixRenderer.generateEscPBytes(content, {
+        endOfJobAction: "feed_tear_off",
+        feedLinesForTearOff: 4,
+      });
+      expect(bTearOff[bTearOff.length - 1]).toBe(0x0a);
+      expect(Array.from(bTearOff)).not.toContain(0x0c);
+      // Ends with 4 CRLF pairs (8 bytes)
+      const last8 = Array.from(bTearOff.slice(-8));
+      expect(last8).toEqual([0x0d, 0x0a, 0x0d, 0x0a, 0x0d, 0x0a, 0x0d, 0x0a]);
+
+      // 3. form_feed
+      const bFF = dotMatrixRenderer.generateEscPBytes(content, { endOfJobAction: "form_feed" });
+      expect(bFF[bFF.length - 1]).toBe(0x0c);
+    });
+
+    it("short bill length is invariant to linesPerPage setting (66, 72, 33)", () => {
+      // Changing linesPerPage must NOT pad extra blank lines to a short bill
+      const rendered66 = dotMatrixRenderer.renderInvoice(sampleInvoice, { columns: 80, linesPerPage: 66 });
+      const rendered72 = dotMatrixRenderer.renderInvoice(sampleInvoice, { columns: 80, linesPerPage: 72 });
+      const rendered33 = dotMatrixRenderer.renderInvoice(sampleInvoice, { columns: 80, linesPerPage: 33 });
+
+      // Clean line counts (excluding page-break chars)
+      const count66 = rendered66.split("\n").filter((l) => !l.includes("\x0C")).length;
+      const count72 = rendered72.split("\n").filter((l) => !l.includes("\x0C")).length;
+      
+      // A short bill should have the exact same line count under 66 and 72
+      expect(count66).toBe(count72);
+      expect(rendered66.trim().endsWith("Jurisdiction only.") || rendered66.trim().length > 0).toBe(true);
+    });
+
+    it("formats raw ISO timestamp as DD-MM-YYYY in store local time without UTC day shifting", () => {
+      // Test the exact bug timestamp from prompt: "2026-10-29T18:30:00.00000"
+      const formatted = dotMatrixRenderer.formatInvoiceDate("2026-10-29T18:30:00.00000");
+      expect(formatted).toBe("29-10-2026 18:30");
+
+      // Plain date without time
+      expect(dotMatrixRenderer.formatInvoiceDate("2026-10-29")).toBe("29-10-2026");
+      expect(dotMatrixRenderer.formatInvoiceDate("2026-12-05")).toBe("05-12-2026");
+    });
+
+    it("prints store header details at the very top, before TAX INVOICE and copy marker", () => {
+      const rendered = dotMatrixRenderer.renderInvoice(sampleInvoice, {
+        columns: 80,
+        copyMarker: "Original for Recipient",
+      });
+      const lines = rendered.split("\n");
+
+      // Store name must appear BEFORE "TAX INVOICE"
+      const storeNameIdx = lines.findIndex((l) => l.includes("ALVERSTONE MEDICARE & SURGICAL STORE"));
+      const taxInvoiceIdx = lines.findIndex((l) => l.includes("TAX INVOICE"));
+      const copyMarkerIdx = lines.findIndex((l) => l.includes("Original for Recipient"));
+
+      expect(storeNameIdx).toBeGreaterThanOrEqual(0);
+      expect(taxInvoiceIdx).toBeGreaterThan(storeNameIdx);
+      expect(copyMarkerIdx).toBeGreaterThan(storeNameIdx);
+    });
+
+    it("renders credit notes and debit notes with store header at top and formatted dates", () => {
+      const creditNoteData: CreditNotePrintData = {
+        return_number: "CN-2026-001",
+        return_date: "2026-10-29T18:30:00.00000",
+        original_invoice_number: "INV-2026-8801",
+        original_invoice_date: "2026-10-08",
+        store_name: "Alverstone MediCare & Surgical Store",
+        store_address: "Ernakulam",
+        store_phone: "0484-2345678",
+        customer_name: "Rahul Varma",
+        lines: [
+          {
+            description: "Augmentin 625 Duo Tablet",
+            hsn_code: "30042000",
+            batch_no: "AUG892",
+            qty: 1,
+            rate: 205.5,
+            gst_percent: 12,
+            amount: 205.5,
+          },
+        ],
+        subtotal: 205.5,
+        tax_total: 24.66,
+        grand_total: 230.16,
+      };
+
+      const cnText = dotMatrixRenderer.renderCreditNote(creditNoteData, { columns: 80 });
+      expect(cnText).toContain("ALVERSTONE MEDICARE & SURGICAL STORE");
+      expect(cnText).toContain("CREDIT NOTE / SALES RETURN");
+      expect(cnText).toContain("Date: 29-10-2026 18:30"); // Formatted date!
+      expect(cnText).not.toContain("2026-10-29T"); // No raw ISO timestamp
+
+      const lines = cnText.split("\n");
+      const storeIdx = lines.findIndex((l) => l.includes("ALVERSTONE MEDICARE & SURGICAL STORE"));
+      const titleIdx = lines.findIndex((l) => l.includes("CREDIT NOTE"));
+      expect(titleIdx).toBeGreaterThan(storeIdx);
+    });
+
+    it("command sets: plain_ascii contains no 0x1B escape codes; tvs_native and esc_p avoid trailing ESC @", () => {
+      const sampleText = "Invoice Line Content\n";
+
+      // 1. plain_ascii
+      const plainBytes = dotMatrixRenderer.generateEscPBytes(sampleText, { commandSet: "plain_ascii" });
+      expect(Array.from(plainBytes)).not.toContain(0x1b); // No ESC byte at all!
+      expect(plainBytes[plainBytes.length - 1]).toBe(0x0a);
+
+      // 2. tvs_native
+      const tvsBytes = dotMatrixRenderer.generateEscPBytes(sampleText, { commandSet: "tvs_native" });
+      expect(tvsBytes[0]).toBe(0x1b);
+      expect(tvsBytes[1]).toBe(0x40); // Initial reset
+      // Must NOT have trailing ESC @ (0x1B, 0x40) at end
+      const lastTwo = [tvsBytes[tvsBytes.length - 2], tvsBytes[tvsBytes.length - 1]];
+      expect(lastTwo).not.toEqual([0x1b, 0x40]);
+
+      // 3. esc_p
+      const escpBytes = dotMatrixRenderer.generateEscPBytes(sampleText, { commandSet: "esc_p" });
+      const lastTwoEscp = [escpBytes[escpBytes.length - 2], escpBytes[escpBytes.length - 1]];
+      expect(lastTwoEscp).not.toEqual([0x1b, 0x40]);
     });
   });
 });

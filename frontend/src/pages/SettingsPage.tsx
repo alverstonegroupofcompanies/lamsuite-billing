@@ -104,6 +104,7 @@ export const SettingsPage: React.FC = () => {
   const [printLogs, setPrintLogs] = useState<PrintJobRecord[]>([]);
   const [isScanningPrinters, setIsScanningPrinters] = useState(false);
   const [testPrintFeedback, setTestPrintFeedback] = useState<{ text: string; success: boolean } | null>(null);
+  const [selectedHexDumpLog, setSelectedHexDumpLog] = useState<PrintJobRecord | null>(null);
 
   useEffect(() => {
     if (activeTab === "printing") {
@@ -172,6 +173,38 @@ export const SettingsPage: React.FC = () => {
       showNotification(err?.message || "Test print failed", "error");
     } finally {
       setIsTestingPrinter(false);
+    }
+  };
+
+  const handleFeedOneLine = async () => {
+    if (!selectedTestPrinter) return;
+    try {
+      const res = await printerManagerService.feedOneLine(selectedTestPrinter);
+      if (res.success) {
+        showNotification(`Advanced paper 1 line on '${selectedTestPrinter}'`, "success");
+      } else {
+        showNotification(res.error || "Feed line command failed", "error");
+      }
+      const logs = await printerManagerService.getPrintHistory();
+      setPrintLogs(logs);
+    } catch (err: any) {
+      showNotification(err.message || "Failed to feed line", "error");
+    }
+  };
+
+  const handleFormFeed = async () => {
+    if (!selectedTestPrinter) return;
+    try {
+      const res = await printerManagerService.formFeed(selectedTestPrinter);
+      if (res.success) {
+        showNotification(`Form feed dispatched to '${selectedTestPrinter}'`, "success");
+      } else {
+        showNotification(res.error || "Form feed command failed", "error");
+      }
+      const logs = await printerManagerService.getPrintHistory();
+      setPrintLogs(logs);
+    } catch (err: any) {
+      showNotification(err.message || "Failed to form feed", "error");
     }
   };
 
@@ -1777,6 +1810,127 @@ export const SettingsPage: React.FC = () => {
                 </label>
               </div>
 
+              {/* Dot Matrix Continuous Stationery Configuration */}
+              <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm space-y-4">
+                <div className="border-b border-slate-100 pb-3">
+                  <h3 className="text-xs font-bold uppercase tracking-wider text-slate-800 flex items-center gap-2">
+                    <Sliders className="h-4 w-4 text-emerald-600" />
+                    <span>Dot Matrix Continuous Stationery Settings</span>
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Fine-tune paper handling, end-of-job head positioning, and command sets for continuous tractor-feed forms (TVS, Epson MSP).
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div>
+                    <label className="block text-[11px] font-semibold uppercase text-slate-600 mb-1">
+                      After Last Printed Line
+                    </label>
+                    <select
+                      value={settings.printing.dotMatrixEndOfJob || "stop_immediately"}
+                      onChange={(e) =>
+                        setSettings({
+                          ...settings,
+                          printing: {
+                            ...settings.printing,
+                            dotMatrixEndOfJob: e.target.value as "stop_immediately" | "feed_tear_off" | "form_feed",
+                          },
+                        })
+                      }
+                      className="w-full rounded-lg border border-slate-300 p-2 text-xs focus:border-blue-500 focus:outline-none bg-white"
+                    >
+                      <option value="stop_immediately">Stop immediately (default - no extra feed)</option>
+                      <option value="feed_tear_off">Feed N lines for tear-off</option>
+                      <option value="form_feed">Form feed to top of next page</option>
+                    </select>
+                    <p className="mt-1 text-[10px] text-slate-500">
+                      Default stops print head right after content to save paper for the next invoice.
+                    </p>
+                  </div>
+
+                  {settings.printing.dotMatrixEndOfJob === "feed_tear_off" && (
+                    <div>
+                      <label className="block text-[11px] font-semibold uppercase text-slate-600 mb-1">
+                        Tear-off Feed Lines (0 - 10)
+                      </label>
+                      <input
+                        type="number"
+                        min={0}
+                        max={10}
+                        value={settings.printing.dotMatrixTearOffFeedLines ?? 0}
+                        onChange={(e) =>
+                          setSettings({
+                            ...settings,
+                            printing: {
+                              ...settings.printing,
+                              dotMatrixTearOffFeedLines: Math.max(0, Math.min(10, parseInt(e.target.value) || 0)),
+                            },
+                          })
+                        }
+                        className="w-full rounded-lg border border-slate-300 p-2 text-xs focus:border-blue-500 focus:outline-none"
+                      />
+                      <p className="mt-1 text-[10px] text-slate-500">
+                        Blank lines to advance past printer tear-off bar.
+                      </p>
+                    </div>
+                  )}
+
+                  <div>
+                    <label className="block text-[11px] font-semibold uppercase text-slate-600 mb-1">
+                      Hardware Page Length
+                    </label>
+                    <select
+                      value={String(settings.printing.dotMatrixPageLength || 66)}
+                      onChange={(e) =>
+                        setSettings({
+                          ...settings,
+                          printing: {
+                            ...settings.printing,
+                            dotMatrixPageLength: e.target.value === "continuous" ? "continuous" : (parseInt(e.target.value) as 66 | 72 | 33),
+                          },
+                        })
+                      }
+                      className="w-full rounded-lg border border-slate-300 p-2 text-xs focus:border-blue-500 focus:outline-none bg-white"
+                    >
+                      <option value="66">66 Lines (11-inch Standard Fanfold)</option>
+                      <option value="72">72 Lines (12-inch Legal Fanfold)</option>
+                      <option value="33">33 Lines (5.5-inch Half-Page)</option>
+                      <option value="continuous">Continuous (Roll / No Fixed Perforations)</option>
+                    </select>
+                    <p className="mt-1 text-[10px] text-slate-500">
+                      Used only to repeat headers on multi-page bills. Never pads short bills.
+                    </p>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-semibold uppercase text-slate-600 mb-1">
+                      Command Set Profile
+                    </label>
+                    <select
+                      value={settings.printing.dotMatrixCommandSet || "esc_p"}
+                      onChange={(e) =>
+                        setSettings({
+                          ...settings,
+                          printing: {
+                            ...settings.printing,
+                            dotMatrixCommandSet: e.target.value as "esc_p" | "tvs_native" | "plain_ascii",
+                          },
+                        })
+                      }
+                      className="w-full rounded-lg border border-slate-300 p-2 text-xs focus:border-blue-500 focus:outline-none bg-white font-mono"
+                    >
+                      <option value="esc_p">ESC/P Standard (Epson LX, FX, LQ, Citizen)</option>
+                      <option value="tvs_native">TVS Native (MSP 240/245/250 Star)</option>
+                      <option value="plain_ascii">Plain ASCII (Generic / Text-Only Driver)</option>
+                    </select>
+                    <p className="mt-1 text-[10px] text-slate-500">
+                      Clean mode reset without trailing paper ejects.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
               {/* Native Printer Diagnostics & Hardware Test Print */}
               <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm space-y-4">
                 <div className="flex items-center justify-between border-b border-slate-100 pb-3">
@@ -1869,6 +2023,100 @@ export const SettingsPage: React.FC = () => {
                   </div>
                 </div>
 
+                {/* Profile & Driver Pairing Compatibility Warnings */}
+                {(() => {
+                  const currPrinter = detectedPrinters.find((p) => p.name === selectedTestPrinter);
+                  if (!currPrinter) return null;
+                  const compat = printerManagerService.validatePaperCompatibility(currPrinter, selectedTestPaper);
+                  if (compat.compatible && !compat.driverWarning) return null;
+                  return (
+                    <div className="space-y-2 pt-1">
+                      {compat.warning && (
+                        <div className="p-3 rounded-lg border border-amber-200 bg-amber-50 text-amber-900 text-xs flex items-start gap-2.5">
+                          <AlertCircle className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
+                          <div className="flex-1">
+                            <span className="font-bold">Printer Profile Mismatch Warning: </span>
+                            <span>{compat.warning}</span>
+                            {compat.suggestedPaper && (
+                              <button
+                                type="button"
+                                onClick={() => setSelectedTestPaper(compat.suggestedPaper!)}
+                                className="ml-2 px-2 py-0.5 rounded bg-amber-200 hover:bg-amber-300 text-amber-900 font-bold transition inline-block text-[11px]"
+                              >
+                                Switch to {compat.suggestedPaper === "thermal_80mm" ? "Thermal 80mm" : compat.suggestedPaper}
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                      {compat.driverWarning && (
+                        <div className="p-2.5 rounded-lg border border-blue-200 bg-blue-50 text-blue-900 text-xs flex items-start gap-2">
+                          <AlertCircle className="h-4 w-4 text-blue-600 shrink-0 mt-0.5" />
+                          <div>
+                            <span className="font-semibold">Driver Notice: </span>
+                            <span>{compat.driverWarning}</span>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+
+                {/* Dot Matrix Manual Alignment & Calibration Bar */}
+                <div className="rounded-lg border border-slate-200 bg-slate-50/70 p-3 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <span className="text-xs font-bold text-slate-800">Dot Matrix Alignment & Calibration Tools</span>
+                      <p className="text-[11px] text-slate-500">
+                        Manually align tractor paper and verify print head boundary with zero paper waste.
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={handleFeedOneLine}
+                        disabled={!selectedTestPrinter}
+                        className="px-2.5 py-1.5 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-100 border border-slate-300 rounded-lg transition disabled:opacity-50"
+                        title="Send single CRLF (0x0D 0x0A) to advance paper exactly 1 line"
+                      >
+                        Feed 1 Line
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleFormFeed}
+                        disabled={!selectedTestPrinter}
+                        className="px-2.5 py-1.5 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-100 border border-slate-300 rounded-lg transition disabled:opacity-50"
+                        title="Send Form Feed (0x0C) to advance paper to next page perforation"
+                      >
+                        Form Feed
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleSendHardwareTestPrint}
+                        disabled={isTestingPrinter || !selectedTestPrinter}
+                        className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-lg transition shadow-sm disabled:opacity-50 shrink-0"
+                        title="Prints exactly 3 lines with NO trailing form feed or empty page ejection"
+                      >
+                        <Printer className={`h-3.5 w-3.5 ${isTestingPrinter ? "animate-bounce" : ""}`} />
+                        <span>{isTestingPrinter ? "Spooling..." : "Test Print (3 Lines)"}</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Set Top of Form (TOF) Guide */}
+                  <details className="text-[11px] text-slate-600 bg-white rounded border border-slate-200 p-2">
+                    <summary className="font-semibold text-slate-700 cursor-pointer select-none hover:text-blue-600">
+                      ℹ️ How to Set Top of Form (TOF) on Dot Matrix Printers (TVS / Epson)
+                    </summary>
+                    <ol className="list-decimal pl-5 mt-2 space-y-1 text-slate-600">
+                      <li>Power on the printer and engage continuous fanfold paper into the tractor pins.</li>
+                      <li>Rotate the platen knob or click <strong>Feed 1 Line</strong> until the horizontal page perforation is aligned right at the print head or ribbon line.</li>
+                      <li>Press the physical <strong>"Set TOF"</strong> or <strong>"Load/Eject"</strong> button on the printer control panel to lock this position as Line 1.</li>
+                      <li>Click <strong>Test Print (3 Lines)</strong> above: 3 test lines will print and stop immediately on Line 3 without advancing or ejecting an empty page.</li>
+                    </ol>
+                  </details>
+                </div>
+
                 <div className="flex items-center justify-between pt-1">
                   <div className="flex-1 min-w-0 pr-4">
                     {testPrintFeedback && (
@@ -1888,16 +2136,6 @@ export const SettingsPage: React.FC = () => {
                       </div>
                     )}
                   </div>
-
-                  <button
-                    type="button"
-                    onClick={handleSendHardwareTestPrint}
-                    disabled={isTestingPrinter || !selectedTestPrinter}
-                    className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-lg transition shadow-sm disabled:opacity-50 shrink-0"
-                  >
-                    <Printer className={`h-4 w-4 ${isTestingPrinter ? "animate-bounce" : ""}`} />
-                    <span>{isTestingPrinter ? "Spooling Test..." : "Send Test Print"}</span>
-                  </button>
                 </div>
               </div>
 
@@ -1950,6 +2188,7 @@ export const SettingsPage: React.FC = () => {
                           <th className="p-2">Format</th>
                           <th className="p-2">Status</th>
                           <th className="p-2">Job ID / Error</th>
+                          <th className="p-2 text-right">Raw Bytes</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100">
@@ -1985,6 +2224,20 @@ export const SettingsPage: React.FC = () => {
                                 <span className="text-rose-600 font-semibold">{log.errorMessage || "Spooler rejected job"}</span>
                               )}
                             </td>
+                            <td className="p-2 text-right">
+                              {log.hexDump ? (
+                                <button
+                                  type="button"
+                                  onClick={() => setSelectedHexDumpLog(log)}
+                                  className="px-2 py-0.5 text-[10px] font-mono font-semibold text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded transition"
+                                  title="View hexadecimal byte dump of this print job"
+                                >
+                                  {log.rawBytesLength ? `${log.rawBytesLength} B` : "Hex Dump"}
+                                </button>
+                              ) : (
+                                <span className="text-slate-400 font-mono text-[10px]">—</span>
+                              )}
+                            </td>
                           </tr>
                         ))}
                       </tbody>
@@ -1992,6 +2245,55 @@ export const SettingsPage: React.FC = () => {
                   </div>
                 )}
               </div>
+
+              {/* Hex Dump Modal Viewer */}
+              {selectedHexDumpLog && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+                  <div className="bg-white rounded-xl shadow-2xl max-w-3xl w-full max-h-[85vh] flex flex-col overflow-hidden border border-slate-200">
+                    <div className="flex items-center justify-between p-4 border-b border-slate-200 bg-slate-50">
+                      <div>
+                        <h4 className="text-sm font-bold text-slate-800">
+                          Spooler Job Raw Byte Diagnostic ({selectedHexDumpLog.documentNumber || selectedHexDumpLog.documentType})
+                        </h4>
+                        <p className="text-xs text-slate-500 font-mono">
+                          Target: {selectedHexDumpLog.printerName} | Length: {selectedHexDumpLog.rawBytesLength ?? 0} bytes
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setSelectedHexDumpLog(null)}
+                        className="text-slate-400 hover:text-slate-700 font-bold px-2 py-1"
+                      >
+                        ✕
+                      </button>
+                    </div>
+
+                    <div className="p-4 overflow-y-auto flex-1 bg-slate-950 font-mono text-xs text-emerald-400">
+                      <pre className="whitespace-pre overflow-x-auto leading-relaxed">
+                        {selectedHexDumpLog.hexDump || "No hex dump available."}
+                      </pre>
+                    </div>
+
+                    <div className="p-3 border-t border-slate-200 bg-slate-50 flex items-center justify-between">
+                      <span className="text-xs text-slate-500">
+                        Inspecting raw escape bytes sent directly to Windows Spooler.
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (selectedHexDumpLog.hexDump) {
+                            navigator.clipboard.writeText(selectedHexDumpLog.hexDump);
+                            showNotification("Hex dump copied to clipboard", "success");
+                          }
+                        }}
+                        className="px-3 py-1.5 text-xs font-semibold bg-white border border-slate-300 hover:bg-slate-100 rounded-lg transition"
+                      >
+                        Copy Hex Dump
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 

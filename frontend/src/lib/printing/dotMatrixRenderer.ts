@@ -3,10 +3,11 @@ import { jsPDF } from "jspdf";
 
 export type DotMatrixCommandSet = "esc_p" | "tvs_native" | "plain_ascii";
 export type DotMatrixPitch = "10cpi" | "12cpi" | "17cpi_condensed";
+export type DotMatrixEndOfJob = "stop_immediately" | "feed_tear_off" | "form_feed";
 
 export interface DotMatrixOptions {
   columns?: 80 | 132;
-  linesPerPage?: number; // default 66 lines for 11", 72 for 12", 33 for 6" half-page
+  linesPerPage?: number; // default 66 lines for 11", 72 for 12", 33 for 6" half-page, 0 for Continuous
   cpi?: DotMatrixPitch;
   commandSet?: DotMatrixCommandSet;
   currencyPrefix?: string; // "Rs." by default
@@ -21,6 +22,8 @@ export interface DotMatrixOptions {
   isDuplicate?: boolean;
   copyMarker?: string;
   truncateDescriptions?: boolean; // If false, wraps descriptions on next line
+  endOfJobAction?: DotMatrixEndOfJob; // default "stop_immediately"
+  feedLinesForTearOff?: number; // 0 to 10 lines (default 0)
 }
 
 export interface DotMatrixPreviewOptions {
@@ -30,6 +33,8 @@ export interface DotMatrixPreviewOptions {
   showPageBreaks?: boolean;
   showTractorFeed?: boolean;
   enableBold?: boolean;
+  endOfJobAction?: DotMatrixEndOfJob;
+  feedLinesForTearOff?: number;
 }
 
 export class DotMatrixRenderer {
@@ -84,6 +89,69 @@ export class DotMatrixRenderer {
       return `${mo}/${yr}`;
     }
     return trimmed.substring(0, 5);
+  }
+
+  /**
+   * Robustly formats invoice/document date to DD-MM-YYYY (with optional HH:mm)
+   * in store local time, without UTC day-shift errors.
+   */
+  formatInvoiceDate(dateStr?: string, timeStr?: string): string {
+    if (!dateStr) return "-";
+    const s = dateStr.trim();
+    // Match YYYY-MM-DD or YYYY-MM-DDTHH:mm:ss.sss
+    const ymd = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})(?:[T\s](\d{1,2}):(\d{1,2}))?/);
+    if (ymd) {
+      const yr = ymd[1];
+      const mo = ymd[2].padStart(2, "0");
+      const da = ymd[3].padStart(2, "0");
+      let res = `${da}-${mo}-${yr}`;
+      if (timeStr && timeStr.trim()) {
+        res += ` ${timeStr.trim()}`;
+      } else if (ymd[4] && ymd[5]) {
+        res += ` ${ymd[4].padStart(2, "0")}:${ymd[5].padStart(2, "0")}`;
+      }
+      return res;
+    }
+    // Match DD-MM-YYYY or DD/MM/YYYY
+    const dmy = s.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})(?:[T\s](\d{1,2}):(\d{1,2}))?/);
+    if (dmy) {
+      const da = dmy[1].padStart(2, "0");
+      const mo = dmy[2].padStart(2, "0");
+      const yr = dmy[3];
+      let res = `${da}-${mo}-${yr}`;
+      if (timeStr && timeStr.trim()) {
+        res += ` ${timeStr.trim()}`;
+      } else if (dmy[4] && dmy[5]) {
+        res += ` ${dmy[4].padStart(2, "0")}:${dmy[5].padStart(2, "0")}`;
+      }
+      return res;
+    }
+    return s;
+  }
+
+  /**
+   * Generates a standard formatted hex dump (offset, hex, ASCII) for raw print job inspection.
+   */
+  formatHexDump(bytes: Uint8Array): string {
+    const lines: string[] = [];
+    for (let i = 0; i < bytes.length; i += 16) {
+      const chunk = bytes.slice(i, i + 16);
+      const offset = i.toString(16).padStart(8, "0");
+      let hexPart = "";
+      let asciiPart = "";
+      for (let j = 0; j < 16; j++) {
+        if (j < chunk.length) {
+          const b = chunk[j];
+          hexPart += b.toString(16).padStart(2, "0").toUpperCase() + " ";
+          asciiPart += b >= 32 && b <= 126 ? String.fromCharCode(b) : ".";
+        } else {
+          hexPart += "   ";
+        }
+        if (j === 7) hexPart += " ";
+      }
+      lines.push(`${offset}  ${hexPart} |${asciiPart}|`);
+    }
+    return lines.join("\n");
   }
 
   /**
@@ -180,18 +248,7 @@ export class DotMatrixRenderer {
       for (let i = 0; i < options.topMarginLines; i++) headerLines.push("");
     }
 
-    // Title / Duplicate Marker Bar
-    const isDup = options?.isDuplicate || options?.copyMarker;
-    const dupText = options?.copyMarker || "DUPLICATE COPY";
-    if (isDup) {
-      const title = "TAX INVOICE";
-      const dupTag = `*** ${dupText} ***`;
-      headerLines.push(leftMargin + title + " ".repeat(Math.max(1, cols - title.length - dupTag.length)) + dupTag);
-    } else {
-      headerLines.push(leftMargin + this.center("TAX INVOICE", cols));
-    }
-
-    // Store Details (Centered, non-wrapping)
+    // 1. Store Details (Store Name Prominent & Centered at the top)
     headerLines.push(leftMargin + this.center(data.store_name.toUpperCase(), cols));
     if (data.store_address) {
       const addrLines = this.wrapText(data.store_address, cols);
@@ -222,6 +279,19 @@ export class DotMatrixRenderer {
 
     headerLines.push(divDouble);
 
+    // 2. Title & Copy Marker Bar (Placed AFTER store header)
+    const isDup = options?.isDuplicate || options?.copyMarker;
+    const dupText = options?.copyMarker || "DUPLICATE COPY";
+    if (isDup) {
+      const title = "TAX INVOICE";
+      const dupTag = `*** ${dupText} ***`;
+      headerLines.push(leftMargin + title + " ".repeat(Math.max(1, cols - title.length - dupTag.length)) + dupTag);
+    } else {
+      headerLines.push(leftMargin + this.center("TAX INVOICE", cols));
+    }
+
+    headerLines.push(divSingle);
+
     // Document & Customer Meta Grid (2 Columns: Left 42 cols, Right 38 cols)
     const leftColWidth = 42;
     const rightColWidth = 38;
@@ -245,7 +315,7 @@ export class DotMatrixRenderer {
 
     const rightMeta: string[] = [];
     rightMeta.push(`Invoice No : #${data.invoice_number}`);
-    rightMeta.push(`Date       : ${data.invoice_date}${data.invoice_time ? ` ${data.invoice_time}` : ""}`);
+    rightMeta.push(`Date       : ${this.formatInvoiceDate(data.invoice_date, data.invoice_time)}`);
     rightMeta.push(`Payment    : ${data.payment_mode || "Cash"}`);
     if (data.place_of_supply) {
       rightMeta.push(`POS        : ${data.place_of_supply}`);
@@ -414,6 +484,8 @@ export class DotMatrixRenderer {
       cols,
       leftMargin,
       documentNumber: data.invoice_number,
+      endOfJobAction: options?.endOfJobAction,
+      feedLinesForTearOff: options?.feedLinesForTearOff,
     });
   }
 
@@ -433,16 +505,7 @@ export class DotMatrixRenderer {
       for (let i = 0; i < options.topMarginLines; i++) headerLines.push("");
     }
 
-    const isDup = options?.isDuplicate || options?.copyMarker;
-    const dupText = options?.copyMarker || "DUPLICATE COPY";
-    if (isDup) {
-      const title = "TAX INVOICE";
-      const dupTag = `*** ${dupText} ***`;
-      headerLines.push(leftMargin + title + " ".repeat(Math.max(1, cols - title.length - dupTag.length)) + dupTag);
-    } else {
-      headerLines.push(leftMargin + this.center("TAX INVOICE", cols));
-    }
-
+    // 1. Store Details (Store Name Prominent & Centered at the top)
     headerLines.push(leftMargin + this.center(data.store_name.toUpperCase(), cols));
     if (data.store_address) {
       headerLines.push(leftMargin + this.center(data.store_address, cols));
@@ -461,10 +524,23 @@ export class DotMatrixRenderer {
 
     headerLines.push(divDouble);
 
+    // 2. Title & Copy Marker Bar (Placed AFTER store header)
+    const isDup = options?.isDuplicate || options?.copyMarker;
+    const dupText = options?.copyMarker || "DUPLICATE COPY";
+    if (isDup) {
+      const title = "TAX INVOICE";
+      const dupTag = `*** ${dupText} ***`;
+      headerLines.push(leftMargin + title + " ".repeat(Math.max(1, cols - title.length - dupTag.length)) + dupTag);
+    } else {
+      headerLines.push(leftMargin + this.center("TAX INVOICE", cols));
+    }
+
+    headerLines.push(divSingle);
+
     // 3-Column Meta Grid in 132 columns
     const p1 = `Customer : ${data.customer_name || "Walk-in Customer"}`.padEnd(46);
     const p2 = `Invoice No: #${data.invoice_number}`.padEnd(42);
-    const p3 = `Date: ${data.invoice_date} ${data.invoice_time || ""}`.padEnd(44);
+    const p3 = `Date: ${this.formatInvoiceDate(data.invoice_date, data.invoice_time)}`.padEnd(44);
     headerLines.push(leftMargin + p1 + p2 + p3);
 
     const g1 = `Phone    : ${data.customer_phone || "-"}`.padEnd(46);
@@ -587,6 +663,8 @@ export class DotMatrixRenderer {
       cols,
       leftMargin,
       documentNumber: data.invoice_number,
+      endOfJobAction: options?.endOfJobAction,
+      feedLinesForTearOff: options?.feedLinesForTearOff,
     });
   }
 
@@ -594,8 +672,9 @@ export class DotMatrixRenderer {
    * Pre-printed stationery format (Prints values at fixed coordinates without borders).
    */
   private renderPrePrintedInvoice(data: InvoicePrintData, options?: DotMatrixOptions): string {
-    const linesPerPage = options?.linesPerPage || 66;
     const leftMargin = " ".repeat(options?.leftMarginSpaces || 0);
+    const endOfJobAction = options?.endOfJobAction || "stop_immediately";
+    const feedLines = Math.min(10, Math.max(0, options?.feedLinesForTearOff || 0));
     const outLines: string[] = [];
 
     // Header offset for pre-printed letterhead
@@ -604,7 +683,7 @@ export class DotMatrixRenderer {
     }
 
     // Document Meta
-    outLines.push(leftMargin + `               ${data.invoice_number.padEnd(25)} ${data.invoice_date}`);
+    outLines.push(leftMargin + `               ${data.invoice_number.padEnd(25)} ${this.formatInvoiceDate(data.invoice_date, data.invoice_time)}`);
     outLines.push(leftMargin + `               ${(data.customer_name || "Cash").padEnd(25)} ${data.customer_phone || ""}`);
     outLines.push("");
 
@@ -619,17 +698,24 @@ export class DotMatrixRenderer {
       outLines.push(`${leftMargin}${num} ${desc} ${batch} ${qty} ${rate} ${amt}`);
     });
 
-    while (outLines.length < linesPerPage - 8) {
-      outLines.push("");
-    }
-
-    // Totals at bottom
+    // Totals at bottom (no artificial padding of empty lines)
     outLines.push(leftMargin + " ".repeat(55) + this.padLeft(this.formatAmount(data.subtotal), 12));
     outLines.push(leftMargin + " ".repeat(55) + this.padLeft(this.formatAmount(data.tax_total), 12));
     outLines.push(leftMargin + " ".repeat(55) + this.padLeft(this.formatAmount(data.grand_total), 12));
-    outLines.push("\x0C");
 
-    return outLines.join("\n");
+    // Trim any trailing blank lines
+    while (outLines.length > 0 && outLines[outLines.length - 1].trim() === "") {
+      outLines.pop();
+    }
+
+    let result = outLines.join("\n");
+    if (endOfJobAction === "form_feed") {
+      result += "\n\x0C";
+    } else if (endOfJobAction === "feed_tear_off" && feedLines > 0) {
+      result += "\n" + "\n".repeat(feedLines);
+    }
+
+    return result;
   }
 
   /**
@@ -643,14 +729,18 @@ export class DotMatrixRenderer {
     const divSingle = leftMargin + "-".repeat(cols);
 
     const headerLines: string[] = [];
-    headerLines.push(leftMargin + this.center(`*** CREDIT NOTE / SALES RETURN ***`, cols));
+    // Store Details FIRST
     headerLines.push(leftMargin + this.center(data.store_name.toUpperCase(), cols));
     if (data.store_address) headerLines.push(leftMargin + this.center(data.store_address, cols));
     headerLines.push(divDouble);
 
-    headerLines.push(leftMargin + `CREDIT NOTE NO : #${data.return_number}`.padEnd(42) + `Date: ${data.return_date}`);
+    // Title AFTER Store Details
+    headerLines.push(leftMargin + this.center(`*** CREDIT NOTE / SALES RETURN ***`, cols));
+    headerLines.push(divSingle);
+
+    headerLines.push(leftMargin + `CREDIT NOTE NO : #${data.return_number}`.padEnd(42) + `Date: ${this.formatInvoiceDate(data.return_date)}`);
     if (data.original_invoice_number) {
-      headerLines.push(leftMargin + `Orig Invoice   : #${data.original_invoice_number}`.padEnd(42) + `Inv Date: ${data.original_invoice_date || "-"}`);
+      headerLines.push(leftMargin + `Orig Invoice   : #${data.original_invoice_number}`.padEnd(42) + `Inv Date: ${this.formatInvoiceDate(data.original_invoice_date)}`);
     }
     const cName = this.padRight(`Customer       : ${data.customer_name.substring(0, 25)}`, 42);
     headerLines.push(leftMargin + cName + `Phone: ${data.customer_phone || "-"}`);
@@ -692,6 +782,8 @@ export class DotMatrixRenderer {
       cols,
       leftMargin,
       documentNumber: data.return_number,
+      endOfJobAction: options?.endOfJobAction,
+      feedLinesForTearOff: options?.feedLinesForTearOff,
     });
   }
 
@@ -706,11 +798,16 @@ export class DotMatrixRenderer {
     const divSingle = leftMargin + "-".repeat(cols);
 
     const headerLines: string[] = [];
-    headerLines.push(leftMargin + this.center(`*** DEBIT NOTE / PURCHASE RETURN ***`, cols));
+    // Store Details FIRST
     headerLines.push(leftMargin + this.center(data.store_name.toUpperCase(), cols));
+    if (data.store_address) headerLines.push(leftMargin + this.center(data.store_address, cols));
     headerLines.push(divDouble);
 
-    headerLines.push(leftMargin + `DEBIT NOTE NO  : #${data.return_number}`.padEnd(42) + `Date: ${data.return_date}`);
+    // Title AFTER Store Details
+    headerLines.push(leftMargin + this.center(`*** DEBIT NOTE / PURCHASE RETURN ***`, cols));
+    headerLines.push(divSingle);
+
+    headerLines.push(leftMargin + `DEBIT NOTE NO  : #${data.return_number}`.padEnd(42) + `Date: ${this.formatInvoiceDate(data.return_date)}`);
     if (data.supplier_invoice_no) {
       headerLines.push(leftMargin + `Supplier Inv   : #${data.supplier_invoice_no}`.padEnd(42) + `Purch No: ${data.original_purchase_number || "-"}`);
     }
@@ -754,11 +851,14 @@ export class DotMatrixRenderer {
       cols,
       leftMargin,
       documentNumber: data.return_number,
+      endOfJobAction: options?.endOfJobAction,
+      feedLinesForTearOff: options?.feedLinesForTearOff,
     });
   }
 
   /**
    * Continuous multi-page pagination logic with repeated headers and Form Feeds (\x0C)
+   * Only outputs Form Feed (\x0C) between pages, and respects endOfJobAction at the end.
    */
   private paginateDocument(params: {
     headerLines: string[];
@@ -768,16 +868,42 @@ export class DotMatrixRenderer {
     cols: number;
     leftMargin: string;
     documentNumber: string;
+    endOfJobAction?: DotMatrixEndOfJob;
+    feedLinesForTearOff?: number;
   }): string {
-    const { headerLines, itemLines, footerLines, linesPerPage, cols, leftMargin, documentNumber } = params;
+    const {
+      headerLines,
+      itemLines,
+      footerLines,
+      linesPerPage,
+      cols,
+      leftMargin,
+      documentNumber,
+      endOfJobAction = "stop_immediately",
+      feedLinesForTearOff = 0,
+    } = params;
+
+    const trimTrailingEmpty = (lines: string[]): string[] => {
+      const copy = [...lines];
+      while (copy.length > 0 && copy[copy.length - 1].trim() === "") {
+        copy.pop();
+      }
+      return copy;
+    };
 
     // Continuous Seamless Flow (linesPerPage: 0): Single continuous roll with no artificial page breaks
     if (!linesPerPage || linesPerPage === 0) {
-      const allLines = [...headerLines, ...itemLines, ...footerLines];
-      return allLines.join("\n") + "\n\x0C";
+      const allLines = trimTrailingEmpty([...headerLines, ...itemLines, ...footerLines]);
+      let result = allLines.join("\n");
+      if (endOfJobAction === "form_feed") {
+        result += "\n\x0C";
+      } else if (endOfJobAction === "feed_tear_off" && feedLinesForTearOff > 0) {
+        result += "\n" + "\n".repeat(Math.min(10, Math.max(1, feedLinesForTearOff)));
+      }
+      return result;
     }
 
-    const printableLinesPerPage = linesPerPage - 2; // Reserve 2 lines for form-feed margins
+    const printableLinesPerPage = Math.max(10, linesPerPage - 2); // Reserve 2 lines for form-feed margins
     const continuationHead = cols === 132
       ? `${this.padRight("#", 3)} ${this.padRight("Item Description", 46)} ${this.padRight("HSN Code", 10)} ${this.padRight("Batch No", 10)} ${this.padRight("Expiry", 7)} ${this.padLeft("Qty", 8)} ${this.padLeft("Rate(Rs)", 14)} ${this.padLeft("Disc(Rs)", 10)} ${this.padLeft("Taxable(Rs)", 13)} ${this.padLeft("GST%", 6)} ${this.padLeft("Amount(Rs)", 13)}`
       : `${this.padRight("#", 2)} ${this.padRight("Item Description", 25)} ${this.padRight("HSN", 8)} ${this.padRight("Batch", 8)} ${this.padRight("Exp", 5)} ${this.padLeft("Qty", 4)} ${this.padLeft("Rate", 7)} ${this.padLeft("GST", 4)} ${this.padLeft("Amount", 9)}`;
@@ -801,7 +927,7 @@ export class DotMatrixRenderer {
       const line = itemLines[i];
       if (currentPage.length + 1 + continuationFooter.length > printableLinesPerPage) {
         currentPage.push(...continuationFooter);
-        pages.push(currentPage);
+        pages.push(trimTrailingEmpty(currentPage));
         pageNum++;
         currentPage = [...continuationHeader];
       }
@@ -810,31 +936,83 @@ export class DotMatrixRenderer {
 
     if (currentPage.length + footerLines.length > printableLinesPerPage) {
       currentPage.push(...continuationFooter);
-      pages.push(currentPage);
+      pages.push(trimTrailingEmpty(currentPage));
       pageNum++;
       currentPage = [
         leftMargin + `[ Document #${documentNumber} - Totals & Summary ]`,
         leftMargin + "-".repeat(cols),
         ...footerLines,
       ];
-      pages.push(currentPage);
+      pages.push(trimTrailingEmpty(currentPage));
     } else {
       currentPage.push(...footerLines);
-      pages.push(currentPage);
+      pages.push(trimTrailingEmpty(currentPage));
     }
 
-    // Join pages with Form Feed character (\x0C)
-    return pages.map((p) => p.join("\n")).join("\n\x0C\n") + "\n\x0C";
+    // Join pages with Form Feed character (\x0C) strictly BETWEEN pages only!
+    let output = pages.map((p) => p.join("\n")).join("\n\x0C\n");
+
+    // Trailing behavior after the last printed line:
+    if (endOfJobAction === "form_feed") {
+      output += "\n\x0C";
+    } else if (endOfJobAction === "feed_tear_off" && feedLinesForTearOff > 0) {
+      output += "\n" + "\n".repeat(Math.min(10, Math.max(1, feedLinesForTearOff)));
+    }
+    // "stop_immediately" (default) appends neither form feed nor extra lines.
+
+    return output;
   }
 
   /**
    * Generates ESC/P binary sequence with escape commands for hardware dot matrix printers.
+   * Supports 'esc_p', 'tvs_native', and 'plain_ascii' command sets.
    */
   generateEscPBytes(rawText: string, options?: DotMatrixOptions): Uint8Array {
     const bytes: number[] = [];
     const encoder = new TextEncoder();
+    const commandSet = options?.commandSet || "esc_p";
+    const endOfJobAction = options?.endOfJobAction || "stop_immediately";
+    const feedLines = Math.min(10, Math.max(0, options?.feedLinesForTearOff || 0));
 
-    // 1. Initialize Printer (ESC @)
+    // Convert non-ASCII currency symbol (₹ -> Rs.)
+    let cleanText = rawText.replace(/₹/g, options?.currencyPrefix || "Rs.");
+
+    if (commandSet === "plain_ascii") {
+      // 1. Plain ASCII Mode (Generic / Text Only driver): No escape codes!
+      cleanText = cleanText
+        .replace(/[^\x00-\x7F]/g, "")
+        .replace(/\r\n/g, "\n")
+        .replace(/\n/g, "\r\n");
+
+      // Strip trailing form feed if not requested
+      if (endOfJobAction !== "form_feed") {
+        cleanText = cleanText.replace(/\x0C+$/, "");
+      }
+
+      if (!cleanText.endsWith("\r\n")) {
+        cleanText += "\r\n";
+      }
+
+      const encoded = encoder.encode(cleanText);
+      for (let i = 0; i < encoded.length; i++) {
+        bytes.push(encoded[i]);
+      }
+
+      if (endOfJobAction === "feed_tear_off" && feedLines > 0) {
+        for (let i = 0; i < feedLines; i++) {
+          bytes.push(0x0D, 0x0A);
+        }
+      } else if (endOfJobAction === "form_feed") {
+        if (bytes[bytes.length - 1] !== 0x0C) {
+          bytes.push(0x0C);
+        }
+      }
+
+      return new Uint8Array(bytes);
+    }
+
+    // 2. Hardware ESC/P and TVS MSP Native Command Sets:
+    // 1. Initialize Printer (ESC @) at start of job
     bytes.push(0x1B, 0x40);
 
     // 2. Select Draft Mode (ESC x 0)
@@ -842,14 +1020,14 @@ export class DotMatrixRenderer {
 
     // 3. Set Pitch / CPI
     if (options?.columns === 132 || options?.cpi === "17cpi_condensed") {
-      bytes.push(0x0F);
+      bytes.push(0x0F); // Condensed mode (17.14 CPI)
     } else if (options?.cpi === "12cpi") {
-      bytes.push(0x1B, 0x4D);
+      bytes.push(0x1B, 0x4D); // 12 CPI Elite
     } else {
-      bytes.push(0x1B, 0x50);
+      bytes.push(0x1B, 0x50); // 10 CPI Pica
     }
 
-    // 4. Set Line Spacing (ESC 2 = 1/6")
+    // 4. Set Line Spacing (ESC 2 = 1/6" standard)
     bytes.push(0x1B, 0x32);
 
     // 5. Optional Double Strike for Carbon Copies (ESC G)
@@ -857,26 +1035,50 @@ export class DotMatrixRenderer {
       bytes.push(0x1B, 0x47);
     }
 
-    // 6. Set Form Length in lines (ESC C n)
-    if (options?.linesPerPage) {
+    // 6. Set Form Length in lines (ESC C n) - only when linesPerPage is specified
+    if (options?.linesPerPage && options.linesPerPage > 0) {
       bytes.push(0x1B, 0x43, Math.min(127, options.linesPerPage));
     }
 
-    // Convert non-ASCII symbols (e.g. ₹ -> Rs.) and encode with CRLF line endings
-    const cleanText = rawText
-      .replace(/₹/g, "Rs.")
+    // Convert to CRLF line endings
+    cleanText = cleanText
+      .replace(/[^\x00-\x7F]/g, "")
       .replace(/\r\n/g, "\n")
       .replace(/\n/g, "\r\n");
+
+    // Strip trailing form feed if not explicitly requested
+    if (endOfJobAction !== "form_feed") {
+      cleanText = cleanText.replace(/\x0C+$/, "");
+    }
+
+    if (!cleanText.endsWith("\r\n")) {
+      cleanText += "\r\n";
+    }
 
     const encoded = encoder.encode(cleanText);
     for (let i = 0; i < encoded.length; i++) {
       bytes.push(encoded[i]);
     }
 
-    // 7. Ensure terminating Form Feed (\x0C)
-    if (bytes[bytes.length - 1] !== 0x0C && bytes[bytes.length - 2] !== 0x0C) {
-      bytes.push(0x0C);
+    // Cleanly cancel active modes without ejecting paper (safe reset)
+    if (options?.doubleStrikeCarbon) {
+      bytes.push(0x1B, 0x48); // Cancel double strike (ESC H)
     }
+    if (options?.columns === 132 || options?.cpi === "17cpi_condensed") {
+      bytes.push(0x12); // Cancel condensed mode (DC2)
+    }
+
+    // End-of-job paper handling:
+    if (endOfJobAction === "feed_tear_off" && feedLines > 0) {
+      for (let i = 0; i < feedLines; i++) {
+        bytes.push(0x0D, 0x0A);
+      }
+    } else if (endOfJobAction === "form_feed") {
+      if (bytes[bytes.length - 1] !== 0x0C) {
+        bytes.push(0x0C);
+      }
+    }
+    // "stop_immediately" (default) leaves print head exactly after the last character.
 
     return new Uint8Array(bytes);
   }
@@ -949,6 +1151,26 @@ export class DotMatrixRenderer {
           })
           .join("");
 
+        const isLastPage = pIdx === pages.length - 1;
+        let endBadgeHtml = "";
+        if (isLastPage) {
+          const action = options?.endOfJobAction || "stop_immediately";
+          const feedN = options?.feedLinesForTearOff || 0;
+          let endLabel = "End of print, no paper feed";
+          if (action === "form_feed") {
+            endLabel = "End of print, form feed to top of next page";
+          } else if (action === "feed_tear_off" && feedN > 0) {
+            endLabel = `End of print, feed ${feedN} line(s) for tear-off`;
+          }
+          endBadgeHtml = `
+            <div class="end-of-print-badge select-none">
+              <span class="badge-line"></span>
+              <span class="badge-text">${endLabel}</span>
+              <span class="badge-line"></span>
+            </div>
+          `;
+        }
+
         const pageBreakHtml =
           showPageBreaks && pIdx < pages.length - 1
             ? `<div class="page-break-badge select-none">
@@ -965,6 +1187,7 @@ export class DotMatrixRenderer {
               <div class="paper-body">
                 ${pIdx === 0 ? rulerHtml : ""}
                 ${renderedLines}
+                ${endBadgeHtml}
               </div>
               <div class="tractor-strip-right"></div>
             </div>
@@ -1103,9 +1326,28 @@ export class DotMatrixRenderer {
       letter-spacing: 1px;
     }
 
+    .end-of-print-badge {
+      display: flex;
+      align-items: center;
+      width: 100%;
+      margin: 16px 0 8px 0;
+      color: #64748b;
+      font-size: 11px;
+      font-weight: bold;
+    }
+    .end-of-print-badge .badge-line {
+      flex: 1;
+      border-bottom: 2px solid #cbd5e1;
+    }
+    .end-of-print-badge .badge-text {
+      padding: 0 12px;
+      letter-spacing: 0.5px;
+      color: #475569;
+    }
+
     @media print {
       body { background-color: white !important; padding: 0 !important; }
-      .ruler-container, .tractor-strip-left, .tractor-strip-right, .line-no, .page-break-badge { display: none !important; }
+      .ruler-container, .tractor-strip-left, .tractor-strip-right, .line-no, .page-break-badge, .end-of-print-badge { display: none !important; }
       .paper-card { box-shadow: none !important; border: none !important; background: transparent !important; page-break-after: always; }
       .paper-body { padding: 0 !important; min-width: auto !important; }
       .line-content { font-size: 10pt !important; line-height: 1.2 !important; color: black !important; }
