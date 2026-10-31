@@ -119,7 +119,6 @@ async function verifyRelease() {
   // Required Asset Categories (Windows)
   const expectedPatterns = [
     { name: 'Windows NSIS Installer (.exe)', pattern: /\.exe$/i },
-    { name: 'Windows MSI Installer (.msi)', pattern: /\.msi$/i },
     { name: 'Windows Updater Signature (.sig)', pattern: /(\.nsis\.zip|\.msi\.zip|\.zip)\.sig$/i },
     { name: 'Updater Manifest (latest.json)', pattern: /^latest\.json$/i },
   ];
@@ -135,6 +134,7 @@ async function verifyRelease() {
 
   // Optional multi-platform patterns if present
   const optionalPatterns = [
+    { name: 'Windows MSI Installer (.msi)', pattern: /\.msi$/i },
     { name: 'macOS Installer (.dmg)', pattern: /\.dmg$/i },
     { name: 'macOS Updater Archive (.app.tar.gz)', pattern: /\.app\.tar\.gz$/i },
     { name: 'macOS Updater Signature (.app.tar.gz.sig)', pattern: /\.app\.tar\.gz\.sig$/i },

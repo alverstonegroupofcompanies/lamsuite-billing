@@ -14,6 +14,9 @@ on:
 permissions:
   contents: read
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE20: true
+
 jobs:
   # ----------------------------------------------------------------------------
   # Job 1: Version Reconciliation & Release Security Gate
@@ -191,100 +194,14 @@ jobs:
           tagName: ${{ needs.validate-and-gate.outputs.version_tag }}
           releaseDraft: true
           prerelease: false
-          uploadUpdaterJson: true
           includeUpdaterJson: true
-          args: '--target x86_64-pc-windows-msvc'
 
   # ----------------------------------------------------------------------------
-  # Job 4: Isolated Legacy Windows 7/8.1 Build (windows-legacy-x64)
-  # ----------------------------------------------------------------------------
-  build-windows-legacy:
-    name: Build Windows Legacy (Win 7/8.1 x64)
-    needs: [validate-and-gate, create-release]
-    permissions:
-      contents: write
-    runs-on: windows-latest
-    steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js 22 LTS
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: 'npm'
-          cache-dependency-path: frontend/package-lock.json
-
-      - name: Install Pinned Rust 1.75.0 (Last Windows 7 Supported Toolchain)
-        uses: dtolnay/rust-toolchain@1.75.0
-        with:
-          targets: x86_64-pc-windows-msvc
-
-      - name: Cache Rust Build Artifacts
-        uses: swatinem/rust-cache@v2
-        with:
-          workspaces: frontend/src-tauri -> target
-          key: win7-legacy-toolchain
-
-      - name: Install Frontend Dependencies
-        working-directory: frontend
-        run: npm ci
-
-      - name: Build Web Assets
-        working-directory: frontend
-        env:
-          VITE_API_BASE_URL: https://api.lamstonehealthcare.com
-          VITE_ADMIN_PORTAL_URL: https://panel.lamstonehealthcare.com
-        run: npm run build
-
-      - name: Build Legacy Windows NSIS Bundle
-        working-directory: frontend
-        env:
-          TAURI_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY || secrets.TAURI_PRIVATE_KEY }}
-          TAURI_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD || secrets.TAURI_KEY_PASSWORD }}
-        run: |
-          npx tauri build --config src-tauri/tauri.legacy.conf.json --bundles nsis
-
-      - name: Package Legacy Windows Artifacts
-        shell: bash
-        run: |
-          mkdir -p dist-legacy
-          find frontend/src-tauri/target/release/bundle/nsis -type f -name "*.exe" -exec cp {} dist-legacy/LamSuite-Billing-windows-legacy-x64-setup.exe \;
-          # Generate checksum
-          sha256sum dist-legacy/LamSuite-Billing-windows-legacy-x64-setup.exe > dist-legacy/LamSuite-Billing-windows-legacy-x64-setup.exe.sha256
-
-      - name: Upload Legacy Assets to Draft Release
-        uses: actions/github-script@v7
-        env:
-          RELEASE_ID: ${{ needs.create-release.outputs.release_id }}
-        with:
-          script: |
-            const fs = require('fs');
-            const path = require('path');
-            const releaseId = process.env.RELEASE_ID;
-            const distDir = path.resolve('dist-legacy');
-            if (fs.existsSync(distDir)) {
-              const files = fs.readdirSync(distDir);
-              for (const file of files) {
-                const filePath = path.join(distDir, file);
-                const data = fs.readFileSync(filePath);
-                console.log(`Uploading legacy asset: ${file}`);
-                await github.rest.repos.uploadReleaseAsset({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  release_id: releaseId,
-                  name: file,
-                  data: data,
-                });
-              }
-            }
-
-  # ----------------------------------------------------------------------------
-  # Job 5: Publish Release & Reconcile Manifest
+  # Job 4: Publish Release & Reconcile Manifest
   # ----------------------------------------------------------------------------
   publish-release:
     name: Publish Release & Reconcile Manifest
-    needs: [validate-and-gate, create-release, build-and-release, build-windows-legacy]
+    needs: [validate-and-gate, create-release, build-and-release]
     permissions:
       contents: write
     runs-on: ubuntu-latest

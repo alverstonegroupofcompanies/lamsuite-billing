@@ -121,8 +121,8 @@ async function run() {
     const name = asset.name;
     const downloadUrl = asset.browser_download_url;
 
-    // Windows
-    if (name.endsWith('.nsis.zip') || (name.endsWith('.zip') && !name.endsWith('.app.tar.gz') && name.includes('setup'))) {
+    // Windows (NSIS or MSI update zip)
+    if (name.endsWith('.nsis.zip') || (name.endsWith('.zip') && !name.endsWith('.app.tar.gz') && !name.endsWith('.AppImage.tar.gz'))) {
       const sigAsset = assets.find(a => a.name === `${name}.sig`);
       if (sigAsset && (!manifest.platforms['windows-x86_64'] || !manifest.platforms['windows-x86_64'].signature)) {
         console.log(`Fetching signature for windows-x86_64 from ${sigAsset.name}...`);
