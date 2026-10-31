@@ -9,76 +9,95 @@ const fs = require('fs');
 const path = require('path');
 const { execFileSync } = require('child_process');
 
-const rawKey = process.env.RAW_KEY || '';
-const rawPassword = process.env.RAW_PASSWORD || '';
-const githubEnvPath = process.env.GITHUB_ENV;
+// Collect candidate keys from all possible secret names
+const rawKeyCandidates = [
+  process.env.TAURI_PRIVATE_KEY,
+  process.env.TAURI_SIGNING_PRIVATE_KEY,
+  process.env.RAW_KEY,
+].filter(Boolean).map(k => k.trim()).filter(Boolean);
 
-if (!rawKey.trim()) {
-  console.error('[FATAL] Neither TAURI_SIGNING_PRIVATE_KEY nor TAURI_PRIVATE_KEY is set in GitHub Secrets.');
+if (rawKeyCandidates.length === 0) {
+  console.error('[FATAL] Neither TAURI_PRIVATE_KEY nor TAURI_SIGNING_PRIVATE_KEY is set in GitHub Secrets.');
   process.exit(1);
 }
 
-// 1. Format the private key as Base64-encoded string
-let encodedKey = '';
-if (rawKey.includes('untrusted comment')) {
-  console.log('[INFO] Private key detected in raw plain-text format. Base64-encoding for Tauri CLI...');
-  encodedKey = Buffer.from(rawKey.trim(), 'utf8').toString('base64');
-} else {
-  // Strip any newlines or spaces that may have been introduced
-  encodedKey = rawKey.replace(/[\r\n\s]+/g, '');
-}
+// Collect candidate passwords
+const rawPasswordCandidates = [
+  process.env.TAURI_KEY_PASSWORD,
+  process.env.TAURI_SIGNING_PRIVATE_KEY_PASSWORD,
+  process.env.TAURI_PRIVATE_KEY_PASSWORD,
+  process.env.RAW_PASSWORD,
+].filter(Boolean);
 
-// Write the key to $HOME/.tauri/private.key
+const dummyFile = path.resolve('frontend', '.signing-probe.txt');
+fs.writeFileSync(dummyFile, 'tauri-signing-probe', 'utf8');
+
+const isWin = process.platform === 'win32';
+const tauriCli = isWin
+  ? path.resolve('frontend', 'node_modules', '.bin', 'tauri.cmd')
+  : path.resolve('frontend', 'node_modules', '.bin', 'tauri');
+
 const homeDir = process.env.USERPROFILE || process.env.HOME || '.';
 const tauriDir = path.join(homeDir, '.tauri');
 if (!fs.existsSync(tauriDir)) {
   fs.mkdirSync(tauriDir, { recursive: true });
 }
 const keyFilePath = path.join(tauriDir, 'private.key');
-fs.writeFileSync(keyFilePath, encodedKey, 'utf8');
 
-// 2. Test decrypting and signing a dummy file using tauri signer
-const dummyFile = path.join(process.cwd(), 'frontend', '.signing-probe.txt');
-fs.writeFileSync(dummyFile, 'tauri-signing-probe', 'utf8');
+let verifiedKey = null;
+let verifiedPassword = null;
+let winningPasswordLabel = null;
 
-// Candidate passwords to test:
-// a) Raw password as passed
-// b) Trimmed password (strip surrounding spaces and whitespace)
-// c) Surrounding quotes stripped (in case user entered "mypassword" in secrets)
-// d) Empty password (in case key was generated with empty password)
-const candidates = [];
+// Unique candidate keys
+const uniqueKeys = [...new Set(rawKeyCandidates)];
 
-if (rawPassword) {
-  candidates.push({ label: 'raw secret password', val: rawPassword });
-  const trimmed = rawPassword.trim();
-  if (trimmed !== rawPassword) {
-    candidates.push({ label: 'whitespace-trimmed secret password', val: trimmed });
+for (const rawKey of uniqueKeys) {
+  let encodedKey = '';
+  if (rawKey.includes('untrusted comment')) {
+    encodedKey = Buffer.from(rawKey.trim(), 'utf8').toString('base64');
+  } else {
+    encodedKey = rawKey.replace(/[\r\n\s]+/g, '');
   }
-  const unquoted = trimmed.replace(/^["']|["']$/g, '');
-  if (unquoted !== trimmed && unquoted !== rawPassword) {
-    candidates.push({ label: 'unquoted secret password', val: unquoted });
+
+  fs.writeFileSync(keyFilePath, encodedKey, 'utf8');
+
+  // Candidate passwords for this key
+  const passCandidates = [];
+  for (const pw of rawPasswordCandidates) {
+    passCandidates.push({ label: 'configured secret password', val: pw });
+    const trimmed = pw.trim();
+    if (trimmed !== pw) {
+      passCandidates.push({ label: 'whitespace-trimmed secret password', val: trimmed });
+    }
+    const unquoted = trimmed.replace(/^["']|["']$/g, '');
+    if (unquoted !== trimmed && unquoted !== pw) {
+      passCandidates.push({ label: 'unquoted secret password', val: unquoted });
+    }
   }
-}
-// Always test empty password as a fallback
-candidates.push({ label: 'empty password (unencrypted key)', val: '' });
+  // Always test empty password as fallback (for unencrypted keys)
+  passCandidates.push({ label: 'empty password (unencrypted key)', val: '' });
 
-let successfulPassword = null;
-let winningLabel = null;
-
-const tauriCli = path.join(process.cwd(), 'frontend', 'node_modules', '.bin', process.platform === 'win32' ? 'tauri.cmd' : 'tauri');
-
-for (const candidate of candidates) {
-  try {
-    execFileSync(tauriCli, ['signer', 'sign', '-f', keyFilePath, '-p', candidate.val, dummyFile], {
-      cwd: path.join(process.cwd(), 'frontend'),
-      stdio: 'pipe',
-    });
-    successfulPassword = candidate.val;
-    winningLabel = candidate.label;
-    break;
-  } catch (err) {
-    // continue trying candidates
+  for (const cand of passCandidates) {
+    try {
+      execFileSync(tauriCli, ['signer', 'sign', '-f', keyFilePath, '-p', cand.val, dummyFile], {
+        cwd: path.resolve('frontend'),
+        stdio: 'pipe',
+        shell: isWin,
+      });
+      verifiedKey = encodedKey;
+      verifiedPassword = cand.val;
+      winningPasswordLabel = cand.label;
+      break;
+    } catch (err) {
+      const errOut = (err.stderr ? err.stderr.toString() : '') + (err.stdout ? err.stdout.toString() : '') + err.message;
+      // If it's a tool execution error (e.g. tauri not found), report it
+      if (err.code === 'ENOENT' || (!errOut.includes('Wrong password') && !errOut.includes('incorrect updater private key'))) {
+        console.warn(`[WARN] Probe execution note: ${errOut.trim()}`);
+      }
+    }
   }
+
+  if (verifiedKey) break;
 }
 
 // Clean up probe files
@@ -88,27 +107,24 @@ try {
   if (fs.existsSync(sigFile)) fs.unlinkSync(sigFile);
 } catch {}
 
-if (successfulPassword === null) {
+if (!verifiedKey) {
   console.error('\n================================================================================');
   console.error('[FATAL] MINISIGN PRIVATE KEY DECRYPTION FAILED!');
-  console.error('The private key in TAURI_PRIVATE_KEY / TAURI_SIGNING_PRIVATE_KEY could not');
-  console.error('be unlocked with the password in TAURI_KEY_PASSWORD / TAURI_SIGNING_PRIVATE_KEY_PASSWORD.');
-  console.error('Tested variations:');
-  candidates.forEach(c => console.error(`  - ${c.label}`));
+  console.error('The private key in GitHub Secrets could not be unlocked.');
   console.error('');
   console.error('Action Required:');
   console.error('1. Check the GitHub repository Secrets (Settings > Secrets and variables > Actions).');
-  console.error('2. Ensure `TAURI_KEY_PASSWORD` matches the passphrase used when the Minisign keypair was generated.');
-  console.error('3. If you forgot the password, generate a new keypair locally using:');
-  console.error('     npm run tauri signer generate -w ~/.tauri/lamsuite.key');
-  console.error('   and update `pubkey` in `tauri.conf.json` as well as `TAURI_PRIVATE_KEY` and `TAURI_KEY_PASSWORD` in GitHub Secrets.');
+  console.error('2. Ensure `TAURI_PRIVATE_KEY` contains the Base64-encoded private key.');
+  console.error('3. If the key is unencrypted, leave `TAURI_KEY_PASSWORD` blank or delete it.');
+  console.error('4. If the key has a password, ensure `TAURI_KEY_PASSWORD` matches the passphrase.');
   console.error('================================================================================\n');
   process.exit(1);
 }
 
-console.log(`[SUCCESS] Private key verified and unlocked successfully using: ${winningLabel}`);
+console.log(`[SUCCESS] Private key verified and unlocked successfully using: ${winningPasswordLabel}`);
 
 // Export to GITHUB_ENV if running in GitHub Actions
+const githubEnvPath = process.env.GITHUB_ENV;
 if (githubEnvPath && fs.existsSync(githubEnvPath)) {
   let winKeyPath = keyFilePath;
   try {
@@ -116,7 +132,7 @@ if (githubEnvPath && fs.existsSync(githubEnvPath)) {
   } catch {}
 
   const delim = 'ENV_DELIM_' + Math.random().toString(36).substring(2);
-  fs.appendFileSync(githubEnvPath, `TAURI_SIGNING_KEY_STRING=${encodedKey}\n`);
+  fs.appendFileSync(githubEnvPath, `TAURI_SIGNING_KEY_STRING=${verifiedKey}\n`);
   fs.appendFileSync(githubEnvPath, `TAURI_KEY_PATH=${winKeyPath}\n`);
-  fs.appendFileSync(githubEnvPath, `TAURI_VERIFIED_KEY_PASSWORD<<${delim}\n${successfulPassword}\n${delim}\n`);
+  fs.appendFileSync(githubEnvPath, `TAURI_VERIFIED_KEY_PASSWORD<<${delim}\n${verifiedPassword}\n${delim}\n`);
 }
