@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 /**
- * Validates that a GitHub release contains all expected multi-platform installers,
+ * Validates that a GitHub release contains all expected installers,
  * updater signature files (.sig), and a valid updater manifest (latest.json).
  * Checks that each platform defined in latest.json resolves with a valid URL and signature.
  */
@@ -27,16 +27,20 @@ function requestJson(url, options = {}) {
   return new Promise((resolve, reject) => {
     const parsed = new URL(url);
     const client = parsed.protocol === 'https:' ? https : http;
+    const isApiGithub = parsed.hostname === 'api.github.com';
+
+    const headers = {
+      'User-Agent': 'LamSuite-Release-Verifier',
+      Accept: options.accept || 'application/vnd.github.v3+json',
+      ...(GITHUB_TOKEN && isApiGithub ? { Authorization: `Bearer ${GITHUB_TOKEN}` } : {}),
+      ...options.headers,
+    };
+
     const req = client.request(parsed, {
       method: 'GET',
-      headers: {
-        'User-Agent': 'LamSuite-Release-Verifier',
-        Accept: 'application/vnd.github.v3+json',
-        ...(GITHUB_TOKEN ? { Authorization: `Bearer ${GITHUB_TOKEN}` } : {}),
-        ...options.headers,
-      },
+      headers,
     }, (res) => {
-      // Handle redirects
+      // Handle redirects without leaking Authorization to S3
       if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
         return resolve(requestJson(res.headers.location, options));
       }
@@ -58,22 +62,38 @@ function requestJson(url, options = {}) {
   });
 }
 
-function checkUrlResolves(url) {
+function checkUrlResolves(url, assets = []) {
   return new Promise((resolve) => {
     try {
       const parsed = new URL(url);
+
+      // In private repositories, github.com/.../releases/download/... cannot be resolved anonymously.
+      // Confirm that the target asset exists in the release assets list with size > 0.
+      if (parsed.hostname === 'github.com' && parsed.pathname.includes('/releases/download/')) {
+        const filename = decodeURIComponent(parsed.pathname.split('/').pop());
+        const matchingAsset = assets.find(a => a.name === filename);
+        if (matchingAsset && matchingAsset.size > 0) {
+          return resolve({
+            ok: true,
+            statusCode: 200,
+            url,
+            verifiedVia: 'release.assets',
+            size: matchingAsset.size,
+          });
+        }
+      }
+
       const client = parsed.protocol === 'https:' ? https : http;
+      const isApiGithub = parsed.hostname === 'api.github.com';
       const req = client.request(parsed, {
         method: 'HEAD',
         headers: {
           'User-Agent': 'LamSuite-Release-Verifier',
-          ...(GITHUB_TOKEN && parsed.hostname.includes('github.com')
-            ? { Authorization: `Bearer ${GITHUB_TOKEN}` }
-            : {}),
+          ...(GITHUB_TOKEN && isApiGithub ? { Authorization: `Bearer ${GITHUB_TOKEN}` } : {}),
         },
       }, (res) => {
         if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-          return resolve(checkUrlResolves(res.headers.location));
+          return resolve(checkUrlResolves(res.headers.location, assets));
         }
         resolve({
           ok: res.statusCode >= 200 && res.statusCode < 400,
@@ -111,7 +131,7 @@ async function verifyRelease() {
   const assets = release.assets || [];
   const assetNames = assets.map(a => a.name);
   console.log(`Found ${assets.length} assets attached to release:`);
-  assetNames.forEach(name => console.log(`  - ${name}`));
+  assets.forEach(a => console.log(`  - ${a.name} (${(a.size / 1024).toFixed(1)} KB)`));
   console.log('');
 
   const errors = [];
@@ -157,10 +177,12 @@ async function verifyRelease() {
   if (!latestJsonAsset) {
     errors.push('CRITICAL: latest.json is missing from release assets.');
   } else {
-    console.log(`\nInspecting latest.json from: ${latestJsonAsset.browser_download_url}`);
+    console.log(`\nInspecting latest.json via GitHub API asset ID: ${latestJsonAsset.id}`);
     try {
-      const manifest = await requestJson(latestJsonAsset.browser_download_url);
-      console.log('Manifest content:', JSON.stringify(manifest, null, 2));
+      // Use the API asset endpoint with octet-stream to fetch from private release
+      const manifestUrl = `https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/assets/${latestJsonAsset.id}`;
+      const manifest = await requestJson(manifestUrl, { accept: 'application/octet-stream' });
+      console.log('Manifest content:\n', JSON.stringify(manifest, null, 2));
 
       if (!manifest.platforms || typeof manifest.platforms !== 'object') {
         errors.push('latest.json is missing a valid "platforms" object.');
@@ -186,11 +208,12 @@ async function verifyRelease() {
             errors.push(`Platform ${plat} in latest.json is missing a valid download URL.`);
           } else {
             console.log(`Checking resolution for ${plat} download URL: ${platData.url}`);
-            const check = await checkUrlResolves(platData.url);
+            const check = await checkUrlResolves(platData.url, assets);
             if (!check.ok) {
               errors.push(`Platform ${plat} download URL failed to resolve (${check.statusCode || check.error}): ${platData.url}`);
             } else {
-              console.log(`[PASS] URL resolves with status ${check.statusCode}`);
+              const note = check.verifiedVia ? ` (verified in ${check.verifiedVia}, size: ${check.size} bytes)` : ` (${check.statusCode})`;
+              console.log(`[PASS] URL resolves successfully${note}`);
             }
           }
         }
@@ -200,7 +223,7 @@ async function verifyRelease() {
           if (!requiredPlatforms.includes(plat)) {
             console.log(`[INFO] Validating additional platform in latest.json: ${plat}`);
             if (platData && platData.signature && platData.url) {
-              const check = await checkUrlResolves(platData.url);
+              const check = await checkUrlResolves(platData.url, assets);
               if (check.ok) {
                 console.log(`[PASS] Platform ${plat} resolves correctly.`);
               } else {
