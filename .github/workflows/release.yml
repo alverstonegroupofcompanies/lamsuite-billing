@@ -179,29 +179,43 @@ jobs:
           VITE_ADMIN_PORTAL_URL: https://panel.lamstonehealthcare.com
         run: npm run build
 
-      - name: Write Tauri Signing Key to File
+      - name: Prepare Tauri Signing Key
         shell: bash
         env:
-          KEY_DATA: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY || secrets.TAURI_PRIVATE_KEY }}
+          RAW_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY || secrets.TAURI_PRIVATE_KEY }}
         run: |
           mkdir -p "$HOME/.tauri"
           KEY_FILE="$HOME/.tauri/private.key"
-          printf '%s\n' "$KEY_DATA" > "$KEY_FILE"
+
+          # If the secret starts with "untrusted comment", it is raw plain text and must be Base64-encoded for Tauri
+          if echo "$RAW_KEY" | grep -q "untrusted comment"; then
+            echo "Private key detected in raw plain-text format. Base64-encoding for Tauri CLI..."
+            ENCODED_KEY=$(printf '%s\n' "$RAW_KEY" | base64 | tr -d '\r\n')
+          else
+            echo "Private key is already Base64-encoded."
+            ENCODED_KEY=$(printf '%s\n' "$RAW_KEY" | tr -d '\r\n')
+          fi
+
+          # Also write to file on disk
+          printf '%s' "$ENCODED_KEY" > "$KEY_FILE"
           if command -v cygpath >/dev/null 2>&1; then
             WIN_KEY_PATH=$(cygpath -w "$KEY_FILE")
           else
             WIN_KEY_PATH="$KEY_FILE"
           fi
+
           echo "TAURI_KEY_PATH=$WIN_KEY_PATH" >> "$GITHUB_ENV"
-          echo "Tauri signing key written to $WIN_KEY_PATH"
+          echo "TAURI_SIGNING_KEY_STRING=$ENCODED_KEY" >> "$GITHUB_ENV"
+          echo "Tauri private signing key prepared successfully."
 
       - name: Build & Package Tauri Application
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAURI_PRIVATE_KEY: ${{ env.TAURI_KEY_PATH }}
+          TAURI_PRIVATE_KEY: ${{ env.TAURI_SIGNING_KEY_STRING }}
           TAURI_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD || secrets.TAURI_KEY_PASSWORD }}
-          TAURI_SIGNING_PRIVATE_KEY: ${{ env.TAURI_KEY_PATH }}
+          TAURI_KEY_PATH: ${{ env.TAURI_KEY_PATH }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ env.TAURI_SIGNING_KEY_STRING }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD || secrets.TAURI_KEY_PASSWORD }}
         with:
           projectPath: ./frontend
