@@ -1,0 +1,24 @@
+{
+  "package": {
+    "productName": "LamSuite Billing Legacy",
+    "version": "2.0.11"
+  },
+  "tauri": {
+    "bundle": {
+      "targets": ["nsis"],
+      "windows": {
+        "webviewInstallMode": {
+          "type": "downloadBootstrapper"
+        }
+      }
+    },
+    "updater": {
+      "active": true,
+      "dialog": false,
+      "endpoints": [
+        "https://updates.lamstonehealthcare.com/latest-legacy-win7.json"
+      ],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDNENjMxNTJBOENCRjQ3NkMKUldSc1I3K01LaFZqUFhkcUJJWDQwZmdINVphR0VIQ2dKWjltR0NjSWUxeFJpRkpzaDV4RUVMUGEK"
+    }
+  }
+}

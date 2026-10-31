@@ -19,6 +19,21 @@ export const KeyboardShortcutsModal: React.FC<KeyboardShortcutsModalProps> = ({ 
 
   const shortcutGroups: ShortcutGroup[] = [
     {
+      category: "Purchase Inward & Goods Receipt",
+      shortcuts: [
+        { key: "Alt+S / B / D / T", description: "Jump to Supplier / Bill No / Date / Purchase Type" },
+        { key: "F1 or /", description: "Jump to Product Entry Row (permanent + row)" },
+        { key: "MMYY / MM/YY", description: "Expiry date mask with auto-validation" },
+        { key: "2+5 or 10+2", description: "Quantity shorthand (Pack + Loose or Pack + Free)" },
+        { key: "Ctrl+N", description: "Quick Add New Product inline in popover" },
+        { key: "Ctrl+Shift+N", description: "Start a New Purchase Bill" },
+        { key: "Alt+F / Alt+I / Alt+R", description: "Freight / Supplier Bill Total / Round-Off" },
+        { key: "F6 / F8 / F9", description: "Find Bill / Save Draft / Recall Draft" },
+        { key: "Ctrl+Shift+C", description: "Configure Inward Grid Columns & Presets" },
+        { key: "F12 / Shift+F12", description: "Post Purchase Bill / Post & Print Labels" },
+      ],
+    },
+    {
       category: "POS Counter & Billing",
       shortcuts: [
         { key: "F1 or /", description: "Focus Product Entry Row / Barcode" },

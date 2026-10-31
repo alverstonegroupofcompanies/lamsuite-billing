@@ -1,0 +1,457 @@
+name: Release Auto-Updatable Multi-Platform App
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'Release Tag (e.g. v2.0.11)'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  # ----------------------------------------------------------------------------
+  # Job 1: Version Reconciliation & Release Security Gate
+  # ----------------------------------------------------------------------------
+  validate-and-gate:
+    name: Validate Versions & Security Gate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.version-check.outputs.version }}
+      version_tag: ${{ steps.version-check.outputs.version_tag }}
+      release_notes: ${{ steps.notes.outputs.notes }}
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js 22 LTS
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Run Version Integrity Check
+        id: version-check
+        run: |
+          TAG="${{ github.event.inputs.tag_name || github.ref_name }}"
+          echo "Checking version synchronization against tag: $TAG"
+          node scripts/check-release-versions.cjs "$TAG"
+          
+          # Extract normalized version
+          PKG_VER=$(node -p "require('./frontend/package.json').version")
+          echo "version=$PKG_VER" >> $GITHUB_OUTPUT
+          echo "version_tag=v$PKG_VER" >> $GITHUB_OUTPUT
+
+      - name: Install Frontend Dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Run Release Security Gate
+        working-directory: frontend
+        run: npm run check:security
+
+      - name: Extract Release Notes
+        id: notes
+        shell: bash
+        run: |
+          TAG="${{ github.event.inputs.tag_name || github.ref_name }}"
+          PREV_TAG=$(git describe --tags --abbrev=0 "$TAG^" 2>/dev/null || echo "")
+          if [ -n "$PREV_TAG" ]; then
+            echo "Generating release notes from $PREV_TAG to $TAG"
+            NOTES=$(git log "$PREV_TAG..$TAG" --oneline --no-merges)
+          else
+            echo "Initial release tag; logging recent commits"
+            NOTES=$(git log -n 10 --oneline --no-merges)
+          fi
+          
+          # Encode multiline notes for GITHUB_OUTPUT
+          {
+            echo "notes<<EOF"
+            echo "## LamSuite Billing Desktop Release $TAG"
+            echo ""
+            echo "### What's Changed"
+            echo "$NOTES"
+            echo ""
+            echo "### Platforms Included"
+            echo "- **Windows**: NSIS Setup (.exe), WiX Installer (.msi), Minisign signature (.sig)"
+            echo "- **macOS**: Apple Silicon (.dmg, .app.tar.gz), Intel (.dmg, .app.tar.gz), .sig"
+            echo "- **Linux**: AppImage (.AppImage), Debian (.deb), RedHat (.rpm), .sig"
+            echo "- **Windows Legacy (7/8.1)**: Standalone installer (frozen WebView2 109 runtime)"
+            echo "- **Updater**: Manifest latest.json with cross-platform signatures"
+            echo "EOF"
+          } >> $GITHUB_OUTPUT
+
+  # ----------------------------------------------------------------------------
+  # Job 2: Create Single Draft Release
+  # ----------------------------------------------------------------------------
+  create-release:
+    name: Create Draft GitHub Release
+    needs: validate-and-gate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      release_id: ${{ steps.create.outputs.result }}
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Create Draft Release via GitHub API
+        id: create
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const tagName = '${{ needs.validate-and-gate.outputs.version_tag }}';
+            const releaseNotes = `${{ needs.validate-and-gate.outputs.release_notes }}`;
+            
+            // Check if release already exists for this tag
+            try {
+              const existing = await github.rest.repos.getReleaseByTag({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                tag: tagName,
+              });
+              console.log(`Found existing release ID ${existing.data.id} for tag ${tagName}`);
+              return existing.data.id;
+            } catch (e) {
+              console.log(`Creating new draft release for ${tagName}...`);
+            }
+
+            const { data } = await github.rest.repos.createRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              tag_name: tagName,
+              name: `LamSuite Billing ${tagName}`,
+              body: releaseNotes,
+              draft: true,
+              prerelease: false,
+            });
+            return data.id;
+
+  # ----------------------------------------------------------------------------
+  # Job 3: Parallel Multi-Platform Build & Sign (build-and-release)
+  # ----------------------------------------------------------------------------
+  build-and-release:
+    name: Build Tauri (${{ matrix.platform.name }})
+    needs: [validate-and-gate, create-release]
+    permissions:
+      contents: write
+    runs-on: ${{ matrix.platform.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - name: 'Windows x64'
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+            args: '--target x86_64-pc-windows-msvc'
+          - name: 'macOS Apple Silicon'
+            os: macos-latest
+            target: aarch64-apple-darwin
+            args: '--target aarch64-apple-darwin'
+          - name: 'macOS Intel'
+            os: macos-latest
+            target: x86_64-apple-darwin
+            args: '--target x86_64-apple-darwin'
+          - name: 'Linux x64'
+            os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            args: '--target x86_64-unknown-linux-gnu'
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22 LTS
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install Rust Stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.platform.target }}
+
+      - name: Cache Rust Build Artifacts
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: frontend/src-tauri -> target
+
+      - name: Install Linux Dependencies (Ubuntu 22.04)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential \
+            curl \
+            wget \
+            file \
+            libssl-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libwebkit2gtk-4.0-dev \
+            patchelf \
+            rpm
+
+      - name: Install Frontend Dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Build Web Assets
+        working-directory: frontend
+        env:
+          VITE_API_BASE_URL: https://api.lamstonehealthcare.com
+          VITE_ADMIN_PORTAL_URL: https://panel.lamstonehealthcare.com
+        run: npm run build
+
+      - name: Build & Package Tauri Application
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Expose both Tauri 1 and Tauri 2 key names for full secret interoperability
+          TAURI_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY || secrets.TAURI_PRIVATE_KEY }}
+          TAURI_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD || secrets.TAURI_KEY_PASSWORD }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY || secrets.TAURI_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD || secrets.TAURI_KEY_PASSWORD }}
+          # Optional Apple Code Signing & Notarization secrets
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        with:
+          projectPath: ./frontend
+          releaseId: ${{ needs.create-release.outputs.release_id }}
+          tagName: ${{ needs.validate-and-gate.outputs.version_tag }}
+          releaseDraft: true
+          prerelease: false
+          uploadUpdaterJson: true
+          includeUpdaterJson: true
+          args: ${{ matrix.platform.args }}
+
+  # ----------------------------------------------------------------------------
+  # Job 4: Isolated Legacy Windows 7/8.1 Build (windows-legacy-x64)
+  # ----------------------------------------------------------------------------
+  build-windows-legacy:
+    name: Build Windows Legacy (Win 7/8.1 x64)
+    needs: [validate-and-gate, create-release]
+    permissions:
+      contents: write
+    runs-on: windows-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22 LTS
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install Pinned Rust 1.75.0 (Last Windows 7 Supported Toolchain)
+        uses: dtolnay/rust-toolchain@1.75.0
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Cache Rust Build Artifacts
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: frontend/src-tauri -> target
+          key: win7-legacy-toolchain
+
+      - name: Install Frontend Dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Build Web Assets
+        working-directory: frontend
+        env:
+          VITE_API_BASE_URL: https://api.lamstonehealthcare.com
+          VITE_ADMIN_PORTAL_URL: https://panel.lamstonehealthcare.com
+        run: npm run build
+
+      - name: Build Legacy Windows NSIS Bundle
+        working-directory: frontend
+        env:
+          TAURI_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY || secrets.TAURI_PRIVATE_KEY }}
+          TAURI_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD || secrets.TAURI_KEY_PASSWORD }}
+        run: |
+          npx tauri build --config src-tauri/tauri.legacy.conf.json --bundles nsis
+
+      - name: Package Legacy Windows Artifacts
+        shell: bash
+        run: |
+          mkdir -p dist-legacy
+          find frontend/src-tauri/target/release/bundle/nsis -type f -name "*.exe" -exec cp {} dist-legacy/LamSuite-Billing-windows-legacy-x64-setup.exe \;
+          # Generate checksum
+          sha256sum dist-legacy/LamSuite-Billing-windows-legacy-x64-setup.exe > dist-legacy/LamSuite-Billing-windows-legacy-x64-setup.exe.sha256
+
+      - name: Upload Legacy Assets to Draft Release
+        uses: actions/github-script@v7
+        env:
+          RELEASE_ID: ${{ needs.create-release.outputs.release_id }}
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+            const releaseId = process.env.RELEASE_ID;
+            const distDir = path.resolve('dist-legacy');
+            if (fs.existsSync(distDir)) {
+              const files = fs.readdirSync(distDir);
+              for (const file of files) {
+                const filePath = path.join(distDir, file);
+                const data = fs.readFileSync(filePath);
+                console.log(`Uploading legacy asset: ${file}`);
+                await github.rest.repos.uploadReleaseAsset({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  release_id: releaseId,
+                  name: file,
+                  data: data,
+                });
+              }
+            }
+
+  # ----------------------------------------------------------------------------
+  # Job 5: Publish Release & Reconcile Manifest
+  # ----------------------------------------------------------------------------
+  publish-release:
+    name: Publish Release & Reconcile Manifest
+    needs: [validate-and-gate, create-release, build-and-release, build-windows-legacy]
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22 LTS
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Reconcile and Verify latest.json Manifest
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          RELEASE_ID: ${{ needs.create-release.outputs.release_id }}
+          RELEASE_TAG: ${{ needs.validate-and-gate.outputs.version_tag }}
+        run: |
+          node scripts/reconcile-latest-json.cjs
+
+      - name: Publish Release (Undraft)
+        uses: actions/github-script@v7
+        env:
+          RELEASE_ID: ${{ needs.create-release.outputs.release_id }}
+        with:
+          script: |
+            const releaseId = process.env.RELEASE_ID;
+            console.log(`Publishing release ID: ${releaseId}`);
+            await github.rest.repos.updateRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              release_id: releaseId,
+              draft: false,
+            });
+            console.log('GitHub Release published successfully.');
+
+  # ----------------------------------------------------------------------------
+  # Job 6: Verification Gate Check
+  # ----------------------------------------------------------------------------
+  verify-release:
+    name: Verify Release Assets & Updater Signatures
+    needs: [validate-and-gate, publish-release]
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22 LTS
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Verify All Installers, Signatures, and Manifest
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          RELEASE_TAG: ${{ needs.validate-and-gate.outputs.version_tag }}
+        run: |
+          node scripts/verify-release-assets.cjs "${RELEASE_TAG}"
+
+  # ----------------------------------------------------------------------------
+  # Job 7: Deploy Updater Assets to Private Hosting Server (Key-based SSH)
+  # ----------------------------------------------------------------------------
+  deploy-updater:
+    name: Deploy to Updates Server
+    needs: [validate-and-gate, publish-release]
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    if: secrets.SSH_HOST != '' && (secrets.SSH_PRIVATE_KEY != '' || secrets.SSH_KEY != '')
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22 LTS
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Download Updater Assets from Published Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          RELEASE_TAG: ${{ needs.validate-and-gate.outputs.version_tag }}
+        run: |
+          mkdir -p updates-dist
+          node -e "
+            const { execSync } = require('child_process');
+            const res = JSON.parse(execSync('curl -s -H \"Authorization: Bearer ' + process.env.GITHUB_TOKEN + '\" https://api.github.com/repos/' + process.env.GITHUB_REPOSITORY + '/releases/tags/' + process.env.RELEASE_TAG).toString());
+            for (const asset of res.assets || []) {
+              if (asset.name.endsWith('.sig') || asset.name.endsWith('.zip') || asset.name.endsWith('.tar.gz') || asset.name.endsWith('.json')) {
+                console.log('Fetching updater asset: ' + asset.name);
+                execSync('curl -sL -H \"Authorization: Bearer ' + process.env.GITHUB_TOKEN + '\" -H \"Accept: application/octet-stream\" ' + asset.url + ' -o updates-dist/' + asset.name);
+              }
+            }
+          "
+
+      - name: Upload Updater Artifacts via Key-Based SCP
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER || 'deploy' }}
+          key: ${{ secrets.SSH_PRIVATE_KEY || secrets.SSH_KEY }}
+          passphrase: ${{ secrets.SSH_PASSPHRASE }}
+          source: 'updates-dist/*'
+          target: '/opt/lamsuite/updates/'
+          strip_components: 1
+
+      - name: Re-index & Ensure Read Permissions on Server
+        uses: appleboy/ssh-action@v1.2.1
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER || 'deploy' }}
+          key: ${{ secrets.SSH_PRIVATE_KEY || secrets.SSH_KEY }}
+          passphrase: ${{ secrets.SSH_PASSPHRASE }}
+          script: |
+            set -euo pipefail
+            if [ -d /opt/lamsuite/updates ]; then
+              sudo chmod -R 755 /opt/lamsuite/updates || true
+              echo 'Updater files successfully synced and permissions verified.'
+            fi

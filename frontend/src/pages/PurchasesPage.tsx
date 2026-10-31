@@ -64,6 +64,7 @@ export const PurchasesPage: React.FC = () => {
 
   // Detail Drawer & Entry Form
   const [isEntryFormOpen, setIsEntryFormOpen] = useState(false);
+  const [editingPurchaseId, setEditingPurchaseId] = useState<string | null>(null);
   const [selectedPurchaseId, setSelectedPurchaseId] = useState<string | null>(null);
   const [poToConvert, setPoToConvert] = useState<any | null>(null);
 
@@ -512,6 +513,16 @@ export const PurchasesPage: React.FC = () => {
                               <Eye className="h-4 w-4" />
                             </button>
                             <button
+                              onClick={() => {
+                                setEditingPurchaseId(p.id);
+                                setIsEntryFormOpen(true);
+                              }}
+                              className="p-1 text-[var(--color-text-muted)] hover:text-[var(--color-accent)] rounded-[6px] hover:bg-[var(--color-accent-soft)] transition-colors cursor-pointer"
+                              title="Edit / Revise purchase bill"
+                            >
+                              <SlidersHorizontal className="h-4 w-4" />
+                            </button>
+                            <button
                               onClick={() => navigate(`/returns/purchases?purchaseId=${p.id}`)}
                               className="p-1 text-[var(--color-warning-text)] hover:text-[var(--color-text)] rounded-[6px] hover:bg-[var(--color-warning-bg)] transition-colors cursor-pointer"
                               title="Return items / Debit Note"
@@ -812,13 +823,16 @@ export const PurchasesPage: React.FC = () => {
         <PurchaseEntryForm
           onClose={() => {
             setIsEntryFormOpen(false);
+            setEditingPurchaseId(null);
             setPoToConvert(null);
           }}
           onSuccess={() => {
             loadAllData();
-            showNotification("Purchase bill recorded successfully!");
+            showNotification(editingPurchaseId ? "Purchase bill revised successfully!" : "Purchase bill recorded successfully!");
+            setEditingPurchaseId(null);
           }}
           initialPoData={poToConvert}
+          editPurchaseId={editingPurchaseId}
         />
       )}
 

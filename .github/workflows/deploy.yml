@@ -179,7 +179,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Deploy via SSH
-        uses: appleboy/ssh-action@v1.0.3
+        uses: appleboy/ssh-action@v1.2.1
         env:
           COMMIT_SHA: ${{ github.sha }}
           IMAGE_BACKEND: ghcr.io/${{ github.repository_owner }}/lamsuite-backend
@@ -189,6 +189,8 @@ jobs:
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER || 'deploy' }}
+          key: ${{ secrets.SSH_PRIVATE_KEY || secrets.SSH_KEY }}
+          passphrase: ${{ secrets.SSH_PASSPHRASE }}
           password: ${{ secrets.SSH_PASSWORD }}
           envs: COMMIT_SHA,IMAGE_BACKEND,IMAGE_PANEL,IMAGE_MCP,IMAGE_WEB
           script: |

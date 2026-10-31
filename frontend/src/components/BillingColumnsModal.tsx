@@ -20,6 +20,8 @@ import {
   type BillingScreenPreset,
   DEFAULT_COLUMNS,
   DEFAULT_HEADER_FIELDS,
+  DEFAULT_PURCHASE_COLUMNS,
+  DEFAULT_PURCHASE_HEADER_FIELDS,
 } from "../lib/settings/companySettingsService";
 import { useModalEscape } from "../lib/ui/modalEscapeManager";
 
@@ -27,20 +29,23 @@ interface BillingColumnsModalProps {
   isOpen: boolean;
   onClose: () => void;
   onLayoutChange?: (columns: ColumnSetting[], headerFields: HeaderFieldSetting[]) => void;
+  target?: "pos" | "purchase";
 }
 
 export const BillingColumnsModal: React.FC<BillingColumnsModalProps> = ({
   isOpen,
   onClose,
   onLayoutChange,
+  target = "pos",
 }) => {
   useModalEscape(isOpen, onClose);
 
+  const isPurchase = target === "purchase";
   const [activeTab, setActiveTab] = useState<"columns" | "header" | "presets">("columns");
   const [columns, setColumns] = useState<ColumnSetting[]>([]);
   const [headerFields, setHeaderFields] = useState<HeaderFieldSetting[]>([]);
   const [presets, setPresets] = useState<BillingScreenPreset[]>([]);
-  const [activePresetId, setActivePresetId] = useState<string>("pharmacy");
+  const [activePresetId, setActivePresetId] = useState<string>(isPurchase ? "pharmacy_inward" : "pharmacy");
   const [newPresetName, setNewPresetName] = useState("");
   const [newPresetDesc, setNewPresetDesc] = useState("");
   const [isSavingPreset, setIsSavingPreset] = useState(false);
@@ -51,18 +56,30 @@ export const BillingColumnsModal: React.FC<BillingColumnsModalProps> = ({
     if (isOpen) {
       loadCurrentLayout();
     }
-  }, [isOpen]);
+  }, [isOpen, target]);
 
   const loadCurrentLayout = () => {
-    const cols = companySettingsService.getBillingColumns();
-    const headers = companySettingsService.getHeaderFields();
-    const allPresets = companySettingsService.getBillingPresets();
-    const settings = companySettingsService.getSettings();
+    if (isPurchase) {
+      const cols = companySettingsService.getPurchaseColumns();
+      const headers = companySettingsService.getPurchaseHeaderFields();
+      const allPresets = companySettingsService.getPurchasePresets();
+      const settings = companySettingsService.getSettings();
 
-    setColumns([...cols]);
-    setHeaderFields([...headers]);
-    setPresets(allPresets);
-    setActivePresetId(settings.active_billing_preset || "pharmacy");
+      setColumns([...cols]);
+      setHeaderFields([...headers]);
+      setPresets(allPresets);
+      setActivePresetId(settings.active_purchase_preset || "pharmacy_inward");
+    } else {
+      const cols = companySettingsService.getBillingColumns();
+      const headers = companySettingsService.getHeaderFields();
+      const allPresets = companySettingsService.getBillingPresets();
+      const settings = companySettingsService.getSettings();
+
+      setColumns([...cols]);
+      setHeaderFields([...headers]);
+      setPresets(allPresets);
+      setActivePresetId(settings.active_billing_preset || "pharmacy");
+    }
   };
 
   const showFeedback = (msg: string) => {
@@ -106,19 +123,35 @@ export const BillingColumnsModal: React.FC<BillingColumnsModalProps> = ({
   };
 
   const handleApplyPreset = async (presetId: string) => {
-    const res = await companySettingsService.applyBillingPreset(presetId, saveAsStoreDefault);
-    setColumns([...res.columns]);
-    setHeaderFields([...res.headerFields]);
-    setActivePresetId(presetId);
-    showFeedback(`Switched to ${presetId.toUpperCase()} preset!`);
-    if (onLayoutChange) {
-      onLayoutChange(res.columns, res.headerFields);
+    if (isPurchase) {
+      const res = await companySettingsService.applyPurchasePreset(presetId, saveAsStoreDefault);
+      setColumns([...res.columns]);
+      setHeaderFields([...res.headerFields]);
+      setActivePresetId(presetId);
+      showFeedback(`Switched to ${presetId.replace(/_/g, " ").toUpperCase()} preset!`);
+      if (onLayoutChange) {
+        onLayoutChange(res.columns, res.headerFields);
+      }
+    } else {
+      const res = await companySettingsService.applyBillingPreset(presetId, saveAsStoreDefault);
+      setColumns([...res.columns]);
+      setHeaderFields([...res.headerFields]);
+      setActivePresetId(presetId);
+      showFeedback(`Switched to ${presetId.toUpperCase()} preset!`);
+      if (onLayoutChange) {
+        onLayoutChange(res.columns, res.headerFields);
+      }
     }
   };
 
   const handleSaveAndApply = async () => {
-    await companySettingsService.setBillingColumns(columns, saveAsStoreDefault);
-    await companySettingsService.setHeaderFields(headerFields, saveAsStoreDefault);
+    if (isPurchase) {
+      await companySettingsService.setPurchaseColumns(columns, saveAsStoreDefault);
+      await companySettingsService.setPurchaseHeaderFields(headerFields, saveAsStoreDefault);
+    } else {
+      await companySettingsService.setBillingColumns(columns, saveAsStoreDefault);
+      await companySettingsService.setHeaderFields(headerFields, saveAsStoreDefault);
+    }
     showFeedback("Layout applied successfully!");
     if (onLayoutChange) {
       onLayoutChange(columns, headerFields);
@@ -132,35 +165,68 @@ export const BillingColumnsModal: React.FC<BillingColumnsModalProps> = ({
     e.preventDefault();
     if (!newPresetName.trim()) return;
 
-    const created = await companySettingsService.saveCustomBillingPreset(
-      newPresetName.trim(),
-      newPresetDesc.trim() || "Custom counter preset",
-      columns,
-      headerFields
-    );
-
-    setPresets(companySettingsService.getBillingPresets());
-    setActivePresetId(created.id);
-    setIsSavingPreset(false);
-    setNewPresetName("");
-    setNewPresetDesc("");
-    showFeedback(`Preset "${created.name}" saved!`);
+    if (isPurchase) {
+      const created = await companySettingsService.saveCustomPurchasePreset(
+        newPresetName.trim(),
+        newPresetDesc.trim() || "Custom purchase preset",
+        columns,
+        headerFields
+      );
+      setPresets(companySettingsService.getPurchasePresets());
+      setActivePresetId(created.id);
+      setIsSavingPreset(false);
+      setNewPresetName("");
+      setNewPresetDesc("");
+      showFeedback(`Preset "${created.name}" saved!`);
+    } else {
+      const created = await companySettingsService.saveCustomBillingPreset(
+        newPresetName.trim(),
+        newPresetDesc.trim() || "Custom counter preset",
+        columns,
+        headerFields
+      );
+      setPresets(companySettingsService.getBillingPresets());
+      setActivePresetId(created.id);
+      setIsSavingPreset(false);
+      setNewPresetName("");
+      setNewPresetDesc("");
+      showFeedback(`Preset "${created.name}" saved!`);
+    }
   };
 
   const handleDeletePreset = async (presetId: string) => {
-    await companySettingsService.deleteCustomBillingPreset(presetId);
-    setPresets(companySettingsService.getBillingPresets());
+    if (isPurchase) {
+      await companySettingsService.deleteCustomPurchasePreset(presetId);
+      setPresets(companySettingsService.getPurchasePresets());
+    } else {
+      await companySettingsService.deleteCustomBillingPreset(presetId);
+      setPresets(companySettingsService.getBillingPresets());
+    }
     showFeedback("Preset deleted.");
   };
 
   const handleResetToDefault = async () => {
-    const res = await companySettingsService.resetBillingLayoutToDefault();
-    setColumns([...res.columns]);
-    setHeaderFields([...res.headerFields]);
-    setActivePresetId("pharmacy");
-    showFeedback("Reset to default pharmacy layout.");
-    if (onLayoutChange) {
-      onLayoutChange(res.columns, res.headerFields);
+    if (isPurchase) {
+      const cols = [...DEFAULT_PURCHASE_COLUMNS];
+      const headers = [...DEFAULT_PURCHASE_HEADER_FIELDS];
+      await companySettingsService.setPurchaseColumns(cols, saveAsStoreDefault);
+      await companySettingsService.setPurchaseHeaderFields(headers, saveAsStoreDefault);
+      setColumns(cols);
+      setHeaderFields(headers);
+      setActivePresetId("pharmacy_inward");
+      showFeedback("Reset to default pharmacy inward layout.");
+      if (onLayoutChange) {
+        onLayoutChange(cols, headers);
+      }
+    } else {
+      const res = await companySettingsService.resetBillingLayoutToDefault();
+      setColumns([...res.columns]);
+      setHeaderFields([...res.headerFields]);
+      setActivePresetId("pharmacy");
+      showFeedback("Reset to default pharmacy layout.");
+      if (onLayoutChange) {
+        onLayoutChange(res.columns, res.headerFields);
+      }
     }
   };
 
@@ -178,9 +244,13 @@ export const BillingColumnsModal: React.FC<BillingColumnsModalProps> = ({
               <Sliders className="h-4 w-4" />
             </div>
             <div>
-              <h3 className="text-sm font-bold text-text-main">Customize Billing Screen & Fields</h3>
+              <h3 className="text-sm font-bold text-text-main">
+                {isPurchase ? "Customize Purchase Inward Screen & Fields" : "Customize Billing Screen & Fields"}
+              </h3>
               <p className="text-[11px] text-text-muted">
-                Show/hide table columns, header metadata, or switch presets (Ctrl+Shift+C)
+                {isPurchase
+                  ? "Show/hide inward table columns, supplier header metadata, or switch presets (Ctrl+Shift+C)"
+                  : "Show/hide table columns, header metadata, or switch presets (Ctrl+Shift+C)"}
               </p>
             </div>
           </div>

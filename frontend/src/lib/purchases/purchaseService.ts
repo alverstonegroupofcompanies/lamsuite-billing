@@ -93,6 +93,8 @@ export interface PurchaseDocumentRecord {
   payment_status: "unpaid" | "partial" | "paid";
   status: "received" | "draft" | "cancelled";
   cancel_reason?: string;
+  is_revised?: number;
+  edit_history?: string;
   notes?: string;
   sync_state: string;
   external_id: string;
@@ -594,6 +596,301 @@ export class PurchaseService {
     }
 
     return { document: doc, items };
+  }
+
+  /**
+   * Retrieves the last recorded purchase details for a product, optionally specific to a supplier.
+   * Useful for auto-filling rates, MRP, pack conversions, and displaying last purchase rate hints.
+   */
+  async getLastPurchaseForItem(
+    productId: string,
+    supplierId?: string
+  ): Promise<{
+    rate: number;
+    mrp?: number;
+    discount_percent?: number;
+    units_per_pack?: number;
+    gst_percent?: number;
+    selling_rate?: number;
+    hsn_code?: string;
+    purchase_number?: string;
+    purchase_date?: string;
+  } | null> {
+    if (!productId) return null;
+
+    const allItems = await sqliteStorage.findAll<PurchaseItemRecord>("purchase_items");
+    const matchingItems = allItems.filter((i) => i.product_id === productId);
+    if (matchingItems.length === 0) return null;
+
+    const allDocs = await sqliteStorage.findAll<PurchaseDocumentRecord>("purchase_documents");
+    const docMap = new Map<string, PurchaseDocumentRecord>();
+    allDocs.forEach((d) => docMap.set(d.id, d));
+
+    // Filter by supplier if provided and valid doc exists
+    let candidateItems = matchingItems.map((item) => ({
+      item,
+      doc: docMap.get(item.purchase_id),
+    })).filter((x) => x.doc && x.doc.status !== "cancelled");
+
+    if (candidateItems.length === 0) return null;
+
+    if (supplierId) {
+      const supplierMatches = candidateItems.filter((x) => x.doc?.supplier_id === supplierId);
+      if (supplierMatches.length > 0) {
+        candidateItems = supplierMatches;
+      }
+    }
+
+    // Sort by doc.created_at descending
+    candidateItems.sort((a, b) => (b.doc?.created_at || 0) - (a.doc?.created_at || 0));
+    const latest = candidateItems[0];
+
+    return {
+      rate: latest.item.purchase_rate,
+      mrp: latest.item.mrp,
+      discount_percent: latest.item.discount_percent,
+      units_per_pack: latest.item.units_per_pack,
+      gst_percent: latest.item.gst_percent,
+      selling_rate: latest.item.selling_rate,
+      hsn_code: latest.item.hsn_code,
+      purchase_number: latest.doc?.purchase_number,
+      purchase_date: latest.doc?.purchase_date,
+    };
+  }
+
+  /**
+   * Atomic Edit & Revision of an existing Purchase Bill:
+   * 1. Reverses original stock received in batch & product master
+   * 2. Reverses original supplier ledger credit entry
+   * 3. Applies new items, stock updates, and recalculated taxes
+   * 4. Updates supplier ledger credit for new total
+   * 5. Enqueues sync update
+   */
+  async updatePurchaseBill(
+    purchaseId: string,
+    doc: PurchaseDocumentInput,
+    reason = "Purchase bill revised"
+  ): Promise<{ success: boolean; purchaseId: string; purchaseNumber: string }> {
+    const originalDoc = await sqliteStorage.findById<PurchaseDocumentRecord>("purchase_documents", purchaseId);
+    if (!originalDoc) throw new Error("Purchase bill not found");
+    if (originalDoc.status === "cancelled") throw new Error("Cannot edit a cancelled purchase bill");
+
+    // Check duplicate invoice if changed
+    if (
+      (doc.supplier_id !== originalDoc.supplier_id || doc.supplier_invoice_no !== originalDoc.supplier_invoice_no) &&
+      doc.supplier_id && doc.supplier_invoice_no
+    ) {
+      const dup = await this.checkDuplicateInvoice(doc.supplier_id, doc.supplier_invoice_no, purchaseId);
+      if (dup) {
+        throw new Error(`Supplier invoice #${doc.supplier_invoice_no} is already recorded on ${dup.purchase_number}`);
+      }
+    }
+
+    const allItems = await sqliteStorage.findAll<PurchaseItemRecord>("purchase_items");
+    const originalItems = allItems.filter((i) => i.purchase_id === purchaseId);
+    const now = Date.now();
+
+    // 1. REVERSE ORIGINAL ITEMS
+    for (const item of originalItems) {
+      const batch = await sqliteStorage.findById<ProductBatch>("product_batches", item.batch_id);
+      if (batch) {
+        batch.stock_qty = Math.max(0, batch.stock_qty - item.total_units);
+        await productsStore.upsertBatch(batch);
+      }
+
+      const prod = await productsStore.getProductById(item.product_id);
+      if (prod) {
+        prod.current_stock = Math.max(0, (prod.current_stock || 0) - item.total_units);
+        await productsStore.upsertProduct(prod);
+      }
+
+      const revTxId = `stk_tx_${now}_rev_${Math.random().toString(16).slice(2, 6)}`;
+      await sqliteStorage.insertRecord("stock_transactions", revTxId, {
+        id: revTxId,
+        product_id: item.product_id,
+        batch_id: item.batch_id,
+        event_type: "PURCHASE_UPDATE_REVERSE",
+        qty_delta: -item.total_units,
+        unit_cost: item.effective_unit_cost,
+        reference_type: "PURCHASE_BILL",
+        reference_id: purchaseId,
+        notes: `Reversal for edit: ${originalDoc.purchase_number}`,
+        created_at: now,
+      });
+
+      await sqliteStorage.deleteRecord("purchase_items", item.id);
+    }
+
+    // 2. REVERSE ORIGINAL SUPPLIER LEDGER IMPACT
+    await supplierLedgerService.recordReturnDebit({
+      supplier_id: originalDoc.supplier_id,
+      return_id: purchaseId,
+      return_number: `REV-${originalDoc.purchase_number}`,
+      return_date: new Date().toISOString().slice(0, 10),
+      amount: originalDoc.grand_total,
+      notes: `Reversal for bill edit: ${reason}`,
+    });
+
+    // 3. APPLY UPDATED ITEMS
+    let subtotal = 0;
+    let discountTotal = 0;
+    let taxTotal = 0;
+    let cgstTotal = 0;
+    let sgstTotal = 0;
+    let igstTotal = 0;
+    let cessTotal = 0;
+    let totalLinesAmount = 0;
+
+    const isInterstate = Boolean(doc.is_interstate);
+    const newItemRecords: PurchaseItemRecord[] = [];
+    const receivedMap: Record<string, number> = {};
+
+    for (const line of doc.lines) {
+      const calc = this.calculateLineTotals(line, isInterstate);
+      subtotal += calc.gross_amount;
+      discountTotal += calc.discount_amount;
+      taxTotal += calc.total_tax;
+      cgstTotal += calc.cgst_amount;
+      sgstTotal += calc.sgst_amount;
+      igstTotal += calc.igst_amount;
+      cessTotal += calc.cess_amount;
+      totalLinesAmount += calc.total_amount;
+
+      receivedMap[line.product_id] = (receivedMap[line.product_id] || 0) + (line.pack_qty || line.qty || 0);
+
+      const batchId = `batch_${line.product_id}_${line.batch_no.replace(/\s+/g, "_")}`;
+      const existingBatch = await sqliteStorage.findById<ProductBatch>("product_batches", batchId);
+      const updatedStock = (existingBatch?.stock_qty || 0) + calc.total_stock_units;
+      const unitsPerPack = Math.max(1, line.units_per_pack || 1);
+
+      await productsStore.upsertBatch({
+        id: batchId,
+        product_id: line.product_id,
+        batch_no: line.batch_no,
+        mfg_date: line.mfg_date,
+        expiry_date: line.expiry_date,
+        stock_qty: updatedStock,
+        mrp: line.mrp,
+        purchase_rate: line.purchase_rate,
+        selling_rate: line.selling_rate || (line.mrp ? round2(line.mrp / unitsPerPack) : undefined),
+        rack_location: line.shelf_location,
+      });
+
+      let prod = await productsStore.getProductById(line.product_id);
+      if (prod) {
+        prod.current_stock = (prod.current_stock || 0) + calc.total_stock_units;
+        prod.ptr = line.purchase_rate;
+        if (line.mrp) prod.mrp = line.mrp;
+        if (line.selling_rate) prod.sel_rate = line.selling_rate;
+        await productsStore.upsertProduct(prod);
+      }
+
+      const stockTxId = `stk_tx_${now}_app_${Math.random().toString(16).slice(2, 6)}`;
+      await sqliteStorage.insertRecord("stock_transactions", stockTxId, {
+        id: stockTxId,
+        product_id: line.product_id,
+        batch_id: batchId,
+        event_type: "PURCHASE_RECEIPT",
+        qty_delta: calc.total_stock_units,
+        unit_cost: calc.effective_unit_cost,
+        reference_type: "PURCHASE_BILL",
+        reference_id: purchaseId,
+        notes: `Inward (Edit): Inv #${doc.supplier_invoice_no} (${line.batch_no})`,
+        created_at: now,
+      });
+
+      const itemId = `pbi_${now}_${Math.random().toString(16).slice(2, 6)}`;
+      const itemRow: PurchaseItemRecord = {
+        id: itemId,
+        purchase_id: purchaseId,
+        product_id: line.product_id,
+        product_name: line.product_name,
+        hsn_code: line.hsn_code,
+        batch_id: batchId,
+        batch_no: line.batch_no,
+        mfg_date: line.mfg_date,
+        expiry_date: line.expiry_date,
+        pack_qty: line.pack_qty ?? line.qty ?? 1,
+        loose_qty: line.loose_qty || 0,
+        free_qty: line.free_qty || 0,
+        units_per_pack: unitsPerPack,
+        total_units: calc.total_stock_units,
+        purchase_rate: line.purchase_rate,
+        discount_percent: line.discount_percent || 0,
+        discount_amount: calc.discount_amount,
+        effective_unit_cost: calc.effective_unit_cost,
+        taxable_amount: calc.taxable_amount,
+        mrp: line.mrp,
+        selling_rate: line.selling_rate,
+        gst_percent: line.gst_percent,
+        cgst_amount: calc.cgst_amount,
+        sgst_amount: calc.sgst_amount,
+        igst_amount: calc.igst_amount,
+        cess_amount: calc.cess_amount,
+        tax_amount: calc.total_tax,
+        total_amount: calc.total_amount,
+      };
+
+      await sqliteStorage.insertRecord("purchase_items", itemId, itemRow as unknown as Record<string, unknown>);
+      newItemRecords.push(itemRow);
+    }
+
+    const roundOff = doc.round_off !== undefined ? doc.round_off : round2(Math.round(totalLinesAmount) - totalLinesAmount);
+    const grandTotal = round2(totalLinesAmount + roundOff);
+
+    // 4. UPDATE PURCHASE DOCUMENT RECORD
+    const updatedDocRow: PurchaseDocumentRecord = {
+      ...originalDoc,
+      supplier_id: doc.supplier_id,
+      supplier_name: doc.supplier_name,
+      supplier_gstin: doc.supplier_gstin,
+      supplier_invoice_no: doc.supplier_invoice_no,
+      purchase_date: doc.purchase_date,
+      due_date: doc.due_date,
+      place_of_supply: doc.place_of_supply || "Kerala",
+      is_interstate: isInterstate ? 1 : 0,
+      is_rcm: doc.is_rcm ? 1 : 0,
+      itc_eligibility: doc.itc_eligibility || "eligible",
+      subtotal: round2(subtotal),
+      discount_total: round2(discountTotal),
+      tax_total: round2(taxTotal),
+      cgst_total: round2(cgstTotal),
+      sgst_total: round2(sgstTotal),
+      igst_total: round2(igstTotal),
+      cess_total: round2(cessTotal),
+      round_off: round2(roundOff),
+      grand_total: round2(grandTotal),
+      is_revised: 1,
+      notes: doc.notes ? `${doc.notes} (Edited: ${reason})` : `Edited: ${reason}`,
+      updated_at: now,
+      sync_state: "pending",
+    };
+
+    await sqliteStorage.insertRecord("purchase_documents", purchaseId, updatedDocRow as unknown as Record<string, unknown>);
+
+    // 5. POST NEW SUPPLIER LEDGER CREDIT
+    await supplierLedgerService.recordPurchaseCredit({
+      supplier_id: doc.supplier_id,
+      supplier_name: doc.supplier_name,
+      purchase_id: purchaseId,
+      purchase_number: originalDoc.purchase_number,
+      purchase_date: doc.purchase_date,
+      amount: grandTotal,
+      notes: `Inward Invoice (Revised): ${doc.supplier_invoice_no}`,
+    });
+
+    // 6. UPDATE PO FULFILLMENT IF LINKED
+    if (doc.po_id) {
+      await purchaseOrderService.updateReceivedQty(doc.po_id, receivedMap);
+    }
+
+    // 7. ENQUEUE FOR SYNC
+    await syncQueueService.enqueue("purchase", purchaseId, "update", {
+      ...updatedDocRow,
+      items: newItemRecords,
+    });
+
+    return { success: true, purchaseId, purchaseNumber: originalDoc.purchase_number };
   }
 }
 

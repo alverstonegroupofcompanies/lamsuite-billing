@@ -8,7 +8,7 @@
   },
   "package": {
     "productName": "LamSuite Billing",
-    "version": "2.0.11"
+    "version": "2.0.12"
   },
   "tauri": {
     "allowlist": {
@@ -50,7 +50,7 @@
     "bundle": {
       "active": true,
       "identifier": "com.lamsuite.billing",
-      "targets": "nsis",
+      "targets": "all",
       "icon": [
         "icons/32x32.png",
         "icons/128x128.png",
@@ -68,6 +68,7 @@
       "active": true,
       "dialog": false,
       "endpoints": [
+        "https://updates.lamstonehealthcare.com/latest.json",
         "https://github.com/alverstonegroupofcompanies/lamsuite-billing/releases/latest/download/latest.json"
       ],
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDNENjMxNTJBOENCRjQ3NkMKUldSc1I3K01LaFZqUFhkcUJJWDQwZmdINVphR0VIQ2dKWjltR0NjSWUxeFJpRkpzaDV4RUVMUGEK"

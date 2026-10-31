@@ -254,6 +254,15 @@ export interface CompanySettings {
   active_billing_preset: string;
   saved_billing_presets: BillingScreenPreset[];
 
+  // Purchase Inward screen columns & layouts
+  enable_pts?: boolean;
+  enable_ptss?: boolean;
+  freight_is_taxable?: boolean;
+  purchase_columns?: ColumnSetting[];
+  purchase_header_fields?: HeaderFieldSetting[];
+  active_purchase_preset?: string;
+  saved_purchase_presets?: BillingScreenPreset[];
+
   enabled_menu_items: string[];
   is_active?: boolean;
 }
@@ -329,6 +338,97 @@ export const BUILTIN_BILLING_PRESETS: BillingScreenPreset[] = [
     headerFields: DEFAULT_HEADER_FIELDS.map((h) => ({
       ...h,
       visible: ["invoice_no", "customer_name", "payment_mode"].includes(h.id),
+    })),
+  },
+];
+
+export const DEFAULT_PURCHASE_COLUMNS: ColumnSetting[] = [
+  { id: "idx", label: "#", visible: true, width: 40, order: 1, required: true },
+  { id: "product_name", label: "Product", visible: true, width: 240, order: 2, required: true },
+  { id: "batch_no", label: "Batch", visible: true, width: 105, order: 3, required: true },
+  { id: "expiry_date", label: "Expiry (MM/YY)", visible: true, width: 95, order: 4, required: true },
+  { id: "qty", label: "Quantity", visible: true, width: 140, order: 5, required: true },
+  { id: "free_qty", label: "Free Qty", visible: true, width: 80, order: 6 },
+  { id: "mrp", label: "MRP (₹)", visible: true, width: 85, order: 7 },
+  { id: "ptr", label: "PTR (₹)", visible: false, width: 80, order: 8 },
+  { id: "pts", label: "PTS (₹)", visible: false, width: 80, order: 9 },
+  { id: "ptss", label: "PTSS (₹)", visible: false, width: 80, order: 10 },
+  { id: "purchase_rate", label: "Pur. Rate (₹)", visible: true, width: 95, order: 11, required: true },
+  { id: "discount", label: "Disc %", visible: true, width: 75, order: 12 },
+  { id: "discount_amount", label: "Disc (₹)", visible: false, width: 75, order: 13 },
+  { id: "scheme", label: "Scheme", visible: false, width: 75, order: 14 },
+  { id: "gst", label: "GST %", visible: true, width: 70, order: 15 },
+  { id: "hsn", label: "HSN", visible: false, width: 85, order: 16 },
+  { id: "selling_rate", label: "Selling Rate (₹)", visible: true, width: 95, order: 17 },
+  { id: "margin", label: "Margin %", visible: true, width: 80, order: 18 },
+  { id: "taxable_value", label: "Taxable (₹)", visible: true, width: 90, order: 19 },
+  { id: "tax", label: "Tax (₹)", visible: true, width: 85, order: 20 },
+  { id: "total", label: "Total (₹)", visible: true, width: 100, order: 21, required: true },
+  { id: "actions", label: "Action", visible: true, width: 60, order: 22, required: true },
+];
+
+export const DEFAULT_PURCHASE_HEADER_FIELDS: HeaderFieldSetting[] = [
+  { id: "entry_no", label: "Entry No", visible: true, required: true, order: 1 },
+  { id: "supplier", label: "Supplier", visible: true, required: true, order: 2 },
+  { id: "supplier_bill_no", label: "Supplier Bill No", visible: true, required: true, order: 3 },
+  { id: "bill_date", label: "Bill Date", visible: true, required: true, order: 4 },
+  { id: "received_date", label: "Received Date", visible: true, order: 5 },
+  { id: "purchase_type", label: "Purchase Type", visible: true, order: 6 },
+  { id: "due_date", label: "Due Date", visible: true, order: 7 },
+  { id: "place_of_supply", label: "Place of Supply / GST", visible: true, order: 8 },
+  { id: "po_grn_link", label: "Link PO / GRN", visible: true, order: 9 },
+  { id: "remarks", label: "Remarks", visible: true, order: 10 },
+];
+
+export const BUILTIN_PURCHASE_PRESETS: BillingScreenPreset[] = [
+  {
+    id: "pharmacy_inward",
+    name: "Pharmacy Inward (Complete)",
+    description: "Full clinical inward with Batch, Expiry, Pack/Loose, Free Qty, MRP, Purchase Rate, Margins & GST.",
+    isBuiltin: true,
+    columns: DEFAULT_PURCHASE_COLUMNS.map((c) => ({
+      ...c,
+      visible: ["idx", "product_name", "batch_no", "expiry_date", "qty", "free_qty", "mrp", "purchase_rate", "discount", "gst", "selling_rate", "margin", "taxable_value", "total", "actions"].includes(c.id),
+    })),
+    headerFields: DEFAULT_PURCHASE_HEADER_FIELDS.map((h) => ({ ...h, visible: true })),
+  },
+  {
+    id: "standard_inward",
+    name: "Standard Inward",
+    description: "Standard inventory receiving layout with Product, Batch, Expiry, Qty, Rate, Tax & Totals.",
+    isBuiltin: true,
+    columns: DEFAULT_PURCHASE_COLUMNS.map((c) => ({
+      ...c,
+      visible: ["idx", "product_name", "batch_no", "expiry_date", "qty", "free_qty", "mrp", "purchase_rate", "discount", "gst", "taxable_value", "tax", "total", "actions"].includes(c.id),
+    })),
+    headerFields: DEFAULT_PURCHASE_HEADER_FIELDS.map((h) => ({
+      ...h,
+      visible: ["entry_no", "supplier", "supplier_bill_no", "bill_date", "purchase_type", "due_date", "place_of_supply"].includes(h.id),
+    })),
+  },
+  {
+    id: "price_margin",
+    name: "Pricing & Trade Margin",
+    description: "Focus on MRP, PTR, PTS, Purchase Rate, Selling Rate, and Margin analysis.",
+    isBuiltin: true,
+    columns: DEFAULT_PURCHASE_COLUMNS.map((c) => ({
+      ...c,
+      visible: ["idx", "product_name", "batch_no", "expiry_date", "qty", "mrp", "ptr", "pts", "purchase_rate", "selling_rate", "margin", "total", "actions"].includes(c.id),
+    })),
+    headerFields: DEFAULT_PURCHASE_HEADER_FIELDS.map((h) => ({ ...h, visible: true })),
+  },
+  {
+    id: "fast_wholesale",
+    name: "Fast Wholesale (Minimal)",
+    description: "Minimalist ultra-fast receiving showing only Product, Batch, Expiry, Qty, Rate, and Net Total.",
+    isBuiltin: true,
+    columns: DEFAULT_PURCHASE_COLUMNS.map((c) => ({
+      ...c,
+      visible: ["idx", "product_name", "batch_no", "expiry_date", "qty", "purchase_rate", "gst", "total", "actions"].includes(c.id),
+    })),
+    headerFields: DEFAULT_PURCHASE_HEADER_FIELDS.map((h) => ({
+      ...h,
+      visible: ["entry_no", "supplier", "supplier_bill_no", "bill_date", "purchase_type"].includes(h.id),
     })),
   },
 ];
@@ -575,6 +675,14 @@ export const DEFAULT_SETTINGS: CompanySettings = {
   header_fields: [...DEFAULT_HEADER_FIELDS],
   active_billing_preset: "pharmacy",
   saved_billing_presets: [...BUILTIN_BILLING_PRESETS],
+
+  enable_pts: false,
+  enable_ptss: false,
+  freight_is_taxable: false,
+  purchase_columns: [...DEFAULT_PURCHASE_COLUMNS],
+  purchase_header_fields: [...DEFAULT_PURCHASE_HEADER_FIELDS],
+  active_purchase_preset: "pharmacy_inward",
+  saved_purchase_presets: [...BUILTIN_PURCHASE_PRESETS],
   enabled_menu_items: [
     "dashboard",
     "pos",
@@ -619,6 +727,13 @@ export class CompanySettingsService {
         header_fields: record.header_fields?.length ? record.header_fields : [...DEFAULT_HEADER_FIELDS],
         active_billing_preset: record.active_billing_preset || "pharmacy",
         saved_billing_presets: record.saved_billing_presets?.length ? record.saved_billing_presets : [...BUILTIN_BILLING_PRESETS],
+        purchase_columns: record.purchase_columns?.length ? record.purchase_columns : [...DEFAULT_PURCHASE_COLUMNS],
+        purchase_header_fields: record.purchase_header_fields?.length ? record.purchase_header_fields : [...DEFAULT_PURCHASE_HEADER_FIELDS],
+        active_purchase_preset: record.active_purchase_preset || "pharmacy_inward",
+        saved_purchase_presets: record.saved_purchase_presets?.length ? record.saved_purchase_presets : [...BUILTIN_PURCHASE_PRESETS],
+        enable_pts: record.enable_pts ?? DEFAULT_SETTINGS.enable_pts,
+        enable_ptss: record.enable_ptss ?? DEFAULT_SETTINGS.enable_ptss,
+        freight_is_taxable: record.freight_is_taxable ?? DEFAULT_SETTINGS.freight_is_taxable,
         enabled_menu_items: record.enabled_menu_items?.length
           ? (record.enabled_menu_items.includes("import_export")
               ? record.enabled_menu_items
@@ -739,6 +854,116 @@ export class CompanySettingsService {
     await this.updateSettings({
       saved_billing_presets: remaining,
       active_billing_preset: "pharmacy",
+    });
+    return true;
+  }
+
+  getPurchaseColumns(): ColumnSetting[] {
+    const local = safeStorage.getItem("lamsuite_purchase_columns");
+    if (local) {
+      try {
+        const parsed = JSON.parse(local);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      } catch (_) {}
+    }
+    return this.currentSettings.purchase_columns?.length
+      ? this.currentSettings.purchase_columns
+      : [...DEFAULT_PURCHASE_COLUMNS];
+  }
+
+  async setPurchaseColumns(columns: ColumnSetting[], persistStore = false): Promise<void> {
+    safeStorage.setItem("lamsuite_purchase_columns", JSON.stringify(columns));
+    this.currentSettings.purchase_columns = [...columns];
+    if (persistStore) {
+      await this.updateSettings({ purchase_columns: columns });
+    }
+  }
+
+  getPurchaseHeaderFields(): HeaderFieldSetting[] {
+    const local = safeStorage.getItem("lamsuite_purchase_header_fields");
+    if (local) {
+      try {
+        const parsed = JSON.parse(local);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      } catch (_) {}
+    }
+    return this.currentSettings.purchase_header_fields?.length
+      ? this.currentSettings.purchase_header_fields
+      : [...DEFAULT_PURCHASE_HEADER_FIELDS];
+  }
+
+  async setPurchaseHeaderFields(fields: HeaderFieldSetting[], persistStore = false): Promise<void> {
+    safeStorage.setItem("lamsuite_purchase_header_fields", JSON.stringify(fields));
+    this.currentSettings.purchase_header_fields = [...fields];
+    if (persistStore) {
+      await this.updateSettings({ purchase_header_fields: fields });
+    }
+  }
+
+  getPurchasePresets(): BillingScreenPreset[] {
+    const storePresets = this.currentSettings.saved_purchase_presets || [];
+    const map = new Map<string, BillingScreenPreset>();
+    BUILTIN_PURCHASE_PRESETS.forEach((p) => map.set(p.id, p));
+    storePresets.forEach((p) => map.set(p.id, p));
+    return Array.from(map.values());
+  }
+
+  async applyPurchasePreset(presetId: string, persistStore = false): Promise<{ columns: ColumnSetting[]; headerFields: HeaderFieldSetting[] }> {
+    const presets = this.getPurchasePresets();
+    const preset = presets.find((p) => p.id === presetId) || BUILTIN_PURCHASE_PRESETS[0];
+
+    const columns = [...preset.columns];
+    const headerFields = [...preset.headerFields];
+
+    await this.setPurchaseColumns(columns, persistStore);
+    await this.setPurchaseHeaderFields(headerFields, persistStore);
+    this.currentSettings.active_purchase_preset = preset.id;
+
+    if (persistStore) {
+      await this.updateSettings({
+        active_purchase_preset: preset.id,
+        purchase_columns: columns,
+        purchase_header_fields: headerFields,
+      });
+    }
+
+    return { columns, headerFields };
+  }
+
+  async saveCustomPurchasePreset(
+    name: string,
+    description: string,
+    columns: ColumnSetting[],
+    headerFields: HeaderFieldSetting[]
+  ): Promise<BillingScreenPreset> {
+    const newPreset: BillingScreenPreset = {
+      id: `preset_pur_custom_${Date.now()}`,
+      name,
+      description,
+      isBuiltin: false,
+      columns,
+      headerFields,
+    };
+
+    const currentPresets = this.getPurchasePresets().filter((p) => !p.isBuiltin);
+    currentPresets.push(newPreset);
+
+    await this.updateSettings({
+      saved_purchase_presets: [...BUILTIN_PURCHASE_PRESETS, ...currentPresets],
+      active_purchase_preset: newPreset.id,
+    });
+
+    return newPreset;
+  }
+
+  async deleteCustomPurchasePreset(presetId: string): Promise<boolean> {
+    const target = this.getPurchasePresets().find((p) => p.id === presetId);
+    if (!target || target.isBuiltin) return false;
+
+    const remaining = (this.currentSettings.saved_purchase_presets || []).filter((p) => p.id !== presetId);
+    await this.updateSettings({
+      saved_purchase_presets: remaining,
+      active_purchase_preset: "pharmacy_inward",
     });
     return true;
   }
