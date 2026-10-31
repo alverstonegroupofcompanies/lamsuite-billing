@@ -50,8 +50,7 @@
     "bundle": {
       "active": true,
       "identifier": "com.lamsuite.billing",
-      "targets": "nsis",
-      "createUpdaterArtifacts": true,
+      "targets": ["nsis", "updater"],
       "icon": [
         "icons/32x32.png",
         "icons/128x128.png",
