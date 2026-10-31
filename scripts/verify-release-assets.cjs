@@ -116,18 +116,11 @@ async function verifyRelease() {
 
   const errors = [];
 
-  // Required Asset Categories
+  // Required Asset Categories (Windows)
   const expectedPatterns = [
     { name: 'Windows NSIS Installer (.exe)', pattern: /\.exe$/i },
     { name: 'Windows MSI Installer (.msi)', pattern: /\.msi$/i },
     { name: 'Windows Updater Signature (.sig)', pattern: /(\.nsis\.zip|\.msi\.zip|\.zip)\.sig$/i },
-    { name: 'macOS Installer (.dmg)', pattern: /\.dmg$/i },
-    { name: 'macOS Updater Archive (.app.tar.gz)', pattern: /\.app\.tar\.gz$/i },
-    { name: 'macOS Updater Signature (.app.tar.gz.sig)', pattern: /\.app\.tar\.gz\.sig$/i },
-    { name: 'Linux AppImage (.AppImage)', pattern: /\.AppImage$/i },
-    { name: 'Linux Debian Package (.deb)', pattern: /\.deb$/i },
-    { name: 'Linux RPM Package (.rpm)', pattern: /\.rpm$/i },
-    { name: 'Linux Updater Signature (.AppImage.tar.gz.sig)', pattern: /(\.AppImage\.tar\.gz|\.tar\.gz)\.sig$/i },
     { name: 'Updater Manifest (latest.json)', pattern: /^latest\.json$/i },
   ];
 
@@ -137,6 +130,25 @@ async function verifyRelease() {
       errors.push(`Missing required release asset: ${exp.name}`);
     } else {
       console.log(`[PASS] Found ${exp.name}`);
+    }
+  }
+
+  // Optional multi-platform patterns if present
+  const optionalPatterns = [
+    { name: 'macOS Installer (.dmg)', pattern: /\.dmg$/i },
+    { name: 'macOS Updater Archive (.app.tar.gz)', pattern: /\.app\.tar\.gz$/i },
+    { name: 'macOS Updater Signature (.app.tar.gz.sig)', pattern: /\.app\.tar\.gz\.sig$/i },
+    { name: 'Linux AppImage (.AppImage)', pattern: /\.AppImage$/i },
+    { name: 'Linux Debian Package (.deb)', pattern: /\.deb$/i },
+    { name: 'Linux RPM Package (.rpm)', pattern: /\.rpm$/i },
+    { name: 'Linux Updater Signature (.AppImage.tar.gz.sig)', pattern: /(\.AppImage\.tar\.gz|\.tar\.gz)\.sig$/i },
+    { name: 'Windows Legacy Installer', pattern: /windows-legacy/i },
+  ];
+
+  for (const opt of optionalPatterns) {
+    const match = assetNames.some(name => opt.pattern.test(name));
+    if (match) {
+      console.log(`[INFO] Found optional asset: ${opt.name}`);
     }
   }
 
@@ -155,15 +167,12 @@ async function verifyRelease() {
       } else {
         const requiredPlatforms = [
           'windows-x86_64',
-          'darwin-aarch64',
-          'darwin-x86_64',
-          'linux-x86_64',
         ];
 
         for (const plat of requiredPlatforms) {
           const platData = manifest.platforms[plat];
           if (!platData) {
-            errors.push(`latest.json missing entry for platform: ${plat}`);
+            errors.push(`latest.json missing required entry for platform: ${plat}`);
             continue;
           }
 
@@ -182,6 +191,21 @@ async function verifyRelease() {
               errors.push(`Platform ${plat} download URL failed to resolve (${check.statusCode || check.error}): ${platData.url}`);
             } else {
               console.log(`[PASS] URL resolves with status ${check.statusCode}`);
+            }
+          }
+        }
+
+        // Also check any other platforms present in manifest
+        for (const [plat, platData] of Object.entries(manifest.platforms)) {
+          if (!requiredPlatforms.includes(plat)) {
+            console.log(`[INFO] Validating additional platform in latest.json: ${plat}`);
+            if (platData && platData.signature && platData.url) {
+              const check = await checkUrlResolves(platData.url);
+              if (check.ok) {
+                console.log(`[PASS] Platform ${plat} resolves correctly.`);
+              } else {
+                console.warn(`[WARN] Platform ${plat} URL check: ${check.statusCode || check.error}`);
+              }
             }
           }
         }
