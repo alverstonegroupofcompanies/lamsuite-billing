@@ -1,5 +1,5 @@
 import type { PrintableDocumentData, PrintableDocumentHeader, ColumnFormat, ReportPrintFormattingOptions } from "../types";
-import { dotMatrixRenderer, resolveLeftMargin } from "../../lib/printing/dotMatrixRenderer";
+import { dotMatrixRenderer, resolveLeftMargin, type DotMatrixPaperWidth } from "../../lib/printing/dotMatrixRenderer";
 
 export class PrintFormatter {
   /**
@@ -411,12 +411,14 @@ export class PrintFormatter {
 
     lines.push(this.padField("*** END OF REPORT ***", W, "center"));
 
+    const pWidth: DotMatrixPaperWidth =
+      W <= 65 ? "6in" : W === 120 ? "12in" : W === 132 ? "15in" : "10in";
     const leftPad = resolveLeftMargin(
       {
         printerCarriageColumns: options?.printerColumns,
         autoCenterPaper: options?.autoCenter !== false,
         leftMarginSpaces: options?.leftMarginSpaces,
-        paperWidth: W <= 65 ? "6in" : undefined,
+        paperWidth: pWidth,
       },
       W
     );
@@ -631,9 +633,17 @@ export class PrintFormatter {
         autoCenter: options?.autoCenter !== false,
         leftMarginSpaces: options?.leftMarginSpaces,
       });
+      const paperWidth: DotMatrixPaperWidth =
+        is6in
+          ? "6in"
+          : layout === "dot-matrix-120"
+          ? "12in"
+          : layout === "dot-matrix-132"
+          ? "15in"
+          : "10in";
       return dotMatrixRenderer.generateMonospaceHtmlPreview(text, {
         columns: cols,
-        paperWidth: is6in ? "6in" : undefined,
+        paperWidth,
         printerCarriageColumns: carriageCols,
         autoCenterPaper: options?.autoCenter !== false,
         showRuler: true,

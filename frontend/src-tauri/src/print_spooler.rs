@@ -219,11 +219,11 @@ pub fn get_native_printers() -> Result<Vec<Value>, String> {
                     };
 
                     let dot_papers = if carriage_cols >= 132 {
-                        vec!["dot_matrix_6in", "dot_matrix_80col", "dot_matrix_120col", "dot_matrix_132col", "half_a4"]
+                        vec!["dot_matrix_6in", "dot_matrix_10in", "dot_matrix_80col", "dot_matrix_12in", "dot_matrix_120col", "dot_matrix_15in", "dot_matrix_132col", "half_a4"]
                     } else if carriage_cols >= 120 {
-                        vec!["dot_matrix_6in", "dot_matrix_80col", "dot_matrix_120col", "half_a4"]
+                        vec!["dot_matrix_6in", "dot_matrix_10in", "dot_matrix_80col", "dot_matrix_12in", "dot_matrix_120col", "half_a4"]
                     } else {
-                        vec!["dot_matrix_6in", "dot_matrix_80col", "half_a4"]
+                        vec!["dot_matrix_6in", "dot_matrix_10in", "dot_matrix_80col", "half_a4"]
                     };
 
                     printers.push(json!({
@@ -309,11 +309,11 @@ pub fn get_native_printers() -> Result<Vec<Value>, String> {
             };
 
             let dot_papers = if carriage_cols >= 132 {
-                vec!["dot_matrix_6in", "dot_matrix_80col", "dot_matrix_120col", "dot_matrix_132col", "half_a4"]
+                vec!["dot_matrix_6in", "dot_matrix_10in", "dot_matrix_80col", "dot_matrix_12in", "dot_matrix_120col", "dot_matrix_15in", "dot_matrix_132col", "half_a4"]
             } else if carriage_cols >= 120 {
-                vec!["dot_matrix_6in", "dot_matrix_80col", "dot_matrix_120col", "half_a4"]
+                vec!["dot_matrix_6in", "dot_matrix_10in", "dot_matrix_80col", "dot_matrix_12in", "dot_matrix_120col", "half_a4"]
             } else {
-                vec!["dot_matrix_6in", "dot_matrix_80col", "half_a4"]
+                vec!["dot_matrix_6in", "dot_matrix_10in", "dot_matrix_80col", "half_a4"]
             };
 
             printers.push(json!({

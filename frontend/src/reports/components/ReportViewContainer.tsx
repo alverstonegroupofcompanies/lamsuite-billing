@@ -66,7 +66,14 @@ export const ReportViewContainer: React.FC<ReportViewContainerProps> = ({ report
   const [printDoc, setPrintDoc] = useState<PrintableDocumentData | null>(null);
   const [isPrintModalOpen, setIsPrintModalOpen] = useState(false);
   const [printLayout, setPrintLayout] = useState<
-    "a4" | "a4-landscape" | "a4-portrait" | "thermal" | "dot-matrix" | "dot-matrix-132"
+    | "a4"
+    | "a4-landscape"
+    | "a4-portrait"
+    | "thermal"
+    | "dot-matrix"
+    | "dot-matrix-60"
+    | "dot-matrix-120"
+    | "dot-matrix-132"
   >("a4");
   const [isCompactColumns, setIsCompactColumns] = useState(false);
 
@@ -163,7 +170,14 @@ export const ReportViewContainer: React.FC<ReportViewContainerProps> = ({ report
     if (!printDoc) return;
     const html = printFormatter.generatePrintHtml(printDoc, printLayout, isCompactColumns);
     const isDot = printLayout.startsWith("dot-matrix");
-    const cols = printLayout === "dot-matrix-132" ? 132 : 80;
+    const cols =
+      printLayout === "dot-matrix-60"
+        ? 50
+        : printLayout === "dot-matrix-120"
+        ? 120
+        : printLayout === "dot-matrix-132"
+        ? 132
+        : 80;
 
     let rawEscPosBytes: Uint8Array | undefined;
     if (isDot) {
@@ -176,7 +190,13 @@ export const ReportViewContainer: React.FC<ReportViewContainerProps> = ({ report
       paperSize: printLayout === "thermal"
         ? "thermal_80mm"
         : isDot
-        ? (cols === 132 ? "dot_matrix_132col" : "dot_matrix_80col")
+        ? cols === 50
+          ? "dot_matrix_6in"
+          : cols === 120
+          ? "dot_matrix_12in"
+          : cols === 132
+          ? "dot_matrix_15in"
+          : "dot_matrix_10in"
         : "a4",
       docType: "report",
       docNumber: `REP-${report.id.toUpperCase()}-${Date.now().toString().slice(-4)}`,

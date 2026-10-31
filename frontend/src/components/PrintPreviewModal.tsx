@@ -40,6 +40,8 @@ import {
   PrintJobRecord,
   isDotMatrixPaper,
   getDotMatrixColumns,
+  getPaperWidthFromSize,
+  getPaperWidthInches,
   getPrinterCarriageColumns,
   calculateHorizontalCenteringOffset,
 } from "../lib/printing/printerManagerService";
@@ -248,7 +250,7 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
   const centeringOffset = useMemo(() => {
     const isDot = isDotMatrixPaper(paperSize);
     if (!isDot) return 0;
-    const cols = getDotMatrixColumns(paperSize, printerProfile?.dotMatrixColumns);
+    const cols = getDotMatrixColumns(paperSize);
     if (printerProfile?.dotMatrixAutoCenter === false) return 0;
     return calculateHorizontalCenteringOffset(printerCarriageCols, cols, { paperSize });
   }, [paperSize, printerProfile, printerCarriageCols]);
@@ -258,12 +260,13 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
     if (!isOpen || !data) return "";
     const isDot = isDotMatrixPaper(paperSize);
     if (isDot) {
-      const cols = getDotMatrixColumns(paperSize, printerProfile?.dotMatrixColumns);
+      const cols = getDotMatrixColumns(paperSize);
+      const paperWidth = getPaperWidthFromSize(paperSize);
       const dotOpts: DotMatrixOptions = {
         columns: cols,
         printerCarriageColumns: printerCarriageCols,
         autoCenterPaper: printerProfile?.dotMatrixAutoCenter ?? true,
-        paperWidth: paperSize === "dot_matrix_6in" ? "6in" : paperSize === "dot_matrix_120col" ? "12in" : paperSize === "dot_matrix_132col" ? "15in" : "10in",
+        paperWidth,
         linesPerPage: printerProfile?.linesPerPage ?? 66,
         commandSet: printerProfile?.dotMatrixCommandSet || "esc_p",
         endOfJobAction: printerProfile?.endOfJobAction || "stop_immediately",
@@ -351,12 +354,13 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
     if (!isOpen || !data) return "";
     const isDot = isDotMatrixPaper(paperSize);
     if (!isDot) return "";
-    const cols = getDotMatrixColumns(paperSize, printerProfile?.dotMatrixColumns);
+    const cols = getDotMatrixColumns(paperSize);
+    const paperWidth = getPaperWidthFromSize(paperSize);
     const dotOpts: DotMatrixOptions = {
       columns: cols,
       printerCarriageColumns: printerCarriageCols,
       autoCenterPaper: printerProfile?.dotMatrixAutoCenter ?? true,
-      paperWidth: paperSize === "dot_matrix_6in" ? "6in" : paperSize === "dot_matrix_120col" ? "12in" : paperSize === "dot_matrix_132col" ? "15in" : "10in",
+      paperWidth,
       linesPerPage: printerProfile?.linesPerPage ?? 66,
       commandSet: printerProfile?.dotMatrixCommandSet || "esc_p",
       endOfJobAction: printerProfile?.endOfJobAction || "stop_immediately",
@@ -557,12 +561,13 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
           cashDrawer: printerProfile?.enableCashDrawerKick ?? true,
         });
       } else if (isDot) {
-        const cols = getDotMatrixColumns(paperSize, printerProfile?.dotMatrixColumns);
+        const cols = getDotMatrixColumns(paperSize);
+        const paperWidth = getPaperWidthFromSize(paperSize);
         const dotOpts: DotMatrixOptions = {
           columns: cols,
           printerCarriageColumns: printerCarriageCols,
           autoCenterPaper: printerProfile?.dotMatrixAutoCenter ?? true,
-          paperWidth: paperSize === "dot_matrix_6in" ? "6in" : paperSize === "dot_matrix_120col" ? "12in" : paperSize === "dot_matrix_132col" ? "15in" : "10in",
+          paperWidth,
           linesPerPage: printerProfile?.linesPerPage ?? 66,
           commandSet: printerProfile?.dotMatrixCommandSet || "esc_p",
           endOfJobAction: printerProfile?.endOfJobAction || "stop_immediately",
@@ -717,12 +722,13 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
       const isDot = isDotMatrixPaper(paperSize);
 
       if (isDot) {
-        const cols = getDotMatrixColumns(paperSize, printerProfile?.dotMatrixColumns);
+        const cols = getDotMatrixColumns(paperSize);
+        const paperWidth = getPaperWidthFromSize(paperSize);
         const dotOpts: DotMatrixOptions = {
           columns: cols,
           printerCarriageColumns: printerCarriageCols,
           autoCenterPaper: printerProfile?.dotMatrixAutoCenter ?? true,
-          paperWidth: paperSize === "dot_matrix_6in" ? "6in" : paperSize === "dot_matrix_120col" ? "12in" : paperSize === "dot_matrix_132col" ? "15in" : "10in",
+          paperWidth,
           linesPerPage: printerProfile?.linesPerPage || 66,
           isDuplicate,
           copyMarker: copyMarker === "None" ? undefined : copyMarker,
@@ -1118,24 +1124,31 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
                         { id: "half_a4", label: "Half-A4 (V-Cut)" },
                         { id: "thermal_80mm", label: "Thermal 80mm" },
                         { id: "thermal_58mm", label: "Thermal 58mm" },
-                        { id: "dot_matrix_6in", label: "Dot Matrix 6\" (60C)" },
-                        { id: "dot_matrix_80col", label: "Dot Matrix 10\" (80C)" },
-                        { id: "dot_matrix_120col", label: "Dot Matrix 12\" (120C)" },
-                        { id: "dot_matrix_132col", label: "Dot Matrix 15\" (132C)" },
-                      ].map((p) => (
-                        <button
-                          key={p.id}
-                          type="button"
-                          onClick={() => setPaperSize(p.id as PaperSize)}
-                          className={`p-2 rounded-lg text-xs font-bold text-left transition border ${
-                            paperSize === p.id
-                              ? "bg-blue-50 dark:bg-blue-950/60 border-blue-500 text-blue-700 dark:text-blue-300 shadow-sm"
-                              : "bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-50"
-                          }`}
-                        >
-                          {p.label}
-                        </button>
-                      ))}
+                        { id: "dot_matrix_6in", label: "Dot Matrix 6\" (60C / 50 Usable)" },
+                        { id: "dot_matrix_10in", label: "Dot Matrix 10\" (80C)" },
+                        { id: "dot_matrix_12in", label: "Dot Matrix 12\" (120C)" },
+                        { id: "dot_matrix_15in", label: "Dot Matrix 15\" (132C)" },
+                      ].map((p) => {
+                        const isSelected =
+                          paperSize === p.id ||
+                          (p.id === "dot_matrix_10in" && paperSize === "dot_matrix_80col") ||
+                          (p.id === "dot_matrix_12in" && paperSize === "dot_matrix_120col") ||
+                          (p.id === "dot_matrix_15in" && paperSize === "dot_matrix_132col");
+                        return (
+                          <button
+                            key={p.id}
+                            type="button"
+                            onClick={() => setPaperSize(p.id as PaperSize)}
+                            className={`p-2 rounded-lg text-xs font-bold text-left transition border ${
+                              isSelected
+                                ? "bg-blue-50 dark:bg-blue-950/60 border-blue-500 text-blue-700 dark:text-blue-300 shadow-sm"
+                                : "bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-50"
+                            }`}
+                          >
+                            {p.label}
+                          </button>
+                        );
+                      })}
                     </div>
                   </div>
 
@@ -1156,30 +1169,37 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
                             Loaded Paper Width
                           </label>
                           <span className="text-[10px] font-mono font-bold text-emerald-700 dark:text-emerald-400 bg-emerald-100 dark:bg-emerald-900/60 px-1.5 py-0.5 rounded">
-                            {getDotMatrixColumns(paperSize)} Columns
+                            {getDotMatrixColumns(paperSize)} Columns ({getPaperWidthInches(paperSize)}&quot; Paper)
                           </span>
                         </div>
                         <div className="grid grid-cols-4 gap-1">
                           {[
-                            { id: "dot_matrix_6in", label: "6\" (60C)", desc: "6-inch Narrow Form" },
-                            { id: "dot_matrix_80col", label: "10\" (80C)", desc: "10-inch Standard" },
-                            { id: "dot_matrix_120col", label: "12\" (120C)", desc: "12-inch Continuous" },
-                            { id: "dot_matrix_132col", label: "15\" (132C)", desc: "15-inch Wide Carriage" },
-                          ].map((pw) => (
-                            <button
-                              key={pw.id}
-                              type="button"
-                              onClick={() => setPaperSize(pw.id as PaperSize)}
-                              className={`px-1.5 py-1.5 rounded text-center text-[11px] font-medium transition ${
-                                paperSize === pw.id
-                                  ? "bg-emerald-600 text-white font-bold shadow-xs"
-                                  : "bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 hover:bg-emerald-50 dark:hover:bg-emerald-950"
-                              }`}
-                              title={pw.desc}
-                            >
-                              {pw.label}
-                            </button>
-                          ))}
+                            { id: "dot_matrix_6in", label: "6\" (60C / 50 Usable)", desc: "6-inch Narrow Form (50 usable cols between perforations)" },
+                            { id: "dot_matrix_10in", label: "10\" (80C)", desc: "10-inch Standard Form (80 cols)" },
+                            { id: "dot_matrix_12in", label: "12\" (120C)", desc: "12-inch Continuous Form (120 cols)" },
+                            { id: "dot_matrix_15in", label: "15\" (132C)", desc: "15-inch Wide Carriage Form (132 cols)" },
+                          ].map((pw) => {
+                            const isSelected =
+                              paperSize === pw.id ||
+                              (pw.id === "dot_matrix_10in" && paperSize === "dot_matrix_80col") ||
+                              (pw.id === "dot_matrix_12in" && paperSize === "dot_matrix_120col") ||
+                              (pw.id === "dot_matrix_15in" && paperSize === "dot_matrix_132col");
+                            return (
+                              <button
+                                key={pw.id}
+                                type="button"
+                                onClick={() => setPaperSize(pw.id as PaperSize)}
+                                className={`px-1.5 py-1.5 rounded text-center text-[11px] font-medium transition ${
+                                  isSelected
+                                    ? "bg-emerald-600 text-white font-bold shadow-xs"
+                                    : "bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 hover:bg-emerald-50 dark:hover:bg-emerald-950"
+                                }`}
+                                title={pw.desc}
+                              >
+                                {pw.label}
+                              </button>
+                            );
+                          })}
                         </div>
                         <p className="mt-1 text-[10px] text-slate-500">
                           Dynamically adjusts table layout, borders, and margins to fit the currently loaded paper width without clipping.

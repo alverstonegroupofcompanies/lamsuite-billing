@@ -86,7 +86,19 @@ export interface DocumentSequenceConfig {
 }
 
 export interface PrintingConfig {
-  paperSize: "thermal_80mm" | "thermal_58mm" | "a4" | "a5" | "half_a4" | "dot_matrix_6in" | "dot_matrix_80col" | "dot_matrix_120col" | "dot_matrix_132col";
+  paperSize:
+    | "thermal_80mm"
+    | "thermal_58mm"
+    | "a4"
+    | "a5"
+    | "half_a4"
+    | "dot_matrix_6in"
+    | "dot_matrix_10in"
+    | "dot_matrix_80col"
+    | "dot_matrix_12in"
+    | "dot_matrix_120col"
+    | "dot_matrix_15in"
+    | "dot_matrix_132col";
   copies: number;
   activeTemplate: "thermal_standard" | "thermal_compact" | "a4_tax_invoice" | "hospital_detailed";
   footerNote: string;

@@ -1563,6 +1563,11 @@ export const SettingsPage: React.FC = () => {
                     <option value="thermal_58mm">Thermal 2-Inch (58mm)</option>
                     <option value="a4">Standard A4 Sheet</option>
                     <option value="a5">Half-Sheet A5</option>
+                    <option value="half_a4">Half-A4 (V-Cut)</option>
+                    <option value="dot_matrix_6in">Dot Matrix 6" (Narrow Continuous)</option>
+                    <option value="dot_matrix_10in">Dot Matrix 10" (Standard Fanfold)</option>
+                    <option value="dot_matrix_12in">Dot Matrix 12" (Continuous Form)</option>
+                    <option value="dot_matrix_15in">Dot Matrix 15" (Wide Carriage)</option>
                   </select>
                 </div>
                 <div>
@@ -1946,7 +1951,7 @@ export const SettingsPage: React.FC = () => {
                       }
                       className="w-full rounded-lg border border-slate-300 p-2 text-xs focus:border-blue-500 focus:outline-none bg-white font-mono"
                     >
-                      <option value="6in">6-inch (60 Columns - Narrow Slip)</option>
+                      <option value="6in">6-inch (50 Columns Usable - Narrow Form)</option>
                       <option value="10in">10-inch (80 Columns - Standard Fanfold)</option>
                       <option value="12in">12-inch (120 Columns - Continuous Form)</option>
                       <option value="15in">15-inch (132 Columns - Wide Carriage)</option>
@@ -2099,10 +2104,13 @@ export const SettingsPage: React.FC = () => {
                       <option value="thermal_58mm">Thermal 58mm ESC/POS Receipt</option>
                       <option value="a4">Standard A4 Tax Invoice</option>
                       <option value="half_a4">Half-A4 (V-Cut)</option>
-                      <option value="dot_matrix_6in">Dot Matrix 6" (60-Column ESC/P)</option>
-                      <option value="dot_matrix_80col">Dot Matrix 10" (80-Column ESC/P)</option>
-                      <option value="dot_matrix_120col">Dot Matrix 12" (120-Column ESC/P)</option>
-                      <option value="dot_matrix_132col">Dot Matrix 15" (132-Column ESC/P)</option>
+                      <option value="dot_matrix_6in">Dot Matrix 6" (50 Columns Usable - Narrow Form)</option>
+                      <option value="dot_matrix_10in">Dot Matrix 10" (80-Column ESC/P - Standard)</option>
+                      <option value="dot_matrix_80col">Dot Matrix 80-Col (10-Inch)</option>
+                      <option value="dot_matrix_12in">Dot Matrix 12" (120-Column ESC/P - Continuous)</option>
+                      <option value="dot_matrix_120col">Dot Matrix 120-Col (12-Inch)</option>
+                      <option value="dot_matrix_15in">Dot Matrix 15" (132-Column ESC/P - Wide Carriage)</option>
+                      <option value="dot_matrix_132col">Dot Matrix 132-Col (15-Inch)</option>
                     </select>
                   </div>
                 </div>

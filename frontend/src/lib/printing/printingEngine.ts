@@ -1,5 +1,10 @@
 import { getIpcBridge, isTauri, invokeCommand } from "../ipc/ipcBridge";
-import { printerManagerService, PaperSize } from "./printerManagerService";
+import {
+  printerManagerService,
+  PaperSize,
+  getDotMatrixColumns,
+  getPaperWidthFromSize,
+} from "./printerManagerService";
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
 import * as QRCodeModule from "qrcode";
@@ -3371,10 +3376,12 @@ export class PrintingEngine {
     const isDotMatrix = Boolean(options?.paperSize && options.paperSize.startsWith("dot_matrix"));
     if (isDotMatrix) {
       let rawText = "";
-      const cols = options?.paperSize === "dot_matrix_6in" ? 60 : options?.paperSize === "dot_matrix_120col" ? 120 : options?.paperSize === "dot_matrix_132col" ? 132 : 80;
+      const pSize = options!.paperSize as PaperSize;
+      const cols = getDotMatrixColumns(pSize);
+      const paperWidth = getPaperWidthFromSize(pSize);
       const dotOpts: DotMatrixOptions = {
         columns: cols,
-        paperWidth: options?.paperSize === "dot_matrix_6in" ? "6in" : options?.paperSize === "dot_matrix_120col" ? "12in" : options?.paperSize === "dot_matrix_132col" ? "15in" : "10in",
+        paperWidth,
         isDuplicate: options?.isDuplicate,
         copyMarker: options?.copyMarker,
         showHsnSummary: options?.showHsnSummary,
@@ -3583,10 +3590,12 @@ export class PrintingEngine {
   renderDocumentPdf(docType: string, data: any, options?: PrintRenderOptions): Uint8Array {
     const isDotMatrix = Boolean(options?.paperSize && options.paperSize.startsWith("dot_matrix"));
     if (isDotMatrix) {
-      const cols = options?.paperSize === "dot_matrix_6in" ? 60 : options?.paperSize === "dot_matrix_120col" ? 120 : options?.paperSize === "dot_matrix_132col" ? 132 : 80;
+      const pSize = options!.paperSize as PaperSize;
+      const cols = getDotMatrixColumns(pSize);
+      const paperWidth = getPaperWidthFromSize(pSize);
       const dotOpts: DotMatrixOptions = {
         columns: cols,
-        paperWidth: options?.paperSize === "dot_matrix_6in" ? "6in" : options?.paperSize === "dot_matrix_120col" ? "12in" : options?.paperSize === "dot_matrix_132col" ? "15in" : "10in",
+        paperWidth,
         isDuplicate: options?.isDuplicate,
         copyMarker: options?.copyMarker,
         showHsnSummary: options?.showHsnSummary,

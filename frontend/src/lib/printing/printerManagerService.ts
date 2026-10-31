@@ -10,8 +10,11 @@ export type PaperSize =
   | "thermal_80mm"
   | "thermal_58mm"
   | "dot_matrix_6in"
+  | "dot_matrix_10in"
   | "dot_matrix_80col"
+  | "dot_matrix_12in"
   | "dot_matrix_120col"
+  | "dot_matrix_15in"
   | "dot_matrix_132col"
   | "barcode_label";
 export type PrinterType = "laser_inkjet" | "thermal_pos" | "dot_matrix" | "virtual_pdf";
@@ -20,18 +23,50 @@ export function isDotMatrixPaper(paperSize: PaperSize): boolean {
   return paperSize.startsWith("dot_matrix");
 }
 
+/**
+ * Returns exact column width strictly based on user-selected paper size.
+ * Prioritizes paper size over printer maximum carriage width so narrow formats are never stretched.
+ */
 export function getDotMatrixColumns(paperSize: PaperSize, fallback?: number): number {
   switch (paperSize) {
     case "dot_matrix_6in":
-      // 5.0" usable printable area between 0.5" left and right tractor-feed perforated margins
-      return fallback || 50;
+      // Always 50 cols (usable area between 0.5" left and right tractor-feed perforated margins)
+      return 50;
+    case "dot_matrix_10in":
+    case "dot_matrix_80col":
+      // Always 80 cols for 10-inch standard continuous paper
+      return 80;
+    case "dot_matrix_12in":
     case "dot_matrix_120col":
+      // Always 120 cols for 12-inch continuous paper
       return 120;
+    case "dot_matrix_15in":
     case "dot_matrix_132col":
+      // Always 132 cols for 15-inch wide continuous paper
       return 132;
+    default:
+      if (typeof fallback === "number" && fallback > 0) return fallback;
+      return 80;
+  }
+}
+
+/**
+ * Maps paper size to standard dot matrix physical width key.
+ */
+export function getPaperWidthFromSize(paperSize: PaperSize): "6in" | "10in" | "12in" | "15in" {
+  switch (paperSize) {
+    case "dot_matrix_6in":
+      return "6in";
+    case "dot_matrix_12in":
+    case "dot_matrix_120col":
+      return "12in";
+    case "dot_matrix_15in":
+    case "dot_matrix_132col":
+      return "15in";
+    case "dot_matrix_10in":
     case "dot_matrix_80col":
     default:
-      return fallback || 80;
+      return "10in";
   }
 }
 
@@ -39,10 +74,13 @@ export function getPaperWidthInches(paperSize: PaperSize): number {
   switch (paperSize) {
     case "dot_matrix_6in":
       return 6.0;
+    case "dot_matrix_10in":
     case "dot_matrix_80col":
       return 10.0;
+    case "dot_matrix_12in":
     case "dot_matrix_120col":
       return 12.0;
+    case "dot_matrix_15in":
     case "dot_matrix_132col":
       return 15.0;
     case "thermal_80mm":
@@ -75,13 +113,18 @@ export function getPrinterCarriageColumns(
   if (printer?.carriageWidthCols) {
     return printer.carriageWidthCols;
   }
+  if (printer?.supportedPaperSizes && printer.supportedPaperSizes.length > 0) {
+    if (printer.supportedPaperSizes.includes("dot_matrix_15in") || printer.supportedPaperSizes.includes("dot_matrix_132col")) return 132;
+    if (printer.supportedPaperSizes.includes("dot_matrix_12in") || printer.supportedPaperSizes.includes("dot_matrix_120col")) return 120;
+    if (printer.supportedPaperSizes.includes("dot_matrix_10in") || printer.supportedPaperSizes.includes("dot_matrix_80col")) return 80;
+  }
   if (printer?.name || printer?.displayName) {
     const name = `${printer.name} ${printer.displayName || ""}`.toLowerCase();
-    if (name.includes("12\"") || name.includes("12-inch") || name.includes("120") || name.includes("245") || name.includes("250")) {
-      return 120;
-    }
     if (name.includes("15\"") || name.includes("15-inch") || name.includes("132") || name.includes("136") || name.includes("lq-2090") || name.includes("wide")) {
       return 132;
+    }
+    if (name.includes("12\"") || name.includes("12-inch") || name.includes("120") || name.includes("245") || name.includes("250")) {
+      return 120;
     }
     if (name.includes("100") || name.includes("10\"") && name.includes("wide")) {
       return 100;
@@ -89,11 +132,6 @@ export function getPrinterCarriageColumns(
     if (name.includes("80") || name.includes("10\"") || name.includes("msp 240") || name.includes("lx-300") || name.includes("lx-310")) {
       return 80;
     }
-  }
-  if (printer?.supportedPaperSizes && printer.supportedPaperSizes.length > 0) {
-    if (printer.supportedPaperSizes.includes("dot_matrix_132col")) return 132;
-    if (printer.supportedPaperSizes.includes("dot_matrix_120col")) return 120;
-    if (printer.supportedPaperSizes.includes("dot_matrix_80col")) return 80;
   }
   // Default for standard dot matrix carriage
   return 80;
@@ -133,12 +171,12 @@ export function getContinuousPaperGeometry(params: {
     paperTotalCols = 60;
     tractorMargin = 5; // 0.5" perforated strip with pin-feed holes on each side
     usableCols = params.customUsableCols || 50; // 5.0" usable body between perforations
-  } else if (size === "dot_matrix_120col" || width === "12in" || (typeof width === "number" && width > 11 && width <= 13)) {
+  } else if (size === "dot_matrix_12in" || size === "dot_matrix_120col" || width === "12in" || (typeof width === "number" && width > 11 && width <= 13)) {
     paperWidthInches = 12.0;
     paperTotalCols = 120;
     tractorMargin = 0;
     usableCols = params.customUsableCols || 120;
-  } else if (size === "dot_matrix_132col" || width === "15in" || (typeof width === "number" && width > 13)) {
+  } else if (size === "dot_matrix_15in" || size === "dot_matrix_132col" || width === "15in" || (typeof width === "number" && width > 13)) {
     paperWidthInches = 15.0;
     paperTotalCols = 132;
     tractorMargin = 0;
@@ -312,7 +350,7 @@ export const DEFAULT_SYSTEM_PRINTERS: SystemPrinterInfo[] = [
     portName: "LPT1",
     printerType: "dot_matrix",
     carriageWidthCols: 80,
-    supportedPaperSizes: ["dot_matrix_6in", "dot_matrix_80col", "half_a4"],
+    supportedPaperSizes: ["dot_matrix_6in", "dot_matrix_10in", "dot_matrix_80col", "half_a4"],
     isVirtual: false,
   },
   {
@@ -324,7 +362,7 @@ export const DEFAULT_SYSTEM_PRINTERS: SystemPrinterInfo[] = [
     portName: "LPT1",
     printerType: "dot_matrix",
     carriageWidthCols: 120,
-    supportedPaperSizes: ["dot_matrix_6in", "dot_matrix_80col", "dot_matrix_120col", "half_a4"],
+    supportedPaperSizes: ["dot_matrix_6in", "dot_matrix_10in", "dot_matrix_80col", "dot_matrix_12in", "dot_matrix_120col", "half_a4"],
     isVirtual: false,
   },
   {
@@ -336,7 +374,7 @@ export const DEFAULT_SYSTEM_PRINTERS: SystemPrinterInfo[] = [
     portName: "LPT1",
     printerType: "dot_matrix",
     carriageWidthCols: 132,
-    supportedPaperSizes: ["dot_matrix_6in", "dot_matrix_80col", "dot_matrix_120col", "dot_matrix_132col", "half_a4"],
+    supportedPaperSizes: ["dot_matrix_6in", "dot_matrix_10in", "dot_matrix_80col", "dot_matrix_12in", "dot_matrix_120col", "dot_matrix_15in", "dot_matrix_132col", "half_a4"],
     isVirtual: false,
   },
   {
@@ -673,6 +711,15 @@ export class PrinterManagerService {
           compatible: false,
           warning: `'${printer.displayName}' is a dot-matrix tractor-feed printer and cannot print continuous thermal roll formats.`,
           suggestedPaper: "dot_matrix_80col",
+        };
+      }
+      const carriage = getPrinterCarriageColumns(printer);
+      const paperCols = getDotMatrixColumns(paperSize);
+      if (carriage && paperCols > carriage) {
+        return {
+          compatible: false,
+          warning: `'${printer.displayName}' has a ${carriage}-column carriage, which cannot physically accommodate ${getPaperWidthInches(paperSize)}-inch (${paperCols}-column) continuous paper.`,
+          suggestedPaper: carriage >= 120 ? "dot_matrix_120col" : "dot_matrix_80col",
         };
       }
     }

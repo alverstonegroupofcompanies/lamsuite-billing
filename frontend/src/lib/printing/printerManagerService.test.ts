@@ -179,21 +179,36 @@ describe("PrinterManagerService Native Discovery & Profiles", () => {
 
   it("resolves dynamic columns and paper width inches for multi-width continuous forms", () => {
     expect(isDotMatrixPaper("dot_matrix_6in")).toBe(true);
+    expect(isDotMatrixPaper("dot_matrix_10in")).toBe(true);
     expect(isDotMatrixPaper("dot_matrix_80col")).toBe(true);
+    expect(isDotMatrixPaper("dot_matrix_12in")).toBe(true);
     expect(isDotMatrixPaper("dot_matrix_120col")).toBe(true);
+    expect(isDotMatrixPaper("dot_matrix_15in")).toBe(true);
     expect(isDotMatrixPaper("dot_matrix_132col")).toBe(true);
     expect(isDotMatrixPaper("thermal_80mm")).toBe(false);
     expect(isDotMatrixPaper("a4")).toBe(false);
 
     // 6-inch continuous paper has 50 usable cols between 0.5" (5 cols) tractor margins
     expect(getDotMatrixColumns("dot_matrix_6in")).toBe(50);
+    expect(getDotMatrixColumns("dot_matrix_10in")).toBe(80);
     expect(getDotMatrixColumns("dot_matrix_80col")).toBe(80);
+    expect(getDotMatrixColumns("dot_matrix_12in")).toBe(120);
     expect(getDotMatrixColumns("dot_matrix_120col")).toBe(120);
+    expect(getDotMatrixColumns("dot_matrix_15in")).toBe(132);
     expect(getDotMatrixColumns("dot_matrix_132col")).toBe(132);
 
+    // Ensure fallback/printer carriage never overrides user-selected paper size
+    expect(getDotMatrixColumns("dot_matrix_6in", 120)).toBe(50);
+    expect(getDotMatrixColumns("dot_matrix_10in", 120)).toBe(80);
+    expect(getDotMatrixColumns("dot_matrix_12in", 80)).toBe(120);
+    expect(getDotMatrixColumns("dot_matrix_15in", 80)).toBe(132);
+
     expect(getPaperWidthInches("dot_matrix_6in")).toBe(6.0);
+    expect(getPaperWidthInches("dot_matrix_10in")).toBe(10.0);
     expect(getPaperWidthInches("dot_matrix_80col")).toBe(10.0);
+    expect(getPaperWidthInches("dot_matrix_12in")).toBe(12.0);
     expect(getPaperWidthInches("dot_matrix_120col")).toBe(12.0);
+    expect(getPaperWidthInches("dot_matrix_15in")).toBe(15.0);
     expect(getPaperWidthInches("dot_matrix_132col")).toBe(15.0);
 
     const geom6 = getContinuousPaperGeometry({ paperSize: "dot_matrix_6in", printerCarriageCols: 120 });
@@ -202,6 +217,24 @@ describe("PrinterManagerService Native Discovery & Profiles", () => {
     expect(geom6.usableBodyCols).toBe(50);
     expect(geom6.paperLeftOffsetCols).toBe(30);
     expect(geom6.contentLeftOffsetCols).toBe(35);
+
+    const geom10 = getContinuousPaperGeometry({ paperSize: "dot_matrix_10in", printerCarriageCols: 120 });
+    expect(geom10.paperTotalCols).toBe(80);
+    expect(geom10.usableBodyCols).toBe(80);
+    expect(geom10.paperLeftOffsetCols).toBe(20);
+    expect(geom10.contentLeftOffsetCols).toBe(20);
+
+    const geom12 = getContinuousPaperGeometry({ paperSize: "dot_matrix_12in", printerCarriageCols: 120 });
+    expect(geom12.paperTotalCols).toBe(120);
+    expect(geom12.usableBodyCols).toBe(120);
+    expect(geom12.paperLeftOffsetCols).toBe(0);
+    expect(geom12.contentLeftOffsetCols).toBe(0);
+
+    const geom15 = getContinuousPaperGeometry({ paperSize: "dot_matrix_15in", printerCarriageCols: 132 });
+    expect(geom15.paperTotalCols).toBe(132);
+    expect(geom15.usableBodyCols).toBe(132);
+    expect(geom15.paperLeftOffsetCols).toBe(0);
+    expect(geom15.contentLeftOffsetCols).toBe(0);
   });
 
   it("handles offline printer error gracefully without false success", async () => {

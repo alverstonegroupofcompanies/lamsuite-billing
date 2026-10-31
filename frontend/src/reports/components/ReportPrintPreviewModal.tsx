@@ -368,10 +368,10 @@ export const ReportPrintPreviewModal: React.FC<ReportPrintPreviewModalProps> = (
           ? is6in
             ? "dot_matrix_6in"
             : cols === 120
-            ? "dot_matrix_120col"
+            ? "dot_matrix_12in"
             : cols === 132
-            ? "dot_matrix_132col"
-            : "dot_matrix_80col"
+            ? "dot_matrix_15in"
+            : "dot_matrix_10in"
           : printLayout === "a4-landscape"
           ? "a4"
           : "a4";
@@ -379,6 +379,7 @@ export const ReportPrintPreviewModal: React.FC<ReportPrintPreviewModalProps> = (
       let rawEscPosBytes: Uint8Array | undefined;
       if (isDot) {
         const carriageCols = getPrinterCarriageColumns(selectedPrinterInfo);
+        const paperWidth = is6in ? "6in" : cols === 120 ? "12in" : cols === 132 ? "15in" : "10in";
         const text = printFormatter.generateDotMatrixText(documentData, cols, {
           printerColumns: carriageCols,
           autoCenter: true,
@@ -386,7 +387,7 @@ export const ReportPrintPreviewModal: React.FC<ReportPrintPreviewModalProps> = (
         rawEscPosBytes = dotMatrixRenderer.generateEscPBytes(text, {
           columns: cols,
           printerCarriageColumns: carriageCols,
-          paperWidth: is6in ? "6in" : undefined,
+          paperWidth,
           autoCenterPaper: true,
           endOfJobAction: "stop_immediately",
         });
