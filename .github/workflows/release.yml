@@ -403,17 +403,32 @@ jobs:
     permissions:
       contents: read
     runs-on: ubuntu-latest
-    if: secrets.SSH_HOST != '' && (secrets.SSH_PRIVATE_KEY != '' || secrets.SSH_KEY != '')
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
+      - name: Check SSH Deployment Secrets
+        id: check-ssh
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_KEY: ${{ secrets.SSH_PRIVATE_KEY || secrets.SSH_KEY }}
+        run: |
+          if [ -z "$SSH_HOST" ] || [ -z "$SSH_KEY" ]; then
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::notice ::SSH_HOST or SSH_PRIVATE_KEY is not configured. Skipping updates server deployment."
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+            echo "SSH deployment credentials verified."
+          fi
+
       - name: Setup Node.js 22 LTS
+        if: steps.check-ssh.outputs.configured == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: 22
 
       - name: Download Updater Assets from Published Release
+        if: steps.check-ssh.outputs.configured == 'true'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
@@ -432,6 +447,7 @@ jobs:
           "
 
       - name: Upload Updater Artifacts via Key-Based SCP
+        if: steps.check-ssh.outputs.configured == 'true'
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.SSH_HOST }}
@@ -443,6 +459,7 @@ jobs:
           strip_components: 1
 
       - name: Re-index & Ensure Read Permissions on Server
+        if: steps.check-ssh.outputs.configured == 'true'
         uses: appleboy/ssh-action@v1.2.1
         with:
           host: ${{ secrets.SSH_HOST }}
