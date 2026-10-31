@@ -25,12 +25,13 @@ function githubApi(endpoint, method = 'GET', body = null, headers = {}) {
   return new Promise((resolve, reject) => {
     const url = endpoint.startsWith('https://') ? endpoint : `https://api.github.com${endpoint}`;
     const parsed = new URL(url);
+    const isApiGithub = parsed.hostname === 'api.github.com';
     const req = https.request(parsed, {
       method,
       headers: {
         'User-Agent': 'LamSuite-Updater-Reconciler',
         Accept: 'application/vnd.github.v3+json',
-        Authorization: `Bearer ${GITHUB_TOKEN}`,
+        ...(isApiGithub ? { Authorization: `Bearer ${GITHUB_TOKEN}` } : {}),
         ...headers,
       },
     }, (res) => {
@@ -62,12 +63,13 @@ function downloadRaw(url) {
   return new Promise((resolve, reject) => {
     const parsed = new URL(url);
     const client = parsed.protocol === 'https:' ? https : http;
+    const isApiGithub = parsed.hostname === 'api.github.com';
     const req = client.request(parsed, {
       method: 'GET',
       headers: {
         'User-Agent': 'LamSuite-Updater-Reconciler',
         Accept: 'application/octet-stream',
-        Authorization: `Bearer ${GITHUB_TOKEN}`,
+        ...(isApiGithub ? { Authorization: `Bearer ${GITHUB_TOKEN}` } : {}),
       },
     }, (res) => {
       if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {

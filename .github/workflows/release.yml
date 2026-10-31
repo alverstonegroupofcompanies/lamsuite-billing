@@ -195,6 +195,7 @@ jobs:
           releaseDraft: true
           prerelease: false
           includeUpdaterJson: true
+          args: '--bundles nsis,updater'
 
   # ----------------------------------------------------------------------------
   # Job 4: Publish Release & Reconcile Manifest
