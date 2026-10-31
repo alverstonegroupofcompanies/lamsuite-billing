@@ -757,22 +757,23 @@ describe("Dot Matrix Plain-Text Renderer & ESC/P Generator", () => {
   });
 
   describe("Dynamic Multiple Paper Widths (6-inch, 10-inch, 12-inch, 15-inch)", () => {
-    it("renders 6-inch narrow paper (60 cols) with all lines <= 60 chars and exact table layout", () => {
+    it("renders 6-inch narrow paper (60 cols physical, 50 cols usable between perforations) with all lines <= 60 chars and exact table layout", () => {
       const rendered = dotMatrixRenderer.renderInvoice(sampleInvoice, {
         paperWidth: "6in",
       });
       const lines = rendered.split("\n");
 
-      // Verify no line exceeds 60 characters
+      // Verify no line exceeds 60 characters (physical 6.0" paper width)
       for (const line of lines) {
         expect(line.length).toBeLessThanOrEqual(60);
       }
 
-      // Check header divider is exactly 60 characters
-      expect(lines.some((l) => l === "-".repeat(60))).toBe(true);
+      // Check header divider is 50 characters past 5-character tractor margin (total 55 <= 60 chars)
+      expect(lines.some((l) => l === " ".repeat(5) + "-".repeat(50))).toBe(true);
+      expect(lines.some((l) => l === " ".repeat(5) + "=".repeat(50))).toBe(true);
 
-      // Check 60-col table headers
-      expect(rendered).toContain("Item Description");
+      // Check table headers fit within the 50-col usable area
+      expect(rendered).toContain("Item Desc");
       expect(rendered).toContain("Batch");
       expect(rendered).toContain("Amount");
 
@@ -780,6 +781,14 @@ describe("Dot Matrix Plain-Text Renderer & ESC/P Generator", () => {
       expect(rendered).toContain("ALVERSTONE MEDICARE & SURGICAL STORE");
       expect(rendered).toContain("Augmentin");
       expect(rendered).toContain("Rs.");
+
+      // Also verify raw 60-column mode without tractor margins
+      const raw60 = dotMatrixRenderer.renderInvoice(sampleInvoice, {
+        columns: 60,
+        tractorFeedMargin: false,
+      });
+      expect(raw60).toContain("Item Description");
+      expect(raw60.split("\n").some((l) => l === "-".repeat(60))).toBe(true);
     });
 
     it("renders 10-inch standard paper (80 cols) with all lines <= 80 chars", () => {
@@ -911,7 +920,7 @@ describe("Dot Matrix Plain-Text Renderer & ESC/P Generator", () => {
       expect(resolveLeftMargin({ printerCarriageColumns: 120, autoCenterPaper: true, leftMarginSpaces: 2 }, 60)).toBe(" ".repeat(32));
     });
 
-    it("renders 6-inch invoice centered inside 12-inch carriage with exactly 30 spaces left offset on all lines", () => {
+    it("renders 6-inch continuous invoice centered inside 12-inch carriage with 35 spaces left offset (30 platen + 5 tractor)", () => {
       const rendered = dotMatrixRenderer.renderInvoice(sampleInvoice, {
         paperWidth: "6in",
         printerCarriageColumns: 120,
@@ -919,18 +928,27 @@ describe("Dot Matrix Plain-Text Renderer & ESC/P Generator", () => {
       });
 
       const lines = rendered.split("\n");
-      // All non-empty lines must start with exactly 30 spaces
+      // All non-empty lines must start with exactly 35 spaces (30 platen centering + 5 left tractor feed margin)
       for (const line of lines) {
         if (line.trim().length > 0) {
-          expect(line.startsWith(" ".repeat(30))).toBe(true);
-          // And content after the 30 spaces must not exceed 60 characters (total length <= 90)
-          expect(line.length).toBeLessThanOrEqual(90);
+          expect(line.startsWith(" ".repeat(35))).toBe(true);
+          // And content after the 35 spaces must not exceed 50 characters (total length <= 85 in 120c carriage)
+          expect(line.length).toBeLessThanOrEqual(85);
         }
       }
 
-      // Divider line check: 30 spaces + 60 hyphens = 90 chars total
-      expect(lines.some((l) => l === " ".repeat(30) + "-".repeat(60))).toBe(true);
-      expect(lines.some((l) => l === " ".repeat(30) + "=".repeat(60))).toBe(true);
+      // Divider line check: 35 spaces + 50 hyphens = 85 chars total
+      expect(lines.some((l) => l === " ".repeat(35) + "-".repeat(50))).toBe(true);
+      expect(lines.some((l) => l === " ".repeat(35) + "=".repeat(50))).toBe(true);
+
+      // Verify non-tractor 60-col paper centered has exactly 30 spaces
+      const raw60 = dotMatrixRenderer.renderInvoice(sampleInvoice, {
+        columns: 60,
+        tractorFeedMargin: false,
+        printerCarriageColumns: 120,
+        autoCenterPaper: true,
+      });
+      expect(raw60.split("\n").some((l) => l === " ".repeat(30) + "-".repeat(60))).toBe(true);
     });
 
     it("renders 10-inch invoice on 10-inch carriage with 0 offset (no unintended left spaces)", () => {

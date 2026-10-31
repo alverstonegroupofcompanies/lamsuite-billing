@@ -7,6 +7,7 @@ import {
   getPaperWidthInches,
   getPrinterCarriageColumns,
   calculateHorizontalCenteringOffset,
+  getContinuousPaperGeometry,
   type SystemPrinterInfo,
   type PrinterProfileConfig,
 } from "./printerManagerService";
@@ -184,7 +185,8 @@ describe("PrinterManagerService Native Discovery & Profiles", () => {
     expect(isDotMatrixPaper("thermal_80mm")).toBe(false);
     expect(isDotMatrixPaper("a4")).toBe(false);
 
-    expect(getDotMatrixColumns("dot_matrix_6in")).toBe(60);
+    // 6-inch continuous paper has 50 usable cols between 0.5" (5 cols) tractor margins
+    expect(getDotMatrixColumns("dot_matrix_6in")).toBe(50);
     expect(getDotMatrixColumns("dot_matrix_80col")).toBe(80);
     expect(getDotMatrixColumns("dot_matrix_120col")).toBe(120);
     expect(getDotMatrixColumns("dot_matrix_132col")).toBe(132);
@@ -193,6 +195,13 @@ describe("PrinterManagerService Native Discovery & Profiles", () => {
     expect(getPaperWidthInches("dot_matrix_80col")).toBe(10.0);
     expect(getPaperWidthInches("dot_matrix_120col")).toBe(12.0);
     expect(getPaperWidthInches("dot_matrix_132col")).toBe(15.0);
+
+    const geom6 = getContinuousPaperGeometry({ paperSize: "dot_matrix_6in", printerCarriageCols: 120 });
+    expect(geom6.paperTotalCols).toBe(60);
+    expect(geom6.tractorMarginLeftCols).toBe(5);
+    expect(geom6.usableBodyCols).toBe(50);
+    expect(geom6.paperLeftOffsetCols).toBe(30);
+    expect(geom6.contentLeftOffsetCols).toBe(35);
   });
 
   it("handles offline printer error gracefully without false success", async () => {
@@ -516,11 +525,15 @@ describe("PrinterManagerService Native Discovery & Profiles", () => {
     expect(getPrinterCarriageColumns(p132)).toBe(132);
 
     // Centering calculation:
-    // 60-col on 120-col carriage => 30
+    // Raw 60-col on 120-col carriage => 30
     expect(calculateHorizontalCenteringOffset(120, 60)).toBe(30);
+    // 6-inch continuous form with tractor margins on 120-col carriage => 30 platen + 5 tractor = 35
+    expect(calculateHorizontalCenteringOffset(120, 50, { paperSize: "dot_matrix_6in" })).toBe(35);
+    // 6-inch continuous form with tractor margins on 80-col carriage => 10 platen + 5 tractor = 15
+    expect(calculateHorizontalCenteringOffset(80, 50, { paperSize: "dot_matrix_6in" })).toBe(15);
     // 80-col on 120-col carriage => 20
     expect(calculateHorizontalCenteringOffset(120, 80)).toBe(20);
-    // 60-col on 80-col carriage => 10
+    // Raw 60-col on 80-col carriage => 10
     expect(calculateHorizontalCenteringOffset(80, 60)).toBe(10);
     // 80-col on 80-col carriage => 0
     expect(calculateHorizontalCenteringOffset(80, 80)).toBe(0);
@@ -540,8 +553,8 @@ describe("PrinterManagerService Native Discovery & Profiles", () => {
     expect(res.success).toBe(true);
 
     const text = String.fromCharCode(...capturedBytes);
-    // Offset is (120 - 60) / 2 = 30 spaces
-    expect(text).toContain(" ".repeat(30) + "LamSuite Dot-Matrix Calibration Test");
-    expect(text).toContain("[Centered +30C]");
+    // Total offset is (120 - 60) / 2 = 30 platen + 5 tractor = 35 spaces
+    expect(text).toContain(" ".repeat(35) + "LamSuite Dot-Matrix Calibration Test");
+    expect(text).toContain("[Centered +35C (Platen +30C + Tractor 5C)]");
   });
 });

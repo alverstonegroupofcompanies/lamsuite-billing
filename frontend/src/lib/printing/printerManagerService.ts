@@ -1,6 +1,6 @@
 import { isTauri, invokeCommand, registerMockHandler } from "../ipc/ipcBridge";
 import { sqliteStorage } from "../db/sqliteStorage";
-import { dotMatrixRenderer } from "./dotMatrixRenderer";
+import { dotMatrixRenderer, type DotMatrixPaperWidth } from "./dotMatrixRenderer";
 
 export type PrinterStatus = "ready" | "offline" | "paper_out" | "error" | "busy" | "unknown";
 export type PaperSize =
@@ -23,7 +23,8 @@ export function isDotMatrixPaper(paperSize: PaperSize): boolean {
 export function getDotMatrixColumns(paperSize: PaperSize, fallback?: number): number {
   switch (paperSize) {
     case "dot_matrix_6in":
-      return 60;
+      // 5.0" usable printable area between 0.5" left and right tractor-feed perforated margins
+      return fallback || 50;
     case "dot_matrix_120col":
       return 120;
     case "dot_matrix_132col":
@@ -62,6 +63,7 @@ export function getPaperWidthInches(paperSize: PaperSize): number {
 /**
  * Resolves the full physical carriage/printable width in columns (at standard 10 CPI) for a dot matrix printer.
  * If not explicitly configured, infers from printer capabilities, model name, or supported paper sizes.
+ * Never treats narrow paper size (such as 6-inch) as the printer's carriage width.
  */
 export function getPrinterCarriageColumns(
   printer?: SystemPrinterInfo | null,
@@ -81,6 +83,9 @@ export function getPrinterCarriageColumns(
     if (name.includes("15\"") || name.includes("15-inch") || name.includes("132") || name.includes("136") || name.includes("lq-2090") || name.includes("wide")) {
       return 132;
     }
+    if (name.includes("100") || name.includes("10\"") && name.includes("wide")) {
+      return 100;
+    }
     if (name.includes("80") || name.includes("10\"") || name.includes("msp 240") || name.includes("lx-300") || name.includes("lx-310")) {
       return 80;
     }
@@ -89,22 +94,112 @@ export function getPrinterCarriageColumns(
     if (printer.supportedPaperSizes.includes("dot_matrix_132col")) return 132;
     if (printer.supportedPaperSizes.includes("dot_matrix_120col")) return 120;
     if (printer.supportedPaperSizes.includes("dot_matrix_80col")) return 80;
-    if (printer.supportedPaperSizes.includes("dot_matrix_6in")) return 60;
   }
   // Default for standard dot matrix carriage
   return 80;
 }
 
+export interface ContinuousPaperGeometry {
+  paperWidthInches: number; // e.g. 6.0
+  paperTotalCols: number; // e.g. 60 (at standard 10 CPI)
+  tractorMarginLeftCols: number; // e.g. 5 (0.5" perforated margin with pin-feed holes)
+  tractorMarginRightCols: number; // e.g. 5 (0.5" perforated margin with pin-feed holes)
+  usableBodyCols: number; // e.g. 50 (area between perforations: 60 - 5 - 5 = 50)
+  paperLeftOffsetCols: number; // offset to center the physical paper on platen: floor((printerCols - paperTotalCols) / 2)
+  contentLeftOffsetCols: number; // total left indent before text = paperLeftOffsetCols + tractorMarginLeftCols + manualMargin
+}
+
 /**
- * Calculates horizontal left offset (in character spaces at standard pitch) to center a smaller paper
- * width within the printer's full printable/carriage width.
- * Returns 0 if paper width matches or exceeds printer carriage width.
+ * Returns exact physical paper dimensions and tractor-feed positioning.
+ */
+export function getContinuousPaperGeometry(params: {
+  paperSize?: PaperSize;
+  paperWidth?: DotMatrixPaperWidth;
+  printerCarriageCols?: number;
+  autoCenter?: boolean;
+  manualLeftMarginSpaces?: number;
+  customUsableCols?: number;
+}): ContinuousPaperGeometry {
+  let paperWidthInches = 10.0;
+  let paperTotalCols = 80;
+  let tractorMargin = 0;
+  let usableCols = 80;
+
+  const size = params.paperSize;
+  const width = params.paperWidth;
+
+  if (size === "dot_matrix_6in" || width === "6in" || (typeof width === "number" && width <= 7)) {
+    paperWidthInches = 6.0;
+    paperTotalCols = 60;
+    tractorMargin = 5; // 0.5" perforated strip with pin-feed holes on each side
+    usableCols = params.customUsableCols || 50; // 5.0" usable body between perforations
+  } else if (size === "dot_matrix_120col" || width === "12in" || (typeof width === "number" && width > 11 && width <= 13)) {
+    paperWidthInches = 12.0;
+    paperTotalCols = 120;
+    tractorMargin = 0;
+    usableCols = params.customUsableCols || 120;
+  } else if (size === "dot_matrix_132col" || width === "15in" || (typeof width === "number" && width > 13)) {
+    paperWidthInches = 15.0;
+    paperTotalCols = 132;
+    tractorMargin = 0;
+    usableCols = params.customUsableCols || 132;
+  } else {
+    paperWidthInches = 10.0;
+    paperTotalCols = 80;
+    tractorMargin = 0;
+    usableCols = params.customUsableCols || 80;
+  }
+
+  const printerCarriageCols = params.printerCarriageCols || paperTotalCols;
+  const autoCenter = params.autoCenter !== false;
+  const manualMargin = Math.max(0, params.manualLeftMarginSpaces || 0);
+
+  let paperLeftOffsetCols = 0;
+  if (autoCenter && printerCarriageCols > paperTotalCols) {
+    paperLeftOffsetCols = Math.floor((printerCarriageCols - paperTotalCols) / 2);
+  }
+
+  const contentLeftOffsetCols = paperLeftOffsetCols + tractorMargin + manualMargin;
+
+  return {
+    paperWidthInches,
+    paperTotalCols,
+    tractorMarginLeftCols: tractorMargin,
+    tractorMarginRightCols: tractorMargin,
+    usableBodyCols: usableCols,
+    paperLeftOffsetCols,
+    contentLeftOffsetCols,
+  };
+}
+
+/**
+ * Calculates horizontal left offset (in character spaces at standard 10 CPI) to center continuous paper
+ * and its printable content within the printer's supported carriage width.
+ * Accounts for both physical paper platen centering and 0.5" tractor-feed perforated margins.
  */
 export function calculateHorizontalCenteringOffset(
   printerCarriageCols: number,
-  paperWidthCols: number
+  paperWidthCols: number,
+  options?: { includeTractorMargin?: boolean; paperSize?: PaperSize | string }
 ): number {
-  if (!printerCarriageCols || !paperWidthCols || paperWidthCols >= printerCarriageCols) {
+  if (!printerCarriageCols) return 0;
+
+  const is6inTractor =
+    options?.paperSize === "dot_matrix_6in" ||
+    (paperWidthCols === 50 && options?.includeTractorMargin !== false) ||
+    (paperWidthCols <= 55 && options?.includeTractorMargin !== false);
+
+  if (is6inTractor) {
+    const paperPhysicalCols = 60; // 6.0 inches total physical paper width
+    const tractorMargin = options?.includeTractorMargin !== false ? 5 : 0; // 0.5 inches tractor margin (5 cols)
+    const paperLeftOffset = printerCarriageCols > paperPhysicalCols
+      ? Math.floor((printerCarriageCols - paperPhysicalCols) / 2)
+      : 0;
+    return paperLeftOffset + tractorMargin;
+  }
+
+  // Standard paper (e.g. 60 raw cols, 80 cols, 120 cols, 132 cols)
+  if (!paperWidthCols || paperWidthCols >= printerCarriageCols) {
     return 0;
   }
   return Math.floor((printerCarriageCols - paperWidthCols) / 2);
@@ -918,12 +1013,18 @@ export class PrinterManagerService {
       const profile = await this.getProfileForPrinter(printerName);
       const carriageCols = getPrinterCarriageColumns(printer, profile);
       const offset = profile.dotMatrixAutoCenter !== false
-        ? calculateHorizontalCenteringOffset(carriageCols, cols)
+        ? calculateHorizontalCenteringOffset(carriageCols, cols, { paperSize })
         : 0;
       const leftPad = " ".repeat(offset);
       const encoder = new TextEncoder();
+      const is6in = paperSize === "dot_matrix_6in";
+      const detailStr = offset > 0
+        ? is6in
+          ? ` [Centered +${offset}C (Platen +${Math.max(0, offset - 5)}C + Tractor 5C)]`
+          : ` [Centered +${offset}C]`
+        : "";
       const text = "\x1B@" + leftPad + "LamSuite Dot-Matrix Calibration Test (" + cols + " Col / " + widthIn + "\")\r\n" +
-        leftPad + "Printer: " + printerName + (offset > 0 ? " [Centered +" + offset + "C]" : "") + "\r\n" +
+        leftPad + "Printer: " + printerName + detailStr + "\r\n" +
         leftPad + "Status: Ready - Head Stopped Immediately\r\n";
       rawEscPosBytes = encoder.encode(text);
     }

@@ -201,10 +201,30 @@ pub fn get_native_printers() -> Result<Vec<Value>, String> {
                     let is_dot = name_lower.contains("msp")
                         || name_lower.contains("dot")
                         || name_lower.contains("lx")
-                        || name_lower.contains("fx");
+                        || name_lower.contains("fx")
+                        || name_lower.contains("lq")
+                        || name_lower.contains("matrix");
                     let is_virtual = name_lower.contains("pdf")
                         || name_lower.contains("xps")
                         || name_lower.contains("onenote");
+
+                    let carriage_cols = if name_lower.contains("245") || name_lower.contains("120") || name_lower.contains("12\"") || name_lower.contains("12 inch") {
+                        120
+                    } else if name_lower.contains("2090") || name_lower.contains("136") || name_lower.contains("132") || name_lower.contains("15\"") || name_lower.contains("15 inch") || name_lower.contains("wide") {
+                        132
+                    } else if name_lower.contains("100") {
+                        100
+                    } else {
+                        80
+                    };
+
+                    let dot_papers = if carriage_cols >= 132 {
+                        vec!["dot_matrix_6in", "dot_matrix_80col", "dot_matrix_120col", "dot_matrix_132col", "half_a4"]
+                    } else if carriage_cols >= 120 {
+                        vec!["dot_matrix_6in", "dot_matrix_80col", "dot_matrix_120col", "half_a4"]
+                    } else {
+                        vec!["dot_matrix_6in", "dot_matrix_80col", "half_a4"]
+                    };
 
                     printers.push(json!({
                         "name": clean_name,
@@ -215,7 +235,8 @@ pub fn get_native_printers() -> Result<Vec<Value>, String> {
                         "driverName": if driver.is_empty() { "Windows Printer Driver" } else { &driver },
                         "portName": if port.is_empty() { "USB" } else { &port },
                         "printerType": if is_thermal { "thermal_pos" } else if is_dot { "dot_matrix" } else if is_virtual { "virtual_pdf" } else { "laser_inkjet" },
-                        "supportedPaperSizes": if is_thermal { vec!["thermal_80mm", "thermal_58mm"] } else if is_dot { vec!["dot_matrix_80col", "half_a4"] } else { vec!["a4", "a5", "half_a4"] },
+                        "carriageWidthCols": if is_dot { Some(carriage_cols) } else { None },
+                        "supportedPaperSizes": if is_thermal { vec!["thermal_80mm", "thermal_58mm"] } else if is_dot { dot_papers } else { vec!["a4", "a5", "half_a4"] },
                         "isVirtual": is_virtual
                     }));
                 }
@@ -269,8 +290,31 @@ pub fn get_native_printers() -> Result<Vec<Value>, String> {
             let name_lower = name.to_lowercase();
             let is_def = !default_printer.is_empty() && name == default_printer;
             let is_thermal = name_lower.contains("pos") || name_lower.contains("thermal") || name_lower.contains("t82") || name_lower.contains("receipt");
-            let is_dot = name_lower.contains("msp") || name_lower.contains("dot") || name_lower.contains("lx");
+            let is_dot = name_lower.contains("msp")
+                || name_lower.contains("dot")
+                || name_lower.contains("lx")
+                || name_lower.contains("fx")
+                || name_lower.contains("lq")
+                || name_lower.contains("matrix");
             let is_virtual = name_lower.contains("pdf");
+
+            let carriage_cols = if name_lower.contains("245") || name_lower.contains("120") || name_lower.contains("12\"") || name_lower.contains("12 inch") {
+                120
+            } else if name_lower.contains("2090") || name_lower.contains("136") || name_lower.contains("132") || name_lower.contains("15\"") || name_lower.contains("15 inch") || name_lower.contains("wide") {
+                132
+            } else if name_lower.contains("100") {
+                100
+            } else {
+                80
+            };
+
+            let dot_papers = if carriage_cols >= 132 {
+                vec!["dot_matrix_6in", "dot_matrix_80col", "dot_matrix_120col", "dot_matrix_132col", "half_a4"]
+            } else if carriage_cols >= 120 {
+                vec!["dot_matrix_6in", "dot_matrix_80col", "dot_matrix_120col", "half_a4"]
+            } else {
+                vec!["dot_matrix_6in", "dot_matrix_80col", "half_a4"]
+            };
 
             printers.push(json!({
                 "name": name,
@@ -281,7 +325,8 @@ pub fn get_native_printers() -> Result<Vec<Value>, String> {
                 "driverName": "CUPS Native Driver",
                 "portName": "CUPS",
                 "printerType": if is_thermal { "thermal_pos" } else if is_dot { "dot_matrix" } else if is_virtual { "virtual_pdf" } else { "laser_inkjet" },
-                "supportedPaperSizes": if is_thermal { vec!["thermal_80mm", "thermal_58mm"] } else if is_dot { vec!["dot_matrix_80col", "half_a4"] } else { vec!["a4", "a5", "half_a4"] },
+                "carriageWidthCols": if is_dot { Some(carriage_cols) } else { None },
+                "supportedPaperSizes": if is_thermal { vec!["thermal_80mm", "thermal_58mm"] } else if is_dot { dot_papers } else { vec!["a4", "a5", "half_a4"] },
                 "isVirtual": is_virtual
             }));
         }

@@ -352,9 +352,10 @@ export const ReportPrintPreviewModal: React.FC<ReportPrintPreviewModalProps> = (
 
     try {
       const isDot = printLayout.startsWith("dot-matrix");
+      const is6in = printLayout === "dot-matrix-60";
       const cols =
-        printLayout === "dot-matrix-60"
-          ? 60
+        is6in
+          ? 50
           : printLayout === "dot-matrix-120"
           ? 120
           : printLayout === "dot-matrix-132"
@@ -364,7 +365,7 @@ export const ReportPrintPreviewModal: React.FC<ReportPrintPreviewModalProps> = (
         printLayout === "thermal"
           ? "thermal_80mm"
           : isDot
-          ? cols === 60
+          ? is6in
             ? "dot_matrix_6in"
             : cols === 120
             ? "dot_matrix_120col"
@@ -385,6 +386,7 @@ export const ReportPrintPreviewModal: React.FC<ReportPrintPreviewModalProps> = (
         rawEscPosBytes = dotMatrixRenderer.generateEscPBytes(text, {
           columns: cols,
           printerCarriageColumns: carriageCols,
+          paperWidth: is6in ? "6in" : undefined,
           autoCenterPaper: true,
           endOfJobAction: "stop_immediately",
         });
@@ -438,9 +440,10 @@ export const ReportPrintPreviewModal: React.FC<ReportPrintPreviewModalProps> = (
       const defaultFileName = `${cleanTitle}_${new Date().toISOString().slice(0, 10)}.pdf`;
 
       if (printLayout.startsWith("dot-matrix")) {
+        const is6in = printLayout === "dot-matrix-60";
         const cols =
-          printLayout === "dot-matrix-60"
-            ? 60
+          is6in
+            ? 50
             : printLayout === "dot-matrix-120"
             ? 120
             : printLayout === "dot-matrix-132"

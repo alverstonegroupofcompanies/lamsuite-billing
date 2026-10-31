@@ -7,9 +7,10 @@ export type DotMatrixEndOfJob = "stop_immediately" | "feed_tear_off" | "form_fee
 export type DotMatrixPaperWidth = "6in" | "10in" | "12in" | "15in" | number;
 
 export interface DotMatrixOptions {
-  columns?: number; // 60 (6"), 80 (10"), 120 (12"), 132 (15"/condensed) or custom
-  printerCarriageColumns?: number; // Physical carriage width of printer (e.g. 80, 120, 132, 136)
-  autoCenterPaper?: boolean; // Center smaller paper width relative to wider carriage (default true)
+  columns?: number; // 50 (usable area between tractor perforations), 60 (full 6"), 80 (10"), 120 (12"), 132 (15"/condensed) or custom
+  printerCarriageColumns?: number; // Physical carriage width of printer (e.g. 80, 100, 120, 132, 136)
+  autoCenterPaper?: boolean; // Center continuous paper relative to wider carriage (default true)
+  tractorFeedMargin?: boolean; // Account for 0.5" (5 cols) perforated tractor-feed strips on each side (default true for 6in continuous paper)
   paperWidth?: DotMatrixPaperWidth; // Physical paper width loaded in printer
   linesPerPage?: number; // default 66 lines for 11", 72 for 12", 33 for 6" half-page, 0 for Continuous
   cpi?: DotMatrixPitch;
@@ -31,9 +32,10 @@ export interface DotMatrixOptions {
 }
 
 export interface DotMatrixPreviewOptions {
-  columns?: number; // 60, 80, 120, 132 or custom
+  columns?: number; // 50, 60, 80, 120, 132 or custom
   printerCarriageColumns?: number;
   autoCenterPaper?: boolean;
+  tractorFeedMargin?: boolean;
   paperWidth?: DotMatrixPaperWidth;
   showRuler?: boolean;
   showLineNumbers?: boolean;
@@ -46,13 +48,34 @@ export interface DotMatrixPreviewOptions {
 
 /**
  * Resolves total left margin spaces, including automatic horizontal centering offset
- * when smaller paper is used inside a wider printer carriage, plus any user-specified manual margin.
+ * when smaller paper is used inside a wider printer carriage, accounting for 0.5" (5 cols)
+ * tractor-feed perforated margins, plus any user-specified manual margin.
  */
 export function resolveLeftMargin(options?: DotMatrixOptions, paperCols?: number): string {
   const manualMargin = Math.max(0, options?.leftMarginSpaces || 0);
   const carriageCols = options?.printerCarriageColumns;
   const autoCenter = options?.autoCenterPaper !== false;
+  const paperWidth = options?.paperWidth;
 
+  const is6inTractor =
+    paperWidth === "6in" ||
+    (typeof paperWidth === "number" && paperWidth <= 7) ||
+    paperCols === 50 ||
+    options?.tractorFeedMargin === true ||
+    (paperCols !== undefined && paperCols <= 55);
+
+  if (is6inTractor) {
+    const paperPhysicalCols = 60; // 6.0" physical continuous form
+    const tractorMargin = options?.tractorFeedMargin !== false ? 5 : 0; // 0.5" perforated margin past pinfeed holes
+    let paperLeftOffset = 0;
+    if (autoCenter && carriageCols && carriageCols > paperPhysicalCols) {
+      paperLeftOffset = Math.floor((carriageCols - paperPhysicalCols) / 2);
+    }
+    const totalSpaces = paperLeftOffset + tractorMargin + manualMargin;
+    return totalSpaces > 0 ? " ".repeat(totalSpaces) : "";
+  }
+
+  // Standard 60, 80, 120, 132 columns paper without tractor offset
   let autoOffset = 0;
   if (autoCenter && carriageCols && paperCols && carriageCols > paperCols) {
     autoOffset = Math.floor((carriageCols - paperCols) / 2);
@@ -71,14 +94,14 @@ export function resolveDotMatrixColumns(options?: { columns?: number; paperWidth
   }
   if (options?.paperWidth) {
     if (typeof options.paperWidth === "number") {
-      if (options.paperWidth <= 7) return 60;
+      if (options.paperWidth <= 7) return 50; // 5.0" usable printable area between 0.5" tractor margins
       if (options.paperWidth <= 11) return 80;
       if (options.paperWidth <= 13) return 120;
       return 132;
     }
     switch (options.paperWidth) {
       case "6in":
-        return 60;
+        return 50; // 5.0" usable printable area between 0.5" tractor margins
       case "10in":
         return 80;
       case "12in":
@@ -349,15 +372,16 @@ export class DotMatrixRenderer {
 
     headerLines.push(divSingle);
 
-    // Document & Customer Meta Grid (2 Columns: Left 33 cols, Right 27 cols)
-    const leftColWidth = Math.min(34, Math.floor(cols * 0.55));
+    // Document & Customer Meta Grid (2 Columns: Left 26/33 cols, Right 24/27 cols)
+    const is50Col = cols <= 55;
+    const leftColWidth = is50Col ? 26 : Math.min(34, Math.floor(cols * 0.55));
     const rightColWidth = cols - leftColWidth;
 
     const leftMeta: string[] = [];
     leftMeta.push(`Customer : ${(data.customer_name || "Walk-in").substring(0, leftColWidth - 11)}`);
-    leftMeta.push(`Phone    : ${data.customer_phone || "-"}`);
+    leftMeta.push(`Phone    : ${(data.customer_phone || "-").substring(0, leftColWidth - 11)}`);
     if (data.customer_gstin) {
-      leftMeta.push(`GSTIN    : ${data.customer_gstin}`);
+      leftMeta.push(`GSTIN    : ${data.customer_gstin.substring(0, leftColWidth - 11)}`);
     }
     if (options?.showDoctorPatient !== false) {
       if (data.patient_name) {
@@ -371,25 +395,40 @@ export class DotMatrixRenderer {
     }
 
     const rightMeta: string[] = [];
-    rightMeta.push(`Invoice No : #${data.invoice_number}`);
-    rightMeta.push(`Date       : ${this.formatInvoiceDate(data.invoice_date, data.invoice_time)}`);
-    rightMeta.push(`Payment    : ${data.payment_mode || "Cash"}`);
-    if (data.place_of_supply) {
-      rightMeta.push(`POS        : ${data.place_of_supply}`);
+    if (is50Col) {
+      rightMeta.push(`Inv No: #${data.invoice_number}`.substring(0, rightColWidth));
+      rightMeta.push(`Date  : ${this.formatInvoiceDate(data.invoice_date)}`.substring(0, rightColWidth));
+      rightMeta.push(`Pay   : ${data.payment_mode || "Cash"}`.substring(0, rightColWidth));
+      if (data.place_of_supply) {
+        rightMeta.push(`POS   : ${data.place_of_supply}`.substring(0, rightColWidth));
+      }
+    } else {
+      rightMeta.push(`Invoice No : #${data.invoice_number}`);
+      rightMeta.push(`Date       : ${this.formatInvoiceDate(data.invoice_date, data.invoice_time)}`);
+      rightMeta.push(`Payment    : ${data.payment_mode || "Cash"}`);
+      if (data.place_of_supply) {
+        rightMeta.push(`POS        : ${data.place_of_supply}`);
+      }
     }
 
     const maxMetaRows = Math.max(leftMeta.length, rightMeta.length);
     for (let i = 0; i < maxMetaRows; i++) {
       const l = this.padRight(leftMeta[i] || "", leftColWidth);
       const r = this.padRight(rightMeta[i] || "", rightColWidth);
-      headerLines.push(leftMargin + l + r);
+      headerLines.push(leftMargin + (l + r).substring(0, cols));
     }
 
     headerLines.push(divSingle);
 
-    // 60-Column Item Table Header
-    // #  Item Description     Batch   Exp    Qty    Rate    Amount (Exact 60 Cols: 2+1+20+1+7+1+5+1+4+1+7+1+9 = 60)
-    const itemTableHead = `${this.padRight("#", 2)} ${this.padRight("Item Description", 20)} ${this.padRight("Batch", 7)} ${this.padRight("Exp", 5)} ${this.padLeft("Qty", 4)} ${this.padLeft("Rate", 7)} ${this.padLeft("Amount", 9)}`;
+    // Item Table Header: 50 cols (usable area between tractor perforations) or 60 cols
+    const descW = is50Col ? 14 : 20;
+    const batchW = is50Col ? 6 : 7;
+    const expW = 5;
+    const qtyW = 4;
+    const rateW = is50Col ? 6 : 7;
+    const amtW = is50Col ? 7 : 9;
+
+    const itemTableHead = `${this.padRight("#", 2)} ${this.padRight(is50Col ? "Item Desc" : "Item Description", descW)} ${this.padRight("Batch", batchW)} ${this.padRight("Exp", expW)} ${this.padLeft("Qty", qtyW)} ${this.padLeft("Rate", rateW)} ${this.padLeft("Amount", amtW)}`;
     headerLines.push(leftMargin + itemTableHead);
     headerLines.push(divSingle);
 
@@ -397,18 +436,18 @@ export class DotMatrixRenderer {
     const itemLines: string[] = [];
     data.lines.forEach((item, idx) => {
       const num = this.padRight(idx + 1, 2);
-      const descFirst = item.description.substring(0, 20).padEnd(20);
-      const batch = this.padRight((item.batch_no || "-").substring(0, 7), 7);
-      const exp = this.padRight(this.formatExpiry(item.expiry_date), 5);
-      const qty = this.padLeft(this.formatQty(item.qty, item.loose_qty), 4);
-      const rate = this.padLeft(item.rate.toFixed(2), 7);
-      const amt = this.padLeft(this.formatAmount(item.amount), 9);
+      const descFirst = item.description.substring(0, descW).padEnd(descW);
+      const batch = this.padRight((item.batch_no || "-").substring(0, batchW), batchW);
+      const exp = this.padRight(this.formatExpiry(item.expiry_date), expW);
+      const qty = this.padLeft(this.formatQty(item.qty, item.loose_qty), qtyW);
+      const rate = this.padLeft(item.rate.toFixed(2), rateW);
+      const amt = this.padLeft(this.formatAmount(item.amount), amtW);
 
       itemLines.push(`${leftMargin}${num} ${descFirst} ${batch} ${exp} ${qty} ${rate} ${amt}`);
 
       // Indented secondary line if description was wrapped or to display HSN/GST
-      if (options?.truncateDescriptions !== true && item.description.length > 20) {
-        const remainingDesc = item.description.substring(20, 50).trim();
+      if (options?.truncateDescriptions !== true && item.description.length > descW) {
+        const remainingDesc = item.description.substring(descW, descW + 30).trim();
         const taxNote = item.hsn_code ? ` [HSN:${item.hsn_code} GST:${item.gst_percent}%]` : ` [GST:${item.gst_percent}%]`;
         const extraLine = ("   " + remainingDesc + taxNote).substring(0, cols);
         itemLines.push(leftMargin + extraLine);
@@ -419,25 +458,41 @@ export class DotMatrixRenderer {
     const footerLines: string[] = [];
     footerLines.push(divSingle);
 
-    // HSN Tax Summary (Compact for 60 cols)
+    // HSN Tax Summary (Compact for 50/60 cols)
     if (options?.showHsnSummary !== false) {
       const hsnRows = calculateHsnSummary(data.lines);
       if (hsnRows.length > 0) {
-        // HSN/SAC  Taxable(Rs) CGST% CGST(Rs) SGST% SGST(Rs) TotalTax (Exact 60 Cols: 8+1+12+1+5+1+8+1+5+1+8+1+8 = 59-60)
-        const hsnHead = `${this.padRight("HSN/SAC", 8)} ${this.padLeft("Taxable(Rs)", 12)} ${this.padLeft("CGST%", 5)} ${this.padLeft("CGST(Rs)", 8)} ${this.padLeft("SGST%", 5)} ${this.padLeft("SGST(Rs)", 8)} ${this.padLeft("TotTax", 8)}`;
-        footerLines.push(leftMargin + hsnHead);
-        footerLines.push(divSingle);
-        hsnRows.forEach((h) => {
-          const hCode = this.padRight(h.hsnCode, 8);
-          const tVal = this.padLeft(this.formatAmount(h.taxableValue), 12);
-          const cRate = this.padLeft(`${h.cgstRate}%`, 5);
-          const cAmt = this.padLeft(this.formatAmount(h.cgstAmount), 8);
-          const sRate = this.padLeft(`${h.sgstRate}%`, 5);
-          const sAmt = this.padLeft(this.formatAmount(h.sgstAmount), 8);
-          const totTax = this.padLeft(this.formatAmount(h.totalTax), 8);
-          footerLines.push(`${leftMargin}${hCode} ${tVal} ${cRate} ${cAmt} ${sRate} ${sAmt} ${totTax}`);
-        });
-        footerLines.push(divSingle);
+        if (is50Col) {
+          // 49-50 cols: HSN/SAC(7) Taxable(11) CGST(9) SGST(9) TotTax(9) = 49 cols
+          const hsnHead = `${this.padRight("HSN/SAC", 7)} ${this.padLeft("Taxable(Rs)", 11)} ${this.padLeft("CGST", 9)} ${this.padLeft("SGST", 9)} ${this.padLeft("TotTax", 9)}`;
+          footerLines.push(leftMargin + hsnHead);
+          footerLines.push(divSingle);
+          hsnRows.forEach((h) => {
+            const hCode = this.padRight(h.hsnCode, 7);
+            const tVal = this.padLeft(this.formatAmount(h.taxableValue), 11);
+            const cgst = this.padLeft(`${h.cgstRate}% ${this.formatAmount(h.cgstAmount)}`, 9);
+            const sgst = this.padLeft(`${h.sgstRate}% ${this.formatAmount(h.sgstAmount)}`, 9);
+            const totTax = this.padLeft(this.formatAmount(h.totalTax), 9);
+            footerLines.push(`${leftMargin}${hCode} ${tVal} ${cgst} ${sgst} ${totTax}`);
+          });
+          footerLines.push(divSingle);
+        } else {
+          // HSN/SAC  Taxable(Rs) CGST% CGST(Rs) SGST% SGST(Rs) TotalTax (Exact 60 Cols: 8+1+12+1+5+1+8+1+5+1+8+1+8 = 59-60)
+          const hsnHead = `${this.padRight("HSN/SAC", 8)} ${this.padLeft("Taxable(Rs)", 12)} ${this.padLeft("CGST%", 5)} ${this.padLeft("CGST(Rs)", 8)} ${this.padLeft("SGST%", 5)} ${this.padLeft("SGST(Rs)", 8)} ${this.padLeft("TotTax", 8)}`;
+          footerLines.push(leftMargin + hsnHead);
+          footerLines.push(divSingle);
+          hsnRows.forEach((h) => {
+            const hCode = this.padRight(h.hsnCode, 8);
+            const tVal = this.padLeft(this.formatAmount(h.taxableValue), 12);
+            const cRate = this.padLeft(`${h.cgstRate}%`, 5);
+            const cAmt = this.padLeft(this.formatAmount(h.cgstAmount), 8);
+            const sRate = this.padLeft(`${h.sgstRate}%`, 5);
+            const sAmt = this.padLeft(this.formatAmount(h.sgstAmount), 8);
+            const totTax = this.padLeft(this.formatAmount(h.totalTax), 8);
+            footerLines.push(`${leftMargin}${hCode} ${tVal} ${cRate} ${cAmt} ${sRate} ${sAmt} ${totTax}`);
+          });
+          footerLines.push(divSingle);
+        }
       }
     }
 
@@ -1197,8 +1252,14 @@ export class DotMatrixRenderer {
     headerLines.push(divSingle);
 
     if (cols <= 65) {
-      const leftW = Math.min(32, Math.floor(cols * 0.53));
+      const is50Col = cols <= 55;
+      const leftW = is50Col ? 26 : Math.min(32, Math.floor(cols * 0.53));
       const rightW = cols - leftW;
+      const descW = is50Col ? 14 : 20;
+      const batchW = is50Col ? 6 : 7;
+      const rateW = is50Col ? 6 : 7;
+      const amtW = is50Col ? 7 : 9;
+
       headerLines.push(leftMargin + this.padRight(`CREDIT NOTE : #${data.return_number}`, leftW) + this.padRight(`Date: ${this.formatInvoiceDate(data.return_date)}`, rightW));
       if (data.original_invoice_number) {
         headerLines.push(leftMargin + this.padRight(`Orig Invoice: #${data.original_invoice_number}`, leftW) + this.padRight(`Inv Date: ${this.formatInvoiceDate(data.original_invoice_date)}`, rightW));
@@ -1206,7 +1267,7 @@ export class DotMatrixRenderer {
       headerLines.push(leftMargin + this.padRight(`Customer    : ${(data.customer_name || "").substring(0, leftW - 14)}`, leftW) + this.padRight(`Phone: ${data.customer_phone || "-"}`, rightW));
       headerLines.push(divSingle);
 
-      headerLines.push(leftMargin + `${this.padRight("#", 2)} ${this.padRight("Item Description", 20)} ${this.padRight("Batch", 7)} ${this.padRight("Exp", 5)} ${this.padLeft("Qty", 4)} ${this.padLeft("Rate", 7)} ${this.padLeft("Amount", 9)}`);
+      headerLines.push(leftMargin + `${this.padRight("#", 2)} ${this.padRight(is50Col ? "Item Desc" : "Item Description", descW)} ${this.padRight("Batch", batchW)} ${this.padRight("Exp", 5)} ${this.padLeft("Qty", 4)} ${this.padLeft("Rate", rateW)} ${this.padLeft("Amount", amtW)}`);
       headerLines.push(divSingle);
     } else {
       const leftW = cols >= 120 ? 60 : 42;
@@ -1229,13 +1290,18 @@ export class DotMatrixRenderer {
     const itemLines: string[] = [];
     data.lines.forEach((l, idx) => {
       if (cols <= 65) {
+        const is50Col = cols <= 55;
+        const descW = is50Col ? 14 : 20;
+        const batchW = is50Col ? 6 : 7;
+        const rateW = is50Col ? 6 : 7;
+        const amtW = is50Col ? 7 : 9;
         const num = this.padRight(idx + 1, 2);
-        const desc = l.description.substring(0, 20).padEnd(20);
-        const batch = this.padRight((l.batch_no || "-").substring(0, 7), 7);
+        const desc = l.description.substring(0, descW).padEnd(descW);
+        const batch = this.padRight((l.batch_no || "-").substring(0, batchW), batchW);
         const exp = this.padRight(this.formatExpiry((l as any).expiry_date), 5);
         const qty = this.padLeft(l.qty, 4);
-        const rate = this.padLeft(l.rate.toFixed(2), 7);
-        const amt = this.padLeft(this.formatAmount(l.amount), 9);
+        const rate = this.padLeft(l.rate.toFixed(2), rateW);
+        const amt = this.padLeft(this.formatAmount(l.amount), amtW);
         itemLines.push(`${leftMargin}${num} ${desc} ${batch} ${exp} ${qty} ${rate} ${amt}`);
       } else if (cols >= 120) {
         const num = this.padRight(idx + 1, 2);
@@ -1269,8 +1335,12 @@ export class DotMatrixRenderer {
     footerLines.push(divDouble);
     footerLines.push(leftMargin + this.padLeft(`CREDIT TOTAL  : ${curr} ` + this.padLeft(this.formatAmount(data.grand_total), 11), cols));
     footerLines.push(divDouble);
-    footerLines.push(leftMargin + `Amount in Words: ${data.amount_in_words || numberToWordsIndian(data.grand_total)}`);
-    footerLines.push(leftMargin + `Refund Mode: ${data.refund_mode}`);
+    const words = data.amount_in_words || numberToWordsIndian(data.grand_total);
+    const wordsLines = this.wrapText(`Amount in Words: ${words}`, cols);
+    wordsLines.forEach((w) => footerLines.push(leftMargin + w));
+    if (data.refund_mode) {
+      footerLines.push(leftMargin + `Refund Mode: ${data.refund_mode}`.substring(0, cols));
+    }
     footerLines.push("");
     const signRow = `Customer Signature` + " ".repeat(Math.max(2, cols - 18 - 20)) + `Authorised Signatory`;
     footerLines.push(leftMargin + signRow);
@@ -1309,8 +1379,14 @@ export class DotMatrixRenderer {
     headerLines.push(divSingle);
 
     if (cols <= 65) {
-      const leftW = Math.min(32, Math.floor(cols * 0.53));
+      const is50Col = cols <= 55;
+      const leftW = is50Col ? 26 : Math.min(32, Math.floor(cols * 0.53));
       const rightW = cols - leftW;
+      const descW = is50Col ? 14 : 20;
+      const batchW = is50Col ? 6 : 7;
+      const rateW = is50Col ? 6 : 7;
+      const amtW = is50Col ? 7 : 9;
+
       headerLines.push(leftMargin + this.padRight(`DEBIT NOTE  : #${data.return_number}`, leftW) + this.padRight(`Date: ${this.formatInvoiceDate(data.return_date)}`, rightW));
       if (data.supplier_invoice_no) {
         headerLines.push(leftMargin + this.padRight(`Supplier Inv: #${data.supplier_invoice_no}`, leftW) + this.padRight(`Purch: ${data.original_purchase_number || "-"}`, rightW));
@@ -1318,7 +1394,7 @@ export class DotMatrixRenderer {
       headerLines.push(leftMargin + this.padRight(`Supplier    : ${(data.supplier_name || "").substring(0, leftW - 14)}`, leftW) + this.padRight(`GST: ${data.supplier_gstin || "-"}`, rightW));
       headerLines.push(divSingle);
 
-      headerLines.push(leftMargin + `${this.padRight("#", 2)} ${this.padRight("Item Description", 20)} ${this.padRight("Batch", 7)} ${this.padRight("Exp", 5)} ${this.padLeft("Qty", 4)} ${this.padLeft("Rate", 7)} ${this.padLeft("Amount", 9)}`);
+      headerLines.push(leftMargin + `${this.padRight("#", 2)} ${this.padRight(is50Col ? "Item Desc" : "Item Description", descW)} ${this.padRight("Batch", batchW)} ${this.padRight("Exp", 5)} ${this.padLeft("Qty", 4)} ${this.padLeft("Rate", rateW)} ${this.padLeft("Amount", amtW)}`);
       headerLines.push(divSingle);
     } else {
       const leftW = cols >= 120 ? 60 : 42;
@@ -1341,13 +1417,18 @@ export class DotMatrixRenderer {
     const itemLines: string[] = [];
     data.lines.forEach((l, idx) => {
       if (cols <= 65) {
+        const is50Col = cols <= 55;
+        const descW = is50Col ? 14 : 20;
+        const batchW = is50Col ? 6 : 7;
+        const rateW = is50Col ? 6 : 7;
+        const amtW = is50Col ? 7 : 9;
         const num = this.padRight(idx + 1, 2);
-        const desc = l.description.substring(0, 20).padEnd(20);
-        const batch = this.padRight((l.batch_no || "-").substring(0, 7), 7);
+        const desc = l.description.substring(0, descW).padEnd(descW);
+        const batch = this.padRight((l.batch_no || "-").substring(0, batchW), batchW);
         const exp = this.padRight(this.formatExpiry((l as any).expiry_date), 5);
         const qty = this.padLeft(l.qty, 4);
-        const rate = this.padLeft(l.rate.toFixed(2), 7);
-        const amt = this.padLeft(this.formatAmount(l.amount), 9);
+        const rate = this.padLeft(l.rate.toFixed(2), rateW);
+        const amt = this.padLeft(this.formatAmount(l.amount), amtW);
         itemLines.push(`${leftMargin}${num} ${desc} ${batch} ${exp} ${qty} ${rate} ${amt}`);
       } else if (cols >= 120) {
         const num = this.padRight(idx + 1, 2);
@@ -1381,8 +1462,12 @@ export class DotMatrixRenderer {
     footerLines.push(divDouble);
     footerLines.push(leftMargin + this.padLeft(`DEBIT TOTAL   : ${curr} ` + this.padLeft(this.formatAmount(data.grand_total), 11), cols));
     footerLines.push(divDouble);
-    footerLines.push(leftMargin + `Amount in Words: ${data.amount_in_words || numberToWordsIndian(data.grand_total)}`);
-    footerLines.push(leftMargin + `Settlement: ${data.settlement_type}`);
+    const words = data.amount_in_words || numberToWordsIndian(data.grand_total);
+    const wordsLines = this.wrapText(`Amount in Words: ${words}`, cols);
+    wordsLines.forEach((w) => footerLines.push(leftMargin + w));
+    if (data.settlement_type) {
+      footerLines.push(leftMargin + `Settlement: ${data.settlement_type}`.substring(0, cols));
+    }
     footerLines.push("");
     const signRow = `Supplier Signature` + " ".repeat(Math.max(2, cols - 18 - 20)) + `Authorised Signatory`;
     footerLines.push(leftMargin + signRow);

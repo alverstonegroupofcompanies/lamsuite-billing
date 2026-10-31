@@ -1,5 +1,5 @@
 import type { PrintableDocumentData, PrintableDocumentHeader, ColumnFormat, ReportPrintFormattingOptions } from "../types";
-import { dotMatrixRenderer } from "../../lib/printing/dotMatrixRenderer";
+import { dotMatrixRenderer, resolveLeftMargin } from "../../lib/printing/dotMatrixRenderer";
 
 export class PrintFormatter {
   /**
@@ -411,16 +411,17 @@ export class PrintFormatter {
 
     lines.push(this.padField("*** END OF REPORT ***", W, "center"));
 
-    const manualMargin = Math.max(0, options?.leftMarginSpaces || 0);
-    const carriage = options?.printerColumns;
-    let offset = 0;
-    if (options?.autoCenter !== false && carriage && carriage > W) {
-      offset = Math.floor((carriage - W) / 2);
-    }
-    const totalMargin = offset + manualMargin;
-    if (totalMargin > 0) {
-      const pad = " ".repeat(totalMargin);
-      return lines.map((l) => pad + l).join("\n");
+    const leftPad = resolveLeftMargin(
+      {
+        printerCarriageColumns: options?.printerColumns,
+        autoCenterPaper: options?.autoCenter !== false,
+        leftMarginSpaces: options?.leftMarginSpaces,
+        paperWidth: W <= 65 ? "6in" : undefined,
+      },
+      W
+    );
+    if (leftPad.length > 0) {
+      return lines.map((l) => leftPad + l).join("\n");
     }
     return lines.join("\n");
   }
@@ -615,15 +616,16 @@ export class PrintFormatter {
     const activeDoc = shouldCompact ? this.createCompactDocument(doc) : doc;
 
     if (layout.startsWith("dot-matrix")) {
+      const is6in = layout === "dot-matrix-60";
       const cols =
-        layout === "dot-matrix-60"
-          ? 60
+        is6in
+          ? 50 // 5.0" usable body between 0.5" tractor margins
           : layout === "dot-matrix-120"
           ? 120
           : layout === "dot-matrix-132"
           ? 132
           : 80;
-      const carriageCols = options?.printerColumns || cols;
+      const carriageCols = options?.printerColumns || (is6in ? 60 : cols);
       const text = this.generateDotMatrixText(activeDoc, cols, {
         printerColumns: carriageCols,
         autoCenter: options?.autoCenter !== false,
@@ -631,6 +633,7 @@ export class PrintFormatter {
       });
       return dotMatrixRenderer.generateMonospaceHtmlPreview(text, {
         columns: cols,
+        paperWidth: is6in ? "6in" : undefined,
         printerCarriageColumns: carriageCols,
         autoCenterPaper: options?.autoCenter !== false,
         showRuler: true,

@@ -250,7 +250,7 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
     if (!isDot) return 0;
     const cols = getDotMatrixColumns(paperSize, printerProfile?.dotMatrixColumns);
     if (printerProfile?.dotMatrixAutoCenter === false) return 0;
-    return calculateHorizontalCenteringOffset(printerCarriageCols, cols);
+    return calculateHorizontalCenteringOffset(printerCarriageCols, cols, { paperSize });
   }, [paperSize, printerProfile, printerCarriageCols]);
 
   // Build Rendered HTML
@@ -1281,11 +1281,17 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
                       {centeringOffset > 0 ? (
                         <div className="text-[10px] bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 px-2 py-1 rounded border border-emerald-200 dark:border-emerald-800 flex items-center justify-between">
                           <span>Horizontal Alignment:</span>
-                          <strong>Centered (+{centeringOffset} spc offset in {printerCarriageCols}c)</strong>
+                          <strong>
+                            {paperSize === "dot_matrix_6in"
+                              ? `Centered (+${centeringOffset}c: Platen +${Math.max(0, centeringOffset - 5)}c, Tractor +5c in ${printerCarriageCols}c)`
+                              : `Centered (+${centeringOffset}c offset in ${printerCarriageCols}c)`}
+                          </strong>
                         </div>
                       ) : (
                         <div className="text-[10px] text-slate-500 dark:text-slate-400">
-                          {printerCarriageCols > (getDotMatrixColumns(paperSize, printerProfile?.dotMatrixColumns)) && printerProfile?.dotMatrixAutoCenter === false
+                          {printerProfile?.dotMatrixAutoCenter === false && paperSize === "dot_matrix_6in"
+                            ? "Left-aligned: tractor margin +5c past holes (Auto-centering disabled)"
+                            : printerCarriageCols > (getDotMatrixColumns(paperSize, printerProfile?.dotMatrixColumns)) && printerProfile?.dotMatrixAutoCenter === false
                             ? "Auto-centering disabled; prints from extreme left"
                             : "Paper width matches carriage (0 offset)"}
                         </div>
