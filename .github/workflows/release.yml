@@ -176,14 +176,29 @@ jobs:
           VITE_ADMIN_PORTAL_URL: https://panel.lamstonehealthcare.com
         run: npm run build
 
+      - name: Write Tauri Signing Key to File
+        shell: bash
+        env:
+          KEY_DATA: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY || secrets.TAURI_PRIVATE_KEY }}
+        run: |
+          mkdir -p "$HOME/.tauri"
+          KEY_FILE="$HOME/.tauri/private.key"
+          printf '%s\n' "$KEY_DATA" > "$KEY_FILE"
+          if command -v cygpath >/dev/null 2>&1; then
+            WIN_KEY_PATH=$(cygpath -w "$KEY_FILE")
+          else
+            WIN_KEY_PATH="$KEY_FILE"
+          fi
+          echo "TAURI_KEY_PATH=$WIN_KEY_PATH" >> "$GITHUB_ENV"
+          echo "Tauri signing key written to $WIN_KEY_PATH"
+
       - name: Build & Package Tauri Application
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Expose both Tauri 1 and Tauri 2 key names for full secret interoperability
-          TAURI_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY || secrets.TAURI_PRIVATE_KEY }}
+          TAURI_PRIVATE_KEY: ${{ env.TAURI_KEY_PATH }}
           TAURI_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD || secrets.TAURI_KEY_PASSWORD }}
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY || secrets.TAURI_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ env.TAURI_KEY_PATH }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD || secrets.TAURI_KEY_PASSWORD }}
         with:
           projectPath: ./frontend
