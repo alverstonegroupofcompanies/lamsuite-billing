@@ -70,7 +70,7 @@ import { storeRegistryService } from "../lib/auth/storeRegistryService";
 
 export const SettingsPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState<
-    "general" | "billing" | "sequences" | "printing" | "columns" | "security" | "integrations" | "sync_devices" | "backup_reset" | "tools"
+    "general" | "billing" | "sequences" | "printing" | "columns" | "security" | "integrations" | "sync_devices" | "backup_reset" | "tools" | "updates"
   >("general");
 
   const [billingSubTab, setBillingSubTab] = useState<"taxes" | "payments">("taxes");
@@ -484,6 +484,7 @@ export const SettingsPage: React.FC = () => {
         <div className="w-56 shrink-0 overflow-y-auto rounded-card border border-border-main bg-surface p-2 shadow-xs text-xs space-y-1">
           {[
             { id: "general", label: "General & Workspace", icon: Store },
+            { id: "updates", label: "Software Updates", icon: RefreshCw },
             { id: "billing", label: "Billing & Taxes", icon: DollarSign },
             { id: "sequences", label: "Document Sequences", icon: Hash },
             { id: "printing", label: "Printing & Templates", icon: Printer },
@@ -695,6 +696,65 @@ export const SettingsPage: React.FC = () => {
                       );
                     })}
                   </div>
+                </div>
+
+                {/* Software Updates Quick Access in General Tab */}
+                <div className="rounded-lg border border-slate-200 p-4 space-y-3 bg-slate-50/50">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <div className="text-xs font-bold text-slate-800">Software Updates & Version</div>
+                      <p className="text-[11px] text-slate-500">
+                        Check for new versions of LamSuite Billing Desktop.
+                      </p>
+                    </div>
+                    <span className="inline-flex items-center gap-1 rounded-full bg-indigo-50 border border-indigo-200 px-2.5 py-0.5 text-[11px] font-mono font-bold text-indigo-700">
+                      Installed: {APP_FULL_VERSION}
+                    </span>
+                  </div>
+                  <button
+                    onClick={handleManualCheckUpdate}
+                    disabled={isCheckingUpdate}
+                    className="flex items-center gap-1.5 rounded bg-indigo-600 px-3 py-2 text-xs font-semibold text-white hover:bg-indigo-700 disabled:opacity-50 cursor-pointer"
+                  >
+                    <RefreshCw className={`h-3.5 w-3.5 ${isCheckingUpdate ? "animate-spin" : ""}`} />
+                    <span>{isCheckingUpdate ? "Checking for Updates..." : "Check for Updates"}</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* TAB: Dedicated Software Updates */}
+          {activeTab === "updates" && (
+            <div className="max-w-2xl space-y-6">
+              <div>
+                <h2 className="text-sm font-bold text-slate-800">Software Updates</h2>
+                <p className="text-xs text-slate-500">Manage desktop application updates, release channels, and version verification.</p>
+              </div>
+
+              <div className="rounded-lg border border-slate-200 p-5 space-y-4 bg-white shadow-2xs">
+                <div className="flex items-center justify-between border-b border-slate-100 pb-4">
+                  <div>
+                    <h3 className="text-xs font-bold text-slate-800">Current Installed Release</h3>
+                    <p className="text-[11px] text-slate-500">Desktop runtime executable and UI bundle</p>
+                  </div>
+                  <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 border border-emerald-200 px-3 py-1 text-xs font-mono font-bold text-emerald-700">
+                    {APP_FULL_VERSION}
+                  </span>
+                </div>
+
+                <div className="space-y-3">
+                  <p className="text-xs text-slate-600">
+                    Click the button below to query the secure update server. If an update is detected, LamSuite will download the verified installer package and prompt to restart.
+                  </p>
+                  <button
+                    onClick={handleManualCheckUpdate}
+                    disabled={isCheckingUpdate}
+                    className="flex items-center gap-2 rounded bg-indigo-600 px-4 py-2.5 text-xs font-semibold text-white hover:bg-indigo-700 disabled:opacity-50 transition-colors shadow-2xs cursor-pointer"
+                  >
+                    <RefreshCw className={`h-4 w-4 ${isCheckingUpdate ? "animate-spin" : ""}`} />
+                    <span>{isCheckingUpdate ? "Checking for Updates..." : "Check for Software Updates Now"}</span>
+                  </button>
                 </div>
               </div>
             </div>

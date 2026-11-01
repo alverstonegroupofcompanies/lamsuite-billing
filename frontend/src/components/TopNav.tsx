@@ -382,9 +382,13 @@ export const TopNav: React.FC<TopNavProps> = ({ enabledMenus, onOpenShortcutsHel
 
       {/* Right: Help, Shortcuts & App Version */}
       <div className="flex items-center gap-2 pl-2">
-        <span className="hidden md:inline-flex items-center rounded-[6px] bg-[var(--color-nav-hover)] px-2 py-0.5 font-mono text-[10px] font-semibold text-[#C9D8D3] border border-[var(--color-nav-border)]">
+        <Link
+          to="/settings"
+          title={`Installed Version: ${APP_FULL_VERSION} (Click to open Settings & Software Updates)`}
+          className="hidden md:inline-flex items-center rounded-[6px] bg-[var(--color-nav-hover)] px-2 py-0.5 font-mono text-[10px] font-semibold text-[#C9D8D3] border border-[var(--color-nav-border)] hover:text-white hover:border-[var(--color-accent)] transition-colors cursor-pointer"
+        >
           {APP_FULL_VERSION}
-        </span>
+        </Link>
         <button
           onClick={onOpenShortcutsHelp}
           title="View Keyboard Shortcuts & Cheatsheet"
