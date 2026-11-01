@@ -342,4 +342,66 @@ BOOL WINAPI SetProcessDpiAwarenessContext(HANDLE value) {
     return Shim_SetProcessDpiAwarenessContext(value);
 }
 
+// ============================================================================
+// 7. Cryptographic RNG API (ProcessPrng)
+//    Referenced by modern getrandom (0.3+) / uuid on Windows.
+//    ProcessPrng is missing from bcryptprimitives.dll on Windows 7 SP1.
+//    On Windows 8+, dispatches to real ProcessPrng in bcryptprimitives.dll.
+//    On Windows 7 SP1, falls back to RtlGenRandom (SystemFunction036 in advapi32.dll).
+// ============================================================================
+
+typedef BOOL (WINAPI *PFN_ProcessPrng)(PBYTE, SIZE_T);
+typedef BOOLEAN (WINAPI *PFN_RtlGenRandom)(PVOID, ULONG);
+
+static PFN_ProcessPrng g_pfnRealProcessPrng = NULL;
+static PFN_RtlGenRandom g_pfnRtlGenRandom = NULL;
+static BOOL g_prngInitialized = FALSE;
+
+static void InitPrngApi(void) {
+    if (g_prngInitialized) return;
+
+    HMODULE hBcryptPrimitives = LoadLibraryA("bcryptprimitives.dll");
+    if (hBcryptPrimitives) {
+        g_pfnRealProcessPrng = (PFN_ProcessPrng)GetProcAddress(hBcryptPrimitives, "ProcessPrng");
+    }
+
+    if (!g_pfnRealProcessPrng) {
+        HMODULE hAdvapi32 = GetModuleHandleW(L"advapi32.dll");
+        if (!hAdvapi32) {
+            hAdvapi32 = LoadLibraryW(L"advapi32.dll");
+        }
+        if (hAdvapi32) {
+            g_pfnRtlGenRandom = (PFN_RtlGenRandom)GetProcAddress(hAdvapi32, "SystemFunction036");
+        }
+    }
+    g_prngInitialized = TRUE;
+}
+
+BOOL WINAPI Shim_ProcessPrng(PBYTE pbData, SIZE_T cbData) {
+    InitPrngApi();
+    if (g_pfnRealProcessPrng) {
+        return g_pfnRealProcessPrng(pbData, cbData);
+    }
+
+    if (g_pfnRtlGenRandom && pbData && cbData > 0) {
+        SIZE_T remaining = cbData;
+        PBYTE ptr = pbData;
+        while (remaining > 0) {
+            ULONG chunk = (remaining > 0xFFFFFFFF) ? 0xFFFFFFFF : (ULONG)remaining;
+            if (!g_pfnRtlGenRandom(ptr, chunk)) {
+                return FALSE;
+            }
+            ptr += chunk;
+            remaining -= chunk;
+        }
+        return TRUE;
+    }
+
+    return FALSE;
+}
+BOOL (WINAPI *__imp_ProcessPrng)(PBYTE, SIZE_T) = Shim_ProcessPrng;
+BOOL WINAPI ProcessPrng(PBYTE pbData, SIZE_T cbData) {
+    return Shim_ProcessPrng(pbData, cbData);
+}
+
 #endif // defined(_WIN32) || defined(_WIN64)

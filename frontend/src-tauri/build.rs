@@ -41,6 +41,7 @@ fn main() {
 
             println!("cargo:rustc-link-arg=/FORCE:MULTIPLE");
             println!("cargo:rustc-link-arg=/NODEFAULTLIB:synchronization.lib");
+            println!("cargo:rustc-link-arg=/NODEFAULTLIB:bcryptprimitives.lib");
         }
     }
 

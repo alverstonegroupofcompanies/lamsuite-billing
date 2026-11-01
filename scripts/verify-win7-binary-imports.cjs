@@ -31,6 +31,7 @@ const BANNED_WIN7_SYMBOLS = new Set([
   'SetThreadDescription',
   'GetDpiForWindow',
   'SetProcessDpiAwarenessContext',
+  'ProcessPrng',
 ]);
 
 // Host-only compiler and build artifact directories that are NOT distributed to end-users
