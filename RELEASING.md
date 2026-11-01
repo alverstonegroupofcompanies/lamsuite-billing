@@ -115,14 +115,14 @@ You will be prompted for a password. This command outputs:
 ### Step 1: Synchronize Version Numbers
 Ensure `package.json`, `Cargo.toml`, and `tauri.conf.json` reflect the exact same SemVer version:
 ```bash
-# Example bumping to 2.0.12
-node scripts/check-release-versions.cjs 2.0.12
+# Example bumping to 2.0.13
+node scripts/check-release-versions.cjs 2.0.13
 ```
 If versions disagree, update:
-- `frontend/package.json`: `"version": "2.0.12"`
-- `frontend/src-tauri/Cargo.toml`: `version = "2.0.12"`
-- `frontend/src-tauri/tauri.conf.json`: `"package": { "version": "2.0.12" }`
-- `frontend/src-tauri/tauri.legacy.conf.json`: `"package": { "version": "2.0.12" }`
+- `frontend/package.json`: `"version": "2.0.13"`
+- `frontend/src-tauri/Cargo.toml`: `version = "2.0.13"`
+- `frontend/src-tauri/tauri.conf.json`: `"package": { "version": "2.0.13" }`
+- `frontend/src-tauri/tauri.legacy.conf.json`: `"package": { "version": "2.0.13" }`
 
 ### Step 2: Run Local Quality & Security Gates
 ```bash
@@ -135,10 +135,10 @@ npm test
 ### Step 3: Tag and Push
 ```bash
 git add frontend/package.json frontend/src-tauri/Cargo.toml frontend/src-tauri/tauri.conf.json frontend/src-tauri/tauri.legacy.conf.json
-git commit -m "chore(release): bump desktop version to 2.0.12"
-git tag -a v2.0.12 -m "Release v2.0.12"
+git commit -m "chore(release): bump desktop version to 2.0.13"
+git tag -a v2.0.13 -m "Release v2.0.13"
 git push origin main
-git push origin v2.0.12
+git push origin v2.0.13
 ```
 
 ---
