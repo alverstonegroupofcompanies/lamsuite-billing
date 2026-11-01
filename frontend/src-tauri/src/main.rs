@@ -7,7 +7,7 @@ use serde_json::{json, Value};
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Mutex;
-use tauri::State;
+use tauri::{Manager, State};
 
 struct DbState {
     conn: Mutex<Connection>,
@@ -905,18 +905,9 @@ fn main() {
                 if let Some(dir) = found_dir {
                     let path_str = dir.to_string_lossy().to_string();
                     let clean_path = path_str.strip_prefix(r"\\?\").unwrap_or(&path_str);
-                    std::env::set_var("WEBVIEW2_BROWSER_EXECUTABLE_FOLDER", clean_path);
+                    let final_path = clean_path.trim_end_matches('\\').trim_end_matches('/');
+                    std::env::set_var("WEBVIEW2_BROWSER_EXECUTABLE_FOLDER", final_path);
                 }
-
-                let local_app_data = std::env::var("LOCALAPPDATA")
-                    .map(PathBuf::from)
-                    .or_else(|_| std::env::var("APPDATA").map(PathBuf::from))
-                    .unwrap_or_else(|_| exe_dir.to_path_buf());
-                let webview_data_dir = local_app_data.join("LamSuite Billing Legacy").join("EBWebView");
-                let _ = std::fs::create_dir_all(&webview_data_dir);
-                let data_str = webview_data_dir.to_string_lossy().to_string();
-                let clean_data = data_str.strip_prefix(r"\\?\").unwrap_or(&data_str);
-                std::env::set_var("WEBVIEW2_USER_DATA_FOLDER", clean_data);
             }
         }
     }
@@ -936,6 +927,13 @@ fn main() {
     );
 
     let app = tauri::Builder::default()
+        .setup(|app| {
+            if let Some(window) = app.get_window("main") {
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
+            Ok(())
+        })
         .manage(DbState {
             conn: Mutex::new(conn),
         })

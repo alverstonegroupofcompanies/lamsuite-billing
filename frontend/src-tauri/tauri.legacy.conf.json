@@ -7,6 +7,17 @@
     "version": "2.0.13"
   },
   "tauri": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "LamSuite Billing Legacy",
+        "width": 1280,
+        "height": 800,
+        "resizable": true,
+        "fullscreen": false,
+        "focus": false
+      }
+    ],
     "bundle": {
       "identifier": "com.lamsuite.billing.legacy",
       "targets": ["nsis"],
