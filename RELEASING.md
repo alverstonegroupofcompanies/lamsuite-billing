@@ -154,14 +154,14 @@ The release workflow `.github/workflows/release.yml` executes in seven stages:
    - `macos-latest` (Apple Silicon) -> DMG, `.app.tar.gz`, and `.app.tar.gz.sig`.
    - `macos-latest` (Intel) -> DMG, `.app.tar.gz`, and `.app.tar.gz.sig`.
    - `ubuntu-22.04` (Linux) -> `.AppImage`, `.deb`, `.rpm`, `.AppImage.tar.gz`, and `.sig`.
-4. **`build-windows-legacy`**: Compiles an isolated Windows 7/8.1 64-bit binary pinned to **Rust 1.75.0** and bundles `LamSuite-Billing-windows-legacy-x64-setup.exe`.
-5. **`publish-release`**: Consolidates all platform signatures into `latest.json` and changes release status from Draft to Published.
+4. **`build-windows-legacy`**: Compiles an isolated Windows 7/8.1 64-bit binary pinned to **Rust 1.77.2** with `win7_compat_shim.c` (neutralizing Windows 8+ `PackageIdFromFullName` imports), bundles **WebView2 Fixed Version Runtime 109**, verifies zero banned entry points via `verify-win7-binary-imports.cjs`, and packages `LamSuite-Billing-windows-legacy-x64-setup.exe`.
+5. **`publish-release`**: Consolidates all platform signatures into `latest.json` and legacy channel `latest-legacy-win7.json`, and changes release status from Draft to Published.
 6. **`verify-release`**: **The release quality gate.** It:
-   - Confirms all 11 required assets are attached to the release.
-   - Inspects `latest.json` to verify entries exist for `windows-x86_64`, `darwin-aarch64`, `darwin-x86_64`, and `linux-x86_64`.
+   - Confirms all required assets (modern installer, legacy installer, updater signatures, manifests) are attached to the release.
+   - Inspects `latest.json` and `latest-legacy-win7.json` to verify entries exist for `windows-x86_64`, `darwin-aarch64`, `darwin-x86_64`, and `linux-x86_64`.
    - Sends HTTP requests to ensure every update URL resolves (200 OK) and signatures are valid.
    - Fails the workflow immediately if any artifact or entry is missing.
-7. **`deploy-updater`**: Syncs update archives and `latest.json` to the updates hosting server (`/opt/lamsuite/updates/`) via SSH key authentication.
+7. **`deploy-updater`**: Syncs update archives, `latest.json`, and `latest-legacy-win7.json` to the updates hosting server (`/opt/lamsuite/updates/`) via SSH key authentication.
 
 ---
 
@@ -192,10 +192,22 @@ The release workflow `.github/workflows/release.yml` executes in seven stages:
 
 ### Windows 7 / 8.1 Legacy VM Test Procedure
 > [!IMPORTANT]
-> Microsoft ceased all security updates for Windows 7 (Jan 2020) and Windows 8.1 (Jan 2023). WebView2 runtime 109 is the final supported build and contains known unpatched Chromium CVEs.
+> Microsoft ceased all security updates for Windows 7 (Jan 2020) and Windows 8.1 (Jan 2023). WebView2 runtime 109 is the final supported build and contains known unpatched Chromium CVEs. Windows 7 must have Service Pack 1 and essential updates installed prior to running the legacy installer.
 
-1. Launch a clean Windows 7 SP1 x64 or Windows 8.1 x64 virtual machine.
-2. Install Microsoft Edge WebView2 Fixed Version Runtime `109.0.1518.78` x64.
-3. Run `LamSuite-Billing-windows-legacy-x64-setup.exe`.
-4. Confirm successful GUI launch, hardware acceleration fallback, and SQLite database connectivity.
-5. Legacy builds query `latest-legacy-win7.json` and will never attempt to apply modern Windows 10/11 updates.
+#### VM Environment Setup:
+1. **Clean Virtual Machine**: Windows 7 SP1 x64 (Build 7601) or Windows 8.1 x64.
+2. **Mandatory Updates**:
+   - **KB4474419**: SHA-2 code signing support (mandatory for driver and installer validation).
+   - **KB4490628**: Servicing Stack Update (SSU).
+   - **KB2999226 / KB3118401**: Universal C Runtime (UCRT).
+3. **TLS 1.2 Protocol Activation**:
+   - Run the provided registry script (`enable-tls12-windows7.reg`) to set `DefaultSecureProtocols = 0x00000a00` in `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Internet Settings\WinHttp`.
+4. **Root Certificate Installation**:
+   - Import `isrgrootx1.der` (ISRG Root X1 / Let's Encrypt CA) into the Local Machine **Trusted Root Certification Authorities** store using `certmgr.msc` or `certutil -addstore -f "ROOT" isrgrootx1.der`.
+5. **Install & Verify**:
+   - Run `LamSuite-Billing-windows-legacy-x64-setup.exe`.
+   - Confirm installer unpacks and launches with **zero** `PackageIdFromFullName` or `KERNEL32.dll` missing-entry-point dialogs.
+   - Confirm bundled WebView2 Fixed Version 109 initializes the POS interface.
+   - Log in with staff PIN, sync master catalogue from `https://api.lamstonehealthcare.com`, and execute test bills.
+   - Verify local thermal receipt spooling (`RAW` ESC/POS) and dot-matrix continuous feed spooling (`ESC/P2`).
+   - Trigger manual update check: verify `latest-legacy-win7.json` is queried and the app auto-updates strictly on the legacy channel without offering Windows 10/11 binaries.

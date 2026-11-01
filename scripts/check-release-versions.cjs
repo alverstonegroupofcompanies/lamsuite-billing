@@ -17,6 +17,7 @@ const rootDir = path.resolve(__dirname, '..');
 const pkgPath = path.join(rootDir, 'frontend', 'package.json');
 const cargoPath = path.join(rootDir, 'frontend', 'src-tauri', 'Cargo.toml');
 const tauriConfPath = path.join(rootDir, 'frontend', 'src-tauri', 'tauri.conf.json');
+const tauriLegacyConfPath = path.join(rootDir, 'frontend', 'src-tauri', 'tauri.legacy.conf.json');
 
 const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
 const cargoContent = fs.readFileSync(cargoPath, 'utf8');
@@ -26,12 +27,21 @@ const cargoVersion = cargoMatch ? cargoMatch[1] : null;
 const tauriConf = JSON.parse(fs.readFileSync(tauriConfPath, 'utf8'));
 const tauriVersion = tauriConf.package ? tauriConf.package.version : null;
 
+let tauriLegacyVersion = null;
+if (fs.existsSync(tauriLegacyConfPath)) {
+  const tauriLegacyConf = JSON.parse(fs.readFileSync(tauriLegacyConfPath, 'utf8'));
+  tauriLegacyVersion = tauriLegacyConf.package ? tauriLegacyConf.package.version : null;
+}
+
 console.log('--- LamSuite Billing Version Integrity Check ---');
-console.log(`frontend/package.json:     ${pkg.version}`);
-console.log(`frontend/Cargo.toml:       ${cargoVersion}`);
-console.log(`frontend/tauri.conf.json:  ${tauriVersion}`);
+console.log(`frontend/package.json:            ${pkg.version}`);
+console.log(`frontend/Cargo.toml:              ${cargoVersion}`);
+console.log(`frontend/tauri.conf.json:         ${tauriVersion}`);
+if (tauriLegacyVersion) {
+  console.log(`frontend/tauri.legacy.conf.json:  ${tauriLegacyVersion}`);
+}
 if (targetTag) {
-  console.log(`Release Tag Argument:      ${targetTag}`);
+  console.log(`Release Tag Argument:             ${targetTag}`);
 }
 
 const errors = [];
@@ -43,6 +53,9 @@ if (pkg.version !== cargoVersion) {
 }
 if (pkg.version !== tauriVersion) {
   errors.push(`Version mismatch: package.json (${pkg.version}) does not match tauri.conf.json (${tauriVersion})`);
+}
+if (tauriLegacyVersion && pkg.version !== tauriLegacyVersion) {
+  errors.push(`Version mismatch: package.json (${pkg.version}) does not match tauri.legacy.conf.json (${tauriLegacyVersion})`);
 }
 if (targetTag && pkg.version !== targetTag) {
   errors.push(`Version mismatch: Codebase version (${pkg.version}) does not match git release tag (${targetTag})`);

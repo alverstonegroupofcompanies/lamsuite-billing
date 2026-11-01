@@ -141,6 +141,7 @@ async function verifyRelease() {
     { name: 'Windows NSIS Installer (.exe)', pattern: /\.exe$/i },
     { name: 'Windows Updater Signature (.sig)', pattern: /(\.nsis\.zip|\.msi\.zip|\.zip)\.sig$/i },
     { name: 'Updater Manifest (latest.json)', pattern: /^latest\.json$/i },
+    { name: 'Windows Legacy Installer (Win 7/8.1)', pattern: /windows-legacy.*\.exe$/i },
   ];
 
   for (const exp of expectedPatterns) {
@@ -162,7 +163,7 @@ async function verifyRelease() {
     { name: 'Linux Debian Package (.deb)', pattern: /\.deb$/i },
     { name: 'Linux RPM Package (.rpm)', pattern: /\.rpm$/i },
     { name: 'Linux Updater Signature (.AppImage.tar.gz.sig)', pattern: /(\.AppImage\.tar\.gz|\.tar\.gz)\.sig$/i },
-    { name: 'Windows Legacy Installer', pattern: /windows-legacy/i },
+    { name: 'Windows Legacy Updater Manifest (latest-legacy-win7.json)', pattern: /^latest-legacy-win7\.json$/i },
   ];
 
   for (const opt of optionalPatterns) {

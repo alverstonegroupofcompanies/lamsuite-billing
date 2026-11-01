@@ -28,6 +28,8 @@ import { StoreGatewayPage } from "./pages/StoreGatewayPage";
 import { storeRegistryService, type RegisteredStoreRecord } from "./lib/auth/storeRegistryService";
 import { autoUpdateService, type UpdateInfo } from "./lib/settings/autoUpdateService";
 import { UpdateNotificationModal } from "./components/UpdateNotificationModal";
+import { windows7PrereqService, type Windows7PrereqStatus } from "./lib/lan/windows7PrereqService";
+import { Windows7PrereqModal } from "./components/Windows7PrereqModal";
 import { API_BASE_URL } from "./config/env";
 import { cloudDeltaSyncService } from "./lib/sync/cloudDeltaSyncService";
 import { deviceSessionService } from "./lib/devices/deviceSessionService";
@@ -69,9 +71,22 @@ export const App: React.FC = () => {
     Boolean(staffAuthService.getCurrentSession())
   );
   const [availableUpdate, setAvailableUpdate] = useState<UpdateInfo | null>(null);
+  const [win7Status, setWin7Status] = useState<Windows7PrereqStatus | null>(null);
+  const [showWin7Modal, setShowWin7Modal] = useState<boolean>(false);
 
   useEffect(() => {
     initWorkspaceSettings();
+
+    // Check Windows 7 / 8.1 runtime prerequisites
+    const { isLegacy } = windows7PrereqService.detectLegacyWindows();
+    if (isLegacy) {
+      windows7PrereqService.runDiagnostics().then((status) => {
+        setWin7Status(status);
+        if (!status.httpsProbePassed || status.certStoreIssueDetected || status.tls12IssueDetected) {
+          setShowWin7Modal(true);
+        }
+      });
+    }
 
     // Check for updates in desktop mode
     companySettingsService.loadSettings().then((cfg) => {
@@ -200,34 +215,51 @@ export const App: React.FC = () => {
   // Operator PIN/Password Login for Active Store
   if (!hasStaffSession) {
     return (
-      <StaffLoginPage
-        key={activeStore?.id || "default"}
-        activeStore={activeStore}
-        onLoginSuccess={async () => {
-          setHasStaffSession(true);
+      <>
+        <StaffLoginPage
+          key={activeStore?.id || "default"}
+          activeStore={activeStore}
+          onLoginSuccess={async () => {
+            setHasStaffSession(true);
 
-          // On first login / sign in, ensure master catalog is pulled and ready for work
-          try {
-            const currentProducts = await productsStore.getAllProducts();
-            const activeProfile = await storeDeviceService.getDeviceProfile();
+            // On first login / sign in, ensure master catalog is pulled and ready for work
+            try {
+              const currentProducts = await productsStore.getAllProducts();
+              const activeProfile = await storeDeviceService.getDeviceProfile();
 
-            if (currentProducts.length <= 1) {
-              // Online cloud sync: check backend server for catalog data
-              const storeId = activeStore?.id || activeProfile?.store_id || "1";
-              await cloudDeltaSyncService.pullMasterDelta({
-                fetchMasterDeltas: async (wm) => {
-                  const res = await fetch(`${API_BASE_URL}/api/sync/pull/deltas?store_id=${storeId}&since_watermark=${wm}`);
-                  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-                  return res.json();
-                },
-              }).catch(() => {});
+              if (currentProducts.length <= 1) {
+                // Online cloud sync: check backend server for catalog data
+                const storeId = activeStore?.id || activeProfile?.store_id || "1";
+                await cloudDeltaSyncService.pullMasterDelta({
+                  fetchMasterDeltas: async (wm) => {
+                    const res = await fetch(`${API_BASE_URL}/api/sync/pull/deltas?store_id=${storeId}&since_watermark=${wm}`);
+                    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                    return res.json();
+                  },
+                }).catch(() => {});
+              }
+            } catch (e) {
+              console.warn("Post-login data pull check deferred:", e);
             }
-          } catch (e) {
-            console.warn("Post-login data pull check deferred:", e);
-          }
-        }}
-        onBackToStores={() => setShowGateway(true)}
-      />
+          }}
+          onBackToStores={() => setShowGateway(true)}
+        />
+        {showWin7Modal && win7Status && (
+          <Windows7PrereqModal
+            status={win7Status}
+            onClose={() => setShowWin7Modal(false)}
+            onRefresh={() => {
+              const updated = windows7PrereqService.getCachedStatus();
+              if (updated) {
+                setWin7Status(updated);
+                if (updated.httpsProbePassed && !updated.certStoreIssueDetected) {
+                  setShowWin7Modal(false);
+                }
+              }
+            }}
+          />
+        )}
+      </>
     );
   }
 
@@ -260,6 +292,21 @@ export const App: React.FC = () => {
         <UpdateNotificationModal
           updateInfo={availableUpdate}
           onClose={() => setAvailableUpdate(null)}
+        />
+      )}
+      {showWin7Modal && win7Status && (
+        <Windows7PrereqModal
+          status={win7Status}
+          onClose={() => setShowWin7Modal(false)}
+          onRefresh={() => {
+            const updated = windows7PrereqService.getCachedStatus();
+            if (updated) {
+              setWin7Status(updated);
+              if (updated.httpsProbePassed && !updated.certStoreIssueDetected) {
+                setShowWin7Modal(false);
+              }
+            }
+          }}
         />
       )}
     </BrowserRouter>

@@ -216,6 +216,69 @@ async function run() {
     req.write(manifestData);
     req.end();
   });
+
+  // Reconcile and upload dedicated legacy manifest (latest-legacy-win7.json)
+  const legacySetupAsset = assets.find(a => /windows-legacy.*\.exe$/i.test(a.name));
+  const legacySigAsset = assets.find(a => /windows-legacy.*\.sig$/i.test(a.name));
+  const existingLegacyLatest = assets.find(a => a.name === 'latest-legacy-win7.json');
+
+  if (legacySetupAsset) {
+    console.log(`\nReconciling latest-legacy-win7.json for ${legacySetupAsset.name}...`);
+    let legacySig = '';
+    if (legacySigAsset) {
+      console.log(`Fetching legacy signature from ${legacySigAsset.name}...`);
+      legacySig = await downloadRaw(legacySigAsset.url);
+    }
+
+    const legacyManifest = {
+      version: release.tag_name ? release.tag_name.replace(/^v/, '') : '',
+      notes: release.body || `LamSuite Billing Legacy Windows 7/8.1 update ${release.tag_name}`,
+      pub_date: release.published_at || release.created_at || new Date().toISOString(),
+      platforms: {
+        'windows-x86_64': {
+          signature: legacySig,
+          url: legacySetupAsset.browser_download_url,
+        },
+      },
+    };
+
+    fs.writeFileSync('latest-legacy-win7.json', JSON.stringify(legacyManifest, null, 2), 'utf8');
+
+    if (existingLegacyLatest) {
+      console.log(`Deleting previous latest-legacy-win7.json asset (ID: ${existingLegacyLatest.id})...`);
+      await githubApi(`/repos/${GITHUB_REPOSITORY}/releases/assets/${existingLegacyLatest.id}`, 'DELETE');
+    }
+
+    const legacyData = fs.readFileSync('latest-legacy-win7.json');
+    console.log(`Uploading latest-legacy-win7.json to ${uploadUrl}...`);
+
+    await new Promise((resolve, reject) => {
+      const parsed = new URL(`${uploadUrl}?name=latest-legacy-win7.json`);
+      const req = https.request(parsed, {
+        method: 'POST',
+        headers: {
+          'User-Agent': 'LamSuite-Updater-Reconciler',
+          Authorization: `Bearer ${GITHUB_TOKEN}`,
+          'Content-Type': 'application/json',
+          'Content-Length': legacyData.length,
+        },
+      }, (res) => {
+        let data = '';
+        res.on('data', chunk => { data += chunk; });
+        res.on('end', () => {
+          if (res.statusCode >= 200 && res.statusCode < 300) {
+            console.log('[SUCCESS] Uploaded latest-legacy-win7.json!');
+            resolve();
+          } else {
+            reject(new Error(`Legacy manifest upload failed (${res.statusCode}): ${data}`));
+          }
+        });
+      });
+      req.on('error', reject);
+      req.write(legacyData);
+      req.end();
+    });
+  }
 }
 
 run().catch(err => {
