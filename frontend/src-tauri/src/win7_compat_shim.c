@@ -1,6 +1,9 @@
 #if defined(_WIN32) || defined(_WIN64)
 
+#define _WIN32_WINNT 0x0601 // Target Windows 7 SP1
+
 #include <windows.h>
+#include <stdint.h>
 
 #ifndef APPMODEL_ERROR_NO_PACKAGE
 #define APPMODEL_ERROR_NO_PACKAGE 15700L
@@ -9,15 +12,20 @@
 /*
  * Windows 7 SP1 & 8.1 API Compatibility Shim
  *
- * Provides local resolutions for Windows 8+ AppModel and Kernel APIs that are
- * statically referenced by modern WebView2LoaderStatic.lib or toolchain components.
- * By defining both the direct symbol and the __imp_ function pointer locally,
- * the MSVC linker satisfies the references from this object and avoids emitting
- * static import directory entries for KERNEL32.dll that would otherwise cause
- * "The procedure entry point ... could not be located in KERNEL32.dll" errors on Windows 7.
+ * Provides local resolutions for Windows 8+ AppModel, Synchronization, Memory,
+ * and Kernel APIs that are statically referenced by modern WebView2LoaderStatic.lib,
+ * Rust standard library (1.78+), or toolchain components.
+ *
+ * By defining both direct symbols and their __imp_ function pointers locally in an
+ * object file linked with /NODEFAULTLIB:synchronization.lib and /FORCE:MULTIPLE,
+ * the MSVC linker satisfies references from this object and eliminates static
+ * import table entries for KERNEL32.dll and api-ms-win-core-synch-l1-2-0.dll.
  */
 
-// --- 1. PackageIdFromFullName ---
+// ============================================================================
+// 1. AppModel APIs (Referenced by WebView2LoaderStatic.lib)
+// ============================================================================
+
 LONG WINAPI Shim_PackageIdFromFullName(PCWSTR packageFullName, const UINT32 flags, UINT32 *bufferLength, BYTE *buffer) {
     (void)packageFullName;
     (void)flags;
@@ -30,7 +38,6 @@ LONG WINAPI PackageIdFromFullName(PCWSTR packageFullName, const UINT32 flags, UI
     return Shim_PackageIdFromFullName(packageFullName, flags, bufferLength, buffer);
 }
 
-// --- 2. GetPackageFamilyName ---
 LONG WINAPI Shim_GetPackageFamilyName(HANDLE hProcess, UINT32 *packageFamilyNameLength, PWSTR packageFamilyName) {
     (void)hProcess;
     (void)packageFamilyNameLength;
@@ -42,7 +49,6 @@ LONG WINAPI GetPackageFamilyName(HANDLE hProcess, UINT32 *packageFamilyNameLengt
     return Shim_GetPackageFamilyName(hProcess, packageFamilyNameLength, packageFamilyName);
 }
 
-// --- 3. GetPackageFullName ---
 LONG WINAPI Shim_GetPackageFullName(HANDLE hProcess, UINT32 *packageFullNameLength, PWSTR packageFullName) {
     (void)hProcess;
     (void)packageFullNameLength;
@@ -54,7 +60,6 @@ LONG WINAPI GetPackageFullName(HANDLE hProcess, UINT32 *packageFullNameLength, P
     return Shim_GetPackageFullName(hProcess, packageFullNameLength, packageFullName);
 }
 
-// --- 4. GetCurrentPackageFamilyName ---
 LONG WINAPI Shim_GetCurrentPackageFamilyName(UINT32 *packageFamilyNameLength, PWSTR packageFamilyName) {
     (void)packageFamilyNameLength;
     (void)packageFamilyName;
@@ -65,7 +70,6 @@ LONG WINAPI GetCurrentPackageFamilyName(UINT32 *packageFamilyNameLength, PWSTR p
     return Shim_GetCurrentPackageFamilyName(packageFamilyNameLength, packageFamilyName);
 }
 
-// --- 5. GetCurrentPackageFullName ---
 LONG WINAPI Shim_GetCurrentPackageFullName(UINT32 *packageFullNameLength, PWSTR packageFullName) {
     (void)packageFullNameLength;
     (void)packageFullName;
@@ -76,7 +80,6 @@ LONG WINAPI GetCurrentPackageFullName(UINT32 *packageFullNameLength, PWSTR packa
     return Shim_GetCurrentPackageFullName(packageFullNameLength, packageFullName);
 }
 
-// --- 6. GetPackagePathByFullName ---
 LONG WINAPI Shim_GetPackagePathByFullName(PCWSTR packageFullName, UINT32 *pathLength, PWSTR path) {
     (void)packageFullName;
     (void)pathLength;
@@ -88,7 +91,10 @@ LONG WINAPI GetPackagePathByFullName(PCWSTR packageFullName, UINT32 *pathLength,
     return Shim_GetPackagePathByFullName(packageFullName, pathLength, path);
 }
 
-// --- 7. GetSystemTimePreciseAsFileTime ---
+// ============================================================================
+// 2. High-Precision Timing API (Referenced by Rust std Instant::now)
+// ============================================================================
+
 typedef VOID (WINAPI *PFN_GetSystemTimePreciseAsFileTime)(LPFILETIME);
 VOID WINAPI Shim_GetSystemTimePreciseAsFileTime(LPFILETIME lpSystemTimeAsFileTime) {
     static PFN_GetSystemTimePreciseAsFileTime pfnReal = NULL;
@@ -113,7 +119,10 @@ VOID WINAPI GetSystemTimePreciseAsFileTime(LPFILETIME lpSystemTimeAsFileTime) {
     Shim_GetSystemTimePreciseAsFileTime(lpSystemTimeAsFileTime);
 }
 
-// --- 8. SetThreadDescription ---
+// ============================================================================
+// 3. Thread Description API
+// ============================================================================
+
 HRESULT WINAPI Shim_SetThreadDescription(HANDLE hThread, PCWSTR lpThreadDescription) {
     (void)hThread;
     (void)lpThreadDescription;
@@ -122,6 +131,215 @@ HRESULT WINAPI Shim_SetThreadDescription(HANDLE hThread, PCWSTR lpThreadDescript
 HRESULT (WINAPI *__imp_SetThreadDescription)(HANDLE, PCWSTR) = Shim_SetThreadDescription;
 HRESULT WINAPI SetThreadDescription(HANDLE hThread, PCWSTR lpThreadDescription) {
     return Shim_SetThreadDescription(hThread, lpThreadDescription);
+}
+
+// ============================================================================
+// 4. Synchronization APIs (WaitOnAddress / WakeByAddressSingle / WakeByAddressAll)
+//    Referenced by modern Rust std synchronization primitives (parking_lot / thread park).
+//    On Windows 8+, dispatches to OS synchronization. On Windows 7 SP1, falls back
+//    to a hashed table of native SRWLock and CONDITION_VARIABLE primitives.
+// ============================================================================
+
+typedef BOOL (WINAPI *PFN_WaitOnAddress)(volatile VOID*, PVOID, SIZE_T, DWORD);
+typedef VOID (WINAPI *PFN_WakeByAddressSingle)(PVOID);
+typedef VOID (WINAPI *PFN_WakeByAddressAll)(PVOID);
+
+static PFN_WaitOnAddress g_pfnRealWaitOnAddress = NULL;
+static PFN_WakeByAddressSingle g_pfnRealWakeByAddressSingle = NULL;
+static PFN_WakeByAddressAll g_pfnRealWakeByAddressAll = NULL;
+static BOOL g_synchInitialized = FALSE;
+
+#define FUTEX_HASH_BITS 7
+#define FUTEX_BUCKETS (1 << FUTEX_HASH_BITS) /* 128 buckets */
+
+static SRWLOCK g_futex_locks[FUTEX_BUCKETS];
+static CONDITION_VARIABLE g_futex_cvs[FUTEX_BUCKETS];
+
+static inline unsigned int FutexHash(const void *addr) {
+    uintptr_t val = (uintptr_t)addr;
+    val ^= (val >> 16);
+    val ^= (val >> 8);
+    return (unsigned int)(val & (FUTEX_BUCKETS - 1));
+}
+
+static void InitSynchApi(void) {
+    if (g_synchInitialized) return;
+    HMODULE hKernel32 = GetModuleHandleW(L"kernel32.dll");
+    if (hKernel32) {
+        g_pfnRealWaitOnAddress = (PFN_WaitOnAddress)GetProcAddress(hKernel32, "WaitOnAddress");
+        g_pfnRealWakeByAddressSingle = (PFN_WakeByAddressSingle)GetProcAddress(hKernel32, "WakeByAddressSingle");
+        g_pfnRealWakeByAddressAll = (PFN_WakeByAddressAll)GetProcAddress(hKernel32, "WakeByAddressAll");
+    }
+    if (!g_pfnRealWaitOnAddress) {
+        HMODULE hSynch = LoadLibraryA("api-ms-win-core-synch-l1-2-0.dll");
+        if (hSynch) {
+            g_pfnRealWaitOnAddress = (PFN_WaitOnAddress)GetProcAddress(hSynch, "WaitOnAddress");
+            g_pfnRealWakeByAddressSingle = (PFN_WakeByAddressSingle)GetProcAddress(hSynch, "WakeByAddressSingle");
+            g_pfnRealWakeByAddressAll = (PFN_WakeByAddressAll)GetProcAddress(hSynch, "WakeByAddressAll");
+        }
+    }
+    g_synchInitialized = TRUE;
+}
+
+BOOL WINAPI Shim_WaitOnAddress(volatile VOID *Address, PVOID CompareAddress, SIZE_T AddressSize, DWORD dwMilliseconds) {
+    InitSynchApi();
+    if (g_pfnRealWaitOnAddress) {
+        return g_pfnRealWaitOnAddress(Address, CompareAddress, AddressSize, dwMilliseconds);
+    }
+
+    if (AddressSize != 1 && AddressSize != 2 && AddressSize != 4 && AddressSize != 8) {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return FALSE;
+    }
+
+    unsigned int bucket = FutexHash(Address);
+    AcquireSRWLockExclusive(&g_futex_locks[bucket]);
+
+    BOOL match = FALSE;
+    if (AddressSize == 1) {
+        match = (*(const volatile char*)Address == *(const char*)CompareAddress);
+    } else if (AddressSize == 2) {
+        match = (*(const volatile short*)Address == *(const short*)CompareAddress);
+    } else if (AddressSize == 4) {
+        match = (*(const volatile long*)Address == *(const long*)CompareAddress);
+    } else if (AddressSize == 8) {
+        match = (*(const volatile long long*)Address == *(const long long*)CompareAddress);
+    }
+
+    if (!match) {
+        ReleaseSRWLockExclusive(&g_futex_locks[bucket]);
+        return TRUE;
+    }
+
+    BOOL ok = SleepConditionVariableSRW(&g_futex_cvs[bucket], &g_futex_locks[bucket], dwMilliseconds, 0);
+    ReleaseSRWLockExclusive(&g_futex_locks[bucket]);
+
+    if (!ok) {
+        return FALSE;
+    }
+    return TRUE;
+}
+BOOL (WINAPI *__imp_WaitOnAddress)(volatile VOID*, PVOID, SIZE_T, DWORD) = Shim_WaitOnAddress;
+BOOL WINAPI WaitOnAddress(volatile VOID *Address, PVOID CompareAddress, SIZE_T AddressSize, DWORD dwMilliseconds) {
+    return Shim_WaitOnAddress(Address, CompareAddress, AddressSize, dwMilliseconds);
+}
+
+VOID WINAPI Shim_WakeByAddressSingle(PVOID Address) {
+    InitSynchApi();
+    if (g_pfnRealWakeByAddressSingle) {
+        g_pfnRealWakeByAddressSingle(Address);
+        return;
+    }
+
+    unsigned int bucket = FutexHash(Address);
+    WakeConditionVariable(&g_futex_cvs[bucket]);
+}
+VOID (WINAPI *__imp_WakeByAddressSingle)(PVOID) = Shim_WakeByAddressSingle;
+VOID WINAPI WakeByAddressSingle(PVOID Address) {
+    Shim_WakeByAddressSingle(Address);
+}
+
+VOID WINAPI Shim_WakeByAddressAll(PVOID Address) {
+    InitSynchApi();
+    if (g_pfnRealWakeByAddressAll) {
+        g_pfnRealWakeByAddressAll(Address);
+        return;
+    }
+
+    unsigned int bucket = FutexHash(Address);
+    WakeAllConditionVariable(&g_futex_cvs[bucket]);
+}
+VOID (WINAPI *__imp_WakeByAddressAll)(PVOID) = Shim_WakeByAddressAll;
+VOID WINAPI WakeByAddressAll(PVOID Address) {
+    Shim_WakeByAddressAll(Address);
+}
+
+// ============================================================================
+// 5. File & Memory APIs (CreateFile2, VirtualAlloc2, MapViewOfFile3)
+// ============================================================================
+
+typedef struct _SHIM_CREATEFILE2_EXTENDED_PARAMETERS {
+    DWORD dwSize;
+    DWORD dwFileAttributes;
+    DWORD dwFileFlags;
+    DWORD dwSecurityQosFlags;
+    LPSECURITY_ATTRIBUTES lpSecurityAttributes;
+    HANDLE hTemplateFile;
+} SHIM_CREATEFILE2_EXTENDED_PARAMETERS;
+
+HANDLE WINAPI Shim_CreateFile2(LPCWSTR lpFileName, DWORD dwDesiredAccess, DWORD dwShareMode, DWORD dwCreationDisposition, void *pCreateExParams) {
+    DWORD dwFlagsAndAttributes = FILE_ATTRIBUTE_NORMAL;
+    if (pCreateExParams) {
+        SHIM_CREATEFILE2_EXTENDED_PARAMETERS *p = (SHIM_CREATEFILE2_EXTENDED_PARAMETERS*)pCreateExParams;
+        if (p->dwSize >= sizeof(DWORD) * 3) {
+            dwFlagsAndAttributes = p->dwFileAttributes | p->dwFileFlags;
+        }
+    }
+    return CreateFileW(lpFileName, dwDesiredAccess, dwShareMode, NULL, dwCreationDisposition, dwFlagsAndAttributes, NULL);
+}
+HANDLE (WINAPI *__imp_CreateFile2)(LPCWSTR, DWORD, DWORD, DWORD, void*) = Shim_CreateFile2;
+HANDLE WINAPI CreateFile2(LPCWSTR lpFileName, DWORD dwDesiredAccess, DWORD dwShareMode, DWORD dwCreationDisposition, void *pCreateExParams) {
+    return Shim_CreateFile2(lpFileName, dwDesiredAccess, dwShareMode, dwCreationDisposition, pCreateExParams);
+}
+
+PVOID WINAPI Shim_VirtualAlloc2(HANDLE Process, PVOID BaseAddress, SIZE_T Size, ULONG AllocationType, ULONG PageProtection, void *ExtendedParameters, ULONG ParameterCount) {
+    (void)ExtendedParameters;
+    (void)ParameterCount;
+    HANDLE hProc = Process ? Process : GetCurrentProcess();
+    return VirtualAllocEx(hProc, BaseAddress, Size, AllocationType, PageProtection);
+}
+PVOID (WINAPI *__imp_VirtualAlloc2)(HANDLE, PVOID, SIZE_T, ULONG, ULONG, void*, ULONG) = Shim_VirtualAlloc2;
+PVOID WINAPI VirtualAlloc2(HANDLE Process, PVOID BaseAddress, SIZE_T Size, ULONG AllocationType, ULONG PageProtection, void *ExtendedParameters, ULONG ParameterCount) {
+    return Shim_VirtualAlloc2(Process, BaseAddress, Size, AllocationType, PageProtection, ExtendedParameters, ParameterCount);
+}
+
+PVOID WINAPI Shim_MapViewOfFile3(HANDLE FileMapping, HANDLE Process, PVOID BaseAddress, ULONG64 Offset, SIZE_T ViewSize, ULONG AllocationType, ULONG PageProtection, void *ExtendedParameters, ULONG ParameterCount) {
+    (void)Process;
+    (void)BaseAddress;
+    (void)AllocationType;
+    (void)ExtendedParameters;
+    (void)ParameterCount;
+    DWORD offsetHigh = (DWORD)(Offset >> 32);
+    DWORD offsetLow = (DWORD)(Offset & 0xFFFFFFFF);
+    return MapViewOfFile(FileMapping, FILE_MAP_ALL_ACCESS, offsetHigh, offsetLow, ViewSize);
+}
+PVOID (WINAPI *__imp_MapViewOfFile3)(HANDLE, HANDLE, PVOID, ULONG64, SIZE_T, ULONG, ULONG, void*, ULONG) = Shim_MapViewOfFile3;
+PVOID WINAPI MapViewOfFile3(HANDLE FileMapping, HANDLE Process, PVOID BaseAddress, ULONG64 Offset, SIZE_T ViewSize, ULONG AllocationType, ULONG PageProtection, void *ExtendedParameters, ULONG ParameterCount) {
+    return Shim_MapViewOfFile3(FileMapping, Process, BaseAddress, Offset, ViewSize, AllocationType, PageProtection, ExtendedParameters, ParameterCount);
+}
+
+// ============================================================================
+// 6. DPI APIs (GetDpiForWindow, SetProcessDpiAwarenessContext)
+// ============================================================================
+
+UINT WINAPI Shim_GetDpiForWindow(HWND hwnd) {
+    (void)hwnd;
+    HDC hdc = GetDC(NULL);
+    UINT dpi = 96;
+    if (hdc) {
+        dpi = (UINT)GetDeviceCaps(hdc, LOGPIXELSX);
+        ReleaseDC(NULL, hdc);
+    }
+    return dpi ? dpi : 96;
+}
+UINT (WINAPI *__imp_GetDpiForWindow)(HWND) = Shim_GetDpiForWindow;
+UINT WINAPI GetDpiForWindow(HWND hwnd) {
+    return Shim_GetDpiForWindow(hwnd);
+}
+
+BOOL WINAPI Shim_SetProcessDpiAwarenessContext(HANDLE value) {
+    (void)value;
+    typedef BOOL (WINAPI *PFN_SetProcessDPIAware)(VOID);
+    HMODULE hUser32 = GetModuleHandleW(L"user32.dll");
+    if (hUser32) {
+        PFN_SetProcessDPIAware pfn = (PFN_SetProcessDPIAware)GetProcAddress(hUser32, "SetProcessDPIAware");
+        if (pfn) return pfn();
+    }
+    return TRUE;
+}
+BOOL (WINAPI *__imp_SetProcessDpiAwarenessContext)(HANDLE) = Shim_SetProcessDpiAwarenessContext;
+BOOL WINAPI SetProcessDpiAwarenessContext(HANDLE value) {
+    return Shim_SetProcessDpiAwarenessContext(value);
 }
 
 #endif // defined(_WIN32) || defined(_WIN64)

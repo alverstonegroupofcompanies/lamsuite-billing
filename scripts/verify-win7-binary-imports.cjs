@@ -4,8 +4,8 @@
  * CI Verification Gate: Windows 7 Compatibility Binary Import Checker
  *
  * Scans Windows PE binaries (.exe, .dll) for static imports of Windows 8+ APIs
- * (such as PackageIdFromFullName, GetPackageFamilyName, GetSystemTimePreciseAsFileTime)
- * that cause immediate fatal startup crashes on Windows 7 SP1 / Windows 8.1.
+ * (such as PackageIdFromFullName, GetPackageFamilyName, GetSystemTimePreciseAsFileTime,
+ * WaitOnAddress, etc.) that cause immediate fatal startup crashes on Windows 7 SP1 / Windows 8.1.
  *
  * If any banned symbol is found in the Import Address Table (IAT) of KERNEL32.dll
  * or other system libraries, this script fails with exit code 1.
@@ -13,7 +13,6 @@
 
 const fs = require('fs');
 const path = require('path');
-const { execSync } = require('child_process');
 
 const BANNED_WIN7_SYMBOLS = new Set([
   'PackageIdFromFullName',
@@ -32,6 +31,16 @@ const BANNED_WIN7_SYMBOLS = new Set([
   'SetThreadDescription',
   'GetDpiForWindow',
   'SetProcessDpiAwarenessContext',
+]);
+
+// Host-only compiler and build artifact directories that are NOT distributed to end-users
+const IGNORED_DIRS = new Set([
+  'build',
+  'deps',
+  '.fingerprint',
+  'incremental',
+  'examples',
+  'target-sub-dir',
 ]);
 
 /**
@@ -162,11 +171,23 @@ function parsePeImports(buffer) {
 }
 
 function scanFile(filePath) {
+  if (!fs.existsSync(filePath)) {
+    return [];
+  }
+
   const stats = fs.statSync(filePath);
   if (stats.isDirectory()) {
+    const dirBase = path.basename(filePath);
+    if (IGNORED_DIRS.has(dirBase)) {
+      return [];
+    }
+
     const results = [];
     const entries = fs.readdirSync(filePath);
     for (const entry of entries) {
+      if (IGNORED_DIRS.has(entry)) {
+        continue;
+      }
       const fullPath = path.join(filePath, entry);
       results.push(...scanFile(fullPath));
     }
@@ -199,22 +220,37 @@ function scanFile(filePath) {
 }
 
 function main() {
-  const targetPath = process.argv[2] || 'frontend/src-tauri/target/release';
+  const targets = process.argv.slice(2);
+  if (targets.length === 0) {
+    targets.push('frontend/src-tauri/target/release');
+  }
+
   console.log('=== Windows 7 Compatibility Binary Import Verification ===');
-  console.log(`Scan Target: ${path.resolve(targetPath)}`);
+  console.log(`Scan Targets: ${targets.join(', ')}`);
   console.log(`Banned Win8+ APIs checked: ${Array.from(BANNED_WIN7_SYMBOLS).join(', ')}\n`);
 
-  if (!fs.existsSync(targetPath)) {
-    console.warn(`[WARN] Target path "${targetPath}" does not exist on disk. Skipping binary check.`);
+  let allViolations = [];
+  let scannedCount = 0;
+
+  for (const target of targets) {
+    if (!fs.existsSync(target)) {
+      console.warn(`[WARN] Target path "${target}" does not exist on disk. Skipping.`);
+      continue;
+    }
+    const violations = scanFile(target);
+    allViolations.push(...violations);
+    scannedCount++;
+  }
+
+  if (scannedCount === 0) {
+    console.warn(`[WARN] No target paths were found on disk to inspect.`);
     process.exit(0);
   }
 
-  const violations = scanFile(targetPath);
-
-  if (violations.length > 0) {
+  if (allViolations.length > 0) {
     console.error('\n[FATAL] Windows 7 Incompatibility Detected:');
-    console.error(`Found ${violations.length} banned Windows 8+ import(s) that will crash on Windows 7:\n`);
-    for (const v of violations) {
+    console.error(`Found ${allViolations.length} banned Windows 8+ import(s) that will crash on Windows 7:\n`);
+    for (const v of allViolations) {
       console.error(`  - Binary:   ${v.file}`);
       console.error(`    System DLL: ${v.dll}`);
       console.error(`    Function:   ${v.func} (MISSING on Windows 7 SP1)\n`);
@@ -222,7 +258,7 @@ function main() {
     process.exit(1);
   }
 
-  console.log('\n[PASS] Verified 0 banned Windows 8+ entry points found.');
+  console.log('\n[PASS] Verified 0 banned Windows 8+ entry points found in deployed binaries.');
   console.log('Binary import table is fully compatible with Windows 7 SP1 and Windows 8.1.');
 }
 

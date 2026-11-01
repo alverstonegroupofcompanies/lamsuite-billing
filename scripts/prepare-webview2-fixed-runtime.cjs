@@ -25,21 +25,34 @@ if (fs.existsSync(targetDir) && fs.readdirSync(targetDir).length > 2) {
 
 fs.mkdirSync(targetDir, { recursive: true });
 
-// Check if fixed runtime archive or source is available
-const runtimeCabUrl = 'https://msedge.sf.dl.delivery.mp.microsoft.com/filestreamingservice/files/2f3a6967-54b9-4a0b-8012-3f6e5e8e7a68/Microsoft.WebView2.FixedVersionRuntime.109.0.1518.78.x64.cab';
+// Reliable fixed runtime archive URLs (Primary GitHub mirror + Microsoft CDN fallback)
+const runtimeUrls = [
+  'https://github.com/westinyang/WebView2RuntimeArchive/releases/download/109.0.1518.78/Microsoft.WebView2.FixedVersionRuntime.109.0.1518.78.x64.cab',
+  'https://msedge.sf.dl.delivery.mp.microsoft.com/filestreamingservice/files/e97607f4-c5f1-4684-95c3-c61555f08f19/Microsoft.WebView2.FixedVersionRuntime.109.0.1518.78.x64.cab',
+];
 const cabFile = path.resolve(__dirname, '..', 'frontend', 'vendor', 'webview2_fixed_109.cab');
 
-try {
-  console.log(`Attempting to retrieve WebView2 Fixed Runtime 109 from Microsoft CDN...`);
-  // Use curl with timeout
-  execSync(`curl -fsSL --connect-timeout 15 --max-time 120 "${runtimeCabUrl}" -o "${cabFile}"`, { stdio: 'inherit' });
+let downloaded = false;
+for (const url of runtimeUrls) {
+  try {
+    console.log(`Attempting to retrieve WebView2 Fixed Runtime 109 from: ${url}...`);
+    execSync(`curl -fsSL --connect-timeout 20 --max-time 180 "${url}" -o "${cabFile}"`, { stdio: 'inherit' });
+    if (fs.existsSync(cabFile) && fs.statSync(cabFile).size > 10000000) {
+      console.log(`[PASS] Successfully downloaded runtime archive (${Math.round(fs.statSync(cabFile).size / (1024 * 1024))} MB).`);
+      downloaded = true;
+      break;
+    }
+  } catch (e) {
+    console.warn(`[WARN] Download from ${url} failed: ${e.message}`);
+  }
+}
 
-  if (fs.existsSync(cabFile) && fs.statSync(cabFile).size > 1000000) {
+try {
+  if (downloaded && fs.existsSync(cabFile)) {
     console.log('Extracting CAB archive into target runtime directory...');
     if (process.platform === 'win32') {
       execSync(`expand "${cabFile}" -F:* "${targetDir}"`, { stdio: 'inherit' });
     } else {
-      // On non-windows hosts, try cabextract if installed
       try {
         execSync(`cabextract -d "${targetDir}" "${cabFile}"`, { stdio: 'inherit' });
       } catch {
@@ -48,8 +61,7 @@ try {
     }
   }
 } catch (e) {
-  console.warn(`[NOTICE] Fixed runtime download skipped or timed out: ${e.message}`);
-  console.log('Creating minimal fixedRuntime placeholder files for bundler staging.');
+  console.warn(`[NOTICE] Fixed runtime extraction skipped or failed: ${e.message}`);
 }
 
 // Ensure directory has minimal metadata markers so bundler succeeds

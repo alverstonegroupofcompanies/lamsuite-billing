@@ -285,16 +285,16 @@ jobs:
         run: |
           npx tauri build --config src-tauri/tauri.legacy.conf.json --bundles nsis
 
-      - name: Verify Windows 7 Binary Imports (Automated Zero Win8+ Entry Points Gate)
-        run: |
-          node scripts/verify-win7-binary-imports.cjs frontend/src-tauri/target/release
-
       - name: Package Legacy Windows Artifacts & Checksums
         shell: bash
         run: |
           mkdir -p dist-legacy
           find frontend/src-tauri/target/release/bundle/nsis -type f -name "*.exe" -exec cp {} dist-legacy/LamSuite-Billing-windows-legacy-x64-setup.exe \;
           sha256sum dist-legacy/LamSuite-Billing-windows-legacy-x64-setup.exe > dist-legacy/LamSuite-Billing-windows-legacy-x64-setup.exe.sha256
+
+      - name: Verify Windows 7 Binary Imports (Automated Zero Win8+ Entry Points Gate)
+        run: |
+          node scripts/verify-win7-binary-imports.cjs "frontend/src-tauri/target/release" dist-legacy
 
       - name: Upload Legacy Assets to Draft Release
         uses: actions/github-script@v7
