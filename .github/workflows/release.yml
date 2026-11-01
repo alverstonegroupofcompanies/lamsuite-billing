@@ -237,16 +237,17 @@ jobs:
           cache: 'npm'
           cache-dependency-path: frontend/package-lock.json
 
-      - name: Install Rust Toolchain
-        uses: dtolnay/rust-toolchain@stable
+      - name: Install Rust Nightly Toolchain (for x86_64-win7-windows-msvc)
+        uses: dtolnay/rust-toolchain@nightly
         with:
-          targets: x86_64-pc-windows-msvc
+          targets: x86_64-win7-windows-msvc
+          components: rust-src
 
       - name: Cache Rust Build Artifacts
         uses: swatinem/rust-cache@v2
         with:
           workspaces: frontend/src-tauri -> target
-          key: win7-legacy-toolchain-v2
+          key: win7-nightly-build-std-v1
 
       - name: Install Frontend Dependencies
         working-directory: frontend
@@ -274,27 +275,40 @@ jobs:
         run: |
           node scripts/prepare-signing-key.cjs
 
+      - name: Configure Cargo for Windows 7 Target (build-std)
+        shell: bash
+        run: |
+          mkdir -p frontend/src-tauri/.cargo
+          cat << 'EOF' > frontend/src-tauri/.cargo/config.toml
+          [unstable]
+          build-std = ["std", "panic_abort"]
+          EOF
+
       - name: Build Legacy Windows NSIS Bundle
         working-directory: frontend
         env:
+          CARGO_UNSTABLE_BUILD_STD: std,panic_abort
           TAURI_PRIVATE_KEY: ${{ env.TAURI_SIGNING_KEY_STRING }}
           TAURI_KEY_PASSWORD: ${{ env.TAURI_VERIFIED_KEY_PASSWORD }}
           TAURI_KEY_PATH: ${{ env.TAURI_KEY_PATH }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ env.TAURI_SIGNING_KEY_STRING }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ env.TAURI_VERIFIED_KEY_PASSWORD }}
         run: |
-          npx tauri build --config src-tauri/tauri.legacy.conf.json --bundles nsis
+          npx tauri build --config src-tauri/tauri.legacy.conf.json --target x86_64-win7-windows-msvc --bundles nsis
 
       - name: Package Legacy Windows Artifacts & Checksums
         shell: bash
         run: |
           mkdir -p dist-legacy
-          find frontend/src-tauri/target/release/bundle/nsis -type f -name "*.exe" -exec cp {} dist-legacy/LamSuite-Billing-windows-legacy-x64-setup.exe \;
+          find frontend/src-tauri/target/x86_64-win7-windows-msvc/release/bundle/nsis -type f -name "*.exe" -exec cp {} dist-legacy/LamSuite-Billing-windows-legacy-x64-setup.exe \;
+          if [ ! -f dist-legacy/LamSuite-Billing-windows-legacy-x64-setup.exe ]; then
+            find frontend/src-tauri/target/release/bundle/nsis -type f -name "*.exe" -exec cp {} dist-legacy/LamSuite-Billing-windows-legacy-x64-setup.exe \;
+          fi
           sha256sum dist-legacy/LamSuite-Billing-windows-legacy-x64-setup.exe > dist-legacy/LamSuite-Billing-windows-legacy-x64-setup.exe.sha256
 
       - name: Verify Windows 7 Binary Imports (Automated Zero Win8+ Entry Points Gate)
         run: |
-          node scripts/verify-win7-binary-imports.cjs "frontend/src-tauri/target/release" dist-legacy
+          node scripts/verify-win7-binary-imports.cjs "frontend/src-tauri/target" dist-legacy
 
       - name: Upload Legacy Assets to Draft Release
         uses: actions/github-script@v7

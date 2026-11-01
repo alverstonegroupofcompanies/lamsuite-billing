@@ -1,4 +1,26 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
+
+fn find_obj(dir: &Path) -> Option<PathBuf> {
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                if let Some(found) = find_obj(&path) {
+                    return Some(found);
+                }
+            } else if let Some(ext) = path.extension() {
+                if (ext == "obj" || ext == "o")
+                    && path
+                        .file_name()
+                        .map_or(false, |n| n.to_string_lossy().contains("win7_compat_shim"))
+                {
+                    return Some(path);
+                }
+            }
+        }
+    }
+    None
+}
 
 fn main() {
     let target_os = std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
@@ -12,18 +34,9 @@ fn main() {
         if target_env == "msvc" {
             let out_dir = std::env::var("OUT_DIR").unwrap();
             let out_path = Path::new(&out_dir);
-            let candidate_objs = [
-                out_path.join("src").join("win7_compat_shim.obj"),
-                out_path.join("win7_compat_shim.obj"),
-                out_path.join("src").join("win7_compat_shim.o"),
-                out_path.join("win7_compat_shim.o"),
-            ];
 
-            for obj in &candidate_objs {
-                if obj.exists() {
-                    println!("cargo:rustc-link-arg={}", obj.display());
-                    break;
-                }
+            if let Some(obj) = find_obj(out_path) {
+                println!("cargo:rustc-link-arg={}", obj.display());
             }
 
             println!("cargo:rustc-link-arg=/FORCE:MULTIPLE");
