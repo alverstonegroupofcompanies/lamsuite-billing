@@ -1,5 +1,6 @@
 import React from "react";
 import { X, Keyboard, Command } from "lucide-react";
+import { APP_FULL_VERSION } from "../config/version";
 import { useModalEscape } from "../lib/ui/modalEscapeManager";
 
 interface KeyboardShortcutsModalProps {
@@ -126,9 +127,14 @@ export const KeyboardShortcutsModal: React.FC<KeyboardShortcutsModalProps> = ({ 
 
         {/* Modal Footer */}
         <div className="flex items-center justify-between border-t border-border-main bg-canvas px-6 py-3 text-xs text-text-muted">
-          <div className="flex items-center gap-1.5">
-            <Command className="h-3.5 w-3.5 text-text-muted" />
-            <span>Press <strong className="text-text-main font-mono">Esc</strong> to exit anytime</span>
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-1.5">
+              <Command className="h-3.5 w-3.5 text-text-muted" />
+              <span>Press <strong className="text-text-main font-mono">Esc</strong> to exit anytime</span>
+            </div>
+            <span className="font-mono text-[10px] text-text-muted/60">
+              LamSuite Billing {APP_FULL_VERSION}
+            </span>
           </div>
           <button
             onClick={onClose}

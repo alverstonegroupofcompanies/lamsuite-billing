@@ -164,6 +164,8 @@ async function verifyRelease() {
     { name: 'Linux RPM Package (.rpm)', pattern: /\.rpm$/i },
     { name: 'Linux Updater Signature (.AppImage.tar.gz.sig)', pattern: /(\.AppImage\.tar\.gz|\.tar\.gz)\.sig$/i },
     { name: 'Windows Legacy Updater Manifest (latest-legacy-win7.json)', pattern: /^latest-legacy-win7\.json$/i },
+    { name: 'Windows Legacy Updater Archive (.nsis.zip)', pattern: /windows-legacy.*\.nsis\.zip$/i },
+    { name: 'Windows Legacy Updater Signature (.sig)', pattern: /windows-legacy.*\.sig$/i },
   ];
 
   for (const opt of optionalPatterns) {

@@ -24,6 +24,7 @@ import { AccountSwitcherModal } from "./AccountSwitcherModal";
 import { StoreSwitcherModal } from "./StoreSwitcherModal";
 import { storeRegistryService, type RegisteredStoreRecord, STORE_PRESET_COLORS } from "../lib/auth/storeRegistryService";
 import { Lock, Users, Building2 } from "lucide-react";
+import { APP_FULL_VERSION } from "../config/version";
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -367,7 +368,12 @@ export const Layout: React.FC<LayoutProps> = ({ children, onOpenGateway, onAddNe
               className="h-8 w-8 rounded-[8px] object-cover border border-[var(--color-border)] bg-[var(--color-surface)] shrink-0"
             />
             <div>
-              <h1 className="text-sm font-bold text-[var(--color-text)] leading-tight whitespace-nowrap">LamSuite Billing</h1>
+              <div className="flex items-center gap-1.5">
+                <h1 className="text-sm font-bold text-[var(--color-text)] leading-tight whitespace-nowrap">LamSuite Billing</h1>
+                <span className="rounded bg-[var(--color-surface-subtle)] border border-[var(--color-border)] px-1.5 py-0.2 text-[10px] font-mono font-bold text-[var(--color-accent)] shadow-2xs">
+                  {APP_FULL_VERSION}
+                </span>
+              </div>
               <p className="text-[11px] text-[var(--color-text-muted)] font-medium whitespace-nowrap">Retail & Pharmacy POS</p>
             </div>
           </Link>

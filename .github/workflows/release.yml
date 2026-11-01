@@ -289,13 +289,15 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ env.TAURI_SIGNING_KEY_STRING }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ env.TAURI_VERIFIED_KEY_PASSWORD }}
         run: |
-          npx tauri build --config src-tauri/tauri.legacy.conf.json --bundles nsis
+          npx tauri build --config src-tauri/tauri.legacy.conf.json --bundles nsis,updater
 
       - name: Package Legacy Windows Artifacts & Checksums
         shell: bash
         run: |
           mkdir -p dist-legacy
           find frontend/src-tauri/target/release/bundle/nsis -type f -name "*.exe" -exec cp {} dist-legacy/LamSuite-Billing-windows-legacy-x64-setup.exe \;
+          find frontend/src-tauri/target/release/bundle/nsis -type f -name "*.nsis.zip" -exec cp {} dist-legacy/LamSuite-Billing-windows-legacy-x64-setup.nsis.zip \;
+          find frontend/src-tauri/target/release/bundle/nsis -type f -name "*.nsis.zip.sig" -exec cp {} dist-legacy/LamSuite-Billing-windows-legacy-x64-setup.nsis.zip.sig \;
           if [ ! -f dist-legacy/LamSuite-Billing-windows-legacy-x64-setup.exe ]; then
             find frontend/src-tauri/target -type f -name "*.exe" | grep -i "nsis" | while read -r exe; do
               cp "$exe" dist-legacy/LamSuite-Billing-windows-legacy-x64-setup.exe
@@ -303,6 +305,9 @@ jobs:
           fi
           node scripts/patch-win7-binary-imports.cjs dist-legacy frontend/src-tauri/target/release
           sha256sum dist-legacy/LamSuite-Billing-windows-legacy-x64-setup.exe > dist-legacy/LamSuite-Billing-windows-legacy-x64-setup.exe.sha256
+          if [ -f dist-legacy/LamSuite-Billing-windows-legacy-x64-setup.nsis.zip ]; then
+            sha256sum dist-legacy/LamSuite-Billing-windows-legacy-x64-setup.nsis.zip > dist-legacy/LamSuite-Billing-windows-legacy-x64-setup.nsis.zip.sha256
+          fi
 
       - name: Verify Windows 7 Binary Imports (Automated Zero Win8+ Entry Points Gate)
         run: |

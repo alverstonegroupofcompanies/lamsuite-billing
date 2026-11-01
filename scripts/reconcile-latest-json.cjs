@@ -218,7 +218,8 @@ async function run() {
   });
 
   // Reconcile and upload dedicated legacy manifest (latest-legacy-win7.json)
-  const legacySetupAsset = assets.find(a => /windows-legacy.*\.exe$/i.test(a.name));
+  const legacyZipAsset = assets.find(a => /windows-legacy.*\.nsis\.zip$/i.test(a.name) || /windows-legacy.*\.zip$/i.test(a.name));
+  const legacySetupAsset = legacyZipAsset || assets.find(a => /windows-legacy.*\.exe$/i.test(a.name));
   const legacySigAsset = assets.find(a => /windows-legacy.*\.sig$/i.test(a.name));
   const existingLegacyLatest = assets.find(a => a.name === 'latest-legacy-win7.json');
 

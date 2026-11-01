@@ -21,6 +21,7 @@ import {
   LucideIcon,
   Layers,
 } from "lucide-react";
+import { APP_FULL_VERSION } from "../config/version";
 
 export interface NavChildItem {
   id: string;
@@ -379,8 +380,11 @@ export const TopNav: React.FC<TopNavProps> = ({ enabledMenus, onOpenShortcutsHel
         })}
       </div>
 
-      {/* Right: Help & Shortcuts Trigger */}
+      {/* Right: Help, Shortcuts & App Version */}
       <div className="flex items-center gap-2 pl-2">
+        <span className="hidden md:inline-flex items-center rounded-[6px] bg-[var(--color-nav-hover)] px-2 py-0.5 font-mono text-[10px] font-semibold text-[#C9D8D3] border border-[var(--color-nav-border)]">
+          {APP_FULL_VERSION}
+        </span>
         <button
           onClick={onOpenShortcutsHelp}
           title="View Keyboard Shortcuts & Cheatsheet"

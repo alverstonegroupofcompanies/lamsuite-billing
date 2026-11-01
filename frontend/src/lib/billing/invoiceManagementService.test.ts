@@ -47,7 +47,14 @@ describe("InvoiceManagementService", () => {
 
   it("lists invoices with search filtering across invoice number, customer, and line items", async () => {
     const now = Date.now();
-    const todayStr = new Date().toISOString().slice(0, 10);
+    const formatYmdKolkata = (d: Date) => {
+      try {
+        return d.toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+      } catch {
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+      }
+    };
+    const todayStr = formatYmdKolkata(new Date());
 
     const inv1: InvoiceRecord = {
       id: "inv_1",
@@ -182,7 +189,14 @@ describe("InvoiceManagementService", () => {
 
   it("saves invoice revisions: reverses original stock, applies new stock, updates totals, and logs audit trail", async () => {
     const now = Date.now();
-    const todayStr = new Date().toISOString().slice(0, 10);
+    const formatYmdKolkata = (d: Date) => {
+      try {
+        return d.toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+      } catch {
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+      }
+    };
+    const todayStr = formatYmdKolkata(new Date());
 
     // Initial invoice: sold 2 packs (30 units) of Dolo 650
     // Initial batch stock starts at 150 - 30 = 120
@@ -285,7 +299,14 @@ describe("InvoiceManagementService", () => {
 
   it("cancels invoice: restores batch stock, marks invoice cancelled, and retains record for audit/reports", async () => {
     const now = Date.now();
-    const todayStr = new Date().toISOString().slice(0, 10);
+    const formatYmdKolkata = (d: Date) => {
+      try {
+        return d.toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+      } catch {
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+      }
+    };
+    const todayStr = formatYmdKolkata(new Date());
 
     // Initial batch stock starts at 100 base units
     await productsStore.upsertBatch({ ...dummyBatch, stock_qty: 100 });

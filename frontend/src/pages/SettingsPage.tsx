@@ -64,6 +64,7 @@ import { partiesStore } from "../lib/masters/partiesStore";
 import { seed50Products } from "../lib/masters/seedProductsData";
 import { applyWorkspaceSettings } from "../lib/settings/workspaceThemeService";
 import { autoUpdateService, type UpdateInfo } from "../lib/settings/autoUpdateService";
+import { APP_FULL_VERSION } from "../config/version";
 import { UpdateNotificationModal } from "../components/UpdateNotificationModal";
 import { storeRegistryService } from "../lib/auth/storeRegistryService";
 
@@ -2991,7 +2992,12 @@ export const SettingsPage: React.FC = () => {
                 </div>
 
                 <div className="rounded-lg border border-slate-200 p-4 space-y-3">
-                  <div className="text-xs font-bold text-slate-800">Check for Software Updates</div>
+                  <div className="flex items-center justify-between">
+                    <div className="text-xs font-bold text-slate-800">Check for Software Updates</div>
+                    <span className="inline-flex items-center gap-1 rounded-full bg-indigo-50 border border-indigo-200 px-2.5 py-0.5 text-[11px] font-mono font-bold text-indigo-700">
+                      Installed: {APP_FULL_VERSION}
+                    </span>
+                  </div>
                   <p className="text-[11px] text-slate-500">
                     Query the release API server to check if a newer version of LamSuite Billing Desktop is available.
                   </p>
