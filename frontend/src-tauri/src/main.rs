@@ -791,18 +791,38 @@ fn main() {
         if let Ok(exe_path) = std::env::current_exe() {
             if let Some(exe_dir) = exe_path.parent() {
                 let candidates = [
+                    exe_dir.join("WebView2FixedVersionRuntime"),
+                    exe_dir.join("Microsoft.WebView2.FixedVersionRuntime"),
+                    exe_dir.join("webview2-runtime"),
                     exe_dir.join("webview2-runtime").join("Microsoft.WebView2.FixedVersionRuntime.109.0.1518.78.x64"),
                     exe_dir.join("Microsoft.WebView2.FixedVersionRuntime.109.0.1518.78.x64"),
-                    exe_dir.join("webview2-runtime"),
+                    exe_dir.to_path_buf(),
                 ];
 
+                let mut found_dir = None;
                 for candidate in &candidates {
                     if candidate.join("msedgewebview2.exe").exists() {
-                        let path_str = candidate.to_string_lossy().to_string();
-                        let clean_path = path_str.strip_prefix(r"\\?\").unwrap_or(&path_str);
-                        std::env::set_var("WEBVIEW2_BROWSER_EXECUTABLE_FOLDER", clean_path);
+                        found_dir = Some(candidate.clone());
                         break;
                     }
+                }
+
+                if found_dir.is_none() {
+                    if let Ok(entries) = std::fs::read_dir(exe_dir) {
+                        for entry in entries.flatten() {
+                            let p = entry.path();
+                            if p.is_dir() && p.join("msedgewebview2.exe").exists() {
+                                found_dir = Some(p);
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                if let Some(dir) = found_dir {
+                    let path_str = dir.to_string_lossy().to_string();
+                    let clean_path = path_str.strip_prefix(r"\\?\").unwrap_or(&path_str);
+                    std::env::set_var("WEBVIEW2_BROWSER_EXECUTABLE_FOLDER", clean_path);
                 }
             }
         }
