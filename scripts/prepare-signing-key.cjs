@@ -32,10 +32,7 @@ const rawPasswordCandidates = [
 const dummyFile = path.resolve('frontend', '.signing-probe.txt');
 fs.writeFileSync(dummyFile, 'tauri-signing-probe', 'utf8');
 
-const isWin = process.platform === 'win32';
-const tauriCli = isWin
-  ? path.resolve('frontend', 'node_modules', '.bin', 'tauri.cmd')
-  : path.resolve('frontend', 'node_modules', '.bin', 'tauri');
+const tauriJs = path.resolve('frontend', 'node_modules', '@tauri-apps', 'cli', 'tauri.js');
 
 const homeDir = process.env.USERPROFILE || process.env.HOME || '.';
 const tauriDir = path.join(homeDir, '.tauri');
@@ -79,10 +76,9 @@ for (const rawKey of uniqueKeys) {
 
   for (const cand of passCandidates) {
     try {
-      execFileSync(tauriCli, ['signer', 'sign', '-f', keyFilePath, '-p', cand.val, dummyFile], {
+      execFileSync(process.execPath, [tauriJs, 'signer', 'sign', '-f', keyFilePath, '-p', cand.val, dummyFile], {
         cwd: path.resolve('frontend'),
         stdio: 'pipe',
-        shell: isWin,
       });
       verifiedKey = encodedKey;
       verifiedPassword = cand.val;
