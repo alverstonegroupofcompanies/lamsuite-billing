@@ -237,10 +237,9 @@ jobs:
           cache: 'npm'
           cache-dependency-path: frontend/package-lock.json
 
-      - name: Install Rust Nightly Toolchain (for x86_64-win7-windows-msvc)
+      - name: Install Rust Nightly Toolchain (with rust-src for build-std)
         uses: dtolnay/rust-toolchain@nightly
         with:
-          targets: x86_64-win7-windows-msvc
           components: rust-src
 
       - name: Cache Rust Build Artifacts
@@ -300,9 +299,15 @@ jobs:
         shell: bash
         run: |
           mkdir -p dist-legacy
-          find frontend/src-tauri/target/x86_64-win7-windows-msvc/release/bundle/nsis -type f -name "*.exe" -exec cp {} dist-legacy/LamSuite-Billing-windows-legacy-x64-setup.exe \;
+          find frontend/src-tauri/target -type f -name "*.exe" | grep -i "nsis" | while read -r exe; do
+            echo "Found NSIS setup: $exe"
+            cp "$exe" dist-legacy/LamSuite-Billing-windows-legacy-x64-setup.exe
+          done
           if [ ! -f dist-legacy/LamSuite-Billing-windows-legacy-x64-setup.exe ]; then
-            find frontend/src-tauri/target/release/bundle/nsis -type f -name "*.exe" -exec cp {} dist-legacy/LamSuite-Billing-windows-legacy-x64-setup.exe \;
+            find frontend/src-tauri/target -type f -name "*setup*.exe" | grep -v "build" | while read -r exe; do
+              echo "Found fallback setup: $exe"
+              cp "$exe" dist-legacy/LamSuite-Billing-windows-legacy-x64-setup.exe
+            done
           fi
           sha256sum dist-legacy/LamSuite-Billing-windows-legacy-x64-setup.exe > dist-legacy/LamSuite-Billing-windows-legacy-x64-setup.exe.sha256
 
