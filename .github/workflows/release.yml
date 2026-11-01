@@ -237,16 +237,10 @@ jobs:
           cache: 'npm'
           cache-dependency-path: frontend/package-lock.json
 
-      - name: Install Pinned Rust 1.77.2 (Final Windows 7 Supported Toolchain)
-        uses: dtolnay/rust-toolchain@1.77.2
+      - name: Install Rust Toolchain
+        uses: dtolnay/rust-toolchain@stable
         with:
           targets: x86_64-pc-windows-msvc
-
-      - name: Ensure Cargo Lockfile Compatibility for Rust 1.77.2 (Version 3 Format)
-        shell: bash
-        run: |
-          sed -i.bak 's/^version = 4/version = 3/' frontend/src-tauri/Cargo.lock || true
-          rm -f frontend/src-tauri/Cargo.lock.bak
 
       - name: Cache Rust Build Artifacts
         uses: swatinem/rust-cache@v2

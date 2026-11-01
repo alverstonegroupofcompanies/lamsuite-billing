@@ -154,7 +154,7 @@ The release workflow `.github/workflows/release.yml` executes in seven stages:
    - `macos-latest` (Apple Silicon) -> DMG, `.app.tar.gz`, and `.app.tar.gz.sig`.
    - `macos-latest` (Intel) -> DMG, `.app.tar.gz`, and `.app.tar.gz.sig`.
    - `ubuntu-22.04` (Linux) -> `.AppImage`, `.deb`, `.rpm`, `.AppImage.tar.gz`, and `.sig`.
-4. **`build-windows-legacy`**: Compiles an isolated Windows 7/8.1 64-bit binary pinned to **Rust 1.77.2** with `win7_compat_shim.c` (neutralizing Windows 8+ `PackageIdFromFullName` imports), bundles **WebView2 Fixed Version Runtime 109**, verifies zero banned entry points via `verify-win7-binary-imports.cjs`, and packages `LamSuite-Billing-windows-legacy-x64-setup.exe`.
+4. **`build-windows-legacy`**: Compiles an isolated Windows 7/8.1 64-bit binary using `win7_compat_shim.c` (neutralizing Windows 8+ `PackageIdFromFullName` and `GetSystemTimePreciseAsFileTime` imports), bundles **WebView2 Fixed Version Runtime 109**, verifies zero banned entry points via `verify-win7-binary-imports.cjs`, and packages `LamSuite-Billing-windows-legacy-x64-setup.exe`.
 5. **`publish-release`**: Consolidates all platform signatures into `latest.json` and legacy channel `latest-legacy-win7.json`, and changes release status from Draft to Published.
 6. **`verify-release`**: **The release quality gate.** It:
    - Confirms all required assets (modern installer, legacy installer, updater signatures, manifests) are attached to the release.
