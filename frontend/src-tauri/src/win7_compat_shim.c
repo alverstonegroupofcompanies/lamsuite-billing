@@ -404,4 +404,43 @@ BOOL WINAPI ProcessPrng(PBYTE pbData, SIZE_T cbData) {
     return Shim_ProcessPrng(pbData, cbData);
 }
 
+// ============================================================================
+// 8. Windows 7 FastFail (INT 29h) Handler & Initialization
+//    On Windows 8+, __fastfail is a native CPU/kernel contract (INT 29h).
+//    On Windows 7 SP1, INT 29h is not handled and raises EXCEPTION_ACCESS_VIOLATION
+//    (0xC0000005). We catch it in a Vectored Exception Handler to display a clear
+//    diagnostic message box instead of an opaque crash dialog.
+// ============================================================================
+
+static LONG WINAPI VectoredCrashFilter(PEXCEPTION_POINTERS pExceptionInfo) {
+    if (pExceptionInfo && pExceptionInfo->ExceptionRecord) {
+        DWORD code = pExceptionInfo->ExceptionRecord->ExceptionCode;
+        unsigned char *ip = (unsigned char*)pExceptionInfo->ExceptionRecord->ExceptionAddress;
+        if (code == 0xC0000005 || code == 0xC000001D) {
+            if (ip && ip[0] == 0xCD && ip[1] == 0x29) {
+                DWORD fastFailCode = 7;
+#if defined(_WIN64)
+                if (pExceptionInfo->ContextRecord) {
+                    fastFailCode = (DWORD)pExceptionInfo->ContextRecord->Rcx;
+                }
+#endif
+                char buf[512];
+                wsprintfA(buf, "LamSuite Billing encountered a fatal abort (FastFail %u at %p).\n\nPlease verify that Microsoft Edge WebView2 runtime is installed.", fastFailCode, ip);
+                MessageBoxA(NULL, buf, "LamSuite Billing - Fatal Exit", MB_ICONSTOP | MB_OK);
+                ExitProcess(fastFailCode ? fastFailCode : 1);
+            }
+        }
+    }
+    return EXCEPTION_CONTINUE_SEARCH;
+}
+
+void InitWin7CompatShim(void) {
+    static BOOL initialized = FALSE;
+    if (initialized) return;
+    initialized = TRUE;
+    AddVectoredExceptionHandler(1, VectoredCrashFilter);
+    InitSynchApi();
+    InitPrngApi();
+}
+
 #endif // defined(_WIN32) || defined(_WIN64)

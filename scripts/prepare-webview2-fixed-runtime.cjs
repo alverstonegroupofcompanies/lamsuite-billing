@@ -13,18 +13,30 @@ const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
 
-const targetDir = path.resolve(__dirname, '..', 'frontend', 'vendor', 'Microsoft.WebView2.FixedVersionRuntime');
+const targetDir = path.resolve(__dirname, '..', 'frontend', 'src-tauri', 'WebView2FixedRuntime');
+const legacyVendorDir = path.resolve(__dirname, '..', 'frontend', 'vendor', 'Microsoft.WebView2.FixedVersionRuntime');
 
 console.log('=== Preparing WebView2 Fixed Version 109 Runtime for Legacy Build ===');
 console.log(`Target Directory: ${targetDir}`);
 
 const runtimeExe = path.join(targetDir, 'msedgewebview2.exe');
+const legacyExe = path.join(legacyVendorDir, 'msedgewebview2.exe');
+
+// Check if already populated in targetDir or legacyVendorDir
 if (fs.existsSync(runtimeExe) && fs.statSync(runtimeExe).size > 100000) {
-  console.log('[PASS] WebView2 Fixed Version Runtime already exists and is populated.');
+  console.log('[PASS] WebView2 Fixed Version Runtime already exists in target directory.');
+  process.exit(0);
+}
+if (fs.existsSync(legacyExe) && fs.statSync(legacyExe).size > 100000) {
+  console.log('[INFO] Populating WebView2 Fixed Version Runtime from legacy vendor cache...');
+  fs.mkdirSync(targetDir, { recursive: true });
+  fs.cpSync(legacyVendorDir, targetDir, { recursive: true });
+  console.log('[PASS] WebView2 Fixed Version Runtime successfully populated.');
   process.exit(0);
 }
 
 fs.mkdirSync(targetDir, { recursive: true });
+fs.mkdirSync(path.dirname(legacyVendorDir), { recursive: true });
 
 // Reliable fixed runtime archive URLs (Primary GitHub mirror + Microsoft CDN fallback)
 const runtimeUrls = [
@@ -123,5 +135,16 @@ if (fs.existsSync(runtimeExe) && fs.statSync(runtimeExe).size > 100000) {
 
 const versionFile = path.join(targetDir, 'version.txt');
 fs.writeFileSync(versionFile, '109.0.1518.78');
+
+// Mirror to legacy vendor directory if needed
+try {
+  if (!fs.existsSync(legacyExe)) {
+    console.log(`[INFO] Mirroring runtime to legacy vendor directory: ${legacyVendorDir}`);
+    fs.mkdirSync(legacyVendorDir, { recursive: true });
+    fs.cpSync(targetDir, legacyVendorDir, { recursive: true });
+  }
+} catch (e) {
+  console.warn(`[WARN] Could not mirror to legacy vendor dir: ${e.message}`);
+}
 
 console.log('[SUCCESS] WebView2 Fixed Version 109 directory staging completed successfully.');

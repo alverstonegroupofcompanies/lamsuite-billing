@@ -20,6 +20,8 @@ backend/.phpunit.result.cache
 *.sqlite3
 *.sqlite-journal
 frontend/src-tauri/webview2-runtime/
+frontend/src-tauri/WebView2FixedRuntime/
+frontend/vendor/
 *.cab
 
 # Tauri updater private keys

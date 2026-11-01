@@ -695,12 +695,28 @@ fn secure_store_delete(key: String) -> Result<Value, String> {
 }
 
 fn get_app_dir() -> PathBuf {
-    let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
-    let app_dir = PathBuf::from(home)
-        .join(".gemini")
-        .join("antigravity")
-        .join("scratch")
-        .join("lamsuite-billing");
+    #[cfg(target_os = "windows")]
+    {
+        if let Ok(appdata) = std::env::var("APPDATA") {
+            let app_dir = PathBuf::from(appdata).join("LamSuite Billing");
+            let _ = fs::create_dir_all(&app_dir);
+            return app_dir;
+        }
+        if let Ok(userprofile) = std::env::var("USERPROFILE") {
+            let app_dir = PathBuf::from(userprofile).join(".lamsuite-billing");
+            let _ = fs::create_dir_all(&app_dir);
+            return app_dir;
+        }
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        if let Ok(home) = std::env::var("HOME") {
+            let app_dir = PathBuf::from(home).join(".lamsuite-billing");
+            let _ = fs::create_dir_all(&app_dir);
+            return app_dir;
+        }
+    }
+    let app_dir = PathBuf::from(".").join(".lamsuite-billing");
     let _ = fs::create_dir_all(&app_dir);
     app_dir
 }
@@ -785,14 +801,89 @@ fn get_db_path() -> PathBuf {
     get_app_dir().join("lamsuite_desktop.sqlite")
 }
 
+#[cfg(target_os = "windows")]
+extern "C" {
+    fn InitWin7CompatShim();
+}
+
+#[cfg(target_os = "windows")]
+fn find_webview2_runtime(dir: &std::path::Path, max_depth: usize) -> Option<PathBuf> {
+    if max_depth == 0 {
+        return None;
+    }
+    if dir.join("msedgewebview2.exe").is_file() {
+        return Some(dir.to_path_buf());
+    }
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                if let Some(found) = find_webview2_runtime(&path, max_depth - 1) {
+                    return Some(found);
+                }
+            }
+        }
+    }
+    None
+}
+
 fn main() {
+    std::panic::set_hook(Box::new(|info| {
+        let location = info
+            .location()
+            .map(|l| format!("{}:{}:{}", l.file(), l.line(), l.column()))
+            .unwrap_or_else(|| "unknown".into());
+        let payload = if let Some(s) = info.payload().downcast_ref::<&str>() {
+            (*s).to_string()
+        } else if let Some(s) = info.payload().downcast_ref::<String>() {
+            s.clone()
+        } else {
+            "Unknown panic payload".to_string()
+        };
+        let msg = format!(
+            "LamSuite Billing encountered an unhandled error:\n\n{}\n\nLocation: {}",
+            payload, location
+        );
+
+        #[cfg(target_os = "windows")]
+        unsafe {
+            use std::ffi::OsStr;
+            use std::os::windows::ffi::OsStrExt;
+            let wide_msg: Vec<u16> = OsStr::new(&msg).encode_wide().chain(Some(0)).collect();
+            let wide_title: Vec<u16> = OsStr::new("LamSuite Billing - Unhandled Error")
+                .encode_wide()
+                .chain(Some(0))
+                .collect();
+            extern "system" {
+                fn MessageBoxW(
+                    hwnd: *mut std::ffi::c_void,
+                    text: *const u16,
+                    title: *const u16,
+                    utype: u32,
+                ) -> i32;
+            }
+            MessageBoxW(
+                std::ptr::null_mut(),
+                wide_msg.as_ptr(),
+                wide_title.as_ptr(),
+                0x10, /* MB_ICONERROR */
+            );
+        }
+        eprintln!("{}", msg);
+    }));
+
     #[cfg(target_os = "windows")]
     {
+        unsafe {
+            InitWin7CompatShim();
+        }
+
         if let Ok(exe_path) = std::env::current_exe() {
             if let Some(exe_dir) = exe_path.parent() {
                 let candidates = [
-                    exe_dir.join("WebView2FixedVersionRuntime"),
+                    exe_dir.join("WebView2FixedRuntime"),
                     exe_dir.join("Microsoft.WebView2.FixedVersionRuntime"),
+                    exe_dir.join("_up_").join("vendor").join("Microsoft.WebView2.FixedVersionRuntime"),
                     exe_dir.join("webview2-runtime"),
                     exe_dir.join("webview2-runtime").join("Microsoft.WebView2.FixedVersionRuntime.109.0.1518.78.x64"),
                     exe_dir.join("Microsoft.WebView2.FixedVersionRuntime.109.0.1518.78.x64"),
@@ -801,22 +892,14 @@ fn main() {
 
                 let mut found_dir = None;
                 for candidate in &candidates {
-                    if candidate.join("msedgewebview2.exe").exists() {
+                    if candidate.join("msedgewebview2.exe").is_file() {
                         found_dir = Some(candidate.clone());
                         break;
                     }
                 }
 
                 if found_dir.is_none() {
-                    if let Ok(entries) = std::fs::read_dir(exe_dir) {
-                        for entry in entries.flatten() {
-                            let p = entry.path();
-                            if p.is_dir() && p.join("msedgewebview2.exe").exists() {
-                                found_dir = Some(p);
-                                break;
-                            }
-                        }
-                    }
+                    found_dir = find_webview2_runtime(exe_dir, 4);
                 }
 
                 if let Some(dir) = found_dir {
@@ -824,6 +907,16 @@ fn main() {
                     let clean_path = path_str.strip_prefix(r"\\?\").unwrap_or(&path_str);
                     std::env::set_var("WEBVIEW2_BROWSER_EXECUTABLE_FOLDER", clean_path);
                 }
+
+                let local_app_data = std::env::var("LOCALAPPDATA")
+                    .map(PathBuf::from)
+                    .or_else(|_| std::env::var("APPDATA").map(PathBuf::from))
+                    .unwrap_or_else(|_| exe_dir.to_path_buf());
+                let webview_data_dir = local_app_data.join("LamSuite Billing Legacy").join("EBWebView");
+                let _ = std::fs::create_dir_all(&webview_data_dir);
+                let data_str = webview_data_dir.to_string_lossy().to_string();
+                let clean_data = data_str.strip_prefix(r"\\?\").unwrap_or(&data_str);
+                std::env::set_var("WEBVIEW2_USER_DATA_FOLDER", clean_data);
             }
         }
     }
@@ -842,7 +935,7 @@ fn main() {
         [],
     );
 
-    tauri::Builder::default()
+    let app = tauri::Builder::default()
         .manage(DbState {
             conn: Mutex::new(conn),
         })
@@ -869,6 +962,43 @@ fn main() {
             secure_store_get,
             secure_store_delete
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!());
+
+    match app {
+        Ok(app) => {
+            app.run(|_app_handle, _event| {});
+        }
+        Err(err) => {
+            let err_msg = format!(
+                "Failed to initialize LamSuite Billing desktop window:\n\n{}\n\nPlease verify that the bundled WebView2 Fixed Version Runtime is present.",
+                err
+            );
+            #[cfg(target_os = "windows")]
+            unsafe {
+                use std::ffi::OsStr;
+                use std::os::windows::ffi::OsStrExt;
+                let wide_msg: Vec<u16> = OsStr::new(&err_msg).encode_wide().chain(Some(0)).collect();
+                let wide_title: Vec<u16> = OsStr::new("LamSuite Billing - Startup Error")
+                    .encode_wide()
+                    .chain(Some(0))
+                    .collect();
+                extern "system" {
+                    fn MessageBoxW(
+                        hwnd: *mut std::ffi::c_void,
+                        text: *const u16,
+                        title: *const u16,
+                        utype: u32,
+                    ) -> i32;
+                }
+                MessageBoxW(
+                    std::ptr::null_mut(),
+                    wide_msg.as_ptr(),
+                    wide_title.as_ptr(),
+                    0x10, /* MB_ICONERROR */
+                );
+            }
+            eprintln!("{}", err_msg);
+            std::process::exit(1);
+        }
+    }
 }

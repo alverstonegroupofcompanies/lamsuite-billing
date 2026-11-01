@@ -13,7 +13,7 @@
       "windows": {
         "webviewInstallMode": {
           "type": "fixedRuntime",
-          "path": "../vendor/Microsoft.WebView2.FixedVersionRuntime"
+          "path": "./WebView2FixedRuntime"
         }
       }
     },
