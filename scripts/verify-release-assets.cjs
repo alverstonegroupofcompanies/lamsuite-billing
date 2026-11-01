@@ -67,9 +67,12 @@ function checkUrlResolves(url, assets = []) {
     try {
       const parsed = new URL(url);
 
-      // In private repositories, github.com/.../releases/download/... cannot be resolved anonymously.
+      // In private repositories, github.com/.../releases/download/... or updates.lamstonehealthcare.com cannot be resolved anonymously.
       // Confirm that the target asset exists in the release assets list with size > 0.
-      if (parsed.hostname === 'github.com' && parsed.pathname.includes('/releases/download/')) {
+      if (
+        (parsed.hostname === 'github.com' && parsed.pathname.includes('/releases/download/')) ||
+        parsed.hostname === 'updates.lamstonehealthcare.com'
+      ) {
         const filename = decodeURIComponent(parsed.pathname.split('/').pop());
         const matchingAsset = assets.find(a => a.name === filename);
         if (matchingAsset && matchingAsset.size > 0) {

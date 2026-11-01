@@ -447,13 +447,14 @@ jobs:
         env:
           SSH_HOST: ${{ secrets.SSH_HOST }}
           SSH_KEY: ${{ secrets.SSH_PRIVATE_KEY || secrets.SSH_KEY }}
+          SSH_PASSWORD: ${{ secrets.SSH_PASSWORD }}
         run: |
-          if [ -z "$SSH_HOST" ] || [ -z "$SSH_KEY" ]; then
-            echo "configured=false" >> "$GITHUB_OUTPUT"
-            echo "::notice ::SSH_HOST or SSH_PRIVATE_KEY is not configured. Skipping updates server deployment."
-          else
+          if [ -n "$SSH_HOST" ] && { [ -n "$SSH_KEY" ] || [ -n "$SSH_PASSWORD" ]; }; then
             echo "configured=true" >> "$GITHUB_OUTPUT"
             echo "SSH deployment credentials verified."
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::notice ::SSH_HOST and SSH credentials not configured. Skipping updates server deployment."
           fi
 
       - name: Setup Node.js 22 LTS
@@ -489,6 +490,7 @@ jobs:
           username: ${{ secrets.SSH_USER || 'deploy' }}
           key: ${{ secrets.SSH_PRIVATE_KEY || secrets.SSH_KEY }}
           passphrase: ${{ secrets.SSH_PASSPHRASE }}
+          password: ${{ secrets.SSH_PASSWORD }}
           source: 'updates-dist/*'
           target: '/opt/lamsuite/updates/'
           strip_components: 1
@@ -501,6 +503,7 @@ jobs:
           username: ${{ secrets.SSH_USER || 'deploy' }}
           key: ${{ secrets.SSH_PRIVATE_KEY || secrets.SSH_KEY }}
           passphrase: ${{ secrets.SSH_PASSPHRASE }}
+          password: ${{ secrets.SSH_PASSWORD }}
           script: |
             set -euo pipefail
             if [ -d /opt/lamsuite/updates ]; then
