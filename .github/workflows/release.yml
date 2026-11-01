@@ -319,10 +319,31 @@ jobs:
             const releaseId = process.env.RELEASE_ID;
             const distDir = path.resolve('dist-legacy');
             if (fs.existsSync(distDir)) {
+              // Retrieve existing assets for this release to overwrite safely
+              const existingAssets = await github.rest.repos.listReleaseAssets({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                release_id: releaseId,
+              });
+              const assetMap = new Map();
+              for (const asset of existingAssets.data) {
+                assetMap.set(asset.name, asset.id);
+              }
+
               const files = fs.readdirSync(distDir);
               for (const file of files) {
                 const filePath = path.join(distDir, file);
                 const data = fs.readFileSync(filePath);
+
+                if (assetMap.has(file)) {
+                  console.log(`Deleting existing release asset: ${file} (ID: ${assetMap.get(file)})`);
+                  await github.rest.repos.deleteReleaseAsset({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    asset_id: assetMap.get(file),
+                  });
+                }
+
                 console.log(`Uploading legacy asset: ${file}`);
                 await github.rest.repos.uploadReleaseAsset({
                   owner: context.repo.owner,
