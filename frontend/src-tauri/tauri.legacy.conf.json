@@ -1,4 +1,7 @@
 {
+  "build": {
+    "beforeBundleCommand": "node ../scripts/patch-win7-binary-imports.cjs target/release"
+  },
   "package": {
     "productName": "LamSuite Billing Legacy",
     "version": "2.0.13"
