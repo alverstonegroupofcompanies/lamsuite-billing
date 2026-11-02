@@ -28,6 +28,7 @@ use App\Http\Controllers\Api\PrintController;
 use App\Http\Controllers\Api\DataExchangeController;
 use App\Http\Controllers\Api\MigrationController;
 use App\Http\Controllers\Api\CounterController;
+use App\Http\Controllers\Api\DesktopUpdateController;
 use App\Http\Controllers\Api\HeldBillController;
 use App\Http\Controllers\Api\StaffAuthController;
 use App\Http\Controllers\Api\DeviceSessionController;
@@ -105,12 +106,10 @@ Route::post('/counters/{id}/shifts/close', [CounterController::class, 'closeShif
 Route::post('/counters/{id}/status', [CounterController::class, 'updateStatus']);
 Route::post('/stores/day-close', [CounterController::class, 'closeStoreDay']);
 
-// Desktop Tauri Updater Manifest Endpoint
-Route::get('/app/update/{target}/{current_version}', function ($target, $current_version) {
-    // When no new update is released, Tauri expects HTTP 204 (No Content)
-    // When a new update is ready, return JSON with version, pub_date, signature, and url
-    return response()->noContent();
-});
+// Desktop Tauri Updater Manifest Endpoints
+Route::get('/app/update/latest.json', [DesktopUpdateController::class, 'getLatestManifest']);
+Route::get('/app/update/latest-legacy-win7.json', [DesktopUpdateController::class, 'getLegacyManifest']);
+Route::get('/app/update/{target}/{current_version}', [DesktopUpdateController::class, 'checkDynamicUpdate']);
 
 /*
 |--------------------------------------------------------------------------
@@ -322,6 +321,8 @@ Route::middleware(['auth:sanctum', 'session.timeout', 'ip.allowlist', 'scope.sto
     Route::get('/settings/gst-periods', [AdminSettingController::class, 'gstPeriods'])->middleware('rbac:settings,view');
     Route::post('/settings/gst-periods/toggle-lock', [AdminSettingController::class, 'toggleGstPeriodLock'])->middleware('rbac:settings,edit');
     Route::get('/settings/backup-restore', [AdminSettingController::class, 'backupRestorePoints'])->middleware('rbac:settings,view');
+    Route::get('/settings/min-app-version', [DesktopUpdateController::class, 'getMinVersion'])->middleware('rbac:settings,view');
+    Route::post('/settings/min-app-version', [DesktopUpdateController::class, 'setMinVersion'])->middleware('rbac:settings,edit');
 
     // Module 12: Audit Log (Read-only)
     Route::get('/audit-logs', [AdminAuditController::class, 'index'])->middleware('rbac:audit,view');

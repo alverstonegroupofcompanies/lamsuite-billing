@@ -42,6 +42,9 @@ export interface DeviceSessionItem {
   sign_in_time: string | null;
   last_seen: string | null;
   app_version: string;
+  is_out_of_date?: boolean;
+  min_required_version?: string;
+  latest_version?: string;
   unsynced_items_count: number;
   is_active: boolean;
 }
@@ -87,6 +90,11 @@ export const DevicesPage: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
+  const [minRequiredVersion, setMinRequiredVersion] = useState<string>("2.0.18");
+  const [latestVersion, setLatestVersion] = useState<string>("2.0.18");
+  const [outOfDateCount, setOutOfDateCount] = useState<number>(0);
+  const [isMinVersionModalOpen, setIsMinVersionModalOpen] = useState<boolean>(false);
+  const [newMinVersionInput, setNewMinVersionInput] = useState<string>("2.0.18");
 
   const [activeTab, setActiveTab] = useState<"logged_in" | "counters" | "negative_stock">("logged_in");
   const [negativeReport, setNegativeReport] = useState<any>(null);
@@ -117,12 +125,35 @@ export const DevicesPage: React.FC = () => {
   const fetchDeviceSessions = async () => {
     setIsLoading(true);
     try {
-      const res = await api.get<{ success: boolean; devices: DeviceSessionItem[] }>("/device-sessions");
+      const res = await api.get<{
+        success: boolean;
+        devices: DeviceSessionItem[];
+        min_required_version?: string;
+        latest_version?: string;
+        out_of_date_count?: number;
+      }>("/device-sessions");
       setDeviceSessions(res.devices || []);
+      if (res.min_required_version) {
+        setMinRequiredVersion(res.min_required_version);
+        setNewMinVersionInput(res.min_required_version);
+      }
+      if (res.latest_version) setLatestVersion(res.latest_version);
+      if (typeof res.out_of_date_count === "number") setOutOfDateCount(res.out_of_date_count);
     } catch (err) {
       console.error("Failed to load device sessions:", err);
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const handleSaveMinVersion = async () => {
+    try {
+      await api.post("/admin/settings/min-app-version", { min_version: newMinVersionInput.trim() });
+      setIsMinVersionModalOpen(false);
+      await fetchDeviceSessions();
+      alert(`Minimum desktop app version successfully set to v${newMinVersionInput.trim()}.`);
+    } catch (err: any) {
+      alert(err?.message || "Failed to update minimum version.");
     }
   };
 
@@ -270,7 +301,9 @@ export const DevicesPage: React.FC = () => {
       s.user_role?.toLowerCase().includes(search.toLowerCase()) ||
       s.ip_address?.toLowerCase().includes(search.toLowerCase()) ||
       (s.location && s.location.toLowerCase().includes(search.toLowerCase()));
-    const matchesStatus = !statusFilter || s.status.toLowerCase() === statusFilter.toLowerCase();
+    const matchesStatus =
+      !statusFilter ||
+      (statusFilter === "out_of_date" ? Boolean(s.is_out_of_date) : s.status.toLowerCase() === statusFilter.toLowerCase());
     return matchesSearch && matchesStatus;
   });
 
@@ -403,7 +436,19 @@ export const DevicesPage: React.FC = () => {
             <option value="offline">Offline Only</option>
             <option value="locked">Locked Only</option>
             <option value="revoked">Revoked Only</option>
+            <option value="out_of_date">Out of Date ({outOfDateCount})</option>
           </select>
+
+          {hasPermission("settings", "edit") && (
+            <button
+              onClick={() => setIsMinVersionModalOpen(true)}
+              className="px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-100 flex items-center gap-1.5 cursor-pointer"
+              title="Configure minimum required app version across stores"
+            >
+              <span>Min Version:</span>
+              <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400">v{minRequiredVersion}</span>
+            </button>
+          )}
 
           <button
             onClick={() => {
@@ -504,8 +549,16 @@ export const DevicesPage: React.FC = () => {
 
                       {/* Version & Sync Queue */}
                       <td className="px-4 py-3">
-                        <div className="font-mono text-[11px] text-slate-800 dark:text-slate-200">
-                          v{s.app_version || "2.0.17"}
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="font-mono text-[11px] font-semibold text-slate-800 dark:text-slate-200">
+                            v{s.app_version || "2.0.18"}
+                          </span>
+                          {s.is_out_of_date && (
+                            <span className="inline-flex items-center gap-0.5 text-[9px] font-bold text-rose-700 bg-rose-50 dark:bg-rose-950 dark:text-rose-300 px-1.5 py-0.2 rounded">
+                              <AlertTriangle className="w-2.5 h-2.5" />
+                              Out of Date
+                            </span>
+                          )}
                         </div>
                         {s.unsynced_items_count > 0 ? (
                           <span className="inline-flex items-center gap-1 text-[10px] font-bold text-amber-700 bg-amber-50 dark:bg-amber-950 dark:text-amber-300 px-1.5 py-0.2 rounded mt-0.5">
@@ -811,6 +864,59 @@ export const DevicesPage: React.FC = () => {
                 className="px-3.5 py-1.5 text-xs font-bold rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white shadow-xs"
               >
                 Save
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal for setting Minimum Required Desktop Version */}
+      {isMinVersionModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-xs p-4">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl max-w-sm w-full p-5 border border-slate-200 dark:border-slate-800 shadow-xl space-y-4 text-xs">
+            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
+              <h3 className="font-bold text-sm text-slate-900 dark:text-white">Minimum App Version Policy</h3>
+              <button
+                type="button"
+                onClick={() => setIsMinVersionModalOpen(false)}
+                className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+              >
+                ✕
+              </button>
+            </div>
+
+            <p className="text-slate-500 dark:text-slate-400 text-[11px] leading-relaxed">
+              Define the minimum required build of LamSuite Billing. Connected devices running an older version will be flagged as <strong>Out of Date</strong>.
+            </p>
+
+            <div className="space-y-1">
+              <label className="font-semibold text-slate-700 dark:text-slate-300 block">
+                Required Version (SemVer)
+              </label>
+              <input
+                type="text"
+                value={newMinVersionInput}
+                onChange={(e) => setNewMinVersionInput(e.target.value)}
+                placeholder="2.0.18"
+                className="w-full bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-1.5 font-mono text-slate-900 dark:text-white focus:outline-hidden"
+              />
+              <span className="text-[10px] text-slate-400">Current latest release: v{latestVersion}</span>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setIsMinVersionModalOpen(false)}
+                className="px-3 py-1.5 text-xs font-semibold rounded-xl border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveMinVersion}
+                className="px-3.5 py-1.5 text-xs font-bold rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white shadow-xs"
+              >
+                Save Policy
               </button>
             </div>
           </div>

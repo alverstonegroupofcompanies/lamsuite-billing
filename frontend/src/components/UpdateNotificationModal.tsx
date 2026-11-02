@@ -1,5 +1,5 @@
-import React, { useState } from "react";
-import { Download, RefreshCw, AlertCircle, CheckCircle2, X } from "lucide-react";
+import React, { useState, useEffect } from "react";
+import { Download, RefreshCw, AlertCircle, CheckCircle2, X, AlertTriangle, Layers } from "lucide-react";
 import { autoUpdateService, type UpdateInfo } from "../lib/settings/autoUpdateService";
 
 interface UpdateModalProps {
@@ -10,27 +10,47 @@ interface UpdateModalProps {
 export const UpdateNotificationModal: React.FC<UpdateModalProps> = ({ updateInfo, onClose }) => {
   const [isInstalling, setIsInstalling] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string>("");
+  const [downloadProgress, setDownloadProgress] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [unsyncedCount, setUnsyncedCount] = useState<number>(0);
+  const [showUnsyncedWarning, setShowUnsyncedWarning] = useState<boolean>(false);
 
-  const handleInstall = async () => {
+  useEffect(() => {
+    autoUpdateService.getUnsyncedBillsCount().then((count) => {
+      setUnsyncedCount(count);
+    });
+  }, []);
+
+  const handleStartUpdate = async (ignoreWarning: boolean = false) => {
+    if (!ignoreWarning && unsyncedCount > 0) {
+      setShowUnsyncedWarning(true);
+      return;
+    }
+
+    setShowUnsyncedWarning(false);
     setIsInstalling(true);
     setError(null);
-    setStatusMessage("Preparing update...");
+    setStatusMessage("Connecting to update server...");
+    setDownloadProgress(null);
 
     try {
       await autoUpdateService.installAndRestart((event) => {
         if (event.status === "PENDING") {
-          setStatusMessage("Downloading update package...");
+          setStatusMessage("Downloading verified update package...");
+          setDownloadProgress(30);
         } else if (event.status === "DONE") {
-          setStatusMessage("Update downloaded. Restarting application...");
+          setStatusMessage("Update verified. Restarting application...");
+          setDownloadProgress(100);
         } else if (event.status === "ERROR") {
           setError(event.error || "Failed to download update.");
           setIsInstalling(false);
+          setDownloadProgress(null);
         }
-      });
+      }, true);
     } catch (err: any) {
-      setError(err?.message || "An unexpected error occurred during installation.");
+      setError(err?.message || "An unexpected error occurred during update.");
       setIsInstalling(false);
+      setDownloadProgress(null);
     }
   };
 
@@ -51,7 +71,7 @@ export const UpdateNotificationModal: React.FC<UpdateModalProps> = ({ updateInfo
           {!isInstalling && (
             <button
               onClick={onClose}
-              className="text-slate-400 hover:text-white p-1 rounded-md hover:bg-slate-800 transition"
+              className="text-slate-400 hover:text-white p-1 rounded-md hover:bg-slate-800 transition cursor-pointer"
             >
               <X className="w-4 h-4" />
             </button>
@@ -60,31 +80,83 @@ export const UpdateNotificationModal: React.FC<UpdateModalProps> = ({ updateInfo
 
         {/* Content */}
         <div className="p-5 space-y-4 text-xs">
-          {updateInfo.manifest?.body && (
-            <div className="bg-slate-950/60 p-3 rounded-lg border border-slate-800 text-slate-300 max-h-48 overflow-y-auto whitespace-pre-line font-mono text-[11px]">
-              {updateInfo.manifest.body}
+          {showUnsyncedWarning ? (
+            <div className="p-3.5 rounded-lg bg-amber-950/60 border border-amber-800/80 text-amber-200 space-y-2.5">
+              <div className="flex items-center gap-2 font-bold text-amber-300">
+                <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+                <span>Pending Offline Sync Detected</span>
+              </div>
+              <p className="text-[11px] leading-relaxed text-amber-200">
+                You have <strong className="font-semibold underline">{unsyncedCount} unsynced bill(s)</strong> waiting to sync to the server. Updating will close and restart LamSuite.
+              </p>
+              <div className="flex gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setShowUnsyncedWarning(false)}
+                  className="px-3 py-1.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 text-[11px] font-semibold"
+                >
+                  Cancel & Sync First
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleStartUpdate(true)}
+                  className="px-3 py-1.5 rounded bg-amber-600 hover:bg-amber-500 text-white text-[11px] font-semibold"
+                >
+                  Proceed Anyway
+                </button>
+              </div>
             </div>
-          )}
+          ) : (
+            <>
+              {unsyncedCount > 0 && (
+                <div className="flex items-center gap-2 px-3 py-2 bg-amber-950/30 border border-amber-800/40 rounded-lg text-amber-300 text-[11px]">
+                  <Layers className="w-3.5 h-3.5 shrink-0" />
+                  <span>{unsyncedCount} unsynced transaction(s) pending sync.</span>
+                </div>
+              )}
 
-          {!updateInfo.manifest?.body && (
-            <p className="text-slate-300 leading-relaxed">
-              A new update of <strong>LamSuite Billing</strong> is ready to install. Updating includes important
-              improvements, tax calculation updates, and bug fixes.
-            </p>
-          )}
+              {updateInfo.manifest?.body && (
+                <div className="bg-slate-950/60 p-3 rounded-lg border border-slate-800 text-slate-300 max-h-48 overflow-y-auto whitespace-pre-line font-mono text-[11px]">
+                  {updateInfo.manifest.body}
+                </div>
+              )}
 
-          {statusMessage && (
-            <div className="flex items-center gap-2 text-blue-400 bg-blue-950/40 border border-blue-800/50 p-2.5 rounded-lg">
-              <RefreshCw className="w-3.5 h-3.5 animate-spin shrink-0" />
-              <span>{statusMessage}</span>
-            </div>
-          )}
+              {!updateInfo.manifest?.body && (
+                <p className="text-slate-300 leading-relaxed">
+                  A new release of <strong>LamSuite Billing</strong> is ready to install. Updating includes important
+                  improvements, tax calculation updates, and offline engine enhancements.
+                </p>
+              )}
 
-          {error && (
-            <div className="flex items-center gap-2 text-rose-400 bg-rose-950/40 border border-rose-800/50 p-2.5 rounded-lg">
-              <AlertCircle className="w-4 h-4 shrink-0" />
-              <span>{error}</span>
-            </div>
+              {downloadProgress !== null && (
+                <div className="space-y-1.5">
+                  <div className="flex justify-between text-[10px] text-slate-400">
+                    <span>Download & Verification</span>
+                    <span>{downloadProgress}%</span>
+                  </div>
+                  <div className="w-full bg-slate-800 rounded-full h-2 overflow-hidden">
+                    <div
+                      className="bg-blue-500 h-full rounded-full transition-all duration-300"
+                      style={{ width: `${downloadProgress}%` }}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {statusMessage && (
+                <div className="flex items-center gap-2 text-blue-400 bg-blue-950/40 border border-blue-800/50 p-2.5 rounded-lg">
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin shrink-0" />
+                  <span>{statusMessage}</span>
+                </div>
+              )}
+
+              {error && (
+                <div className="flex items-center gap-2 text-rose-400 bg-rose-950/40 border border-rose-800/50 p-2.5 rounded-lg">
+                  <AlertCircle className="w-4 h-4 shrink-0" />
+                  <span>{error}</span>
+                </div>
+              )}
+            </>
           )}
         </div>
 
@@ -94,16 +166,16 @@ export const UpdateNotificationModal: React.FC<UpdateModalProps> = ({ updateInfo
             <button
               type="button"
               onClick={onClose}
-              className="px-3.5 py-1.5 rounded-lg border border-slate-700 hover:bg-slate-800 text-slate-300 text-xs font-medium transition"
+              className="px-3.5 py-1.5 rounded-lg border border-slate-700 hover:bg-slate-800 text-slate-300 text-xs font-medium transition cursor-pointer"
             >
               Remind Me Later
             </button>
           )}
           <button
             type="button"
-            disabled={isInstalling}
-            onClick={handleInstall}
-            className="flex items-center gap-2 px-4 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 active:bg-blue-700 disabled:opacity-50 text-white text-xs font-semibold shadow-lg shadow-blue-600/20 transition"
+            disabled={isInstalling || showUnsyncedWarning}
+            onClick={() => handleStartUpdate(false)}
+            className="flex items-center gap-2 px-4 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 active:bg-blue-700 disabled:opacity-50 text-white text-xs font-semibold shadow-lg shadow-blue-600/20 transition cursor-pointer"
           >
             {isInstalling ? (
               <>

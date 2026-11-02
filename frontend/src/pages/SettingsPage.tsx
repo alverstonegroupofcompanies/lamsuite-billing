@@ -74,6 +74,7 @@ import { applyWorkspaceSettings } from "../lib/settings/workspaceThemeService";
 import { autoUpdateService, type UpdateInfo } from "../lib/settings/autoUpdateService";
 import { APP_FULL_VERSION } from "../config/version";
 import { UpdateNotificationModal } from "../components/UpdateNotificationModal";
+import { SoftwareUpdatesTab } from "../components/settings/SoftwareUpdatesTab";
 import { storeRegistryService } from "../lib/auth/storeRegistryService";
 
 export const SettingsPage: React.FC = () => {
@@ -736,38 +737,10 @@ export const SettingsPage: React.FC = () => {
 
           {/* TAB: Dedicated Software Updates */}
           {activeTab === "updates" && (
-            <div className="max-w-2xl space-y-6">
-              <div>
-                <h2 className="text-sm font-bold text-slate-800">Software Updates</h2>
-                <p className="text-xs text-slate-500">Manage desktop application updates, release channels, and version verification.</p>
-              </div>
-
-              <div className="rounded-lg border border-slate-200 p-5 space-y-4 bg-white shadow-2xs">
-                <div className="flex items-center justify-between border-b border-slate-100 pb-4">
-                  <div>
-                    <h3 className="text-xs font-bold text-slate-800">Current Installed Release</h3>
-                    <p className="text-[11px] text-slate-500">Desktop runtime executable and UI bundle</p>
-                  </div>
-                  <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 border border-emerald-200 px-3 py-1 text-xs font-mono font-bold text-emerald-700">
-                    {APP_FULL_VERSION}
-                  </span>
-                </div>
-
-                <div className="space-y-3">
-                  <p className="text-xs text-slate-600">
-                    Click the button below to query the secure update server. If an update is detected, LamSuite will download the verified installer package and prompt to restart.
-                  </p>
-                  <button
-                    onClick={handleManualCheckUpdate}
-                    disabled={isCheckingUpdate}
-                    className="flex items-center gap-2 rounded bg-indigo-600 px-4 py-2.5 text-xs font-semibold text-white hover:bg-indigo-700 disabled:opacity-50 transition-colors shadow-2xs cursor-pointer"
-                  >
-                    <RefreshCw className={`h-4 w-4 ${isCheckingUpdate ? "animate-spin" : ""}`} />
-                    <span>{isCheckingUpdate ? "Checking for Updates..." : "Check for Software Updates Now"}</span>
-                  </button>
-                </div>
-              </div>
-            </div>
+            <SoftwareUpdatesTab
+              onFoundUpdate={(info) => setFoundUpdate(info)}
+              showNotification={showNotification}
+            />
           )}
 
           {/* TAB 2: Billing & Taxes */}

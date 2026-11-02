@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Models\AuditLog;
+use App\Models\CompanySetting;
 use App\Models\Counter;
 use App\Models\Device;
 use App\Models\DeviceSession;
@@ -50,9 +51,26 @@ class DeviceSessionController
             ?: $request->query('current_device_uuid')
             ?: $request->query('device_uuid');
 
-        $devices = $sessions->map(function (DeviceSession $s) use ($currentDeviceUuid) {
+        $minSetting = CompanySetting::where('key', 'min_required_desktop_version')
+            ->where(function ($q) use ($storeId) {
+                if ($storeId) {
+                    $q->where('store_id', $storeId)->orWhereNull('store_id');
+                } else {
+                    $q->whereNull('store_id');
+                }
+            })
+            ->latest()
+            ->first();
+
+        $minRequiredVersion = $minSetting ? ($minSetting->value['version'] ?? '2.0.18') : '2.0.18';
+        $latestSetting = CompanySetting::where('key', 'latest_desktop_release_version')->latest()->first();
+        $latestVersion = $latestSetting ? ($latestSetting->value['version'] ?? '2.0.18') : '2.0.18';
+
+        $devices = $sessions->map(function (DeviceSession $s) use ($currentDeviceUuid, $minRequiredVersion, $latestVersion) {
             $status = $s->computeStatus();
             $userRole = $s->user_role ?: ($s->user?->role ?: ($s->user?->is_admin ? 'Admin' : 'Cashier'));
+            $appVer = $s->app_version ?: '2.0.18';
+            $isOutOfDate = version_compare($appVer, $minRequiredVersion, '<');
 
             return [
                 'id' => (string)$s->id,
@@ -70,7 +88,10 @@ class DeviceSessionController
                 'login_time' => $s->login_time ? $s->login_time->toIso8601String() : null,
                 'last_seen' => $s->last_active_at ? $s->last_active_at->toIso8601String() : null,
                 'last_active' => $s->last_active_at ? $s->last_active_at->toIso8601String() : null,
-                'app_version' => $s->app_version ?: '2.0.17',
+                'app_version' => $appVer,
+                'is_out_of_date' => $isOutOfDate,
+                'min_required_version' => $minRequiredVersion,
+                'latest_version' => $latestVersion,
                 'unsynced_items_count' => (int)($s->unsynced_items_count ?? 0),
                 'is_this_device' => !empty($currentDeviceUuid) && $s->device_uuid === $currentDeviceUuid,
                 'is_active' => (bool)$s->is_active,
@@ -96,6 +117,9 @@ class DeviceSessionController
             'offline_count' => $devices->where('status', 'Offline')->count(),
             'locked_count' => $devices->where('status', 'Locked')->count(),
             'revoked_count' => $devices->where('status', 'Revoked')->count(),
+            'out_of_date_count' => $devices->where('is_out_of_date', true)->count(),
+            'min_required_version' => $minRequiredVersion,
+            'latest_version' => $latestVersion,
             // Backwards compatibility keys
             'online_count' => $devices->where('status', 'Active')->count(),
         ]);
@@ -432,7 +456,7 @@ class DeviceSessionController
                 'login_time' => $c->last_seen_at ?: $c->created_at ?: now()->subMinutes(10),
                 'last_active_at' => $c->last_seen_at ?: now()->subMinutes(10),
                 'status' => $isRevoked ? 'revoked' : ($isActive ? 'active' : 'offline'),
-                'app_version' => '2.0.17',
+                'app_version' => '2.0.18',
                 'unsynced_items_count' => 0,
                 'user_role' => 'Cashier',
                 'is_active' => !$isRevoked,

@@ -440,7 +440,7 @@ services:
     container_name: lamsuite-updates
     restart: unless-stopped
     volumes:
-      - updates_data:/usr/share/nginx/html:ro
+      - ${UPDATES_DIR:-/opt/lamsuite/updates}:/usr/share/nginx/html:ro
     networks:
       - lamsuite-public
     labels:

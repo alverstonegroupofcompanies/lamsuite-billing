@@ -89,17 +89,16 @@ export const App: React.FC = () => {
     }
 
     // Check for updates in desktop mode
-    companySettingsService.loadSettings().then((cfg) => {
-      if (cfg?.workspace?.autoUpdateCheck !== false) {
-        autoUpdateService.checkForUpdates().then((res) => {
-          if (res.shouldUpdate) {
-            setAvailableUpdate(res);
-          }
-        }).catch(() => {
-          // Silent catch on network/offline
-        });
-      }
-    });
+    const updateCfg = autoUpdateService.getConfig();
+    if (updateCfg.autoCheckOnStartup) {
+      autoUpdateService.checkForUpdates().then((res) => {
+        if (res.shouldUpdate) {
+          setAvailableUpdate(res);
+        }
+      }).catch(() => {
+        // Silent catch on background check
+      });
+    }
 
     // Trigger daily auto-backup check
     import("./lib/backup/dailyAutoBackup").then(({ dailyAutoBackupService }) => {
