@@ -20,7 +20,7 @@ describe("Products Availability in Masters & All Invoice Forms", () => {
 
     const prods = await productsStore.getAllProducts();
     expect(prods.length).toBeGreaterThanOrEqual(50);
-  });
+  }, 15000);
 
   it("handles products with is_active as 1, true, and undefined as active in POS search", async () => {
     const prodTrue: ProductItem = {

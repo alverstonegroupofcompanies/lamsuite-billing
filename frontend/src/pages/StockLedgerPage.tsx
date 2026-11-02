@@ -18,9 +18,10 @@ import {
   type PhysicalReconciliationLine,
   type InterStoreTransferInput,
 } from "../lib/stock/inventoryService";
-import { productsStore, type ProductBatch, type ProductItem } from "../lib/masters/productsStore";
+import { productsStore, formatExpiryDisplay, type ProductBatch, type ProductItem } from "../lib/masters/productsStore";
 import { sqliteStorage } from "../lib/db/sqliteStorage";
 import { useModalEscape } from "../lib/ui/modalEscapeManager";
+import { BatchCombobox } from "../components/BatchCombobox";
 
 export const StockLedgerPage: React.FC = () => {
   const navigate = useNavigate();
@@ -30,6 +31,7 @@ export const StockLedgerPage: React.FC = () => {
   const [lowStockProducts, setLowStockProducts] = useState<ProductItem[]>([]);
   const [negativeStockBatches, setNegativeStockBatches] = useState<ProductBatch[]>([]);
   const [allBatches, setAllBatches] = useState<ProductBatch[]>([]);
+  const [productsMap, setProductsMap] = useState<Record<string, ProductItem>>({});
   const [notification, setNotification] = useState<{ message: string; type: "success" | "error" } | null>(null);
 
   // Modals State
@@ -49,6 +51,13 @@ export const StockLedgerPage: React.FC = () => {
   const [trBatchId, setTrBatchId] = useState("");
   const [trQty, setTrQty] = useState<number>(1);
 
+  // Selected Batch References
+  const selectedAdjBatch = allBatches.find((b) => b.id === adjBatchId);
+  const selectedAdjProduct = selectedAdjBatch ? productsMap[selectedAdjBatch.product_id] : null;
+
+  const selectedTrBatch = allBatches.find((b) => b.id === trBatchId);
+  const selectedTrProduct = selectedTrBatch ? productsMap[selectedTrBatch.product_id] : null;
+
   useEffect(() => {
     loadData();
   }, []);
@@ -56,6 +65,13 @@ export const StockLedgerPage: React.FC = () => {
   const loadData = async () => {
     const txs = await sqliteStorage.findAll<any>("stock_transactions");
     setTransactions(txs.sort((a, b) => (b.created_at || 0) - (a.created_at || 0)));
+
+    const prods = await productsStore.getAllProducts();
+    const pMap: Record<string, ProductItem> = {};
+    for (const p of prods) {
+      pMap[p.id] = p;
+    }
+    setProductsMap(pMap);
 
     const batches = await sqliteStorage.findAll<ProductBatch>("product_batches");
     setAllBatches(batches);
@@ -96,6 +112,8 @@ export const StockLedgerPage: React.FC = () => {
       if (res.success) {
         showNotification("Stock adjustment recorded in ledger!");
         setIsAdjustmentModalOpen(false);
+        setAdjBatchId("");
+        setAdjQty(-1);
         setAdjNotes("");
         loadData();
       }
@@ -127,6 +145,8 @@ export const StockLedgerPage: React.FC = () => {
       if (res.success) {
         showNotification(`Dispatched stock transfer ${transferNo}!`);
         setIsTransferModalOpen(false);
+        setTrBatchId("");
+        setTrQty(1);
         loadData();
       }
     } catch (err) {
@@ -263,7 +283,10 @@ export const StockLedgerPage: React.FC = () => {
                           {tx.event_type}
                         </span>
                       </td>
-                      <td className="px-4 py-3 font-mono text-text-main tabular-nums">{tx.batch_id || "-"}</td>
+                      <td className="px-4 py-3">
+                        <div className="font-semibold text-text-main">{productsMap[tx.product_id]?.name || "-"}</div>
+                        <div className="font-mono text-text-muted text-[10px]">{tx.batch_id || "-"}</div>
+                      </td>
                       <td className="px-4 py-3 text-text-main font-medium">{tx.reference_id || tx.reference_type || "-"}</td>
                       <td className="px-4 py-3 text-right font-mono font-bold tabular-nums">
                         <span className={tx.qty_delta >= 0 ? "text-accent" : "text-status-danger"}>
@@ -286,6 +309,7 @@ export const StockLedgerPage: React.FC = () => {
           <table className="w-full text-left text-xs">
             <thead className="bg-canvas border-b border-border-main text-[11px] font-semibold uppercase tracking-wider text-text-muted">
               <tr>
+                <th className="px-4 py-3">Product Name</th>
                 <th className="px-4 py-3">Batch No</th>
                 <th className="px-4 py-3">Expiry Date</th>
                 <th className="px-4 py-3 text-right">Available Stock</th>
@@ -296,7 +320,7 @@ export const StockLedgerPage: React.FC = () => {
             <tbody className="divide-y divide-border-main">
               {nearExpiryBatches.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="py-12 text-center text-text-muted">
+                  <td colSpan={6} className="py-12 text-center text-text-muted">
                     <CheckCircle className="mx-auto h-8 w-8 text-accent mb-1" />
                     <p className="font-medium">No batches expiring within 60 days</p>
                   </td>
@@ -304,8 +328,13 @@ export const StockLedgerPage: React.FC = () => {
               ) : (
                 nearExpiryBatches.map((b) => (
                   <tr key={b.id} className="hover:bg-status-warning/5 transition-colors bg-status-warning/5">
+                    <td className="px-4 py-3 font-semibold text-text-main">
+                      {productsMap[b.product_id]?.name || "Unknown Product"}
+                    </td>
                     <td className="px-4 py-3 font-mono font-semibold text-text-main tabular-nums">{b.batch_no}</td>
-                    <td className="px-4 py-3 font-mono font-semibold text-status-warning tabular-nums">{b.expiry_date}</td>
+                    <td className="px-4 py-3 font-mono font-semibold text-status-warning tabular-nums">
+                      {formatExpiryDisplay(b.expiry_date)}
+                    </td>
                     <td className="px-4 py-3 text-right font-mono font-semibold text-text-main tabular-nums">{b.stock_qty}</td>
                     <td className="px-4 py-3 text-right font-mono text-text-main tabular-nums">₹ {Number(b.mrp || 0).toFixed(2)}</td>
                     <td className="px-4 py-3 text-center">
@@ -368,6 +397,7 @@ export const StockLedgerPage: React.FC = () => {
           <table className="w-full text-left text-xs">
             <thead className="bg-canvas border-b border-border-main text-[11px] font-semibold uppercase tracking-wider text-text-muted">
               <tr>
+                <th className="px-4 py-3">Product Name</th>
                 <th className="px-4 py-3">Batch No</th>
                 <th className="px-4 py-3">Expiry Date</th>
                 <th className="px-4 py-3 text-right">Stock on Hand</th>
@@ -379,7 +409,7 @@ export const StockLedgerPage: React.FC = () => {
             <tbody className="divide-y divide-border-main">
               {negativeStockBatches.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="py-12 text-center text-text-muted">
+                  <td colSpan={7} className="py-12 text-center text-text-muted">
                     <CheckCircle className="mx-auto h-8 w-8 text-accent mb-1" />
                     <p className="font-medium">No negative stock batches found</p>
                     <p className="text-[11px] text-text-muted mt-0.5">All batches have non-negative balances on hand</p>
@@ -388,8 +418,13 @@ export const StockLedgerPage: React.FC = () => {
               ) : (
                 negativeStockBatches.map((b) => (
                   <tr key={b.id} className="hover:bg-status-danger/5 transition-colors bg-status-danger/5">
+                    <td className="px-4 py-3 font-semibold text-text-main">
+                      {productsMap[b.product_id]?.name || "Unknown Product"}
+                    </td>
                     <td className="px-4 py-3 font-mono font-semibold text-text-main tabular-nums">{b.batch_no}</td>
-                    <td className="px-4 py-3 font-mono text-text-muted tabular-nums">{b.expiry_date}</td>
+                    <td className="px-4 py-3 font-mono text-text-muted tabular-nums">
+                      {formatExpiryDisplay(b.expiry_date)}
+                    </td>
                     <td className="px-4 py-3 text-right font-mono font-bold text-status-danger tabular-nums">{b.stock_qty}</td>
                     <td className="px-4 py-3 text-right font-mono font-semibold text-status-danger tabular-nums">
                       {Math.abs(b.stock_qty || 0)} units short
@@ -424,19 +459,51 @@ export const StockLedgerPage: React.FC = () => {
             <div className="p-5 space-y-3">
               <div>
                 <label className="text-xs font-medium text-text-main block mb-1">Select Batch *</label>
-                <select
+                <BatchCombobox
                   value={adjBatchId}
-                  onChange={(e) => setAdjBatchId(e.target.value)}
-                  className="w-full rounded-btn border border-border-main bg-surface px-2.5 py-2 text-xs text-text-main focus:border-accent focus:outline-none"
-                >
-                  <option value="">-- Choose Batch --</option>
-                  {allBatches.map((b) => (
-                    <option key={b.id} value={b.id}>
-                      {b.batch_no} (Stock: {b.stock_qty}, Exp: {b.expiry_date})
-                    </option>
-                  ))}
-                </select>
+                  onChange={(bId) => setAdjBatchId(bId)}
+                  batches={allBatches}
+                  products={productsMap}
+                  placeholder="Search product name or batch..."
+                />
               </div>
+
+              {selectedAdjBatch && (
+                <div className="rounded-btn border border-border-main bg-canvas p-3 text-xs space-y-1.5 animate-in fade-in duration-150">
+                  <div className="flex items-center justify-between">
+                    <span className="text-text-muted">Product:</span>
+                    <span className="font-bold text-text-main truncate max-w-[220px]">
+                      {selectedAdjProduct?.name || "Unknown Product"}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between text-[11px]">
+                    <span className="text-text-muted">Batch Number:</span>
+                    <span className="font-mono font-semibold text-text-main bg-surface px-1.5 py-0.5 rounded border border-border-main">
+                      {selectedAdjBatch.batch_no}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between text-[11px]">
+                    <span className="text-text-muted">Expiry Date:</span>
+                    <span className="font-mono text-text-main">{formatExpiryDisplay(selectedAdjBatch.expiry_date)}</span>
+                  </div>
+                  <div className="flex items-center justify-between text-[11px]">
+                    <span className="text-text-muted">Current Stock on Hand:</span>
+                    <span
+                      className={`font-mono font-bold ${
+                        selectedAdjBatch.stock_qty <= 0 ? "text-status-danger" : "text-accent"
+                      }`}
+                    >
+                      {selectedAdjBatch.stock_qty} units
+                    </span>
+                  </div>
+                  {selectedAdjBatch.stock_qty + adjQty < 0 && (
+                    <div className="text-[11px] text-status-warning flex items-center gap-1.5 pt-1.5 border-t border-border-main">
+                      <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                      <span>Adjustment will lead to negative stock ({selectedAdjBatch.stock_qty + adjQty} units).</span>
+                    </div>
+                  )}
+                </div>
+              )}
 
               <div>
                 <label className="text-xs font-medium text-text-main block mb-1">
@@ -520,19 +587,38 @@ export const StockLedgerPage: React.FC = () => {
 
               <div>
                 <label className="text-xs font-medium text-text-main block mb-1">Batch to Transfer *</label>
-                <select
+                <BatchCombobox
                   value={trBatchId}
-                  onChange={(e) => setTrBatchId(e.target.value)}
-                  className="w-full rounded-btn border border-border-main bg-surface px-2.5 py-2 text-xs text-text-main focus:border-accent focus:outline-none"
-                >
-                  <option value="">-- Choose Batch --</option>
-                  {allBatches.map((b) => (
-                    <option key={b.id} value={b.id}>
-                      {b.batch_no} (Available: {b.stock_qty})
-                    </option>
-                  ))}
-                </select>
+                  onChange={(bId) => setTrBatchId(bId)}
+                  batches={allBatches}
+                  products={productsMap}
+                  filterInStockOnly={true}
+                  placeholder="Search product or batch to transfer..."
+                />
               </div>
+
+              {selectedTrBatch && (
+                <div className="rounded-btn border border-border-main bg-canvas p-3 text-xs space-y-1.5 animate-in fade-in duration-150">
+                  <div className="flex items-center justify-between">
+                    <span className="text-text-muted">Product:</span>
+                    <span className="font-bold text-text-main truncate max-w-[220px]">
+                      {selectedTrProduct?.name || "Unknown Product"}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between text-[11px]">
+                    <span className="text-text-muted">Batch / Expiry:</span>
+                    <span className="font-mono text-text-main">
+                      {selectedTrBatch.batch_no} • Exp: {formatExpiryDisplay(selectedTrBatch.expiry_date)}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between text-[11px]">
+                    <span className="text-text-muted">Available to Transfer:</span>
+                    <span className="font-mono font-bold text-accent">
+                      {selectedTrBatch.stock_qty} units
+                    </span>
+                  </div>
+                </div>
+              )}
 
               <div>
                 <label className="text-xs font-medium text-text-main block mb-1">Transfer Quantity *</label>

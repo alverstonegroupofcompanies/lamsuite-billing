@@ -62,14 +62,14 @@ class DeviceSessionController
             ->latest()
             ->first();
 
-        $minRequiredVersion = $minSetting ? ($minSetting->value['version'] ?? '2.0.20') : '2.0.20';
+        $minRequiredVersion = $minSetting ? ($minSetting->value['version'] ?? '2.0.21') : '2.0.21';
         $latestSetting = CompanySetting::where('key', 'latest_desktop_release_version')->latest()->first();
-        $latestVersion = $latestSetting ? ($latestSetting->value['version'] ?? '2.0.20') : '2.0.20';
+        $latestVersion = $latestSetting ? ($latestSetting->value['version'] ?? '2.0.21') : '2.0.21';
 
         $devices = $sessions->map(function (DeviceSession $s) use ($currentDeviceUuid, $minRequiredVersion, $latestVersion) {
             $status = $s->computeStatus();
             $userRole = $s->user_role ?: ($s->user?->role ?: ($s->user?->is_admin ? 'Admin' : 'Cashier'));
-            $appVer = $s->app_version ?: '2.0.20';
+            $appVer = $s->app_version ?: '2.0.21';
             $isOutOfDate = version_compare($appVer, $minRequiredVersion, '<');
 
             return [
@@ -456,7 +456,7 @@ class DeviceSessionController
                 'login_time' => $c->last_seen_at ?: $c->created_at ?: now()->subMinutes(10),
                 'last_active_at' => $c->last_seen_at ?: now()->subMinutes(10),
                 'status' => $isRevoked ? 'revoked' : ($isActive ? 'active' : 'offline'),
-                'app_version' => '2.0.20',
+                'app_version' => '2.0.21',
                 'unsynced_items_count' => 0,
                 'user_role' => 'Cashier',
                 'is_active' => !$isRevoked,
