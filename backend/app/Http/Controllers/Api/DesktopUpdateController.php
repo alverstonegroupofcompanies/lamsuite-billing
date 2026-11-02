@@ -131,7 +131,7 @@ class DesktopUpdateController
             ? 'LamSuite-Billing-windows-legacy-x64-setup.nsis.zip'
             : "LamSuite-Billing_{$latest}_x64-setup.nsis.zip";
 
-        $downloadUrl = url("/api/app/update/download/{$fileName}");
+        $downloadUrl = $this->buildDownloadUrl($fileName);
 
         return response()->json([
             'url' => $downloadUrl,
@@ -230,7 +230,7 @@ class DesktopUpdateController
                     $url = $data['url'];
                     $filename = basename(parse_url($url, PHP_URL_PATH) ?: $url);
                     if ($filename) {
-                        $data['url'] = url("/api/app/update/download/{$filename}");
+                        $data['url'] = $this->buildDownloadUrl($filename);
                     }
                 }
             }
@@ -240,15 +240,34 @@ class DesktopUpdateController
     }
 
     /**
+     * Builds a full HTTPS download URL for the requested asset.
+     */
+    private function buildDownloadUrl(string $filename): string
+    {
+        $baseUrl = config('app.url');
+        if (empty($baseUrl) || str_contains($baseUrl, 'localhost')) {
+            $baseUrl = url('/');
+        }
+        $baseUrl = rtrim($baseUrl, '/');
+
+        // Enforce HTTPS scheme on production lamstonehealthcare.com domain
+        if (str_contains($baseUrl, 'lamstonehealthcare.com') || request()->header('X-Forwarded-Proto') === 'https') {
+            $baseUrl = preg_replace('/^http:/i', 'https:', $baseUrl);
+        }
+
+        return "{$baseUrl}/api/app/update/download/{$filename}";
+    }
+
+    /**
      * Synthesizes a valid multi-platform manifest with local direct download endpoints.
      */
     private function synthesizeManifest(bool $isLegacy): array
     {
         $version = $this->getLatestVersion();
         $date = now()->toIso8601String();
-        $downloadBase = url('/api/app/update/download');
 
         if ($isLegacy) {
+            $legacyFile = 'LamSuite-Billing-windows-legacy-x64-setup.nsis.zip';
             return [
                 'version' => $version,
                 'notes' => "LamSuite Billing Legacy Windows 7/8.1 v{$version} Update\nBundled Fixed WebView2 109 Runtime with zero Win8+ API imports.",
@@ -256,12 +275,13 @@ class DesktopUpdateController
                 'platforms' => [
                     'windows-x86_64' => [
                         'signature' => 'dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRR09ENStxSU9JbDhadnVreTZOck5jamh1OTJTUkZuZFM0VUhzUXRoT1JwRzFrWW52REVyRUFkVmpSRUgvdUdvemYwanJ1YUpDQm91bDFFcmw2eFpodTJCNEUxWkxuTkFvPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzNjU3ODQ4CWZpbGU6TGFtU3VpdGUtQmlsbGluZy1MZWdhY3lfMi4wLjIzX3g2NC1zZXR1cC5uc2lzLnppcAozbG5Uc1QxSkl2TVZrTDdIcU5rNkRJK212K3Z6ZXpvQ2lXTnVVTWtwUVVvTFUyWTAwZTVGOENwMlN2c0RVKzZGME5VQ1dhV3FyL3c0L2tFc0pkS2FDUT09Cg==',
-                        'url' => "{$downloadBase}/LamSuite-Billing-windows-legacy-x64-setup.nsis.zip",
+                        'url' => $this->buildDownloadUrl($legacyFile),
                     ],
                 ],
             ];
         }
 
+        $winFile = "LamSuite-Billing_{$version}_x64-setup.nsis.zip";
         return [
             'version' => $version,
             'notes' => "LamSuite Billing v{$version} Update\n- Full offline-first transaction support\n- Automated sync queue with live reconciliation\n- Modernized printing engine with integrated preview",
@@ -269,11 +289,11 @@ class DesktopUpdateController
             'platforms' => [
                 'windows-x86_64' => [
                     'signature' => 'dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRR09ENStxSU9JbDhjZlVyMXdZYjRIbUY5dmRsbXlJZW9sL2MyaTlMTTFNNGdjbUpqUkRQa0VzbTFVeXl5dWdxR0FWSytEaUZmeGlVaVlSa0ovOTJlN0tlUWtPUTJmS2dNPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzNjU3MjE3CWZpbGU6TGFtU3VpdGUtQmlsbGluZ18yLjAuMjNfeDY0LXNldHVwLm5zaXMuemlwClBmT1RuZGREK1gvRXgrM0I0UkJET24vb0FpTXNUbVE5VHo2V1FmOTh6aWxjYWlLM2w1ZXVxRmpWSndRZUdsa3RDNnlkRzNnc2VDRDFnejdzSGJCcEFBPT0K',
-                    'url' => "{$downloadBase}/LamSuite-Billing_{$version}_x64-setup.nsis.zip",
+                    'url' => $this->buildDownloadUrl($winFile),
                 ],
                 'windows-x86_64-nsis' => [
                     'signature' => 'dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRR09ENStxSU9JbDhjZlVyMXdZYjRIbUY5dmRsbXlJZW9sL2MyaTlMTTFNNGdjbUpqUkRQa0VzbTFVeXl5dWdxR0FWSytEaUZmeGlVaVlSa0ovOTJlN0tlUWtPUTJmS2dNPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzNjU3MjE3CWZpbGU6TGFtU3VpdGUtQmlsbGluZ18yLjAuMjNfeDY0LXNldHVwLm5zaXMuemlwClBmT1RuZGREK1gvRXgrM0I0UkJET24vb0FpTXNUbVE5VHo2V1FmOTh6aWxjYWlLM2w1ZXVxRmpWSndRZUdsa3RDNnlkRzNnc2VDRDFnejdzSGJCcEFBPT0K',
-                    'url' => "{$downloadBase}/LamSuite-Billing_{$version}_x64-setup.nsis.zip",
+                    'url' => $this->buildDownloadUrl($winFile),
                 ],
             ],
         ];
