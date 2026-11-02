@@ -144,8 +144,15 @@ export class InventoryService {
   }
 
   async getLowStockProducts(): Promise<ProductItem[]> {
-    const all = await sqliteStorage.findAll<ProductItem>("products");
-    return all.filter((p) => p.is_active && (p.reorder_level || 0) > 0 && (p.current_stock || 0) <= (p.reorder_level || 0));
+    const all = await productsStore.getAllProducts();
+    return all.filter((p) => {
+      const isActive =
+        p.is_active !== false &&
+        (p.is_active as any) !== 0 &&
+        (p.is_active as any) !== "0" &&
+        (p.is_active as any) !== "false";
+      return isActive && (p.reorder_level || 0) > 0 && (p.current_stock || 0) <= (p.reorder_level || 0);
+    });
   }
 
   async getNegativeStockBatches(): Promise<ProductBatch[]> {

@@ -56,6 +56,7 @@ export class DistributedHeldBillService {
         method: "POST",
         headers: { "Content-Type": "application/json", Accept: "application/json" },
         body: JSON.stringify(record),
+        signal: AbortSignal.timeout(1500),
       });
     } catch {
       // Degraded offline: already saved in local cache
@@ -67,7 +68,9 @@ export class DistributedHeldBillService {
   async listHeldBills(): Promise<DistributedHeldBill[]> {
     // Attempt live fetch from server
     try {
-      const res = await fetch(`${this.getEffectiveBaseUrl()}/api/held-bills`);
+      const res = await fetch(`${this.getEffectiveBaseUrl()}/api/held-bills`, {
+        signal: AbortSignal.timeout(1500),
+      });
       if (res.ok) {
         const data = await res.json();
         if (data.success && Array.isArray(data.held_bills)) {
@@ -116,6 +119,7 @@ export class DistributedHeldBillService {
         method: "POST",
         headers: { "Content-Type": "application/json", Accept: "application/json" },
         body: JSON.stringify({ counter_id: claimingCounterId }),
+        signal: AbortSignal.timeout(1500),
       });
 
       if (res.status === 409) {
@@ -176,7 +180,10 @@ export class DistributedHeldBillService {
 
   async releaseOrCancelHold(holdId: string): Promise<void> {
     try {
-      await fetch(`${this.getEffectiveBaseUrl()}/api/held-bills/${holdId}`, { method: "DELETE" });
+      await fetch(`${this.getEffectiveBaseUrl()}/api/held-bills/${holdId}`, {
+        method: "DELETE",
+        signal: AbortSignal.timeout(1500),
+      });
     } catch {}
 
     const existing = await sqliteStorage.findById<any>("distributed_held_bills", holdId);

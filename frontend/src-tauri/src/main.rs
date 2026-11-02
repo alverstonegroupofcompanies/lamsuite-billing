@@ -5,7 +5,7 @@ mod print_spooler;
 use rusqlite::{params, Connection};
 use serde_json::{json, Value};
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use tauri::{Manager, State};
 
@@ -59,6 +59,33 @@ fn db_insert(
     .map_err(|e| e.to_string())?;
 
     Ok(json!({ "success": true }))
+}
+
+#[tauri::command]
+fn db_insert_batch(
+    table: String,
+    items: Vec<Value>,
+    state: State<DbState>,
+) -> Result<Value, String> {
+    let mut conn = state.conn.lock().map_err(|e| e.to_string())?;
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+    {
+        let mut stmt = tx
+            .prepare(
+                "INSERT INTO kv_store (table_name, id, data) VALUES (?1, ?2, ?3)
+                 ON CONFLICT(table_name, id) DO UPDATE SET data = excluded.data;",
+            )
+            .map_err(|e| e.to_string())?;
+        for item in &items {
+            let id = item.get("id").and_then(|v| v.as_str()).unwrap_or("");
+            let data = item.get("record").unwrap_or(item);
+            let json_str = serde_json::to_string(data).map_err(|e| e.to_string())?;
+            stmt.execute(params![table, id, json_str])
+                .map_err(|e| e.to_string())?;
+        }
+    }
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(json!({ "success": true, "count": items.len() }))
 }
 
 #[tauri::command]
@@ -721,6 +748,66 @@ fn get_app_dir() -> PathBuf {
     app_dir
 }
 
+fn copy_dir_all(src: &Path, dst: &Path) {
+    let _ = fs::create_dir_all(dst);
+    if let Ok(entries) = fs::read_dir(src) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let dest_path = dst.join(entry.file_name());
+            if path.is_dir() {
+                copy_dir_all(&path, &dest_path);
+            } else if path.is_file() && !dest_path.exists() {
+                let _ = fs::copy(&path, &dest_path);
+            }
+        }
+    }
+}
+
+fn ensure_app_dir_initialized() {
+    let app_dir = get_app_dir();
+    let _ = fs::create_dir_all(&app_dir);
+
+    let candidates = [
+        PathBuf::from("."),
+        PathBuf::from(".."),
+    ];
+
+    let reg_target = app_dir.join("stores_registry.json");
+    if !reg_target.exists() {
+        for cand in &candidates {
+            let f = cand.join("stores_registry.json");
+            if f.is_file() {
+                let _ = fs::copy(&f, &reg_target);
+                break;
+            }
+        }
+    }
+
+    let db_target = app_dir.join("lamsuite_desktop.sqlite");
+    if !db_target.exists() {
+        for cand in &candidates {
+            let f = cand.join("lamsuite_desktop.sqlite");
+            if f.is_file() {
+                let _ = fs::copy(&f, &db_target);
+                break;
+            }
+        }
+    }
+
+    let stores_target = app_dir.join("stores");
+    let needs_stores = !stores_target.exists()
+        || fs::read_dir(&stores_target).map(|mut d| d.next().is_none()).unwrap_or(true);
+    if needs_stores {
+        for cand in &candidates {
+            let d = cand.join("stores");
+            if d.is_dir() {
+                copy_dir_all(&d, &stores_target);
+                break;
+            }
+        }
+    }
+}
+
 fn get_store_registry_path() -> PathBuf {
     get_app_dir().join("stores_registry.json")
 }
@@ -754,11 +841,28 @@ fn db_switch_store(
 ) -> Result<Value, String> {
     let app_dir = get_app_dir();
     let db_path = if let Some(rel) = relative_db_path {
-        app_dir.join(rel)
+        let candidate = app_dir.join(&rel);
+        if !candidate.exists() {
+            let local_candidate = PathBuf::from(&rel);
+            if local_candidate.is_file() {
+                if let Some(parent) = candidate.parent() {
+                    let _ = fs::create_dir_all(parent);
+                }
+                let _ = fs::copy(&local_candidate, &candidate);
+            }
+        }
+        candidate
     } else {
         let store_dir = app_dir.join("stores").join(&store_id);
         let _ = fs::create_dir_all(&store_dir);
-        store_dir.join("store.sqlite")
+        let target = store_dir.join("store.sqlite");
+        if !target.exists() {
+            let local_candidate = PathBuf::from("stores").join(&store_id).join("store.sqlite");
+            if local_candidate.is_file() {
+                let _ = fs::copy(&local_candidate, &target);
+            }
+        }
+        target
     };
 
     if let Some(parent) = db_path.parent() {
@@ -912,6 +1016,7 @@ fn main() {
         }
     }
 
+    ensure_app_dir_initialized();
     let db_path = get_db_path();
     let conn = Connection::open(&db_path).unwrap_or_else(|_| Connection::open_in_memory().unwrap());
 
@@ -941,6 +1046,7 @@ fn main() {
             db_migrate,
             db_version,
             db_insert,
+            db_insert_batch,
             db_find_by_id,
             db_find_all,
             db_delete,

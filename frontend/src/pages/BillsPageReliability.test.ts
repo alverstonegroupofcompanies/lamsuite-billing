@@ -215,6 +215,7 @@ describe("Invoice Register & Bills Page Reliability", () => {
     try {
       const res = await fetch(`${baseUrl}/api/invoices?store_id=1&per_page=100`, {
         headers: { Accept: "application/json" },
+        signal: AbortSignal.timeout(1500),
       });
       if (res.ok) {
         const data = await res.json();
@@ -243,6 +244,7 @@ describe("Invoice Register & Bills Page Reliability", () => {
           Accept: "application/json",
           "X-Store-Id": "4",
         },
+        signal: AbortSignal.timeout(1500),
         body: JSON.stringify({
           store_id: 4,
           external_id: testStoreExternalId,

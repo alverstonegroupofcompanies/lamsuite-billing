@@ -108,6 +108,30 @@ export class MockSqliteDatabase {
     }
   }
 
+  insertBatch(table: string, items: Array<{ id: string; record: Record<string, unknown> | object }>): void {
+    if (!items || items.length === 0) return;
+    const t = this.ensureTable(table);
+    for (const item of items) {
+      t.set(item.id, { ...(item.record as Record<string, unknown>) });
+    }
+    this.persistTable(table);
+
+    // Keep purchases and purchase_documents synchronized in mock/browser mode
+    if (table === "purchase_documents") {
+      const alt = this.ensureTable("purchases");
+      for (const item of items) {
+        alt.set(item.id, { ...(item.record as Record<string, unknown>) });
+      }
+      this.persistTable("purchases");
+    } else if (table === "purchases") {
+      const alt = this.ensureTable("purchase_documents");
+      for (const item of items) {
+        alt.set(item.id, { ...(item.record as Record<string, unknown>) });
+      }
+      this.persistTable("purchase_documents");
+    }
+  }
+
   findById<T = Record<string, unknown>>(table: string, id: string): T | null {
     const t = this.ensureTable(table);
     let row = t.get(id);

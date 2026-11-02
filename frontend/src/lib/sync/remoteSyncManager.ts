@@ -257,7 +257,7 @@ export class RemoteSyncManager {
       // Pull fresh deltas
       await cloudDeltaSyncService.pullMasterDelta({
         fetchMasterDeltas: async (wm) => {
-          const res = await fetch(`/api/sync/pull/deltas?since_watermark=${wm}`);
+          const res = await fetch(`${API_BASE_URL}/api/sync/pull/deltas?since_watermark=${wm}`);
           return res.json();
         },
       });

@@ -11,8 +11,8 @@ use Illuminate\Support\Facades\Storage;
 
 class DesktopUpdateController
 {
-    private const CURRENT_APP_VERSION = '2.0.18';
-    private const DEFAULT_MIN_VERSION = '2.0.18';
+    private const CURRENT_APP_VERSION = '2.0.19';
+    private const DEFAULT_MIN_VERSION = '2.0.19';
 
     /**
      * Get the latest desktop updater manifest (latest.json).

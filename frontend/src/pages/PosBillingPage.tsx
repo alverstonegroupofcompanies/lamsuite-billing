@@ -748,6 +748,8 @@ export const PosBillingPage: React.FC = () => {
   useEffect(() => {
     searchInputRef.current?.focus();
     refreshCartState();
+    // Warm up and ensure product catalog is ready for billing
+    productsStore.getAllProducts().catch(() => {});
   }, []);
 
   // Global POS Hotkeys Listener

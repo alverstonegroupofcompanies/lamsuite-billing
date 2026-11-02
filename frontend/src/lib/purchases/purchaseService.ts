@@ -551,7 +551,7 @@ export class PurchaseService {
         );
         if (matchingTxs.length > 0) {
           const batches = await sqliteStorage.findAll<ProductBatch>("product_batches");
-          const products = await sqliteStorage.findAll<ProductItem>("products");
+          const products = await productsStore.getAllProducts();
 
           items = matchingTxs.map((tx, idx) => {
             const batch = batches.find((b) => b.id === tx.batch_id);

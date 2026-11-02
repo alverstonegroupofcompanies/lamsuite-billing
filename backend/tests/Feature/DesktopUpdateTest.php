@@ -44,14 +44,14 @@ class DesktopUpdateTest extends TestCase
 
     public function test_dynamic_update_returns_204_when_up_to_date(): void
     {
-        $response = $this->getJson('/api/app/update/windows-x86_64/2.0.18');
+        $response = $this->getJson('/api/app/update/windows-x86_64/2.0.19');
 
         $response->assertStatus(204);
     }
 
     public function test_dynamic_update_returns_200_with_package_when_older(): void
     {
-        $response = $this->getJson('/api/app/update/windows-x86_64/2.0.17');
+        $response = $this->getJson('/api/app/update/windows-x86_64/2.0.18');
 
         $response->assertStatus(200)
             ->assertJsonStructure([
@@ -87,14 +87,14 @@ class DesktopUpdateTest extends TestCase
         // Get initial min version
         $resGet = $this->getJson('/api/admin/settings/min-app-version');
         $resGet->assertStatus(200)
-            ->assertJsonPath('min_version', '2.0.18');
+            ->assertJsonPath('min_version', '2.0.19');
 
-        // Set min version to 2.0.19
+        // Set min version to 2.0.20
         $resPost = $this->postJson('/api/admin/settings/min-app-version', [
-            'min_version' => '2.0.19',
+            'min_version' => '2.0.20',
         ]);
         $resPost->assertStatus(200)
-            ->assertJsonPath('min_version', '2.0.19');
+            ->assertJsonPath('min_version', '2.0.20');
 
         // Verify device session flags out-of-date device
         DeviceSession::create([
@@ -106,7 +106,7 @@ class DesktopUpdateTest extends TestCase
             'user_id' => $admin->id,
             'user_role' => 'Admin',
             'ip_address' => '192.168.1.50',
-            'app_version' => '2.0.18', // Older than 2.0.19
+            'app_version' => '2.0.19', // Older than 2.0.20
             'unsynced_items_count' => 0,
             'is_active' => true,
             'login_time' => now(),

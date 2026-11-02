@@ -3,7 +3,7 @@ import { X, Plus, Trash2, CheckCircle, FileText, Building2, ShoppingBag } from "
 import { purchaseOrderService, type POLineItemInput } from "../../lib/purchases/purchaseOrderService";
 import { supplierLedgerService, type SupplierMaster } from "../../lib/purchases/supplierLedgerService";
 import { sqliteStorage } from "../../lib/db/sqliteStorage";
-import { type ProductItem } from "../../lib/masters/productsStore";
+import { productsStore, type ProductItem } from "../../lib/masters/productsStore";
 import { useModalEscape } from "../../lib/ui/modalEscapeManager";
 
 interface PurchaseOrderModalProps {
@@ -50,7 +50,7 @@ export const PurchaseOrderModal: React.FC<PurchaseOrderModalProps> = ({
     setSuppliers(sups);
     if (sups.length > 0 && !supplierId) setSupplierId(sups[0].id);
 
-    const prods = await sqliteStorage.findAll<ProductItem>("products");
+    const prods = await productsStore.getAllProducts();
     setAllProducts(prods);
   };
 

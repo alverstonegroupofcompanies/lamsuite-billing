@@ -142,18 +142,32 @@ export class ProductsStore {
     return await sqliteStorage.findById<ProductItem>("products", id);
   }
 
-  async getAllProducts(): Promise<ProductItem[]> {
-    return await sqliteStorage.findAll<ProductItem>("products");
+  async getAllProducts(autoSeedIfEmpty = true): Promise<ProductItem[]> {
+    let prods = await sqliteStorage.findAll<ProductItem>("products");
+    if (autoSeedIfEmpty && (!prods || prods.length === 0)) {
+      await sqliteStorage.ensureCatalogReady();
+      prods = await sqliteStorage.findAll<ProductItem>("products");
+    }
+    return prods;
+  }
+
+  async ensureCatalogPopulated(storeId?: string): Promise<{ populated: boolean; count: number; source: string }> {
+    return await sqliteStorage.ensureCatalogReady(storeId);
   }
 
   async findProductByBarcode(barcode: string): Promise<ProductItem | null> {
-    const cleanBarcode = barcode.trim();
+    const cleanBarcode = String(barcode || "").trim();
     if (!cleanBarcode) return null;
 
-    const all = await sqliteStorage.findAll<ProductItem>("products");
+    let all = await sqliteStorage.findAll<ProductItem>("products");
+    if (!all || all.length === 0) {
+      await sqliteStorage.ensureCatalogReady();
+      all = await sqliteStorage.findAll<ProductItem>("products");
+    }
+
     for (const item of all) {
-      if (item.barcode && item.barcode.trim() === cleanBarcode) return item;
-      if (item.secondary_barcodes && item.secondary_barcodes.some((b) => b && b.trim() === cleanBarcode)) {
+      if (item.barcode && String(item.barcode).trim() === cleanBarcode) return item;
+      if (item.secondary_barcodes && item.secondary_barcodes.some((b) => b && String(b).trim() === cleanBarcode)) {
         return item;
       }
     }
@@ -164,16 +178,28 @@ export class ProductsStore {
     const q = query.trim().toLowerCase();
     if (!q) return [];
 
-    const all = await sqliteStorage.findAll<ProductItem>("products");
+    let all = await sqliteStorage.findAll<ProductItem>("products");
+    if (!all || all.length === 0) {
+      await sqliteStorage.ensureCatalogReady();
+      all = await sqliteStorage.findAll<ProductItem>("products");
+    }
+
     return all.filter((item) => {
-      if (!item.is_active) return false;
-      const nameMatch = item.name ? item.name.toLowerCase().includes(q) : false;
-      const genericMatch = item.generic_name ? item.generic_name.toLowerCase().includes(q) : false;
-      const barcodeMatch = item.barcode ? item.barcode.toLowerCase().includes(q) : false;
+      // Treat as active if true, 1, "1", or undefined/null (default active)
+      const isActive =
+        item.is_active !== false &&
+        (item.is_active as any) !== 0 &&
+        (item.is_active as any) !== "0" &&
+        (item.is_active as any) !== "false";
+      if (!isActive) return false;
+
+      const nameMatch = item.name ? String(item.name).toLowerCase().includes(q) : false;
+      const genericMatch = item.generic_name ? String(item.generic_name).toLowerCase().includes(q) : false;
+      const barcodeMatch = item.barcode ? String(item.barcode).toLowerCase().includes(q) : false;
       const secondaryBarcodeMatch = item.secondary_barcodes
-        ? item.secondary_barcodes.some((b) => b && b.toLowerCase().includes(q))
+        ? item.secondary_barcodes.some((b) => b && String(b).toLowerCase().includes(q))
         : false;
-      const hsnMatch = item.hsn_sac_code ? item.hsn_sac_code.toLowerCase().includes(q) : false;
+      const hsnMatch = item.hsn_sac_code ? String(item.hsn_sac_code).toLowerCase().includes(q) : false;
       return Boolean(nameMatch || genericMatch || barcodeMatch || secondaryBarcodeMatch || hsnMatch);
     });
   }

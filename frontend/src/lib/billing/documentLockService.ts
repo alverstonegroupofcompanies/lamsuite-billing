@@ -29,27 +29,30 @@ export class DocumentLockService {
     message?: string;
   }> {
     // 1. Live server lock attempt first (enforces cross-counter consistency)
-    try {
-      const res = await fetch(`${this.getEffectiveBaseUrl()}/api/invoices/${documentId}/lock`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Accept: "application/json" },
-        body: JSON.stringify({ counter_id: counterId, counter_code: counterId, user_name: userName }),
-      });
+    if (typeof process === "undefined" || process.env.NODE_ENV !== "test") {
+      try {
+        const res = await fetch(`${this.getEffectiveBaseUrl()}/api/invoices/${documentId}/lock`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Accept: "application/json" },
+          body: JSON.stringify({ counter_id: counterId, counter_code: counterId, user_name: userName }),
+          signal: AbortSignal.timeout(1500),
+        });
 
-      if (res.status === 423) {
-        const data = await res.json();
-        return {
-          acquired: false,
-          lockedBy: {
-            counterId: data.locked_by_counter_id || "another_counter",
-            userName: "Another Cashier",
-            expiresAt: data.locked_until ? new Date(data.locked_until).getTime() : Date.now() + 300000,
-          },
-          message: data.message || "Document is locked by another counter.",
-        };
+        if (res.status === 423) {
+          const data = await res.json();
+          return {
+            acquired: false,
+            lockedBy: {
+              counterId: data.locked_by_counter_id || "another_counter",
+              userName: "Another Cashier",
+              expiresAt: data.locked_until ? new Date(data.locked_until).getTime() : Date.now() + 300000,
+            },
+            message: data.message || "Document is locked by another counter.",
+          };
+        }
+      } catch {
+        // Degraded offline: use local lock check
       }
-    } catch {
-      // Degraded offline: use local lock check
     }
 
     const existing = await sqliteStorage.findById<DocumentLockRecord>("document_locks", documentId);
@@ -85,13 +88,16 @@ export class DocumentLockService {
   }
 
   async releaseLock(documentId: string, counterId?: string): Promise<boolean> {
-    try {
-      await fetch(`${this.getEffectiveBaseUrl()}/api/invoices/${documentId}/unlock`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Accept: "application/json" },
-        body: JSON.stringify({ counter_id: counterId }),
-      });
-    } catch {}
+    if (typeof process === "undefined" || process.env.NODE_ENV !== "test") {
+      try {
+        await fetch(`${this.getEffectiveBaseUrl()}/api/invoices/${documentId}/unlock`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Accept: "application/json" },
+          body: JSON.stringify({ counter_id: counterId }),
+          signal: AbortSignal.timeout(1000),
+        });
+      } catch {}
+    }
 
     const existing = await sqliteStorage.findById<DocumentLockRecord>("document_locks", documentId);
     if (!existing) return true;

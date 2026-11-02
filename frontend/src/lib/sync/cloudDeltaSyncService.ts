@@ -38,7 +38,8 @@ export class CloudDeltaSyncService {
     let appliedParties = 0;
 
     // 1. Ingest Products
-    if (Array.isArray(delta.products)) {
+    if (Array.isArray(delta.products) && delta.products.length > 0) {
+      const productBatch: Array<{ id: string; record: Record<string, unknown> }> = [];
       for (const prod of delta.products) {
         const normalizedProd: ProductItem = {
           ...prod,
@@ -49,15 +50,20 @@ export class CloudDeltaSyncService {
           pts: prod.pts !== undefined ? Number(prod.pts) : undefined,
           gst_percent: Number(prod.gst_percent || 0),
           current_stock: Number(prod.current_stock || 0),
-          is_active: prod.is_active !== undefined ? Boolean(prod.is_active) : true,
+          is_active:
+            prod.is_active !== undefined
+              ? Boolean(prod.is_active) && (prod.is_active as any) !== "0" && (prod.is_active as any) !== 0
+              : true,
         };
-        await productsStore.upsertProduct(normalizedProd);
-        appliedProducts += 1;
+        productBatch.push({ id: normalizedProd.id, record: normalizedProd as unknown as Record<string, unknown> });
       }
+      await sqliteStorage.insertBatch("products", productBatch);
+      appliedProducts += productBatch.length;
     }
 
     // 2. Ingest Batches
-    if (Array.isArray(delta.batches)) {
+    if (Array.isArray(delta.batches) && delta.batches.length > 0) {
+      const batchItems: Array<{ id: string; record: Record<string, unknown> }> = [];
       for (const batch of delta.batches) {
         const normalizedBatch: ProductBatch = {
           ...batch,
@@ -68,9 +74,10 @@ export class CloudDeltaSyncService {
           purchase_rate: batch.purchase_rate !== undefined ? Number(batch.purchase_rate) : undefined,
           selling_rate: batch.selling_rate !== undefined ? Number(batch.selling_rate) : undefined,
         };
-        await productsStore.upsertBatch(normalizedBatch);
-        appliedBatches += 1;
+        batchItems.push({ id: normalizedBatch.id, record: normalizedBatch as unknown as Record<string, unknown> });
       }
+      await sqliteStorage.insertBatch("product_batches", batchItems);
+      appliedBatches += batchItems.length;
     }
 
     // 3. Ingest Parties
@@ -79,7 +86,10 @@ export class CloudDeltaSyncService {
         const normalizedParty: PartyMaster = {
           ...party,
           id: String(party.id),
-          is_active: party.is_active !== undefined ? Boolean(party.is_active) : true,
+          is_active:
+            party.is_active !== undefined
+              ? Boolean(party.is_active) && (party.is_active as any) !== "0" && (party.is_active as any) !== 0
+              : true,
           credit_limit: party.credit_limit !== undefined ? Number(party.credit_limit) : undefined,
           outstanding_balance: party.outstanding_balance !== undefined ? Number(party.outstanding_balance) : undefined,
         };

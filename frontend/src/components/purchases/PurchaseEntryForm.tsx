@@ -300,6 +300,9 @@ export const PurchaseEntryForm: React.FC<PurchaseEntryFormProps> = ({
         setLines(initialPoData.lines || []);
       }
 
+      // Warm up and ensure master catalog is loaded
+      productsStore.getAllProducts().catch(() => {});
+
       // Generate next purchase number
       const nextNum = await purchaseService.generateNextPurchaseNumber();
       setEntryNumber(nextNum);

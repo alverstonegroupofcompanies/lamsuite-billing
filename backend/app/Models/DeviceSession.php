@@ -152,7 +152,7 @@ class DeviceSession extends Model
             'login_time' => now(),
             'last_active_at' => now(),
             'status' => 'active',
-            'app_version' => $appVersion ?: '2.0.18',
+            'app_version' => $appVersion ?: '2.0.19',
             'unsynced_items_count' => 0,
             'is_active' => true,
             'user_agent' => $userAgent ? substr($userAgent, 0, 255) : null,

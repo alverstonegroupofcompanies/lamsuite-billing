@@ -18,6 +18,7 @@ import {
   Upload,
   Download,
   Scale,
+  RefreshCw,
 } from "lucide-react";
 import { productsStore, type ProductItem, type ProductBatch } from "../lib/masters/productsStore";
 import { useModalEscape } from "../lib/ui/modalEscapeManager";
@@ -45,6 +46,7 @@ export const MastersPage: React.FC = () => {
   const [notification, setNotification] = useState<{ message: string; type: "success" | "error" } | null>(null);
   const [importEntityId, setImportEntityId] = useState<string | null>(null);
   const [exportEntityId, setExportEntityId] = useState<string | null>(null);
+  const [isSyncing, setIsSyncing] = useState<boolean>(false);
 
   // Products state
   const [products, setProducts] = useState<ProductItem[]>([]);
@@ -144,9 +146,15 @@ export const MastersPage: React.FC = () => {
     setTimeout(() => setNotification(null), 3500);
   };
 
-  const loadData = async () => {
+  const loadData = async (forceSync = false) => {
     try {
-      const prods = await sqliteStorage.findAll<ProductItem>("products");
+      let prods = await sqliteStorage.findAll<ProductItem>("products");
+      if (forceSync || !prods || prods.length === 0) {
+        setIsSyncing(true);
+        await productsStore.ensureCatalogPopulated();
+        prods = await sqliteStorage.findAll<ProductItem>("products");
+        setIsSyncing(false);
+      }
       setProducts(prods);
 
       const allBatches = await sqliteStorage.findAll<ProductBatch>("product_batches");
@@ -162,6 +170,7 @@ export const MastersPage: React.FC = () => {
       setUnits(allUnits);
     } catch (err) {
       console.error("Error loading master data:", err);
+      setIsSyncing(false);
     }
   };
 
@@ -174,11 +183,11 @@ export const MastersPage: React.FC = () => {
     if (!searchQuery) return true;
     const q = searchQuery.toLowerCase();
     return (
-      (p.name?.toLowerCase().includes(q) ?? false) ||
-      (p.barcode?.toLowerCase().includes(q) ?? false) ||
-      (p.secondary_barcodes?.some((b) => b?.toLowerCase().includes(q)) ?? false) ||
-      (p.generic_name?.toLowerCase().includes(q) ?? false) ||
-      (p.hsn_sac_code?.toLowerCase().includes(q) ?? false)
+      (p.name ? String(p.name).toLowerCase().includes(q) : false) ||
+      (p.barcode ? String(p.barcode).toLowerCase().includes(q) : false) ||
+      (p.secondary_barcodes?.some((b) => b ? String(b).toLowerCase().includes(q) : false) ?? false) ||
+      (p.generic_name ? String(p.generic_name).toLowerCase().includes(q) : false) ||
+      (p.hsn_sac_code ? String(p.hsn_sac_code).toLowerCase().includes(q) : false)
     );
   });
 
@@ -555,6 +564,19 @@ export const MastersPage: React.FC = () => {
         <div className="flex items-center gap-2">
           {activeTab === "products" && (
             <>
+              <button
+                onClick={async () => {
+                  showNotification("Syncing products from catalog...", "success");
+                  await loadData(true);
+                  showNotification("Master catalog refreshed!", "success");
+                }}
+                disabled={isSyncing}
+                className="flex items-center gap-1.5 rounded-btn border border-border-main bg-surface px-3 py-2 text-xs font-semibold text-text-main shadow-xs hover:bg-canvas cursor-pointer transition-colors disabled:opacity-50"
+                title="Fetch latest catalog from server or re-seed local store"
+              >
+                <RefreshCw className={`h-3.5 w-3.5 text-accent ${isSyncing ? "animate-spin" : ""}`} />
+                <span>{isSyncing ? "Syncing..." : "Sync Catalog"}</span>
+              </button>
               <button
                 onClick={() => setImportEntityId("items")}
                 className="flex items-center gap-1.5 rounded-btn border border-border-main bg-surface px-3 py-2 text-xs font-semibold text-text-main shadow-xs hover:bg-canvas cursor-pointer transition-colors"

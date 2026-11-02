@@ -662,6 +662,13 @@ export class SqliteStorageService {
       return { success: true };
     });
 
+    registerMockHandler("db:insertBatch", async (args) => {
+      const { table, items } = (args as { table: string; items: Array<{ id: string; record: Record<string, unknown> }> }) || {};
+      if (!table || !Array.isArray(items)) throw new Error("Missing table or items");
+      db.insertBatch(table, items);
+      return { success: true, count: items.length };
+    });
+
     registerMockHandler("db:findById", async (args) => {
       const { table, id } = (args as { table: string; id: string }) || {};
       return db.findById(table, id);
@@ -707,15 +714,57 @@ export class SqliteStorageService {
       getMockDatabase().setStore(storeId);
     }
     // Re-initialize schema on the target store database
-    await this.initDatabase();
+    await this.initDatabase(false);
+    this.ensureCatalogReady(storeId).catch(() => {});
     return result;
   }
 
-  async initDatabase(): Promise<number> {
+  async initDatabase(autoSeed = true): Promise<number> {
     const bridge = getIpcBridge();
     const result = await bridge.invoke<{ success: boolean; version: number }>("db:migrate");
     this.initialized = true;
+    if (autoSeed) {
+      this.ensureCatalogReady().catch(() => {});
+    }
     return result.version;
+  }
+
+  async ensureCatalogReady(storeId?: string): Promise<{ populated: boolean; count: number; source: string }> {
+    try {
+      const existing = await this.findAll("products");
+      if (Array.isArray(existing) && existing.length > 0) {
+        return { populated: false, count: existing.length, source: "already_populated" };
+      }
+
+      // 1. Try pulling master delta from backend/cloud server
+      try {
+        const { cloudDeltaSyncService } = await import("../sync/cloudDeltaSyncService");
+        const { API_BASE_URL } = await import("../../config/env");
+        const targetStore = storeId || "1";
+        const syncRes = await cloudDeltaSyncService.pullMasterDelta({
+          fetchMasterDeltas: async (wm) => {
+            const res = await fetch(`${API_BASE_URL}/api/sync/pull/deltas?store_id=${targetStore}&since_watermark=${wm}`, {
+              signal: AbortSignal.timeout(1500),
+            });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            return res.json();
+          },
+        });
+        if (syncRes.appliedProducts > 0) {
+          return { populated: true, count: syncRes.appliedProducts, source: "cloud_sync" };
+        }
+      } catch {
+        // Offline or backend unavailable
+      }
+
+      // 2. If backend is unreachable or returned 0 products, seed standard 50 test products & batches
+      const { seed50Products } = await import("../masters/seedProductsData");
+      const seedRes = await seed50Products();
+      return { populated: true, count: seedRes.productsCount, source: "seed_50_products" };
+    } catch (err) {
+      console.warn("ensureCatalogReady warning:", err);
+      return { populated: false, count: 0, source: "error" };
+    }
   }
 
   async getDatabaseVersion(): Promise<number> {
@@ -727,6 +776,22 @@ export class SqliteStorageService {
   async insertRecord(table: string, id: string, record: Record<string, unknown> | object): Promise<void> {
     const bridge = getIpcBridge();
     await bridge.invoke("db:insert", { table, id, record: record as Record<string, unknown> });
+  }
+
+  async insertBatch(table: string, items: Array<{ id: string; record: Record<string, unknown> | object }>): Promise<void> {
+    if (!items || items.length === 0) return;
+    const bridge = getIpcBridge();
+    if (bridge.runtime === "mock") {
+      getMockDatabase().insertBatch(table, items);
+      return;
+    }
+    try {
+      await bridge.invoke("db:insertBatch", { table, items });
+    } catch {
+      for (const item of items) {
+        await this.insertRecord(table, item.id, item.record);
+      }
+    }
   }
 
   async updateRecord(table: string, id: string, partial: Record<string, unknown> | object): Promise<void> {

@@ -114,6 +114,7 @@ export const App: React.FC = () => {
           const updated = await storeRegistryService.loadRegistry();
           setRegisteredStores(updated.stores);
           setActiveStore(storeRegistryService.getActiveStore());
+          productsStore.ensureCatalogPopulated(storeRegistryService.getActiveStore()?.id || "1").catch(() => {});
         } else {
           setRegisteredStores([]);
         }
@@ -136,6 +137,9 @@ export const App: React.FC = () => {
           } else if (currentActive) {
             await storeRegistryService.switchActiveStore(currentActive.id, true).catch(() => {});
           }
+
+          const activeStoreId = String(currentActive?.id || "1");
+          productsStore.ensureCatalogPopulated(activeStoreId).catch(() => {});
         }
       }
       setIsInitializing(false);
@@ -192,6 +196,7 @@ export const App: React.FC = () => {
           const active = storeRegistryService.getActiveStore() || reg.stores[reg.stores.length - 1];
           setActiveStore(active);
           setShowGateway(false);
+          productsStore.ensureCatalogPopulated(active?.id || profile.store_id).catch(() => {});
         }}
         onCancel={registeredStores.length > 0 ? () => setIsAddingStore(false) : undefined}
       />
@@ -205,6 +210,7 @@ export const App: React.FC = () => {
         onSelectStore={(selected) => {
           setActiveStore(selected);
           setShowGateway(false);
+          productsStore.ensureCatalogPopulated(selected.id).catch(() => {});
         }}
         onAddNewStore={() => setIsAddingStore(true)}
       />

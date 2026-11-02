@@ -1,5 +1,6 @@
 import { productsStore, type ProductItem, type ProductBatch } from "./productsStore";
 import { partiesStore } from "./partiesStore";
+import { sqliteStorage } from "../db/sqliteStorage";
 
 export const TEST_SEED_PRODUCTS: ProductItem[] = [
   {
@@ -1744,13 +1745,17 @@ export const TEST_SEED_BATCHES: ProductBatch[] = [
 
 /** Seed all 50 products and their batches into storage */
 export async function seed50Products(): Promise<{ productsCount: number; batchesCount: number }> {
-  for (const prod of TEST_SEED_PRODUCTS) {
-    await productsStore.upsertProduct(prod);
-  }
+  const prodItems = TEST_SEED_PRODUCTS.map((p) => ({
+    id: p.id,
+    record: p as unknown as Record<string, unknown>,
+  }));
+  await sqliteStorage.insertBatch("products", prodItems);
 
-  for (const batch of TEST_SEED_BATCHES) {
-    await productsStore.upsertBatch(batch);
-  }
+  const batchItems = TEST_SEED_BATCHES.map((b) => ({
+    id: b.id,
+    record: b as unknown as Record<string, unknown>,
+  }));
+  await sqliteStorage.insertBatch("product_batches", batchItems);
 
   // Also ensure demo customer and supplier exist
   await partiesStore.upsertCustomer({
