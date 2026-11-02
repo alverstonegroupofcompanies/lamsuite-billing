@@ -62,15 +62,15 @@ function safeSetStorage(key: string, val: string): void {
 
 const CHANNEL_ENDPOINTS: Record<UpdateChannel, string[]> = {
   stable: [
-    "https://updates.lamstonehealthcare.com/latest.json",
+    "https://github.com/alverstonegroupofcompanies/lamsuite-billing/releases/latest/download/latest.json",
     "https://api.lamstonehealthcare.com/api/app/update/latest.json",
   ],
   legacy_win7: [
-    "https://updates.lamstonehealthcare.com/latest-legacy-win7.json",
+    "https://github.com/alverstonegroupofcompanies/lamsuite-billing/releases/latest/download/latest-legacy-win7.json",
     "https://api.lamstonehealthcare.com/api/app/update/latest-legacy-win7.json",
   ],
   beta: [
-    "https://updates.lamstonehealthcare.com/latest-beta.json",
+    "https://github.com/alverstonegroupofcompanies/lamsuite-billing/releases/latest/download/latest-beta.json",
     "https://api.lamstonehealthcare.com/api/app/update/latest.json",
   ],
 };
@@ -81,7 +81,8 @@ const CHANNEL_ENDPOINTS: Record<UpdateChannel, string[]> = {
 export function classifyUpdaterError(
   err: any,
   diagnosticUrl: string,
-  statusCode?: number | null
+  statusCode?: number | null,
+  context?: "check" | "install"
 ): { category: string; readableMessage: string; isOnline: boolean } {
   const isOnline = typeof navigator !== "undefined" && typeof navigator.onLine === "boolean" ? navigator.onLine : true;
   if (!isOnline && !statusCode) {
@@ -96,9 +97,12 @@ export function classifyUpdaterError(
   const lower = rawStr.toLowerCase();
 
   if (statusCode === 404 || lower.includes("404") || lower.includes("not found")) {
+    const isInstall = context === "install" || lower.includes("download") || lower.includes(".zip") || lower.includes(".exe");
     return {
       category: "not_found",
-      readableMessage: "Update feed not found (HTTP 404)",
+      readableMessage: isInstall
+        ? "Update package download failed (HTTP 404: asset not found on release)"
+        : "Update feed not found (HTTP 404)",
       isOnline: true,
     };
   }
@@ -552,7 +556,7 @@ class AutoUpdateService {
       await relaunch();
     } catch (err: any) {
       console.error("[AutoUpdate] Installation failed:", err);
-      const classified = classifyUpdaterError(err, this.getPrimaryEndpoint());
+      const classified = classifyUpdaterError(err, this.getPrimaryEndpoint(), null, "install");
       throw new Error(classified.readableMessage || "Update installation failed");
     } finally {
       this.isDownloading = false;

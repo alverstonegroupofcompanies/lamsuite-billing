@@ -118,12 +118,10 @@ async function run() {
     }
   }
 
-  const UPDATES_BASE_URL = (process.env.UPDATES_BASE_URL || 'https://updates.lamstonehealthcare.com').replace(/\/+$/, '');
-
-  // Map asset extensions to platforms
+  // Map asset extensions to platforms using GitHub Releases download URLs
   for (const asset of assets) {
     const name = asset.name;
-    const downloadUrl = `${UPDATES_BASE_URL}/${name}`;
+    const downloadUrl = asset.browser_download_url || `https://github.com/${GITHUB_REPOSITORY}/releases/download/${release.tag_name}/${name}`;
 
     // Windows (NSIS or MSI update zip)
     if (name.endsWith('.nsis.zip') || (name.endsWith('.zip') && !name.endsWith('.app.tar.gz') && !name.endsWith('.AppImage.tar.gz'))) {
@@ -240,7 +238,7 @@ async function run() {
       platforms: {
         'windows-x86_64': {
           signature: legacySig,
-          url: `${UPDATES_BASE_URL}/${legacySetupAsset.name}`,
+          url: legacySetupAsset.browser_download_url || `https://github.com/${GITHUB_REPOSITORY}/releases/download/${release.tag_name}/${legacySetupAsset.name}`,
         },
       },
     };

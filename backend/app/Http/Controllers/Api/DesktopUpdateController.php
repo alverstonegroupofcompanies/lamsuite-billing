@@ -80,16 +80,16 @@ class DesktopUpdateController
             return response()->noContent();
         }
 
-        $baseUrl = config('app.url', 'https://updates.lamstonehealthcare.com');
-        $baseUrl = rtrim($baseUrl, '/');
+        $githubRepo = 'alverstonegroupofcompanies/lamsuite-billing';
+        $githubReleaseBase = "https://github.com/{$githubRepo}/releases/download/v{$latest}";
 
         $isLegacy = str_contains(strtolower($target), 'legacy') || str_contains(strtolower($target), 'win7');
         $fileName = $isLegacy
-            ? 'LamSuite-Billing-windows-legacy-x64-setup.exe'
-            : 'LamSuite-Billing-Setup-' . $latest . '.exe';
+            ? 'LamSuite-Billing-windows-legacy-x64-setup.nsis.zip'
+            : 'LamSuite.Billing_' . $latest . '_x64-setup.nsis.zip';
 
         return response()->json([
-            'url' => $baseUrl . '/' . $fileName,
+            'url' => "{$githubReleaseBase}/{$fileName}",
             'version' => $latest,
             'notes' => "LamSuite Billing update v{$latest}\nIncludes security enhancements, GST rules parity, and updater reliability.",
             'pub_date' => now()->toIso8601String(),
@@ -179,7 +179,8 @@ class DesktopUpdateController
     {
         $version = $this->getLatestVersion();
         $date = now()->toIso8601String();
-        $updatesBase = 'https://updates.lamstonehealthcare.com';
+        $githubRepo = 'alverstonegroupofcompanies/lamsuite-billing';
+        $githubReleaseBase = "https://github.com/{$githubRepo}/releases/download/v{$version}";
 
         if ($isLegacy) {
             return [
@@ -189,7 +190,7 @@ class DesktopUpdateController
                 'platforms' => [
                     'windows-x86_64' => [
                         'signature' => 'dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIG1pbmlzaWduIHNlY3JldCBrZXkKUldSc1I3K01LaFZqUFhkcUJJWDQwZmdINVphR0VIQ2dKWjltR0NjSWUxeFJpRkpzaDV4RUVMUGEK',
-                        'url' => "{$updatesBase}/LamSuite-Billing-windows-legacy-x64-setup.exe",
+                        'url' => "{$githubReleaseBase}/LamSuite-Billing-windows-legacy-x64-setup.nsis.zip",
                     ],
                 ],
             ];
@@ -202,19 +203,19 @@ class DesktopUpdateController
             'platforms' => [
                 'windows-x86_64' => [
                     'signature' => 'dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIG1pbmlzaWduIHNlY3JldCBrZXkKUldRR09ENStxSU9JbDJpblJXQTV6am8zVDFuME1udVJkdUZXeExUSEF6aXNONDUvSE84YktXd3IK',
-                    'url' => "{$updatesBase}/LamSuite-Billing-Setup-{$version}.exe",
+                    'url' => "{$githubReleaseBase}/LamSuite.Billing_{$version}_x64-setup.nsis.zip",
                 ],
                 'darwin-aarch64' => [
                     'signature' => '',
-                    'url' => "{$updatesBase}/LamSuite-Billing-darwin-aarch64.app.tar.gz",
+                    'url' => "{$githubReleaseBase}/LamSuite-Billing-darwin-aarch64.app.tar.gz",
                 ],
                 'darwin-x86_64' => [
                     'signature' => '',
-                    'url' => "{$updatesBase}/LamSuite-Billing-darwin-x86_64.app.tar.gz",
+                    'url' => "{$githubReleaseBase}/LamSuite-Billing-darwin-x86_64.app.tar.gz",
                 ],
                 'linux-x86_64' => [
                     'signature' => '',
-                    'url' => "{$updatesBase}/LamSuite-Billing-linux-x86_64.AppImage.tar.gz",
+                    'url' => "{$githubReleaseBase}/LamSuite-Billing-linux-x86_64.AppImage.tar.gz",
                 ],
             ],
         ];
