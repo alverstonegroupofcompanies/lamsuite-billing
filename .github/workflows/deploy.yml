@@ -178,6 +178,20 @@ jobs:
     if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Sync docker-compose.yml to Host
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER || 'deploy' }}
+          key: ${{ secrets.SSH_PRIVATE_KEY || secrets.SSH_KEY }}
+          passphrase: ${{ secrets.SSH_PASSPHRASE }}
+          password: ${{ secrets.SSH_PASSWORD }}
+          source: 'docker-compose.yml'
+          target: '/opt/lamsuite/'
+
       - name: Deploy via SSH
         uses: appleboy/ssh-action@v1.2.1
         env:
@@ -197,6 +211,10 @@ jobs:
 
             set -euo pipefail
             cd /opt/lamsuite
+
+            # Ensure updates directory exists on host
+            mkdir -p /opt/lamsuite/updates
+            (chmod -R 755 /opt/lamsuite/updates 2>/dev/null || sudo chmod -R 755 /opt/lamsuite/updates 2>/dev/null || true)
 
             # Remember the last recorded deployment tag.
             PREV_TAG=$(cat .current_deploy_tag 2>/dev/null || true)
