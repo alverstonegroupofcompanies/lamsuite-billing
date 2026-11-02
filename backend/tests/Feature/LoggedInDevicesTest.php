@@ -96,7 +96,7 @@ class LoggedInDevicesTest extends TestCase
         $this->assertTrue($device['is_this_device']);
         $this->assertNotNull($device['sign_in_time']);
         $this->assertNotNull($device['last_seen']);
-        $this->assertEquals('2.0.19', $device['app_version']);
+        $this->assertEquals('2.0.20', $device['app_version']);
         $this->assertEquals(0, $device['unsynced_items_count']);
     }
 

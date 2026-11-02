@@ -4,7 +4,7 @@
   },
   "package": {
     "productName": "LamSuite Billing Legacy",
-    "version": "2.0.19"
+    "version": "2.0.20"
   },
   "tauri": {
     "windows": [
