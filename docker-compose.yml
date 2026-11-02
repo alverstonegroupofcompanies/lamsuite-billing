@@ -160,6 +160,8 @@ services:
       - REVERB_SCHEME=http
     volumes:
       - storage_data:/var/www/html/storage/app/public
+      - /opt/lamsuite/updates:/opt/lamsuite/updates:ro
+      - /opt/lamsuite/updates:/var/www/html/storage/app/updates:ro
     networks:
       - lamsuite-public
       - lamsuite-internal
@@ -224,6 +226,8 @@ services:
       - REVERB_SCHEME=http
     volumes:
       - storage_data:/var/www/html/storage/app/public
+      - /opt/lamsuite/updates:/opt/lamsuite/updates:ro
+      - /opt/lamsuite/updates:/var/www/html/storage/app/updates:ro
     networks:
       - lamsuite-internal
     healthcheck:
@@ -268,6 +272,8 @@ services:
       - REDIS_PORT=6379
     volumes:
       - storage_data:/var/www/html/storage/app/public
+      - /opt/lamsuite/updates:/opt/lamsuite/updates:ro
+      - /opt/lamsuite/updates:/var/www/html/storage/app/updates:ro
     networks:
       - lamsuite-internal
     healthcheck:

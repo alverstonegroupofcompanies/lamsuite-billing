@@ -7,11 +7,11 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Support\Facades\File;
-use Illuminate\Support\Facades\Storage;
+use Symfony\Component\HttpFoundation\BinaryFileResponse;
 
 class DesktopUpdateController
 {
-    private const CURRENT_APP_VERSION = '2.0.21';
+    private const CURRENT_APP_VERSION = '2.0.23';
     private const DEFAULT_MIN_VERSION = '2.0.21';
 
     /**
@@ -24,7 +24,7 @@ class DesktopUpdateController
         if (File::exists($manifestPath)) {
             $content = json_decode(File::get($manifestPath), true);
             if ($content && is_array($content)) {
-                return response()->json($content);
+                return response()->json($this->rewriteManifestUrls($content));
             }
         }
 
@@ -33,7 +33,16 @@ class DesktopUpdateController
         if (File::exists($hostPath)) {
             $content = json_decode(File::get($hostPath), true);
             if ($content && is_array($content)) {
-                return response()->json($content);
+                return response()->json($this->rewriteManifestUrls($content));
+            }
+        }
+
+        // Check public storage updates
+        $publicPath = storage_path('app/public/updates/latest.json');
+        if (File::exists($publicPath)) {
+            $content = json_decode(File::get($publicPath), true);
+            if ($content && is_array($content)) {
+                return response()->json($this->rewriteManifestUrls($content));
             }
         }
 
@@ -50,7 +59,7 @@ class DesktopUpdateController
         if (File::exists($manifestPath)) {
             $content = json_decode(File::get($manifestPath), true);
             if ($content && is_array($content)) {
-                return response()->json($content);
+                return response()->json($this->rewriteManifestUrls($content));
             }
         }
 
@@ -58,11 +67,48 @@ class DesktopUpdateController
         if (File::exists($hostPath)) {
             $content = json_decode(File::get($hostPath), true);
             if ($content && is_array($content)) {
-                return response()->json($content);
+                return response()->json($this->rewriteManifestUrls($content));
+            }
+        }
+
+        $publicPath = storage_path('app/public/updates/latest-legacy-win7.json');
+        if (File::exists($publicPath)) {
+            $content = json_decode(File::get($publicPath), true);
+            if ($content && is_array($content)) {
+                return response()->json($this->rewriteManifestUrls($content));
             }
         }
 
         return response()->json($this->synthesizeManifest(true));
+    }
+
+    /**
+     * Serve raw updater binary files (.nsis.zip, .sig, .exe) to client workstations.
+     */
+    public function downloadUpdateBinary(string $filename): BinaryFileResponse
+    {
+        $filename = basename($filename);
+        if (!preg_match('/^[A-Za-z0-9._-]+\.(zip|exe|sig|tar\.gz|AppImage)$/i', $filename)) {
+            abort(404, 'Invalid updater asset filename.');
+        }
+
+        $candidates = [
+            storage_path("app/updates/{$filename}"),
+            "/opt/lamsuite/updates/{$filename}",
+            storage_path("app/public/updates/{$filename}"),
+        ];
+
+        foreach ($candidates as $filePath) {
+            if (File::exists($filePath)) {
+                return response()->file($filePath, [
+                    'Content-Type' => 'application/octet-stream',
+                    'Content-Disposition' => 'attachment; filename="' . $filename . '"',
+                    'Cache-Control' => 'public, max-age=86400',
+                ]);
+            }
+        }
+
+        abort(404, "Updater package '{$filename}' is not found on this server.");
     }
 
     /**
@@ -80,20 +126,21 @@ class DesktopUpdateController
             return response()->noContent();
         }
 
-        $githubRepo = 'alverstonegroupofcompanies/lamsuite-billing';
-        $githubReleaseBase = "https://github.com/{$githubRepo}/releases/download/v{$latest}";
-
         $isLegacy = str_contains(strtolower($target), 'legacy') || str_contains(strtolower($target), 'win7');
         $fileName = $isLegacy
             ? 'LamSuite-Billing-windows-legacy-x64-setup.nsis.zip'
-            : 'LamSuite.Billing_' . $latest . '_x64-setup.nsis.zip';
+            : "LamSuite-Billing_{$latest}_x64-setup.nsis.zip";
+
+        $downloadUrl = url("/api/app/update/download/{$fileName}");
 
         return response()->json([
-            'url' => "{$githubReleaseBase}/{$fileName}",
+            'url' => $downloadUrl,
             'version' => $latest,
             'notes' => "LamSuite Billing update v{$latest}\nIncludes security enhancements, GST rules parity, and updater reliability.",
             'pub_date' => now()->toIso8601String(),
-            'signature' => 'dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIG1pbmlzaWduIHNlY3JldCBrZXkKUldRR09ENStxSU9JbDJpblJXQTV6am8zVDFuME1udVJkdUZXeExUSEF6aXNONDUvSE84YktXd3IK',
+            'signature' => $isLegacy
+                ? 'dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRR09ENStxSU9JbDhadnVreTZOck5jamh1OTJTUkZuZFM0VUhzUXRoT1JwRzFrWW52REVyRUFkVmpSRUgvdUdvemYwanJ1YUpDQm91bDFFcmw2eFpodTJCNEUxWkxuTkFvPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzNjU3ODQ4CWZpbGU6TGFtU3VpdGUtQmlsbGluZy1MZWdhY3lfMi4wLjIzX3g2NC1zZXR1cC5uc2lzLnppcAozbG5Uc1QxSkl2TVZrTDdIcU5rNkRJK212K3Z6ZXpvQ2lXTnVVTWtwUVVvTFUyWTAwZTVGOENwMlN2c0RVKzZGME5VQ1dhV3FyL3c0L2tFc0pkS2FDUT09Cg=='
+                : 'dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRR09ENStxSU9JbDhjZlVyMXdZYjRIbUY5dmRsbXlJZW9sL2MyaTlMTTFNNGdjbUpqUkRQa0VzbTFVeXl5dWdxR0FWSytEaUZmeGlVaVlSa0ovOTJlN0tlUWtPUTJmS2dNPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzNjU3MjE3CWZpbGU6TGFtU3VpdGUtQmlsbGluZ18yLjAuMjNfeDY0LXNldHVwLm5zaXMuemlwClBmT1RuZGREK1gvRXgrM0I0UkJET24vb0FpTXNUbVE5VHo2V1FmOTh6aWxjYWlLM2w1ZXVxRmpWSndRZUdsa3RDNnlkRzNnc2VDRDFnejdzSGJCcEFBPT0K',
         ]);
     }
 
@@ -173,14 +220,33 @@ class DesktopUpdateController
     }
 
     /**
-     * Synthesizes a valid multi-platform manifest.
+     * Rewrites manifest download URLs to serve from the LamStone API server.
+     */
+    private function rewriteManifestUrls(array $manifest): array
+    {
+        if (isset($manifest['platforms']) && is_array($manifest['platforms'])) {
+            foreach ($manifest['platforms'] as $platform => &$data) {
+                if (isset($data['url']) && is_string($data['url'])) {
+                    $url = $data['url'];
+                    $filename = basename(parse_url($url, PHP_URL_PATH) ?: $url);
+                    if ($filename) {
+                        $data['url'] = url("/api/app/update/download/{$filename}");
+                    }
+                }
+            }
+        }
+
+        return $manifest;
+    }
+
+    /**
+     * Synthesizes a valid multi-platform manifest with local direct download endpoints.
      */
     private function synthesizeManifest(bool $isLegacy): array
     {
         $version = $this->getLatestVersion();
         $date = now()->toIso8601String();
-        $githubRepo = 'alverstonegroupofcompanies/lamsuite-billing';
-        $githubReleaseBase = "https://github.com/{$githubRepo}/releases/download/v{$version}";
+        $downloadBase = url('/api/app/update/download');
 
         if ($isLegacy) {
             return [
@@ -189,8 +255,8 @@ class DesktopUpdateController
                 'pub_date' => $date,
                 'platforms' => [
                     'windows-x86_64' => [
-                        'signature' => 'dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIG1pbmlzaWduIHNlY3JldCBrZXkKUldSc1I3K01LaFZqUFhkcUJJWDQwZmdINVphR0VIQ2dKWjltR0NjSWUxeFJpRkpzaDV4RUVMUGEK',
-                        'url' => "{$githubReleaseBase}/LamSuite-Billing-windows-legacy-x64-setup.nsis.zip",
+                        'signature' => 'dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRR09ENStxSU9JbDhadnVreTZOck5jamh1OTJTUkZuZFM0VUhzUXRoT1JwRzFrWW52REVyRUFkVmpSRUgvdUdvemYwanJ1YUpDQm91bDFFcmw2eFpodTJCNEUxWkxuTkFvPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzNjU3ODQ4CWZpbGU6TGFtU3VpdGUtQmlsbGluZy1MZWdhY3lfMi4wLjIzX3g2NC1zZXR1cC5uc2lzLnppcAozbG5Uc1QxSkl2TVZrTDdIcU5rNkRJK212K3Z6ZXpvQ2lXTnVVTWtwUVVvTFUyWTAwZTVGOENwMlN2c0RVKzZGME5VQ1dhV3FyL3c0L2tFc0pkS2FDUT09Cg==',
+                        'url' => "{$downloadBase}/LamSuite-Billing-windows-legacy-x64-setup.nsis.zip",
                     ],
                 ],
             ];
@@ -202,20 +268,12 @@ class DesktopUpdateController
             'pub_date' => $date,
             'platforms' => [
                 'windows-x86_64' => [
-                    'signature' => 'dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIG1pbmlzaWduIHNlY3JldCBrZXkKUldRR09ENStxSU9JbDJpblJXQTV6am8zVDFuME1udVJkdUZXeExUSEF6aXNONDUvSE84YktXd3IK',
-                    'url' => "{$githubReleaseBase}/LamSuite.Billing_{$version}_x64-setup.nsis.zip",
+                    'signature' => 'dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRR09ENStxSU9JbDhjZlVyMXdZYjRIbUY5dmRsbXlJZW9sL2MyaTlMTTFNNGdjbUpqUkRQa0VzbTFVeXl5dWdxR0FWSytEaUZmeGlVaVlSa0ovOTJlN0tlUWtPUTJmS2dNPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzNjU3MjE3CWZpbGU6TGFtU3VpdGUtQmlsbGluZ18yLjAuMjNfeDY0LXNldHVwLm5zaXMuemlwClBmT1RuZGREK1gvRXgrM0I0UkJET24vb0FpTXNUbVE5VHo2V1FmOTh6aWxjYWlLM2w1ZXVxRmpWSndRZUdsa3RDNnlkRzNnc2VDRDFnejdzSGJCcEFBPT0K',
+                    'url' => "{$downloadBase}/LamSuite-Billing_{$version}_x64-setup.nsis.zip",
                 ],
-                'darwin-aarch64' => [
-                    'signature' => '',
-                    'url' => "{$githubReleaseBase}/LamSuite-Billing-darwin-aarch64.app.tar.gz",
-                ],
-                'darwin-x86_64' => [
-                    'signature' => '',
-                    'url' => "{$githubReleaseBase}/LamSuite-Billing-darwin-x86_64.app.tar.gz",
-                ],
-                'linux-x86_64' => [
-                    'signature' => '',
-                    'url' => "{$githubReleaseBase}/LamSuite-Billing-linux-x86_64.AppImage.tar.gz",
+                'windows-x86_64-nsis' => [
+                    'signature' => 'dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRR09ENStxSU9JbDhjZlVyMXdZYjRIbUY5dmRsbXlJZW9sL2MyaTlMTTFNNGdjbUpqUkRQa0VzbTFVeXl5dWdxR0FWSytEaUZmeGlVaVlSa0ovOTJlN0tlUWtPUTJmS2dNPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzNjU3MjE3CWZpbGU6TGFtU3VpdGUtQmlsbGluZ18yLjAuMjNfeDY0LXNldHVwLm5zaXMuemlwClBmT1RuZGREK1gvRXgrM0I0UkJET24vb0FpTXNUbVE5VHo2V1FmOTh6aWxjYWlLM2w1ZXVxRmpWSndRZUdsa3RDNnlkRzNnc2VDRDFnejdzSGJCcEFBPT0K',
+                    'url' => "{$downloadBase}/LamSuite-Billing_{$version}_x64-setup.nsis.zip",
                 ],
             ],
         ];

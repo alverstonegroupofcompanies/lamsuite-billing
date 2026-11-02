@@ -109,6 +109,7 @@ Route::post('/stores/day-close', [CounterController::class, 'closeStoreDay']);
 // Desktop Tauri Updater Manifest Endpoints
 Route::get('/app/update/latest.json', [DesktopUpdateController::class, 'getLatestManifest']);
 Route::get('/app/update/latest-legacy-win7.json', [DesktopUpdateController::class, 'getLegacyManifest']);
+Route::get('/app/update/download/{filename}', [DesktopUpdateController::class, 'downloadUpdateBinary'])->where('filename', '[A-Za-z0-9._-]+');
 Route::get('/app/update/{target}/{current_version}', [DesktopUpdateController::class, 'checkDynamicUpdate']);
 
 /*

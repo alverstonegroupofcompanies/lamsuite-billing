@@ -64,16 +64,16 @@ function safeSetStorage(key: string, val: string): void {
 
 const CHANNEL_ENDPOINTS: Record<UpdateChannel, string[]> = {
   stable: [
-    "https://github.com/alverstonegroupofcompanies/lamsuite-billing/releases/latest/download/latest.json",
     "https://api.lamstonehealthcare.com/api/app/update/latest.json",
+    "https://github.com/alverstonegroupofcompanies/lamsuite-billing/releases/latest/download/latest.json",
   ],
   legacy_win7: [
-    "https://github.com/alverstonegroupofcompanies/lamsuite-billing/releases/latest/download/latest-legacy-win7.json",
     "https://api.lamstonehealthcare.com/api/app/update/latest-legacy-win7.json",
+    "https://github.com/alverstonegroupofcompanies/lamsuite-billing/releases/latest/download/latest-legacy-win7.json",
   ],
   beta: [
-    "https://github.com/alverstonegroupofcompanies/lamsuite-billing/releases/latest/download/latest-beta.json",
     "https://api.lamstonehealthcare.com/api/app/update/latest.json",
+    "https://github.com/alverstonegroupofcompanies/lamsuite-billing/releases/latest/download/latest-beta.json",
   ],
 };
 
