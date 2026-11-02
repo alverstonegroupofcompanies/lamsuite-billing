@@ -1,6 +1,17 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { autoUpdateService, classifyUpdaterError } from "./autoUpdateService";
 import { sqliteStorage } from "../db/sqliteStorage";
+import * as tauriUpdater from "@tauri-apps/api/updater";
+
+vi.mock("@tauri-apps/api/updater", () => ({
+  checkUpdate: vi.fn(),
+  installUpdate: vi.fn(),
+  onUpdaterEvent: vi.fn(),
+}));
+
+vi.mock("@tauri-apps/api/process", () => ({
+  relaunch: vi.fn(),
+}));
 
 describe("AutoUpdateService - Error Classification & Diagnostics Engine", () => {
   const originalOnLine = navigator.onLine;
@@ -139,7 +150,7 @@ describe("AutoUpdateService - Mocked Feed Scenarios", () => {
 
   it("1. Mocked feed returning no update -> Up to date state", async () => {
     const mockFeed = {
-      version: "2.0.21",
+      version: "2.0.22",
       notes: "Current version",
       pub_date: new Date().toISOString(),
       platforms: {},
@@ -151,13 +162,13 @@ describe("AutoUpdateService - Mocked Feed Scenarios", () => {
 
     const result = await autoUpdateService.checkForUpdates();
     expect(result.shouldUpdate).toBe(false);
-    expect(result.message).toContain("Already up to date (version 2.0.21)");
+    expect(result.message).toContain("Already up to date (version 2.0.22)");
     expect(result.diagnostic?.status).toBe(200);
   });
 
   it("2. Mocked feed returning a newer version -> Offers new version with release notes", async () => {
     const mockFeed = {
-      version: "2.0.22",
+      version: "2.0.23",
       notes: "- Security patch\n- Enhanced offline reconciliation",
       pub_date: new Date().toISOString(),
       platforms: {},
@@ -169,7 +180,7 @@ describe("AutoUpdateService - Mocked Feed Scenarios", () => {
 
     const result = await autoUpdateService.checkForUpdates();
     expect(result.shouldUpdate).toBe(true);
-    expect(result.manifest?.version).toBe("2.0.22");
+    expect(result.manifest?.version).toBe("2.0.23");
     expect(result.manifest?.body).toContain("Security patch");
   });
 
@@ -223,6 +234,28 @@ describe("AutoUpdateService - Unsynced Offline Bills Safety Gate", () => {
 
     await expect(autoUpdateService.installAndRestart()).rejects.toThrow(
       "You have 1 unsynced bill(s) pending. Updating will restart the application. Please sync all pending transactions before updating."
+    );
+  });
+
+  it("Captures download failure (404), formats exact message with URL, and notifies deviceSessionService", async () => {
+    vi.spyOn(autoUpdateService, "isTauri").mockReturnValue(true);
+    const { deviceSessionService } = await import("../devices/deviceSessionService");
+    const reportSpy = vi.spyOn(deviceSessionService, "reportUpdateFailure").mockResolvedValue(true);
+
+    vi.mocked(tauriUpdater.installUpdate).mockRejectedValue(
+      new Error("Download request failed with status: 404 Not Found")
+    );
+
+    const testUrl = "https://github.com/alverstonegroupofcompanies/lamsuite-billing/releases/download/v2.0.21/LamSuite-Billing_2.0.21_x64-setup.nsis.zip";
+
+    await expect(
+      autoUpdateService.installAndRestart(undefined, true, testUrl)
+    ).rejects.toThrow(`Download failed (404): ${testUrl}`);
+
+    expect(reportSpy).toHaveBeenCalledWith(
+      testUrl,
+      404,
+      expect.stringContaining("404")
     );
   });
 });

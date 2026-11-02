@@ -3,7 +3,13 @@
 /**
  * Reconciles and verifies the unified latest.json manifest for Tauri auto-updater.
  * Inspects all uploaded assets on the GitHub release, extracts signature contents,
- * and uploads/updates latest.json so all platforms (Windows, macOS ARM/Intel, Linux) are present.
+ * and uploads/updates latest.json with final public URLs.
+ * 
+ * Guarantees:
+ * 1. Fails immediately if the release is still marked as a DRAFT.
+ * 2. Merges entries from the current run only (never preserves stale entries from previous runs).
+ * 3. Builds canonical, URL-safe download URLs using the published release tag.
+ * 4. Reconciles both standard latest.json and legacy latest-legacy-win7.json.
  */
 
 const fs = require('fs');
@@ -93,100 +99,122 @@ async function run() {
   console.log(`Reconciling latest.json for release ID: ${RELEASE_ID || RELEASE_TAG}...`);
   const release = await githubApi(RELEASE_ID ? `/repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}` : `/repos/${GITHUB_REPOSITORY}/releases/tags/${RELEASE_TAG}`);
 
-  const assets = release.assets || [];
-  console.log(`Release has ${assets.length} total assets.`);
+  if (release.draft) {
+    throw new Error(`CRITICAL: Release ${release.tag_name || RELEASE_ID} is still marked as DRAFT. The release must be published before reconciling updater manifests so URLs are permanent and public.`);
+  }
 
-  let manifest = {
-    version: release.tag_name ? release.tag_name.replace(/^v/, '') : '',
-    notes: release.body || `LamSuite Billing update ${release.tag_name}`,
-    pub_date: release.published_at || release.created_at || new Date().toISOString(),
+  const tagName = release.tag_name;
+  if (!tagName || tagName.includes('untagged')) {
+    throw new Error(`CRITICAL: Invalid release tag name "${tagName}". Must be a valid published tag.`);
+  }
+
+  const assets = release.assets || [];
+  console.log(`Published release ${tagName} has ${assets.length} total assets.`);
+
+  // Build clean manifest for current run ONLY (never merge from older runs)
+  const manifest = {
+    version: tagName.replace(/^v/, ''),
+    notes: release.body || `LamSuite Billing update ${tagName}`,
+    pub_date: release.published_at || new Date().toISOString(),
     platforms: {},
   };
 
-  // Check if latest.json already exists in assets
-  const existingLatest = assets.find(a => a.name === 'latest.json');
-  if (existingLatest) {
-    try {
-      const current = await githubApi(`/repos/${GITHUB_REPOSITORY}/releases/assets/${existingLatest.id}`, 'GET', null, {
-        Accept: 'application/octet-stream',
-      });
-      if (current && typeof current === 'object' && current.platforms) {
-        manifest = current;
-      }
-    } catch (e) {
-      console.warn('Could not read existing latest.json, building fresh manifest:', e.message);
-    }
-  }
+  const uploadUrl = release.upload_url.replace(/\{(\?.*)?\}/, '');
 
-  // Map asset extensions to platforms using GitHub Releases download URLs
+  // Map asset extensions to platforms using canonical public URLs
   for (const asset of assets) {
     const name = asset.name;
-    const downloadUrl = asset.browser_download_url || `https://github.com/${GITHUB_REPOSITORY}/releases/download/${release.tag_name}/${name}`;
 
-    // Windows (NSIS or MSI update zip)
-    if (name.endsWith('.nsis.zip') || (name.endsWith('.zip') && !name.endsWith('.app.tar.gz') && !name.endsWith('.AppImage.tar.gz'))) {
+    // Safety check: ensure file names are URL-safe
+    if (name.includes(' ')) {
+      console.warn(`[WARNING] Asset "${name}" contains spaces! Ensure product and artifact names avoid spaces.`);
+    }
+
+    const publicDownloadUrl = `https://github.com/${GITHUB_REPOSITORY}/releases/download/${tagName}/${encodeURIComponent(name).replace(/%2E/g, '.')}`;
+
+    // Standard Windows x86_64
+    if (
+      (name.endsWith('.nsis.zip') || (name.endsWith('.zip') && !name.endsWith('.app.tar.gz') && !name.endsWith('.AppImage.tar.gz'))) &&
+      !name.toLowerCase().includes('legacy')
+    ) {
       const sigAsset = assets.find(a => a.name === `${name}.sig`);
-      if (sigAsset && (!manifest.platforms['windows-x86_64'] || !manifest.platforms['windows-x86_64'].signature)) {
+      if (sigAsset) {
         console.log(`Fetching signature for windows-x86_64 from ${sigAsset.name}...`);
         const sig = await downloadRaw(sigAsset.url);
-        manifest.platforms['windows-x86_64'] = {
-          signature: sig,
-          url: downloadUrl,
-        };
+        if (sig && sig.length > 0) {
+          manifest.platforms['windows-x86_64'] = {
+            signature: sig,
+            url: publicDownloadUrl,
+          };
+          manifest.platforms['windows-x86_64-nsis'] = {
+            signature: sig,
+            url: publicDownloadUrl,
+          };
+        }
       }
     }
 
     // macOS Apple Silicon
     if (name.includes('aarch64') && name.endsWith('.app.tar.gz')) {
       const sigAsset = assets.find(a => a.name === `${name}.sig`);
-      if (sigAsset && (!manifest.platforms['darwin-aarch64'] || !manifest.platforms['darwin-aarch64'].signature)) {
+      if (sigAsset) {
         console.log(`Fetching signature for darwin-aarch64 from ${sigAsset.name}...`);
         const sig = await downloadRaw(sigAsset.url);
-        manifest.platforms['darwin-aarch64'] = {
-          signature: sig,
-          url: downloadUrl,
-        };
+        if (sig && sig.length > 0) {
+          manifest.platforms['darwin-aarch64'] = {
+            signature: sig,
+            url: publicDownloadUrl,
+          };
+        }
       }
     }
 
     // macOS Intel / Universal
-    if ((name.includes('x64') || name.includes('x86_64') || name.includes('universal')) && name.endsWith('.app.tar.gz')) {
+    if ((name.includes('x64') || name.includes('x86_64') || name.includes('universal')) && name.endsWith('.app.tar.gz') && !name.includes('aarch64')) {
       const sigAsset = assets.find(a => a.name === `${name}.sig`);
-      if (sigAsset && (!manifest.platforms['darwin-x86_64'] || !manifest.platforms['darwin-x86_64'].signature)) {
+      if (sigAsset) {
         console.log(`Fetching signature for darwin-x86_64 from ${sigAsset.name}...`);
         const sig = await downloadRaw(sigAsset.url);
-        manifest.platforms['darwin-x86_64'] = {
-          signature: sig,
-          url: downloadUrl,
-        };
+        if (sig && sig.length > 0) {
+          manifest.platforms['darwin-x86_64'] = {
+            signature: sig,
+            url: publicDownloadUrl,
+          };
+        }
       }
     }
 
-    // Linux
+    // Linux x86_64
     if (name.endsWith('.AppImage.tar.gz')) {
       const sigAsset = assets.find(a => a.name === `${name}.sig`);
-      if (sigAsset && (!manifest.platforms['linux-x86_64'] || !manifest.platforms['linux-x86_64'].signature)) {
+      if (sigAsset) {
         console.log(`Fetching signature for linux-x86_64 from ${sigAsset.name}...`);
         const sig = await downloadRaw(sigAsset.url);
-        manifest.platforms['linux-x86_64'] = {
-          signature: sig,
-          url: downloadUrl,
-        };
+        if (sig && sig.length > 0) {
+          manifest.platforms['linux-x86_64'] = {
+            signature: sig,
+            url: publicDownloadUrl,
+          };
+        }
       }
     }
   }
 
-  console.log('\nConsolidated latest.json platforms:', Object.keys(manifest.platforms));
+  console.log('\nConsolidated latest.json platforms (current run only):', Object.keys(manifest.platforms));
+  if (Object.keys(manifest.platforms).length === 0) {
+    throw new Error('CRITICAL: No valid platforms with non-empty signatures were detected in current release assets.');
+  }
+
   fs.writeFileSync('latest.json', JSON.stringify(manifest, null, 2), 'utf8');
 
-  // If latest.json asset exists, delete old one before re-uploading
+  // If latest.json asset already exists, delete old one before re-uploading
+  const existingLatest = assets.find(a => a.name === 'latest.json');
   if (existingLatest) {
     console.log(`Deleting previous latest.json asset (ID: ${existingLatest.id})...`);
     await githubApi(`/repos/${GITHUB_REPOSITORY}/releases/assets/${existingLatest.id}`, 'DELETE');
   }
 
   // Upload new latest.json
-  const uploadUrl = release.upload_url.replace(/\{(\?.*)?\}/, '');
   const manifestData = fs.readFileSync('latest.json');
   console.log(`Uploading consolidated latest.json to ${uploadUrl}...`);
 
@@ -231,14 +259,20 @@ async function run() {
       legacySig = await downloadRaw(legacySigAsset.url);
     }
 
+    if (!legacySig) {
+      throw new Error(`CRITICAL: Legacy asset ${legacySetupAsset.name} exists but signature is missing or empty!`);
+    }
+
+    const legacyDownloadUrl = `https://github.com/${GITHUB_REPOSITORY}/releases/download/${tagName}/${encodeURIComponent(legacySetupAsset.name).replace(/%2E/g, '.')}`;
+
     const legacyManifest = {
-      version: release.tag_name ? release.tag_name.replace(/^v/, '') : '',
-      notes: release.body || `LamSuite Billing Legacy Windows 7/8.1 update ${release.tag_name}`,
-      pub_date: release.published_at || release.created_at || new Date().toISOString(),
+      version: tagName.replace(/^v/, ''),
+      notes: release.body || `LamSuite Billing Legacy Windows 7/8.1 update ${tagName}`,
+      pub_date: release.published_at || new Date().toISOString(),
       platforms: {
         'windows-x86_64': {
           signature: legacySig,
-          url: legacySetupAsset.browser_download_url || `https://github.com/${GITHUB_REPOSITORY}/releases/download/${release.tag_name}/${legacySetupAsset.name}`,
+          url: legacyDownloadUrl,
         },
       },
     };
@@ -283,6 +317,6 @@ async function run() {
 }
 
 run().catch(err => {
-  console.error('[ERROR] Reconciling latest.json failed:', err);
+  console.error('[ERROR] Reconciling manifests failed:', err.message);
   process.exit(1);
 });

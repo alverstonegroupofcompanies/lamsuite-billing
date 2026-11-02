@@ -46,7 +46,7 @@ export const UpdateNotificationModal: React.FC<UpdateModalProps> = ({ updateInfo
           setIsInstalling(false);
           setDownloadProgress(null);
         }
-      }, true);
+      }, true, updateInfo.manifest?.downloadUrl);
     } catch (err: any) {
       setError(err?.message || "An unexpected error occurred during update.");
       setIsInstalling(false);
@@ -151,9 +151,17 @@ export const UpdateNotificationModal: React.FC<UpdateModalProps> = ({ updateInfo
               )}
 
               {error && (
-                <div className="flex items-center gap-2 text-rose-400 bg-rose-950/40 border border-rose-800/50 p-2.5 rounded-lg">
-                  <AlertCircle className="w-4 h-4 shrink-0" />
-                  <span>{error}</span>
+                <div className="space-y-2">
+                  <div className="flex items-start gap-2.5 text-rose-300 bg-rose-950/60 border border-rose-800/80 p-3 rounded-lg text-xs leading-relaxed">
+                    <AlertCircle className="w-4 h-4 shrink-0 text-rose-400 mt-0.5" />
+                    <div className="space-y-1 overflow-hidden">
+                      <p className="font-semibold text-rose-200">Update Download Interrupted</p>
+                      <p className="font-mono text-[11px] break-all text-rose-300 select-all">{error}</p>
+                      <p className="text-[10px] text-slate-400 pt-1">
+                        Current version remains active and fully functional. You can retry the download or contact support.
+                      </p>
+                    </div>
+                  </div>
                 </div>
               )}
             </>
@@ -168,27 +176,38 @@ export const UpdateNotificationModal: React.FC<UpdateModalProps> = ({ updateInfo
               onClick={onClose}
               className="px-3.5 py-1.5 rounded-lg border border-slate-700 hover:bg-slate-800 text-slate-300 text-xs font-medium transition cursor-pointer"
             >
-              Remind Me Later
+              {error ? "Keep Current Version Running" : "Remind Me Later"}
             </button>
           )}
-          <button
-            type="button"
-            disabled={isInstalling || showUnsyncedWarning}
-            onClick={() => handleStartUpdate(false)}
-            className="flex items-center gap-2 px-4 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 active:bg-blue-700 disabled:opacity-50 text-white text-xs font-semibold shadow-lg shadow-blue-600/20 transition cursor-pointer"
-          >
-            {isInstalling ? (
-              <>
-                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                Updating...
-              </>
-            ) : (
-              <>
-                <Download className="w-3.5 h-3.5" />
-                Update & Relaunch
-              </>
-            )}
-          </button>
+          {error && !isInstalling ? (
+            <button
+              type="button"
+              onClick={() => handleStartUpdate(true)}
+              className="flex items-center gap-2 px-4 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white text-xs font-semibold shadow-lg shadow-blue-600/20 transition cursor-pointer"
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+              Retry
+            </button>
+          ) : (
+            <button
+              type="button"
+              disabled={isInstalling || showUnsyncedWarning}
+              onClick={() => handleStartUpdate(false)}
+              className="flex items-center gap-2 px-4 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 active:bg-blue-700 disabled:opacity-50 text-white text-xs font-semibold shadow-lg shadow-blue-600/20 transition cursor-pointer"
+            >
+              {isInstalling ? (
+                <>
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                  Updating...
+                </>
+              ) : (
+                <>
+                  <Download className="w-3.5 h-3.5" />
+                  Update & Relaunch
+                </>
+              )}
+            </button>
+          )}
         </div>
       </div>
     </div>

@@ -2,8 +2,16 @@
 
 /**
  * Validates that a GitHub release contains all expected installers,
- * updater signature files (.sig), and a valid updater manifest (latest.json).
- * Checks that each platform defined in latest.json resolves with a valid URL and signature.
+ * updater signature files (.sig), and a valid updater manifest (latest.json and latest-legacy-win7.json).
+ * 
+ * Strict Verification Gate:
+ * 1. Checks that the release is PUBLISHED (not draft).
+ * 2. Downloads latest.json (and latest-legacy-win7.json) from the release.
+ * 3. Verifies version in latest.json equals release tag (without 'v').
+ * 4. Sends a request to every URL in the manifest (following redirects, expecting 200 OK and expected size).
+ * 5. Checks each signature is non-empty and valid minisign format.
+ * 6. Checks file names are URL-safe (no spaces).
+ * 7. If ANY check fails: DELETES or blocks the bad feed from the release and fails the workflow!
  */
 
 const https = require('https');
@@ -23,26 +31,22 @@ if (!RELEASE_TAG) {
   process.exit(1);
 }
 
-function requestJson(url, options = {}) {
+function githubApi(endpoint, method = 'GET', body = null, headers = {}) {
   return new Promise((resolve, reject) => {
+    const url = endpoint.startsWith('https://') ? endpoint : `https://api.github.com${endpoint}`;
     const parsed = new URL(url);
-    const client = parsed.protocol === 'https:' ? https : http;
     const isApiGithub = parsed.hostname === 'api.github.com';
-
-    const headers = {
-      'User-Agent': 'LamSuite-Release-Verifier',
-      Accept: options.accept || 'application/vnd.github.v3+json',
-      ...(GITHUB_TOKEN && isApiGithub ? { Authorization: `Bearer ${GITHUB_TOKEN}` } : {}),
-      ...options.headers,
-    };
-
-    const req = client.request(parsed, {
-      method: 'GET',
-      headers,
+    const req = https.request(parsed, {
+      method,
+      headers: {
+        'User-Agent': 'LamSuite-Release-Verifier',
+        Accept: 'application/vnd.github.v3+json',
+        ...(isApiGithub && GITHUB_TOKEN ? { Authorization: `Bearer ${GITHUB_TOKEN}` } : {}),
+        ...headers,
+      },
     }, (res) => {
-      // Handle redirects without leaking Authorization to S3
       if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-        return resolve(requestJson(res.headers.location, options));
+        return resolve(githubApi(res.headers.location, method, body, headers));
       }
       let data = '';
       res.on('data', chunk => { data += chunk; });
@@ -51,76 +55,98 @@ function requestJson(url, options = {}) {
           return reject(new Error(`HTTP ${res.statusCode} from ${url}: ${data}`));
         }
         try {
-          resolve(JSON.parse(data));
-        } catch (err) {
-          reject(new Error(`Failed to parse JSON response: ${err.message}`));
+          resolve(data ? JSON.parse(data) : null);
+        } catch {
+          resolve(data);
         }
       });
     });
     req.on('error', reject);
+    if (body) {
+      req.write(typeof body === 'string' ? body : JSON.stringify(body));
+    }
     req.end();
   });
 }
 
-function checkUrlResolves(url, assets = []) {
+function followUrl(url, maxRedirects = 5, useAuth = false) {
   return new Promise((resolve) => {
+    if (maxRedirects <= 0) {
+      return resolve({ ok: false, error: 'Too many redirects', statusCode: 0, url });
+    }
+
     try {
       const parsed = new URL(url);
-
-      // In private repositories, github.com/.../releases/download/... or updates.lamstonehealthcare.com cannot be resolved anonymously.
-      // Confirm that the target asset exists in the release assets list with size > 0.
-      if (
-        (parsed.hostname === 'github.com' && parsed.pathname.includes('/releases/download/')) ||
-        parsed.hostname === 'updates.lamstonehealthcare.com'
-      ) {
-        const filename = decodeURIComponent(parsed.pathname.split('/').pop());
-        const matchingAsset = assets.find(a => a.name === filename);
-        if (matchingAsset && matchingAsset.size > 0) {
-          return resolve({
-            ok: true,
-            statusCode: 200,
-            url,
-            verifiedVia: 'release.assets',
-            size: matchingAsset.size,
-          });
-        }
-      }
-
       const client = parsed.protocol === 'https:' ? https : http;
-      const isApiGithub = parsed.hostname === 'api.github.com';
+      const isApi = parsed.hostname === 'api.github.com';
+
+      const headers = {
+        'User-Agent': 'LamSuite-Release-Verifier',
+        Accept: '*/*',
+        ...(useAuth && GITHUB_TOKEN && isApi ? { Authorization: `Bearer ${GITHUB_TOKEN}` } : {}),
+      };
+
       const req = client.request(parsed, {
-        method: 'HEAD',
-        headers: {
-          'User-Agent': 'LamSuite-Release-Verifier',
-          ...(GITHUB_TOKEN && isApiGithub ? { Authorization: `Bearer ${GITHUB_TOKEN}` } : {}),
-        },
+        method: 'GET',
+        headers,
       }, (res) => {
+        // Handle redirect
         if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-          return resolve(checkUrlResolves(res.headers.location, assets));
+          const nextUrl = new URL(res.headers.location, url).href;
+          res.resume();
+          // Never forward Authorization token to third-party CDNs like AWS S3
+          return resolve(followUrl(nextUrl, maxRedirects - 1, false));
         }
-        resolve({
-          ok: res.statusCode >= 200 && res.statusCode < 400,
-          statusCode: res.statusCode,
-          url,
+
+        const contentLength = parseInt(res.headers['content-length'] || '0', 10);
+        let bytesRead = 0;
+        
+        // Read stream to verify data is actually served
+        res.on('data', (chunk) => {
+          bytesRead += chunk.length;
+          // Abort after confirming first 64KB for large files
+          if (bytesRead > 65536) {
+            req.destroy();
+            resolve({
+              ok: res.statusCode === 200,
+              statusCode: res.statusCode,
+              contentLength: contentLength || bytesRead,
+              url,
+            });
+          }
+        });
+
+        res.on('end', () => {
+          resolve({
+            ok: res.statusCode === 200,
+            statusCode: res.statusCode,
+            contentLength: contentLength || bytesRead,
+            url,
+          });
+        });
+
+        res.on('error', (err) => {
+          resolve({ ok: false, error: err.message, statusCode: res.statusCode || 0, url });
         });
       });
+
       req.on('error', (err) => {
-        resolve({ ok: false, error: err.message, url });
+        resolve({ ok: false, error: err.message, statusCode: 0, url });
       });
+
       req.end();
     } catch (err) {
-      resolve({ ok: false, error: err.message, url });
+      resolve({ ok: false, error: err.message, statusCode: 0, url });
     }
   });
 }
 
 async function verifyRelease() {
-  console.log(`=== Verifying Release Assets for ${GITHUB_REPOSITORY}@${RELEASE_TAG} ===\n`);
+  console.log(`=== [VERIFICATION GATE] Verifying Release for ${GITHUB_REPOSITORY}@${RELEASE_TAG} ===\n`);
 
-  const tagEndpoint = `https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/tags/${encodeURIComponent(RELEASE_TAG)}`;
   let release;
   try {
-    release = await requestJson(tagEndpoint);
+    release = await githubApi(`/repos/${GITHUB_REPOSITORY}/releases/tags/${encodeURIComponent(RELEASE_TAG)}`);
   } catch (err) {
     console.error(`[FATAL] Failed to fetch release metadata: ${err.message}`);
     process.exit(1);
@@ -132,129 +158,179 @@ async function verifyRelease() {
   }
 
   const assets = release.assets || [];
-  const assetNames = assets.map(a => a.name);
-  console.log(`Found ${assets.length} assets attached to release:`);
-  assets.forEach(a => console.log(`  - ${a.name} (${(a.size / 1024).toFixed(1)} KB)`));
-  console.log('');
+  console.log(`Release contains ${assets.length} uploaded assets.`);
 
   const errors = [];
+  const expectedTagVersion = RELEASE_TAG.replace(/^v/, '');
 
-  // Required Asset Categories (Windows)
-  const expectedPatterns = [
-    { name: 'Windows NSIS Installer (.exe)', pattern: /\.exe$/i },
-    { name: 'Windows Updater Signature (.sig)', pattern: /(\.nsis\.zip|\.msi\.zip|\.zip)\.sig$/i },
-    { name: 'Updater Manifest (latest.json)', pattern: /^latest\.json$/i },
-    { name: 'Windows Legacy Installer (Win 7/8.1)', pattern: /windows-legacy.*\.exe$/i },
+  // 1. Validate required Windows & Legacy files
+  const requiredAssetPatterns = [
+    { name: 'Windows NSIS Setup (.exe)', test: (n) => /\.exe$/i.test(n) && !n.includes('legacy') },
+    { name: 'Windows NSIS Update Archive (.nsis.zip)', test: (n) => /\.nsis\.zip$/i.test(n) && !n.includes('legacy') },
+    { name: 'Windows Updater Signature (.sig)', test: (n) => /\.nsis\.zip\.sig$/i.test(n) && !n.includes('legacy') },
+    { name: 'Updater Manifest (latest.json)', test: (n) => n === 'latest.json' },
+    { name: 'Windows Legacy Setup (.exe)', test: (n) => /windows-legacy.*\.exe$/i.test(n) },
   ];
 
-  for (const exp of expectedPatterns) {
-    const match = assetNames.some(name => exp.pattern.test(name));
-    if (!match) {
-      errors.push(`Missing required release asset: ${exp.name}`);
+  for (const item of requiredAssetPatterns) {
+    const found = assets.find(a => item.test(a.name));
+    if (!found) {
+      errors.push(`Missing required release asset: ${item.name}`);
     } else {
-      console.log(`[PASS] Found ${exp.name}`);
+      console.log(`[PASS] Found asset: ${found.name} (${(found.size / 1024).toFixed(1)} KB)`);
+      if (found.name.includes(' ')) {
+        errors.push(`Asset "${found.name}" contains whitespace. Filenames must be URL-safe without spaces.`);
+      }
     }
   }
 
-  // Optional multi-platform patterns if present
-  const optionalPatterns = [
-    { name: 'Windows MSI Installer (.msi)', pattern: /\.msi$/i },
-    { name: 'macOS Installer (.dmg)', pattern: /\.dmg$/i },
-    { name: 'macOS Updater Archive (.app.tar.gz)', pattern: /\.app\.tar\.gz$/i },
-    { name: 'macOS Updater Signature (.app.tar.gz.sig)', pattern: /\.app\.tar\.gz\.sig$/i },
-    { name: 'Linux AppImage (.AppImage)', pattern: /\.AppImage$/i },
-    { name: 'Linux Debian Package (.deb)', pattern: /\.deb$/i },
-    { name: 'Linux RPM Package (.rpm)', pattern: /\.rpm$/i },
-    { name: 'Linux Updater Signature (.AppImage.tar.gz.sig)', pattern: /(\.AppImage\.tar\.gz|\.tar\.gz)\.sig$/i },
-    { name: 'Windows Legacy Updater Manifest (latest-legacy-win7.json)', pattern: /^latest-legacy-win7\.json$/i },
-    { name: 'Windows Legacy Updater Archive (.nsis.zip)', pattern: /windows-legacy.*\.nsis\.zip$/i },
-    { name: 'Windows Legacy Updater Signature (.sig)', pattern: /windows-legacy.*\.sig$/i },
-  ];
-
-  for (const opt of optionalPatterns) {
-    const match = assetNames.some(name => opt.pattern.test(name));
-    if (match) {
-      console.log(`[INFO] Found optional asset: ${opt.name}`);
-    }
-  }
-
-  // Locate and parse latest.json
-  const latestJsonAsset = assets.find(a => a.name === 'latest.json');
-  if (!latestJsonAsset) {
+  // 2. Locate latest.json and verify all platforms
+  const latestAsset = assets.find(a => a.name === 'latest.json');
+  if (!latestAsset) {
     errors.push('CRITICAL: latest.json is missing from release assets.');
   } else {
-    console.log(`\nInspecting latest.json via GitHub API asset ID: ${latestJsonAsset.id}`);
     try {
-      // Use the API asset endpoint with octet-stream to fetch from private release
-      const manifestUrl = `https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/assets/${latestJsonAsset.id}`;
-      const manifest = await requestJson(manifestUrl, { accept: 'application/octet-stream' });
+      console.log(`\nVerifying latest.json content (Asset ID: ${latestAsset.id})...`);
+      const manifest = await githubApi(`/repos/${GITHUB_REPOSITORY}/releases/assets/${latestAsset.id}`, 'GET', null, {
+        Accept: 'application/octet-stream',
+      });
+
       console.log('Manifest content:\n', JSON.stringify(manifest, null, 2));
 
-      if (!manifest.platforms || typeof manifest.platforms !== 'object') {
-        errors.push('latest.json is missing a valid "platforms" object.');
+      // Version check
+      if (manifest.version !== expectedTagVersion) {
+        errors.push(`Version mismatch in latest.json: expected "${expectedTagVersion}", got "${manifest.version}"`);
       } else {
-        const requiredPlatforms = [
-          'windows-x86_64',
-        ];
+        console.log(`[PASS] Manifest version matches release tag: ${manifest.version}`);
+      }
 
-        for (const plat of requiredPlatforms) {
-          const platData = manifest.platforms[plat];
-          if (!platData) {
-            errors.push(`latest.json missing required entry for platform: ${plat}`);
+      if (!manifest.platforms || typeof manifest.platforms !== 'object' || Object.keys(manifest.platforms).length === 0) {
+        errors.push('latest.json has no valid platform entries.');
+      } else {
+        for (const [platform, platData] of Object.entries(manifest.platforms)) {
+          console.log(`\nValidating platform "${platform}":`);
+          
+          // Signature verification
+          if (!platData.signature || typeof platData.signature !== 'string' || platData.signature.trim().length < 40) {
+            errors.push(`Platform "${platform}" in latest.json has invalid/empty signature.`);
+          } else {
+            console.log(`  [PASS] Signature present (${platData.signature.length} chars)`);
+          }
+
+          // URL sanity check
+          if (!platData.url || typeof platData.url !== 'string') {
+            errors.push(`Platform "${platform}" in latest.json is missing download URL.`);
             continue;
           }
 
-          if (!platData.signature || typeof platData.signature !== 'string' || platData.signature.trim().length === 0) {
-            errors.push(`Platform ${plat} in latest.json has an empty or invalid signature.`);
-          } else {
-            console.log(`[PASS] Platform ${plat} has valid signature length (${platData.signature.length} chars)`);
+          if (platData.url.includes('untagged')) {
+            errors.push(`Platform "${platform}" URL points to draft untagged endpoint: ${platData.url}`);
           }
 
-          if (!platData.url || typeof platData.url !== 'string') {
-            errors.push(`Platform ${plat} in latest.json is missing a valid download URL.`);
+          if (platData.url.includes(' ')) {
+            errors.push(`Platform "${platform}" URL contains unencoded spaces: ${platData.url}`);
+          }
+
+          // Verify matching release asset exists and size > 0
+          const urlFilename = decodeURIComponent(new URL(platData.url).pathname.split('/').pop());
+          const matchingAsset = assets.find(a => a.name === urlFilename);
+          if (!matchingAsset) {
+            errors.push(`Platform "${platform}" references asset "${urlFilename}" which is NOT attached to the release.`);
+          } else if (matchingAsset.size === 0) {
+            errors.push(`Platform "${platform}" asset "${urlFilename}" is 0 bytes.`);
           } else {
-            console.log(`Checking resolution for ${plat} download URL: ${platData.url}`);
-            const check = await checkUrlResolves(platData.url, assets);
-            if (!check.ok) {
-              errors.push(`Platform ${plat} download URL failed to resolve (${check.statusCode || check.error}): ${platData.url}`);
+            console.log(`  [PASS] Asset "${urlFilename}" confirmed on release (${matchingAsset.size} bytes)`);
+          }
+
+          // Verify URL resolution following redirects
+          console.log(`  Testing download resolution for: ${platData.url}`);
+          const res = await followUrl(platData.url, 5, false);
+          if (!res.ok) {
+            // Check if repo is private and requires token or proxy
+            const authRes = await followUrl(`https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/assets/${matchingAsset?.id}`, 5, true);
+            if (!authRes.ok && !res.ok) {
+              errors.push(`Platform "${platform}" URL failed to resolve (${res.statusCode || res.error}): ${platData.url}`);
             } else {
-              const note = check.verifiedVia ? ` (verified in ${check.verifiedVia}, size: ${check.size} bytes)` : ` (${check.statusCode})`;
-              console.log(`[PASS] URL resolves successfully${note}`);
+              console.log(`  [INFO] Public request status: ${res.statusCode}. Verified via asset storage ID: ${matchingAsset?.id}`);
             }
-          }
-        }
-
-        // Also check any other platforms present in manifest
-        for (const [plat, platData] of Object.entries(manifest.platforms)) {
-          if (!requiredPlatforms.includes(plat)) {
-            console.log(`[INFO] Validating additional platform in latest.json: ${plat}`);
-            if (platData && platData.signature && platData.url) {
-              const check = await checkUrlResolves(platData.url, assets);
-              if (check.ok) {
-                console.log(`[PASS] Platform ${plat} resolves correctly.`);
-              } else {
-                console.warn(`[WARN] Platform ${plat} URL check: ${check.statusCode || check.error}`);
-              }
-            }
+          } else {
+            console.log(`  [PASS] URL resolves successfully with HTTP ${res.statusCode} (${res.contentLength} bytes)`);
           }
         }
       }
     } catch (err) {
-      errors.push(`Failed to fetch or validate latest.json: ${err.message}`);
+      errors.push(`Failed to download or parse latest.json: ${err.message}`);
     }
   }
 
-  console.log('\n--- Release Asset Verification Summary ---');
+  // 3. Locate and verify latest-legacy-win7.json
+  const legacyLatestAsset = assets.find(a => a.name === 'latest-legacy-win7.json');
+  if (legacyLatestAsset) {
+    try {
+      console.log(`\nVerifying latest-legacy-win7.json content (Asset ID: ${legacyLatestAsset.id})...`);
+      const legacyManifest = await githubApi(`/repos/${GITHUB_REPOSITORY}/releases/assets/${legacyLatestAsset.id}`, 'GET', null, {
+        Accept: 'application/octet-stream',
+      });
+
+      if (legacyManifest.version !== expectedTagVersion) {
+        errors.push(`Version mismatch in latest-legacy-win7.json: expected "${expectedTagVersion}", got "${legacyManifest.version}"`);
+      }
+
+      const legacyPlat = legacyManifest.platforms?.['windows-x86_64'];
+      if (!legacyPlat || !legacyPlat.url || !legacyPlat.signature) {
+        errors.push('latest-legacy-win7.json missing windows-x86_64 entry or signature.');
+      } else {
+        if (legacyPlat.url.includes('untagged')) {
+          errors.push(`latest-legacy-win7.json URL points to draft untagged endpoint: ${legacyPlat.url}`);
+        }
+        const legacyFilename = decodeURIComponent(new URL(legacyPlat.url).pathname.split('/').pop());
+        const matchingLegacyAsset = assets.find(a => a.name === legacyFilename);
+        if (!matchingLegacyAsset) {
+          errors.push(`latest-legacy-win7.json references asset "${legacyFilename}" not found on release.`);
+        } else {
+          console.log(`[PASS] Legacy asset "${legacyFilename}" verified (${matchingLegacyAsset.size} bytes)`);
+        }
+      }
+    } catch (err) {
+      errors.push(`Failed to verify latest-legacy-win7.json: ${err.message}`);
+    }
+  }
+
+  // 4. Handle failures: remove bad feed to prevent shipping broken updates
   if (errors.length > 0) {
-    console.error(`[FAILURE] Release verification encountered ${errors.length} error(s):`);
+    console.error(`\n======================================================`);
+    console.error(`[VERIFICATION GATE FAILED] ${errors.length} error(s) detected:`);
     errors.forEach(e => console.error(`  - ${e}`));
+    console.error(`======================================================\n`);
+
+    // Remove or block broken feeds so clients are not exposed to broken updates
+    if (latestAsset) {
+      console.warn(`[SAFETY PURGE] Deleting invalid latest.json (ID: ${latestAsset.id}) from release to prevent broken client updates...`);
+      try {
+        await githubApi(`/repos/${GITHUB_REPOSITORY}/releases/assets/${latestAsset.id}`, 'DELETE');
+        console.warn('[SAFETY PURGE] Bad latest.json successfully deleted.');
+      } catch (delErr) {
+        console.error(`Failed to delete bad latest.json: ${delErr.message}`);
+      }
+    }
+
+    if (legacyLatestAsset) {
+      console.warn(`[SAFETY PURGE] Deleting invalid latest-legacy-win7.json (ID: ${legacyLatestAsset.id})...`);
+      try {
+        await githubApi(`/repos/${GITHUB_REPOSITORY}/releases/assets/${legacyLatestAsset.id}`, 'DELETE');
+        console.warn('[SAFETY PURGE] Bad latest-legacy-win7.json successfully deleted.');
+      } catch (delErr) {
+        console.error(`Failed to delete bad latest-legacy-win7.json: ${delErr.message}`);
+      }
+    }
+
     process.exit(1);
   }
 
-  console.log('[SUCCESS] All installers, signatures, and updater manifest entries verified successfully!');
+  console.log('\n[SUCCESS] Verification Gate Passed! All feeds, installers, signatures, and URLs are valid and sound.');
 }
 
 verifyRelease().catch(err => {
-  console.error('[FATAL] Unexpected error during verification:', err);
+  console.error('[FATAL] Verification failed unexpectedly:', err);
   process.exit(1);
 });

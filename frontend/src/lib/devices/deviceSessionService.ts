@@ -117,7 +117,7 @@ export class DeviceSessionService {
           sign_in_time: new Date(profile.registered_at || Date.now()).toISOString(),
           last_active: new Date().toISOString(),
           last_seen: new Date().toISOString(),
-          app_version: "2.0.21",
+          app_version: "2.0.22",
           unsynced_items_count: 0,
           is_this_device: true,
           status: "Active",
@@ -137,6 +137,9 @@ export class DeviceSessionService {
     app_version?: string;
     unsynced_items_count?: number;
     status?: "Active" | "Idle" | "Locked";
+    update_status?: string;
+    update_error?: string;
+    last_error?: string;
   }): Promise<boolean> {
     try {
       const profile = await storeDeviceService.getDeviceProfile().catch(() => null);
@@ -162,11 +165,14 @@ export class DeviceSessionService {
           device_uuid: profile.device_uuid,
           device_name: profile.device_name || undefined,
           counter_name: profile.counter_name || undefined,
-          app_version: params?.app_version || "2.0.21",
+          app_version: params?.app_version || "2.0.22",
           unsynced_items_count: unsynced,
           status: params?.status || "Active",
           user_role: userRole,
           store_id: profile.store_id,
+          update_status: params?.update_status,
+          update_error: params?.update_error,
+          last_error: params?.last_error,
         }),
       });
 
@@ -174,6 +180,19 @@ export class DeviceSessionService {
     } catch {
       return false;
     }
+  }
+
+  /**
+   * Report update failure details to the admin panel device status.
+   */
+  async reportUpdateFailure(failingUrl: string, statusCode: number | string = 404, rawError?: string): Promise<boolean> {
+    const errorText = `Download failed (${statusCode}): ${failingUrl}`;
+    console.error(`[DeviceSession] Reporting updater failure: ${errorText}`);
+    return this.sendHeartbeat({
+      update_status: "Update Download Failed",
+      update_error: errorText,
+      last_error: rawError || errorText,
+    });
   }
 
   /**

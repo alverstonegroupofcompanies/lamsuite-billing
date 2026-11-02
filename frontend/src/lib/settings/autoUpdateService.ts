@@ -1,6 +1,7 @@
 import { checkUpdate, installUpdate, onUpdaterEvent, type UpdateStatusResult } from "@tauri-apps/api/updater";
 import { relaunch } from "@tauri-apps/api/process";
 import { sqliteStorage } from "../db/sqliteStorage";
+import { deviceSessionService } from "../devices/deviceSessionService";
 
 export type UpdateChannel = "stable" | "legacy_win7" | "beta";
 
@@ -25,6 +26,7 @@ export interface UpdateInfo {
     version: string;
     date?: string;
     body?: string;
+    downloadUrl?: string;
   };
   diagnostic?: UpdateCheckDiagnostic;
 }
@@ -39,7 +41,7 @@ export interface UpdateSettingsConfig {
 
 export type UpdateProgressCallback = (status: UpdateStatusResult) => void;
 
-const CURRENT_VERSION = "2.0.21";
+const CURRENT_VERSION = "2.0.22";
 const STORAGE_KEY_CONFIG = "lamsuite_updater_config";
 const STORAGE_KEY_DIAGNOSTICS = "lamsuite_updater_diagnostics";
 
@@ -101,7 +103,7 @@ export function classifyUpdaterError(
     return {
       category: "not_found",
       readableMessage: isInstall
-        ? "Update package download failed (HTTP 404: asset not found on release)"
+        ? `Download failed (404): ${diagnosticUrl}`
         : "Update feed not found (HTTP 404)",
       isOnline: true,
     };
@@ -200,6 +202,7 @@ class AutoUpdateService {
   private unlistenStatus: (() => void) | null = null;
   private backgroundIntervalId: any = null;
   private lastDiagnostic: UpdateCheckDiagnostic | null = null;
+  private cachedDownloadUrl: string = "";
 
   constructor() {
     this.initBackgroundTimer();
@@ -402,6 +405,15 @@ class AutoUpdateService {
         const remoteVer = probe.data.version?.replace(/^v/, "") || CURRENT_VERSION;
         const isNewer = this.compareSemver(remoteVer, CURRENT_VERSION) > 0;
 
+        let downloadUrl = "";
+        if (probe.data?.platforms) {
+          const platKey = Object.keys(probe.data.platforms).find((k) => k.includes("windows") || k.includes("darwin") || k.includes("linux")) || Object.keys(probe.data.platforms)[0];
+          if (platKey && probe.data.platforms[platKey]?.url) {
+            downloadUrl = probe.data.platforms[platKey].url;
+            this.cachedDownloadUrl = downloadUrl;
+          }
+        }
+
         const diag: UpdateCheckDiagnostic = {
           timestamp: new Date().toISOString(),
           url: probe.url,
@@ -423,6 +435,7 @@ class AutoUpdateService {
             version: remoteVer,
             date: probe.data.pub_date,
             body: probe.data.notes,
+            downloadUrl,
           },
           diagnostic: diag,
         };
@@ -481,6 +494,16 @@ class AutoUpdateService {
       };
       this.recordDiagnostic(diag);
 
+      // In desktop environment, also query probe asynchronously to cache platform download URL
+      this.probeUpdateFeed(config.channel, 1).then((probe) => {
+        if (probe?.data?.platforms) {
+          const pKey = Object.keys(probe.data.platforms).find((k) => k.includes("windows") || k.includes("darwin") || k.includes("linux")) || Object.keys(probe.data.platforms)[0];
+          if (pKey && probe.data.platforms[pKey]?.url) {
+            this.cachedDownloadUrl = probe.data.platforms[pKey].url;
+          }
+        }
+      }).catch(() => {});
+
       const result: UpdateInfo = {
         shouldUpdate,
         message: readableMsg,
@@ -489,6 +512,7 @@ class AutoUpdateService {
               version: manifest.version,
               date: manifest.date,
               body: manifest.body,
+              downloadUrl: this.cachedDownloadUrl || undefined,
             }
           : undefined,
         diagnostic: diag,
@@ -519,7 +543,8 @@ class AutoUpdateService {
    */
   public async installAndRestart(
     onProgress?: UpdateProgressCallback,
-    skipSafetyCheck: boolean = false
+    skipSafetyCheck: boolean = false,
+    explicitDownloadUrl?: string
   ): Promise<void> {
     if (!this.isTauri()) {
       throw new Error("Updates can only be installed in the desktop environment");
@@ -539,6 +564,7 @@ class AutoUpdateService {
     }
 
     this.isDownloading = true;
+    const targetUrl = explicitDownloadUrl || this.cachedDownloadUrl || this.getPrimaryEndpoint();
 
     try {
       if (onProgress) {
@@ -556,8 +582,27 @@ class AutoUpdateService {
       await relaunch();
     } catch (err: any) {
       console.error("[AutoUpdate] Installation failed:", err);
-      const classified = classifyUpdaterError(err, this.getPrimaryEndpoint(), null, "install");
-      throw new Error(classified.readableMessage || "Update installation failed");
+      const rawMsg = typeof err === "string" ? err : (err?.message || String(err));
+      const statusMatch = rawMsg.match(/status:\s*(\d{3})/i) || rawMsg.match(/\b(\d{3})\b/);
+      const statusCode = statusMatch ? parseInt(statusMatch[1], 10) : 404;
+
+      const urlMatch = rawMsg.match(/https?:\/\/[^\s"',)]+/);
+      const failingUrl = urlMatch ? urlMatch[0] : targetUrl;
+      const formattedError = `Download failed (${statusCode}): ${failingUrl}`;
+
+      console.error(`[AutoUpdate] ${formattedError}`);
+
+      // Report failure to admin panel device session status
+      deviceSessionService.reportUpdateFailure(failingUrl, statusCode, rawMsg).catch((e) => {
+        console.warn("[AutoUpdate] Failed reporting to device session:", e);
+      });
+
+      // Keep current version running smoothly and expose clear error
+      const errorObj = new Error(formattedError);
+      (errorObj as any).failingUrl = failingUrl;
+      (errorObj as any).statusCode = statusCode;
+      (errorObj as any).rawError = rawMsg;
+      throw errorObj;
     } finally {
       this.isDownloading = false;
       if (this.unlistenStatus) {

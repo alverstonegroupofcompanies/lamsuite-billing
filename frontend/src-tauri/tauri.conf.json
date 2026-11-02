@@ -7,8 +7,8 @@
     "withGlobalTauri": true
   },
   "package": {
-    "productName": "LamSuite Billing",
-    "version": "2.0.21"
+    "productName": "LamSuite-Billing",
+    "version": "2.0.22"
   },
   "tauri": {
     "allowlist": {
