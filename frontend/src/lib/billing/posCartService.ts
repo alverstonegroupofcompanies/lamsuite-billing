@@ -56,11 +56,74 @@ export class PosCartService {
   private billDiscount: { type: "percent" | "amount"; value: number } = { type: "amount", value: 0 };
   private manualRoundOff: number | null = null;
   private companyTaxMode: CompanyTaxMode = "inclusive";
+  private storeState: string = "32";
+  private gstType: "regular" | "composition" | "no_tax" = "regular";
+  private taxModeOverride?: CompanyTaxMode | null = null;
+  private gstTypeOverride?: "regular" | "composition" | "no_tax" | null = null;
+  private allowTaxOverride: boolean = false;
   private isInterState = false;
   private prescriptionMeta: PosPrescriptionMeta = {};
 
   getLines(): PosCartLine[] {
     return [...this.lines];
+  }
+
+  setStoreTaxSettings(config: {
+    taxMode?: CompanyTaxMode;
+    storeState?: string;
+    gstType?: "regular" | "composition" | "no_tax";
+    allowTaxOverride?: boolean;
+  }) {
+    if (config.taxMode) this.companyTaxMode = config.taxMode;
+    if (config.storeState) this.storeState = config.storeState;
+    if (config.gstType) this.gstType = config.gstType;
+    if (config.allowTaxOverride !== undefined) this.allowTaxOverride = config.allowTaxOverride;
+    this.recalculateAllLines();
+  }
+
+  setTaxOverride(override: {
+    taxMode?: CompanyTaxMode | null;
+    gstType?: "regular" | "composition" | "no_tax" | null;
+  }) {
+    if (override.taxMode !== undefined) this.taxModeOverride = override.taxMode;
+    if (override.gstType !== undefined) this.gstTypeOverride = override.gstType;
+    this.recalculateAllLines();
+  }
+
+  clearTaxOverride() {
+    this.taxModeOverride = null;
+    this.gstTypeOverride = null;
+    this.recalculateAllLines();
+  }
+
+  getActiveTaxMode(): {
+    taxMode: CompanyTaxMode;
+    gstType: "regular" | "composition" | "no_tax";
+    isOverridden: boolean;
+    isComposition: boolean;
+    isInterState: boolean;
+    documentTitle: "Tax Invoice" | "Bill of Supply";
+    allowOverride: boolean;
+  } {
+    const taxMode = this.taxModeOverride || this.companyTaxMode;
+    const gstType = this.gstTypeOverride || this.gstType;
+    const isComposition = gstType === "composition" || gstType === "no_tax";
+    return {
+      taxMode,
+      gstType,
+      isOverridden: Boolean(this.taxModeOverride || this.gstTypeOverride),
+      isComposition,
+      isInterState: this.isInterState,
+      documentTitle: isComposition ? "Bill of Supply" : "Tax Invoice",
+      allowOverride: this.allowTaxOverride,
+    };
+  }
+
+  recalculateAllLines() {
+    this.lines = this.lines.map((l) => ({
+      ...l,
+      calculated: this.calculateLine(l),
+    }));
   }
 
   setCustomer(id: string, name: string, gstin = "", placeOfSupply = "", phone = "") {
@@ -69,6 +132,18 @@ export class PosCartService {
     this.customerGstin = gstin;
     this.placeOfSupply = placeOfSupply;
     this.customerPhone = phone;
+
+    // Automatically resolve place of supply and intra/inter state
+    const cleanGst = (gstin || "").trim();
+    const cleanPos = (placeOfSupply || "").trim();
+    let destState = this.storeState;
+    if (cleanGst.length >= 2 && /^\d{2}/.test(cleanGst)) {
+      destState = cleanGst.slice(0, 2);
+    } else if (cleanPos.length >= 2 && /^\d{2}/.test(cleanPos)) {
+      destState = cleanPos.slice(0, 2);
+    }
+    this.isInterState = destState !== this.storeState;
+    this.recalculateAllLines();
   }
 
   getCustomer() {
@@ -144,7 +219,15 @@ export class PosCartService {
       gst_percent: line.product.gst_percent,
       rate_basis: line.rate_basis,
     };
-    return calculateLineTotals(input, this.companyTaxMode, this.isInterState);
+    const active = this.getActiveTaxMode();
+    return calculateLineTotals(input, {
+      companyTaxMode: active.taxMode,
+      isInterState: this.isInterState,
+      storeState: this.storeState,
+      gstType: active.gstType,
+      placeOfSupply: this.placeOfSupply,
+      customerGstin: this.customerGstin,
+    });
   }
 
   async scanBarcodeAndAddToCart(barcode: string): Promise<{ success: boolean; line?: PosCartLine; error?: string }> {
@@ -458,6 +541,8 @@ export class PosCartService {
     this.billDiscount = { type: "amount", value: 0 };
     this.manualRoundOff = null;
     this.prescriptionMeta = {};
+    this.taxModeOverride = null;
+    this.gstTypeOverride = null;
   }
 
   addItem(product: ProductItem, batch: ProductBatch, qty = 1, looseQty = 0) {
@@ -479,10 +564,18 @@ export class PosCartService {
       rate_basis: l.rate_basis,
     }));
 
+    const active = this.getActiveTaxMode();
     return calculateInvoiceTotals(
       billingLines,
       this.billDiscount,
-      this.companyTaxMode,
+      {
+        companyTaxMode: active.taxMode,
+        isInterState: this.isInterState,
+        storeState: this.storeState,
+        gstType: active.gstType,
+        placeOfSupply: this.placeOfSupply,
+        customerGstin: this.customerGstin,
+      },
       this.isInterState,
       this.manualRoundOff === null,
       this.manualRoundOff
@@ -539,6 +632,8 @@ export class PosCartService {
       ? "Split"
       : (resolvedPayments[0]?.mode || (typeof paymentModeOrPayments === "string" ? paymentModeOrPayments : "Cash"));
 
+    const activeTax = this.getActiveTaxMode();
+
     // 1. Submit through Online Transaction Service (Online-First with offline fallback)
     const txRes = await onlineTransactionService.submitAuthoritativeInvoice({
       store_id: activeStoreId,
@@ -556,6 +651,10 @@ export class PosCartService {
       paid_amount: totals.grand_total,
       payments: resolvedPayments,
       counter_id: activeCounterId,
+      tax_mode: activeTax.taxMode,
+      store_state: this.storeState,
+      gst_type: activeTax.gstType,
+      is_composition: activeTax.isComposition,
       patient_name: this.prescriptionMeta.patient_name,
       doctor_name: this.prescriptionMeta.doctor_name,
       doctor_reg_no: this.prescriptionMeta.doctor_reg_no,

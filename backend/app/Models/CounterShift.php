@@ -46,4 +46,14 @@ class CounterShift extends Model
     {
         return $this->belongsTo(Store::class);
     }
+
+    public function openedBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'opened_by_user_id');
+    }
+
+    public function closedBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'closed_by_user_id');
+    }
 }

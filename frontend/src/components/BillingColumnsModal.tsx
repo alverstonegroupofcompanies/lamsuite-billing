@@ -13,6 +13,7 @@ import {
   ArrowUp,
   ArrowDown,
 } from "lucide-react";
+import { isClinicalSupported } from "../lib/settings/storeTypePresets";
 import {
   companySettingsService,
   type ColumnSetting,
@@ -379,7 +380,9 @@ export const BillingColumnsModal: React.FC<BillingColumnsModalProps> = ({
             <div className="text-[11px] text-slate-500 mb-2">
               Configure patient metadata, customer details, and doctor headers visible above the billing table.
             </div>
-            {headerFields.map((field, idx) => (
+            {headerFields
+              .filter((f) => isClinicalSupported(companySettingsService.getSettings()?.store_type) || !["doctor", "patient"].includes(f.id))
+              .map((field, idx) => (
               <div
                 key={field.id}
                 className="flex items-center justify-between py-2.5 hover:bg-slate-50 px-2 rounded-lg transition-colors text-xs"

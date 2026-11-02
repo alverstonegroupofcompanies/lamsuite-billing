@@ -111,11 +111,7 @@ export class PartiesStore {
     const target = normalizeIndianPhone(phone);
     if (!target) return null;
 
-    const all = await this.getAllCustomers();
-    if (all.length === 0) {
-      await this.seedSampleCustomersIfEmpty();
-    }
-    const customers = all.length === 0 ? await this.getAllCustomers() : all;
+    const customers = await this.getAllCustomers();
 
     for (const c of customers) {
       if (normalizeIndianPhone(c.phone) === target) return c;
@@ -132,11 +128,7 @@ export class PartiesStore {
     const rawTerm = query.trim().toLowerCase();
     const cleanPhoneQuery = rawTerm.replace(/\D/g, "");
 
-    const all = await this.getAllCustomers();
-    if (all.length === 0) {
-      await this.seedSampleCustomersIfEmpty();
-    }
-    const customers = all.length === 0 ? await this.getAllCustomers() : all;
+    const customers = await this.getAllCustomers();
 
     if (!rawTerm) {
       return this.getRecentOrFrequentCustomers(limit);
@@ -205,8 +197,7 @@ export class PartiesStore {
   async getRecentOrFrequentCustomers(limit = 10): Promise<Customer[]> {
     const all = await this.getAllCustomers();
     if (all.length === 0) {
-      await this.seedSampleCustomersIfEmpty();
-      return (await this.getAllCustomers()).filter((c) => c.is_active).slice(0, limit);
+      return [];
     }
 
     try {

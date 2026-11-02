@@ -17,6 +17,7 @@ import {
 import { partiesStore, type Customer } from "../lib/masters/partiesStore";
 import { productsStore, type ProductItem } from "../lib/masters/productsStore";
 import { printingEngine, type CreditNotePrintData } from "../lib/printing/printingEngine";
+import { companySettingsService } from "../lib/settings/companySettingsService";
 import { invoiceManagementService, type InvoiceRecord, type InvoiceItemRecord } from "../lib/billing/invoiceManagementService";
 import { PrintPreviewModal } from "../components/PrintPreviewModal";
 import { useModalEscape } from "../lib/ui/modalEscapeManager";
@@ -354,16 +355,18 @@ export const CustomerDebitNotePage: React.FC = () => {
   };
 
   const handlePrintCreditNote = (cn: CreditNoteRecord) => {
+    const header = companySettingsService.getStorePrintHeader();
     const printData: CreditNotePrintData = {
       return_number: cn.credit_note_number,
       return_date: cn.credit_note_date,
       original_invoice_number: cn.original_invoice_numbers.join(", "),
       customer_debit_note_number: cn.source_debit_note_number,
       invoice_references: cn.invoice_references,
-      store_name: "LamStone Pharmacy & Retail",
-      store_address: "Main Road, Palakkad, Kerala - 678001",
-      store_phone: "9876543210",
-      store_gstin: "32AAAAA0000A1Z5",
+      store_name: header.store_name,
+      store_address: header.store_address,
+      store_phone: header.store_phone,
+      store_gstin: header.store_gstin,
+      store_type: header.store_type,
       customer_name: cn.customer_name,
       customer_phone: cn.customer_phone,
       customer_gstin: cn.customer_gstin,

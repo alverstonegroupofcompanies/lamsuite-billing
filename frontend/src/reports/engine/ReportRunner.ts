@@ -71,9 +71,9 @@ export class ReportRunner {
       : module.columns.filter((c) => c.isDefaultVisible);
 
     const storeDetails = {
-      storeName: settings.store_name || "LamStone Pharmacy & Retail",
-      address: settings.address || "Main Road, Palakkad, Kerala",
-      phone: settings.phone || "9876543210",
+      storeName: settings.store_name || "Store",
+      address: settings.address || "",
+      phone: settings.phone || "",
       gstin: settings.gstin,
       dlNo: settings.drug_license_numbers?.[0],
     };

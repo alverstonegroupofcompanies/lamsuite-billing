@@ -32,6 +32,16 @@ export const MastersPage: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [search, setSearch] = useState("");
 
+  const isPharmacy = Boolean(activeStore && (activeStore.store_type || "pharmacy") === "pharmacy");
+  const availablePartyTypes = (isPharmacy
+    ? ["customer", "supplier", "doctor", "patient"]
+    : ["customer", "supplier"]) as Array<"customer" | "supplier" | "doctor" | "patient">;
+
+  // Ledger Modal State
+  const [selectedLedgerParty, setSelectedLedgerParty] = useState<Party | null>(null);
+  const [ledgerData, setLedgerData] = useState<any | null>(null);
+  const [isLedgerLoading, setIsLedgerLoading] = useState(false);
+
   // Product Edit / Create Modal
   const [isProductModalOpen, setIsProductModalOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Partial<Product> | null>(null);
@@ -113,8 +123,31 @@ export const MastersPage: React.FC = () => {
   };
 
   useEffect(() => {
+    if (!isPharmacy && (partyType === "doctor" || partyType === "patient")) {
+      setPartyType("customer");
+    }
+  }, [isPharmacy, partyType]);
+
+  useEffect(() => {
     fetchCatalog();
   }, [activeTab, partyType, search, productPage, productPerPage, partyPage, activeStore]);
+
+  const openLedger = async (party: Party) => {
+    setSelectedLedgerParty(party);
+    setIsLedgerLoading(true);
+    try {
+      const endpoint =
+        party.type === "supplier"
+          ? `/admin/suppliers/${party.id}/ledger`
+          : `/admin/customers/${party.id}/ledger`;
+      const res = await api.get(endpoint);
+      setLedgerData(res);
+    } catch (err) {
+      console.error("Failed to load party ledger:", err);
+    } finally {
+      setIsLedgerLoading(false);
+    }
+  };
 
   const handleSaveProduct = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -351,7 +384,7 @@ export const MastersPage: React.FC = () => {
 
         {activeTab === "parties" && (
           <div className="flex items-center gap-1 overflow-x-auto text-xs w-full sm:w-auto">
-            {(["customer", "supplier", "doctor", "patient"] as const).map((type) => (
+            {availablePartyTypes.map((type) => (
               <button
                 key={type}
                 onClick={() => {
@@ -548,18 +581,19 @@ export const MastersPage: React.FC = () => {
                   <th className="px-4 py-3">Address</th>
                   <th className="px-4 py-3 text-right">Credit Limit</th>
                   <th className="px-4 py-3 text-right">Current Ledger Balance</th>
+                  <th className="px-4 py-3 text-right">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                 {isLoading ? (
                   <tr>
-                    <td colSpan={5} className="px-4 py-8 text-center text-slate-400">
+                    <td colSpan={6} className="px-4 py-8 text-center text-slate-400">
                       Loading parties...
                     </td>
                   </tr>
                 ) : parties.length === 0 ? (
                   <tr>
-                    <td colSpan={5} className="px-4 py-8 text-center text-slate-400">
+                    <td colSpan={6} className="px-4 py-8 text-center text-slate-400">
                       No {partyType} records found.
                     </td>
                   </tr>
@@ -586,6 +620,16 @@ export const MastersPage: React.FC = () => {
                         }`}
                       >
                         {formatINR(pt.current_balance)}
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        {(pt.type === "customer" || pt.type === "supplier") && (
+                          <button
+                            onClick={() => openLedger(pt)}
+                            className="px-2.5 py-1 text-[11px] font-semibold bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-lg transition"
+                          >
+                            View Ledger
+                          </button>
+                        )}
                       </td>
                     </tr>
                   ))
@@ -970,6 +1014,103 @@ export const MastersPage: React.FC = () => {
                   Commit Import
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Party Ledger Statement Modal */}
+      {selectedLedgerParty && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 overflow-y-auto">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 max-w-3xl w-full p-6 space-y-4 my-8">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
+              <div>
+                <h3 className="font-bold text-slate-900 dark:text-white text-base">
+                  {selectedLedgerParty.name} — Ledger Statement
+                </h3>
+                <p className="text-xs text-slate-400 capitalize">
+                  {selectedLedgerParty.type} | Phone: {selectedLedgerParty.phone || "—"} | GSTIN: {selectedLedgerParty.gstin || "Unregistered"}
+                </p>
+              </div>
+              <button
+                onClick={() => {
+                  setSelectedLedgerParty(null);
+                  setLedgerData(null);
+                }}
+                className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Balances summary */}
+            <div className="grid grid-cols-2 gap-3">
+              <div className="bg-slate-50 dark:bg-slate-800/50 p-3 rounded-xl border border-slate-200 dark:border-slate-700/60">
+                <span className="text-[10px] text-slate-500 uppercase font-semibold">Opening Balance</span>
+                <div className="text-sm font-bold font-mono">
+                  {formatINR(ledgerData?.opening_balance ?? selectedLedgerParty.opening_balance)}
+                </div>
+              </div>
+              <div className="bg-slate-50 dark:bg-slate-800/50 p-3 rounded-xl border border-slate-200 dark:border-slate-700/60">
+                <span className="text-[10px] text-slate-500 uppercase font-semibold">Current Outstanding Balance</span>
+                <div className="text-sm font-bold font-mono text-brand-600 dark:text-brand-400">
+                  {formatINR(ledgerData?.current_balance ?? selectedLedgerParty.current_balance)}
+                </div>
+              </div>
+            </div>
+
+            {/* Transactions Table */}
+            <div className="border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden max-h-80 overflow-y-auto">
+              <table className="w-full text-xs text-left text-slate-600 dark:text-slate-300">
+                <thead className="bg-slate-50 dark:bg-slate-800/50 text-slate-500 uppercase text-[10px] font-semibold sticky top-0 border-b border-slate-200 dark:border-slate-800">
+                  <tr>
+                    <th className="px-3 py-2">Date</th>
+                    <th className="px-3 py-2">Document Type</th>
+                    <th className="px-3 py-2">Doc Number</th>
+                    <th className="px-3 py-2 text-right">Debit (₹)</th>
+                    <th className="px-3 py-2 text-right">Credit (₹)</th>
+                    <th className="px-3 py-2 text-right">Balance (₹)</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800 font-mono">
+                  {isLedgerLoading ? (
+                    <tr>
+                      <td colSpan={6} className="px-4 py-8 text-center text-slate-400 font-sans">
+                        Loading ledger transactions...
+                      </td>
+                    </tr>
+                  ) : !ledgerData?.transactions?.length ? (
+                    <tr>
+                      <td colSpan={6} className="px-4 py-8 text-center text-slate-400 font-sans">
+                        No transactions found for this party.
+                      </td>
+                    </tr>
+                  ) : (
+                    ledgerData.transactions.map((tx: any, idx: number) => (
+                      <tr key={idx} className="hover:bg-slate-50/50">
+                        <td className="px-3 py-2 text-[11px] font-sans">{tx.doc_date}</td>
+                        <td className="px-3 py-2 font-sans font-medium">{tx.type}</td>
+                        <td className="px-3 py-2 font-bold text-slate-900 dark:text-white">{tx.doc_number}</td>
+                        <td className="px-3 py-2 text-right text-red-600">{tx.debit > 0 ? formatINR(tx.debit) : "—"}</td>
+                        <td className="px-3 py-2 text-right text-emerald-600">{tx.credit > 0 ? formatINR(tx.credit) : "—"}</td>
+                        <td className="px-3 py-2 text-right font-bold">{formatINR(tx.running_balance)}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="flex justify-end pt-2">
+              <button
+                onClick={() => {
+                  setSelectedLedgerParty(null);
+                  setLedgerData(null);
+                }}
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-xs font-semibold rounded-xl text-slate-700 dark:text-slate-300"
+              >
+                Close Statement
+              </button>
             </div>
           </div>
         </div>

@@ -24,7 +24,7 @@ class DeviceSessionController
             $this->bootstrapFromCounters($storeId);
         }
 
-        $query = DeviceSession::with(['user:id,name,username', 'counter:id,counter_name,counter_code,location_name'])
+        $query = DeviceSession::with(['user:id,name,username,role,is_admin', 'counter:id,counter_name,counter_code,location_name'])
             ->where('store_id', $storeId);
 
         // Search filter
@@ -34,7 +34,11 @@ class DeviceSessionController
                   ->orWhere('counter_name', 'like', "%{$search}%")
                   ->orWhere('counter_code', 'like', "%{$search}%")
                   ->orWhere('ip_address', 'like', "%{$search}%")
-                  ->orWhere('location', 'like', "%{$search}%");
+                  ->orWhere('location', 'like', "%{$search}%")
+                  ->orWhere('user_role', 'like', "%{$search}%")
+                  ->orWhereHas('user', function ($uq) use ($search) {
+                      $uq->where('name', 'like', "%{$search}%");
+                  });
             });
         }
 
@@ -42,43 +46,58 @@ class DeviceSessionController
             ->orderBy('last_active_at', 'desc')
             ->get();
 
-        $devices = $sessions->map(function (DeviceSession $s) {
+        $currentDeviceUuid = $request->header('X-Device-Uuid')
+            ?: $request->query('current_device_uuid')
+            ?: $request->query('device_uuid');
+
+        $devices = $sessions->map(function (DeviceSession $s) use ($currentDeviceUuid) {
             $status = $s->computeStatus();
+            $userRole = $s->user_role ?: ($s->user?->role ?: ($s->user?->is_admin ? 'Admin' : 'Cashier'));
+
             return [
                 'id' => (string)$s->id,
                 'session_id' => $s->session_id,
                 'device_uuid' => $s->device_uuid,
-                'device_name' => $s->device_name ?: null,
-                'counter_name' => $s->counter_name ?: null,
+                'device_name' => $s->device_name ?: 'Workstation',
+                'counter_name' => $s->counter_name ?: 'Counter 1',
                 'counter_code' => $s->counter_code ?: null,
+                'user_name' => $s->user?->name ?: null,
+                'user_role' => $userRole,
                 'ip_address' => $s->ip_address ?: null,
                 'location' => $s->location ?: null,
+                'status' => $status, // Active, Idle, Offline, Locked, Revoked
+                'sign_in_time' => $s->login_time ? $s->login_time->toIso8601String() : null,
                 'login_time' => $s->login_time ? $s->login_time->toIso8601String() : null,
+                'last_seen' => $s->last_active_at ? $s->last_active_at->toIso8601String() : null,
                 'last_active' => $s->last_active_at ? $s->last_active_at->toIso8601String() : null,
-                'status' => $status,
+                'app_version' => $s->app_version ?: '2.0.17',
+                'unsynced_items_count' => (int)($s->unsynced_items_count ?? 0),
+                'is_this_device' => !empty($currentDeviceUuid) && $s->device_uuid === $currentDeviceUuid,
                 'is_active' => (bool)$s->is_active,
-                'user_name' => $s->user?->name ?: null,
             ];
         });
 
         // Filter by computed status if requested
         if ($filterStatus = $request->query('status')) {
             $statusNormalized = strtolower(trim($filterStatus));
-            $devices = $devices->filter(function ($d) use ($statusNormalized) {
-                if ($statusNormalized === 'all') return true;
-                if ($statusNormalized === 'online') return $d['status'] === 'Online';
-                if ($statusNormalized === 'offline') return $d['status'] === 'Offline';
-                if (in_array($statusNormalized, ['expired', 'session expired'])) return $d['status'] === 'Session Expired';
-                return strtolower($d['status']) === $statusNormalized;
-            })->values();
+            if ($statusNormalized !== 'all') {
+                $devices = $devices->filter(function ($d) use ($statusNormalized) {
+                    return strtolower($d['status']) === $statusNormalized;
+                })->values();
+            }
         }
 
         return response()->json([
             'success' => true,
             'devices' => $devices,
             'total' => $devices->count(),
-            'online_count' => $devices->where('status', 'Online')->count(),
+            'active_count' => $devices->where('status', 'Active')->count(),
+            'idle_count' => $devices->where('status', 'Idle')->count(),
             'offline_count' => $devices->where('status', 'Offline')->count(),
+            'locked_count' => $devices->where('status', 'Locked')->count(),
+            'revoked_count' => $devices->where('status', 'Revoked')->count(),
+            // Backwards compatibility keys
+            'online_count' => $devices->where('status', 'Active')->count(),
         ]);
     }
 
@@ -91,6 +110,10 @@ class DeviceSessionController
             'device_uuid' => 'required|string',
             'device_name' => 'nullable|string|max:100',
             'counter_name' => 'nullable|string|max:100',
+            'app_version' => 'nullable|string|max:30',
+            'unsynced_items_count' => 'nullable|integer',
+            'status' => 'nullable|string|in:Active,active,Idle,idle,Locked,locked',
+            'user_role' => 'nullable|string|max:50',
             'store_id' => 'nullable',
         ]);
 
@@ -101,11 +124,14 @@ class DeviceSessionController
             $deviceUuid,
             $ip,
             $validated['device_name'] ?? null,
-            $validated['counter_name'] ?? null
+            $validated['counter_name'] ?? null,
+            $validated['app_version'] ?? null,
+            isset($validated['unsynced_items_count']) ? (int)$validated['unsynced_items_count'] : null,
+            $validated['status'] ?? null,
+            $validated['user_role'] ?? null
         );
 
         if (!$session) {
-            // If active session not found, create one if device or counter exists
             $storeId = $this->resolveStoreId($request);
             $session = DeviceSession::recordLogin(
                 $storeId,
@@ -116,20 +142,207 @@ class DeviceSessionController
                 null,
                 $request->user()?->id,
                 $ip,
-                $this->detectLocation($request)
+                $this->detectLocation($request),
+                $request->userAgent(),
+                $validated['app_version'] ?? null,
+                $validated['user_role'] ?? null
             );
         }
 
         return response()->json([
             'success' => true,
             'status' => $session->computeStatus(),
+            'last_seen' => $session->last_active_at?->toIso8601String(),
             'last_active' => $session->last_active_at?->toIso8601String(),
             'timestamp' => now()->toIso8601String(),
         ]);
     }
 
     /**
-     * Terminate / log out an active device session.
+     * Rename workstation or counter name.
+     */
+    public function rename(Request $request, string $id): JsonResponse
+    {
+        $session = DeviceSession::findOrFail($id);
+        $validated = $request->validate([
+            'counter_name' => 'nullable|string|max:100',
+            'device_name' => 'nullable|string|max:100',
+        ]);
+
+        $updates = [];
+        if (!empty($validated['counter_name'])) {
+            $updates['counter_name'] = trim($validated['counter_name']);
+        }
+        if (!empty($validated['device_name'])) {
+            $updates['device_name'] = trim($validated['device_name']);
+        }
+
+        if (empty($updates)) {
+            return response()->json(['message' => 'No names provided to update.'], 422);
+        }
+
+        $session->update($updates);
+
+        if ($session->counter_id && !empty($updates['counter_name'])) {
+            Counter::where('id', $session->counter_id)->update(['counter_name' => $updates['counter_name']]);
+        }
+        if (!empty($updates['device_name'])) {
+            Device::where('device_uuid', $session->device_uuid)->update(['device_name' => $updates['device_name']]);
+        }
+
+        AuditLog::log(
+            'device_session_renamed',
+            'DeviceSession',
+            (string)$session->id,
+            null,
+            $updates,
+            $session->store_id,
+            $request->user()?->id
+        );
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Device / Counter renamed successfully.',
+            'device' => [
+                'id' => (string)$session->id,
+                'counter_name' => $session->counter_name,
+                'device_name' => $session->device_name,
+            ],
+        ]);
+    }
+
+    /**
+     * Lock device session.
+     */
+    public function lock(Request $request, string $id): JsonResponse
+    {
+        $session = DeviceSession::findOrFail($id);
+        $session->update([
+            'status' => 'locked',
+        ]);
+
+        AuditLog::log(
+            'device_session_locked',
+            'DeviceSession',
+            (string)$session->id,
+            null,
+            ['device_uuid' => $session->device_uuid],
+            $session->store_id,
+            $request->user()?->id
+        );
+
+        return response()->json([
+            'success' => true,
+            'message' => "Workstation '{$session->device_name}' locked.",
+            'status' => 'Locked',
+        ]);
+    }
+
+    /**
+     * Unlock device session.
+     */
+    public function unlock(Request $request, string $id): JsonResponse
+    {
+        $session = DeviceSession::findOrFail($id);
+        $session->update([
+            'status' => 'active',
+            'last_active_at' => now(),
+        ]);
+
+        AuditLog::log(
+            'device_session_unlocked',
+            'DeviceSession',
+            (string)$session->id,
+            null,
+            ['device_uuid' => $session->device_uuid],
+            $session->store_id,
+            $request->user()?->id
+        );
+
+        return response()->json([
+            'success' => true,
+            'message' => "Workstation '{$session->device_name}' unlocked.",
+            'status' => 'Active',
+        ]);
+    }
+
+    /**
+     * Revoke device / counter permanently.
+     */
+    public function revoke(Request $request, string $id): JsonResponse
+    {
+        $session = DeviceSession::findOrFail($id);
+        $session->update([
+            'status' => 'revoked',
+            'is_active' => false,
+            'last_active_at' => now(),
+        ]);
+
+        if ($session->counter_id) {
+            Counter::where('id', $session->counter_id)->update(['status' => 'revoked']);
+        }
+        Device::where('device_uuid', $session->device_uuid)->update([
+            'status' => 'revoked',
+            'revoke_reason' => $request->input('reason', 'Revoked from devices console'),
+        ]);
+
+        AuditLog::log(
+            'device_session_revoked',
+            'DeviceSession',
+            (string)$session->id,
+            null,
+            ['device_uuid' => $session->device_uuid, 'reason' => $request->input('reason')],
+            $session->store_id,
+            $request->user()?->id
+        );
+
+        return response()->json([
+            'success' => true,
+            'message' => "Device '{$session->device_name}' revoked permanently.",
+            'status' => 'Revoked',
+        ]);
+    }
+
+    /**
+     * Force-expire or log out an active device session.
+     */
+    public function forceLogout(Request $request, string $id): JsonResponse
+    {
+        $session = DeviceSession::findOrFail($id);
+        $session->update([
+            'is_active' => false,
+            'status' => 'expired',
+            'last_active_at' => now(),
+        ]);
+
+        AuditLog::log(
+            'device_session_force_logout',
+            'DeviceSession',
+            (string)$session->id,
+            null,
+            ['device_uuid' => $session->device_uuid, 'device_name' => $session->device_name],
+            $session->store_id,
+            $request->user()?->id
+        );
+
+        return response()->json([
+            'success' => true,
+            'message' => "Session for '{$session->device_name}' terminated.",
+            'status' => 'Offline',
+            'is_active' => false,
+        ]);
+    }
+
+    /**
+     * Alias for forceLogout / expireSession.
+     */
+    public function expireSession(Request $request, string $id): JsonResponse
+    {
+        return $this->forceLogout($request, $id);
+    }
+
+    /**
+     * Terminate / log out an active device session via device_uuid or session_id.
      */
     public function logout(Request $request): JsonResponse
     {
@@ -143,39 +356,6 @@ class DeviceSessionController
         return response()->json([
             'success' => true,
             'message' => 'Device session ended successfully.',
-        ]);
-    }
-
-    /**
-     * Force-expire or revoke an active session from the admin panel / logged-in devices table.
-     */
-    public function expireSession(Request $request, string $id): JsonResponse
-    {
-        $session = DeviceSession::findOrFail($id);
-        $session->update([
-            'is_active' => false,
-            'status' => 'expired',
-            'last_active_at' => now(),
-        ]);
-
-        AuditLog::log(
-            'device_session_expired_by_admin',
-            'DeviceSession',
-            (string)$session->id,
-            null,
-            ['device_uuid' => $session->device_uuid, 'device_name' => $session->device_name],
-            $session->store_id,
-            $request->user()?->id
-        );
-
-        return response()->json([
-            'success' => true,
-            'message' => "Session for '{$session->device_name}' expired.",
-            'device' => [
-                'id' => (string)$session->id,
-                'status' => 'Session Expired',
-                'is_active' => false,
-            ],
         ]);
     }
 
@@ -244,14 +424,17 @@ class DeviceSessionController
                 'counter_id' => $c->id,
                 'device_uuid' => $deviceUuid,
                 'session_id' => 'ds_bootstrap_' . $c->id . '_' . bin2hex(random_bytes(6)),
-                'device_name' => $c->device_name ?: null,
-                'counter_name' => $c->counter_name ?: null,
+                'device_name' => $c->device_name ?: 'Workstation ' . $c->id,
+                'counter_name' => $c->counter_name ?: 'Counter ' . $c->id,
                 'counter_code' => $c->counter_code ?: null,
-                'ip_address' => $c->ip_address ?: null,
+                'ip_address' => $c->ip_address ?: '127.0.0.1',
                 'location' => $c->location_name ?: null,
                 'login_time' => $c->last_seen_at ?: $c->created_at ?: now()->subMinutes(10),
                 'last_active_at' => $c->last_seen_at ?: now()->subMinutes(10),
-                'status' => $isRevoked ? 'revoked' : ($isActive ? 'online' : 'offline'),
+                'status' => $isRevoked ? 'revoked' : ($isActive ? 'active' : 'offline'),
+                'app_version' => '2.0.17',
+                'unsynced_items_count' => 0,
+                'user_role' => 'Cashier',
                 'is_active' => !$isRevoked,
             ]);
         }

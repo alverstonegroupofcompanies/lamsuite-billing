@@ -11,6 +11,8 @@
 
 export type CompanyTaxMode = "inclusive" | "exclusive";
 
+export type GstType = "regular" | "composition" | "no_tax" | "unregistered";
+
 export type RateBasis = "sel_rate" | "mrp" | "ptr" | "pts" | "ptss" | "loose_rate" | "cost_price";
 
 export interface TaxEngineLineInput {
@@ -38,6 +40,7 @@ export interface TaxEngineDocumentInput {
   place_of_supply?: string | null;
   default_tax_mode?: CompanyTaxMode;
   is_composition?: boolean;
+  gst_type?: GstType;
   lines: TaxEngineLineInput[];
   bill_discount?: { type: "percent" | "amount"; value: number };
   auto_round_off?: boolean;
@@ -110,6 +113,9 @@ export interface TaxEngineDocumentTotals {
   is_inter_state: boolean;
   store_state: string;
   place_of_supply: string;
+  is_composition: boolean;
+  gst_type: GstType;
+  document_title: "Tax Invoice" | "Bill of Supply";
   lines: TaxEngineCalculatedLine[];
   hsn_summary: TaxHsnSummaryItem[];
 }
@@ -162,7 +168,9 @@ export function calculateDocumentTaxes(input: TaxEngineDocumentInput): TaxEngine
 
   const isInterState = storeState !== posState;
   const defaultTaxMode = input.default_tax_mode || "inclusive";
-  const isComposition = Boolean(input.is_composition);
+  const gstType: GstType = input.gst_type || (input.is_composition ? "composition" : "regular");
+  const isComposition = Boolean(input.is_composition) || gstType === "composition" || gstType === "no_tax" || gstType === "unregistered";
+  const documentTitle: "Tax Invoice" | "Bill of Supply" = isComposition ? "Bill of Supply" : "Tax Invoice";
 
   // 1. Calculate Gross and Line Discounts per line
   interface PreLine {
@@ -478,6 +486,9 @@ export function calculateDocumentTaxes(input: TaxEngineDocumentInput): TaxEngine
     is_inter_state: isInterState,
     store_state: storeState,
     place_of_supply: posState,
+    is_composition: isComposition,
+    gst_type: gstType,
+    document_title: documentTitle,
     lines: calculatedLines,
     hsn_summary: hsnSummary,
   };

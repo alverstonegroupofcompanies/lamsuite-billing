@@ -17,6 +17,8 @@ export interface RegisteredStoreRecord {
   counter_id: string;
   counter_name: string;
   counter_code: string;
+  store_type?: string;
+  gst_type?: string;
   is_hub: boolean;
   registered_at: number;
   last_opened_at: number;

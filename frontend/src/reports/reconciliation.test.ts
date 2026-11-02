@@ -296,4 +296,40 @@ describe("Financial Data Layer & Reports Reconciliation (Zero Drift to the Paisa
     expect(searchResult.rows).toHaveLength(1);
     expect(searchResult.rows[0].supplier_name).toBe("Apollo Pharma Distributors Pvt Ltd");
   });
+
+  it("empty store produces clean zeros and zero totals without NaN or sample numbers", async () => {
+    await sqliteStorage.clearTable("invoices");
+    await sqliteStorage.clearTable("invoice_items");
+    await sqliteStorage.clearTable("purchase_documents");
+
+    const dashboard = await dashboardMetricsService.getDashboardMetrics("today", "2026-11-02", "2026-11-02");
+    expect(dashboard.netSales).toBe(0);
+    expect(dashboard.grossSales).toBe(0);
+    expect(dashboard.billsIssuedCount).toBe(0);
+    expect(dashboard.averageTicket).toBe(0);
+    expect(dashboard.payments.cash).toBe(0);
+    expect(dashboard.payments.upi).toBe(0);
+    expect(dashboard.payments.digitalPercent).toBe(0);
+    expect(dashboard.gst.totalTaxable).toBe(0);
+    expect(dashboard.gst.totalTaxAccrued).toBe(0);
+
+    const salesRegReport = reportRegistry.get("sales-register")!;
+    const salesResult = await reportRunner.executeReport(salesRegReport, {
+      filters: { startDate: "2026-11-02", endDate: "2026-11-02" },
+    });
+    expect(salesResult.rows).toHaveLength(0);
+    expect(salesResult.totalCount).toBe(0);
+    expect(salesResult.summary.grand_total).toBe(0);
+    expect(salesResult.summary.tax_total).toBe(0);
+
+    const dailyColReport = reportRegistry.get("daily-collection")!;
+    const dailyResult = await reportRunner.executeReport(dailyColReport, {
+      filters: { startDate: "2026-11-02", endDate: "2026-11-02" },
+    });
+    expect(dailyResult.rows.length).toBeGreaterThan(0);
+    for (const row of dailyResult.rows) {
+      expect(row.amount).toBe(0);
+      expect(row.count).toBe(0);
+    }
+  });
 });

@@ -76,7 +76,16 @@ export const PurchaseEntryForm: React.FC<PurchaseEntryFormProps> = ({
   editPurchaseId,
 }) => {
   useModalEscape(true, () => {
-    // Only close on Esc if not editing or active inside an input
+    if (isEditingCell) {
+      cancelCellEdit();
+      return;
+    }
+    if (focusContext === "grid") {
+      setSelectedRowIndex(null);
+      setFocusContext("entry_row");
+      entryProductInputRef.current?.focus();
+      return;
+    }
     if (confirm("Close purchase bill entry? Any unsaved line items will be lost.")) {
       onClose();
     }
@@ -108,8 +117,79 @@ export const PurchaseEntryForm: React.FC<PurchaseEntryFormProps> = ({
   // Grid Lines & Draft Inline Entry Row
   const [lines, setLines] = useState<PurchaseLineItemInput[]>(initialPoData?.lines || []);
   const [selectedRowIndex, setSelectedRowIndex] = useState<number | null>(null);
+  const [selectedCellCol, setSelectedCellCol] = useState<string>("qty");
+  const [isEditingCell, setIsEditingCell] = useState(false);
+  const cellEditBackupRef = useRef<PurchaseLineItemInput | null>(null);
   const [focusContext, setFocusContext] = useState<PurchaseFocusContext>("entry_row");
   const [undoDeleteBuffer, setUndoDeleteBuffer] = useState<{ line: PurchaseLineItemInput; index: number } | null>(null);
+
+  const EDITABLE_PURCHASE_COLS = useMemo(
+    () => [
+      "product_name",
+      "batch_no",
+      "expiry_date",
+      "qty",
+      "free_qty",
+      "mrp",
+      "purchase_rate",
+      "discount",
+      "gst",
+      "selling_rate",
+    ],
+    []
+  );
+
+  const getNavigableCols = useCallback(() => {
+    return purchaseColumns
+      .filter((c) => c.visible !== false)
+      .sort((a, b) => (a.order || 0) - (b.order || 0))
+      .map((c) => c.id)
+      .filter((id) => EDITABLE_PURCHASE_COLS.includes(id));
+  }, [purchaseColumns, EDITABLE_PURCHASE_COLS]);
+
+  const startCellEdit = (rowIndex: number, colId: string) => {
+    if (!lines[rowIndex]) return;
+    if (colId === "product_name") {
+      setSelectedLineForConversion(lines[rowIndex]);
+      setIsConversionModalOpen(true);
+      return;
+    }
+    cellEditBackupRef.current = { ...lines[rowIndex] };
+    setSelectedRowIndex(rowIndex);
+    setSelectedCellCol(colId);
+    setIsEditingCell(true);
+    setFocusContext("cell_edit");
+  };
+
+  const saveCellEdit = () => {
+    setIsEditingCell(false);
+    setFocusContext("grid");
+    cellEditBackupRef.current = null;
+  };
+
+  const cancelCellEdit = () => {
+    if (cellEditBackupRef.current && selectedRowIndex !== null) {
+      const backup = cellEditBackupRef.current;
+      setLines((prev) => {
+        const next = [...prev];
+        next[selectedRowIndex] = backup;
+        return next;
+      });
+    }
+    setIsEditingCell(false);
+    setFocusContext("grid");
+    cellEditBackupRef.current = null;
+  };
+
+  const updateCommittedLineField = (rowIndex: number, field: keyof PurchaseLineItemInput, value: any) => {
+    setLines((prev) => {
+      const next = [...prev];
+      if (next[rowIndex]) {
+        next[rowIndex] = { ...next[rowIndex], [field]: value };
+      }
+      return next;
+    });
+  };
 
   // Permanent Entry Row (Draft line state)
   const [entryDraftProduct, setEntryDraftProduct] = useState<ProductItem | null>(null);
@@ -502,8 +582,13 @@ export const PurchaseEntryForm: React.FC<PurchaseEntryFormProps> = ({
     const updated = [...lines];
     updated.splice(undoDeleteBuffer.index, 0, undoDeleteBuffer.line);
     setLines(updated);
+    setSelectedRowIndex(undoDeleteBuffer.index);
+    const navCols = getNavigableCols();
+    setSelectedCellCol(navCols.includes("qty") ? "qty" : navCols[0] || "product_name");
+    setFocusContext("grid");
+    const restoredName = undoDeleteBuffer.line.product_name;
     setUndoDeleteBuffer(null);
-    showNotification(`Restored ${undoDeleteBuffer.line.product_name}`);
+    showNotification(`Restored ${restoredName}`);
   };
 
   // Product Search & Barcode input handler
@@ -514,6 +599,8 @@ export const PurchaseEntryForm: React.FC<PurchaseEntryFormProps> = ({
         setSelectedSearchIndex((prev) => (prev + 1 >= searchResults.length ? 0 : prev + 1));
       } else if (lines.length > 0) {
         setSelectedRowIndex(0);
+        const navCols = getNavigableCols();
+        setSelectedCellCol(navCols.includes("qty") ? "qty" : navCols[0] || "product_name");
         setFocusContext("grid");
       }
       return;
@@ -525,6 +612,8 @@ export const PurchaseEntryForm: React.FC<PurchaseEntryFormProps> = ({
         setSelectedSearchIndex((prev) => (prev - 1 < 0 ? searchResults.length - 1 : prev - 1));
       } else if (lines.length > 0) {
         setSelectedRowIndex(lines.length - 1);
+        const navCols = getNavigableCols();
+        setSelectedCellCol(navCols.includes("qty") ? "qty" : navCols[0] || "product_name");
         setFocusContext("grid");
       } else {
         supplierInputRef.current?.focus();
@@ -610,6 +699,94 @@ export const PurchaseEntryForm: React.FC<PurchaseEntryFormProps> = ({
         entryProductInputRef.current?.select();
         setFocusContext("entry_row");
         return;
+      }
+
+      // --- Grid Line & Cell Traversal Mode ---
+      if (focusContext === "grid" && !isEditingCell) {
+        // ArrowUp: move to previous line
+        if (e.key === "ArrowUp") {
+          e.preventDefault();
+          if (selectedRowIndex !== null && selectedRowIndex > 0) {
+            setSelectedRowIndex(selectedRowIndex - 1);
+          }
+          return;
+        }
+
+        // ArrowDown: move to next line, or return to entry row from last line
+        if (e.key === "ArrowDown") {
+          e.preventDefault();
+          if (selectedRowIndex !== null) {
+            if (selectedRowIndex >= lines.length - 1) {
+              // Return to entry row at bottom!
+              setSelectedRowIndex(null);
+              setFocusContext("entry_row");
+              setTimeout(() => {
+                entryProductInputRef.current?.focus();
+                entryProductInputRef.current?.select();
+              }, 20);
+            } else {
+              setSelectedRowIndex(selectedRowIndex + 1);
+            }
+          }
+          return;
+        }
+
+        // ArrowLeft: move to previous cell in row
+        if (e.key === "ArrowLeft") {
+          e.preventDefault();
+          const navCols = getNavigableCols();
+          const curIdx = navCols.indexOf(selectedCellCol);
+          if (curIdx > 0) {
+            setSelectedCellCol(navCols[curIdx - 1]);
+          }
+          return;
+        }
+
+        // ArrowRight: move to next cell in row
+        if (e.key === "ArrowRight") {
+          e.preventDefault();
+          const navCols = getNavigableCols();
+          const curIdx = navCols.indexOf(selectedCellCol);
+          if (curIdx >= 0 && curIdx < navCols.length - 1) {
+            setSelectedCellCol(navCols[curIdx + 1]);
+          }
+          return;
+        }
+
+        // Enter: start inline editing for selected cell
+        if (e.key === "Enter") {
+          e.preventDefault();
+          if (selectedRowIndex !== null && lines[selectedRowIndex]) {
+            startCellEdit(selectedRowIndex, selectedCellCol);
+          }
+          return;
+        }
+
+        // Delete or Backspace: remove line with undo buffer
+        if (e.key === "Delete" || (e.key === "Backspace" && (document.activeElement?.tagName || "").toLowerCase() !== "input")) {
+          e.preventDefault();
+          if (selectedRowIndex !== null) {
+            const idxToRemove = selectedRowIndex;
+            removeCommittedLine(idxToRemove);
+            if (lines.length <= 1) {
+              setSelectedRowIndex(null);
+              setFocusContext("entry_row");
+              setTimeout(() => entryProductInputRef.current?.focus(), 20);
+            } else {
+              setSelectedRowIndex(Math.min(idxToRemove, lines.length - 2));
+            }
+          }
+          return;
+        }
+
+        // Esc: exit grid line selection and return to entry row
+        if (e.key === "Escape") {
+          e.preventDefault();
+          setSelectedRowIndex(null);
+          setFocusContext("entry_row");
+          setTimeout(() => entryProductInputRef.current?.focus(), 20);
+          return;
+        }
       }
 
       // Alt+S : Focus Supplier
@@ -749,6 +926,11 @@ export const PurchaseEntryForm: React.FC<PurchaseEntryFormProps> = ({
     undoDeleteBuffer,
     freightCharges,
     manualRoundOff,
+    focusContext,
+    isEditingCell,
+    selectedRowIndex,
+    selectedCellCol,
+    getNavigableCols,
   ]);
 
   // Open Post Summary Modal and run verification checks
@@ -1213,7 +1395,9 @@ export const PurchaseEntryForm: React.FC<PurchaseEntryFormProps> = ({
                     key={`${line.product_id}_${line.batch_no}_${idx}`}
                     idx={idx}
                     line={line}
-                    isSelected={selectedRowIndex === idx && focusContext === "grid"}
+                    isSelected={selectedRowIndex === idx && (focusContext === "grid" || focusContext === "cell_edit")}
+                    selectedCellCol={selectedCellCol}
+                    isEditingCell={isEditingCell && selectedRowIndex === idx}
                     visibleCols={visibleColumns}
                     isInterstate={isInterstate}
                     lastPurchaseDetails={lastPurchaseMap[line.product_id]}
@@ -1221,6 +1405,17 @@ export const PurchaseEntryForm: React.FC<PurchaseEntryFormProps> = ({
                       setSelectedRowIndex(idx);
                       setFocusContext("grid");
                     }}
+                    onCellClick={(colId) => {
+                      setSelectedRowIndex(idx);
+                      setSelectedCellCol(colId);
+                      setFocusContext("grid");
+                    }}
+                    onCellDoubleClick={(colId) => {
+                      startCellEdit(idx, colId);
+                    }}
+                    onCellEditSave={saveCellEdit}
+                    onCellEditCancel={cancelCellEdit}
+                    onFieldChange={(field, val) => updateCommittedLineField(idx, field, val)}
                     onRemoveLine={() => removeCommittedLine(idx)}
                     onEditConversion={() => {
                       setSelectedLineForConversion(line);

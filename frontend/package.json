@@ -1,13 +1,14 @@
 {
   "name": "lamsuite-billing-frontend",
   "private": true,
-  "version": "2.0.16",
+  "version": "2.0.17",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
     "test": "vitest run",
+    "test:branding": "node ../scripts/verify-clean-branding.cjs",
     "test:security": "vitest run src/lib/auth/storeDeviceService.test.ts",
     "check:security": "node scripts/checkReleaseSecurity.cjs && vitest run src/lib/auth/storeDeviceService.test.ts",
     "test:watch": "vitest",

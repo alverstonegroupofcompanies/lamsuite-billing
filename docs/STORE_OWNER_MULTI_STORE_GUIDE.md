@@ -1,6 +1,6 @@
 # LamSuite Billing — Store Owner's Guide: Multi-Store Workspace
 
-Welcome to **LamSuite Billing v2.0** with **Tally-Style Multi-Store Workspace**. 
+Welcome to **LamSuite Billing v2.0** with **Multi-Store Workspace**. 
 
 This feature allows you to register and maintain multiple stores and branch counters on the same workstation terminal without resetting or re-pairing your device each time. You can switch between your pharmacy, clinic, or wholesale branch in under one second.
 

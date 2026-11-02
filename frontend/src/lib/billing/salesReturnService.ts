@@ -229,12 +229,14 @@ export class SalesReturnService {
     const storeState = (originalInv as any)?.store_state_code;
     const isTaxInclusive = (originalInv as any)?.is_tax_inclusive || false;
 
+    const isComposition = (originalInv as any)?.is_composition || (originalInv as any)?.gst_type === "composition" || (originalInv as any)?.gst_type === "no_tax" || (originalInv && originalInv.tax_total === 0);
     const taxResult = calculateDocumentTaxes({
       store_state: storeState || "32",
       lines: taxLines,
       customer_gstin: customerGstin,
       place_of_supply: placeOfSupply,
       default_tax_mode: isTaxInclusive ? "inclusive" : "exclusive",
+      is_composition: Boolean(isComposition),
     });
 
     const returnLines: SalesReturnItem[] = [];

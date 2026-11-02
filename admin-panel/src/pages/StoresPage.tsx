@@ -409,6 +409,64 @@ export const StoresPage: React.FC = () => {
 
                 <div>
                   <label className="block font-medium text-slate-700 dark:text-slate-300 mb-1">
+                    Store Type (Domain Preset) *
+                  </label>
+                  <select
+                    value={editingStore.store_type || "pharmacy"}
+                    onChange={(e) => {
+                      const newType = e.target.value;
+                      if (editingStore.store_type === "pharmacy" && newType !== "pharmacy") {
+                        if (!window.confirm("Notice: Switching from Pharmacy to another business type will hide doctor, patient, prescription and Schedule H fields across POS, bills, and reports. Existing records will NOT be deleted. Do you want to proceed?")) {
+                          return;
+                        }
+                      }
+                      setEditingStore({ ...editingStore, store_type: newType });
+                    }}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                  >
+                    <option value="pharmacy">Pharmacy & Chemists</option>
+                    <option value="cosmetics">Cosmetics & Beauty</option>
+                    <option value="kirana_general">General Store / Kirana / Supermarket</option>
+                    <option value="clothing">Clothing & Footwear</option>
+                    <option value="electronics">Electronics & Mobile Store</option>
+                    <option value="stationery">Stationery & Books</option>
+                    <option value="wholesale">Wholesale & Distributor</option>
+                    <option value="restaurant">Restaurant, Cafe & Bakery</option>
+                    <option value="other">General Retail / Other</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block font-medium text-slate-700 dark:text-slate-300 mb-1">
+                    GST Billing Type *
+                  </label>
+                  <select
+                    value={editingStore.gst_type || "regular"}
+                    onChange={(e) => setEditingStore({ ...editingStore, gst_type: e.target.value as any })}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                  >
+                    <option value="regular">Regular Taxpayer (Tax Invoice)</option>
+                    <option value="composition">Composition Scheme (Bill of Supply)</option>
+                    <option value="no_tax">Unregistered / No Tax (Bill of Supply)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block font-medium text-slate-700 dark:text-slate-300 mb-1">
+                    Tax Price Basis
+                  </label>
+                  <select
+                    value={editingStore.tax_mode || "inclusive"}
+                    onChange={(e) => setEditingStore({ ...editingStore, tax_mode: e.target.value as any })}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                  >
+                    <option value="inclusive">Tax Inclusive (MRP / Retail)</option>
+                    <option value="exclusive">Tax Exclusive (B2B / Wholesale)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block font-medium text-slate-700 dark:text-slate-300 mb-1">
                     License Plan
                   </label>
                   <input

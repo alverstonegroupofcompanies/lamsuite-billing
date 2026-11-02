@@ -91,12 +91,13 @@ class AdminReportController
         foreach ($invoices as $inv) {
             foreach ($inv->items as $item) {
                 $prod = Product::find($item->product_id);
-                $hsn = $prod ? ($prod->hsn_sac_code ?: '30049099') : '30049099';
+                $hsn = trim($item->hsn_code ?? $prod?->hsn_sac_code ?? 'OTHER');
+                if (empty($hsn)) $hsn = 'OTHER';
 
                 if (!isset($hsnMap[$hsn])) {
                     $hsnMap[$hsn] = [
                         'hsn_code' => $hsn,
-                        'description' => 'Pharmaceutical Goods',
+                        'description' => $prod?->name ?? $item->product_name ?? 'Item',
                         'total_qty' => 0,
                         'taxable_value' => 0,
                         'cgst_amount' => 0,
@@ -157,32 +158,65 @@ class AdminReportController
     }
 
     /**
-     * Customer Outstanding & Aging Report.
+     * Customer Outstanding & Real Aging Report based on unpaid invoice dates.
      */
     public function customerAging(Request $request): JsonResponse
     {
         $storeId = $request->get('active_store_id');
+        $today = Carbon::today();
 
-        $customers = Party::where('type', 'customer')
+        $parties = Party::where('type', 'customer')
             ->where('current_balance', '>', 0)
             ->when($storeId, fn($q) => $q->where('store_id', $storeId))
             ->orderBy('current_balance', 'desc')
-            ->get()
-            ->map(function ($c) {
-                // Approximate aging brackets
-                $bal = (float)$c->current_balance;
-                return [
-                    'id' => $c->id,
-                    'name' => $c->name,
-                    'phone' => $c->phone,
-                    'credit_limit' => $c->credit_limit,
-                    'current_balance' => $bal,
-                    'bracket_0_30' => round($bal * 0.6, 2),
-                    'bracket_31_60' => round($bal * 0.25, 2),
-                    'bracket_61_90' => round($bal * 0.1, 2),
-                    'bracket_90_plus' => round($bal * 0.05, 2),
-                ];
-            });
+            ->get();
+
+        $customers = $parties->map(function ($party) use ($today) {
+            $totalOutstanding = (float)$party->current_balance;
+
+            $unpaidInvoices = Invoice::where('customer_id', $party->id)
+                ->where('status', '!=', 'cancelled')
+                ->whereRaw('grand_total > paid_amount')
+                ->orderBy('invoice_date', 'asc')
+                ->get();
+
+            $b0_30 = 0.0;
+            $b31_60 = 0.0;
+            $b61_90 = 0.0;
+            $b90_plus = 0.0;
+
+            if ($unpaidInvoices->isNotEmpty()) {
+                foreach ($unpaidInvoices as $inv) {
+                    $due = max(0, (float)$inv->grand_total - (float)$inv->paid_amount);
+                    $invDate = Carbon::parse($inv->invoice_date);
+                    $daysOld = $invDate->diffInDays($today);
+
+                    if ($daysOld <= 30) {
+                        $b0_30 += $due;
+                    } elseif ($daysOld <= 60) {
+                        $b31_60 += $due;
+                    } elseif ($daysOld <= 90) {
+                        $b61_90 += $due;
+                    } else {
+                        $b90_plus += $due;
+                    }
+                }
+            } else {
+                $b0_30 = $totalOutstanding;
+            }
+
+            return [
+                'id' => $party->id,
+                'name' => $party->name,
+                'phone' => $party->phone,
+                'credit_limit' => $party->credit_limit,
+                'current_balance' => round($totalOutstanding, 2),
+                'bracket_0_30' => round($b0_30, 2),
+                'bracket_31_60' => round($b31_60, 2),
+                'bracket_61_90' => round($b61_90, 2),
+                'bracket_90_plus' => round($b90_plus, 2),
+            ];
+        });
 
         return response()->json([
             'total_customers_with_dues' => $customers->count(),

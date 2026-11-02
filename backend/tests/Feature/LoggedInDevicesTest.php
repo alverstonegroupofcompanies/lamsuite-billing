@@ -22,11 +22,11 @@ class LoggedInDevicesTest extends TestCase
         parent::setUp();
 
         $this->store = Store::create([
-            'name' => 'Alverstone Central Pharmacy',
+            'name' => 'LamSuite Central Store',
             'code' => 'CENTRAL-01',
             'is_active' => true,
             'tax_mode' => 'exclusive',
-            'address' => 'Palakkad, Kerala',
+            'address' => 'Central Retail Market',
         ]);
 
         $this->adminUser = User::create([
@@ -41,8 +41,8 @@ class LoggedInDevicesTest extends TestCase
     }
 
     /**
-     * 1. A device logs in and appears in the Logged-In Devices list.
-     * 2. The displayed device name and counter name match the sign-in information.
+     * 1. A device logs in and appears in the Logged-In Devices list with Active status,
+     * matching device name, counter name, user role, and app version.
      */
     public function test_device_login_appears_in_logged_in_devices_with_matching_names(): void
     {
@@ -78,8 +78,9 @@ class LoggedInDevicesTest extends TestCase
         ]);
         $loginRes->assertStatus(200);
 
-        // Fetch logged-in devices
-        $res = $this->getJson('/api/devices/logged-in?store_id=' . $this->store->id);
+        // Fetch logged-in devices with X-Device-Uuid header
+        $res = $this->withHeaders(['X-Device-Uuid' => 'uuid_pos_alpha'])
+            ->getJson('/api/device-sessions?store_id=' . $this->store->id);
         $res->assertStatus(200);
         $res->assertJson(['success' => true]);
 
@@ -91,59 +92,44 @@ class LoggedInDevicesTest extends TestCase
         $this->assertEquals('POS Terminal Alpha', $device['device_name']);
         $this->assertEquals('Counter 01 (Front Desk)', $device['counter_name']);
         $this->assertEquals('C01', $device['counter_code']);
-        $this->assertEquals('Online', $device['status']);
-        $this->assertNotNull($device['login_time']);
-        $this->assertNotNull($device['last_active']);
+        $this->assertEquals('Active', $device['status']);
+        $this->assertTrue($device['is_this_device']);
+        $this->assertNotNull($device['sign_in_time']);
+        $this->assertNotNull($device['last_seen']);
+        $this->assertEquals('2.0.17', $device['app_version']);
+        $this->assertEquals(0, $device['unsynced_items_count']);
     }
 
     /**
-     * 3. Multiple devices can log in simultaneously and appear as separate entries.
+     * 2. Multiple devices can log in simultaneously and appear as separate entries.
      */
-    public function test_multiple_devices_appear_as_separate_entries(): void
+    public function test_multiple_devices_login_simultaneously(): void
     {
-        $c1 = Counter::create([
-            'store_id' => $this->store->id,
-            'counter_code' => 'C01',
-            'counter_name' => 'Counter 01',
-            'device_name' => 'Dell Optiplex 7050',
-            'device_uuid' => 'uuid_terminal_1',
-            'status' => 'active',
-        ]);
-
-        $c2 = Counter::create([
-            'store_id' => $this->store->id,
-            'counter_code' => 'C02',
-            'counter_name' => 'Counter 02',
-            'device_name' => 'HP EliteDesk 800',
-            'device_uuid' => 'uuid_terminal_2',
-            'status' => 'active',
-        ]);
-
-        // Device 1 session
         DeviceSession::recordLogin(
             $this->store->id,
             'uuid_terminal_1',
             'Dell Optiplex 7050',
-            $c1->id,
-            $c1->counter_name,
+            null,
+            'Counter 01',
             'C01',
             null,
-            '192.168.1.10'
+            '192.168.1.10',
+            'Ground Floor'
         );
 
-        // Device 2 session
         DeviceSession::recordLogin(
             $this->store->id,
             'uuid_terminal_2',
             'HP EliteDesk 800',
-            $c2->id,
-            $c2->counter_name,
+            null,
+            'Counter 02',
             'C02',
             null,
-            '192.168.1.11'
+            '192.168.1.11',
+            'First Floor'
         );
 
-        $res = $this->getJson('/api/devices/logged-in?store_id=' . $this->store->id);
+        $res = $this->getJson('/api/device-sessions?store_id=' . $this->store->id);
         $res->assertStatus(200);
 
         $devices = collect($res->json('devices'));
@@ -161,7 +147,7 @@ class LoggedInDevicesTest extends TestCase
     }
 
     /**
-     * 4. A device becomes offline after its heartbeat stops or its session expires.
+     * 3. A device becomes offline after its heartbeat stops or its session expires.
      */
     public function test_device_becomes_offline_when_heartbeat_stops(): void
     {
@@ -174,15 +160,15 @@ class LoggedInDevicesTest extends TestCase
             'C03'
         );
 
-        // Initial status is Online
-        $this->assertEquals('Online', $session->computeStatus(120));
+        // Initial status is Active
+        $this->assertEquals('Active', $session->computeStatus(120));
 
-        // Simulate heartbeat stopping: set last_active_at to 10 minutes ago
+        // Simulate heartbeat stopping: set last_active_at to 15 minutes ago
         $session->update([
-            'last_active_at' => now()->subMinutes(10),
+            'last_active_at' => now()->subMinutes(15),
         ]);
 
-        $res = $this->getJson('/api/devices/logged-in?store_id=' . $this->store->id);
+        $res = $this->getJson('/api/device-sessions?store_id=' . $this->store->id);
         $res->assertStatus(200);
 
         $dev = collect($res->json('devices'))->firstWhere('device_uuid', 'uuid_inactive_dev');
@@ -191,11 +177,11 @@ class LoggedInDevicesTest extends TestCase
     }
 
     /**
-     * 5. Logging out updates the device status correctly to Session Expired.
+     * 4. Logging out updates the device status to Offline and is_active to false.
      */
-    public function test_logging_out_updates_device_status_to_session_expired(): void
+    public function test_logging_out_updates_device_status_to_offline(): void
     {
-        $session = DeviceSession::recordLogin(
+        DeviceSession::recordLogin(
             $this->store->id,
             'uuid_logout_dev',
             'Register PC',
@@ -204,46 +190,63 @@ class LoggedInDevicesTest extends TestCase
             'C01'
         );
 
-        $this->assertEquals('Online', $session->computeStatus());
-
         // Device calls logout
-        $logoutRes = $this->postJson('/api/devices/logout', [
+        $logoutRes = $this->postJson('/api/device-sessions/logout', [
             'device_uuid' => 'uuid_logout_dev',
         ]);
         $logoutRes->assertStatus(200);
 
-        $res = $this->getJson('/api/devices/logged-in?store_id=' . $this->store->id);
+        $res = $this->getJson('/api/device-sessions?store_id=' . $this->store->id);
         $dev = collect($res->json('devices'))->firstWhere('device_uuid', 'uuid_logout_dev');
         $this->assertNotNull($dev);
-        $this->assertEquals('Session Expired', $dev['status']);
+        $this->assertEquals('Offline', $dev['status']);
         $this->assertFalse($dev['is_active']);
     }
 
     /**
-     * 6. Admin can force-expire a session via API.
+     * 5. Rename, lock, unlock, and revoke controls.
      */
-    public function test_admin_can_expire_device_session(): void
+    public function test_device_can_be_renamed_locked_and_revoked(): void
     {
         $session = DeviceSession::recordLogin(
             $this->store->id,
-            'uuid_admin_expire',
-            'Remote Cashier',
+            'uuid_ctrl_dev',
+            'Original PC',
             null,
-            'Counter 02',
-            'C02'
+            'Counter 01',
+            'C01'
         );
 
-        $expireRes = $this->postJson("/api/devices/sessions/{$session->id}/expire");
-        $expireRes->assertStatus(200);
-        $expireRes->assertJson(['success' => true]);
+        // Rename
+        $renameRes = $this->postJson("/api/device-sessions/{$session->id}/rename", [
+            'device_name' => 'Renamed PC',
+            'counter_name' => 'Fast Counter',
+        ]);
+        $renameRes->assertStatus(200);
+        $this->assertEquals('Renamed PC', $session->fresh()->device_name);
+        $this->assertEquals('Fast Counter', $session->fresh()->counter_name);
 
-        $fresh = $session->fresh();
-        $this->assertFalse($fresh->is_active);
-        $this->assertEquals('Session Expired', $fresh->computeStatus());
+        // Lock
+        $lockRes = $this->postJson("/api/device-sessions/{$session->id}/lock");
+        $lockRes->assertStatus(200);
+        $this->assertEquals('Locked', $session->fresh()->computeStatus());
+
+        // Unlock
+        $unlockRes = $this->postJson("/api/device-sessions/{$session->id}/unlock");
+        $unlockRes->assertStatus(200);
+        $this->assertEquals('Active', $session->fresh()->computeStatus());
+
+        // Revoke
+        $revokeRes = $this->postJson("/api/device-sessions/{$session->id}/revoke", [
+            'reason' => 'Terminated',
+        ]);
+        $revokeRes->assertStatus(200);
+        $this->assertEquals('Revoked', $session->fresh()->computeStatus());
+        $this->assertFalse($session->fresh()->is_active);
     }
 
     /**
-     * 7. Missing IP or location information returns null (so UI displays N/A cleanly without fabricated data).
+     * 6. Missing IP or location information returns null cleanly without fabricated data.
      */
     public function test_missing_ip_or_location_returns_null_for_na_display(): void
     {
@@ -259,7 +262,7 @@ class LoggedInDevicesTest extends TestCase
             null  // No location
         );
 
-        $res = $this->getJson('/api/devices/logged-in?store_id=' . $this->store->id);
+        $res = $this->getJson('/api/device-sessions?store_id=' . $this->store->id);
         $res->assertStatus(200);
 
         $dev = collect($res->json('devices'))->firstWhere('device_uuid', 'uuid_no_ip');
@@ -269,7 +272,7 @@ class LoggedInDevicesTest extends TestCase
     }
 
     /**
-     * 8. Prevents duplicate active sessions for the same device UUID.
+     * 7. Prevents duplicate active sessions for the same device UUID.
      */
     public function test_prevents_duplicate_active_entries_for_same_device(): void
     {

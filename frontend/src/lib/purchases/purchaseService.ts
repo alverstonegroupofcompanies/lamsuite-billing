@@ -6,7 +6,7 @@ import { companySettingsService } from "../settings/companySettingsService";
 import { round2 } from "../billing/billingCalculations";
 import { getIndianFinancialYear } from "../billing/salesReturnService";
 import { syncQueueService } from "../sync/syncQueueService";
-import { calculateDocumentTaxes } from "../tax-engine/taxEngine";
+import { calculateDocumentTaxes, cleanStateCode } from "../tax-engine/taxEngine";
 
 export interface PurchaseLineItemInput {
   product_id: string;
@@ -190,10 +190,14 @@ export class PurchaseService {
     const free = Math.max(0, line.free_qty || 0);
     const unitsPerPack = Math.max(1, line.units_per_pack || 1);
 
+    const settings = companySettingsService.getSettings();
+    const storeState = settings.state_code || "32";
+    const defaultTaxMode = settings.purchase_tax_mode || "exclusive";
+
     const doc = calculateDocumentTaxes({
-      store_state: "32",
-      place_of_supply: isInterstate ? "27-Maharashtra" : "32-Kerala",
-      default_tax_mode: "exclusive",
+      store_state: storeState,
+      place_of_supply: isInterstate ? (cleanStateCode(storeState) === "32" ? "29-Karnataka" : "32-Kerala") : storeState,
+      default_tax_mode: defaultTaxMode,
       lines: [
         {
           qty: packs,
@@ -207,7 +211,7 @@ export class PurchaseService {
           discount_amount: line.discount_amount,
           gst_percent: line.gst_percent,
           cess_percent: line.cess_percent,
-          is_tax_inclusive: false,
+          is_tax_inclusive: defaultTaxMode === "inclusive",
         },
       ],
       auto_round_off: false,

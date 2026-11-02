@@ -34,17 +34,17 @@ class DatabaseSeeder extends Seeder
     {
         // 1. Create Stores
         $store1 = Store::create([
-            'name' => 'LamStone Pharmacy & Retail (Palakkad Main)',
+            'name' => 'LamStone Healthcare Center',
             'code' => 'STORE-01',
-            'phone' => '+91 98765 43210',
-            'email' => 'palakkad@lamstone.in',
-            'address' => 'Shop 12-14, Municipal Stadium Complex, Main Road, Palakkad, Kerala - 678001',
+            'phone' => '+91 484 2901234',
+            'email' => 'support@lamstone.in',
+            'address' => 'Main Healthcare Complex, Kerala - 682001',
             'state_code' => '32',
             'gstin' => '32AAAAA0000A1Z5',
-            'drug_license_numbers' => ['20B-KL-PKD-10293', '21B-KL-PKD-10294'],
+            'drug_license_numbers' => ['20B-KL-10293', '21B-KL-10294'],
             'fssai_no' => '10020041000123',
             'tax_mode' => 'inclusive',
-            'invoice_prefix' => 'INV-PKD',
+            'invoice_prefix' => 'INV',
             'is_active' => true,
             'license_plan' => 'Enterprise Multi-Store',
             'license_expires_at' => Carbon::now()->addMonths(14),

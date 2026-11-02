@@ -99,6 +99,9 @@ export const REPORT_CATEGORIES: ReportCategoryMeta[] = [
   },
 ];
 
+import { companySettingsService } from "../lib/settings/companySettingsService";
+import { isClinicalSupported } from "../lib/settings/storeTypePresets";
+
 export class ReportRegistry {
   private reports = new Map<string, ReportModule>();
 
@@ -170,10 +173,14 @@ export class ReportRegistry {
   }
 
   /**
-   * List all registered reports
+   * List all registered reports (scopes pharmacy category only when store type is pharmacy)
    */
   getAll(): ReportModule[] {
-    return Array.from(this.reports.values());
+    const settings = companySettingsService.getSettings();
+    const showClinical = isClinicalSupported(settings.store_type);
+    const all = Array.from(this.reports.values());
+    if (showClinical) return all;
+    return all.filter((r) => r.category !== "pharmacy");
   }
 
   /**

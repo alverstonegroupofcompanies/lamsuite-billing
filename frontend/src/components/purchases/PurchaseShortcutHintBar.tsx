@@ -1,7 +1,7 @@
 import React from "react";
 import { Keyboard, HelpCircle } from "lucide-react";
 
-export type PurchaseFocusContext = "header" | "entry_row" | "grid" | "modal";
+export type PurchaseFocusContext = "header" | "entry_row" | "grid" | "cell_edit" | "modal";
 
 interface PurchaseShortcutHintBarProps {
   context: PurchaseFocusContext;
@@ -71,17 +71,24 @@ export const PurchaseShortcutHintBar: React.FC<PurchaseShortcutHintBarProps> = (
     case "grid":
       hints = [
         { key: "↑ / ↓", label: "Select Line" },
-        { key: "↓ (last)", label: "Entry Row" },
-        { key: "Enter", label: "Edit Cell" },
-        { key: "Del / Ctrl+D", label: "Delete Line" },
+        { key: "← / →", label: "Select Cell" },
+        { key: "Enter", label: "Edit Cell", highlight: true },
+        { key: "Del", label: "Delete Line" },
         { key: "Ctrl+Z", label: "Undo Delete" },
-        { key: "Ctrl+B", label: "Batch" },
-        { key: "Ctrl+U", label: "Pack / Unit" },
+        { key: "↓ (last)", label: "Entry Row" },
+        { key: "Esc", label: "Entry Row", onClick: onFocusEntryRow },
         { key: "F4", label: "Packaging" },
         { key: "Ctrl+F2", label: "Bill Disc" },
         { key: "Alt+R", label: "Round-off" },
-        { key: "F1", label: "Entry Row", onClick: onFocusEntryRow },
         { key: "F12", label: "Post Purchase", highlight: true, onClick: onPost },
+      ];
+      break;
+
+    case "cell_edit":
+      hints = [
+        { key: "Enter", label: "Save & Next Cell", highlight: true },
+        { key: "Esc", label: "Cancel Edit" },
+        { key: "Tab", label: "Next Cell" },
       ];
       break;
 

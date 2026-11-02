@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { deviceSessionService } from "./deviceSessionService";
 import { storeDeviceService } from "../auth/storeDeviceService";
 
-describe("deviceSessionService - Centralized Logged-In Device Tracking", () => {
+describe("deviceSessionService - Centralized Logged-In Device Tracking (Item 2)", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
   });
@@ -22,12 +22,19 @@ describe("deviceSessionService - Centralized Logged-In Device Tracking", () => {
           device_name: "POS-Checkout-01",
           counter_name: "Counter 01",
           counter_code: "C01",
+          user_name: "Cashier Reshma",
+          user_role: "Cashier",
           ip_address: "103.24.12.5",
           location: "Kochi, Kerala, IN",
           login_time: "2026-10-29T10:00:00Z",
+          sign_in_time: "2026-10-29T10:00:00Z",
           last_active: new Date(Date.now() - 30 * 1000).toISOString(),
-          status: "Online",
-          user_name: "Cashier Reshma",
+          last_seen: new Date(Date.now() - 30 * 1000).toISOString(),
+          status: "Active",
+          app_version: "2.0.17",
+          unsynced_items_count: 2,
+          is_this_device: true,
+          is_active: true,
         },
         {
           id: "2",
@@ -36,12 +43,19 @@ describe("deviceSessionService - Centralized Logged-In Device Tracking", () => {
           device_name: null,
           counter_name: null,
           counter_code: null,
+          user_name: null,
+          user_role: null,
           ip_address: null,
           location: null,
           login_time: null,
+          sign_in_time: null,
           last_active: new Date(Date.now() - 300 * 1000).toISOString(),
+          last_seen: new Date(Date.now() - 300 * 1000).toISOString(),
           status: "Offline",
-          user_name: null,
+          app_version: "2.0.17",
+          unsynced_items_count: 0,
+          is_this_device: false,
+          is_active: false,
         },
       ],
       total: 2,
@@ -59,9 +73,13 @@ describe("deviceSessionService - Centralized Logged-In Device Tracking", () => {
     const dev1 = devices[0];
     expect(dev1.device_name).toBe("POS-Checkout-01");
     expect(dev1.counter_name).toBe("Counter 01");
+    expect(dev1.user_name).toBe("Cashier Reshma");
+    expect(dev1.user_role).toBe("Cashier");
     expect(dev1.ip_address).toBe("103.24.12.5");
     expect(dev1.location).toBe("Kochi, Kerala, IN");
-    expect(dev1.status).toBe("Online");
+    expect(dev1.status).toBe("Active");
+    expect(dev1.is_this_device).toBe(true);
+    expect(dev1.unsynced_items_count).toBe(2);
 
     const dev2 = devices[1];
     expect(dev2.device_name).toBeNull();
@@ -69,6 +87,7 @@ describe("deviceSessionService - Centralized Logged-In Device Tracking", () => {
     expect(dev2.ip_address).toBeNull();
     expect(dev2.location).toBeNull();
     expect(dev2.status).toBe("Offline");
+    expect(dev2.is_this_device).toBe(false);
   });
 
   it("2. Filters devices correctly by status and search query params", async () => {
@@ -80,7 +99,8 @@ describe("deviceSessionService - Centralized Logged-In Device Tracking", () => {
           device_uuid: "uuid-1",
           device_name: "Dell All-in-One",
           counter_name: "Pharmacy Front Desk",
-          status: "Online",
+          status: "Active",
+          is_active: true,
         },
       ],
       total: 1,
@@ -92,12 +112,12 @@ describe("deviceSessionService - Centralized Logged-In Device Tracking", () => {
       json: async () => mockApiResponse,
     } as Response);
 
-    await deviceSessionService.getLoggedInDevices({ search: "Pharmacy", status: "Online" });
+    await deviceSessionService.getLoggedInDevices({ search: "Pharmacy", status: "Active" });
 
     expect(fetchSpy).toHaveBeenCalledTimes(1);
     const calledUrl = fetchSpy.mock.calls[0][0] as string;
     expect(calledUrl).toContain("search=Pharmacy");
-    expect(calledUrl).toContain("status=Online");
+    expect(calledUrl).toContain("status=Active");
   });
 
   it("3. sendHeartbeat posts to centralized heartbeat endpoint", async () => {
@@ -118,10 +138,10 @@ describe("deviceSessionService - Centralized Logged-In Device Tracking", () => {
     expect(success).toBe(true);
     expect(fetchSpy).toHaveBeenCalledTimes(1);
     const calledUrl = fetchSpy.mock.calls[0][0] as string;
-    expect(calledUrl).toContain("/api/devices/heartbeat");
+    expect(calledUrl).toContain("/api/device-sessions/heartbeat");
   });
 
-  it("4. notifyLogout sends logout payload to /api/devices/logout", async () => {
+  it("4. notifyLogout sends logout payload to /api/device-sessions/logout", async () => {
     vi.spyOn(storeDeviceService, "getDeviceProfile").mockResolvedValueOnce({
       device_uuid: "uuid-test-123",
       store_id: "store_1",
@@ -137,24 +157,32 @@ describe("deviceSessionService - Centralized Logged-In Device Tracking", () => {
     expect(success).toBe(true);
     expect(fetchSpy).toHaveBeenCalledTimes(1);
     const calledUrl = fetchSpy.mock.calls[0][0] as string;
-    expect(calledUrl).toContain("/api/devices/logout");
+    expect(calledUrl).toContain("/api/device-sessions/logout");
   });
 
-  it("5. expireDeviceSession sends revocation request to /api/devices/sessions/{id}/expire", async () => {
-    const fetchSpy = vi.spyOn(global, "fetch").mockResolvedValueOnce({
+  it("5. renameDevice, lockDevice, and revokeDevice call proper endpoints", async () => {
+    const fetchSpy = vi.spyOn(global, "fetch").mockResolvedValue({
       ok: true,
       status: 200,
-      json: async () => ({ success: true, message: "Device session expired successfully" }),
+      json: async () => ({ success: true }),
     } as Response);
 
-    // Mock subsequent refresh call
-    vi.spyOn(deviceSessionService, "getLoggedInDevices").mockResolvedValueOnce([]);
+    vi.spyOn(deviceSessionService, "getLoggedInDevices").mockResolvedValue([]);
 
-    const success = await deviceSessionService.expireDeviceSession("sess-999");
-    expect(success).toBe(true);
-    expect(fetchSpy).toHaveBeenCalledTimes(1);
-    const calledUrl = fetchSpy.mock.calls[0][0] as string;
-    expect(calledUrl).toContain("/api/devices/sessions/sess-999/expire");
+    // Rename
+    const renameRes = await deviceSessionService.renameDevice("10", { counter_name: "Counter 2" });
+    expect(renameRes).toBe(true);
+    expect(fetchSpy.mock.calls[0][0]).toContain("/api/device-sessions/10/rename");
+
+    // Lock
+    const lockRes = await deviceSessionService.lockDevice("10");
+    expect(lockRes).toBe(true);
+    expect(fetchSpy.mock.calls[1][0]).toContain("/api/device-sessions/10/lock");
+
+    // Revoke
+    const revokeRes = await deviceSessionService.revokeDevice("10", "Old machine");
+    expect(revokeRes).toBe(true);
+    expect(fetchSpy.mock.calls[2][0]).toContain("/api/device-sessions/10/revoke");
   });
 
   it("6. startHeartbeatTimer runs periodic heartbeat and returns clean cancellation", async () => {

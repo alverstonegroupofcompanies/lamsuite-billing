@@ -496,8 +496,14 @@ class InvoiceController
                 // Resolve Store Tax Profile
                 $storeModel = Store::find($storeId);
                 $storeStateCode = $storeModel ? ($storeModel->state_code ?: '32') : '32';
+                $storeGstType = $storeModel ? ($storeModel->gst_type ?: 'regular') : 'regular';
                 $taxSetting = CompanySetting::where('store_id', $storeId)->where('key', 'tax_settings')->first();
                 $defaultTaxMode = $taxSetting ? ($taxSetting->value['tax_mode'] ?? 'inclusive') : 'inclusive';
+                $allowOverride = $taxSetting ? (bool)($taxSetting->value['allow_tax_override_per_bill'] ?? false) : false;
+
+                $effectiveGstType = ($allowOverride && !empty($validated['gst_type'])) ? $validated['gst_type'] : $storeGstType;
+                $effectiveTaxMode = ($allowOverride && !empty($validated['tax_mode'])) ? $validated['tax_mode'] : $defaultTaxMode;
+                $isComposition = in_array($effectiveGstType, ['composition', 'no_tax', 'unregistered'], true);
 
                 // Authoritative Tax Calculation via TaxEngine
                 $engineLines = [];
@@ -524,7 +530,9 @@ class InvoiceController
                     'store_state' => $storeStateCode,
                     'customer_gstin' => $party ? $party->gstin : ($validated['customer_gstin'] ?? null),
                     'place_of_supply' => $validated['place_of_supply'] ?? ($party ? $party->state_code : $storeStateCode),
-                    'default_tax_mode' => $defaultTaxMode,
+                    'default_tax_mode' => $effectiveTaxMode,
+                    'gst_type' => $effectiveGstType,
+                    'is_composition' => $isComposition,
                     'lines' => $engineLines,
                     'bill_discount' => [
                         'type' => !empty($validated['bill_discount_percent']) ? 'percent' : 'amount',

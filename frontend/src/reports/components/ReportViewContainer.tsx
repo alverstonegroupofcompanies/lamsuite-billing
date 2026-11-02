@@ -258,36 +258,16 @@ export const ReportViewContainer: React.FC<ReportViewContainerProps> = ({ report
             Export CSV
           </button>
 
-          {/* Print Layout Options */}
-          <div className="flex items-center rounded-md border border-gray-300 shadow-2xs bg-white p-0.5">
-            <button
-              type="button"
-              onClick={() => handleOpenPrintPreview("a4")}
-              title="Print standard A4 Report"
-              className="px-2 py-1 text-xs font-medium text-gray-700 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors flex items-center gap-1"
-            >
-              <Printer className="w-3.5 h-3.5 text-gray-500" />
-              A4
-            </button>
-            <span className="text-gray-300">|</span>
-            <button
-              type="button"
-              onClick={() => handleOpenPrintPreview("thermal")}
-              title="Print 80mm POS Thermal Receipt"
-              className="px-2 py-1 text-xs font-medium text-gray-700 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
-            >
-              80mm
-            </button>
-            <span className="text-gray-300">|</span>
-            <button
-              type="button"
-              onClick={() => handleOpenPrintPreview("dot-matrix")}
-              title="Print 80-Column Dot Matrix ASCII"
-              className="px-2 py-1 text-xs font-medium text-gray-700 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
-            >
-              DotMatrix
-            </button>
-          </div>
+          {/* Unified Print Button */}
+          <button
+            type="button"
+            onClick={() => handleOpenPrintPreview()}
+            title="Open Report Print Preview"
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition shadow-2xs cursor-pointer"
+          >
+            <Printer className="w-3.5 h-3.5 text-blue-600" />
+            <span>Print</span>
+          </button>
         </div>
       </div>
 

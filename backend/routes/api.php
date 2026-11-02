@@ -65,11 +65,19 @@ Route::post('/sync/push/transfers', [SyncController::class, 'pushTransfers']);
 Route::post('/sync/push/staff', [SyncController::class, 'pushStaff']);
 Route::get('/sync/pull/deltas', [SyncController::class, 'pullDeltas']);
 
-// Centralized Device Session Tracking & Logged-In Devices
+// Centralized Device Session Tracking & Logged-In Devices (Item 2)
+Route::get('/device-sessions', [DeviceSessionController::class, 'index']);
 Route::get('/devices/logged-in', [DeviceSessionController::class, 'index']);
 Route::get('/devices/connected', [DeviceSessionController::class, 'index']);
+Route::post('/device-sessions/heartbeat', [DeviceSessionController::class, 'heartbeat']);
 Route::post('/devices/heartbeat', [DeviceSessionController::class, 'heartbeat']);
+Route::post('/device-sessions/logout', [DeviceSessionController::class, 'logout']);
 Route::post('/devices/logout', [DeviceSessionController::class, 'logout']);
+Route::post('/device-sessions/{id}/rename', [DeviceSessionController::class, 'rename']);
+Route::post('/device-sessions/{id}/lock', [DeviceSessionController::class, 'lock']);
+Route::post('/device-sessions/{id}/unlock', [DeviceSessionController::class, 'unlock']);
+Route::post('/device-sessions/{id}/revoke', [DeviceSessionController::class, 'revoke']);
+Route::post('/device-sessions/{id}/force-logout', [DeviceSessionController::class, 'forceLogout']);
 Route::post('/devices/sessions/{id}/expire', [DeviceSessionController::class, 'expireSession']);
 Route::post('/devices/sessions/{id}/logout', [DeviceSessionController::class, 'expireSession']);
 Route::post('/staff/logout', [StaffAuthController::class, 'logout']);
@@ -140,6 +148,11 @@ Route::middleware('auth:sanctum')->group(function () {
 
 
     Route::get('/reports/daily-collection', [ReportController::class, 'dailyCollection']);
+    Route::get('/reports/top-selling', [ReportController::class, 'topSelling']);
+    Route::get('/reports/cash-book', [ReportController::class, 'cashBook']);
+    Route::get('/reports/daily-summary', [ReportController::class, 'dailySummary']);
+    Route::get('/reports/profit', [ReportController::class, 'profit']);
+    Route::get('/reports/stock-ledger', [ReportController::class, 'stockLedger']);
     Route::get('/reports/gstr-1', [ReportController::class, 'gstr1']);
     Route::get('/reports/hsn-summary', [ReportController::class, 'hsnSummary']);
     Route::get('/reports/customer-aging', [ReportController::class, 'customerAging']);
@@ -153,6 +166,12 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/data-exchange/templates/{type}', [DataExchangeController::class, 'template']);
     Route::get('/data-exchange/export/{type}', [DataExchangeController::class, 'export']);
     Route::get('/data-exchange/history', [DataExchangeController::class, 'history']);
+
+    // Payments & Returns API (MCP client parity)
+    Route::post('/payments/customer', [AdminTransactionController::class, 'customerPayments']);
+    Route::post('/payments/supplier', [AdminTransactionController::class, 'storeSupplierPayment']);
+    Route::post('/returns/sales', [AdminTransactionController::class, 'returns']);
+    Route::post('/returns/purchase', [AdminTransactionController::class, 'purchaseReturns']);
 });
 
 /*
@@ -243,13 +262,28 @@ Route::middleware(['auth:sanctum', 'session.timeout', 'ip.allowlist', 'scope.sto
     Route::post('/invoices/{id}/cancel', [AdminTransactionController::class, 'cancelInvoice'])->middleware('rbac:transactions,edit');
     Route::put('/invoices/{id}', [AdminTransactionController::class, 'updateInvoice'])->middleware('rbac:transactions,edit');
 
+    Route::get('/returns', [AdminTransactionController::class, 'returns'])->middleware('rbac:transactions,view');
+    Route::get('/quotations', [AdminTransactionController::class, 'quotations'])->middleware('rbac:transactions,view');
+
     Route::get('/purchases', [AdminTransactionController::class, 'purchases'])->middleware('rbac:transactions,view');
     Route::get('/purchases/{id}', [AdminTransactionController::class, 'showPurchase'])->middleware('rbac:transactions,view');
+    Route::get('/purchase-returns', [AdminTransactionController::class, 'purchaseReturns'])->middleware('rbac:transactions,view');
+    Route::get('/purchase-orders', [AdminTransactionController::class, 'purchaseOrders'])->middleware('rbac:transactions,view');
+
+    Route::get('/held-bills', [AdminTransactionController::class, 'heldBills'])->middleware('rbac:transactions,view');
+    Route::get('/held-bills/{id}', [AdminTransactionController::class, 'showHeldBill'])->middleware('rbac:transactions,view');
+
+    Route::get('/shifts', [AdminTransactionController::class, 'shifts'])->middleware('rbac:transactions,view');
 
     Route::get('/stock/adjustments', [AdminTransactionController::class, 'stockAdjustments'])->middleware('rbac:transactions,view');
     Route::get('/stock/transfers', [AdminTransactionController::class, 'stockTransfers'])->middleware('rbac:transactions,view');
     Route::get('/expenses', [AdminTransactionController::class, 'expenses'])->middleware('rbac:transactions,view');
     Route::get('/customer-payments', [AdminTransactionController::class, 'customerPayments'])->middleware('rbac:transactions,view');
+    Route::get('/supplier-payments', [AdminTransactionController::class, 'supplierPayments'])->middleware('rbac:transactions,view');
+    Route::post('/supplier-payments', [AdminTransactionController::class, 'storeSupplierPayment'])->middleware('rbac:transactions,create');
+
+    Route::get('/customers/{id}/ledger', [AdminTransactionController::class, 'customerLedger'])->middleware('rbac:transactions,view');
+    Route::get('/suppliers/{id}/ledger', [AdminTransactionController::class, 'supplierLedger'])->middleware('rbac:transactions,view');
 
     // Module 8: Inventory
     Route::get('/inventory/batches', [AdminInventoryController::class, 'batchInventory'])->middleware('rbac:inventory,view');
@@ -265,6 +299,13 @@ Route::middleware(['auth:sanctum', 'session.timeout', 'ip.allowlist', 'scope.sto
     Route::get('/reports/customer-aging', [AdminReportController::class, 'customerAging'])->middleware('rbac:reports,view');
     Route::get('/reports/pharmacy', [AdminReportController::class, 'pharmacyReport'])->middleware('rbac:reports,view');
     Route::get('/reports/scheduled', [AdminReportController::class, 'scheduledReports'])->middleware('rbac:reports,view');
+    Route::get('/reports/daily-collection', [ReportController::class, 'dailyCollection'])->middleware('rbac:reports,view');
+    Route::get('/reports/top-selling', [ReportController::class, 'topSelling'])->middleware('rbac:reports,view');
+    Route::get('/reports/cash-book', [ReportController::class, 'cashBook'])->middleware('rbac:reports,view');
+    Route::get('/reports/daily-summary', [ReportController::class, 'dailySummary'])->middleware('rbac:reports,view');
+    Route::get('/reports/profit', [ReportController::class, 'profit'])->middleware('rbac:reports,view');
+    Route::get('/reports/stock-ledger', [ReportController::class, 'stockLedger'])->middleware('rbac:reports,view');
+    Route::get('/reports/tax-reconciliation', [ReportController::class, 'taxReconciliation'])->middleware('rbac:reports,view');
 
     // Module 10: Sync Center
     Route::get('/sync/events', [AdminSyncController::class, 'index'])->middleware('rbac:sync,view');

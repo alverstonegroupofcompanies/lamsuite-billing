@@ -202,6 +202,32 @@ export interface PaymentModeConfig {
   };
 }
 
+export interface StoreUpiAccount {
+  id: string;
+  upiId: string;
+  payeeName: string;
+  merchantCode?: string;
+  qrSubtext?: string;
+  isDefault: boolean;
+  counterOverrides?: string[];
+}
+
+export interface UpiSettingsConfig {
+  enabled: boolean;
+  showInSettlement: boolean;
+  showOnPrintedBills: boolean;
+  qrSubtext: string;
+  accounts: StoreUpiAccount[];
+  defaultUpiId?: string;
+  defaultPayeeName?: string;
+}
+
+export function validateUpiId(vpa: string): boolean {
+  if (!vpa || typeof vpa !== "string") return false;
+  const clean = vpa.trim();
+  return /^[a-zA-Z0-9.\-_]{2,256}@[a-zA-Z]{2,64}$/.test(clean);
+}
+
 export interface PaymentSettingsConfig {
   modes: PaymentModeConfig[];
   upiVpa?: string;
@@ -210,6 +236,7 @@ export interface PaymentSettingsConfig {
   enableQuickDenominations: boolean;
   creditPolicy: "allow_with_limit" | "warn_on_exceed" | "block_on_exceed";
   printShowReferences: boolean;
+  upi?: UpiSettingsConfig;
 }
 
 export interface CompanySettings {
@@ -224,6 +251,11 @@ export interface CompanySettings {
   drug_license_numbers?: string[];
   fssai_no?: string;
   currency_symbol: string;
+
+  // Store & Tax Configuration
+  store_type?: "pharmacy" | "cosmetics" | "kirana_general" | "clothing" | "electronics" | "stationery" | "wholesale" | "restaurant" | "other";
+  gst_type: "regular" | "composition" | "no_tax";
+  allow_tax_override_per_bill?: boolean;
 
   // Billing
   tax_mode: "inclusive" | "exclusive";
@@ -517,28 +549,43 @@ export const DEFAULT_PAYMENT_MODES: PaymentModeConfig[] = [
   },
 ];
 
+export const DEFAULT_UPI_SETTINGS: UpiSettingsConfig = {
+  enabled: true,
+  showInSettlement: true,
+  showOnPrintedBills: true,
+  qrSubtext: "Scan & Pay with any UPI app",
+  accounts: [],
+  defaultUpiId: "",
+  defaultPayeeName: "",
+};
+
 export const DEFAULT_PAYMENT_SETTINGS: PaymentSettingsConfig = {
   modes: [...DEFAULT_PAYMENT_MODES],
-  upiVpa: "store@upi",
-  upiPayeeName: "LamStone Retail Store",
+  upiVpa: "",
+  upiPayeeName: "",
   enableDynamicUpiQr: true,
   enableQuickDenominations: true,
   creditPolicy: "warn_on_exceed",
   printShowReferences: false,
+  upi: DEFAULT_UPI_SETTINGS,
 };
 
 export const DEFAULT_SETTINGS: CompanySettings = {
   store_id: "store_main",
-  store_name: "LamStone Pharmacy & Retail",
-  display_name: "LamStone Super Clinic & Medicos",
-  phone: "9876543210",
-  email: "billing@lamstone.in",
-  address: "Main Road, Palakkad, Kerala - 678001",
+  store_name: "Retail Store",
+  display_name: "Retail Store",
+  phone: "",
+  email: "",
+  address: "",
   state_code: "32",
-  gstin: "32AAAAA0000A1Z5",
-  drug_license_numbers: ["20B-123456", "21B-123457"],
-  fssai_no: "10020041000123",
+  gstin: "",
+  drug_license_numbers: [],
+  fssai_no: "",
   currency_symbol: "₹",
+
+  store_type: "pharmacy",
+  gst_type: "regular",
+  allow_tax_override_per_bill: false,
 
   tax_mode: "inclusive",
   purchase_tax_mode: "exclusive",
@@ -572,10 +619,10 @@ export const DEFAULT_SETTINGS: CompanySettings = {
     paperSize: "thermal_80mm",
     copies: 1,
     activeTemplate: "thermal_standard",
-    footerNote: "Thank you for shopping with us! Get well soon.",
+    footerNote: "Thank you for shopping with us!",
     termsAndConditions: "Goods once sold cannot be returned without original cash memo.",
-    jurisdictionNote: "Subject to Palakkad Jurisdiction only.",
-    brandByline: "Powered by LamSuite Retail 2.0",
+    jurisdictionNote: "Subject to Local Jurisdiction only.",
+    brandByline: "LamSuite Billing",
     printDrugLicenses: true,
     printDoctorDetails: true,
     printPatientDetails: true,
@@ -742,6 +789,125 @@ export class CompanySettingsService {
       };
     }
     return { ...this.currentSettings };
+  }
+
+  /**
+   * Resolves the authoritative UPI account for a given counter code or store default.
+   */
+  getActiveUpi(
+    counterCodeOrSettings?: string | CompanySettings,
+    explicitCounterCode?: string
+  ): {
+    vpa: string;
+    payeeName: string;
+    qrSubtext: string;
+    merchantCode?: string;
+    showInSettlement?: boolean;
+    showOnPrintedBills?: boolean;
+    enabled?: boolean;
+  } | null {
+    let s: CompanySettings;
+    let counterCode: string | undefined;
+
+    if (typeof counterCodeOrSettings === "string") {
+      counterCode = counterCodeOrSettings;
+      s = this.getSettings();
+    } else if (counterCodeOrSettings && typeof counterCodeOrSettings === "object") {
+      s = counterCodeOrSettings;
+      counterCode = explicitCounterCode;
+    } else {
+      s = this.getSettings();
+      counterCode = explicitCounterCode;
+    }
+
+    const upiConfig = s.payments?.upi || (s as any).paymentSettings?.upi;
+    if (upiConfig && upiConfig.enabled === false) {
+      return null;
+    }
+
+    if (upiConfig && upiConfig.accounts && upiConfig.accounts.length > 0) {
+      if (counterCode) {
+        const counterMatch = upiConfig.accounts.find((a: any) =>
+          a.counterOverrides && a.counterOverrides.some((c: any) => c.toLowerCase() === counterCode!.toLowerCase())
+        );
+        if (counterMatch && counterMatch.upiId) {
+          return {
+            vpa: counterMatch.upiId,
+            payeeName: counterMatch.payeeName || s.display_name || s.store_name,
+            qrSubtext: counterMatch.qrSubtext || upiConfig.qrSubtext || "Scan with any UPI app to pay",
+            merchantCode: counterMatch.merchantCode,
+            showInSettlement: upiConfig.showInSettlement !== false,
+            showOnPrintedBills: upiConfig.showOnPrintedBills !== false,
+            enabled: upiConfig.enabled !== false,
+          };
+        }
+      }
+
+      const defaultAcc = upiConfig.accounts.find((a: any) => a.isDefault) || upiConfig.accounts[0];
+      if (defaultAcc && defaultAcc.upiId) {
+        return {
+          vpa: defaultAcc.upiId,
+          payeeName: defaultAcc.payeeName || s.display_name || s.store_name,
+          qrSubtext: defaultAcc.qrSubtext || upiConfig.qrSubtext || "Scan with any UPI app to pay",
+          merchantCode: defaultAcc.merchantCode,
+          showInSettlement: upiConfig.showInSettlement !== false,
+          showOnPrintedBills: upiConfig.showOnPrintedBills !== false,
+          enabled: upiConfig.enabled !== false,
+        };
+      }
+    }
+
+    const legacyVpa = s.payments?.upiVpa || (s as any).paymentSettings?.upiVpa;
+    if (legacyVpa && validateUpiId(legacyVpa)) {
+      return {
+        vpa: legacyVpa,
+        payeeName: s.payments?.upiPayeeName || (s as any).paymentSettings?.upiPayeeName || s.display_name || s.store_name,
+        qrSubtext: "Scan with any UPI app to pay",
+        showInSettlement: true,
+        showOnPrintedBills: true,
+        enabled: true,
+      };
+    }
+
+    return null;
+  }
+
+  getStorePrintHeader(): {
+    store_name: string;
+    display_name?: string;
+    store_address?: string;
+    store_phone?: string;
+    store_email?: string;
+    store_gstin?: string;
+    store_type?: string;
+    gst_type?: string;
+    drug_license_numbers?: string[];
+    fssai_no?: string;
+    upi_vpa?: string;
+    footer_text?: string;
+    terms_and_conditions?: string;
+    jurisdiction_note?: string;
+  } {
+    const s = this.getSettings();
+    const upi = this.getActiveUpi();
+    const name = s.display_name || s.store_name || "Store";
+
+    return {
+      store_name: name,
+      display_name: s.display_name || name,
+      store_address: s.address || "",
+      store_phone: s.phone || "",
+      store_email: s.email || "",
+      store_gstin: s.gstin || "",
+      store_type: s.store_type || "pharmacy",
+      gst_type: s.gst_type || "regular",
+      drug_license_numbers: s.drug_license_numbers || [],
+      fssai_no: s.fssai_no || "",
+      upi_vpa: upi?.vpa || s.payments?.upiVpa || "",
+      footer_text: s.printing?.footerNote || "",
+      terms_and_conditions: s.printing?.termsAndConditions || "",
+      jurisdiction_note: s.printing?.jurisdictionNote || "",
+    };
   }
 
   getSettings(): CompanySettings {
@@ -994,7 +1160,31 @@ export class CompanySettingsService {
       security: { ...this.currentSettings.security, ...(updates.security || {}) },
       wallet: { ...this.currentSettings.wallet, ...(updates.wallet || {}) },
       smtp: { ...this.currentSettings.smtp, ...(updates.smtp || {}) },
+      payments: { ...this.currentSettings.payments, ...(updates.payments || {}) },
     };
+
+    if (updates.payments?.upi || updates.payments?.upiVpa) {
+      try {
+        const auditId = `audit_upi_${Date.now()}_${Math.random().toString(16).slice(2, 6)}`;
+        await sqliteStorage.insertRecord("security_audit_logs", auditId, {
+          id: auditId,
+          event_type: "UPI_SETTINGS_UPDATED",
+          timestamp: Date.now(),
+          details: JSON.stringify({
+            accounts: this.currentSettings.payments?.upi?.accounts?.map((a) => ({
+              upiId: a.upiId,
+              payeeName: a.payeeName,
+              isDefault: a.isDefault,
+              counterOverrides: a.counterOverrides,
+            })),
+            defaultVpa: this.currentSettings.payments?.upi?.defaultUpiId || this.currentSettings.payments?.upiVpa,
+            enabled: this.currentSettings.payments?.upi?.enabled,
+          }),
+        });
+      } catch (err) {
+        console.warn("Failed to record UPI update in audit log:", err);
+      }
+    }
 
     if (this.currentSettings.sequences) {
       this.currentSettings.invoice_prefix = this.currentSettings.sequences.invoicePrefix;

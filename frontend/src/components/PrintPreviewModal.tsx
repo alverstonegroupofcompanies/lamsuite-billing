@@ -22,6 +22,12 @@ import {
   Zap,
   Maximize2,
   Minimize2,
+  Table,
+  ArrowUp,
+  ArrowDown,
+  Save,
+  Plus,
+  Trash2,
 } from "lucide-react";
 import {
   printingEngine,
@@ -31,6 +37,9 @@ import {
   DebitNotePrintData,
   generateWhatsAppShareUrl,
   generateEmailShareUrl,
+  PrintColumnConfig,
+  resolvePrintColumns,
+  AVAILABLE_PRINT_COLUMNS,
 } from "../lib/printing/printingEngine";
 import {
   printerManagerService,
@@ -40,14 +49,18 @@ import {
   PrintJobRecord,
   isDotMatrixPaper,
   getDotMatrixColumns,
+  deriveDotMatrixColumns,
   getPaperWidthFromSize,
   getPaperWidthInches,
   getPrinterCarriageColumns,
+  getPrinterMaxCarriageWidthInches,
+  isPaperWiderThanPrinter,
   calculateHorizontalCenteringOffset,
 } from "../lib/printing/printerManagerService";
 import { isTauri } from "../lib/ipc/ipcBridge";
 import { dotMatrixRenderer, DotMatrixOptions } from "../lib/printing/dotMatrixRenderer";
 import { companySettingsService } from "../lib/settings/companySettingsService";
+import { isClinicalSupported } from "../lib/settings/storeTypePresets";
 import { useModalEscape } from "../lib/ui/modalEscapeManager";
 
 export interface PrintPreviewModalProps {
@@ -109,8 +122,27 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
     });
   };
 
+  const activeStoreType = data?.store_type || settings?.store_type;
+  const isPharmacy = isClinicalSupported(activeStoreType);
+
   // Tab State
-  const [activeTab, setActiveTab] = useState<"device" | "layout" | "share">("device");
+  const [activeTab, setActiveTab] = useState<"device" | "layout" | "fields" | "share">("device");
+
+  // Columns & Fields Customization State
+  const [customColumns, setCustomColumns] = useState<PrintColumnConfig[]>(() => {
+    return resolvePrintColumns(undefined, isPharmacy);
+  });
+  const [customPaperWidth, setCustomPaperWidth] = useState<number>(10.0);
+  const [customLinesPerPage, setCustomLinesPerPage] = useState<number>(66);
+  const [namedTemplateTitle, setNamedTemplateTitle] = useState<string>("");
+  const [savedTemplates, setSavedTemplates] = useState<{ id: string; name: string; columns: PrintColumnConfig[] }[]>(() => {
+    try {
+      const raw = localStorage.getItem("lamsuite_named_print_templates");
+      return raw ? JSON.parse(raw) : [];
+    } catch {
+      return [];
+    }
+  });
 
   // Printer Management State
   const [systemPrinters, setSystemPrinters] = useState<SystemPrinterInfo[]>([]);
@@ -173,6 +205,25 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
         const effectivePaper: PaperSize = initialFormat || (settings.printing.paperSize as PaperSize) || "a4";
         setPaperSize(effectivePaper);
 
+        // Load document-specific last used settings
+        const lastDocSettings = await printerManagerService.getLastUsedDocSettings(docType);
+        if (mounted && lastDocSettings) {
+          if (lastDocSettings.paperSize && !initialFormat) {
+            setPaperSize(lastDocSettings.paperSize);
+          }
+          if (lastDocSettings.columns && lastDocSettings.columns.length > 0) {
+            setCustomColumns(lastDocSettings.columns);
+          }
+          if (lastDocSettings.copies) setCopies(lastDocSettings.copies);
+          if (lastDocSettings.orientation) setOrientation(lastDocSettings.orientation);
+          if (lastDocSettings.showHsnSummary !== undefined) setShowHsnSummary(lastDocSettings.showHsnSummary);
+          if (lastDocSettings.showUpiQr !== undefined) setShowUpiQr(lastDocSettings.showUpiQr);
+          if (lastDocSettings.showDoctorPatient !== undefined) setShowDoctorPatient(lastDocSettings.showDoctorPatient);
+          if (lastDocSettings.showDrugLicenses !== undefined) setShowDrugLicenses(lastDocSettings.showDrugLicenses);
+          if (lastDocSettings.showTerms !== undefined) setShowTerms(lastDocSettings.showTerms);
+          if (lastDocSettings.customWidth) setCustomPaperWidth(lastDocSettings.customWidth);
+        }
+
         // Resolve last-used or default printer
         const defaultOrLastPrinter = await printerManagerService.getLastUsedPrinter(docType, effectivePaper);
         if (mounted) {
@@ -231,6 +282,134 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
     await printerManagerService.setLastUsedPrinter(docType, paperSize, printerName);
   };
 
+  // Column Customization Actions
+  const handleToggleColumnVisibility = (colId: string) => {
+    setCustomColumns((prev) => {
+      const updated = prev.map((c) => (c.id === colId ? { ...c, visible: c.visible === false } : c));
+      printerManagerService.setLastUsedDocSettings(docType, {
+        paperSize,
+        copies,
+        orientation,
+        showHsnSummary,
+        showUpiQr,
+        showDoctorPatient,
+        showDrugLicenses,
+        showTerms,
+        columns: updated,
+        printerName: selectedPrinterName,
+      });
+      return updated;
+    });
+  };
+
+  const handleRenameColumn = (colId: string, newLabel: string) => {
+    setCustomColumns((prev) => {
+      const updated = prev.map((c) => (c.id === colId ? { ...c, label: newLabel } : c));
+      printerManagerService.setLastUsedDocSettings(docType, {
+        paperSize,
+        copies,
+        orientation,
+        showHsnSummary,
+        showUpiQr,
+        showDoctorPatient,
+        showDrugLicenses,
+        showTerms,
+        columns: updated,
+        printerName: selectedPrinterName,
+      });
+      return updated;
+    });
+  };
+
+  const handleMoveColumn = (index: number, direction: "up" | "down") => {
+    const targetIndex = direction === "up" ? index - 1 : index + 1;
+    if (targetIndex < 0 || targetIndex >= customColumns.length) return;
+    setCustomColumns((prev) => {
+      const list = [...prev];
+      const temp = list[index];
+      list[index] = list[targetIndex];
+      list[targetIndex] = temp;
+      const reordered = list.map((c, i) => ({ ...c, order: i + 1 }));
+      printerManagerService.setLastUsedDocSettings(docType, {
+        paperSize,
+        copies,
+        orientation,
+        showHsnSummary,
+        showUpiQr,
+        showDoctorPatient,
+        showDrugLicenses,
+        showTerms,
+        columns: reordered,
+        printerName: selectedPrinterName,
+      });
+      return reordered;
+    });
+  };
+
+  const handleResetColumns = () => {
+    const def = resolvePrintColumns(undefined, isPharmacy);
+    setCustomColumns(def);
+    setStatusMessage({ text: "Columns reset to defaults", type: "info" });
+  };
+
+  const handleSaveAsStoreDefault = () => {
+    try {
+      companySettingsService.updateSettings({
+        printing: {
+          ...settings.printing,
+          paperSize: paperSize as any,
+          copies,
+          printHsnSummary: showHsnSummary,
+          printUpiQrCode: showUpiQr,
+          printDoctorDetails: showDoctorPatient,
+          printDrugLicenses: showDrugLicenses,
+        },
+      });
+      printerManagerService.setLastUsedDocSettings(docType, {
+        paperSize,
+        copies,
+        orientation,
+        showHsnSummary,
+        showUpiQr,
+        showDoctorPatient,
+        showDrugLicenses,
+        showTerms,
+        columns: customColumns,
+        printerName: selectedPrinterName,
+      });
+      setStatusMessage({ text: "Saved as store-wide default layout!", type: "success" });
+    } catch {
+      setStatusMessage({ text: "Failed to save store defaults", type: "error" });
+    }
+  };
+
+  const handleSaveAsNamedTemplate = () => {
+    if (!namedTemplateTitle.trim()) return;
+    try {
+      const newTemplate = {
+        id: `tpl_${Date.now()}`,
+        name: namedTemplateTitle.trim(),
+        columns: customColumns,
+        paperSize,
+      };
+      const updated = [...savedTemplates, newTemplate];
+      setSavedTemplates(updated);
+      localStorage.setItem("lamsuite_named_print_templates", JSON.stringify(updated));
+      setNamedTemplateTitle("");
+      setStatusMessage({ text: `Saved template "${newTemplate.name}"`, type: "success" });
+    } catch {
+      setStatusMessage({ text: "Failed to save template", type: "error" });
+    }
+  };
+
+  const handleLoadNamedTemplate = (tplId: string) => {
+    const tpl = savedTemplates.find((t) => t.id === tplId);
+    if (tpl) {
+      setCustomColumns(tpl.columns);
+      setStatusMessage({ text: `Loaded template "${tpl.name}"`, type: "info" });
+    }
+  };
+
   // Selected Printer Info
   const selectedPrinterInfo = useMemo(() => {
     return systemPrinters.find((p) => p.name.toLowerCase() === selectedPrinterName.toLowerCase()) || null;
@@ -255,13 +434,17 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
     return calculateHorizontalCenteringOffset(printerCarriageCols, cols, { paperSize });
   }, [paperSize, printerProfile, printerCarriageCols]);
 
+  const carriageWidthCheck = useMemo(() => {
+    return isPaperWiderThanPrinter(paperSize, selectedPrinterInfo, printerProfile, customPaperWidth);
+  }, [paperSize, selectedPrinterInfo, printerProfile, customPaperWidth]);
+
   // Build Rendered HTML
   const renderedHtml = useMemo(() => {
     if (!isOpen || !data) return "";
     const isDot = isDotMatrixPaper(paperSize);
     if (isDot) {
-      const cols = getDotMatrixColumns(paperSize);
-      const paperWidth = getPaperWidthFromSize(paperSize);
+      const cols = deriveDotMatrixColumns(paperSize, printerProfile?.dotMatrixPitch || "10cpi", { customWidthInches: customPaperWidth });
+      const paperWidth = getPaperWidthFromSize(paperSize, customPaperWidth);
       const dotOpts: DotMatrixOptions = {
         columns: cols,
         printerCarriageColumns: printerCarriageCols,
@@ -325,6 +508,7 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
       currencySymbolFormat: "rupee_symbol",
       isDuplicate,
       printerName: selectedPrinterName,
+      columns: customColumns,
     };
     return printingEngine.renderDocumentHtml(docType, data, options);
   }, [
@@ -347,6 +531,8 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
     showRuler,
     showLineNumbers,
     showPageBreaks,
+    customColumns,
+    customPaperWidth,
   ]);
 
   // Compute Raw Spooler Hex Dump for Dot-Matrix inspection & audit
@@ -354,8 +540,8 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
     if (!isOpen || !data) return "";
     const isDot = isDotMatrixPaper(paperSize);
     if (!isDot) return "";
-    const cols = getDotMatrixColumns(paperSize);
-    const paperWidth = getPaperWidthFromSize(paperSize);
+    const cols = deriveDotMatrixColumns(paperSize, printerProfile?.dotMatrixPitch || "10cpi", { customWidthInches: customPaperWidth });
+    const paperWidth = getPaperWidthFromSize(paperSize, customPaperWidth);
     const dotOpts: DotMatrixOptions = {
       columns: cols,
       printerCarriageColumns: printerCarriageCols,
@@ -608,6 +794,7 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
           copies,
           orientation,
           isDuplicate,
+          columns: customColumns,
         });
       }
 
@@ -660,14 +847,17 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
     setStatusMessage({ text: `Sending test slip to ${selectedPrinterName}...`, type: "info" });
 
     try {
+      const storeHdr = companySettingsService.getStorePrintHeader();
       const testData: InvoicePrintData = {
         invoice_number: "TEST-PAGE-01",
         invoice_date: new Date().toISOString().split("T")[0],
         invoice_time: new Date().toLocaleTimeString(),
-        store_name: settings.store_name || "LamStone Pharmacy",
-        store_address: settings.address || "Main Street Branch",
-        store_phone: settings.phone || "9876543210",
-        store_gstin: settings.gstin || "32AAAAA0000A1Z5",
+        store_name: storeHdr.store_name,
+        store_address: storeHdr.store_address,
+        store_phone: storeHdr.store_phone,
+        store_gstin: storeHdr.store_gstin,
+        store_type: storeHdr.store_type,
+        gst_type: storeHdr.gst_type,
         lines: [
           { description: "Printer Calibration Test Item", qty: 1, rate: 100, gst_percent: 18, amount: 118 },
         ],
@@ -788,7 +978,13 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
         setSavedFilePath(fileName);
         setStatusMessage({ text: `PDF saved successfully: ${fileName}`, type: "success" });
       } else {
-        const res = await printingEngine.exportToPdf(data as InvoicePrintData);
+        const res = await printingEngine.exportToPdf(data as InvoicePrintData, {
+          paperSize,
+          copies,
+          orientation,
+          isDuplicate,
+          columns: customColumns,
+        });
         if (res.success && res.file_path) {
           setSavedFilePath(res.file_path);
           setStatusMessage({ text: `PDF saved to ${res.file_path}`, type: "success" });
@@ -976,35 +1172,46 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
               <button
                 type="button"
                 onClick={() => setActiveTab("device")}
-                className={`flex-1 py-3 text-xs font-bold border-b-2 flex items-center justify-center gap-1.5 transition ${
+                className={`flex-1 py-3 text-xs font-bold border-b-2 flex items-center justify-center gap-1 transition ${
                   activeTab === "device"
                     ? "border-blue-600 text-blue-600 dark:text-blue-400 bg-white dark:bg-slate-900"
                     : "border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"
                 }`}
               >
-                <Printer className="w-3.5 h-3.5" /> Printer & Profile
+                <Printer className="w-3.5 h-3.5" /> Printer
               </button>
               <button
                 type="button"
                 onClick={() => setActiveTab("layout")}
-                className={`flex-1 py-3 text-xs font-bold border-b-2 flex items-center justify-center gap-1.5 transition ${
+                className={`flex-1 py-3 text-xs font-bold border-b-2 flex items-center justify-center gap-1 transition ${
                   activeTab === "layout"
                     ? "border-blue-600 text-blue-600 dark:text-blue-400 bg-white dark:bg-slate-900"
                     : "border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"
                 }`}
               >
-                <Sliders className="w-3.5 h-3.5" /> Layout & GST
+                <Sliders className="w-3.5 h-3.5" /> Paper
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab("fields")}
+                className={`flex-1 py-3 text-xs font-bold border-b-2 flex items-center justify-center gap-1 transition ${
+                  activeTab === "fields"
+                    ? "border-blue-600 text-blue-600 dark:text-blue-400 bg-white dark:bg-slate-900"
+                    : "border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"
+                }`}
+              >
+                <Table className="w-3.5 h-3.5" /> Fields
               </button>
               <button
                 type="button"
                 onClick={() => setActiveTab("share")}
-                className={`flex-1 py-3 text-xs font-bold border-b-2 flex items-center justify-center gap-1.5 transition ${
+                className={`flex-1 py-3 text-xs font-bold border-b-2 flex items-center justify-center gap-1 transition ${
                   activeTab === "share"
                     ? "border-blue-600 text-blue-600 dark:text-blue-400 bg-white dark:bg-slate-900"
                     : "border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"
                 }`}
               >
-                <Share2 className="w-3.5 h-3.5" /> Share & PDF
+                <Share2 className="w-3.5 h-3.5" /> Export
               </button>
             </div>
 
@@ -1124,10 +1331,11 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
                         { id: "half_a4", label: "Half-A4 (V-Cut)" },
                         { id: "thermal_80mm", label: "Thermal 80mm" },
                         { id: "thermal_58mm", label: "Thermal 58mm" },
-                        { id: "dot_matrix_6in", label: "Dot Matrix 6\" (60C / 50 Usable)" },
-                        { id: "dot_matrix_10in", label: "Dot Matrix 10\" (80C)" },
-                        { id: "dot_matrix_12in", label: "Dot Matrix 12\" (120C)" },
-                        { id: "dot_matrix_15in", label: "Dot Matrix 15\" (132C)" },
+                        { id: "dot_matrix_6in", label: "Dot Matrix 6\" Paper" },
+                        { id: "dot_matrix_10in", label: "Dot Matrix 10\" Paper" },
+                        { id: "dot_matrix_12in", label: "Dot Matrix 12\" Paper" },
+                        { id: "dot_matrix_15in", label: "Dot Matrix 15\" Paper" },
+                        { id: "dot_matrix_custom", label: "Custom Continuous Size" },
                       ].map((p) => {
                         const isSelected =
                           paperSize === p.id ||
@@ -1162,6 +1370,19 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
                         </span>
                       </div>
 
+                      {/* Carriage Width Warning if Paper Exceeds Carriage */}
+                      {carriageWidthCheck.isWider && (
+                        <div className="bg-amber-100 dark:bg-amber-950/70 border border-amber-400 dark:border-amber-600/80 rounded-lg p-2.5 text-xs text-amber-950 dark:text-amber-200 flex items-start gap-2">
+                          <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                          <div className="space-y-0.5">
+                            <div className="font-bold">Paper Exceeds Printer Carriage</div>
+                            <div className="text-[11px] leading-tight">
+                              Selected paper width ({carriageWidthCheck.paperWidthInches}&quot;) is wider than printer maximum carriage width ({carriageWidthCheck.maxCarriageWidthInches}&quot;). The print head cannot reach beyond the physical carriage edge.
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
                       {/* Loaded Paper Width Switcher */}
                       <div>
                         <div className="flex items-center justify-between mb-1.5">
@@ -1169,15 +1390,16 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
                             Loaded Paper Width
                           </label>
                           <span className="text-[10px] font-mono font-bold text-emerald-700 dark:text-emerald-400 bg-emerald-100 dark:bg-emerald-900/60 px-1.5 py-0.5 rounded">
-                            {getDotMatrixColumns(paperSize)} Columns ({getPaperWidthInches(paperSize)}&quot; Paper)
+                            {deriveDotMatrixColumns(paperSize, printerProfile?.dotMatrixPitch || "10cpi", { customWidthInches: customPaperWidth })} Columns ({getPaperWidthInches(paperSize, customPaperWidth)}&quot; Paper @ {(printerProfile?.dotMatrixPitch || "10cpi").toUpperCase()})
                           </span>
                         </div>
-                        <div className="grid grid-cols-4 gap-1">
+                        <div className="grid grid-cols-5 gap-1">
                           {[
-                            { id: "dot_matrix_6in", label: "6\" (60C / 50 Usable)", desc: "6-inch Narrow Form (50 usable cols between perforations)" },
-                            { id: "dot_matrix_10in", label: "10\" (80C)", desc: "10-inch Standard Form (80 cols)" },
-                            { id: "dot_matrix_12in", label: "12\" (120C)", desc: "12-inch Continuous Form (120 cols)" },
-                            { id: "dot_matrix_15in", label: "15\" (132C)", desc: "15-inch Wide Carriage Form (132 cols)" },
+                            { id: "dot_matrix_6in", label: "6\" Paper", desc: "6-inch Narrow Form (50 usable cols between perforations)" },
+                            { id: "dot_matrix_10in", label: "10\" Paper", desc: "10-inch Standard Form" },
+                            { id: "dot_matrix_12in", label: "12\" Paper", desc: "12-inch Continuous Form" },
+                            { id: "dot_matrix_15in", label: "15\" Paper", desc: "15-inch Wide Carriage Form" },
+                            { id: "dot_matrix_custom", label: "Custom", desc: "Custom Paper Width" },
                           ].map((pw) => {
                             const isSelected =
                               paperSize === pw.id ||
@@ -1201,9 +1423,72 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
                             );
                           })}
                         </div>
+                        {paperSize === "dot_matrix_custom" && (
+                          <div className="mt-2 flex items-center justify-between bg-white dark:bg-slate-800 p-2 rounded border border-slate-200 dark:border-slate-700">
+                            <label className="text-[11px] font-semibold text-slate-700 dark:text-slate-300">
+                              Custom Width (Inches):
+                            </label>
+                            <input
+                              type="number"
+                              min={4}
+                              max={18}
+                              step={0.5}
+                              value={customPaperWidth}
+                              onChange={(e) => setCustomPaperWidth(parseFloat(e.target.value) || 10)}
+                              className="w-20 text-xs p-1 bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-600 rounded text-center font-bold"
+                            />
+                          </div>
+                        )}
                         <p className="mt-1 text-[10px] text-slate-500">
                           Dynamically adjusts table layout, borders, and margins to fit the currently loaded paper width without clipping.
                         </p>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">
+                            Character Pitch (CPI)
+                          </label>
+                          <select
+                            value={printerProfile?.dotMatrixPitch || "10cpi"}
+                            onChange={(e) => {
+                              if (printerProfile) {
+                                const updated = { ...printerProfile, dotMatrixPitch: e.target.value as any };
+                                setPrinterProfile(updated);
+                                printerManagerService.saveProfile(updated);
+                              }
+                            }}
+                            className="w-full text-xs bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded p-1.5 text-slate-800 dark:text-slate-100"
+                          >
+                            <option value="10cpi">10 CPI (Standard Pica)</option>
+                            <option value="12cpi">12 CPI (Elite)</option>
+                            <option value="17cpi_condensed">17 CPI (Condensed)</option>
+                          </select>
+                        </div>
+
+                        <div>
+                          <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1" title="Used only for paging long bills and form feed, never to pad short bills">
+                            Page Length
+                          </label>
+                          <select
+                            value={printerProfile?.linesPerPage ?? 66}
+                            onChange={(e) => {
+                              if (printerProfile) {
+                                const val = parseInt(e.target.value);
+                                const linesPerPage = isNaN(val) ? 66 : val;
+                                const updated = { ...printerProfile, linesPerPage };
+                                setPrinterProfile(updated);
+                                printerManagerService.saveProfile(updated);
+                              }
+                            }}
+                            className="w-full text-xs bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded p-1.5 text-slate-800 dark:text-slate-100"
+                          >
+                            <option value={66}>66 Lines (11" Standard Continuous)</option>
+                            <option value={72}>72 Lines (12" Continuous Form)</option>
+                            <option value={33}>33 Lines (6" Half-Page Continuous)</option>
+                            <option value={0}>Continuous (No Page Breaks / Roll)</option>
+                          </select>
+                        </div>
                       </div>
 
                       <div className="grid grid-cols-2 gap-2">
@@ -1225,30 +1510,6 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
                             <option value="esc_p">ESC/P (Epson Standard)</option>
                             <option value="tvs_native">TVS MSP Native</option>
                             <option value="plain_ascii">Generic Text Only</option>
-                          </select>
-                        </div>
-
-                        <div>
-                          <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1" title="Used only for paging long bills and form feed, never to pad short bills">
-                            Lines / Page
-                          </label>
-                          <select
-                            value={printerProfile?.linesPerPage ?? 66}
-                            onChange={(e) => {
-                              if (printerProfile) {
-                                const val = parseInt(e.target.value);
-                                const linesPerPage = isNaN(val) ? 66 : val;
-                                const updated = { ...printerProfile, linesPerPage };
-                                setPrinterProfile(updated);
-                                printerManagerService.saveProfile(updated);
-                              }
-                            }}
-                            className="w-full text-xs bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded p-1.5 text-slate-800 dark:text-slate-100"
-                          >
-                            <option value={66}>66 Lines (11" Standard Continuous)</option>
-                            <option value={72}>72 Lines (12" Continuous Form)</option>
-                            <option value={33}>33 Lines (6" Half-Page Continuous)</option>
-                            <option value={0}>Continuous (No Page Breaks / Roll)</option>
                           </select>
                         </div>
                       </div>
@@ -1620,6 +1881,129 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
                         className="rounded text-blue-600"
                       />
                     </label>
+                  </div>
+                </div>
+              )}
+
+              {/* Fields & Columns Customization Tab */}
+              {activeTab === "fields" && (
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h4 className="text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-200">
+                        Document Fields & Columns
+                      </h4>
+                      <p className="text-[11px] text-slate-500">
+                        Choose visible columns, reorder them, or rename header titles.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleResetColumns}
+                      className="text-[11px] font-bold text-blue-600 dark:text-blue-400 hover:underline cursor-pointer"
+                    >
+                      Reset
+                    </button>
+                  </div>
+
+                  {/* Columns List */}
+                  <div className="border border-slate-200 dark:border-slate-700 rounded-lg overflow-hidden divide-y divide-slate-200 dark:divide-slate-700 bg-white dark:bg-slate-800">
+                    {customColumns.map((col, idx) => {
+                      if (!isPharmacy && (col.id === "batch" || col.id === "expiry")) return null;
+                      return (
+                        <div key={col.id} className="p-2.5 flex items-center justify-between gap-2 hover:bg-slate-50 dark:hover:bg-slate-750">
+                          <div className="flex items-center gap-2 flex-1">
+                            <input
+                              type="checkbox"
+                              id={`col-vis-${col.id}`}
+                              checked={col.visible !== false}
+                              onChange={() => handleToggleColumnVisibility(col.id)}
+                              className="rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                            />
+                            <div className="flex-1">
+                              <input
+                                type="text"
+                                value={col.label}
+                                onChange={(e) => handleRenameColumn(col.id, e.target.value)}
+                                placeholder="Column Title"
+                                className="w-full text-xs font-semibold px-2 py-1 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded focus:border-blue-500 focus:outline-none text-slate-800 dark:text-slate-100"
+                              />
+                            </div>
+                            <span className="text-[10px] font-mono text-slate-400 uppercase bg-slate-100 dark:bg-slate-700 px-1.5 py-0.5 rounded">
+                              {col.id}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-1">
+                            <button
+                              type="button"
+                              disabled={idx === 0}
+                              onClick={() => handleMoveColumn(idx, "up")}
+                              className="p-1 rounded text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-30 cursor-pointer"
+                              title="Move Column Up"
+                            >
+                              <ArrowUp className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              disabled={idx === customColumns.length - 1}
+                              onClick={() => handleMoveColumn(idx, "down")}
+                              className="p-1 rounded text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-30 cursor-pointer"
+                              title="Move Column Down"
+                            >
+                              <ArrowDown className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* Template & Default Management */}
+                  <div className="bg-slate-50 dark:bg-slate-800/60 p-3 rounded-lg border border-slate-200 dark:border-slate-700 space-y-3">
+                    <button
+                      type="button"
+                      onClick={handleSaveAsStoreDefault}
+                      className="w-full flex items-center justify-center gap-1.5 py-2 px-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold shadow-xs cursor-pointer transition"
+                    >
+                      <Save className="w-3.5 h-3.5" />
+                      <span>Save as Store Default</span>
+                    </button>
+
+                    <div className="pt-2 border-t border-slate-200 dark:border-slate-700 flex gap-2">
+                      <input
+                        type="text"
+                        value={namedTemplateTitle}
+                        onChange={(e) => setNamedTemplateTitle(e.target.value)}
+                        placeholder="Template Name (e.g. Rate to Price)"
+                        className="flex-1 text-xs px-2.5 py-1.5 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-600 rounded-lg text-slate-800 dark:text-slate-100"
+                      />
+                      <button
+                        type="button"
+                        onClick={handleSaveAsNamedTemplate}
+                        disabled={!namedTemplateTitle.trim()}
+                        className="px-3 py-1.5 bg-slate-800 dark:bg-slate-700 text-white text-xs font-bold rounded-lg hover:bg-slate-900 disabled:opacity-40 cursor-pointer"
+                      >
+                        Save
+                      </button>
+                    </div>
+
+                    {savedTemplates.length > 0 && (
+                      <div className="pt-2 border-t border-slate-200 dark:border-slate-700">
+                        <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">
+                          Load Named Template:
+                        </label>
+                        <select
+                          onChange={(e) => handleLoadNamedTemplate(e.target.value)}
+                          className="w-full text-xs p-1.5 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg text-slate-800 dark:text-slate-100"
+                          defaultValue=""
+                        >
+                          <option value="" disabled>Select a named template...</option>
+                          {savedTemplates.map((t) => (
+                            <option key={t.id} value={t.id}>{t.name}</option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
                   </div>
                 </div>
               )}

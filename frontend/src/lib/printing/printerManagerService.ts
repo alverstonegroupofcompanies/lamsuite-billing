@@ -16,6 +16,7 @@ export type PaperSize =
   | "dot_matrix_120col"
   | "dot_matrix_15in"
   | "dot_matrix_132col"
+  | "dot_matrix_custom"
   | "barcode_label";
 export type PrinterType = "laser_inkjet" | "thermal_pos" | "dot_matrix" | "virtual_pdf";
 
@@ -24,10 +25,69 @@ export function isDotMatrixPaper(paperSize: PaperSize): boolean {
 }
 
 /**
- * Returns exact column width strictly based on user-selected paper size.
+ * Derives column count from physical paper width and characters per inch (CPI), minus tractor-feed margins.
+ * For example:
+ * - 6" at 10 CPI: 60 cols full, 50 cols usable (with 0.5" left and right tractor-feed margins)
+ * - 10" at 10 CPI: 100 cols (or 80 cols printable)
+ * - 12" at 10 CPI: 120 cols
+ * - 15" at 10 CPI: 150 cols (or 132 cols printable)
+ * Scaled accordingly for 12 CPI (Elite) and 17 CPI (Condensed).
+ */
+export function deriveDotMatrixColumns(
+  paperSize: PaperSize,
+  cpiPitch: "10cpi" | "12cpi" | "17cpi_condensed" | number = "10cpi",
+  options?: { customWidthInches?: number; marginInches?: number }
+): number {
+  let cpi = 10;
+  if (typeof cpiPitch === "number") {
+    cpi = cpiPitch;
+  } else if (cpiPitch === "12cpi") {
+    cpi = 12;
+  } else if (cpiPitch === "17cpi_condensed") {
+    cpi = 17;
+  }
+
+  let widthInches = 10.0;
+  let marginInches = options?.marginInches ?? 0;
+
+  switch (paperSize) {
+    case "dot_matrix_6in":
+      widthInches = 6.0;
+      if (options?.marginInches === undefined) marginInches = 1.0; // 0.5" tractor feed each side
+      break;
+    case "dot_matrix_10in":
+    case "dot_matrix_80col":
+      widthInches = 10.0;
+      break;
+    case "dot_matrix_12in":
+    case "dot_matrix_120col":
+      widthInches = 12.0;
+      break;
+    case "dot_matrix_15in":
+    case "dot_matrix_132col":
+      widthInches = 15.0;
+      break;
+    default:
+      if (options?.customWidthInches) widthInches = options.customWidthInches;
+      break;
+  }
+
+  const usableWidth = Math.max(1, widthInches - marginInches);
+  return Math.floor(usableWidth * cpi);
+}
+
+/**
+ * Returns exact column width strictly based on user-selected paper size and optional CPI.
  * Prioritizes paper size over printer maximum carriage width so narrow formats are never stretched.
  */
-export function getDotMatrixColumns(paperSize: PaperSize, fallback?: number): number {
+export function getDotMatrixColumns(
+  paperSize: PaperSize,
+  cpiOrFallback?: "10cpi" | "12cpi" | "17cpi_condensed" | number,
+  fallback?: number
+): number {
+  if (typeof cpiOrFallback === "string") {
+    return deriveDotMatrixColumns(paperSize, cpiOrFallback);
+  }
   switch (paperSize) {
     case "dot_matrix_6in":
       // Always 50 cols (usable area between 0.5" left and right tractor-feed perforated margins)
@@ -45,6 +105,7 @@ export function getDotMatrixColumns(paperSize: PaperSize, fallback?: number): nu
       // Always 132 cols for 15-inch wide continuous paper
       return 132;
     default:
+      if (typeof cpiOrFallback === "number" && cpiOrFallback > 0) return cpiOrFallback;
       if (typeof fallback === "number" && fallback > 0) return fallback;
       return 80;
   }
@@ -53,7 +114,7 @@ export function getDotMatrixColumns(paperSize: PaperSize, fallback?: number): nu
 /**
  * Maps paper size to standard dot matrix physical width key.
  */
-export function getPaperWidthFromSize(paperSize: PaperSize): "6in" | "10in" | "12in" | "15in" {
+export function getPaperWidthFromSize(paperSize: PaperSize, customWidth?: number): "6in" | "10in" | "12in" | "15in" {
   switch (paperSize) {
     case "dot_matrix_6in":
       return "6in";
@@ -66,11 +127,17 @@ export function getPaperWidthFromSize(paperSize: PaperSize): "6in" | "10in" | "1
     case "dot_matrix_10in":
     case "dot_matrix_80col":
     default:
+      if (customWidth) {
+        if (customWidth <= 7) return "6in";
+        if (customWidth <= 11) return "10in";
+        if (customWidth <= 13) return "12in";
+        return "15in";
+      }
       return "10in";
   }
 }
 
-export function getPaperWidthInches(paperSize: PaperSize): number {
+export function getPaperWidthInches(paperSize: PaperSize, customWidth?: number): number {
   switch (paperSize) {
     case "dot_matrix_6in":
       return 6.0;
@@ -83,6 +150,8 @@ export function getPaperWidthInches(paperSize: PaperSize): number {
     case "dot_matrix_15in":
     case "dot_matrix_132col":
       return 15.0;
+    case "dot_matrix_custom":
+      return customWidth && customWidth > 0 ? customWidth : 10.0;
     case "thermal_80mm":
       return 3.15;
     case "thermal_58mm":
@@ -135,6 +204,44 @@ export function getPrinterCarriageColumns(
   }
   // Default for standard dot matrix carriage
   return 80;
+}
+
+/**
+ * Returns printer's physical maximum carriage/platen width in inches.
+ */
+export function getPrinterMaxCarriageWidthInches(
+  printer?: SystemPrinterInfo | null,
+  profile?: PrinterProfileConfig | null
+): number {
+  if (profile?.maxCarriageWidthInches && profile.maxCarriageWidthInches > 0) {
+    return profile.maxCarriageWidthInches;
+  }
+  const cols = getPrinterCarriageColumns(printer, profile);
+  if (cols >= 132) return 15.0;
+  if (cols >= 120) return 12.0;
+  if (cols >= 100) return 10.0;
+  return 10.0;
+}
+
+/**
+ * Verifies whether the selected continuous paper width exceeds the printer's physical platen/carriage width.
+ */
+export function isPaperWiderThanPrinter(
+  paperSize: PaperSize,
+  printer?: SystemPrinterInfo | null,
+  profile?: PrinterProfileConfig | null,
+  customWidth?: number
+): { isWider: boolean; paperWidthInches: number; maxCarriageWidthInches: number } {
+  if (!isDotMatrixPaper(paperSize)) {
+    return { isWider: false, paperWidthInches: 0, maxCarriageWidthInches: 0 };
+  }
+  const paperWidthInches = customWidth || getPaperWidthInches(paperSize);
+  const maxCarriageWidthInches = getPrinterMaxCarriageWidthInches(printer, profile);
+  return {
+    isWider: paperWidthInches > maxCarriageWidthInches,
+    paperWidthInches,
+    maxCarriageWidthInches,
+  };
 }
 
 export interface ContinuousPaperGeometry {
@@ -279,6 +386,7 @@ export interface PrinterProfileConfig {
   // Dot matrix specifics
   dotMatrixColumns?: 60 | 80 | 120 | 132;
   dotMatrixCarriageWidth?: 80 | 120 | 132 | 136;
+  maxCarriageWidthInches?: number; // e.g. 10.0, 12.0, 15.0
   dotMatrixAutoCenter?: boolean;
   dotMatrixLoadedPaperWidth?: "6in" | "10in" | "12in" | "15in";
   dotMatrixCommandSet?: "esc_p" | "tvs_native" | "plain_ascii";
@@ -674,6 +782,53 @@ export class PrinterManagerService {
       id: STORAGE_LAST_USED_KEY,
       updated_at: new Date().toISOString(),
     });
+  }
+
+  /**
+   * Retrieves full last-used print settings for document type and printer.
+   */
+  // Memory fallback for environments without localStorage
+  private _memoryDocSettings = new Map<string, string>();
+
+  async getLastUsedDocSettings(docType: string): Promise<{
+    paperSize?: PaperSize;
+    copies?: number;
+    orientation?: "portrait" | "landscape";
+    showHsnSummary?: boolean;
+    showUpiQr?: boolean;
+    showDoctorPatient?: boolean;
+    showDrugLicenses?: boolean;
+    showTerms?: boolean;
+    columns?: any[];
+    printerName?: string;
+    linesPerPage?: number;
+    cpi?: "10cpi" | "12cpi" | "17cpi_condensed";
+    customWidth?: number;
+  } | null> {
+    const key = `doc_print_settings_${docType}`;
+    try {
+      if (typeof localStorage !== "undefined" && typeof localStorage.getItem === "function") {
+        const raw = localStorage.getItem(key);
+        if (raw) return JSON.parse(raw);
+      }
+    } catch {}
+    const memRaw = this._memoryDocSettings.get(key);
+    if (memRaw) return JSON.parse(memRaw);
+    return null;
+  }
+
+  /**
+   * Remembers full last-used print settings for document type and printer.
+   */
+  async setLastUsedDocSettings(docType: string, settings: any): Promise<void> {
+    const key = `doc_print_settings_${docType}`;
+    const serialized = JSON.stringify(settings);
+    this._memoryDocSettings.set(key, serialized);
+    try {
+      if (typeof localStorage !== "undefined" && typeof localStorage.setItem === "function") {
+        localStorage.setItem(key, serialized);
+      }
+    } catch {}
   }
 
   /**

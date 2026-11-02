@@ -30,6 +30,7 @@ import {
   ChevronUp,
   QrCode,
   RefreshCw,
+  Receipt,
 } from "lucide-react";
 import { posCartService, type PosCartLine } from "../lib/billing/posCartService";
 import {
@@ -48,6 +49,8 @@ import {
   type InvoicePrintData,
 } from "../lib/printing/printingEngine";
 import { isTauri } from "../lib/ipc/ipcBridge";
+import { isClinicalSupported } from "../lib/settings/storeTypePresets";
+import { staffAuthService } from "../lib/auth/staffAuthService";
 import { companySettingsService, DEFAULT_COLUMNS, DEFAULT_PAYMENT_MODES, type ColumnSetting, type HeaderFieldSetting, type PaymentModeConfig } from "../lib/settings/companySettingsService";
 import type { InvoiceTotals } from "../lib/billing/billingCalculations";
 import {
@@ -57,6 +60,7 @@ import {
   type InvoiceDiffResult,
 } from "../lib/billing/invoiceManagementService";
 import { PrintPreviewModal } from "../components/PrintPreviewModal";
+import { TaxOverrideModal } from "../components/TaxOverrideModal";
 import { CustomerCombobox } from "../components/CustomerCombobox";
 import { SmartQtyInput } from "../components/SmartQtyInput";
 import { PosGridRow, type PosRateBasis } from "../components/PosGridRow";
@@ -123,6 +127,7 @@ export const PosBillingPage: React.FC = () => {
   const [isBillDiscountModalOpen, setIsBillDiscountModalOpen] = useState(false);
   const [isRoundOffModalOpen, setIsRoundOffModalOpen] = useState(false);
   const [isShortcutsModalOpen, setIsShortcutsModalOpen] = useState(false);
+  const [isTaxOverrideModalOpen, setIsTaxOverrideModalOpen] = useState(false);
   const [ariaAnnouncement, setAriaAnnouncement] = useState("");
 
   // Editing Past Invoice State
@@ -144,6 +149,17 @@ export const PosBillingPage: React.FC = () => {
 
   // Product Entry Style & Inline Entry Row State
   const [appSettingsState, setAppSettingsState] = useState(() => companySettingsService.getSettings());
+
+  useEffect(() => {
+    posCartService.setStoreTaxSettings({
+      taxMode: appSettingsState.tax_mode,
+      storeState: appSettingsState.state_code,
+      gstType: appSettingsState.gst_type,
+      allowTaxOverride: appSettingsState.allow_tax_override_per_bill,
+    });
+    setTotals(posCartService.getTotals());
+    setLines(posCartService.getLines());
+  }, [appSettingsState]);
   const productEntryStyle = appSettingsState.keyboard?.productEntryStyle || "inline_row";
   const entryRowPosition = appSettingsState.keyboard?.entryRowPosition || "bottom";
   const addLineMode = appSettingsState.keyboard?.addLineMode || "immediate";
@@ -2159,7 +2175,6 @@ export const PosBillingPage: React.FC = () => {
           setPreviewModalState({
             isOpen: true,
             data: printData,
-            initialFormat: printFormat === "a4" ? "a4" : "thermal_80mm",
             title: `Revised Invoice Preview - #${editingInvoice.invoice_number}`,
           });
         }
@@ -2220,16 +2235,23 @@ export const PosBillingPage: React.FC = () => {
     const settings = companySettingsService.getSettings();
     const tenderCalcSnapshot = billingTenderService.calculateTenderBalance(activeTotals.grand_total, tenders);
 
+    const storeHeader = companySettingsService.getStorePrintHeader();
+
     return {
       invoice_number: invoiceNumber,
       invoice_date: new Date().toISOString().slice(0, 10),
-      store_name: settings.display_name || settings.store_name || "LamStone Pharmacy & Retail",
-      store_address: settings.address || "Main Road, Palakkad, Kerala - 678001",
-      store_phone: settings.phone || "9876543210",
-      store_email: settings.email || undefined,
-      store_gstin: settings.gstin || "32ABCDE1234F1Z5",
-      drug_license_numbers: settings.drug_license_numbers && settings.drug_license_numbers.length > 0 ? settings.drug_license_numbers : ["20B/KL-PKD-1029", "21B/KL-PKD-1030"],
-      fssai_no: settings.fssai_no || undefined,
+      store_name: storeHeader.store_name,
+      store_address: storeHeader.store_address,
+      store_phone: storeHeader.store_phone,
+      store_email: storeHeader.store_email,
+      store_gstin: storeHeader.store_gstin,
+      store_type: storeHeader.store_type,
+      gst_type: storeHeader.gst_type,
+      drug_license_numbers: storeHeader.drug_license_numbers,
+      fssai_no: storeHeader.fssai_no,
+      upi_vpa: storeHeader.upi_vpa,
+      terms_and_conditions: storeHeader.terms_and_conditions,
+      jurisdiction_note: storeHeader.jurisdiction_note,
       place_of_supply: settings.state_code ? `${settings.state_code}-Kerala` : "32-Kerala",
       customer_name: customerName || "Walk-in Customer",
       customer_phone: customerPhone || "",
@@ -2270,9 +2292,6 @@ export const PosBillingPage: React.FC = () => {
       tax_total: activeTotals.total_tax,
       round_off: activeTotals.round_off,
       grand_total: activeTotals.grand_total,
-      upi_vpa: (settings.printing as any)?.upi_vpa || "pharmacy@upi",
-      terms_and_conditions: settings.printing?.termsAndConditions,
-      jurisdiction_note: settings.printing?.jurisdictionNote,
       footer_note: settings.printing?.footerNote,
     };
   };
@@ -2382,7 +2401,6 @@ export const PosBillingPage: React.FC = () => {
             setPreviewModalState({
               isOpen: true,
               data: printData,
-              initialFormat: "thermal_80mm",
               title: `Tax Invoice Preview - #${invoiceNumber}`,
             });
           } else {
@@ -2409,7 +2427,6 @@ export const PosBillingPage: React.FC = () => {
               setPreviewModalState({
                 isOpen: true,
                 data: printData,
-                initialFormat: printFormat === "a4" ? "a4" : "thermal_80mm",
                 title: `Tax Invoice Preview - #${invoiceNumber}`,
               });
             }
@@ -2523,6 +2540,36 @@ export const PosBillingPage: React.FC = () => {
             </div>
           )}
 
+          {/* Active Tax Regime Badge */}
+          <div className="flex items-center">
+            <button
+              type="button"
+              onClick={() => {
+                if (appSettingsState.allow_tax_override_per_bill) {
+                  setIsTaxOverrideModalOpen(true);
+                }
+              }}
+              className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-bold border transition-colors ${
+                posCartService.getActiveTaxMode().isComposition
+                  ? "border-amber-500/40 bg-amber-500/10 text-amber-500"
+                  : "border-emerald-500/40 bg-emerald-500/10 text-emerald-500"
+              } ${appSettingsState.allow_tax_override_per_bill ? "cursor-pointer hover:opacity-80" : "cursor-default"}`}
+              title={appSettingsState.allow_tax_override_per_bill ? "Click to override Tax Mode for this bill" : "Active Store Tax Mode"}
+            >
+              <Receipt className="h-3 w-3" />
+              <span>
+                {posCartService.getActiveTaxMode().isComposition
+                  ? "Bill of Supply (0% Tax)"
+                  : `GST ${posCartService.getActiveTaxMode().taxMode === "inclusive" ? "Incl" : "Excl"}`}
+                {posCartService.getIsInterState() ? " • IGST" : ""}
+                {posCartService.getActiveTaxMode().isOverridden ? " (Override)" : ""}
+              </span>
+              {appSettingsState.allow_tax_override_per_bill && (
+                <ChevronDown className="h-3 w-3 opacity-70" />
+              )}
+            </button>
+          </div>
+
           {posHeaders.find((h) => h.id === "customer_name")?.visible !== false && (
             <>
               <div className="h-6 w-px bg-[var(--color-border)] hidden sm:block" />
@@ -2586,7 +2633,7 @@ export const PosBillingPage: React.FC = () => {
             />
           )}
 
-          {posHeaders.find((h) => h.id === "doctor")?.visible && (
+          {isClinicalSupported(appSettingsState.store_type) && posHeaders.find((h) => h.id === "doctor")?.visible && (
             <input
               type="text"
               value={doctorName}
@@ -2599,7 +2646,7 @@ export const PosBillingPage: React.FC = () => {
             />
           )}
 
-          {posHeaders.find((h) => h.id === "patient")?.visible && (
+          {isClinicalSupported(appSettingsState.store_type) && posHeaders.find((h) => h.id === "patient")?.visible && (
             <input
               type="text"
               value={patientName}
@@ -2730,7 +2777,7 @@ export const PosBillingPage: React.FC = () => {
                     setSearchResults([]);
                   }, 180);
                 }}
-                placeholder="Scan barcode or type medicine / product name (Press Enter)... [F1]"
+                placeholder="Scan barcode or type item / product name (Press Enter)... [F1]"
                 className="w-full rounded-[10px] border border-[var(--color-border)] bg-[var(--color-surface)] pl-10 pr-24 py-2 text-xs font-medium text-[var(--color-text)] placeholder-[var(--color-text-muted)] focus:border-[var(--color-accent)] focus:outline-none shadow-2xs transition-colors"
               />
               <div className="absolute right-3 flex items-center gap-1.5 text-[11px] text-[var(--color-text-muted)]">
@@ -3820,49 +3867,56 @@ export const PosBillingPage: React.FC = () => {
                 </div>
 
                 {/* 4. Dynamic UPI QR Panel */}
-                {upiLine && (appSettings.payments?.enableDynamicUpiQr ?? true) && (
-                  <div className="rounded-lg border border-indigo-200 bg-indigo-50/40 p-3 flex flex-col sm:flex-row items-center gap-4">
-                    <div className="shrink-0 bg-white p-2 rounded-lg border border-indigo-200 shadow-xs flex items-center justify-center">
-                      {(() => {
-                        const upiUri = `upi://pay?pa=${encodeURIComponent(
-                          appSettings.payments?.upiVpa || "store@upi"
-                        )}&pn=${encodeURIComponent(
-                          appSettings.payments?.upiPayeeName || "LamSuite Billing"
-                        )}&am=${upiLine.amount.toFixed(2)}&cu=INR&tn=${encodeURIComponent(`Inv ${invoiceNumber}`)}`;
-                        const svg = generateQrCodeSvg(upiUri, 110);
-                        return <div dangerouslySetInnerHTML={{ __html: svg }} />;
-                      })()}
+                {(() => {
+                  const activeSession = staffAuthService.getCurrentSession();
+                  const activeCounter = activeSession?.counterId || "Counter 01";
+                  const activeUpi = companySettingsService.getActiveUpi(activeCounter);
+
+                  if (!upiLine || !activeUpi || !activeUpi.showInSettlement) return null;
+
+                  const upiUri = `upi://pay?pa=${encodeURIComponent(
+                    activeUpi.vpa
+                  )}&pn=${encodeURIComponent(
+                    activeUpi.payeeName
+                  )}&am=${upiLine.amount.toFixed(2)}&cu=INR&tn=${encodeURIComponent(`Inv ${invoiceNumber}`)}`;
+                  const svg = generateQrCodeSvg(upiUri, 110);
+
+                  return (
+                    <div className="rounded-lg border border-indigo-200 bg-indigo-50/40 p-3 flex flex-col sm:flex-row items-center gap-4">
+                      <div className="shrink-0 bg-white p-2 rounded-lg border border-indigo-200 shadow-xs flex items-center justify-center">
+                        <div dangerouslySetInnerHTML={{ __html: svg }} />
+                      </div>
+                      <div className="flex-1 space-y-1.5 text-xs text-slate-700">
+                        <div className="flex items-center gap-1.5">
+                          <QrCode className="h-4 w-4 text-indigo-600" />
+                          <span className="font-bold text-indigo-900">Dynamic UPI Payment QR</span>
+                        </div>
+                        <p className="text-[11px] text-slate-600">
+                          {activeUpi.qrSubtext} for exact bill amount of{" "}
+                          <strong className="text-indigo-900 font-bold">₹ {upiLine.amount.toFixed(2)}</strong>.
+                        </p>
+                        <div className="flex items-center gap-3 text-[11px] text-slate-500">
+                          <span>VPA: <strong className="text-slate-700 font-mono">{activeUpi.vpa}</strong></span>
+                          <span>Payee: <strong className="text-slate-700 font-mono">{activeUpi.payeeName}</strong></span>
+                        </div>
+                        <div className="pt-1">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const idx = tenders.indexOf(upiLine);
+                              if (idx >= 0) handleUpdatePaymentLine(idx, { status: "received" });
+                              showNotification("UPI payment marked as received!", "success");
+                            }}
+                            className="px-2.5 py-1 rounded bg-indigo-600 text-white text-[11px] font-semibold hover:bg-indigo-700 transition-colors cursor-pointer inline-flex items-center gap-1.5"
+                          >
+                            <CheckCircle className="h-3.5 w-3.5" />
+                            <span>Mark as Received</span>
+                          </button>
+                        </div>
+                      </div>
                     </div>
-                    <div className="flex-1 space-y-1.5 text-xs text-slate-700">
-                      <div className="flex items-center gap-1.5">
-                        <QrCode className="h-4 w-4 text-indigo-600" />
-                        <span className="font-bold text-indigo-900">Dynamic UPI Payment QR</span>
-                      </div>
-                      <p className="text-[11px] text-slate-600">
-                        Scan with GPay, PhonePe, Paytm or BHIM for exact bill amount of{" "}
-                        <strong className="text-indigo-900 font-bold">₹ {upiLine.amount.toFixed(2)}</strong>.
-                      </p>
-                      <div className="flex items-center gap-3 text-[11px] text-slate-500">
-                        <span>VPA: <strong className="text-slate-700 font-mono">{appSettings.payments?.upiVpa || "store@upi"}</strong></span>
-                        <span>Ref: <strong className="text-slate-700 font-mono">Inv #{invoiceNumber}</strong></span>
-                      </div>
-                      <div className="pt-1">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const idx = tenders.indexOf(upiLine);
-                            if (idx >= 0) handleUpdatePaymentLine(idx, { status: "received" });
-                            showNotification("UPI payment marked as received!", "success");
-                          }}
-                          className="px-2.5 py-1 rounded bg-indigo-600 text-white text-[11px] font-semibold hover:bg-indigo-700 transition-colors cursor-pointer inline-flex items-center gap-1.5"
-                        >
-                          <CheckCircle className="h-3.5 w-3.5" />
-                          <span>Mark as Received</span>
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                )}
+                  );
+                })()}
 
                 {/* 5. Credit (Udhari) Rules Panel */}
                 {creditLine && (
@@ -3915,25 +3969,22 @@ export const PosBillingPage: React.FC = () => {
                 {/* 6. Print Output Format Selector */}
                 <div>
                   <label className="text-xs font-semibold text-slate-700 block mb-1.5">
-                    Print Output Format (Saved per Counter)
+                    Print Action
                   </label>
-                  <div className="grid grid-cols-3 sm:grid-cols-5 gap-1.5">
+                  <div className="grid grid-cols-2 gap-2">
                     {[
-                      { key: "thermal" as const, label: "Thermal 80mm", icon: Printer },
-                      { key: "a4" as const, label: "A4 Tax Invoice", icon: FileText },
-                      { key: "pdf" as const, label: "Save PDF", icon: Download },
-                      { key: "none" as const, label: "No Print", icon: X },
-                      { key: "ask" as const, label: "Ask Each Time", icon: Sliders },
+                      { key: "ask" as const, label: "Print Bill (Preview/Default)", icon: Printer },
+                      { key: "none" as const, label: "No Print (Save Only)", icon: X },
                     ].map((item) => {
                       const Icon = item.icon;
-                      const isSelected = printFormat === item.key;
+                      const isSelected = item.key === "none" ? printFormat === "none" : printFormat !== "none";
                       return (
                         <button
                           key={item.key}
                           type="button"
                           disabled={isFinalizing}
                           onClick={() => setPrintFormat(item.key)}
-                          className={`flex items-center justify-center gap-1.5 rounded-lg py-1.5 px-2 text-xs font-medium border transition-all cursor-pointer disabled:opacity-50 ${
+                          className={`flex items-center justify-center gap-1.5 rounded-lg py-2 px-3 text-xs font-semibold border transition-all cursor-pointer disabled:opacity-50 ${
                             isSelected
                               ? "border-blue-600 bg-blue-50 text-blue-700 font-bold shadow-xs"
                               : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
@@ -4015,7 +4066,7 @@ export const PosBillingPage: React.FC = () => {
                     <span>
                       {isFinalizing
                         ? "Saving..."
-                        : `Save & Print (${printFormat.toUpperCase()}) [F12]`}
+                        : "Save & Print [F12]"}
                     </span>
                   </button>
                 </div>
@@ -4187,25 +4238,11 @@ export const PosBillingPage: React.FC = () => {
                 />
               </div>
 
-              {/* Format selection */}
+              {/* Print Notice */}
               <div className="flex items-center justify-between border-t border-slate-200 pt-3">
-                <span className="text-xs font-semibold text-slate-600">Reprint Format:</span>
-                <div className="flex gap-2">
-                  {(["thermal", "a4", "pdf"] as const).map((fmt) => (
-                    <button
-                      key={fmt}
-                      type="button"
-                      onClick={() => setPrintFormat(fmt)}
-                      className={`rounded px-3 py-1 text-xs font-bold uppercase transition-all ${
-                        printFormat === fmt
-                          ? "bg-blue-600 text-white shadow-xs"
-                          : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-                      }`}
-                    >
-                      {fmt}
-                    </button>
-                  ))}
-                </div>
+                <span className="text-xs text-slate-500">
+                  Print preview with your saved layout will open upon confirming revision.
+                </span>
               </div>
             </div>
 
@@ -4258,6 +4295,13 @@ export const PosBillingPage: React.FC = () => {
           setPosColumns([...cols]);
           setPosHeaders([...hdrs]);
         }}
+      />
+
+      {/* Per-Bill Tax Mode Override Modal */}
+      <TaxOverrideModal
+        isOpen={isTaxOverrideModalOpen}
+        onClose={() => setIsTaxOverrideModalOpen(false)}
+        onApplied={refreshCartState}
       />
 
       {/* Manual Unit Conversion Editor Modal */}

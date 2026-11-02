@@ -7,6 +7,8 @@ import {
 } from "./printerManagerService";
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
+import { isClinicalSupported } from "../settings/storeTypePresets";
+import { companySettingsService } from "../settings/companySettingsService";
 import * as QRCodeModule from "qrcode";
 import { ROBOTO_REGULAR_BASE64, ROBOTO_BOLD_BASE64 } from "./embeddedFonts";
 import { dotMatrixRenderer, DotMatrixOptions } from "./dotMatrixRenderer";
@@ -22,6 +24,8 @@ export interface InvoicePrintData {
   store_phone?: string;
   store_email?: string;
   store_gstin?: string;
+  store_type?: string;
+  gst_type?: string;
   drug_license_numbers?: string[]; // e.g. ["20B-12345", "21B-67890"]
   fssai_no?: string;
   place_of_supply?: string;
@@ -95,6 +99,7 @@ export interface PrintRenderOptions {
   currencySymbolFormat?: "rupee_symbol" | "rs_text";
   isDuplicate?: boolean;
   printerName?: string;
+  columns?: PrintColumnConfig[];
 }
 
 export interface HsnSummaryRow {
@@ -303,6 +308,77 @@ export const DEFAULT_PRINT_COLUMNS: PrintColumnConfig[] = [
   { id: "rate", label: "Rate", visible: true, widthPercent: 12, order: 5 },
   { id: "amount", label: "Amount", visible: true, widthPercent: 13, order: 6 },
 ];
+
+export const AVAILABLE_PRINT_COLUMNS: PrintColumnConfig[] = [
+  { id: "sl_no", label: "#", visible: true, widthPercent: 5, order: 1 },
+  { id: "description", label: "Item Description", visible: true, widthPercent: 30, order: 2 },
+  { id: "hsn", label: "HSN", visible: true, widthPercent: 10, order: 3 },
+  { id: "batch", label: "Batch", visible: true, widthPercent: 10, order: 4 },
+  { id: "expiry", label: "Exp", visible: true, widthPercent: 8, order: 5 },
+  { id: "qty", label: "Qty", visible: true, widthPercent: 8, order: 6 },
+  { id: "rate", label: "Rate (₹)", visible: true, widthPercent: 12, order: 7 },
+  { id: "mrp", label: "MRP", visible: false, widthPercent: 10, order: 8 },
+  { id: "discount", label: "Disc", visible: false, widthPercent: 8, order: 9 },
+  { id: "gst", label: "GST %", visible: true, widthPercent: 7, order: 10 },
+  { id: "amount", label: "Total (₹)", visible: true, widthPercent: 13, order: 11 },
+];
+
+export function resolvePrintColumns(options?: PrintRenderOptions, isPharmacy: boolean = true): PrintColumnConfig[] {
+  if (options?.columns && options.columns.length > 0) {
+    return options.columns.filter((c) => c.visible !== false).sort((a, b) => a.order - b.order);
+  }
+  return AVAILABLE_PRINT_COLUMNS.filter((c) => {
+    if (!isPharmacy && (c.id === "batch" || c.id === "expiry")) return false;
+    return c.visible;
+  }).sort((a, b) => a.order - b.order);
+}
+
+export function formatColumnCellHtml(colId: string, item: any, itemNumber: number): { align: string; content: string; isBold?: boolean } {
+  const align = colId === "description" ? "left" : (["qty", "rate", "mrp", "discount", "gst", "amount", "total"].includes(colId) ? "right" : "center");
+  let content = "-";
+  let isBold = false;
+  switch (colId) {
+    case "sl_no":
+      content = String(itemNumber);
+      break;
+    case "description":
+      content = `<div style="font-weight: 700; color: #0f172a;">${item.description || item.item_name || ""}</div>`;
+      break;
+    case "hsn":
+      content = item.hsn_code || item.hsn || "-";
+      break;
+    case "batch":
+      content = item.batch_no || "-";
+      break;
+    case "expiry":
+      content = item.expiry_date || "-";
+      break;
+    case "qty":
+      content = `${item.qty}${item.loose_qty ? ` + ${item.loose_qty}L` : ""}`;
+      break;
+    case "mrp":
+      content = `₹ ${(item.mrp || 0).toFixed(2)}`;
+      break;
+    case "rate":
+      content = `₹ ${(item.rate || 0).toFixed(2)}`;
+      break;
+    case "discount":
+      content = item.discount_percent ? `${item.discount_percent}%` : (item.discount_amount ? `₹ ${item.discount_amount.toFixed(2)}` : "-");
+      break;
+    case "gst":
+      content = `${item.gst_percent || 0}%`;
+      break;
+    case "amount":
+    case "total":
+      content = `₹ ${(item.amount || 0).toFixed(2)}`;
+      isBold = true;
+      break;
+    default:
+      content = item[colId] !== undefined ? String(item[colId]) : "-";
+      break;
+  }
+  return { align, content, isBold };
+}
 
 export const STANDARD_TEMPLATES: NamedPrintTemplate[] = [
   {
@@ -574,18 +650,23 @@ export class PrintingEngine {
     }
 
     const amountWords = data.amount_in_words || numberToWordsIndian(data.grand_total);
-    const showHsn = options?.showHsnSummary !== false;
-    const showQr = options?.showUpiQr !== false;
-    const showClinical = options?.showDoctorPatient !== false;
-    const showLicenses = options?.showDrugLicenses !== false;
+    const activeStoreType = data.store_type || companySettingsService.getSettings()?.store_type;
+    const isPharmacy = isClinicalSupported(activeStoreType);
+    const isCompositionOrNoTax = data.gst_type === "composition" || data.gst_type === "no_tax" || companySettingsService.getSettings()?.gst_type === "composition" || companySettingsService.getSettings()?.gst_type === "no_tax";
+    
+    const showHsn = !isCompositionOrNoTax && options?.showHsnSummary !== false;
+    const showClinical = isPharmacy && options?.showDoctorPatient !== false;
+    const showLicenses = isPharmacy && options?.showDrugLicenses !== false;
     const showTerms = options?.showTerms !== false;
     const copyMarker = options?.copyMarker;
     const isDuplicate = options?.isDuplicate;
 
-    const hsnRows = calculateHsnSummary(data.lines);
-    const upiVpa = data.upi_vpa || "pharmacy@upi";
-    const upiUri = generateUpiPaymentString(upiVpa, data.store_name, data.grand_total, data.invoice_number);
-    const qrSvg = generateQrCodeSvg(upiUri, 76);
+    const hsnRows = isCompositionOrNoTax ? [] : calculateHsnSummary(data.lines);
+    const activeUpi = companySettingsService.getActiveUpi();
+    const upiVpa = data.upi_vpa || activeUpi?.vpa || "";
+    const showQr = Boolean(upiVpa) && options?.showUpiQr !== false;
+    const upiUri = upiVpa ? generateUpiPaymentString(upiVpa, data.store_name, data.grand_total, data.invoice_number) : "";
+    const qrSvg = upiUri ? generateQrCodeSvg(upiUri, 76) : "";
 
     const isInterState = (data.igst_total !== undefined && data.igst_total > 0) || hsnRows.some((r) => r.igstAmount > 0);
     const cgstTotal = data.cgst_total !== undefined ? data.cgst_total : round2(data.tax_total / 2);
@@ -635,6 +716,7 @@ export class PrintingEngine {
       })
       .join("");
 
+    const activeColumns = resolvePrintColumns(options, isPharmacy);
     const pageChunks = chunkInvoiceLines(data.lines, 14, 16, 24, 14);
     const totalPages = pageChunks.length;
 
@@ -653,17 +735,15 @@ export class PrintingEngine {
             const itemNumber = startIdx + i + 1;
             return `
           <tr>
-            <td style="padding: 4px 6px; text-align: center; border-bottom: 1px solid #cbd5e1; border-right: 1px solid #cbd5e1;">${itemNumber}</td>
-            <td style="padding: 4px 6px; border-bottom: 1px solid #cbd5e1; border-right: 1px solid #cbd5e1;">
-              <div style="font-weight: 700; color: #0f172a;">${l.description}</div>
-            </td>
-            <td style="padding: 4px 6px; text-align: center; border-bottom: 1px solid #cbd5e1; border-right: 1px solid #cbd5e1;">${l.hsn_code || "300490"}</td>
-            <td style="padding: 4px 6px; text-align: center; border-bottom: 1px solid #cbd5e1; border-right: 1px solid #cbd5e1; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;">${l.batch_no || "-"}</td>
-            <td style="padding: 4px 6px; text-align: center; border-bottom: 1px solid #cbd5e1; border-right: 1px solid #cbd5e1;">${l.expiry_date || "-"}</td>
-            <td style="padding: 4px 6px; text-align: right; border-bottom: 1px solid #cbd5e1; border-right: 1px solid #cbd5e1; font-variant-numeric: tabular-nums;">${l.qty}${l.loose_qty ? ` + ${l.loose_qty}L` : ""}</td>
-            <td style="padding: 4px 6px; text-align: right; border-bottom: 1px solid #cbd5e1; border-right: 1px solid #cbd5e1; font-variant-numeric: tabular-nums;">₹ ${l.rate.toFixed(2)}</td>
-            <td style="padding: 4px 6px; text-align: right; border-bottom: 1px solid #cbd5e1; border-right: 1px solid #cbd5e1; font-variant-numeric: tabular-nums;">${l.gst_percent}%</td>
-            <td style="padding: 4px 6px; text-align: right; border-bottom: 1px solid #cbd5e1; font-weight: 700; color: #0f172a; font-variant-numeric: tabular-nums;">₹ ${l.amount.toFixed(2)}</td>
+            ${activeColumns
+              .map((col) => {
+                const { align, content, isBold } = formatColumnCellHtml(col.id, l, itemNumber);
+                const mono = col.id === "batch" || col.id === "hsn" ? "font-family: ui-monospace, SFMono-Regular, Menlo, monospace;" : "";
+                const num = ["qty", "rate", "mrp", "discount", "gst", "amount", "total"].includes(col.id) ? "font-variant-numeric: tabular-nums;" : "";
+                const bold = isBold ? "font-weight: 700; color: #0f172a;" : "";
+                return `<td style="padding: 4px 6px; text-align: ${align}; border-bottom: 1px solid #cbd5e1; border-right: 1px solid #cbd5e1; ${mono} ${num} ${bold}">${content}</td>`;
+              })
+              .join("")}
           </tr>`;
           })
           .join("");
@@ -675,7 +755,7 @@ export class PrintingEngine {
             ? `
         <div class="header">
           <div class="store-name">${data.store_name}</div>
-          <div class="store-sub">${data.store_address || "Main Road, Palakkad, Kerala - 678001"} • Phone: ${data.store_phone || "9876543210"}</div>
+          <div class="store-sub">${data.store_address || ""}${data.store_phone ? ` • Phone: ${data.store_phone}` : ""}</div>
           ${
             showLicenses
               ? `<div class="store-licenses">
@@ -720,15 +800,13 @@ export class PrintingEngine {
         <table class="data-table">
           <thead>
             <tr>
-              <th style="width: 28px; text-align: center; border-right: 1px solid #cbd5e1;">#</th>
-              <th style="text-align: left; border-right: 1px solid #cbd5e1;">Item Description</th>
-              <th style="width: 60px; text-align: center; border-right: 1px solid #cbd5e1;">HSN</th>
-              <th style="width: 65px; text-align: center; border-right: 1px solid #cbd5e1;">Batch</th>
-              <th style="width: 55px; text-align: center; border-right: 1px solid #cbd5e1;">Exp</th>
-              <th style="width: 45px; text-align: right; border-right: 1px solid #cbd5e1;">Qty</th>
-              <th style="width: 75px; text-align: right; border-right: 1px solid #cbd5e1;">Rate (₹)</th>
-              <th style="width: 55px; text-align: right; border-right: 1px solid #cbd5e1;">GST %</th>
-              <th style="width: 85px; text-align: right;">Total (₹)</th>
+              ${activeColumns
+                .map((col) => {
+                  const align = col.id === "description" ? "left" : (["qty", "rate", "mrp", "discount", "gst", "amount", "total"].includes(col.id) ? "right" : "center");
+                  const widthStyle = col.widthPercent ? `width: ${col.widthPercent}%;` : "";
+                  return `<th style="${widthStyle} text-align: ${align}; border-right: 1px solid #cbd5e1;">${col.label}</th>`;
+                })
+                .join("")}
             </tr>
           </thead>
           <tbody>
@@ -1063,15 +1141,20 @@ export class PrintingEngine {
    */
   generateThermalInvoiceHtml(data: InvoicePrintData, widthMm: 80 | 58 = 80, options?: PrintRenderOptions): string {
     const is58 = widthMm === 58;
-    const showQr = options?.showUpiQr !== false;
-    const showClinical = options?.showDoctorPatient !== false;
-    const showLicenses = options?.showDrugLicenses !== false;
+    const activeStoreType = data.store_type || companySettingsService.getSettings()?.store_type;
+    const isPharmacy = isClinicalSupported(activeStoreType);
+    const isCompositionOrNoTax = data.gst_type === "composition" || data.gst_type === "no_tax" || companySettingsService.getSettings()?.gst_type === "composition" || companySettingsService.getSettings()?.gst_type === "no_tax";
+    
+    const showClinical = isPharmacy && options?.showDoctorPatient !== false;
+    const showLicenses = isPharmacy && options?.showDrugLicenses !== false;
     const showTerms = options?.showTerms !== false;
     const copyMarker = options?.copyMarker;
 
-    const upiVpa = data.upi_vpa || "pharmacy@upi";
-    const upiUri = generateUpiPaymentString(upiVpa, data.store_name, data.grand_total, data.invoice_number);
-    const qrSvg = generateQrCodeSvg(upiUri, is58 ? 85 : 100);
+    const activeUpi = companySettingsService.getActiveUpi();
+    const upiVpa = data.upi_vpa || activeUpi?.vpa || "";
+    const showQr = Boolean(upiVpa) && options?.showUpiQr !== false;
+    const upiUri = upiVpa ? generateUpiPaymentString(upiVpa, data.store_name, data.grand_total, data.invoice_number) : "";
+    const qrSvg = upiUri ? generateQrCodeSvg(upiUri, is58 ? 85 : 100) : "";
 
     const isInterState = data.igst_total !== undefined && data.igst_total > 0;
     const cgstTotal = data.cgst_total !== undefined ? data.cgst_total : round2(data.tax_total / 2);
@@ -1246,13 +1329,16 @@ export class PrintingEngine {
    */
   generateHalfA4InvoiceHtml(data: InvoicePrintData, options?: PrintRenderOptions): string {
     const amountWords = data.amount_in_words || numberToWordsIndian(data.grand_total);
-    const showQr = options?.showUpiQr !== false;
-    const showLicenses = options?.showDrugLicenses !== false;
+    const activeStoreType = data.store_type || companySettingsService.getSettings()?.store_type;
+    const isPharmacy = isClinicalSupported(activeStoreType);
+    const showLicenses = isPharmacy && options?.showDrugLicenses !== false;
     const copyMarker = options?.copyMarker;
 
-    const upiVpa = data.upi_vpa || "pharmacy@upi";
-    const upiUri = generateUpiPaymentString(upiVpa, data.store_name, data.grand_total, data.invoice_number);
-    const qrSvg = generateQrCodeSvg(upiUri, 58);
+    const activeUpi = companySettingsService.getActiveUpi();
+    const upiVpa = data.upi_vpa || activeUpi?.vpa || "";
+    const showQr = Boolean(upiVpa) && options?.showUpiQr !== false;
+    const upiUri = upiVpa ? generateUpiPaymentString(upiVpa, data.store_name, data.grand_total, data.invoice_number) : "";
+    const qrSvg = upiUri ? generateQrCodeSvg(upiUri, 58) : "";
 
     const isInterState = data.igst_total !== undefined && data.igst_total > 0;
     const cgstTotal = data.cgst_total !== undefined ? data.cgst_total : round2(data.tax_total / 2);
@@ -1368,7 +1454,7 @@ export class PrintingEngine {
    * Generates a high-fidelity vector PDF matching the Statutory A4 Tax Invoice layout,
    * using embedded Roboto font with full Unicode ₹ support, repeating headers, and totals summary.
    */
-  generateInvoicePdf(data: InvoicePrintData): Uint8Array {
+  generateInvoicePdf(data: InvoicePrintData, options?: PrintRenderOptions): Uint8Array {
     const doc = new jsPDF({
       orientation: "portrait",
       unit: "mm",
@@ -1386,17 +1472,18 @@ export class PrintingEngine {
     const marginX = 12;
     const contentWidth = pageWidth - marginX * 2; // 186mm
     const centerX = pageWidth / 2;
+    const isPharmacy = isClinicalSupported(data.store_type || companySettingsService.getSettings()?.store_type);
 
-    // Header: Pharmacy Name & Contact
+    // Header: Store Name & Contact
     doc.setFont("Roboto", "bold");
     doc.setFontSize(15);
     doc.setTextColor(15, 23, 42); // slate-900
-    doc.text(data.store_name || "Pharmacy Store", centerX, 14, { align: "center" });
+    doc.text(data.store_name || "Store", centerX, 14, { align: "center" });
 
     doc.setFont("Roboto", "normal");
     doc.setFontSize(8);
     doc.setTextColor(71, 85, 105); // slate-600
-    const addressLine = `${data.store_address || "Main Road, Palakkad, Kerala - 678001"} • Phone: ${data.store_phone || "9876543210"}`;
+    const addressLine = `${data.store_address || ""}${data.store_phone ? ` • Phone: ${data.store_phone}` : ""}`;
     doc.text(addressLine, centerX, 18.5, { align: "center" });
 
     // Licenses (GSTIN, DL, FSSAI)
@@ -1470,34 +1557,48 @@ export class PrintingEngine {
     doc.text(`Place of Supply: ${data.place_of_supply || "32-Kerala"}`, rightColX, metaBoxY + 16.5);
 
     // Items Table using jspdf-autotable
-    const tableRows = data.lines.map((l, i) => [
-      String(i + 1),
-      l.description,
-      l.hsn_code || "300490",
-      l.batch_no || "-",
-      l.expiry_date || "-",
-      `${l.qty}${l.loose_qty ? ` + ${l.loose_qty}L` : ""}`,
-      `₹ ${l.rate.toFixed(2)}`,
-      `${l.gst_percent}%`,
-      `₹ ${l.amount.toFixed(2)}`,
-    ]);
+    const activeColumns = resolvePrintColumns(options, isPharmacy);
+    const tableRows = data.lines.map((l, i) => {
+      return activeColumns.map((col) => {
+        switch (col.id) {
+          case "sl_no":
+            return String(i + 1);
+          case "description":
+            return l.description || (l as any).item_name || "";
+          case "hsn":
+            return l.hsn_code || (l as any).hsn || "-";
+          case "batch":
+            return l.batch_no || "-";
+          case "expiry":
+            return l.expiry_date || "-";
+          case "qty":
+            return `${l.qty}${l.loose_qty ? ` + ${l.loose_qty}L` : ""}`;
+          case "mrp":
+            return `₹ ${((l as any).mrp || 0).toFixed(2)}`;
+          case "rate":
+            return `₹ ${(l.rate || 0).toFixed(2)}`;
+          case "discount":
+            return (l as any).discount_percent ? `${(l as any).discount_percent}%` : "-";
+          case "gst":
+            return `${l.gst_percent || 0}%`;
+          case "amount":
+          case "total":
+            return `₹ ${(l.amount || 0).toFixed(2)}`;
+          default:
+            return String((l as any)[col.id] || "-");
+        }
+      });
+    });
 
-    const colAlignments: Record<number, "left" | "center" | "right"> = {
-      0: "center",
-      1: "left",
-      2: "center",
-      3: "center",
-      4: "center",
-      5: "right",
-      6: "right",
-      7: "right",
-      8: "right",
-    };
+    const colAlignments: Record<number, "left" | "center" | "right"> = {};
+    activeColumns.forEach((c, idx) => {
+      colAlignments[idx] = c.id === "description" ? "left" : (["qty", "rate", "mrp", "discount", "gst", "amount", "total"].includes(c.id) ? "right" : "center");
+    });
 
     autoTable(doc, {
       startY: 53.5,
       margin: { left: marginX, right: marginX },
-      head: [["#", "Item Description", "HSN", "Batch", "Exp", "Qty", "Rate (₹)", "GST %", "Total (₹)"]],
+      head: [activeColumns.map((c) => c.label)],
       body: tableRows,
       theme: "grid",
       showHead: "everyPage",
@@ -1690,26 +1791,34 @@ export class PrintingEngine {
     doc.setDrawColor(226, 232, 240);
     doc.rect(colLeftX, row1Y, colLeftWidth, row1Height, "S");
 
-    const upiVpa = data.upi_vpa || "pharmacy@upi";
-    const upiUri = generateUpiPaymentString(upiVpa, data.store_name, data.grand_total, data.invoice_number);
-    drawQrCodeJsPdf(doc, upiUri, colLeftX + 4, row1Y + 4, 24);
+    const activeUpi = companySettingsService.getActiveUpi();
+    const upiVpa = data.upi_vpa || activeUpi?.vpa || "";
+    if (upiVpa) {
+      const upiUri = generateUpiPaymentString(upiVpa, data.store_name, data.grand_total, data.invoice_number);
+      drawQrCodeJsPdf(doc, upiUri, colLeftX + 4, row1Y + 4, 24);
 
-    const qrTextX = colLeftX + 32;
-    doc.setFont("Roboto", "bold");
-    doc.setFontSize(8);
-    doc.setTextColor(15, 23, 42);
-    doc.text("Scan & Pay via UPI", qrTextX, row1Y + 9);
+      const qrTextX = colLeftX + 32;
+      doc.setFont("Roboto", "bold");
+      doc.setFontSize(8);
+      doc.setTextColor(15, 23, 42);
+      doc.text(activeUpi?.payeeName ? `Pay to ${activeUpi.payeeName}` : "Scan & Pay via UPI", qrTextX, row1Y + 9);
 
-    doc.setFont("Roboto", "normal");
-    doc.setFontSize(7);
-    doc.setTextColor(71, 85, 105);
-    doc.text(`UPI VPA: ${upiVpa}`, qrTextX, row1Y + 14.5);
-    doc.setFont("Roboto", "bold");
-    doc.text(`Total Amount: ₹ ${data.grand_total.toFixed(2)}`, qrTextX, row1Y + 19.5);
-    doc.setFont("Roboto", "normal");
-    doc.setFontSize(6.5);
-    doc.setTextColor(148, 163, 184);
-    doc.text("Scan with GPay, PhonePe, Paytm, or any UPI app", qrTextX, row1Y + 25);
+      doc.setFont("Roboto", "normal");
+      doc.setFontSize(7);
+      doc.setTextColor(71, 85, 105);
+      doc.text(`UPI ID: ${upiVpa}`, qrTextX, row1Y + 14.5);
+      doc.setFont("Roboto", "bold");
+      doc.text(`Total Amount: ₹ ${data.grand_total.toFixed(2)}`, qrTextX, row1Y + 19.5);
+      doc.setFont("Roboto", "normal");
+      doc.setFontSize(6.5);
+      doc.setTextColor(148, 163, 184);
+      doc.text(activeUpi?.qrSubtext || "Scan with GPay, PhonePe, Paytm, or any UPI app", qrTextX, row1Y + 25);
+    } else {
+      doc.setFont("Roboto", "bold");
+      doc.setFontSize(8);
+      doc.setTextColor(100, 116, 139);
+      doc.text("Thank you for your business!", colLeftX + 8, row1Y + 16);
+    }
 
     // Top-Right: Totals Card (X: colRightX = 123mm, Width: colRightWidth = 75mm)
     doc.setFillColor(248, 250, 252);
@@ -1852,13 +1961,13 @@ export class PrintingEngine {
     return false;
   }
 
-  async exportToPdf(data: InvoicePrintData): Promise<{ success: boolean; file_path?: string; cancelled?: boolean; error?: string }> {
+  async exportToPdf(data: InvoicePrintData, options?: PrintRenderOptions): Promise<{ success: boolean; file_path?: string; cancelled?: boolean; error?: string }> {
     const cleanInvoiceNo = data.invoice_number.replace(/[^a-zA-Z0-9_-]/g, "_");
     const defaultFileName = `Invoice_${cleanInvoiceNo}.pdf`;
 
     let pdfBytes: Uint8Array;
     try {
-      pdfBytes = this.generateInvoicePdf(data);
+      pdfBytes = this.generateInvoicePdf(data, options);
     } catch (err: any) {
       console.error("PDF generation failed:", err);
       return { success: false, error: `PDF generation error: ${err?.message || err}` };
@@ -3672,6 +3781,8 @@ export interface CreditNotePrintData {
   store_address?: string;
   store_phone?: string;
   store_gstin?: string;
+  store_type?: string;
+  gst_type?: string;
   drug_license_numbers?: string[];
   customer_name: string;
   customer_phone?: string;
@@ -3699,6 +3810,8 @@ export interface DebitNotePrintData {
   store_address?: string;
   store_phone?: string;
   store_gstin?: string;
+  store_type?: string;
+  gst_type?: string;
   supplier_name: string;
   supplier_phone?: string;
   supplier_gstin?: string;

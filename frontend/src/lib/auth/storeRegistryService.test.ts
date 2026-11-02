@@ -5,7 +5,7 @@ import { resetMockHandlers } from "../ipc/ipcBridge";
 import { posCartService } from "../billing/posCartService";
 import type { StoreDeviceProfile } from "./storeDeviceService";
 
-describe("Tally-Style Multi-Store Workspace & Registry", () => {
+describe("Multi-Store Workspace & Registry", () => {
   beforeEach(async () => {
     resetMockHandlers();
     sqliteStorage.registerMockIpcHandlers();

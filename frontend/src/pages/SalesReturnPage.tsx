@@ -26,6 +26,7 @@ import {
 import { useModalEscape } from "../lib/ui/modalEscapeManager";
 import { invoiceManagementService, type InvoiceRecord, type InvoiceItemRecord } from "../lib/billing/invoiceManagementService";
 import { printingEngine, type CreditNotePrintData } from "../lib/printing/printingEngine";
+import { companySettingsService } from "../lib/settings/companySettingsService";
 import { PrintPreviewModal } from "../components/PrintPreviewModal";
 
 const RETURN_REASONS: { value: ReturnReason; label: string }[] = [
@@ -260,15 +261,17 @@ export const SalesReturnPage: React.FC = () => {
   const totals = calcTotals();
 
   const handlePrintCreditNote = (ret: any) => {
+    const header = companySettingsService.getStorePrintHeader();
     const printData: CreditNotePrintData = {
       return_number: ret.return_number,
       return_date: ret.return_date,
       original_invoice_number: ret.original_invoice_number,
       original_invoice_date: ret.original_invoice_date,
-      store_name: "LamStone Pharmacy & Retail",
-      store_address: "Main Road, Palakkad, Kerala - 678001",
-      store_phone: "9876543210",
-      store_gstin: "32AAAAA0000A1Z5",
+      store_name: header.store_name,
+      store_address: header.store_address,
+      store_phone: header.store_phone,
+      store_gstin: header.store_gstin,
+      store_type: header.store_type,
       customer_name: ret.customer_name || "Walk-in Customer",
       customer_phone: ret.customer_phone,
       customer_gstin: ret.customer_gstin,

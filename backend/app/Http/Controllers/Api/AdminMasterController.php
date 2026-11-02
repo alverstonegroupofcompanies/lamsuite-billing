@@ -7,6 +7,7 @@ use App\Models\MasterLookup;
 use App\Models\Party;
 use App\Models\Product;
 use App\Models\ProductBatch;
+use App\Models\Store;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -278,10 +279,22 @@ class AdminMasterController
     {
         $storeId = $request->get('active_store_id');
         $type = $request->query('type');
+        $store = $storeId ? Store::find($storeId) : null;
+        $isPharmacy = !$store || $store->store_type === 'pharmacy';
+
+        if (!$isPharmacy && in_array($type, ['doctor', 'patient'])) {
+            return response()->json([
+                'data' => [],
+                'current_page' => 1,
+                'last_page' => 1,
+                'total' => 0,
+            ]);
+        }
 
         $query = Party::query()
             ->when($storeId, fn($q) => $q->where('store_id', $storeId))
-            ->when($type, fn($q) => $q->where('type', $type));
+            ->when($type, fn($q) => $q->where('type', $type))
+            ->when(!$isPharmacy && empty($type), fn($q) => $q->whereNotIn('type', ['doctor', 'patient']));
 
         if ($search = $request->query('search')) {
             $query->where(function ($q) use ($search) {
@@ -304,6 +317,16 @@ class AdminMasterController
 
     public function storeParty(Request $request): JsonResponse
     {
+        $storeId = $request->input('store_id') ?: $request->get('active_store_id');
+        $store = $storeId ? Store::find($storeId) : null;
+        $isPharmacy = !$store || $store->store_type === 'pharmacy';
+
+        if (!$isPharmacy && in_array($request->input('type'), ['doctor', 'patient'])) {
+            return response()->json([
+                'message' => 'Clinical party types (Doctor, Patient) are strictly permitted for Pharmacy stores only.',
+            ], 422);
+        }
+
         $validated = $request->validate([
             'store_id' => 'required|exists:stores,id',
             'type' => 'required|in:customer,supplier,doctor,patient',

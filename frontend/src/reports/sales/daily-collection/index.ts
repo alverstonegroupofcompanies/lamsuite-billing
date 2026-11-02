@@ -107,7 +107,7 @@ export const dailyCollectionReport: ReportModule<any, DailyCollectionRow> = {
       {
         category: "Sales Returns & Refunds",
         count: metrics.returnsCount,
-        amount: -metrics.totalReturns,
+        amount: metrics.totalReturns === 0 ? 0 : -metrics.totalReturns,
         sharePercent: metrics.grossSales > 0 ? -Math.round((metrics.totalReturns / metrics.grossSales) * 1000) / 10 : 0,
         note: "Customer return vouchers deducted",
       },

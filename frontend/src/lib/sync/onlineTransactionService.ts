@@ -5,6 +5,7 @@ import { storeDeviceService } from "../auth/storeDeviceService";
 import { storeRegistryService } from "../auth/storeRegistryService";
 import { staffAuthService } from "../auth/staffAuthService";
 import { syncQueueService } from "./syncQueueService";
+import { companySettingsService } from "../settings/companySettingsService";
 import { calculateDocumentTaxes } from "../tax-engine/taxEngine";
 import type { PaymentTenderLine } from "../billing/billingTenderService";
 
@@ -67,6 +68,10 @@ export interface OnlineInvoicePayload {
   tax_total?: number;
   round_off?: number;
   grand_total?: number;
+  tax_mode?: string;
+  store_state?: string;
+  gst_type?: string;
+  is_composition?: boolean;
   is_inter_state?: boolean;
   is_offline_temp?: boolean;
   items: OnlineInvoiceLinePayload[];
@@ -431,11 +436,18 @@ export class OnlineTransactionService {
     const invoiceId = `offline_inv_${now}_${Math.random().toString(16).slice(2, 6)}`;
 
     // Authoritative calculation via tax engine
+    const storeSettings = companySettingsService.getSettings();
+    const stState = payload.store_state || storeSettings.state_code || "32";
+    const gstType = payload.gst_type || storeSettings.gst_type || "regular";
+    const taxMode = (payload.tax_mode as any) || storeSettings.tax_mode || "inclusive";
+
     const docTaxes = calculateDocumentTaxes({
-      store_state: "32",
+      store_state: stState,
       customer_gstin: payload.customer_gstin,
-      place_of_supply: payload.place_of_supply || (payload.is_inter_state ? "XX" : "32"),
-      default_tax_mode: "inclusive",
+      place_of_supply: payload.place_of_supply || (payload.is_inter_state ? "XX" : stState),
+      default_tax_mode: taxMode,
+      gst_type: gstType as any,
+      is_composition: payload.is_composition || gstType === "composition" || gstType === "no_tax",
       lines: payload.items.map((item, idx) => ({
         line_id: `L${idx}`,
         product_id: item.product_id,

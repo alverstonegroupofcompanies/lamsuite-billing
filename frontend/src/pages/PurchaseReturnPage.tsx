@@ -22,6 +22,7 @@ import {
 } from "../lib/purchases/purchaseReturnService";
 import { sqliteStorage } from "../lib/db/sqliteStorage";
 import { printingEngine, type DebitNotePrintData } from "../lib/printing/printingEngine";
+import { companySettingsService } from "../lib/settings/companySettingsService";
 import { PrintPreviewModal } from "../components/PrintPreviewModal";
 import { useModalEscape } from "../lib/ui/modalEscapeManager";
 
@@ -252,15 +253,17 @@ export const PurchaseReturnPage: React.FC = () => {
   const totals = calcTotals();
 
   const handlePrintDebitNote = (ret: any) => {
+    const header = companySettingsService.getStorePrintHeader();
     const printData: DebitNotePrintData = {
       return_number: ret.return_number,
       return_date: ret.return_date,
       original_purchase_number: ret.original_purchase_number,
       supplier_invoice_no: ret.supplier_invoice_no,
-      store_name: "LamStone Pharmacy & Retail",
-      store_address: "Main Road, Palakkad, Kerala - 678001",
-      store_phone: "9876543210",
-      store_gstin: "32AAAAA0000A1Z5",
+      store_name: header.store_name,
+      store_address: header.store_address,
+      store_phone: header.store_phone,
+      store_gstin: header.store_gstin,
+      store_type: header.store_type,
       supplier_name: ret.supplier_name,
       supplier_gstin: ret.supplier_gstin,
       lines: (ret.lines || []).map((l: any) => ({

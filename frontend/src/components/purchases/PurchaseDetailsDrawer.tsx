@@ -21,6 +21,7 @@ import {
 import { BarcodePrintModal } from "./BarcodePrintModal";
 import { SupplierPaymentModal } from "./SupplierPaymentModal";
 import { PrintPreviewModal } from "../PrintPreviewModal";
+import { companySettingsService } from "../../lib/settings/companySettingsService";
 import { useNavigate } from "react-router-dom";
 import { useModalEscape } from "../../lib/ui/modalEscapeManager";
 
@@ -472,7 +473,10 @@ export const PurchaseDetailsDrawer: React.FC<PurchaseDetailsDrawerProps> = ({
           data={{
             invoice_number: doc.purchase_number,
             invoice_date: doc.purchase_date,
-            store_name: "LamStone Pharmacy",
+            store_name: companySettingsService.getStorePrintHeader().store_name,
+            store_address: companySettingsService.getStorePrintHeader().store_address,
+            store_phone: companySettingsService.getStorePrintHeader().store_phone,
+            store_gstin: companySettingsService.getStorePrintHeader().store_gstin,
             place_of_supply: doc.place_of_supply || "State",
             customer_name: doc.supplier_name,
             customer_gstin: doc.supplier_gstin,

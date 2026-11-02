@@ -602,15 +602,19 @@ export const BillsPage: React.FC = () => {
   };
 
   const buildPrintData = (invoice: InvoiceRecord, items: InvoiceItemRecord[]): InvoicePrintData => {
+    const header = companySettingsService.getStorePrintHeader();
     return {
       invoice_number: invoice.invoice_number + (invoice.is_revised ? " (Revised)" : ""),
       invoice_date: invoice.invoice_date,
-      store_name: "LamStone Pharmacy & Retail",
-      store_address: "Main Road, Palakkad, Kerala - 678001",
-      store_phone: "9876543210",
-      store_gstin: "32ABCDE1234F1Z5",
-      drug_license_numbers: ["20B/KL-PKD-1029", "21B/KL-PKD-1030"],
-      fssai_no: "10020042001234",
+      store_name: header.store_name,
+      store_address: header.store_address,
+      store_phone: header.store_phone,
+      store_email: header.store_email,
+      store_gstin: header.store_gstin,
+      store_type: header.store_type,
+      gst_type: (invoice as any).gst_type || header.gst_type,
+      drug_license_numbers: header.drug_license_numbers,
+      fssai_no: header.fssai_no,
       place_of_supply: invoice.place_of_supply || "32-Kerala",
       customer_name: invoice.customer_name || "Walk-in Customer",
       customer_phone: invoice.customer_phone || "",
@@ -638,7 +642,9 @@ export const BillsPage: React.FC = () => {
         reference: p.reference_no,
         status: p.status,
       })),
-      upi_vpa: "pharmacy@upi",
+      upi_vpa: header.upi_vpa,
+      terms_and_conditions: header.terms_and_conditions,
+      jurisdiction_note: header.jurisdiction_note,
     };
   };
 
@@ -703,61 +709,25 @@ export const BillsPage: React.FC = () => {
   });
 
   // Actions
-  const handleReprint = async (format: "a4" | "thermal" | "pdf", e?: React.MouseEvent) => {
+  const handleReprint = async () => {
     if (!selectedInvoice) return;
     const printData = buildPrintData(selectedInvoice, selectedInvoiceItems);
-    const settings = companySettingsService.getSettings();
-    const previewMode = settings.printing.previewMode || "always";
-    const bypassPreview = (e && e.shiftKey) || previewMode === "never" || (previewMode === "skip_thermal" && format === "thermal");
+    setPreviewModalState({
+      isOpen: true,
+      data: printData,
+      title: `Print Preview - #${selectedInvoice.invoice_number}`,
+    });
+  };
 
-    if (!bypassPreview) {
-      setPreviewModalState({
-        isOpen: true,
-        data: printData,
-        initialFormat: format === "a4" ? "a4" : "thermal_80mm",
-        title: `Reprint Preview - #${selectedInvoice.invoice_number}`,
-      });
-      return;
-    }
-
-    try {
-      if (format === "thermal") {
-        await printingEngine.printThermalReceipt(printData);
-        showNotification("Thermal receipt sent to printer");
-      } else if (format === "a4") {
-        await printingEngine.printA4TaxInvoice(printData);
-        showNotification("A4 Tax Invoice sent to printer");
-      } else if (format === "pdf") {
-        const res = await printingEngine.exportToPdf(printData);
-        if (res.cancelled) {
-          // User intentionally cancelled the file dialog - show nothing
-          return;
-        }
-        if (!res.success) {
-          showNotification(res.error || "Failed to save PDF invoice", "error");
-          return;
-        }
-        showNotification(
-          res.file_path ? `Saved to: ${res.file_path}` : "PDF invoice saved successfully!",
-          "success",
-          res.file_path
-            ? [
-                {
-                  label: "Open file",
-                  icon: "open",
-                  onClick: () => printingEngine.openFile(res.file_path!),
-                },
-                {
-                  label: "Show in folder",
-                  icon: "folder",
-                  onClick: () => printingEngine.revealFile(res.file_path!),
-                },
-              ]
-            : undefined
-        );
-      }
-    } catch (err) {
-      showNotification("Error printing invoice", "error");
+  const handleSavePdf = async () => {
+    if (!selectedInvoice) return;
+    const printData = buildPrintData(selectedInvoice, selectedInvoiceItems);
+    const res = await printingEngine.exportToPdf(printData);
+    if (res.cancelled) return;
+    if (res.success && res.file_path) {
+      showNotification(`Saved to: ${res.file_path}`, "success");
+    } else {
+      showNotification(res.error || "Failed to save PDF", "error");
     }
   };
 
@@ -1624,21 +1594,15 @@ export const BillsPage: React.FC = () => {
               {/* Reprints */}
               <div className="flex items-center gap-2">
                 <button
-                  onClick={() => handleReprint("a4")}
-                  className="flex items-center gap-1 rounded-[10px] bg-[var(--color-accent)] px-3 py-1.5 text-xs font-bold text-white hover:bg-[var(--color-accent-hover)] cursor-pointer transition-colors"
+                  onClick={() => handleReprint()}
+                  className="flex items-center gap-1.5 rounded-[10px] bg-[var(--color-accent)] px-3.5 py-1.5 text-xs font-bold text-white hover:bg-[var(--color-accent-hover)] cursor-pointer transition-colors shadow-xs"
+                  title="Print Bill Preview"
                 >
                   <Printer className="h-3.5 w-3.5" />
-                  <span>Reprint A4</span>
+                  <span>Print</span>
                 </button>
                 <button
-                  onClick={() => handleReprint("thermal")}
-                  className="flex items-center gap-1 rounded-[10px] bg-[var(--color-text)] px-3 py-1.5 text-xs font-bold text-white hover:bg-black cursor-pointer transition-colors"
-                >
-                  <Printer className="h-3.5 w-3.5" />
-                  <span>Reprint Thermal</span>
-                </button>
-                <button
-                  onClick={() => handleReprint("pdf")}
+                  onClick={handleSavePdf}
                   className="flex items-center gap-1 rounded-[10px] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1.5 text-xs font-semibold text-[var(--color-text)] hover:bg-[var(--color-surface-hover)] cursor-pointer transition-colors"
                 >
                   <Download className="h-3.5 w-3.5" />

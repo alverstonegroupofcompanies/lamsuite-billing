@@ -42,6 +42,8 @@ export interface Store {
   drug_license_numbers?: string[];
   fssai_no?: string;
   tax_mode: "inclusive" | "exclusive";
+  store_type?: string;
+  gst_type?: "regular" | "composition" | "no_tax";
   invoice_prefix: string;
   is_active: boolean;
   license_plan: string;
@@ -169,7 +171,7 @@ export interface Invoice {
   grand_total: number;
   paid_amount: number;
   payment_mode: string;
-  status: "issued" | "cancelled";
+  status: "issued" | "cancelled" | "paid" | "draft";
   cancel_reason?: string;
   cancelled_at?: string;
   cancelled_by?: number;

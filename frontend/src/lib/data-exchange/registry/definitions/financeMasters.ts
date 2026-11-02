@@ -161,7 +161,7 @@ export const banksDefinition: EntityDefinition = {
       bank_name: "State Bank of India",
       account_number: "64123456789",
       ifsc_code: "SBIN0001234",
-      branch: "Palakkad Main",
+      branch: "Main Branch",
       upi_id: "lamsuite@sbi",
       is_active: true,
     },

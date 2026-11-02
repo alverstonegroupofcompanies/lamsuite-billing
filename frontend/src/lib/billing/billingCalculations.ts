@@ -54,6 +54,19 @@ export interface InvoiceTotals {
   round_off: number;
   grand_total: number;
   lines?: TaxEngineCalculatedLine[];
+  is_composition?: boolean;
+  gst_type?: string;
+  document_title?: "Tax Invoice" | "Bill of Supply";
+}
+
+export interface BillingTaxOptions {
+  companyTaxMode?: CompanyTaxMode;
+  isInterState?: boolean;
+  storeState?: string;
+  gstType?: "regular" | "composition" | "no_tax" | "unregistered";
+  isComposition?: boolean;
+  customerGstin?: string | null;
+  placeOfSupply?: string | null;
 }
 
 export function round2(n: number): number {
@@ -147,13 +160,30 @@ export function computeAutoRoundOff(amountBeforeRound: number): { roundOff: numb
 
 export function calculateLineTotals(
   line: BillingLineInput,
-  companyTaxMode: CompanyTaxMode = "inclusive",
-  isInterState = false
+  taxModeOrOptions: CompanyTaxMode | BillingTaxOptions = "inclusive",
+  isInterState = false,
+  storeState = "32",
+  gstType?: "regular" | "composition" | "no_tax" | "unregistered"
 ): CalculatedLine {
+  const opts: BillingTaxOptions = typeof taxModeOrOptions === "object"
+    ? taxModeOrOptions
+    : {
+        companyTaxMode: taxModeOrOptions,
+        isInterState,
+        storeState,
+        gstType,
+      };
+
+  const stState = opts.storeState || "32";
+  const posState = opts.placeOfSupply || (opts.isInterState ? "XX" : stState);
+
   const doc = calculateDocumentTaxes({
-    store_state: "32",
-    place_of_supply: isInterState ? "XX" : "32",
-    default_tax_mode: companyTaxMode,
+    store_state: stState,
+    place_of_supply: posState,
+    customer_gstin: opts.customerGstin,
+    default_tax_mode: opts.companyTaxMode || "inclusive",
+    is_composition: opts.isComposition,
+    gst_type: opts.gstType,
     lines: [{
       qty: line.qty,
       loose_qty: line.loose_qty,
@@ -189,15 +219,32 @@ export function calculateLineTotals(
 export function calculateInvoiceTotals(
   lines: BillingLineInput[],
   billDiscount: { type: "percent" | "amount"; value: number } = { type: "amount", value: 0 },
-  companyTaxMode: CompanyTaxMode = "inclusive",
+  taxModeOrOptions: CompanyTaxMode | BillingTaxOptions = "inclusive",
   isInterState = false,
   autoRoundOff = true,
-  manualRoundOff?: number | null
+  manualRoundOff?: number | null,
+  storeState = "32",
+  gstType?: "regular" | "composition" | "no_tax" | "unregistered"
 ): InvoiceTotals {
+  const opts: BillingTaxOptions = typeof taxModeOrOptions === "object"
+    ? taxModeOrOptions
+    : {
+        companyTaxMode: taxModeOrOptions,
+        isInterState,
+        storeState,
+        gstType,
+      };
+
+  const stState = opts.storeState || "32";
+  const posState = opts.placeOfSupply || (opts.isInterState ? "XX" : stState);
+
   const doc = calculateDocumentTaxes({
-    store_state: "32",
-    place_of_supply: isInterState ? "XX" : "32",
-    default_tax_mode: companyTaxMode,
+    store_state: stState,
+    place_of_supply: posState,
+    customer_gstin: opts.customerGstin,
+    default_tax_mode: opts.companyTaxMode || "inclusive",
+    is_composition: opts.isComposition,
+    gst_type: opts.gstType,
     lines: lines.map((l) => ({
       qty: l.qty,
       loose_qty: l.loose_qty,
@@ -230,5 +277,8 @@ export function calculateInvoiceTotals(
     round_off: doc.round_off,
     grand_total: doc.grand_total,
     lines: doc.lines,
+    is_composition: doc.is_composition,
+    gst_type: doc.gst_type,
+    document_title: doc.document_title,
   };
 }

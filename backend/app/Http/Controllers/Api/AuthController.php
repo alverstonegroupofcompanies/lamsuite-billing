@@ -537,7 +537,7 @@ class AuthController
                     'id' => (string)$s->id,
                     'name' => $s->name,
                     'code' => $s->code,
-                    'city' => $s->address ? (explode(',', $s->address)[0] ?? 'Palakkad') : 'Palakkad',
+                    'city' => $s->address ? (trim(explode(',', $s->address)[0]) ?? '') : '',
                     'state_code' => $s->state_code ?? '32',
                     'gstin' => $s->gstin,
                     'is_main' => $s->code === 'MAIN' || $s->code === 'STORE-01',

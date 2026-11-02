@@ -24,6 +24,8 @@ class Store extends Model
         'drug_license_numbers',
         'fssai_no',
         'tax_mode',
+        'store_type',
+        'gst_type',
         'invoice_prefix',
         'is_active',
         'license_plan',

@@ -14,6 +14,7 @@ class DeviceSession extends Model
     protected $fillable = [
         'store_id',
         'user_id',
+        'user_role',
         'counter_id',
         'device_uuid',
         'session_id',
@@ -25,12 +26,15 @@ class DeviceSession extends Model
         'login_time',
         'last_active_at',
         'status',
+        'app_version',
+        'unsynced_items_count',
         'is_active',
         'user_agent',
     ];
 
     protected $casts = [
         'is_active' => 'boolean',
+        'unsynced_items_count' => 'integer',
         'login_time' => 'datetime',
         'last_active_at' => 'datetime',
     ];
@@ -51,13 +55,22 @@ class DeviceSession extends Model
     }
 
     /**
-     * Compute device online status dynamically based on heartbeat freshness.
-     * Default timeout is 120 seconds (2 minutes).
+     * Compute device status: Active, Idle, Offline, Locked, Revoked.
      */
-    public function computeStatus(int $timeoutSeconds = 120): string
+    public function computeStatus(int $activeThresholdSeconds = 120, int $idleThresholdSeconds = 600): string
     {
-        if (!$this->is_active || in_array(strtolower((string)$this->status), ['expired', 'logged_out', 'revoked'])) {
-            return 'Session Expired';
+        $rawStatus = strtolower((string)$this->status);
+
+        if ($rawStatus === 'revoked') {
+            return 'Revoked';
+        }
+
+        if ($rawStatus === 'locked') {
+            return 'Locked';
+        }
+
+        if (!$this->is_active || in_array($rawStatus, ['expired', 'logged_out'])) {
+            return 'Offline';
         }
 
         if (empty($this->last_active_at)) {
@@ -65,16 +78,21 @@ class DeviceSession extends Model
         }
 
         $lastActive = Carbon::parse($this->last_active_at);
-        if ($lastActive->diffInSeconds(now()) > $timeoutSeconds) {
-            return 'Offline';
+        $diffSeconds = $lastActive->diffInSeconds(now());
+
+        if ($diffSeconds <= $activeThresholdSeconds) {
+            return $rawStatus === 'idle' ? 'Idle' : 'Active';
         }
 
-        return 'Online';
+        if ($diffSeconds <= $idleThresholdSeconds) {
+            return 'Idle';
+        }
+
+        return 'Offline';
     }
 
     /**
      * Record a new authenticated device login session.
-     * Deactivates any existing active session for the same device UUID to prevent duplicate active entries.
      */
     public static function recordLogin(
         int|string $storeId,
@@ -86,9 +104,11 @@ class DeviceSession extends Model
         int|string|null $userId = null,
         ?string $ipAddress = null,
         ?string $location = null,
-        ?string $userAgent = null
+        ?string $userAgent = null,
+        ?string $appVersion = null,
+        ?string $userRole = null
     ): self {
-        // Expire prior active sessions for this device to prevent duplicate active entries
+        // Expire prior active sessions for this device
         self::where('device_uuid', $deviceUuid)
             ->where('is_active', true)
             ->update([
@@ -97,7 +117,6 @@ class DeviceSession extends Model
                 'last_active_at' => now(),
             ]);
 
-        // Attempt to auto-fill missing names from Counter or Device models if available
         if (empty($deviceName)) {
             $deviceModel = Device::where('device_uuid', $deviceUuid)->first();
             $counterModel = $counterId ? Counter::find($counterId) : Counter::where('device_uuid', $deviceUuid)->first();
@@ -113,9 +132,15 @@ class DeviceSession extends Model
             }
         }
 
+        if (empty($userRole) && !empty($userId)) {
+            $user = User::find($userId);
+            $userRole = $user?->role ?: ($user?->is_admin ? 'Admin' : 'Cashier');
+        }
+
         return self::create([
             'store_id' => $storeId,
             'user_id' => $userId,
+            'user_role' => $userRole ?: 'Cashier',
             'counter_id' => $counterId,
             'device_uuid' => $deviceUuid,
             'session_id' => 'ds_' . Str::random(32),
@@ -126,20 +151,26 @@ class DeviceSession extends Model
             'location' => $location ?: null,
             'login_time' => now(),
             'last_active_at' => now(),
-            'status' => 'online',
+            'status' => 'active',
+            'app_version' => $appVersion ?: '2.0.17',
+            'unsynced_items_count' => 0,
             'is_active' => true,
             'user_agent' => $userAgent ? substr($userAgent, 0, 255) : null,
         ]);
     }
 
     /**
-     * Update heartbeat / last active timestamp for an active device.
+     * Update heartbeat for an active device session.
      */
     public static function recordHeartbeat(
         string $deviceUuid,
         ?string $ipAddress = null,
         ?string $deviceName = null,
-        ?string $counterName = null
+        ?string $counterName = null,
+        ?string $appVersion = null,
+        ?int $unsyncedItemsCount = null,
+        ?string $status = null,
+        ?string $userRole = null
     ): ?self {
         $session = self::where('device_uuid', $deviceUuid)
             ->where('is_active', true)
@@ -158,6 +189,21 @@ class DeviceSession extends Model
             }
             if ($counterName && empty($session->counter_name)) {
                 $updates['counter_name'] = $counterName;
+            }
+            if ($appVersion) {
+                $updates['app_version'] = $appVersion;
+            }
+            if ($unsyncedItemsCount !== null) {
+                $updates['unsynced_items_count'] = max(0, $unsyncedItemsCount);
+            }
+            if ($status && in_array(strtolower($status), ['active', 'idle', 'locked'])) {
+                // If it is locked on server, client heartbeat shouldn't silently unlock unless authenticated
+                if ($session->status !== 'locked' || strtolower($status) === 'locked') {
+                    $updates['status'] = strtolower($status);
+                }
+            }
+            if ($userRole && empty($session->user_role)) {
+                $updates['user_role'] = $userRole;
             }
             $session->update($updates);
             return $session;

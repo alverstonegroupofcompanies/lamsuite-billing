@@ -11,6 +11,8 @@ export interface PurchaseGridRowProps {
   isDraft?: boolean;
   isJustAdded?: boolean;
   isSelected?: boolean;
+  selectedCellCol?: string;
+  isEditingCell?: boolean;
   visibleCols: ColumnSetting[];
   isInterstate?: boolean;
   lastPurchaseDetails?: { rate: number; purchase_number?: string } | null;
@@ -27,6 +29,10 @@ export interface PurchaseGridRowProps {
   // Navigation and Field edits
   onFieldChange?: (field: keyof PurchaseLineItemInput, value: any) => void;
   onSelectRow?: () => void;
+  onCellClick?: (colId: string) => void;
+  onCellDoubleClick?: (colId: string) => void;
+  onCellEditSave?: () => void;
+  onCellEditCancel?: () => void;
   onCommitDraft?: () => void;
   onClearDraft?: () => void;
   onRemoveLine?: () => void;
@@ -40,6 +46,8 @@ export const PurchaseGridRow: React.FC<PurchaseGridRowProps> = ({
   isDraft = false,
   isJustAdded = false,
   isSelected = false,
+  selectedCellCol = "qty",
+  isEditingCell = false,
   visibleCols,
   isInterstate = false,
   lastPurchaseDetails,
@@ -52,6 +60,10 @@ export const PurchaseGridRow: React.FC<PurchaseGridRowProps> = ({
   isDropdownOpen = false,
   onFieldChange,
   onSelectRow,
+  onCellClick,
+  onCellDoubleClick,
+  onCellEditSave,
+  onCellEditCancel,
   onCommitDraft,
   onClearDraft,
   onRemoveLine,
@@ -106,7 +118,7 @@ export const PurchaseGridRow: React.FC<PurchaseGridRowProps> = ({
       rowClass += "ring-2 ring-inset ring-[var(--color-accent)] ";
     }
   } else if (isSelected) {
-    rowClass += "bg-[var(--color-accent-soft)] ring-2 ring-inset ring-[var(--color-accent)] font-semibold shadow-2xs ";
+    rowClass += "bg-[var(--color-accent-soft)]/20 ring-1 ring-inset ring-[var(--color-accent)]/50 shadow-2xs ";
   } else if (marginInfo.isNegative || expiryStatus?.isExpired) {
     rowClass += "bg-[var(--color-danger-bg)]/30 hover:bg-[var(--color-danger-bg)]/50 ";
   } else if (isSurge || expiryStatus?.isNearExpiry) {
@@ -115,11 +127,42 @@ export const PurchaseGridRow: React.FC<PurchaseGridRowProps> = ({
     rowClass += "hover:bg-[var(--color-surface-hover)] ";
   }
 
+  const getCellHighlight = (colId: string, baseClass = "") => {
+    const isCellActive = !isDraft && isSelected && selectedCellCol === colId;
+    let cls = baseClass;
+    if (isCellActive) {
+      cls += " ring-2 ring-inset ring-[var(--color-accent)] bg-[var(--color-accent-soft)]/40 font-bold rounded-[3px] shadow-2xs";
+    }
+    return cls;
+  };
+
+  const handleCellKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      e.stopPropagation();
+      onCellEditSave?.();
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      e.stopPropagation();
+      onCellEditCancel?.();
+    }
+  };
+
   const renderCellContent = (colId: string) => {
+    const isCellActive = !isDraft && isSelected && selectedCellCol === colId;
+    const isCellEditing = isCellActive && isEditingCell;
+
     switch (colId) {
       case "idx":
         return (
-          <td key="idx" className="px-2.5 py-2 text-center font-mono text-[11px] text-[var(--color-text-muted)] select-none">
+          <td
+            key="idx"
+            className="px-2.5 py-2 text-center font-mono text-[11px] text-[var(--color-text-muted)] select-none"
+            onClick={() => {
+              onSelectRow?.();
+              onCellClick?.("product_name");
+            }}
+          >
             {isDraft ? (
               <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-[var(--color-accent-soft)] font-bold text-[var(--color-accent)]">
                 +
@@ -132,7 +175,18 @@ export const PurchaseGridRow: React.FC<PurchaseGridRowProps> = ({
 
       case "product_name":
         return (
-          <td key="product_name" className="px-3 py-1.5" onClick={onSelectRow}>
+          <td
+            key="product_name"
+            className={getCellHighlight("product_name", "px-3 py-1.5")}
+            onClick={() => {
+              onSelectRow?.();
+              onCellClick?.("product_name");
+            }}
+            onDoubleClick={() => {
+              onSelectRow?.();
+              onCellDoubleClick?.("product_name");
+            }}
+          >
             {isDraft && (!line || !line.product_name) ? (
               <div className="relative flex items-center">
                 <Search className="absolute left-2.5 h-3.5 w-3.5 text-[var(--color-text-faint)] pointer-events-none" />
@@ -160,7 +214,10 @@ export const PurchaseGridRow: React.FC<PurchaseGridRowProps> = ({
                     <button
                       type="button"
                       tabIndex={-1}
-                      onClick={onEditConversion}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onEditConversion?.();
+                      }}
                       className="rounded-[4px] bg-[var(--color-accent-soft)] px-1.5 py-0.2 text-[10px] font-semibold text-[var(--color-accent)] hover:underline cursor-pointer"
                       title="Click or press F4 to edit pack size"
                     >
@@ -192,7 +249,18 @@ export const PurchaseGridRow: React.FC<PurchaseGridRowProps> = ({
 
       case "batch_no":
         return (
-          <td key="batch_no" className="px-2 py-1">
+          <td
+            key="batch_no"
+            className={getCellHighlight("batch_no", "px-2 py-1")}
+            onClick={() => {
+              onSelectRow?.();
+              onCellClick?.("batch_no");
+            }}
+            onDoubleClick={() => {
+              onSelectRow?.();
+              onCellDoubleClick?.("batch_no");
+            }}
+          >
             {isDraft && line ? (
               <input
                 ref={batchInputRef}
@@ -209,6 +277,16 @@ export const PurchaseGridRow: React.FC<PurchaseGridRowProps> = ({
                 placeholder="BATCH"
                 className="w-full uppercase font-mono text-xs rounded-[6px] border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1 text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none"
               />
+            ) : isCellEditing && line ? (
+              <input
+                type="text"
+                autoFocus
+                ref={(el) => el?.select()}
+                value={line.batch_no || ""}
+                onChange={(e) => onFieldChange?.("batch_no", e.target.value.toUpperCase())}
+                onKeyDown={handleCellKeyDown}
+                className="w-full uppercase font-mono text-xs rounded border border-[var(--color-accent)] bg-[var(--color-surface)] px-1.5 py-0.5 text-[var(--color-text)] focus:outline-none shadow-2xs"
+              />
             ) : line ? (
               <span className="font-mono text-xs font-semibold text-[var(--color-text)]">
                 {line.batch_no || "—"}
@@ -221,7 +299,18 @@ export const PurchaseGridRow: React.FC<PurchaseGridRowProps> = ({
 
       case "expiry_date":
         return (
-          <td key="expiry_date" className="px-2 py-1">
+          <td
+            key="expiry_date"
+            className={getCellHighlight("expiry_date", "px-2 py-1")}
+            onClick={() => {
+              onSelectRow?.();
+              onCellClick?.("expiry_date");
+            }}
+            onDoubleClick={() => {
+              onSelectRow?.();
+              onCellDoubleClick?.("expiry_date");
+            }}
+          >
             {isDraft && line ? (
               <div className="relative">
                 <input
@@ -266,9 +355,26 @@ export const PurchaseGridRow: React.FC<PurchaseGridRowProps> = ({
                   </span>
                 )}
               </div>
+            ) : isCellEditing && line ? (
+              <input
+                type="text"
+                autoFocus
+                ref={(el) => el?.select()}
+                value={line.expiry_date || ""}
+                onChange={(e) => onFieldChange?.("expiry_date", e.target.value)}
+                onBlur={() => {
+                  if (line.expiry_date) {
+                    const res = parseExpiryInput(line.expiry_date);
+                    if (res.isValid) onFieldChange?.("expiry_date", res.isoDate);
+                  }
+                }}
+                onKeyDown={handleCellKeyDown}
+                placeholder="MM/YY"
+                className="w-full font-mono text-xs rounded border border-[var(--color-accent)] bg-[var(--color-surface)] px-1.5 py-0.5 text-[var(--color-text)] focus:outline-none shadow-2xs"
+              />
             ) : line ? (
               <div className="font-mono text-xs">
-                <span>{expiryStatus?.display || line.expiry_date}</span>
+                <span>{expiryStatus?.display || line.expiry_date || "—"}</span>
                 {expiryStatus?.isExpired && (
                   <span className="ml-1 rounded px-1 py-0.2 text-[9px] font-bold bg-[var(--color-danger-bg)] text-[var(--color-danger-text)] border border-[var(--color-danger-border)]">
                     Expired
@@ -283,9 +389,20 @@ export const PurchaseGridRow: React.FC<PurchaseGridRowProps> = ({
 
       case "qty":
         return (
-          <td key="qty" className="px-2 py-1 text-center">
+          <td
+            key="qty"
+            className={getCellHighlight("qty", "px-2 py-1 text-center")}
+            onClick={() => {
+              onSelectRow?.();
+              onCellClick?.("qty");
+            }}
+            onDoubleClick={() => {
+              onSelectRow?.();
+              onCellDoubleClick?.("qty");
+            }}
+          >
             {isDraft && line ? (
-              <div className="flex items-center gap-1">
+              <div className="flex items-center gap-1 justify-center">
                 <input
                   ref={qtyInputRef}
                   type="text"
@@ -325,6 +442,17 @@ export const PurchaseGridRow: React.FC<PurchaseGridRowProps> = ({
                   />
                 )}
               </div>
+            ) : isCellEditing && line ? (
+              <input
+                type="number"
+                step="1"
+                autoFocus
+                ref={(el) => el?.select()}
+                value={line.pack_qty ?? line.qty ?? 0}
+                onChange={(e) => onFieldChange?.("pack_qty", Math.max(0, parseFloat(e.target.value) || 0))}
+                onKeyDown={handleCellKeyDown}
+                className="w-16 font-mono font-bold text-xs rounded border border-[var(--color-accent)] bg-[var(--color-surface)] px-1.5 py-0.5 text-[var(--color-text)] text-center focus:outline-none shadow-2xs"
+              />
             ) : line ? (
               <span className="font-mono font-semibold text-xs text-[var(--color-text)]">
                 {line.pack_qty ?? line.qty ?? 0}
@@ -338,7 +466,18 @@ export const PurchaseGridRow: React.FC<PurchaseGridRowProps> = ({
 
       case "free_qty":
         return (
-          <td key="free_qty" className="px-2 py-1 text-center">
+          <td
+            key="free_qty"
+            className={getCellHighlight("free_qty", "px-2 py-1 text-center")}
+            onClick={() => {
+              onSelectRow?.();
+              onCellClick?.("free_qty");
+            }}
+            onDoubleClick={() => {
+              onSelectRow?.();
+              onCellDoubleClick?.("free_qty");
+            }}
+          >
             {isDraft && line ? (
               <input
                 ref={freeQtyInputRef}
@@ -354,6 +493,16 @@ export const PurchaseGridRow: React.FC<PurchaseGridRowProps> = ({
                 }}
                 className="w-12 text-center font-mono text-xs rounded-[6px] border border-[var(--color-border)] bg-[var(--color-surface)] px-1 py-1 text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none"
               />
+            ) : isCellEditing && line ? (
+              <input
+                type="number"
+                autoFocus
+                ref={(el) => el?.select()}
+                value={line.free_qty || 0}
+                onChange={(e) => onFieldChange?.("free_qty", Math.max(0, parseFloat(e.target.value) || 0))}
+                onKeyDown={handleCellKeyDown}
+                className="w-14 font-mono text-xs rounded border border-[var(--color-accent)] bg-[var(--color-surface)] px-1.5 py-0.5 text-[var(--color-text)] text-center focus:outline-none shadow-2xs"
+              />
             ) : line ? (
               <span className="font-mono text-xs text-[var(--color-text-muted)]">
                 {line.free_qty ? `+${line.free_qty}` : "0"}
@@ -366,7 +515,18 @@ export const PurchaseGridRow: React.FC<PurchaseGridRowProps> = ({
 
       case "mrp":
         return (
-          <td key="mrp" className="px-2 py-1 text-right">
+          <td
+            key="mrp"
+            className={getCellHighlight("mrp", "px-2 py-1 text-right")}
+            onClick={() => {
+              onSelectRow?.();
+              onCellClick?.("mrp");
+            }}
+            onDoubleClick={() => {
+              onSelectRow?.();
+              onCellDoubleClick?.("mrp");
+            }}
+          >
             {isDraft && line ? (
               <input
                 ref={mrpInputRef}
@@ -384,6 +544,17 @@ export const PurchaseGridRow: React.FC<PurchaseGridRowProps> = ({
                 placeholder="MRP"
                 className="w-16 text-right font-mono text-xs rounded-[6px] border border-[var(--color-border)] bg-[var(--color-surface)] px-1 py-1 text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none"
               />
+            ) : isCellEditing && line ? (
+              <input
+                type="number"
+                step="0.01"
+                autoFocus
+                ref={(el) => el?.select()}
+                value={line.mrp || ""}
+                onChange={(e) => onFieldChange?.("mrp", parseFloat(e.target.value) || 0)}
+                onKeyDown={handleCellKeyDown}
+                className="w-18 font-mono text-xs rounded border border-[var(--color-accent)] bg-[var(--color-surface)] px-1.5 py-0.5 text-[var(--color-text)] text-right focus:outline-none shadow-2xs"
+              />
             ) : line ? (
               <span className="font-mono text-xs text-[var(--color-text-muted)]">
                 ₹ {Number(line.mrp || 0).toFixed(2)}
@@ -396,28 +567,60 @@ export const PurchaseGridRow: React.FC<PurchaseGridRowProps> = ({
 
       case "ptr":
         return (
-          <td key="ptr" className="px-2 py-1 text-right font-mono text-xs text-[var(--color-text-muted)]">
+          <td
+            key="ptr"
+            className={getCellHighlight("ptr", "px-2 py-1 text-right font-mono text-xs text-[var(--color-text-muted)]")}
+            onClick={() => {
+              onSelectRow?.();
+              onCellClick?.("ptr");
+            }}
+          >
             ₹ {Number(line?.purchase_rate || 0).toFixed(2)}
           </td>
         );
 
       case "pts":
         return (
-          <td key="pts" className="px-2 py-1 text-right font-mono text-xs text-[var(--color-text-muted)]">
+          <td
+            key="pts"
+            className={getCellHighlight("pts", "px-2 py-1 text-right font-mono text-xs text-[var(--color-text-muted)]")}
+            onClick={() => {
+              onSelectRow?.();
+              onCellClick?.("pts");
+            }}
+          >
             ₹ {Number((line?.purchase_rate || 0) * 1.05).toFixed(2)}
           </td>
         );
 
       case "ptss":
         return (
-          <td key="ptss" className="px-2 py-1 text-right font-mono text-xs text-[var(--color-text-muted)]">
+          <td
+            key="ptss"
+            className={getCellHighlight("ptss", "px-2 py-1 text-right font-mono text-xs text-[var(--color-text-muted)]")}
+            onClick={() => {
+              onSelectRow?.();
+              onCellClick?.("ptss");
+            }}
+          >
             ₹ {Number((line?.purchase_rate || 0) * 1.08).toFixed(2)}
           </td>
         );
 
       case "purchase_rate":
         return (
-          <td key="purchase_rate" className="px-2 py-1 text-right">
+          <td
+            key="purchase_rate"
+            className={getCellHighlight("purchase_rate", "px-2 py-1 text-right")}
+            onClick={() => {
+              onSelectRow?.();
+              onCellClick?.("purchase_rate");
+            }}
+            onDoubleClick={() => {
+              onSelectRow?.();
+              onCellDoubleClick?.("purchase_rate");
+            }}
+          >
             {isDraft && line ? (
               <input
                 ref={rateInputRef}
@@ -435,6 +638,17 @@ export const PurchaseGridRow: React.FC<PurchaseGridRowProps> = ({
                 placeholder="Rate"
                 className="w-18 text-right font-mono font-bold text-xs rounded-[6px] border border-[var(--color-border)] bg-[var(--color-surface)] px-1.5 py-1 text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none"
               />
+            ) : isCellEditing && line ? (
+              <input
+                type="number"
+                step="0.01"
+                autoFocus
+                ref={(el) => el?.select()}
+                value={line.purchase_rate || ""}
+                onChange={(e) => onFieldChange?.("purchase_rate", parseFloat(e.target.value) || 0)}
+                onKeyDown={handleCellKeyDown}
+                className="w-20 font-mono font-bold text-xs rounded border border-[var(--color-accent)] bg-[var(--color-surface)] px-1.5 py-0.5 text-[var(--color-text)] text-right focus:outline-none shadow-2xs"
+              />
             ) : line ? (
               <span className="font-mono font-bold text-xs text-[var(--color-text)]">
                 ₹ {Number(line.purchase_rate || 0).toFixed(2)}
@@ -447,7 +661,18 @@ export const PurchaseGridRow: React.FC<PurchaseGridRowProps> = ({
 
       case "discount":
         return (
-          <td key="discount" className="px-2 py-1 text-center">
+          <td
+            key="discount"
+            className={getCellHighlight("discount", "px-2 py-1 text-center")}
+            onClick={() => {
+              onSelectRow?.();
+              onCellClick?.("discount");
+            }}
+            onDoubleClick={() => {
+              onSelectRow?.();
+              onCellDoubleClick?.("discount");
+            }}
+          >
             {isDraft && line ? (
               <input
                 ref={discInputRef}
@@ -464,6 +689,17 @@ export const PurchaseGridRow: React.FC<PurchaseGridRowProps> = ({
                 }}
                 className="w-12 text-center font-mono text-xs rounded-[6px] border border-[var(--color-border)] bg-[var(--color-surface)] px-1 py-1 text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none"
               />
+            ) : isCellEditing && line ? (
+              <input
+                type="number"
+                step="0.1"
+                autoFocus
+                ref={(el) => el?.select()}
+                value={line.discount_percent || 0}
+                onChange={(e) => onFieldChange?.("discount_percent", parseFloat(e.target.value) || 0)}
+                onKeyDown={handleCellKeyDown}
+                className="w-14 font-mono text-xs rounded border border-[var(--color-accent)] bg-[var(--color-surface)] px-1.5 py-0.5 text-[var(--color-text)] text-center focus:outline-none shadow-2xs"
+              />
             ) : line ? (
               <span className="font-mono text-xs text-[var(--color-text-muted)]">
                 {line.discount_percent ? `${line.discount_percent}%` : "—"}
@@ -476,21 +712,32 @@ export const PurchaseGridRow: React.FC<PurchaseGridRowProps> = ({
 
       case "discount_amount":
         return (
-          <td key="discount_amount" className="px-2 py-1 text-right font-mono text-xs text-[var(--color-text-muted)]">
+          <td key="discount_amount" className={getCellHighlight("discount_amount", "px-2 py-1 text-right font-mono text-xs text-[var(--color-text-muted)]")}>
             ₹ {calc?.discount_amount ? calc.discount_amount.toFixed(2) : "0.00"}
           </td>
         );
 
       case "scheme":
         return (
-          <td key="scheme" className="px-2 py-1 text-center font-mono text-xs text-[var(--color-text-muted)]">
+          <td key="scheme" className={getCellHighlight("scheme", "px-2 py-1 text-center font-mono text-xs text-[var(--color-text-muted)]")}>
             {line?.discount_amount ? `₹${line.discount_amount}` : "—"}
           </td>
         );
 
       case "gst":
         return (
-          <td key="gst" className="px-2 py-1 text-center">
+          <td
+            key="gst"
+            className={getCellHighlight("gst", "px-2 py-1 text-center")}
+            onClick={() => {
+              onSelectRow?.();
+              onCellClick?.("gst");
+            }}
+            onDoubleClick={() => {
+              onSelectRow?.();
+              onCellDoubleClick?.("gst");
+            }}
+          >
             {isDraft && line ? (
               <input
                 ref={gstInputRef}
@@ -506,6 +753,17 @@ export const PurchaseGridRow: React.FC<PurchaseGridRowProps> = ({
                 }}
                 className="w-12 text-center font-mono text-xs rounded-[6px] border border-[var(--color-border)] bg-[var(--color-surface)] px-1 py-1 text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none"
               />
+            ) : isCellEditing && line ? (
+              <input
+                type="number"
+                step="1"
+                autoFocus
+                ref={(el) => el?.select()}
+                value={line.gst_percent ?? 0}
+                onChange={(e) => onFieldChange?.("gst_percent", parseFloat(e.target.value) || 0)}
+                onKeyDown={handleCellKeyDown}
+                className="w-14 font-mono text-xs rounded border border-[var(--color-accent)] bg-[var(--color-surface)] px-1.5 py-0.5 text-[var(--color-text)] text-center focus:outline-none shadow-2xs"
+              />
             ) : line ? (
               <span className="font-mono text-xs text-[var(--color-text-muted)]">
                 {line.gst_percent}%
@@ -518,14 +776,25 @@ export const PurchaseGridRow: React.FC<PurchaseGridRowProps> = ({
 
       case "hsn":
         return (
-          <td key="hsn" className="px-2 py-1 text-center font-mono text-xs text-[var(--color-text-muted)]">
+          <td key="hsn" className={getCellHighlight("hsn", "px-2 py-1 text-center font-mono text-xs text-[var(--color-text-muted)]")}>
             {line?.hsn_code || "—"}
           </td>
         );
 
       case "selling_rate":
         return (
-          <td key="selling_rate" className="px-2 py-1 text-right">
+          <td
+            key="selling_rate"
+            className={getCellHighlight("selling_rate", "px-2 py-1 text-right")}
+            onClick={() => {
+              onSelectRow?.();
+              onCellClick?.("selling_rate");
+            }}
+            onDoubleClick={() => {
+              onSelectRow?.();
+              onCellDoubleClick?.("selling_rate");
+            }}
+          >
             {isDraft && line ? (
               <input
                 ref={sellRateInputRef}
@@ -542,6 +811,17 @@ export const PurchaseGridRow: React.FC<PurchaseGridRowProps> = ({
                 placeholder="Sell"
                 className="w-16 text-right font-mono text-xs rounded-[6px] border border-[var(--color-border)] bg-[var(--color-surface)] px-1 py-1 text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none"
               />
+            ) : isCellEditing && line ? (
+              <input
+                type="number"
+                step="0.01"
+                autoFocus
+                ref={(el) => el?.select()}
+                value={line.selling_rate || ""}
+                onChange={(e) => onFieldChange?.("selling_rate", parseFloat(e.target.value) || 0)}
+                onKeyDown={handleCellKeyDown}
+                className="w-18 font-mono text-xs rounded border border-[var(--color-accent)] bg-[var(--color-surface)] px-1.5 py-0.5 text-[var(--color-text)] text-right focus:outline-none shadow-2xs"
+              />
             ) : line ? (
               <span className="font-mono text-xs text-[var(--color-text)]">
                 ₹ {Number(line.selling_rate || 0).toFixed(2)}
@@ -554,7 +834,7 @@ export const PurchaseGridRow: React.FC<PurchaseGridRowProps> = ({
 
       case "margin":
         return (
-          <td key="margin" className="px-2 py-1 text-center">
+          <td key="margin" className={getCellHighlight("margin", "px-2 py-1 text-center")}>
             {line ? (
               <span
                 className={`inline-flex items-center gap-0.5 rounded px-1.5 py-0.2 text-[10px] font-mono font-bold ${
@@ -577,21 +857,21 @@ export const PurchaseGridRow: React.FC<PurchaseGridRowProps> = ({
 
       case "taxable_value":
         return (
-          <td key="taxable_value" className="px-2.5 py-1 text-right font-mono text-xs text-[var(--color-text-muted)]">
+          <td key="taxable_value" className={getCellHighlight("taxable_value", "px-2.5 py-1 text-right font-mono text-xs text-[var(--color-text-muted)]")}>
             ₹ {calc ? calc.taxable_amount.toFixed(2) : "0.00"}
           </td>
         );
 
       case "tax":
         return (
-          <td key="tax" className="px-2.5 py-1 text-right font-mono text-xs text-[var(--color-text-muted)]">
+          <td key="tax" className={getCellHighlight("tax", "px-2.5 py-1 text-right font-mono text-xs text-[var(--color-text-muted)]")}>
             ₹ {calc ? calc.total_tax.toFixed(2) : "0.00"}
           </td>
         );
 
       case "total":
         return (
-          <td key="total" className="px-3 py-1.5 text-right font-mono font-bold text-xs text-[var(--color-text)]">
+          <td key="total" className={getCellHighlight("total", "px-3 py-1.5 text-right font-mono font-bold text-xs text-[var(--color-text)]")}>
             ₹ {calc ? calc.total_amount.toFixed(2) : "0.00"}
           </td>
         );
@@ -615,7 +895,10 @@ export const PurchaseGridRow: React.FC<PurchaseGridRowProps> = ({
               <button
                 type="button"
                 tabIndex={-1}
-                onClick={onRemoveLine}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onRemoveLine?.();
+                }}
                 className="rounded p-1 text-[var(--color-text-muted)] hover:bg-[var(--color-danger-bg)] hover:text-[var(--color-danger-text)] cursor-pointer transition-colors"
                 title="Delete line (Delete / Ctrl+D)"
               >

@@ -163,7 +163,7 @@ export const StoreGatewayPage: React.FC<StoreGatewayPageProps> = ({
               LamSuite Billing • Select Company / Store
             </h1>
             <p className="text-xs text-text-muted">
-              Tally-Style Multi-Store Workspace ({stores.length} Registered Stores on this Workstation)
+              Multi-Store Workspace ({stores.length} Registered Stores on this Workstation)
             </p>
           </div>
         </div>
@@ -481,7 +481,7 @@ export const StoreGatewayPage: React.FC<StoreGatewayPageProps> = ({
 
       {/* Footer copyright */}
       <footer className="text-center text-[11px] text-text-muted py-2 border-t border-border-main">
-        LamSuite Billing v2.0 • Offline-First Multi-Store Retail Engine
+        LamSuite Billing v2.0 • Multi-Store Retail Engine
       </footer>
     </div>
   );

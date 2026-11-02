@@ -2,6 +2,7 @@ import { sqliteStorage } from "../db/sqliteStorage";
 import { productsStore, type ProductBatch } from "../masters/productsStore";
 import { syncQueueService } from "../sync/syncQueueService";
 import { calculateDocumentTaxes, type CompanyTaxMode } from "../tax-engine/taxEngine";
+import { companySettingsService } from "../settings/companySettingsService";
 import type { InvoiceRecord, InvoiceItemRecord } from "../reports/reportEngine";
 
 export interface ReturnItemInput {
@@ -59,11 +60,13 @@ export class PosSalesReturnService {
       gst_percent: item.gst_percent,
     }));
 
+    const isComposition = (originalInv as any)?.is_composition || (originalInv as any)?.gst_type === "composition" || (originalInv as any)?.gst_type === "no_tax" || (originalInv && originalInv.tax_total === 0);
     const taxResult = calculateDocumentTaxes({
       store_state: storeState,
       customer_gstin: originalInv?.customer_gstin,
       place_of_supply: placeOfSupply,
       default_tax_mode: isTaxInclusive ? "inclusive" : "exclusive",
+      is_composition: Boolean(isComposition),
       lines: taxLines,
     });
 
@@ -182,9 +185,15 @@ export class PosSalesReturnService {
       gst_percent: line.gst_percent,
     }));
 
+    const storeSettings = companySettingsService.getSettings();
+    const stState = storeSettings.state_code || "32";
+    const isComp = storeSettings.gst_type === "composition" || storeSettings.gst_type === "no_tax";
+
     const taxResult = calculateDocumentTaxes({
-      store_state: "32",
+      store_state: stState,
       default_tax_mode: defaultTaxMode,
+      gst_type: storeSettings.gst_type,
+      is_composition: isComp,
       lines: taxLines,
     });
 

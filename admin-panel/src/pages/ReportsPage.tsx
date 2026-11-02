@@ -32,6 +32,8 @@ export const ReportsPage: React.FC = () => {
 
   const [isLoading, setIsLoading] = useState(true);
 
+  const isPharmacy = !activeStore || (activeStore.store_type || "pharmacy") === "pharmacy";
+
   const fetchReports = async () => {
     setIsLoading(true);
     try {
@@ -122,7 +124,7 @@ export const ReportsPage: React.FC = () => {
           { id: "sales", label: "Daily Sales & Collection", icon: Receipt },
           { id: "gstr1", label: "GSTR-1 Statutory Summary", icon: FileBarChart2 },
           { id: "aging", label: "Customer Dues Aging", icon: Users },
-          { id: "pharmacy", label: "Rx & Schedule H1 Register", icon: Stethoscope },
+          ...(isPharmacy ? [{ id: "pharmacy", label: "Rx & Schedule H1 Register", icon: Stethoscope }] : []),
           { id: "scheduled", label: "Scheduled Email Digests", icon: Mail },
         ].map((tab) => {
           const Icon = tab.icon;

@@ -35,10 +35,17 @@ import {
   Sparkles,
   Layers,
   Columns as ColumnsIcon,
+  QrCode,
+  Plus,
+  Check,
+  ExternalLink,
 } from "lucide-react";
 import {
   companySettingsService,
   type CompanySettings,
+  type StoreUpiAccount,
+  type UpiSettingsConfig,
+  validateUpiId,
   DEFAULT_SETTINGS,
   DEFAULT_COLUMNS,
   DEFAULT_HEADER_FIELDS,
@@ -47,6 +54,7 @@ import {
   type HeaderFieldSetting,
   type BillingScreenPreset,
 } from "../lib/settings/companySettingsService";
+import { generateQrCodeSvg, generateUpiPaymentString } from "../lib/printing/printingEngine";
 import { syncQueueService, type SyncQueueItem } from "../lib/sync/syncQueueService";
 import { cloudDeltaSyncService } from "../lib/sync/cloudDeltaSyncService";
 import { LoggedInDevicesTable } from "../components/devices/LoggedInDevicesTable";
@@ -61,7 +69,7 @@ import {
 import { sqliteStorage } from "../lib/db/sqliteStorage";
 import { productsStore } from "../lib/masters/productsStore";
 import { partiesStore } from "../lib/masters/partiesStore";
-import { seed50Products } from "../lib/masters/seedProductsData";
+
 import { applyWorkspaceSettings } from "../lib/settings/workspaceThemeService";
 import { autoUpdateService, type UpdateInfo } from "../lib/settings/autoUpdateService";
 import { APP_FULL_VERSION } from "../config/version";
@@ -106,6 +114,17 @@ export const SettingsPage: React.FC = () => {
   const [isScanningPrinters, setIsScanningPrinters] = useState(false);
   const [testPrintFeedback, setTestPrintFeedback] = useState<{ text: string; success: boolean } | null>(null);
   const [selectedHexDumpLog, setSelectedHexDumpLog] = useState<PrintJobRecord | null>(null);
+
+  // Test QR Modal State
+  const [testQrModal, setTestQrModal] = useState<{
+    isOpen: boolean;
+    account: StoreUpiAccount | null;
+    amount: number;
+  }>({
+    isOpen: false,
+    account: null,
+    amount: 100,
+  });
 
   useEffect(() => {
     if (activeTab === "printing") {
@@ -324,16 +343,7 @@ export const SettingsPage: React.FC = () => {
     }
   };
 
-  // Seed sample mock data
-  const handleSeedDemoData = async () => {
-    try {
-      const res = await seed50Products();
-      showNotification(`Successfully seeded ${res.productsCount} test products and ${res.batchesCount} FEFO batches!`);
-    } catch (err) {
-      console.error("Error seeding demo data:", err);
-      showNotification(`Failed seeding demo data: ${err instanceof Error ? err.message : String(err)}`, "error");
-    }
-  };
+
 
   // Trigger Sync Queue Now
   const handleTriggerSyncNow = async () => {
@@ -818,7 +828,19 @@ export const SettingsPage: React.FC = () => {
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-3 gap-4">
+                <div>
+                  <label className="block text-[11px] font-semibold uppercase text-slate-600">GST Registration Type</label>
+                  <select
+                    value={settings.gst_type || "regular"}
+                    onChange={(e) => setSettings({ ...settings, gst_type: e.target.value as any })}
+                    className="mt-1 w-full rounded border border-slate-300 p-2 text-xs focus:border-blue-500 focus:outline-none"
+                  >
+                    <option value="regular">Regular GST (Tax Invoice with CGST/SGST/IGST)</option>
+                    <option value="composition">Composition Scheme (Bill of Supply, 0% Tax)</option>
+                    <option value="no_tax">Unregistered / No Tax (Bill of Supply, 0% Tax)</option>
+                  </select>
+                </div>
                 <div>
                   <label className="block text-[11px] font-semibold uppercase text-slate-600">Sales Tax Mode</label>
                   <select
@@ -841,6 +863,19 @@ export const SettingsPage: React.FC = () => {
                     <option value="inclusive">GST Inclusive</option>
                   </select>
                 </div>
+              </div>
+
+              <div className="flex items-center gap-2 pt-1 pb-1">
+                <input
+                  type="checkbox"
+                  id="allow_tax_override_per_bill"
+                  checked={Boolean(settings.allow_tax_override_per_bill)}
+                  onChange={(e) => setSettings({ ...settings, allow_tax_override_per_bill: e.target.checked })}
+                  className="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                />
+                <label htmlFor="allow_tax_override_per_bill" className="text-xs font-medium text-slate-700 cursor-pointer">
+                  Allow cashiers to override Tax Mode / GST Type per bill in POS
+                </label>
               </div>
 
               <div className="grid grid-cols-3 gap-4">
@@ -1102,64 +1137,414 @@ export const SettingsPage: React.FC = () => {
 
           {billingSubTab === "payments" && (
             <div className="space-y-6">
-              {/* UPI & Global Payment Settings */}
-              <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-xs space-y-4">
-                <h3 className="text-xs font-bold uppercase tracking-wider text-slate-800 border-b pb-2">
-                  UPI VPA & Instant QR Settlement
-                </h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-[11px] font-semibold uppercase text-slate-600">Store UPI VPA / Handle</label>
-                    <input
-                      type="text"
-                      value={settings.payments?.upiVpa || ""}
-                      onChange={(e) =>
-                        setSettings({
-                          ...settings,
-                          payments: { ...settings.payments, upiVpa: e.target.value },
-                        })
-                      }
-                      placeholder="e.g. pharmacy@icici or 9876543210@paytm"
-                      className="mt-1 w-full rounded border border-slate-300 p-2 text-xs font-mono focus:border-blue-500 focus:outline-none"
-                    />
-                    <p className="text-[11px] text-slate-500 mt-1">
-                      Used to render dynamic Bharat QR codes directly on checkout for the exact bill amount.
-                    </p>
+              {/* UPI & Instant QR Settlement Settings (Item 10) */}
+              <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-xs space-y-5">
+                <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                  <div className="flex items-center gap-2">
+                    <QrCode className="h-4 w-4 text-indigo-600" />
+                    <div>
+                      <h3 className="text-xs font-bold uppercase tracking-wider text-slate-800">
+                        UPI Payment & Instant QR Settlement
+                      </h3>
+                      <p className="text-[11px] text-slate-500">
+                        Configure statutory UPI VPAs, payee handles, multiple counter accounts, and test live QR codes.
+                      </p>
+                    </div>
                   </div>
-                  <div>
-                    <label className="block text-[11px] font-semibold uppercase text-slate-600">Payee Merchant Name</label>
+                  <label className="flex items-center gap-2 cursor-pointer bg-slate-50 border border-slate-200 px-3 py-1 rounded-lg">
                     <input
-                      type="text"
-                      value={settings.payments?.upiPayeeName || ""}
-                      onChange={(e) =>
+                      type="checkbox"
+                      checked={settings.payments?.upi?.enabled ?? true}
+                      onChange={(e) => {
+                        const upi = settings.payments?.upi || {
+                          enabled: true,
+                          showInSettlement: true,
+                          showOnPrintedBills: true,
+                          qrSubtext: "Scan with any UPI app to pay",
+                          accounts: [],
+                        };
                         setSettings({
                           ...settings,
-                          payments: { ...settings.payments, upiPayeeName: e.target.value },
-                        })
-                      }
-                      placeholder="e.g. LamStone Medicos"
-                      className="mt-1 w-full rounded border border-slate-300 p-2 text-xs focus:border-blue-500 focus:outline-none"
+                          payments: {
+                            ...settings.payments,
+                            upi: { ...upi, enabled: e.target.checked },
+                          },
+                        });
+                      }}
+                      className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                    />
+                    <span className="text-xs font-bold text-slate-800">
+                      Enable UPI Payments
+                    </span>
+                  </label>
+                </div>
+
+                {/* Display Preferences */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-1">
+                  <label className="flex items-center gap-2 cursor-pointer border border-slate-100 rounded-lg p-2.5 hover:bg-slate-50">
+                    <input
+                      type="checkbox"
+                      checked={settings.payments?.upi?.showInSettlement ?? true}
+                      onChange={(e) => {
+                        const upi = settings.payments?.upi || {
+                          enabled: true,
+                          showInSettlement: true,
+                          showOnPrintedBills: true,
+                          qrSubtext: "Scan with any UPI app to pay",
+                          accounts: [],
+                        };
+                        setSettings({
+                          ...settings,
+                          payments: {
+                            ...settings.payments,
+                            enableDynamicUpiQr: e.target.checked,
+                            upi: { ...upi, showInSettlement: e.target.checked },
+                          },
+                        });
+                      }}
+                      className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                    />
+                    <span className="text-xs font-medium text-slate-700">
+                      Show QR in POS settlement dialog
+                    </span>
+                  </label>
+
+                  <label className="flex items-center gap-2 cursor-pointer border border-slate-100 rounded-lg p-2.5 hover:bg-slate-50">
+                    <input
+                      type="checkbox"
+                      checked={settings.payments?.upi?.showOnPrintedBills ?? true}
+                      onChange={(e) => {
+                        const upi = settings.payments?.upi || {
+                          enabled: true,
+                          showInSettlement: true,
+                          showOnPrintedBills: true,
+                          qrSubtext: "Scan with any UPI app to pay",
+                          accounts: [],
+                        };
+                        setSettings({
+                          ...settings,
+                          printing: { ...settings.printing, printUpiQrCode: e.target.checked },
+                          payments: {
+                            ...settings.payments,
+                            upi: { ...upi, showOnPrintedBills: e.target.checked },
+                          },
+                        });
+                      }}
+                      className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                    />
+                    <span className="text-xs font-medium text-slate-700">
+                      Show QR on printed bills & receipts
+                    </span>
+                  </label>
+
+                  <div>
+                    <label className="block text-[11px] font-semibold uppercase text-slate-600">QR Subtext Note</label>
+                    <input
+                      type="text"
+                      value={settings.payments?.upi?.qrSubtext ?? "Scan with any UPI app to pay"}
+                      onChange={(e) => {
+                        const upi = settings.payments?.upi || {
+                          enabled: true,
+                          showInSettlement: true,
+                          showOnPrintedBills: true,
+                          qrSubtext: "Scan with any UPI app to pay",
+                          accounts: [],
+                        };
+                        setSettings({
+                          ...settings,
+                          payments: {
+                            ...settings.payments,
+                            upi: { ...upi, qrSubtext: e.target.value },
+                          },
+                        });
+                      }}
+                      placeholder="e.g. Scan with any UPI app to pay"
+                      className="mt-1 w-full rounded border border-slate-300 p-2 text-xs focus:border-indigo-500 focus:outline-none"
                     />
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-2">
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={settings.payments?.enableDynamicUpiQr ?? true}
-                      onChange={(e) =>
+                {/* Multi-Account UPI Management */}
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h4 className="text-xs font-bold text-slate-800">Store UPI Accounts & Counter Overrides</h4>
+                      <p className="text-[11px] text-slate-500">
+                        Define store accounts. You can set a primary default and assign dedicated accounts to specific counters.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const curAccounts = settings.payments?.upi?.accounts || [];
+                        const newAcc: StoreUpiAccount = {
+                          id: `upi_acc_${Date.now()}`,
+                          upiId: "",
+                          payeeName: settings.store_name || "Store",
+                          isDefault: curAccounts.length === 0,
+                          counterOverrides: [],
+                        };
+                        const upi = settings.payments?.upi || {
+                          enabled: true,
+                          showInSettlement: true,
+                          showOnPrintedBills: true,
+                          qrSubtext: "Scan with any UPI app to pay",
+                          accounts: [],
+                        };
                         setSettings({
                           ...settings,
-                          payments: { ...settings.payments, enableDynamicUpiQr: e.target.checked },
-                        })
-                      }
-                      className="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
-                    />
-                    <span className="text-xs font-medium text-slate-700">
-                      Show Dynamic UPI QR code in checkout dialog
-                    </span>
-                  </label>
+                          payments: {
+                            ...settings.payments,
+                            upi: {
+                              ...upi,
+                              accounts: [...curAccounts, newAcc],
+                            },
+                          },
+                        });
+                      }}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border border-indigo-200 text-xs font-bold cursor-pointer transition-colors"
+                    >
+                      <Plus className="h-3.5 w-3.5" />
+                      <span>Add UPI Account</span>
+                    </button>
+                  </div>
+
+                  {/* Accounts Table */}
+                  <div className="overflow-x-auto rounded-xl border border-slate-200">
+                    <table className="w-full text-xs text-left">
+                      <thead className="bg-slate-50 text-[10px] font-bold uppercase tracking-wider text-slate-500 border-b border-slate-200">
+                        <tr>
+                          <th className="px-3 py-2.5">Default</th>
+                          <th className="px-3 py-2.5">UPI ID (VPA)</th>
+                          <th className="px-3 py-2.5">Payee Name</th>
+                          <th className="px-3 py-2.5">Merchant Code (MCC)</th>
+                          <th className="px-3 py-2.5">Counter Override</th>
+                          <th className="px-3 py-2.5 text-right">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {((settings.payments?.upi?.accounts && settings.payments.upi.accounts.length > 0)
+                          ? settings.payments.upi.accounts
+                          : [
+                              {
+                                id: "def_acc_1",
+                                upiId: settings.payments?.upiVpa || "",
+                                payeeName: settings.payments?.upiPayeeName || settings.store_name || "",
+                                isDefault: true,
+                                counterOverrides: [],
+                              },
+                            ]
+                        ).map((acc, accIdx) => {
+                          const isValid = validateUpiId(acc.upiId);
+                          return (
+                            <tr key={acc.id || accIdx} className="hover:bg-slate-50/60">
+                              <td className="px-3 py-2.5">
+                                <input
+                                  type="radio"
+                                  name="default_upi_account"
+                                  checked={Boolean(acc.isDefault)}
+                                  onChange={() => {
+                                    const allAccs = (settings.payments?.upi?.accounts || []).map((a, i) => ({
+                                      ...a,
+                                      isDefault: (a.id ? a.id === acc.id : i === accIdx),
+                                    }));
+                                    const upi = settings.payments?.upi || {
+                                      enabled: true,
+                                      showInSettlement: true,
+                                      showOnPrintedBills: true,
+                                      qrSubtext: "Scan with any UPI app to pay",
+                                      accounts: [],
+                                    };
+                                    setSettings({
+                                      ...settings,
+                                      payments: {
+                                        ...settings.payments,
+                                        upiVpa: acc.upiId,
+                                        upiPayeeName: acc.payeeName,
+                                        upi: { ...upi, accounts: allAccs, defaultUpiId: acc.upiId, defaultPayeeName: acc.payeeName },
+                                      },
+                                    });
+                                  }}
+                                  className="h-4 w-4 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                                />
+                              </td>
+                              <td className="px-3 py-2.5">
+                                <div className="flex items-center gap-1.5">
+                                  <input
+                                    type="text"
+                                    value={acc.upiId}
+                                    onChange={(e) => {
+                                      const val = e.target.value.trim();
+                                      const allAccs = [...(settings.payments?.upi?.accounts || [])];
+                                      allAccs[accIdx] = { ...allAccs[accIdx], upiId: val };
+                                      const upi = settings.payments?.upi || {
+                                        enabled: true,
+                                        showInSettlement: true,
+                                        showOnPrintedBills: true,
+                                        qrSubtext: "Scan with any UPI app to pay",
+                                        accounts: [],
+                                      };
+                                      setSettings({
+                                        ...settings,
+                                        payments: {
+                                          ...settings.payments,
+                                          upiVpa: acc.isDefault ? val : settings.payments?.upiVpa,
+                                          upi: { ...upi, accounts: allAccs },
+                                        },
+                                      });
+                                    }}
+                                    placeholder="storename@bank"
+                                    className={`w-48 rounded border p-1.5 text-xs font-mono focus:outline-none ${
+                                      acc.upiId.length === 0
+                                        ? "border-slate-300"
+                                        : isValid
+                                        ? "border-emerald-400 bg-emerald-50/30 text-emerald-900"
+                                        : "border-red-300 bg-red-50/30 text-red-700"
+                                    }`}
+                                  />
+                                  {acc.upiId.length > 0 && (
+                                    <span
+                                      className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
+                                        isValid ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-700"
+                                      }`}
+                                    >
+                                      {isValid ? "Valid" : "Invalid VPA"}
+                                    </span>
+                                  )}
+                                </div>
+                              </td>
+                              <td className="px-3 py-2.5">
+                                <input
+                                  type="text"
+                                  value={acc.payeeName}
+                                  onChange={(e) => {
+                                    const allAccs = [...(settings.payments?.upi?.accounts || [])];
+                                    allAccs[accIdx] = { ...allAccs[accIdx], payeeName: e.target.value };
+                                    const upi = settings.payments?.upi || {
+                                      enabled: true,
+                                      showInSettlement: true,
+                                      showOnPrintedBills: true,
+                                      qrSubtext: "Scan with any UPI app to pay",
+                                      accounts: [],
+                                    };
+                                    setSettings({
+                                      ...settings,
+                                      payments: {
+                                        ...settings.payments,
+                                        upiPayeeName: acc.isDefault ? e.target.value : settings.payments?.upiPayeeName,
+                                        upi: { ...upi, accounts: allAccs },
+                                      },
+                                    });
+                                  }}
+                                  placeholder="Store / Payee Name"
+                                  className="w-40 rounded border border-slate-300 p-1.5 text-xs focus:outline-none focus:border-indigo-500"
+                                />
+                              </td>
+                              <td className="px-3 py-2.5">
+                                <input
+                                  type="text"
+                                  value={acc.merchantCode || ""}
+                                  onChange={(e) => {
+                                    const allAccs = [...(settings.payments?.upi?.accounts || [])];
+                                    allAccs[accIdx] = { ...allAccs[accIdx], merchantCode: e.target.value };
+                                    const upi = settings.payments?.upi || {
+                                      enabled: true,
+                                      showInSettlement: true,
+                                      showOnPrintedBills: true,
+                                      qrSubtext: "Scan with any UPI app to pay",
+                                      accounts: [],
+                                    };
+                                    setSettings({
+                                      ...settings,
+                                      payments: {
+                                        ...settings.payments,
+                                        upi: { ...upi, accounts: allAccs },
+                                      },
+                                    });
+                                  }}
+                                  placeholder="e.g. 5912 (Optional)"
+                                  className="w-28 rounded border border-slate-300 p-1.5 text-xs font-mono focus:outline-none"
+                                />
+                              </td>
+                              <td className="px-3 py-2.5">
+                                <input
+                                  type="text"
+                                  value={(acc.counterOverrides || []).join(", ")}
+                                  onChange={(e) => {
+                                    const split = e.target.value.split(",").map((s) => s.trim()).filter(Boolean);
+                                    const allAccs = [...(settings.payments?.upi?.accounts || [])];
+                                    allAccs[accIdx] = { ...allAccs[accIdx], counterOverrides: split };
+                                    const upi = settings.payments?.upi || {
+                                      enabled: true,
+                                      showInSettlement: true,
+                                      showOnPrintedBills: true,
+                                      qrSubtext: "Scan with any UPI app to pay",
+                                      accounts: [],
+                                    };
+                                    setSettings({
+                                      ...settings,
+                                      payments: {
+                                        ...settings.payments,
+                                        upi: { ...upi, accounts: allAccs },
+                                      },
+                                    });
+                                  }}
+                                  placeholder="e.g. Counter 01, Counter 02"
+                                  className="w-40 rounded border border-slate-300 p-1.5 text-xs focus:outline-none"
+                                />
+                              </td>
+                              <td className="px-3 py-2.5 text-right space-x-2">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setTestQrModal({
+                                      isOpen: true,
+                                      account: acc,
+                                      amount: 100,
+                                    });
+                                  }}
+                                  disabled={!isValid}
+                                  className="px-2.5 py-1 rounded bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border border-indigo-200 text-xs font-bold disabled:opacity-40 cursor-pointer inline-flex items-center gap-1"
+                                >
+                                  <QrCode className="h-3 w-3" />
+                                  <span>Test QR</span>
+                                </button>
+                                {(settings.payments?.upi?.accounts?.length || 0) > 1 && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const allAccs = (settings.payments?.upi?.accounts || []).filter((_, i) => i !== accIdx);
+                                      const upi = settings.payments?.upi || {
+                                        enabled: true,
+                                        showInSettlement: true,
+                                        showOnPrintedBills: true,
+                                        qrSubtext: "Scan with any UPI app to pay",
+                                        accounts: [],
+                                      };
+                                      setSettings({
+                                        ...settings,
+                                        payments: {
+                                          ...settings.payments,
+                                          upi: { ...upi, accounts: allAccs },
+                                        },
+                                      });
+                                    }}
+                                    className="p-1 text-slate-400 hover:text-red-600 cursor-pointer"
+                                    title="Delete UPI Account"
+                                  >
+                                    <Trash2 className="h-3.5 w-3.5" />
+                                  </button>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                <div className="pt-2">
                   <label className="flex items-center gap-2 cursor-pointer">
                     <input
                       type="checkbox"
@@ -3037,19 +3422,7 @@ export const SettingsPage: React.FC = () => {
                   </button>
                 </div>
 
-                <div className="rounded-lg border border-slate-200 p-4 space-y-3">
-                  <div className="text-xs font-bold text-slate-800">Generate 50 Test Products</div>
-                  <p className="text-[11px] text-slate-500">
-                    Loads 50 realistic pharmacy medicines (antibiotics, pain relief, antacids, cardiac, diabetic, vitamins, topicals), FEFO batches, and parties.
-                  </p>
-                  <button
-                    onClick={handleSeedDemoData}
-                    className="flex items-center gap-1.5 rounded bg-emerald-600 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-700"
-                  >
-                    <Play className="h-3.5 w-3.5" />
-                    <span>Seed 50 Test Products</span>
-                  </button>
-                </div>
+
               </div>
             </div>
           )}
@@ -3060,6 +3433,75 @@ export const SettingsPage: React.FC = () => {
           updateInfo={foundUpdate}
           onClose={() => setFoundUpdate(null)}
         />
+      )}
+
+      {/* Test QR Preview Modal */}
+      {testQrModal.isOpen && testQrModal.account && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-xs">
+          <div className="w-full max-w-sm rounded-2xl border border-slate-200 bg-white p-5 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+              <div className="flex items-center gap-2">
+                <QrCode className="h-4 w-4 text-indigo-600" />
+                <h3 className="text-sm font-bold text-slate-800">Test Dynamic UPI QR</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setTestQrModal({ isOpen: false, account: null, amount: 100 })}
+                className="text-slate-400 hover:text-slate-600"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <label className="block text-[11px] font-semibold uppercase text-slate-500 mb-1">
+                  Test Bill Amount (₹)
+                </label>
+                <input
+                  type="number"
+                  min="1"
+                  step="0.01"
+                  value={testQrModal.amount}
+                  onChange={(e) => setTestQrModal({ ...testQrModal, amount: Math.max(0.01, Number(e.target.value) || 0) })}
+                  className="w-full rounded-lg border border-slate-300 p-2 text-xs font-bold text-slate-800 focus:outline-none focus:border-indigo-500"
+                />
+              </div>
+
+              {(() => {
+                const uri = generateUpiPaymentString(
+                  testQrModal.account.upiId,
+                  testQrModal.account.payeeName,
+                  testQrModal.amount,
+                  "TEST-QR-001"
+                );
+                const svg = generateQrCodeSvg(uri, 150);
+                return (
+                  <div className="flex flex-col items-center justify-center rounded-xl border border-indigo-100 bg-indigo-50/30 p-4">
+                    <div className="bg-white p-2 rounded-lg border border-indigo-200 shadow-xs">
+                      <div dangerouslySetInnerHTML={{ __html: svg }} />
+                    </div>
+                    <div className="mt-3 text-center space-y-1">
+                      <div className="text-xs font-bold text-indigo-900">{testQrModal.account.payeeName}</div>
+                      <div className="text-[11px] font-mono text-slate-600">{testQrModal.account.upiId}</div>
+                      <div className="text-[10px] text-slate-500">{testQrModal.account.qrSubtext || "Scan with any UPI app to pay"}</div>
+                    </div>
+                  </div>
+                );
+              })()}
+            </div>
+
+            <div className="flex justify-end pt-2 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setTestQrModal({ isOpen: false, account: null, amount: 100 })}
+                className="px-4 py-1.5 rounded-lg bg-slate-800 text-white text-xs font-bold hover:bg-slate-700"
+              >
+                Close Preview
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

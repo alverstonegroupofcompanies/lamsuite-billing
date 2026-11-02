@@ -624,7 +624,7 @@ export const StaffLoginPage: React.FC<StaffLoginPageProps> = ({
 
       {/* Footer Info */}
       <footer className="text-center text-[11px] text-text-muted max-w-5xl mx-auto w-full flex justify-between items-center">
-        <span>LamSuite Billing v2.0 • Offline-First Retail POS</span>
+        <span>LamSuite Billing v2.0 • Multi-Store Retail POS</span>
         <span>Keyboard shortcuts active (1-9 Operator, Enter Submit, Alt+P Mode)</span>
       </footer>
 

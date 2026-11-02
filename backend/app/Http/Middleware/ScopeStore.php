@@ -19,7 +19,9 @@ class ScopeStore
         // Determine requested store ID
         $requestedStoreId = $request->header('X-Store-Id')
             ?? $request->query('store_id')
+            ?? $request->query('active_store_id')
             ?? $request->input('store_id')
+            ?? $request->input('active_store_id')
             ?? $user->store_id;
 
         if ($requestedStoreId !== null) {

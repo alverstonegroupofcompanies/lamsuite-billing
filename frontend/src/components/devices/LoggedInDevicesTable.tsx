@@ -10,8 +10,20 @@ import {
   AlertCircle,
   PowerOff,
   Filter,
+  Lock,
+  Unlock,
+  Edit2,
+  Trash2,
+  ShieldAlert,
+  Layers,
+  CheckCircle2,
+  XCircle,
 } from "lucide-react";
-import { deviceSessionService, type LoggedInDevice } from "../../lib/devices/deviceSessionService";
+import {
+  deviceSessionService,
+  type LoggedInDevice,
+  type DeviceStatus,
+} from "../../lib/devices/deviceSessionService";
 
 export interface LoggedInDevicesTableProps {
   autoRefreshIntervalMs?: number;
@@ -26,9 +38,14 @@ export const LoggedInDevicesTable: React.FC<LoggedInDevicesTableProps> = ({
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
   const [errorMsg, setErrorMsg] = useState<string>("");
+  const [successMsg, setSuccessMsg] = useState<string>("");
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
-  const [expiringId, setExpiringId] = useState<string | null>(null);
+  const [activeActionId, setActiveActionId] = useState<string | null>(null);
+
+  // Rename modal state
+  const [renameDevice, setRenameDevice] = useState<LoggedInDevice | null>(null);
+  const [renameForm, setRenameForm] = useState({ device_name: "", counter_name: "" });
 
   const fetchDevices = useCallback(
     async (isBackground = false) => {
@@ -44,8 +61,8 @@ export const LoggedInDevicesTable: React.FC<LoggedInDevicesTableProps> = ({
         setDevices(list);
 
         if (onDeviceCountChange) {
-          const onlineCount = list.filter((d) => d.status === "Online").length;
-          onDeviceCountChange(onlineCount, list.length);
+          const activeCount = list.filter((d) => d.status === "Active").length;
+          onDeviceCountChange(activeCount, list.length);
         }
       } catch (err: any) {
         setErrorMsg(err?.message || "Failed to retrieve logged-in devices.");
@@ -66,19 +83,91 @@ export const LoggedInDevicesTable: React.FC<LoggedInDevicesTableProps> = ({
     return () => clearInterval(interval);
   }, [fetchDevices, autoRefreshIntervalMs]);
 
-  const handleExpireSession = async (deviceId: string, name: string | null) => {
-    if (!window.confirm(`Are you sure you want to expire the session for "${name || 'this device'}"?`)) {
+  const handleForceLogout = async (deviceId: string, name: string | null) => {
+    if (!window.confirm(`Force log out session for "${name || 'this workstation'}"? The device will be disconnected immediately.`)) {
       return;
     }
 
-    setExpiringId(deviceId);
+    setActiveActionId(deviceId);
     try {
-      await deviceSessionService.expireDeviceSession(deviceId);
+      await deviceSessionService.forceLogout(deviceId);
+      setSuccessMsg(`Session terminated for "${name || 'workstation'}".`);
+      setTimeout(() => setSuccessMsg(""), 4000);
       await fetchDevices(true);
     } catch (err: any) {
-      alert(err?.message || "Failed to expire session.");
+      alert(err?.message || "Failed to force logout.");
     } finally {
-      setExpiringId(null);
+      setActiveActionId(null);
+    }
+  };
+
+  const handleToggleLock = async (device: LoggedInDevice) => {
+    const isLocked = device.status === "Locked";
+    const promptMsg = isLocked
+      ? `Unlock workstation "${device.device_name || device.counter_name}"?`
+      : `Lock workstation "${device.device_name || device.counter_name}"? Cashier will require authorization to unlock.`;
+
+    if (!window.confirm(promptMsg)) return;
+
+    setActiveActionId(device.id);
+    try {
+      if (isLocked) {
+        await deviceSessionService.unlockDevice(device.id);
+        setSuccessMsg(`Workstation "${device.device_name}" unlocked.`);
+      } else {
+        await deviceSessionService.lockDevice(device.id);
+        setSuccessMsg(`Workstation "${device.device_name}" locked.`);
+      }
+      setTimeout(() => setSuccessMsg(""), 4000);
+      await fetchDevices(true);
+    } catch (err: any) {
+      alert(err?.message || "Lock action failed.");
+    } finally {
+      setActiveActionId(null);
+    }
+  };
+
+  const handleRevokeDevice = async (device: LoggedInDevice) => {
+    const reason = window.prompt(
+      `Revoke workstation "${device.device_name || device.counter_name}" permanently? Enter revocation reason:`,
+      "Decommissioned or unauthorized device"
+    );
+    if (reason === null) return;
+
+    setActiveActionId(device.id);
+    try {
+      await deviceSessionService.revokeDevice(device.id, reason);
+      setSuccessMsg(`Workstation "${device.device_name}" revoked permanently.`);
+      setTimeout(() => setSuccessMsg(""), 4000);
+      await fetchDevices(true);
+    } catch (err: any) {
+      alert(err?.message || "Failed to revoke device.");
+    } finally {
+      setActiveActionId(null);
+    }
+  };
+
+  const openRenameModal = (device: LoggedInDevice) => {
+    setRenameDevice(device);
+    setRenameForm({
+      device_name: device.device_name || "",
+      counter_name: device.counter_name || "",
+    });
+  };
+
+  const handleSaveRename = async () => {
+    if (!renameDevice) return;
+    try {
+      await deviceSessionService.renameDevice(renameDevice.id, {
+        device_name: renameForm.device_name.trim() || undefined,
+        counter_name: renameForm.counter_name.trim() || undefined,
+      });
+      setRenameDevice(null);
+      setSuccessMsg("Device / Counter renamed successfully.");
+      setTimeout(() => setSuccessMsg(""), 4000);
+      await fetchDevices(true);
+    } catch (err: any) {
+      alert(err?.message || "Failed to rename device.");
     }
   };
 
@@ -101,12 +190,11 @@ export const LoggedInDevicesTable: React.FC<LoggedInDevicesTableProps> = ({
   };
 
   const formatRelativeTime = (isoString: string | null): string => {
-    if (!isoString) return "N/A";
+    if (!isoString) return "Never";
     try {
       const date = new Date(isoString);
-      if (isNaN(date.getTime())) return "N/A";
-      const diffSec = Math.round((Date.now() - date.getTime()) / 1000);
-
+      if (isNaN(date.getTime())) return "Never";
+      const diffSec = Math.max(0, Math.floor((Date.now() - date.getTime()) / 1000));
       if (diffSec < 15) return "Just now";
       if (diffSec < 60) return `${diffSec}s ago`;
       const diffMin = Math.floor(diffSec / 60);
@@ -115,32 +203,46 @@ export const LoggedInDevicesTable: React.FC<LoggedInDevicesTableProps> = ({
       if (diffHour < 24) return `${diffHour}h ago`;
       return formatDate(isoString);
     } catch {
-      return "N/A";
+      return "Never";
     }
   };
 
-  const renderStatusBadge = (status: LoggedInDevice["status"]) => {
+  const renderStatusBadge = (status: DeviceStatus) => {
     switch (status) {
-      case "Online":
+      case "Active":
         return (
           <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-            Online
+            Active
+          </span>
+        );
+      case "Idle":
+        return (
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-50 text-amber-700 border border-amber-200">
+            <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
+            Idle
+          </span>
+        );
+      case "Locked":
+        return (
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-50 text-blue-700 border border-blue-200">
+            <Lock className="w-3 h-3 text-blue-600" />
+            Locked
+          </span>
+        );
+      case "Revoked":
+        return (
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-rose-50 text-rose-700 border border-rose-200">
+            <XCircle className="w-3 h-3 text-rose-600" />
+            Revoked
           </span>
         );
       case "Offline":
+      default:
         return (
           <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-slate-100 text-slate-600 border border-slate-200">
             <span className="w-1.5 h-1.5 rounded-full bg-slate-400" />
             Offline
-          </span>
-        );
-      case "Session Expired":
-      default:
-        return (
-          <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-50 text-amber-700 border border-amber-200">
-            <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
-            Session Expired
           </span>
         );
     }
@@ -149,45 +251,47 @@ export const LoggedInDevicesTable: React.FC<LoggedInDevicesTableProps> = ({
   return (
     <div className="space-y-4">
       {/* Header & Controls Bar */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-[var(--color-surface)] p-4 rounded-xl border border-[var(--color-border)] shadow-xs">
         <div>
           <div className="flex items-center gap-2">
             <Laptop className="h-5 w-5 text-emerald-600" />
-            <h3 className="text-sm font-bold text-slate-800">Logged-In Devices</h3>
-            <span className="bg-slate-100 text-slate-600 text-xs px-2 py-0.5 rounded-full font-mono font-medium">
+            <h3 className="text-sm font-bold text-[var(--color-text)]">Logged-In Workstations & Counters</h3>
+            <span className="bg-[var(--color-surface-subtle)] text-[var(--color-text-muted)] text-xs px-2 py-0.5 rounded-full font-mono font-medium">
               {devices.length}
             </span>
           </div>
-          <p className="text-xs text-slate-500 mt-0.5">
-            Centralized inventory of authenticated workstations, active counters, and online sessions.
+          <p className="text-xs text-[var(--color-text-muted)] mt-0.5">
+            Real-time backend connection status, signed-in cashiers, app versions, and synchronization health.
           </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
           {/* Search Box */}
           <div className="relative min-w-[200px]">
-            <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+            <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)] pointer-events-none" />
             <input
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search counter, device, IP..."
-              className="w-full pl-8 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-lg text-slate-700 placeholder-slate-400 focus:outline-none focus:border-emerald-500 focus:bg-white transition-colors"
+              placeholder="Search workstation, counter, user..."
+              className="w-full pl-8 pr-3 py-1.5 text-xs bg-[var(--color-surface-subtle)] border border-[var(--color-border)] rounded-lg text-[var(--color-text)] placeholder-[var(--color-text-muted)] focus:outline-none focus:border-emerald-500 transition-colors"
             />
           </div>
 
           {/* Status Filter */}
-          <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-600">
-            <Filter className="w-3.5 h-3.5 text-slate-400" />
+          <div className="flex items-center gap-1.5 bg-[var(--color-surface-subtle)] border border-[var(--color-border)] rounded-lg px-2.5 py-1.5 text-xs text-[var(--color-text-muted)]">
+            <Filter className="w-3.5 h-3.5 text-[var(--color-text-muted)]" />
             <select
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value)}
-              className="bg-transparent focus:outline-none cursor-pointer text-xs font-medium text-slate-700"
+              className="bg-transparent focus:outline-none cursor-pointer text-xs font-medium text-[var(--color-text)]"
             >
               <option value="all">All Statuses</option>
-              <option value="online">Online</option>
+              <option value="active">Active</option>
+              <option value="idle">Idle</option>
               <option value="offline">Offline</option>
-              <option value="expired">Session Expired</option>
+              <option value="locked">Locked</option>
+              <option value="revoked">Revoked</option>
             </select>
           </div>
 
@@ -196,16 +300,22 @@ export const LoggedInDevicesTable: React.FC<LoggedInDevicesTableProps> = ({
             type="button"
             onClick={() => fetchDevices(false)}
             disabled={isLoading || isRefreshing}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-700 text-xs font-semibold hover:bg-slate-50 disabled:opacity-50 transition-colors shadow-xs"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-text)] text-xs font-semibold hover:bg-[var(--color-surface-subtle)] disabled:opacity-50 transition-colors shadow-xs"
             title="Refresh device list"
           >
-            <RefreshCw className={`h-3.5 w-3.5 text-slate-500 ${isRefreshing || isLoading ? "animate-spin text-emerald-600" : ""}`} />
+            <RefreshCw className={`h-3.5 w-3.5 text-[var(--color-text-muted)] ${isRefreshing || isLoading ? "animate-spin text-emerald-600" : ""}`} />
             <span>Refresh</span>
           </button>
         </div>
       </div>
 
-      {/* Error State Banner */}
+      {/* Notifications */}
+      {successMsg && (
+        <div className="flex items-center gap-2 p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-xs text-emerald-800">
+          <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+          <span>{successMsg}</span>
+        </div>
+      )}
       {errorMsg && (
         <div className="flex items-center justify-between p-3.5 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-800">
           <div className="flex items-center gap-2">
@@ -222,124 +332,102 @@ export const LoggedInDevicesTable: React.FC<LoggedInDevicesTableProps> = ({
         </div>
       )}
 
-      {/* Devices View */}
+      {/* Devices Table */}
       {isLoading && devices.length === 0 ? (
-        /* Loading Skeleton */
-        <div className="bg-white border border-slate-200 rounded-xl p-8 space-y-3">
-          <div className="flex items-center justify-center gap-2 text-xs text-slate-500">
+        <div className="bg-[var(--color-surface)] border border-[var(--color-border)] rounded-xl p-8 space-y-3">
+          <div className="flex items-center justify-center gap-2 text-xs text-[var(--color-text-muted)]">
             <RefreshCw className="h-4 w-4 animate-spin text-emerald-600" />
-            <span>Retrieving authenticated devices...</span>
-          </div>
-          <div className="space-y-2 max-w-md mx-auto pt-2">
-            <div className="h-3 bg-slate-100 rounded animate-pulse w-full" />
-            <div className="h-3 bg-slate-100 rounded animate-pulse w-5/6 mx-auto" />
+            <span>Retrieving connected workstations from backend...</span>
           </div>
         </div>
       ) : devices.length === 0 ? (
-        /* Empty State */
-        <div className="bg-white border border-dashed border-slate-200 rounded-xl p-10 text-center space-y-2">
-          <Monitor className="h-8 w-8 text-slate-300 mx-auto" />
-          <h4 className="text-xs font-bold text-slate-700">No Logged-In Devices Found</h4>
-          <p className="text-[11px] text-slate-500 max-w-sm mx-auto">
+        <div className="bg-[var(--color-surface)] border border-dashed border-[var(--color-border)] rounded-xl p-10 text-center space-y-2">
+          <Monitor className="h-8 w-8 text-[var(--color-text-muted)] mx-auto opacity-40" />
+          <h4 className="text-xs font-bold text-[var(--color-text)]">No Connected Workstations Found</h4>
+          <p className="text-[11px] text-[var(--color-text-muted)] max-w-sm mx-auto">
             {searchQuery || statusFilter !== "all"
               ? "No devices match the applied filter criteria. Try clearing your search."
-              : "When cash counters and workstations log in to the centralized server, their active sessions will appear here."}
+              : "When cash counters and workstations log in to the server, their active sessions will appear here in real time."}
           </p>
         </div>
       ) : (
-        /* Data Table (Desktop) & Cards (Mobile) */
-        <div className="bg-white border border-slate-200 rounded-xl shadow-xs overflow-hidden">
+        <div className="bg-[var(--color-surface)] border border-[var(--color-border)] rounded-xl shadow-xs overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse text-xs">
               <thead>
-                <tr className="bg-slate-50/80 border-b border-slate-200 text-[11px] font-semibold text-slate-600 uppercase tracking-wider">
-                  <th className="py-3 px-4">Device Name</th>
-                  <th className="py-3 px-4">Counter Name</th>
-                  <th className="py-3 px-4">IP Address</th>
-                  <th className="py-3 px-4">Location</th>
-                  <th className="py-3 px-4">Login Time</th>
-                  <th className="py-3 px-4">Last Active</th>
+                <tr className="bg-[var(--color-surface-subtle)] border-b border-[var(--color-border)] text-[11px] font-semibold text-[var(--color-text-muted)] uppercase tracking-wider">
+                  <th className="py-3 px-4">Workstation / Counter</th>
+                  <th className="py-3 px-4">Signed-In User</th>
+                  <th className="py-3 px-4">IP & Location</th>
                   <th className="py-3 px-4">Status</th>
+                  <th className="py-3 px-4">Sign-In Time</th>
+                  <th className="py-3 px-4">Last Seen</th>
+                  <th className="py-3 px-4">Version & Queue</th>
                   <th className="py-3 px-4 text-right">Actions</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100">
+              <tbody className="divide-y divide-[var(--color-border-subtle)]">
                 {devices.map((device) => {
-                  const isOnline = device.status === "Online";
-
                   return (
                     <tr
                       key={device.id}
-                      className="hover:bg-slate-50/70 transition-colors"
+                      className={`hover:bg-[var(--color-surface-subtle)] transition-colors ${
+                        device.is_this_device ? "bg-emerald-50/20" : ""
+                      }`}
                     >
-                      {/* Device Name */}
+                      {/* Workstation / Counter */}
                       <td className="py-3 px-4">
-                        <div className="flex items-center gap-2">
-                          <Laptop className={`w-4 h-4 ${isOnline ? "text-emerald-600" : "text-slate-400"}`} />
+                        <div className="flex items-start gap-2">
+                          <Laptop className="w-4 h-4 text-emerald-600 mt-0.5 shrink-0" />
                           <div>
-                            <span className="font-semibold text-slate-800 block">
-                              {device.device_name || "N/A"}
-                            </span>
-                            {device.user_name && (
-                              <span className="text-[10px] text-slate-500">
-                                User: {device.user_name}
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className="font-bold text-[var(--color-text)]">
+                                {device.device_name || "Workstation"}
                               </span>
-                            )}
+                              {device.is_this_device && (
+                                <span className="inline-flex items-center px-1.5 py-0.2 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
+                                  This device
+                                </span>
+                              )}
+                            </div>
+                            <div className="text-[11px] text-[var(--color-text-muted)] mt-0.5 flex items-center gap-1">
+                              <span>Counter:</span>
+                              <span className="font-semibold text-[var(--color-text)]">
+                                {device.counter_name || "Unassigned"}
+                              </span>
+                              {device.counter_code && (
+                                <span className="font-mono text-[9px] bg-[var(--color-surface-subtle)] border border-[var(--color-border)] px-1 py-0.2 rounded">
+                                  {device.counter_code}
+                                </span>
+                              )}
+                            </div>
                           </div>
                         </div>
                       </td>
 
-                      {/* Counter Name */}
+                      {/* User & Role */}
                       <td className="py-3 px-4">
-                        <div className="flex items-center gap-1.5">
-                          <span className="font-medium text-slate-700">
-                            {device.counter_name || "N/A"}
+                        <div>
+                          <span className="font-semibold text-[var(--color-text)] block">
+                            {device.user_name || "Cashier"}
                           </span>
-                          {device.counter_code && (
-                            <span className="font-mono text-[10px] bg-slate-100 border border-slate-200 px-1.5 py-0.5 rounded text-slate-600 font-bold">
-                              {device.counter_code}
-                            </span>
-                          )}
-                        </div>
-                      </td>
-
-                      {/* IP Address */}
-                      <td className="py-3 px-4">
-                        <span className="font-mono text-slate-600">
-                          {device.ip_address || "N/A"}
-                        </span>
-                      </td>
-
-                      {/* Location */}
-                      <td className="py-3 px-4">
-                        <div className="flex items-center gap-1 text-slate-600">
-                          {device.location ? (
-                            <>
-                              <MapPin className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                              <span>{device.location}</span>
-                            </>
-                          ) : (
-                            <span>N/A</span>
-                          )}
-                        </div>
-                      </td>
-
-                      {/* Login Time */}
-                      <td className="py-3 px-4 text-slate-600">
-                        <div className="flex items-center gap-1">
-                          <Clock className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                          <span>{formatDate(device.login_time)}</span>
-                        </div>
-                      </td>
-
-                      {/* Last Active */}
-                      <td className="py-3 px-4 text-slate-600">
-                        <div className="flex items-center gap-1" title={device.last_active || undefined}>
-                          <Activity className={`w-3.5 h-3.5 shrink-0 ${isOnline ? "text-emerald-500" : "text-slate-400"}`} />
-                          <span className="font-medium text-slate-700">
-                            {formatRelativeTime(device.last_active)}
+                          <span className="inline-flex items-center px-1.5 py-0.2 rounded text-[10px] font-medium bg-[var(--color-surface-subtle)] text-[var(--color-text-muted)] border border-[var(--color-border)] mt-0.5">
+                            {device.user_role || "Cashier"}
                           </span>
                         </div>
+                      </td>
+
+                      {/* IP & Location */}
+                      <td className="py-3 px-4">
+                        <div className="font-mono text-[11px] text-[var(--color-text)]">
+                          {device.ip_address || "127.0.0.1"}
+                        </div>
+                        {device.location ? (
+                          <div className="text-[10px] text-[var(--color-text-muted)] flex items-center gap-1 mt-0.5">
+                            <MapPin className="w-3 h-3 text-[var(--color-text-muted)]" />
+                            <span>{device.location}</span>
+                          </div>
+                        ) : null}
                       </td>
 
                       {/* Status */}
@@ -347,26 +435,168 @@ export const LoggedInDevicesTable: React.FC<LoggedInDevicesTableProps> = ({
                         {renderStatusBadge(device.status)}
                       </td>
 
+                      {/* Sign-In Time */}
+                      <td className="py-3 px-4 text-[var(--color-text-muted)]">
+                        <div className="flex items-center gap-1">
+                          <Clock className="w-3.5 h-3.5 opacity-60 shrink-0" />
+                          <span>{formatDate(device.sign_in_time)}</span>
+                        </div>
+                      </td>
+
+                      {/* Last Seen */}
+                      <td className="py-3 px-4 text-[var(--color-text)]">
+                        <div className="flex items-center gap-1">
+                          <Activity className={`w-3.5 h-3.5 shrink-0 ${device.status === "Active" ? "text-emerald-500" : "text-slate-400"}`} />
+                          <span className="font-medium">
+                            {formatRelativeTime(device.last_seen)}
+                          </span>
+                        </div>
+                      </td>
+
+                      {/* App Version & Unsynced Queue */}
+                      <td className="py-3 px-4">
+                        <div className="flex flex-col gap-0.5">
+                          <span className="font-mono text-[11px] text-[var(--color-text)]">
+                            v{device.app_version || "2.0.17"}
+                          </span>
+                          {device.unsynced_items_count > 0 ? (
+                            <span className="inline-flex items-center gap-1 text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.2 rounded w-fit">
+                              <Layers className="w-2.5 h-2.5" />
+                              {device.unsynced_items_count} unsynced
+                            </span>
+                          ) : (
+                            <span className="text-[10px] text-emerald-600 font-medium">
+                              Fully synced
+                            </span>
+                          )}
+                        </div>
+                      </td>
+
                       {/* Actions */}
                       <td className="py-3 px-4 text-right">
-                        {device.is_active && (
+                        <div className="flex items-center justify-end gap-1 flex-wrap">
+                          {/* Rename Button */}
                           <button
                             type="button"
-                            onClick={() => handleExpireSession(device.id, device.device_name || device.counter_name)}
-                            disabled={expiringId === device.id}
-                            className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-medium text-rose-600 hover:text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-md transition-colors disabled:opacity-50"
-                            title="Expire and disconnect this workstation session"
+                            onClick={() => openRenameModal(device)}
+                            className="p-1 text-[var(--color-text-muted)] hover:text-emerald-600 hover:bg-[var(--color-surface-subtle)] rounded transition-colors"
+                            title="Rename workstation or counter"
                           >
-                            <PowerOff className="w-3 h-3" />
-                            <span>{expiringId === device.id ? "Expiring..." : "Expire Session"}</span>
+                            <Edit2 className="w-3.5 h-3.5" />
                           </button>
-                        )}
+
+                          {/* Lock / Unlock Button */}
+                          {device.status !== "Revoked" && (
+                            <button
+                              type="button"
+                              onClick={() => handleToggleLock(device)}
+                              disabled={activeActionId === device.id}
+                              className={`p-1 rounded transition-colors ${
+                                device.status === "Locked"
+                                  ? "text-blue-600 hover:bg-blue-50"
+                                  : "text-[var(--color-text-muted)] hover:text-blue-600 hover:bg-[var(--color-surface-subtle)]"
+                              }`}
+                              title={device.status === "Locked" ? "Unlock workstation" : "Lock workstation"}
+                            >
+                              {device.status === "Locked" ? (
+                                <Unlock className="w-3.5 h-3.5" />
+                              ) : (
+                                <Lock className="w-3.5 h-3.5" />
+                              )}
+                            </button>
+                          )}
+
+                          {/* Force Logout Button */}
+                          {device.status !== "Offline" && device.status !== "Revoked" && (
+                            <button
+                              type="button"
+                              onClick={() => handleForceLogout(device.id, device.device_name || device.counter_name)}
+                              disabled={activeActionId === device.id}
+                              className="p-1 text-[var(--color-text-muted)] hover:text-amber-600 hover:bg-amber-50 rounded transition-colors disabled:opacity-50"
+                              title="Force log out active session"
+                            >
+                              <PowerOff className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+
+                          {/* Revoke Button */}
+                          {device.status !== "Revoked" && (
+                            <button
+                              type="button"
+                              onClick={() => handleRevokeDevice(device)}
+                              disabled={activeActionId === device.id}
+                              className="p-1 text-[var(--color-text-muted)] hover:text-rose-600 hover:bg-rose-50 rounded transition-colors disabled:opacity-50"
+                              title="Revoke device permanently"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   );
                 })}
               </tbody>
             </table>
+          </div>
+        </div>
+      )}
+
+      {/* Rename Dialog Modal */}
+      {renameDevice && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-xs p-4 animate-in fade-in duration-150">
+          <div className="bg-[var(--color-surface)] border border-[var(--color-border)] rounded-2xl p-5 shadow-2xl max-w-sm w-full space-y-4">
+            <div>
+              <h3 className="text-sm font-bold text-[var(--color-text)]">Rename Workstation / Counter</h3>
+              <p className="text-xs text-[var(--color-text-muted)] mt-0.5">
+                Update the display name for this device across all terminals and reports.
+              </p>
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs font-semibold text-[var(--color-text)] block mb-1">
+                  Device Name
+                </label>
+                <input
+                  type="text"
+                  value={renameForm.device_name}
+                  onChange={(e) => setRenameForm({ ...renameForm, device_name: e.target.value })}
+                  placeholder="e.g. Main Cashier PC"
+                  className="w-full text-xs bg-[var(--color-surface-subtle)] border border-[var(--color-border)] rounded-lg px-3 py-1.5 text-[var(--color-text)] focus:outline-none focus:border-emerald-500"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs font-semibold text-[var(--color-text)] block mb-1">
+                  Counter Name (Given at Sign-in)
+                </label>
+                <input
+                  type="text"
+                  value={renameForm.counter_name}
+                  onChange={(e) => setRenameForm({ ...renameForm, counter_name: e.target.value })}
+                  placeholder="e.g. Counter 1"
+                  className="w-full text-xs bg-[var(--color-surface-subtle)] border border-[var(--color-border)] rounded-lg px-3 py-1.5 text-[var(--color-text)] focus:outline-none focus:border-emerald-500"
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setRenameDevice(null)}
+                className="px-3 py-1.5 text-xs font-semibold rounded-lg border border-[var(--color-border)] text-[var(--color-text-muted)] hover:bg-[var(--color-surface-subtle)]"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveRename}
+                className="px-3.5 py-1.5 text-xs font-bold rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white shadow-xs"
+              >
+                Save Changes
+              </button>
+            </div>
           </div>
         </div>
       )}

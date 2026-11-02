@@ -92,7 +92,9 @@ class TaxEngine
 
         $isInterState = $storeState !== $posState;
         $defaultTaxMode = $input['default_tax_mode'] ?? 'inclusive';
-        $isComposition = (bool) ($input['is_composition'] ?? false);
+        $gstType = $input['gst_type'] ?? ($input['is_composition'] ?? false ? 'composition' : 'regular');
+        $isComposition = (bool) ($input['is_composition'] ?? false) || in_array($gstType, ['composition', 'no_tax', 'unregistered'], true);
+        $documentTitle = $isComposition ? 'Bill of Supply' : 'Tax Invoice';
 
         $lines = $input['lines'] ?? [];
         $preLines = [];
@@ -359,6 +361,9 @@ class TaxEngine
             'is_inter_state' => $isInterState,
             'store_state' => $storeState,
             'place_of_supply' => $posState,
+            'is_composition' => $isComposition,
+            'gst_type' => $gstType,
+            'document_title' => $documentTitle,
             'lines' => $calculatedLines,
             'hsn_summary' => $hsnSummary,
         ];
