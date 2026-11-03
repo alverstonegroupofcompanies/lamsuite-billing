@@ -39,6 +39,7 @@ import {
   Plus,
   Check,
   ExternalLink,
+  MessageCircle,
 } from "lucide-react";
 import {
   companySettingsService,
@@ -54,6 +55,7 @@ import {
   type HeaderFieldSetting,
   type BillingScreenPreset,
 } from "../lib/settings/companySettingsService";
+import { whatsappService } from "../lib/integrations/whatsappService";
 import { generateQrCodeSvg, generateUpiPaymentString } from "../lib/printing/printingEngine";
 import { syncQueueService, type SyncQueueItem } from "../lib/sync/syncQueueService";
 import { cloudDeltaSyncService } from "../lib/sync/cloudDeltaSyncService";
@@ -126,6 +128,60 @@ export const SettingsPage: React.FC = () => {
     account: null,
     amount: 100,
   });
+
+  // WhatsApp Gateway State
+  const [waSessions, setWaSessions] = useState<{ id: string; name: string; status: string }[]>([]);
+  const [isFetchingWaSessions, setIsFetchingWaSessions] = useState(false);
+  const [isTestingWa, setIsTestingWa] = useState(false);
+  const [waTestFeedback, setWaTestFeedback] = useState<{ success: boolean; message: string } | null>(null);
+  const [showWaApiKey, setShowWaApiKey] = useState(false);
+
+  const handleFetchWaSessions = async () => {
+    setIsFetchingWaSessions(true);
+    try {
+      const res = await whatsappService.fetchSessions(settings.whatsapp?.apiUrl, settings.whatsapp?.apiKey);
+      if (res.success && res.sessions.length > 0) {
+        setWaSessions(res.sessions);
+        showNotification(`Found ${res.sessions.length} active OpenWA session(s)`, "success");
+      } else {
+        showNotification(res.error || "No active OpenWA sessions found", "error");
+      }
+    } catch (err: any) {
+      showNotification(err?.message || "Failed to fetch OpenWA sessions", "error");
+    } finally {
+      setIsFetchingWaSessions(false);
+    }
+  };
+
+  const handleTestWaConnection = async () => {
+    setIsTestingWa(true);
+    setWaTestFeedback(null);
+    try {
+      const res = await whatsappService.testConnection(settings.whatsapp?.apiUrl, settings.whatsapp?.apiKey);
+      if (res.success && res.valid) {
+        setWaTestFeedback({
+          success: true,
+          message: `Connected! Role: ${res.role || "operator"}${res.engineType ? ` | Engine: ${res.engineType}` : ""}`,
+        });
+        showNotification("WhatsApp Gateway connected successfully", "success");
+        handleFetchWaSessions();
+      } else {
+        setWaTestFeedback({
+          success: false,
+          message: res.error || "Connection test failed",
+        });
+        showNotification(res.error || "Failed to connect to WhatsApp Gateway", "error");
+      }
+    } catch (err: any) {
+      setWaTestFeedback({
+        success: false,
+        message: err?.message || "Network error",
+      });
+      showNotification("Could not contact WhatsApp Gateway", "error");
+    } finally {
+      setIsTestingWa(false);
+    }
+  };
 
   useEffect(() => {
     if (activeTab === "printing") {
@@ -3226,6 +3282,195 @@ export const SettingsPage: React.FC = () => {
                       <option value="none">None</option>
                     </select>
                   </div>
+                </div>
+              </div>
+
+              {/* WhatsApp Gateway (OpenWA) Card */}
+              <div className="rounded-lg border border-emerald-200 dark:border-emerald-800/60 bg-emerald-50/30 dark:bg-emerald-950/20 p-4 space-y-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <MessageCircle className="w-4 h-4 text-emerald-600" />
+                    <div>
+                      <div className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                        WhatsApp Gateway Dispatch (OpenWA)
+                      </div>
+                      <div className="text-[11px] text-slate-500">
+                        Automated invoice dispatch with high-fidelity PDF attachment via OpenWA.
+                      </div>
+                    </div>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={settings.whatsapp?.enabled ?? false}
+                    onChange={(e) =>
+                      setSettings({
+                        ...settings,
+                        whatsapp: { ...(settings.whatsapp || DEFAULT_SETTINGS.whatsapp), enabled: e.target.checked },
+                      })
+                    }
+                    className="rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+                  />
+                </div>
+
+                {/* Test Feedback */}
+                {waTestFeedback && (
+                  <div
+                    className={`p-2.5 rounded-md text-[11px] font-medium flex items-center gap-2 ${
+                      waTestFeedback.success
+                        ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/50 dark:text-emerald-200"
+                        : "bg-rose-100 text-rose-800 dark:bg-rose-900/50 dark:text-rose-200"
+                    }`}
+                  >
+                    {waTestFeedback.success ? (
+                      <CheckCircle className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                    ) : (
+                      <AlertCircle className="w-3.5 h-3.5 text-rose-600 shrink-0" />
+                    )}
+                    <span>{waTestFeedback.message}</span>
+                  </div>
+                )}
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-600">OpenWA Gateway URL</label>
+                    <input
+                      type="text"
+                      value={settings.whatsapp?.apiUrl || "https://wa-api.alverstone.in"}
+                      onChange={(e) =>
+                        setSettings({
+                          ...settings,
+                          whatsapp: { ...(settings.whatsapp || DEFAULT_SETTINGS.whatsapp), apiUrl: e.target.value },
+                        })
+                      }
+                      className="mt-1 w-full rounded border border-slate-300 p-1.5 text-xs font-mono"
+                    />
+                  </div>
+
+                  <div>
+                    <div className="flex items-center justify-between">
+                      <label className="block text-[11px] font-semibold text-slate-600">Active Session</label>
+                      <button
+                        type="button"
+                        onClick={handleFetchWaSessions}
+                        disabled={isFetchingWaSessions}
+                        className="text-[10px] text-emerald-700 hover:underline flex items-center gap-1 disabled:opacity-50"
+                      >
+                        <RefreshCw className={`w-2.5 h-2.5 ${isFetchingWaSessions ? "animate-spin" : ""}`} />
+                        <span>{isFetchingWaSessions ? "Fetching..." : "Fetch"}</span>
+                      </button>
+                    </div>
+
+                    {waSessions.length > 0 ? (
+                      <select
+                        value={settings.whatsapp?.sessionId || "default"}
+                        onChange={(e) =>
+                          setSettings({
+                            ...settings,
+                            whatsapp: { ...(settings.whatsapp || DEFAULT_SETTINGS.whatsapp), sessionId: e.target.value },
+                          })
+                        }
+                        className="mt-1 w-full rounded border border-slate-300 p-1.5 text-xs font-mono"
+                      >
+                        {waSessions.map((s) => (
+                          <option key={s.id} value={s.id}>
+                            {s.name} ({s.status})
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <input
+                        type="text"
+                        value={settings.whatsapp?.sessionId || "default"}
+                        onChange={(e) =>
+                          setSettings({
+                            ...settings,
+                            whatsapp: { ...(settings.whatsapp || DEFAULT_SETTINGS.whatsapp), sessionId: e.target.value },
+                          })
+                        }
+                        placeholder="default"
+                        className="mt-1 w-full rounded border border-slate-300 p-1.5 text-xs font-mono"
+                      />
+                    )}
+                  </div>
+                </div>
+
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-[11px] font-semibold text-slate-600">OpenWA API Key</label>
+                    <button
+                      type="button"
+                      onClick={() => setShowWaApiKey(!showWaApiKey)}
+                      className="text-[10px] text-slate-500 hover:text-slate-800"
+                    >
+                      {showWaApiKey ? "Hide Key" : "Show Key"}
+                    </button>
+                  </div>
+                  <input
+                    type={showWaApiKey ? "text" : "password"}
+                    value={settings.whatsapp?.apiKey || ""}
+                    onChange={(e) =>
+                      setSettings({
+                        ...settings,
+                        whatsapp: { ...(settings.whatsapp || DEFAULT_SETTINGS.whatsapp), apiKey: e.target.value },
+                      })
+                    }
+                    placeholder="Enter operator / admin API key"
+                    className="w-full rounded border border-slate-300 p-1.5 text-xs font-mono"
+                  />
+                  <p className="text-[10px] text-slate-400 mt-1">
+                    API key from your OpenWA instance. You can also configure this centrally from Admin Panel.
+                  </p>
+                </div>
+
+                {/* Dispatch Options */}
+                <div className="space-y-2 pt-1 border-t border-slate-200/60 dark:border-slate-800">
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      id="opt_send_pdf"
+                      checked={settings.whatsapp?.sendPdfInvoice ?? true}
+                      onChange={(e) =>
+                        setSettings({
+                          ...settings,
+                          whatsapp: { ...(settings.whatsapp || DEFAULT_SETTINGS.whatsapp), sendPdfInvoice: e.target.checked },
+                        })
+                      }
+                      className="rounded border-slate-300 text-emerald-600"
+                    />
+                    <label htmlFor="opt_send_pdf" className="text-xs text-slate-700 cursor-pointer">
+                      Attach high-resolution vector PDF invoice with dispatch
+                    </label>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      id="opt_auto_send"
+                      checked={settings.whatsapp?.autoSendOnBillSave ?? false}
+                      onChange={(e) =>
+                        setSettings({
+                          ...settings,
+                          whatsapp: { ...(settings.whatsapp || DEFAULT_SETTINGS.whatsapp), autoSendOnBillSave: e.target.checked },
+                        })
+                      }
+                      className="rounded border-slate-300 text-emerald-600"
+                    />
+                    <label htmlFor="opt_auto_send" className="text-xs text-slate-700 cursor-pointer">
+                      Auto-send WhatsApp bill when saving invoice (requires customer phone)
+                    </label>
+                  </div>
+                </div>
+
+                <div className="flex justify-end pt-1">
+                  <button
+                    type="button"
+                    onClick={handleTestWaConnection}
+                    disabled={isTestingWa}
+                    className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded font-semibold text-xs flex items-center gap-1.5 disabled:opacity-50"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${isTestingWa ? "animate-spin" : ""}`} />
+                    <span>{isTestingWa ? "Testing Connection..." : "Test Connection"}</span>
+                  </button>
                 </div>
               </div>
             </div>

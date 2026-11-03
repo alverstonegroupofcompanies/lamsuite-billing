@@ -5,6 +5,7 @@ import { posCartService } from "../billing/posCartService";
 import { printerManagerService } from "../printing/printerManagerService";
 import { staffAuthService } from "./staffAuthService";
 import { storeDeviceService, type StoreDeviceProfile } from "./storeDeviceService";
+import { deviceSessionService } from "../devices/deviceSessionService";
 
 export interface RegisteredStoreRecord {
   id: string; // e.g. "store_main", "store_north"
@@ -460,6 +461,9 @@ export class StoreRegistryService {
 
     // 5. Reload company settings for the new store
     await companySettingsService.loadSettings();
+
+    // 6. Broadcast device presence heartbeat under new active store
+    deviceSessionService.sendHeartbeat({ store_id: idStr }).catch(() => {});
 
     return target;
   }

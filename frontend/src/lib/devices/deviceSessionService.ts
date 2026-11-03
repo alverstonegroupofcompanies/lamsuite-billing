@@ -3,6 +3,8 @@ import { storeDeviceService } from "../auth/storeDeviceService";
 import { storeRegistryService } from "../auth/storeRegistryService";
 import { syncQueueService } from "../sync/syncQueueService";
 import { staffAuthService } from "../auth/staffAuthService";
+import { publicIpService } from "../network/publicIpService";
+import { getOrCreateClientDeviceUuid, detectDeviceFriendlyName } from "../auth/clientDeviceIdentifier";
 
 function getStoredToken(): string | null {
   try {
@@ -18,6 +20,9 @@ export type DeviceStatus = "Active" | "Idle" | "Offline" | "Locked" | "Revoked";
 export interface LoggedInDevice {
   id: string;
   session_id?: string;
+  store_id?: string | null;
+  store_name?: string | null;
+  store_code?: string | null;
   device_uuid?: string;
   device_name: string | null;
   counter_name: string | null;
@@ -25,6 +30,7 @@ export interface LoggedInDevice {
   user_name: string | null;
   user_role: string | null;
   ip_address: string | null;
+  public_ip?: string | null;
   location: string | null;
   status: DeviceStatus;
   sign_in_time: string | null;
@@ -40,12 +46,30 @@ export interface LoggedInDevice {
 export interface DeviceFilterOptions {
   search?: string;
   status?: string;
+  store_id?: string;
+}
+
+export interface DeviceSessionResponseMetadata {
+  caller_public_ip?: string | null;
+  other_stores_active_count?: number;
+  other_active_stores?: Array<{
+    store_id: string;
+    store_name?: string | null;
+    store_code?: string | null;
+    device_name?: string | null;
+    counter_name?: string | null;
+  }>;
 }
 
 export class DeviceSessionService {
   private heartbeatInterval: ReturnType<typeof setInterval> | null = null;
   private cachedDevices: LoggedInDevice[] = [];
+  private lastMetadata: DeviceSessionResponseMetadata = {};
   private listeners: Array<(devices: LoggedInDevice[]) => void> = [];
+
+  getMetadata(): DeviceSessionResponseMetadata {
+    return this.lastMetadata;
+  }
 
   /**
    * Fetch real-time list of logged-in devices from the centralized backend server.
@@ -53,13 +77,14 @@ export class DeviceSessionService {
   async getLoggedInDevices(options?: DeviceFilterOptions): Promise<LoggedInDevice[]> {
     const activeStore = storeRegistryService.getActiveStore();
     const profile = await storeDeviceService.getDeviceProfile().catch(() => null);
-    const storeId = activeStore?.id || profile?.store_id || "1";
+    const storeId = options?.store_id !== undefined ? options.store_id : (activeStore?.id || profile?.store_id || "1");
 
     const params = new URLSearchParams();
-    params.set("store_id", String(storeId));
+    if (storeId) params.set("store_id", String(storeId));
     if (options?.search) params.set("search", options.search);
     if (options?.status && options.status !== "all") params.set("status", options.status);
-    if (profile?.device_uuid) params.set("current_device_uuid", profile.device_uuid);
+    const clientUuid = profile?.device_uuid || getOrCreateClientDeviceUuid();
+    params.set("current_device_uuid", clientUuid);
 
     const url = `${API_BASE_URL}/api/device-sessions?${params.toString()}`;
 
@@ -74,7 +99,7 @@ export class DeviceSessionService {
         method: "GET",
         headers: {
           Accept: "application/json",
-          ...(profile?.device_uuid ? { "X-Device-Uuid": profile.device_uuid } : {}),
+          "X-Device-Uuid": clientUuid,
           ...(token ? { "X-Device-Token": token, Authorization: `Bearer ${token}` } : {}),
         },
       });
@@ -84,10 +109,17 @@ export class DeviceSessionService {
       }
 
       const data = await res.json();
+      this.lastMetadata = {
+        caller_public_ip: data.caller_public_ip || null,
+        other_stores_active_count: data.other_stores_active_count || 0,
+        other_active_stores: Array.isArray(data.other_active_stores) ? data.other_active_stores : [],
+      };
+
       if (Array.isArray(data.devices)) {
         this.cachedDevices = data.devices.map((d: any) => ({
           ...d,
-          is_this_device: Boolean(d.is_this_device || (profile?.device_uuid && d.device_uuid === profile.device_uuid)),
+          public_ip: d.public_ip || (d.is_this_device && data.caller_public_ip ? data.caller_public_ip : null),
+          is_this_device: Boolean(d.is_this_device || (clientUuid && d.device_uuid === clientUuid)),
           status: (["Active", "Idle", "Offline", "Locked", "Revoked"].includes(d.status) ? d.status : "Offline") as DeviceStatus,
           sign_in_time: d.sign_in_time || d.login_time || null,
           last_seen: d.last_seen || d.last_active || null,
@@ -102,6 +134,8 @@ export class DeviceSessionService {
         return this.filterLocally(this.cachedDevices, options);
       }
 
+      const publicIp = await publicIpService.getPublicIp().catch(() => null);
+
       if (profile) {
         const fallback: LoggedInDevice = {
           id: profile.device_id || "local_dev_1",
@@ -109,9 +143,13 @@ export class DeviceSessionService {
           device_name: profile.device_name || "This Workstation",
           counter_name: profile.counter_name || "Counter 1",
           counter_code: profile.counter_code || "C01",
+          store_id: profile.store_id || "1",
+          store_name: profile.store_name || "Main Store",
+          store_code: profile.store_code || "STORE-01",
           user_name: staffAuthService.getCurrentSession()?.user.full_name || "Cashier",
           user_role: staffAuthService.getCurrentSession()?.user.role || "Admin",
           ip_address: "127.0.0.1",
+          public_ip: publicIp,
           location: profile.location_name || null,
           login_time: new Date(profile.registered_at || Date.now()).toISOString(),
           sign_in_time: new Date(profile.registered_at || Date.now()).toISOString(),
@@ -137,13 +175,16 @@ export class DeviceSessionService {
     app_version?: string;
     unsynced_items_count?: number;
     status?: "Active" | "Idle" | "Locked";
+    store_id?: string | number;
     update_status?: string;
     update_error?: string;
     last_error?: string;
   }): Promise<boolean> {
     try {
       const profile = await storeDeviceService.getDeviceProfile().catch(() => null);
-      if (!profile || !profile.device_uuid) return false;
+      const activeStore = storeRegistryService.getActiveStore();
+      const deviceUuid = profile?.device_uuid || getOrCreateClientDeviceUuid();
+      const storeId = params?.store_id || activeStore?.id || profile?.store_id || "1";
 
       let unsynced = params?.unsynced_items_count;
       if (unsynced === undefined) {
@@ -153,23 +194,26 @@ export class DeviceSessionService {
 
       const staff = staffAuthService.getCurrentSession();
       const userRole = staff?.user.role === "admin" ? "Store Admin" : (staff?.user.role || "Cashier");
+      const publicIp = await publicIpService.getPublicIp().catch(() => null);
 
       const res = await fetch(`${API_BASE_URL}/api/device-sessions/heartbeat`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Accept: "application/json",
-          ...(profile.device_token ? { "X-Device-Token": profile.device_token } : {}),
+          "X-Device-Uuid": deviceUuid,
+          ...(profile?.device_token ? { "X-Device-Token": profile.device_token } : {}),
         },
         body: JSON.stringify({
-          device_uuid: profile.device_uuid,
-          device_name: profile.device_name || undefined,
-          counter_name: profile.counter_name || undefined,
+          device_uuid: deviceUuid,
+          device_name: profile?.device_name || detectDeviceFriendlyName(),
+          counter_name: profile?.counter_name || "Counter 01",
           app_version: params?.app_version || "2.0.25",
           unsynced_items_count: unsynced,
           status: params?.status || "Active",
           user_role: userRole,
-          store_id: profile.store_id,
+          store_id: storeId,
+          public_ip: publicIp || undefined,
           update_status: params?.update_status,
           update_error: params?.update_error,
           last_error: params?.last_error,

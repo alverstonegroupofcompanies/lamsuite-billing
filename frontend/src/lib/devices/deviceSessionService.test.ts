@@ -208,4 +208,47 @@ describe("deviceSessionService - Centralized Logged-In Device Tracking (Item 2)"
 
     vi.useRealTimers();
   });
+
+  it("7. getLoggedInDevices passes store_id=all and maps public_ip and store metadata", async () => {
+    const mockApiResponse = {
+      success: true,
+      caller_public_ip: "117.236.91.145",
+      other_stores_active_count: 2,
+      devices: [
+        {
+          id: "1",
+          device_uuid: "uuid-1",
+          device_name: "POS 1",
+          store_id: "1",
+          store_code: "STORE-01",
+          store_name: "Palakkad Main",
+          public_ip: "117.236.91.145",
+          ip_address: "127.0.0.1",
+          status: "Active",
+          is_this_device: true,
+          is_active: true,
+        },
+      ],
+      total: 1,
+    };
+
+    const fetchSpy = vi.spyOn(global, "fetch").mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => mockApiResponse,
+    } as Response);
+
+    const devices = await deviceSessionService.getLoggedInDevices({ store_id: "all" });
+    expect(devices).toHaveLength(1);
+    expect(devices[0].public_ip).toBe("117.236.91.145");
+    expect(devices[0].store_code).toBe("STORE-01");
+
+    expect(fetchSpy).toHaveBeenCalled();
+    const calledUrl = fetchSpy.mock.calls[0][0] as string;
+    expect(calledUrl).toContain("store_id=all");
+
+    const meta = deviceSessionService.getMetadata();
+    expect(meta.caller_public_ip).toBe("117.236.91.145");
+    expect(meta.other_stores_active_count).toBe(2);
+  });
 });

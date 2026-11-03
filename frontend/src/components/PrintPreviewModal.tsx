@@ -41,6 +41,7 @@ import {
   resolvePrintColumns,
   AVAILABLE_PRINT_COLUMNS,
 } from "../lib/printing/printingEngine";
+import { whatsappService } from "../lib/integrations/whatsappService";
 import {
   printerManagerService,
   SystemPrinterInfo,
@@ -151,6 +152,7 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
   const [printerProfile, setPrinterProfile] = useState<PrinterProfileConfig | null>(null);
   const [isTestingPrinter, setIsTestingPrinter] = useState<boolean>(false);
   const [lastPrintJob, setLastPrintJob] = useState<PrintJobRecord | null>(null);
+  const [isSendingWhatsApp, setIsSendingWhatsApp] = useState<boolean>(false);
 
   // Print Format & Layout State
   const [paperSize, setPaperSize] = useState<PaperSize>(initialFormat || (settings.printing.paperSize as PaperSize) || "a4");
@@ -2033,19 +2035,55 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
                       <Smartphone className="w-4 h-4 text-emerald-600" /> WhatsApp Customer Dispatch
                     </div>
                     <p className="text-emerald-700 dark:text-emerald-300">
-                      Send document link and summary directly to the customer's WhatsApp.
+                      Dispatches vector PDF invoice and bill summary directly to customer via OpenWA.
                     </p>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const phone = customerPhone || data.customer_phone || "";
-                        const url = generateWhatsAppShareUrl(phone, data as InvoicePrintData);
-                        window.open(url, "_blank");
-                      }}
-                      className="w-full py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-lg transition shadow"
-                    >
-                      Share on WhatsApp
-                    </button>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        disabled={isSendingWhatsApp}
+                        onClick={async () => {
+                          const phone = customerPhone || data.customer_phone || "";
+                          if (!phone.trim()) {
+                            setStatusMessage({ text: "Please enter customer mobile number to dispatch via WhatsApp.", type: "error" });
+                            return;
+                          }
+                          setIsSendingWhatsApp(true);
+                          try {
+                            const res = await whatsappService.dispatchInvoice(phone, data as InvoicePrintData);
+                            if (res.success) {
+                              setStatusMessage({ text: `Invoice #${data.invoice_number} sent successfully via WhatsApp!`, type: "success" });
+                            } else {
+                              if (res.fallbackUrl) {
+                                setStatusMessage({ text: res.error || "OpenWA unavailable. Opening WhatsApp Web fallback...", type: "error" });
+                                whatsappService.openManualShare(phone, data as InvoicePrintData);
+                              } else {
+                                setStatusMessage({ text: res.error || "Failed to dispatch WhatsApp bill.", type: "error" });
+                              }
+                            }
+                          } catch (err: any) {
+                            setStatusMessage({ text: err?.message || "WhatsApp dispatch error.", type: "error" });
+                            whatsappService.openManualShare(phone, data as InvoicePrintData);
+                          } finally {
+                            setIsSendingWhatsApp(false);
+                          }
+                        }}
+                        className="flex-1 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-lg transition shadow flex items-center justify-center gap-1.5 disabled:opacity-50"
+                      >
+                        <Smartphone className={`w-3.5 h-3.5 ${isSendingWhatsApp ? "animate-spin" : ""}`} />
+                        <span>{isSendingWhatsApp ? "Sending..." : "Send via WhatsApp"}</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const phone = customerPhone || data.customer_phone || "";
+                          whatsappService.openManualShare(phone, data as InvoicePrintData);
+                        }}
+                        title="Open WhatsApp Web chat directly"
+                        className="px-2.5 py-2 border border-emerald-300 dark:border-emerald-700 text-emerald-800 dark:text-emerald-300 hover:bg-emerald-100 rounded-lg text-[11px] font-semibold"
+                      >
+                        Manual Link
+                      </button>
+                    </div>
                   </div>
                 </div>
               )}

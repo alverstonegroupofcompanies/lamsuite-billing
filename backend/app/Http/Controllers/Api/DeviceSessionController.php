@@ -18,15 +18,23 @@ class DeviceSessionController
      */
     public function index(Request $request): JsonResponse
     {
-        $storeId = $this->resolveStoreId($request);
+        $isAllStores = strtolower(trim((string)$request->query('store_id'))) === 'all';
+        $storeId = $isAllStores ? null : $this->resolveStoreId($request);
 
         // If no device session records exist for this store yet, bootstrap from registered counters/devices
-        if (DeviceSession::where('store_id', $storeId)->count() === 0) {
+        if ($storeId && DeviceSession::where('store_id', $storeId)->count() === 0) {
             $this->bootstrapFromCounters($storeId);
         }
 
-        $query = DeviceSession::with(['user:id,name,username,role,is_admin', 'counter:id,counter_name,counter_code,location_name'])
-            ->where('store_id', $storeId);
+        $query = DeviceSession::with([
+            'user:id,name,username,role,is_admin',
+            'counter:id,counter_name,counter_code,location_name',
+            'store:id,name,code',
+        ]);
+
+        if (!$isAllStores && $storeId) {
+            $query->where('store_id', $storeId);
+        }
 
         // Search filter
         if ($search = $request->query('search')) {
@@ -35,10 +43,15 @@ class DeviceSessionController
                   ->orWhere('counter_name', 'like', "%{$search}%")
                   ->orWhere('counter_code', 'like', "%{$search}%")
                   ->orWhere('ip_address', 'like', "%{$search}%")
+                  ->orWhere('public_ip', 'like', "%{$search}%")
                   ->orWhere('location', 'like', "%{$search}%")
                   ->orWhere('user_role', 'like', "%{$search}%")
                   ->orWhereHas('user', function ($uq) use ($search) {
                       $uq->where('name', 'like', "%{$search}%");
+                  })
+                  ->orWhereHas('store', function ($sq) use ($search) {
+                      $sq->where('name', 'like', "%{$search}%")
+                        ->orWhere('code', 'like', "%{$search}%");
                   });
             });
         }
@@ -66,15 +79,31 @@ class DeviceSessionController
         $latestSetting = CompanySetting::where('key', 'latest_desktop_release_version')->latest()->first();
         $latestVersion = $latestSetting ? ($latestSetting->value['version'] ?? '2.0.21') : '2.0.21';
 
-        $devices = $sessions->map(function (DeviceSession $s) use ($currentDeviceUuid, $minRequiredVersion, $latestVersion) {
+        $callerPublicIp = DeviceSession::resolvePublicIp($request);
+
+        $devices = $sessions->map(function (DeviceSession $s) use ($currentDeviceUuid, $minRequiredVersion, $latestVersion, $callerPublicIp) {
             $status = $s->computeStatus();
             $userRole = $s->user_role ?: ($s->user?->role ?: ($s->user?->is_admin ? 'Admin' : 'Cashier'));
             $appVer = $s->app_version ?: '2.0.21';
             $isOutOfDate = version_compare($appVer, $minRequiredVersion, '<');
 
+            // Resolve public IP for this device
+            $devicePublicIp = $s->public_ip;
+            if (!$devicePublicIp && $s->ip_address && filter_var($s->ip_address, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE)) {
+                $devicePublicIp = $s->ip_address;
+            }
+            // If this is the current caller device, backfill caller public IP
+            $isThisDevice = !empty($currentDeviceUuid) && $s->device_uuid === $currentDeviceUuid;
+            if (!$devicePublicIp && $isThisDevice && $callerPublicIp) {
+                $devicePublicIp = $callerPublicIp;
+            }
+
             return [
                 'id' => (string)$s->id,
                 'session_id' => $s->session_id,
+                'store_id' => (string)$s->store_id,
+                'store_name' => $s->store?->name ?: null,
+                'store_code' => $s->store?->code ?: null,
                 'device_uuid' => $s->device_uuid,
                 'device_name' => $s->device_name ?: 'Workstation',
                 'counter_name' => $s->counter_name ?: 'Counter 1',
@@ -82,6 +111,7 @@ class DeviceSessionController
                 'user_name' => $s->user?->name ?: null,
                 'user_role' => $userRole,
                 'ip_address' => $s->ip_address ?: null,
+                'public_ip' => $devicePublicIp ?: null,
                 'location' => $s->location ?: null,
                 'status' => $status, // Active, Idle, Offline, Locked, Revoked
                 'sign_in_time' => $s->login_time ? $s->login_time->toIso8601String() : null,
@@ -93,7 +123,7 @@ class DeviceSessionController
                 'min_required_version' => $minRequiredVersion,
                 'latest_version' => $latestVersion,
                 'unsynced_items_count' => (int)($s->unsynced_items_count ?? 0),
-                'is_this_device' => !empty($currentDeviceUuid) && $s->device_uuid === $currentDeviceUuid,
+                'is_this_device' => $isThisDevice,
                 'is_active' => (bool)$s->is_active,
             ];
         });
@@ -108,6 +138,27 @@ class DeviceSessionController
             }
         }
 
+        // Count active sessions on other stores to assist multi-store users
+        $otherStoresActiveCount = 0;
+        $otherActiveStores = [];
+        if ($storeId) {
+            $otherSessions = DeviceSession::with('store:id,name,code')
+                ->where('store_id', '!=', $storeId)
+                ->where('is_active', true)
+                ->where('last_active_at', '>=', now()->subMinutes(10))
+                ->get();
+            $otherStoresActiveCount = $otherSessions->count();
+            $otherActiveStores = $otherSessions->map(function ($os) {
+                return [
+                    'store_id' => (string)$os->store_id,
+                    'store_name' => $os->store?->name,
+                    'store_code' => $os->store?->code,
+                    'device_name' => $os->device_name,
+                    'counter_name' => $os->counter_name,
+                ];
+            })->values()->all();
+        }
+
         return response()->json([
             'success' => true,
             'devices' => $devices,
@@ -120,8 +171,23 @@ class DeviceSessionController
             'out_of_date_count' => $devices->where('is_out_of_date', true)->count(),
             'min_required_version' => $minRequiredVersion,
             'latest_version' => $latestVersion,
+            'caller_public_ip' => $callerPublicIp,
+            'other_stores_active_count' => $otherStoresActiveCount,
+            'other_active_stores' => $otherActiveStores,
             // Backwards compatibility keys
             'online_count' => $devices->where('status', 'Active')->count(),
+        ]);
+    }
+
+    /**
+     * Public IP echo endpoint for client workstation self-discovery.
+     */
+    public function publicIp(Request $request): JsonResponse
+    {
+        $resolved = DeviceSession::resolvePublicIp($request);
+        return response()->json([
+            'success' => true,
+            'ip' => $resolved ?: $request->ip(),
         ]);
     }
 
@@ -139,10 +205,13 @@ class DeviceSessionController
             'status' => 'nullable|string|in:Active,active,Idle,idle,Locked,locked',
             'user_role' => 'nullable|string|max:50',
             'store_id' => 'nullable',
+            'public_ip' => 'nullable|string|max:45',
         ]);
 
         $deviceUuid = $validated['device_uuid'];
         $ip = $request->ip();
+        $publicIp = DeviceSession::resolvePublicIp($request, $validated['public_ip'] ?? null);
+        $targetStoreId = !empty($validated['store_id']) ? (int)$validated['store_id'] : null;
 
         $session = DeviceSession::recordHeartbeat(
             $deviceUuid,
@@ -152,11 +221,13 @@ class DeviceSessionController
             $validated['app_version'] ?? null,
             isset($validated['unsynced_items_count']) ? (int)$validated['unsynced_items_count'] : null,
             $validated['status'] ?? null,
-            $validated['user_role'] ?? null
+            $validated['user_role'] ?? null,
+            $publicIp,
+            $targetStoreId
         );
 
         if (!$session) {
-            $storeId = $this->resolveStoreId($request);
+            $storeId = $targetStoreId ?: $this->resolveStoreId($request);
             $session = DeviceSession::recordLogin(
                 $storeId,
                 $deviceUuid,
@@ -169,13 +240,15 @@ class DeviceSessionController
                 $this->detectLocation($request),
                 $request->userAgent(),
                 $validated['app_version'] ?? null,
-                $validated['user_role'] ?? null
+                $validated['user_role'] ?? null,
+                $publicIp
             );
         }
 
         return response()->json([
             'success' => true,
             'status' => $session->computeStatus(),
+            'public_ip' => $session->public_ip,
             'last_seen' => $session->last_active_at?->toIso8601String(),
             'last_active' => $session->last_active_at?->toIso8601String(),
             'timestamp' => now()->toIso8601String(),

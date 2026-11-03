@@ -167,6 +167,17 @@ export interface EmailSmtpConfig {
   password?: string;
 }
 
+export interface WhatsAppConfig {
+  enabled: boolean;
+  provider: "openwa" | "manual_link";
+  apiUrl: string;            // Default: "https://wa-api.alverstone.in"
+  apiKey: string;            // OpenWA API key
+  sessionId: string;         // Default: "default"
+  sendPdfInvoice: boolean;   // Attach generated PDF
+  autoSendOnBillSave: boolean; // Auto-send when phone is entered
+  customCaption?: string;
+}
+
 export interface BillingKeyboardSettings {
   enterAfterQty: "search" | "next_column" | "next_row";
   autoFocusQtyAfterAdd: boolean;
@@ -279,6 +290,7 @@ export interface CompanySettings {
   inventory: InventoryStockSettings;
   wallet: WalletConfig;
   smtp: EmailSmtpConfig;
+  whatsapp: WhatsAppConfig;
   keyboard: BillingKeyboardSettings;
   payments: PaymentSettingsConfig;
   invoice_columns: ColumnSetting[];
@@ -683,6 +695,17 @@ export const DEFAULT_SETTINGS: CompanySettings = {
     replyTo: "support@lamstone.in",
   },
 
+  whatsapp: {
+    enabled: true,
+    provider: "openwa",
+    apiUrl: "https://wa-api.alverstone.in",
+    apiKey: "",
+    sessionId: "default",
+    sendPdfInvoice: true,
+    autoSendOnBillSave: false,
+    customCaption: "",
+  },
+
   payments: { ...DEFAULT_PAYMENT_SETTINGS },
 
   keyboard: {
@@ -764,6 +787,7 @@ export class CompanySettingsService {
         inventory: { ...DEFAULT_SETTINGS.inventory, ...(record.inventory || {}) },
         wallet: { ...DEFAULT_SETTINGS.wallet, ...(record.wallet || {}) },
         smtp: { ...DEFAULT_SETTINGS.smtp, ...(record.smtp || {}) },
+        whatsapp: { ...DEFAULT_SETTINGS.whatsapp, ...(record.whatsapp || {}) },
         keyboard: { ...DEFAULT_SETTINGS.keyboard, ...(record.keyboard || {}) },
         payments: {
           ...DEFAULT_SETTINGS.payments,
@@ -1160,6 +1184,7 @@ export class CompanySettingsService {
       security: { ...this.currentSettings.security, ...(updates.security || {}) },
       wallet: { ...this.currentSettings.wallet, ...(updates.wallet || {}) },
       smtp: { ...this.currentSettings.smtp, ...(updates.smtp || {}) },
+      whatsapp: { ...this.currentSettings.whatsapp, ...(updates.whatsapp || {}) },
       payments: { ...this.currentSettings.payments, ...(updates.payments || {}) },
     };
 

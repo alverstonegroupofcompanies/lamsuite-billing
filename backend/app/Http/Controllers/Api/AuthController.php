@@ -203,6 +203,8 @@ class AuthController
             'success' => true,
         ]);
 
+        $publicIp = DeviceSession::resolvePublicIp($request, $request->input('public_ip'));
+
         DeviceSession::recordLogin(
             $store->id,
             $deviceUuid,
@@ -213,7 +215,10 @@ class AuthController
             null,
             $clientIp,
             $counter->location_name,
-            $request->userAgent()
+            $request->userAgent(),
+            $request->input('app_version', '2.0.25'),
+            'Cashier',
+            $publicIp
         );
 
         AuditLog::log(
@@ -371,6 +376,8 @@ class AuthController
 
         $device->update(['counter_id' => (string)$counter->id]);
 
+        $publicIp = DeviceSession::resolvePublicIp($request, $request->input('public_ip'));
+
         DeviceSession::recordLogin(
             $store->id,
             $validated['device_uuid'],
@@ -381,7 +388,10 @@ class AuthController
             $user->id,
             $clientIp,
             $counter->location_name,
-            $request->userAgent()
+            $request->userAgent(),
+            $request->input('app_version', '2.0.25'),
+            $user->role ?: 'Store Owner',
+            $publicIp
         );
 
         AuditLog::log(

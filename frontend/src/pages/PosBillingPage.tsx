@@ -48,6 +48,7 @@ import {
   generateQrCodeSvg,
   type InvoicePrintData,
 } from "../lib/printing/printingEngine";
+import { whatsappService } from "../lib/integrations/whatsappService";
 import { isTauri } from "../lib/ipc/ipcBridge";
 import { isClinicalSupported } from "../lib/settings/storeTypePresets";
 import { staffAuthService } from "../lib/auth/staffAuthService";
@@ -292,6 +293,7 @@ export const PosBillingPage: React.FC = () => {
 
   const [isFinalizing, setIsFinalizing] = useState(false);
   const isFinalizingRef = useRef(false);
+  const [isSendingWhatsApp, setIsSendingWhatsApp] = useState(false);
 
   // Print Preview Modal State
   const [previewModalState, setPreviewModalState] = useState<{
@@ -2298,19 +2300,31 @@ export const PosBillingPage: React.FC = () => {
     };
   };
 
-  const handleShareWhatsApp = () => {
+  const handleShareWhatsApp = async () => {
     if (!customerPhone.trim()) {
       showNotification("Please enter customer mobile number to share via WhatsApp", "error");
       return;
     }
     const data = preparePrintData();
-    const url = generateWhatsAppShareUrl(customerPhone, data);
-    if (isTauri()) {
-      import("@tauri-apps/api/shell").then(({ open }) => open(url)).catch(() => window.open(url, "_blank"));
-    } else {
-      window.open(url, "_blank");
+    setIsSendingWhatsApp(true);
+    try {
+      const res = await whatsappService.dispatchInvoice(customerPhone, data);
+      if (res.success) {
+        showNotification(`Invoice #${data.invoice_number} sent to ${customerPhone} via WhatsApp!`, "success");
+      } else {
+        if (res.fallbackUrl) {
+          showNotification(res.error || "WhatsApp Gateway unavailable. Opening WhatsApp Web fallback...", "error");
+          whatsappService.openManualShare(customerPhone, data);
+        } else {
+          showNotification(res.error || "Failed to send WhatsApp message", "error");
+        }
+      }
+    } catch (err: any) {
+      showNotification(err?.message || "Error sending WhatsApp invoice", "error");
+      whatsappService.openManualShare(customerPhone, data);
+    } finally {
+      setIsSendingWhatsApp(false);
     }
-    showNotification("WhatsApp invoice link opened!");
   };
 
   const handleShareEmail = () => {
@@ -2439,6 +2453,18 @@ export const PosBillingPage: React.FC = () => {
         posCartService.clearCart();
         refreshCartState();
         setIsTenderModalOpen(false);
+
+        // Auto-send via WhatsApp if enabled
+        if (appSettings.whatsapp?.enabled && appSettings.whatsapp?.autoSendOnBillSave && customerPhone && customerPhone.trim().length >= 10) {
+          whatsappService.dispatchInvoice(customerPhone, printData).then((waRes) => {
+            if (waRes.success) {
+              showNotification(`Auto-sent invoice #${invoiceNumber} to customer via WhatsApp!`, "success");
+            }
+          }).catch((waErr) => {
+            console.warn("Auto-dispatch WhatsApp error:", waErr);
+          });
+        }
+
         showNotification(
           savedPdfPath
             ? `Saved to: ${savedPdfPath}`
@@ -4004,7 +4030,7 @@ export const PosBillingPage: React.FC = () => {
                 <div className="flex items-center gap-2 pt-1">
                   <button
                     type="button"
-                    disabled={isFinalizing || !customerPhone || customerPhone.trim().length < 10}
+                    disabled={isFinalizing || isSendingWhatsApp || !customerPhone || customerPhone.trim().length < 10}
                     onClick={handleShareWhatsApp}
                     title={
                       customerPhone && customerPhone.trim().length >= 10
@@ -4013,8 +4039,8 @@ export const PosBillingPage: React.FC = () => {
                     }
                     className="flex-1 flex items-center justify-center gap-1.5 rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-800 hover:bg-emerald-100 transition-colors disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
                   >
-                    <MessageCircle className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
-                    <span>WhatsApp Bill {customerPhone ? `(${customerPhone.slice(-4)})` : ""}</span>
+                    <MessageCircle className={`h-3.5 w-3.5 text-emerald-600 shrink-0 ${isSendingWhatsApp ? "animate-spin" : ""}`} />
+                    <span>{isSendingWhatsApp ? "Sending..." : `WhatsApp Bill ${customerPhone ? `(${customerPhone.slice(-4)})` : ""}`}</span>
                   </button>
                   <button
                     type="button"

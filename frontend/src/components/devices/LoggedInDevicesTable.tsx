@@ -18,12 +18,16 @@ import {
   Layers,
   CheckCircle2,
   XCircle,
+  Globe,
+  Building2,
 } from "lucide-react";
 import {
   deviceSessionService,
   type LoggedInDevice,
   type DeviceStatus,
 } from "../../lib/devices/deviceSessionService";
+import { storeRegistryService } from "../../lib/auth/storeRegistryService";
+import { publicIpService } from "../../lib/network/publicIpService";
 
 export interface LoggedInDevicesTableProps {
   autoRefreshIntervalMs?: number;
@@ -41,11 +45,17 @@ export const LoggedInDevicesTable: React.FC<LoggedInDevicesTableProps> = ({
   const [successMsg, setSuccessMsg] = useState<string>("");
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [storeFilter, setStoreFilter] = useState<string>("current");
+  const [callerPublicIp, setCallerPublicIp] = useState<string | null>(null);
+  const [otherStoresActiveCount, setOtherStoresActiveCount] = useState<number>(0);
+  const [otherActiveStores, setOtherActiveStores] = useState<any[]>([]);
   const [activeActionId, setActiveActionId] = useState<string | null>(null);
 
   // Rename modal state
   const [renameDevice, setRenameDevice] = useState<LoggedInDevice | null>(null);
   const [renameForm, setRenameForm] = useState({ device_name: "", counter_name: "" });
+
+  const activeStore = storeRegistryService.getActiveStore();
 
   const fetchDevices = useCallback(
     async (isBackground = false) => {
@@ -54,11 +64,22 @@ export const LoggedInDevicesTable: React.FC<LoggedInDevicesTableProps> = ({
       setErrorMsg("");
 
       try {
+        const curStore = storeRegistryService.getActiveStore();
         const list = await deviceSessionService.getLoggedInDevices({
           search: searchQuery.trim() || undefined,
           status: statusFilter,
+          store_id: storeFilter === "all" ? "all" : (curStore?.id || "1"),
         });
         setDevices(list);
+
+        const meta = deviceSessionService.getMetadata();
+        let pubIp = meta.caller_public_ip || publicIpService.getCachedIp();
+        if (!pubIp) {
+          pubIp = await publicIpService.getPublicIp().catch(() => null);
+        }
+        setCallerPublicIp(pubIp);
+        setOtherStoresActiveCount(meta.other_stores_active_count || 0);
+        setOtherActiveStores(meta.other_active_stores || []);
 
         if (onDeviceCountChange) {
           const activeCount = list.filter((d) => d.status === "Active").length;
@@ -71,7 +92,7 @@ export const LoggedInDevicesTable: React.FC<LoggedInDevicesTableProps> = ({
         setIsRefreshing(false);
       }
     },
-    [searchQuery, statusFilter, onDeviceCountChange]
+    [searchQuery, statusFilter, storeFilter, onDeviceCountChange]
   );
 
   useEffect(() => {
@@ -266,8 +287,20 @@ export const LoggedInDevicesTable: React.FC<LoggedInDevicesTableProps> = ({
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
+          {/* Public IP Badge */}
+          {callerPublicIp && (
+            <div
+              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-800 text-xs font-mono font-medium shadow-2xs"
+              title="Your workstation's detected Public WAN IP address"
+            >
+              <Globe className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+              <span>Public IP:</span>
+              <span className="font-bold">{callerPublicIp}</span>
+            </div>
+          )}
+
           {/* Search Box */}
-          <div className="relative min-w-[200px]">
+          <div className="relative min-w-[180px]">
             <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)] pointer-events-none" />
             <input
               type="text"
@@ -276,6 +309,19 @@ export const LoggedInDevicesTable: React.FC<LoggedInDevicesTableProps> = ({
               placeholder="Search workstation, counter, user..."
               className="w-full pl-8 pr-3 py-1.5 text-xs bg-[var(--color-surface-subtle)] border border-[var(--color-border)] rounded-lg text-[var(--color-text)] placeholder-[var(--color-text-muted)] focus:outline-none focus:border-emerald-500 transition-colors"
             />
+          </div>
+
+          {/* Store Filter */}
+          <div className="flex items-center gap-1.5 bg-[var(--color-surface-subtle)] border border-[var(--color-border)] rounded-lg px-2.5 py-1.5 text-xs text-[var(--color-text-muted)]">
+            <Building2 className="w-3.5 h-3.5 text-[var(--color-text-muted)]" />
+            <select
+              value={storeFilter}
+              onChange={(e) => setStoreFilter(e.target.value)}
+              className="bg-transparent focus:outline-none cursor-pointer text-xs font-medium text-[var(--color-text)]"
+            >
+              <option value="current">Current Store ({activeStore?.code || "STORE-01"})</option>
+              <option value="all">All Stores (Cross-Branch)</option>
+            </select>
           </div>
 
           {/* Status Filter */}
@@ -308,6 +354,32 @@ export const LoggedInDevicesTable: React.FC<LoggedInDevicesTableProps> = ({
           </button>
         </div>
       </div>
+
+      {/* Other Stores Active Devices Alert */}
+      {storeFilter === "current" && otherStoresActiveCount > 0 && (
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 p-3.5 bg-blue-50/90 border border-blue-200 rounded-xl text-xs text-blue-900 shadow-2xs">
+          <div className="flex items-center gap-2.5">
+            <Building2 className="w-4 h-4 text-blue-600 shrink-0" />
+            <div>
+              <span className="font-bold">Other Store Sessions Detected:</span>{" "}
+              <span>
+                {otherStoresActiveCount} workstation{otherStoresActiveCount > 1 ? "s are" : " is"} currently logged in to{" "}
+                <strong>
+                  {Array.from(new Set(otherActiveStores.map((s) => s.store_name || s.store_code || `Store ${s.store_id}`))).join(", ")}
+                </strong>
+                .
+              </span>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => setStoreFilter("all")}
+            className="self-start sm:self-auto shrink-0 px-2.5 py-1 text-xs font-bold bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors cursor-pointer shadow-2xs"
+          >
+            Show All Stores ({otherStoresActiveCount + devices.length})
+          </button>
+        </div>
+      )}
 
       {/* Notifications */}
       {successMsg && (
@@ -389,6 +461,11 @@ export const LoggedInDevicesTable: React.FC<LoggedInDevicesTableProps> = ({
                                   This device
                                 </span>
                               )}
+                              {(storeFilter === "all" || (device.store_code && device.store_code !== activeStore?.code)) && (
+                                <span className="inline-flex items-center px-1.5 py-0.2 rounded text-[9px] font-mono font-bold bg-blue-50 text-blue-700 border border-blue-200" title={device.store_name || undefined}>
+                                  {device.store_code || `STORE-${device.store_id}`}
+                                </span>
+                              )}
                             </div>
                             <div className="text-[11px] text-[var(--color-text-muted)] mt-0.5 flex items-center gap-1">
                               <span>Counter:</span>
@@ -419,15 +496,36 @@ export const LoggedInDevicesTable: React.FC<LoggedInDevicesTableProps> = ({
 
                       {/* IP & Location */}
                       <td className="py-3 px-4">
-                        <div className="font-mono text-[11px] text-[var(--color-text)]">
-                          {device.ip_address || "127.0.0.1"}
+                        <div>
+                          {device.public_ip ? (
+                            <div className="flex items-center gap-1.5">
+                              <span
+                                className="inline-flex items-center gap-1 font-mono text-[11px] font-bold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200"
+                                title="Public WAN IP Address"
+                              >
+                                <Globe className="w-3 h-3 text-emerald-600 shrink-0" />
+                                {device.public_ip}
+                              </span>
+                            </div>
+                          ) : (
+                            <div className="font-mono text-[11px] text-[var(--color-text)]">
+                              {device.ip_address || "127.0.0.1"}
+                            </div>
+                          )}
+
+                          {device.public_ip && device.ip_address && device.ip_address !== device.public_ip && (
+                            <div className="text-[10px] text-[var(--color-text-muted)] font-mono mt-0.5" title="Local Network / Loopback IP">
+                              LAN: {device.ip_address}
+                            </div>
+                          )}
+
+                          {device.location ? (
+                            <div className="text-[10px] text-[var(--color-text-muted)] flex items-center gap-1 mt-0.5">
+                              <MapPin className="w-3 h-3 text-[var(--color-text-muted)] shrink-0" />
+                              <span>{device.location}</span>
+                            </div>
+                          ) : null}
                         </div>
-                        {device.location ? (
-                          <div className="text-[10px] text-[var(--color-text-muted)] flex items-center gap-1 mt-0.5">
-                            <MapPin className="w-3 h-3 text-[var(--color-text-muted)]" />
-                            <span>{device.location}</span>
-                          </div>
-                        ) : null}
                       </td>
 
                       {/* Status */}

@@ -32,6 +32,7 @@ use App\Http\Controllers\Api\DesktopUpdateController;
 use App\Http\Controllers\Api\HeldBillController;
 use App\Http\Controllers\Api\StaffAuthController;
 use App\Http\Controllers\Api\DeviceSessionController;
+use App\Http\Controllers\Api\WhatsAppController;
 
 /*
 |--------------------------------------------------------------------------
@@ -67,6 +68,8 @@ Route::post('/sync/push/staff', [SyncController::class, 'pushStaff']);
 Route::get('/sync/pull/deltas', [SyncController::class, 'pullDeltas']);
 
 // Centralized Device Session Tracking & Logged-In Devices (Item 2)
+Route::get('/public-ip', [DeviceSessionController::class, 'publicIp']);
+Route::get('/network/public-ip', [DeviceSessionController::class, 'publicIp']);
 Route::get('/device-sessions', [DeviceSessionController::class, 'index']);
 Route::get('/devices/logged-in', [DeviceSessionController::class, 'index']);
 Route::get('/devices/connected', [DeviceSessionController::class, 'index']);
@@ -90,6 +93,11 @@ Route::get('/invoices', [InvoiceController::class, 'index']);
 Route::post('/invoices', [InvoiceController::class, 'store']);
 Route::get('/invoices/{id}', [InvoiceController::class, 'show']);
 Route::post('/invoices/{id}/cancel', [InvoiceController::class, 'cancel']);
+
+// Electronic Dispatch & WhatsApp Gateway (OpenWA)
+Route::post('/whatsapp/send-invoice', [WhatsAppController::class, 'sendInvoice']);
+Route::post('/whatsapp/test-connection', [WhatsAppController::class, 'testConnection']);
+Route::get('/whatsapp/sessions', [WhatsAppController::class, 'sessions']);
 
 // Distributed Live Held Bills across all counters
 Route::get('/held-bills', [HeldBillController::class, 'index']);
@@ -322,6 +330,8 @@ Route::middleware(['auth:sanctum', 'session.timeout', 'ip.allowlist', 'scope.sto
     Route::get('/settings/gst-periods', [AdminSettingController::class, 'gstPeriods'])->middleware('rbac:settings,view');
     Route::post('/settings/gst-periods/toggle-lock', [AdminSettingController::class, 'toggleGstPeriodLock'])->middleware('rbac:settings,edit');
     Route::get('/settings/backup-restore', [AdminSettingController::class, 'backupRestorePoints'])->middleware('rbac:settings,view');
+    Route::get('/settings/whatsapp/sessions', [WhatsAppController::class, 'sessions'])->middleware('rbac:settings,view');
+    Route::post('/settings/whatsapp/test', [WhatsAppController::class, 'testConnection'])->middleware('rbac:settings,view');
     Route::get('/settings/min-app-version', [DesktopUpdateController::class, 'getMinVersion'])->middleware('rbac:settings,view');
     Route::post('/settings/min-app-version', [DesktopUpdateController::class, 'setMinVersion'])->middleware('rbac:settings,edit');
 

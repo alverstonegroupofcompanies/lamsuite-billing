@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Models\AuditLog;
+use App\Models\DeviceSession;
 use App\Models\Store;
 use App\Models\User;
 use App\Models\UserSession;
@@ -109,6 +110,32 @@ class AdminAuthController
             'last_activity' => now(),
             'is_active' => true,
         ]);
+
+        $deviceUuid = $request->header('X-Device-UUID')
+            ?: $request->input('device_uuid')
+            ?: ('dev_admin_' . $user->id . '_' . substr(md5(($request->userAgent() ?? '') . $request->ip()), 0, 12));
+
+        $deviceName = $request->input('device_name')
+            ?: ($request->header('Sec-CH-UA-Platform') ? trim($request->header('Sec-CH-UA-Platform'), '"') . ' (Admin)' : 'Admin Console');
+
+        $publicIp = DeviceSession::resolvePublicIp($request, $request->input('public_ip'));
+        $targetStoreId = $request->input('store_id') ?: ($user->store_id ?: 1);
+
+        DeviceSession::recordLogin(
+            $targetStoreId,
+            $deviceUuid,
+            $deviceName,
+            null,
+            'Admin Console',
+            'ADM',
+            $user->id,
+            $request->ip(),
+            null,
+            $request->userAgent(),
+            $request->input('app_version'),
+            $user->role ?: 'Store Owner',
+            $publicIp
+        );
 
         AuditLog::log('login', 'User', (string)$user->id, null, ['ip' => $request->ip()], $user->store_id, $user->id);
 

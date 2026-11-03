@@ -49,6 +49,20 @@ class AdminSettingController
             $smsConfig['api_key'] = '••••••••••••';
         }
 
+        $whatsappConfig = $settings['whatsapp']->value ?? [
+            'enabled' => false,
+            'provider' => 'openwa',
+            'api_url' => 'https://wa-api.alverstone.in',
+            'api_key' => '••••••••••••',
+            'session_id' => 'default',
+            'send_pdf' => true,
+            'auto_send_on_save' => false,
+            'custom_caption' => '',
+        ];
+        if (isset($whatsappConfig['api_key']) && !empty($whatsappConfig['api_key'])) {
+            $whatsappConfig['api_key'] = '••••••••••••';
+        }
+
         return response()->json([
             'store_id' => $storeId,
             'store_details' => $store,
@@ -80,6 +94,7 @@ class AdminSettingController
             ],
             'smtp' => $smtpConfig,
             'sms' => $smsConfig,
+            'whatsapp' => $whatsappConfig,
         ]);
     }
 
@@ -96,6 +111,7 @@ class AdminSettingController
             'wallet' => 'nullable|array',
             'smtp' => 'nullable|array',
             'sms' => 'nullable|array',
+            'whatsapp' => 'nullable|array',
         ]);
 
         foreach ($validated as $key => $val) {
@@ -113,10 +129,16 @@ class AdminSettingController
                         $val['api_key'] = $existing->value['api_key'];
                     }
                 }
+                if ($key === 'whatsapp' && isset($val['api_key']) && str_contains($val['api_key'], '••')) {
+                    $existing = CompanySetting::where('store_id', $storeId)->where('key', 'whatsapp')->first();
+                    if ($existing && isset($existing->value['api_key'])) {
+                        $val['api_key'] = $existing->value['api_key'];
+                    }
+                }
 
                 CompanySetting::updateOrCreate(
                     ['store_id' => $storeId, 'key' => $key],
-                    ['value' => $val, 'is_secret' => in_array($key, ['smtp', 'sms'])]
+                    ['value' => $val, 'is_secret' => in_array($key, ['smtp', 'sms', 'whatsapp'])]
                 );
             }
         }
@@ -133,17 +155,28 @@ class AdminSettingController
     {
         $storeId = $request->get('active_store_id');
         $validated = $request->validate([
-            'secret_type' => 'required|in:smtp_password,sms_api_key,webhook_secret',
-            'new_value' => 'required|string|min:8',
+            'secret_type' => 'required|in:smtp_password,sms_api_key,whatsapp_api_key,webhook_secret',
+            'new_value' => 'required|string|min:4',
         ]);
 
-        $settingKey = str_starts_with($validated['secret_type'], 'smtp') ? 'smtp' : 'sms';
+        if (str_starts_with($validated['secret_type'], 'smtp')) {
+            $settingKey = 'smtp';
+        } elseif (str_starts_with($validated['secret_type'], 'sms')) {
+            $settingKey = 'sms';
+        } elseif (str_starts_with($validated['secret_type'], 'whatsapp')) {
+            $settingKey = 'whatsapp';
+        } else {
+            $settingKey = 'webhook';
+        }
+
         $setting = CompanySetting::where('store_id', $storeId)->where('key', $settingKey)->first();
 
         $val = $setting ? $setting->value : [];
         if ($validated['secret_type'] === 'smtp_password') {
             $val['password'] = $validated['new_value'];
         } elseif ($validated['secret_type'] === 'sms_api_key') {
+            $val['api_key'] = $validated['new_value'];
+        } elseif ($validated['secret_type'] === 'whatsapp_api_key') {
             $val['api_key'] = $validated['new_value'];
         }
 

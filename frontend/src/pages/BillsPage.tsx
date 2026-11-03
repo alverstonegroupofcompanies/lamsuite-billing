@@ -39,6 +39,7 @@ import {
   generateEmailShareUrl,
   type InvoicePrintData,
 } from "../lib/printing/printingEngine";
+import { whatsappService } from "../lib/integrations/whatsappService";
 import { isTauri } from "../lib/ipc/ipcBridge";
 import { posCartService } from "../lib/billing/posCartService";
 import { productsStore, type ProductBatch, type ProductItem } from "../lib/masters/productsStore";
@@ -126,6 +127,8 @@ export const BillsPage: React.FC = () => {
     type: "success" | "error";
     actions?: NotificationAction[];
   } | null>(null);
+
+  const [isSendingWhatsApp, setIsSendingWhatsApp] = useState(false);
 
   const searchInputRef = useRef<HTMLInputElement>(null);
   const tableRef = useRef<HTMLTableSectionElement>(null);
@@ -731,20 +734,32 @@ export const BillsPage: React.FC = () => {
     }
   };
 
-  const handleWhatsAppShare = () => {
+  const handleWhatsAppShare = async () => {
     if (!selectedInvoice) return;
     if (!selectedInvoice.customer_phone?.trim()) {
       showNotification("Customer mobile number not recorded on this bill", "error");
       return;
     }
     const printData = buildPrintData(selectedInvoice, selectedInvoiceItems);
-    const url = generateWhatsAppShareUrl(selectedInvoice.customer_phone, printData);
-    if (isTauri()) {
-      import("@tauri-apps/api/shell").then(({ open }) => open(url)).catch(() => window.open(url, "_blank"));
-    } else {
-      window.open(url, "_blank");
+    setIsSendingWhatsApp(true);
+    try {
+      const res = await whatsappService.dispatchInvoice(selectedInvoice.customer_phone, printData);
+      if (res.success) {
+        showNotification(`Invoice #${selectedInvoice.invoice_number} dispatched to customer WhatsApp!`, "success");
+      } else {
+        if (res.fallbackUrl) {
+          showNotification(res.error || "WhatsApp Gateway unavailable. Opening WhatsApp Web fallback...", "error");
+          whatsappService.openManualShare(selectedInvoice.customer_phone, printData);
+        } else {
+          showNotification(res.error || "Failed to dispatch WhatsApp bill", "error");
+        }
+      }
+    } catch (err: any) {
+      showNotification(err?.message || "Error dispatching WhatsApp bill", "error");
+      whatsappService.openManualShare(selectedInvoice.customer_phone, printData);
+    } finally {
+      setIsSendingWhatsApp(false);
     }
-    showNotification("WhatsApp share window opened");
   };
 
   const handleEmailShare = () => {
@@ -1610,11 +1625,12 @@ export const BillsPage: React.FC = () => {
                 </button>
                 <button
                   onClick={handleWhatsAppShare}
-                  className="flex items-center gap-1 rounded-[10px] bg-[var(--color-accent-soft)] px-2.5 py-1.5 text-xs font-semibold text-[var(--color-accent)] hover:bg-[var(--color-border)] cursor-pointer transition-colors"
+                  disabled={isSendingWhatsApp}
+                  className="flex items-center gap-1 rounded-[10px] bg-[var(--color-accent-soft)] px-2.5 py-1.5 text-xs font-semibold text-[var(--color-accent)] hover:bg-[var(--color-border)] cursor-pointer transition-colors disabled:opacity-50"
                   title="Share via WhatsApp"
                 >
-                  <Share2 className="h-3.5 w-3.5" />
-                  <span>WhatsApp</span>
+                  <Share2 className={`h-3.5 w-3.5 ${isSendingWhatsApp ? "animate-spin" : ""}`} />
+                  <span>{isSendingWhatsApp ? "Sending..." : "WhatsApp"}</span>
                 </button>
               </div>
 

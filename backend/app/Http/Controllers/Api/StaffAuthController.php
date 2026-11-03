@@ -270,9 +270,10 @@ class StaffAuthController
 
         $deviceUuid = $request->header('X-Device-UUID')
             ?: $request->input('device_uuid')
-            ?: ($counter?->device_uuid ?: ('dev_counter_' . ($counter?->id ?: 'main')));
+            ?: ('dev_staff_' . $user->id . '_' . substr(md5(($request->userAgent() ?? '') . $request->ip()), 0, 12));
 
-        $deviceName = $request->input('device_name') ?: ($counter?->device_name ?: null);
+        $deviceName = $request->input('device_name') ?: ($counter?->device_name ?: 'Staff Terminal');
+        $publicIp = DeviceSession::resolvePublicIp($request, $request->input('public_ip'));
 
         DeviceSession::recordLogin(
             $store->id,
@@ -284,7 +285,10 @@ class StaffAuthController
             $user->id,
             $request->ip(),
             $counter?->location_name,
-            $request->userAgent()
+            $request->userAgent(),
+            $request->input('app_version'),
+            $user->role ?: 'Cashier',
+            $publicIp
         );
 
         AuditLog::log(

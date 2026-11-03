@@ -3,6 +3,8 @@ import { staffCryptoService } from "./staffCryptoService";
 import { storeDeviceService } from "./storeDeviceService";
 import { deviceSessionService } from "../devices/deviceSessionService";
 import { API_BASE_URL } from "../../config/env";
+import { getOrCreateClientDeviceUuid, detectDeviceFriendlyName } from "./clientDeviceIdentifier";
+import { publicIpService } from "../network/publicIpService";
 
 export interface StaffUser {
   id: string;
@@ -345,12 +347,16 @@ export class StaffAuthService {
         const targetUserId = localUser?.id || (isNumericId(usernameOrId) ? usernameOrId : undefined);
         const targetUsername = localUser?.username || (!isNumericId(usernameOrId) ? usernameOrId : undefined);
         const resolvedCounterId = profile?.counter_id || profile?.counter_code || "C01";
+        const clientUuid = profile?.device_uuid || getOrCreateClientDeviceUuid();
+        const clientDevName = profile?.device_name || detectDeviceFriendlyName();
+        const publicIp = await publicIpService.getPublicIp().catch(() => null);
 
         const res = await fetch(`${API_BASE_URL}/api/staff/login`, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
             Accept: "application/json",
+            "X-Device-UUID": clientUuid,
             ...(profile?.device_token ? { "X-Device-Token": profile.device_token } : {}),
           },
           body: JSON.stringify({
@@ -359,6 +365,9 @@ export class StaffAuthService {
             username: targetUsername,
             pin: pin,
             counter_id: resolvedCounterId,
+            device_uuid: clientUuid,
+            device_name: clientDevName,
+            public_ip: publicIp || undefined,
           }),
         });
 
@@ -440,12 +449,16 @@ export class StaffAuthService {
         const targetUserId = localUser?.id || (isNumericId(usernameOrId) ? usernameOrId : undefined);
         const targetUsername = localUser?.username || (!isNumericId(usernameOrId) ? usernameOrId : undefined);
         const resolvedCounterId = profile?.counter_id || profile?.counter_code || "C01";
+        const clientUuid = profile?.device_uuid || getOrCreateClientDeviceUuid();
+        const clientDevName = profile?.device_name || detectDeviceFriendlyName();
+        const publicIp = await publicIpService.getPublicIp().catch(() => null);
 
         const res = await fetch(`${API_BASE_URL}/api/staff/login`, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
             Accept: "application/json",
+            "X-Device-UUID": clientUuid,
             ...(profile?.device_token ? { "X-Device-Token": profile.device_token } : {}),
           },
           body: JSON.stringify({
@@ -454,6 +467,9 @@ export class StaffAuthService {
             username: targetUsername,
             password: password,
             counter_id: resolvedCounterId,
+            device_uuid: clientUuid,
+            device_name: clientDevName,
+            public_ip: publicIp || undefined,
           }),
         });
 
@@ -679,11 +695,16 @@ export class StaffAuthService {
         const profile = await storeDeviceService.getDeviceProfile();
         const activeStore = profile?.store_id || "1";
         const resolvedCounterId = profile?.counter_id || profile?.counter_code || "C01";
+        const clientUuid = profile?.device_uuid || getOrCreateClientDeviceUuid();
+        const clientDevName = profile?.device_name || detectDeviceFriendlyName();
+        const publicIp = await publicIpService.getPublicIp().catch(() => null);
+
         const res = await fetch(`${API_BASE_URL}/api/staff/login`, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
             Accept: "application/json",
+            "X-Device-UUID": clientUuid,
             ...(profile?.device_token ? { "X-Device-Token": profile.device_token } : {}),
           },
           body: JSON.stringify({
@@ -692,6 +713,9 @@ export class StaffAuthService {
             username: user.username,
             pin: pin,
             counter_id: resolvedCounterId,
+            device_uuid: clientUuid,
+            device_name: clientDevName,
+            public_ip: publicIp || undefined,
           }),
         });
 

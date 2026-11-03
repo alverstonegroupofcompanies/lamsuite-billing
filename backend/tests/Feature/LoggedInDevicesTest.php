@@ -289,4 +289,58 @@ class LoggedInDevicesTest extends TestCase
         $this->assertCount(1, $activeSessions);
         $this->assertEquals('PC 1 Renamed', $activeSessions->first()->device_name);
     }
+
+    /**
+     * 8. Public IP resolution and reporting via heartbeat and public-ip endpoint.
+     */
+    public function test_public_ip_resolution_and_heartbeat(): void
+    {
+        $loginRes = $this->postJson('/api/device-sessions/heartbeat', [
+            'device_uuid' => 'uuid_pub_test',
+            'device_name' => 'Tablet Desk',
+            'counter_name' => 'Counter 02',
+            'public_ip' => '117.236.91.145',
+            'store_id' => $this->store->id,
+        ], [
+            'CF-Connecting-IP' => '117.236.91.145',
+        ]);
+        $loginRes->assertStatus(200);
+
+        $res = $this->getJson('/api/device-sessions?store_id=' . $this->store->id);
+        $res->assertStatus(200);
+        $dev = collect($res->json('devices'))->firstWhere('device_uuid', 'uuid_pub_test');
+        $this->assertNotNull($dev);
+        $this->assertEquals('117.236.91.145', $dev['public_ip']);
+
+        // Check standalone public IP endpoint
+        $ipRes = $this->getJson('/api/public-ip', ['CF-Connecting-IP' => '117.236.91.145']);
+        $ipRes->assertStatus(200);
+        $this->assertEquals('117.236.91.145', $ipRes->json('ip'));
+    }
+
+    /**
+     * 9. Querying store_id=all returns devices across multiple stores with store names.
+     */
+    public function test_all_stores_query_returns_devices_across_branches(): void
+    {
+        $store2 = Store::create([
+            'name' => 'Secondary Store',
+            'code' => 'STORE-02',
+            'is_active' => true,
+        ]);
+
+        DeviceSession::recordLogin($this->store->id, 'dev_s1', 'Counter S1', null, 'C01', 'C01');
+        DeviceSession::recordLogin($store2->id, 'dev_s2', 'Counter S2', null, 'C01', 'C01');
+
+        $resAll = $this->getJson('/api/device-sessions?store_id=all');
+        $resAll->assertStatus(200);
+        $devices = collect($resAll->json('devices'));
+        $this->assertNotNull($devices->firstWhere('device_uuid', 'dev_s1'));
+        $this->assertNotNull($devices->firstWhere('device_uuid', 'dev_s2'));
+
+        // Querying store 1 also reports other_stores_active_count
+        $resS1 = $this->getJson('/api/device-sessions?store_id=' . $this->store->id);
+        $resS1->assertStatus(200);
+        $this->assertGreaterThanOrEqual(1, $resS1->json('other_stores_active_count'));
+    }
 }

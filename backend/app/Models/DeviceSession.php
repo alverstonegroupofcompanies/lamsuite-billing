@@ -22,6 +22,7 @@ class DeviceSession extends Model
         'counter_name',
         'counter_code',
         'ip_address',
+        'public_ip',
         'location',
         'login_time',
         'last_active_at',
@@ -92,6 +93,56 @@ class DeviceSession extends Model
     }
 
     /**
+     * Resolve the client's actual public IP address from standard proxy headers,
+     * reverse-proxy forward chains, or client self-reporting.
+     */
+    public static function resolvePublicIp(\Illuminate\Http\Request $request, ?string $clientReportedIp = null): ?string
+    {
+        // 1. If client provided a valid public IPv4 / IPv6, use it
+        if ($clientReportedIp && filter_var($clientReportedIp, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE)) {
+            return $clientReportedIp;
+        }
+
+        // 2. Cloudflare Connecting IP
+        $cf = $request->header('CF-Connecting-IP');
+        if ($cf && filter_var($cf, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE)) {
+            return $cf;
+        }
+
+        // 3. True-Client-IP (Akamai / Cloudflare Enterprise)
+        $trueClient = $request->header('True-Client-IP');
+        if ($trueClient && filter_var($trueClient, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE)) {
+            return $trueClient;
+        }
+
+        // 4. X-Real-IP (Nginx / Apache proxy)
+        $xReal = $request->header('X-Real-IP');
+        if ($xReal && filter_var($xReal, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE)) {
+            return $xReal;
+        }
+
+        // 5. X-Forwarded-For chain: grab first public IP from client -> proxy chain
+        $forwarded = $request->header('X-Forwarded-For');
+        if ($forwarded) {
+            $parts = array_map('trim', explode(',', $forwarded));
+            foreach ($parts as $part) {
+                if (filter_var($part, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE)) {
+                    return $part;
+                }
+            }
+        }
+
+        // 6. Direct request IP if public
+        $directIp = $request->ip();
+        if ($directIp && filter_var($directIp, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE)) {
+            return $directIp;
+        }
+
+        // 7. Fallback to client-reported IP (even if in dev/NAT) or direct request IP
+        return $clientReportedIp ?: ($cf ?: ($xReal ?: $directIp));
+    }
+
+    /**
      * Record a new authenticated device login session.
      */
     public static function recordLogin(
@@ -106,7 +157,8 @@ class DeviceSession extends Model
         ?string $location = null,
         ?string $userAgent = null,
         ?string $appVersion = null,
-        ?string $userRole = null
+        ?string $userRole = null,
+        ?string $publicIp = null
     ): self {
         // Expire prior active sessions for this device
         self::where('device_uuid', $deviceUuid)
@@ -148,6 +200,7 @@ class DeviceSession extends Model
             'counter_name' => $counterName ?: null,
             'counter_code' => $counterCode ?: null,
             'ip_address' => $ipAddress ?: null,
+            'public_ip' => $publicIp ?: null,
             'location' => $location ?: null,
             'login_time' => now(),
             'last_active_at' => now(),
@@ -170,7 +223,9 @@ class DeviceSession extends Model
         ?string $appVersion = null,
         ?int $unsyncedItemsCount = null,
         ?string $status = null,
-        ?string $userRole = null
+        ?string $userRole = null,
+        ?string $publicIp = null,
+        int|string|null $storeId = null
     ): ?self {
         $session = self::where('device_uuid', $deviceUuid)
             ->where('is_active', true)
@@ -181,8 +236,14 @@ class DeviceSession extends Model
             $updates = [
                 'last_active_at' => now(),
             ];
+            if ($storeId && (int)$session->store_id !== (int)$storeId) {
+                $updates['store_id'] = (int)$storeId;
+            }
             if ($ipAddress) {
                 $updates['ip_address'] = $ipAddress;
+            }
+            if ($publicIp) {
+                $updates['public_ip'] = $publicIp;
             }
             if ($deviceName && empty($session->device_name)) {
                 $updates['device_name'] = $deviceName;
