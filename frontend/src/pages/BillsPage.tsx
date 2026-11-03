@@ -1475,7 +1475,7 @@ export const BillsPage: React.FC = () => {
                   )}
                   <div className="border-t border-[var(--color-border)] pt-1 flex justify-between font-bold text-sm text-[var(--color-text)]">
                     <span>Grand Total:</span>
-                    <span className="font-mono text-[var(--color-accent)] tabular-nums">₹ {selectedInvoice.grand_total.toFixed(2)}</span>
+                    <span className="font-mono text-[var(--color-accent)] tabular-nums">₹ {Number(selectedInvoice.grand_total || 0).toFixed(2)}</span>
                   </div>
                 </div>
               </div>
@@ -1566,7 +1566,7 @@ export const BillsPage: React.FC = () => {
                         <tr>
                           <td className="px-3 py-1.5 font-bold text-[var(--color-text)]">{selectedInvoice.payment_mode || "Cash"}</td>
                           <td className="px-3 py-1.5 text-right font-mono font-bold tabular-nums text-[var(--color-text)]">
-                            ₹ {selectedInvoice.grand_total.toFixed(2)}
+                            ₹ {Number(selectedInvoice.grand_total || 0).toFixed(2)}
                           </td>
                           <td className="px-3 py-1.5 font-mono text-[var(--color-text-muted)]">—</td>
                           <td className="px-3 py-1.5">

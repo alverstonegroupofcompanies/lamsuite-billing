@@ -1,5 +1,7 @@
 import { sqliteStorage } from "../db/sqliteStorage";
 import { companySettingsService } from "../settings/companySettingsService";
+import { getResolvedApiBaseUrl } from "../../config/env";
+import { storeRegistryService } from "../auth/storeRegistryService";
 
 export interface BranchStore {
   id: string;
@@ -105,9 +107,56 @@ export const INITIAL_BRANCH_STORES: BranchStore[] = [
 export class StoreService {
   private seeded = false;
 
+  async fetchBranchesFromApi(): Promise<BranchStore[]> {
+    try {
+      const baseUrl = getResolvedApiBaseUrl();
+      const res = await fetch(`${baseUrl}/api/branches`, {
+        headers: { Accept: "application/json" },
+      });
+      if (!res.ok) return [];
+      const json = await res.json();
+      const rawStores = Array.isArray(json.data) ? json.data : Array.isArray(json) ? json : [];
+      if (rawStores.length === 0) return [];
+
+      const branches: BranchStore[] = rawStores.map((s: any) => ({
+        id: String(s.id),
+        name: s.name,
+        code: s.code || `STORE-${s.id}`,
+        phone: s.phone || "",
+        email: s.email || undefined,
+        address: s.address || "",
+        city: s.city || "",
+        state_code: s.state_code || "32",
+        state_name: s.state_name || (s.state_code === "33" ? "Tamil Nadu" : "Kerala"),
+        gstin: s.gstin || "",
+        drug_license_numbers: Array.isArray(s.drug_license_numbers) ? s.drug_license_numbers : [],
+        fssai_no: s.fssai_no || undefined,
+        is_main: Boolean(s.is_main),
+        is_active: Boolean(s.is_active !== false),
+      }));
+
+      // Cache real branches in local SQLite
+      for (const b of branches) {
+        await sqliteStorage.insertRecord("stores", b.id, b as unknown as Record<string, unknown>).catch(() => {});
+      }
+
+      return branches;
+    } catch (_) {
+      return [];
+    }
+  }
+
   async ensureStoresSeeded(): Promise<void> {
     if (this.seeded) return;
     try {
+      // 1. Try pulling fresh active stores from backend database
+      const live = await this.fetchBranchesFromApi();
+      if (live.length > 0) {
+        this.seeded = true;
+        return;
+      }
+
+      // 2. Check local SQLite cache
       const existing = await sqliteStorage.findAll<BranchStore>("stores");
       if (existing.length === 0) {
         for (const store of INITIAL_BRANCH_STORES) {
@@ -116,12 +165,18 @@ export class StoreService {
       }
       this.seeded = true;
     } catch (_) {
-      // In-memory or initial fallback
       this.seeded = true;
     }
   }
 
   async getAllStores(): Promise<BranchStore[]> {
+    // 1. Try pulling fresh active stores from DB
+    const live = await this.fetchBranchesFromApi();
+    if (live.length > 0) {
+      return live.filter((s) => s.is_active !== false);
+    }
+
+    // 2. Fall back to local SQLite cache
     await this.ensureStoresSeeded();
     try {
       const stores = await sqliteStorage.findAll<BranchStore>("stores");
@@ -129,29 +184,46 @@ export class StoreService {
         return stores.filter((s) => s.is_active !== false);
       }
     } catch (_) {}
+
+    // 3. Registered stores from client registry
+    const reg = storeRegistryService.getStores();
+    if (reg && reg.length > 0) {
+      return reg.map((r) => ({
+        id: String(r.id),
+        name: r.name,
+        code: r.code,
+        phone: "",
+        address: "",
+        city: "",
+        state_code: "32",
+        gstin: "",
+        is_main: r.is_hub,
+        is_active: r.is_active,
+      }));
+    }
+
     return INITIAL_BRANCH_STORES.filter((s) => s.is_active);
   }
 
   async getStoreById(id: string): Promise<BranchStore | null> {
-    await this.ensureStoresSeeded();
-    try {
-      const store = await sqliteStorage.findById<BranchStore>("stores", id);
-      if (store) return store;
-    } catch (_) {}
-    return INITIAL_BRANCH_STORES.find((s) => s.id === id) || null;
+    const all = await this.getAllStores();
+    return all.find((s) => String(s.id) === String(id) || s.code === id) || null;
   }
 
   async getCurrentStore(): Promise<BranchStore> {
+    const regActive = storeRegistryService.getActiveStore();
     const settings = companySettingsService.getSettings();
-    const currentId = settings.store_id || "store_main";
-    const found = await this.getStoreById(currentId);
+    const currentId = String(regActive?.id || settings.store_id || "1");
+    const currentCode = regActive?.code || "STORE-01";
+
+    const all = await this.getAllStores();
+    const found = all.find((s) => String(s.id) === currentId || s.code === currentCode);
     if (found) return found;
 
-    // Return main store or construct from current company settings
     return {
-      id: settings.store_id || "store_main",
-      name: settings.store_name || "Main Store",
-      code: "MAIN",
+      id: currentId,
+      name: regActive?.name || settings.store_name || "Main Store",
+      code: currentCode,
       phone: settings.phone || "",
       email: settings.email,
       address: settings.address || "",

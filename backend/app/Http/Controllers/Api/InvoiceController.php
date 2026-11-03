@@ -263,6 +263,49 @@ class InvoiceController
             }
         }
 
+        // Auto-match or auto-create customer if customer details are provided
+        if (!$party) {
+            $cleanPhone = !empty($validated['customer_phone']) ? trim($validated['customer_phone']) : null;
+            $cleanName = !empty($validated['customer_name']) ? trim($validated['customer_name']) : null;
+            $isWalkIn = empty($cleanName) || in_array(strtolower($cleanName), ['walk-in', 'walk-in customer', 'walk in']);
+
+            if (!empty($cleanPhone)) {
+                $party = Party::where('type', 'customer')
+                    ->where(function ($q) use ($storeId) {
+                        $q->where('store_id', $storeId)->orWhereNull('store_id');
+                    })
+                    ->where('phone', $cleanPhone)
+                    ->first();
+            }
+
+            if (!$party && !$isWalkIn) {
+                $party = Party::where('type', 'customer')
+                    ->where(function ($q) use ($storeId) {
+                        $q->where('store_id', $storeId)->orWhereNull('store_id');
+                    })
+                    ->where('name', $cleanName)
+                    ->first();
+            }
+
+            // If customer has a real name or valid phone, automatically create in DB
+            if (!$party && (!$isWalkIn || (!empty($cleanPhone) && strlen(preg_replace('/\D/', '', $cleanPhone)) >= 10))) {
+                $party = Party::create([
+                    'store_id' => $storeId,
+                    'type' => 'customer',
+                    'name' => !$isWalkIn ? $cleanName : ("Customer " . substr(preg_replace('/\D/', '', $cleanPhone), -4)),
+                    'phone' => $cleanPhone,
+                    'gstin' => !empty($validated['customer_gstin']) ? strtoupper(trim($validated['customer_gstin'])) : null,
+                    'state_code' => $validated['state_code'] ?? '32',
+                    'credit_limit' => 0,
+                    'opening_balance' => 0,
+                    'current_balance' => 0,
+                    'is_active' => true,
+                    'version' => 1,
+                    'external_id' => $customerId ?: ('cust_' . time() . '_' . substr(md5(uniqid()), 0, 6)),
+                ]);
+            }
+        }
+
         // 4. Check Store Settings (e.g. Negative Stock Allowed)
         $storeSetting = CompanySetting::where('store_id', $storeId)
             ->where('key', 'inventory_settings')

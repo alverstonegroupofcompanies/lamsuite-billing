@@ -183,8 +183,9 @@ export const SalesReturnPage: React.FC = () => {
     // Build return lines
     const lines: ReturnLineState[] = items.map((item) => {
       const key = `${item.product_id}_${item.batch_no}`;
-      const alreadyReturned = qtyMap.get(key) || 0;
-      const maxReturnable = Math.max(0, item.qty - alreadyReturned);
+      const alreadyReturned = Number(qtyMap.get(key) || 0);
+      const soldQty = Number(item.qty || 0);
+      const maxReturnable = Math.max(0, soldQty - alreadyReturned);
       return {
         product_id: item.product_id || "",
         product_name: item.product_name,
@@ -192,12 +193,12 @@ export const SalesReturnPage: React.FC = () => {
         batch_id: (item as any).batch_id || "",
         batch_no: item.batch_no || "",
         expiry_date: item.expiry_date,
-        sold_qty: item.qty,
+        sold_qty: soldQty,
         max_returnable: maxReturnable,
         return_qty: 0,
-        unit_price: item.unit_price,
-        discount_percent: item.discount_percent || 0,
-        gst_percent: item.gst_percent || 0,
+        unit_price: Number(item.unit_price || 0),
+        discount_percent: Number(item.discount_percent || 0),
+        gst_percent: Number(item.gst_percent || 0),
         reason: "customer_return",
         condition: "restock",
         selected: false,
@@ -241,10 +242,10 @@ export const SalesReturnPage: React.FC = () => {
     let grandTotal = 0;
 
     for (const l of selectedLines) {
-      const gross = l.unit_price * l.return_qty;
-      const disc = (gross * (l.discount_percent || 0)) / 100;
+      const gross = Number(l.unit_price || 0) * Number(l.return_qty || 0);
+      const disc = (gross * Number(l.discount_percent || 0)) / 100;
       const taxable = gross - disc;
-      const gstAmt = (taxable * l.gst_percent) / 100;
+      const gstAmt = (taxable * Number(l.gst_percent || 0)) / 100;
       subtotal += gross;
       discountTotal += disc;
       taxTotal += gstAmt;
@@ -509,7 +510,7 @@ export const SalesReturnPage: React.FC = () => {
                     <td className="px-4 py-2.5 font-mono text-[var(--color-accent)]">{r.original_invoice_number || "—"}</td>
                     <td className="px-4 py-2.5 font-semibold text-[var(--color-text)]">{r.customer_name || "Walk-in"}</td>
                     <td className="px-4 py-2.5 text-right font-mono font-bold text-[var(--color-text)] tabular-nums">
-                      ₹ {r.grand_total.toFixed(2)}
+                      ₹ {Number(r.grand_total || 0).toFixed(2)}
                     </td>
                     <td className="px-4 py-2.5">
                       <span className="rounded-full bg-[var(--color-canvas)] border border-[var(--color-border)] px-2 py-0.5 text-[10px] font-semibold text-[var(--color-text)]">{r.refund_mode}</span>
@@ -668,7 +669,7 @@ export const SalesReturnPage: React.FC = () => {
                               )}
                             </div>
                             <div className="text-right">
-                              <div className="font-mono font-bold text-slate-900">₹ {inv.grand_total.toFixed(2)}</div>
+                              <div className="font-mono font-bold text-slate-900">₹ {Number(inv.grand_total || 0).toFixed(2)}</div>
                               <div className="text-[10px] text-slate-400">{inv.invoice_date}</div>
                             </div>
                           </button>
@@ -704,7 +705,7 @@ export const SalesReturnPage: React.FC = () => {
                     </div>
                     <div>
                       <p className="text-[10px] font-semibold uppercase text-slate-400">Invoice Total</p>
-                      <p className="font-mono font-bold text-slate-900">₹ {selectedInvoice.grand_total.toFixed(2)}</p>
+                      <p className="font-mono font-bold text-slate-900">₹ {Number(selectedInvoice.grand_total || 0).toFixed(2)}</p>
                     </div>
                   </div>
 

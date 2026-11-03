@@ -135,8 +135,8 @@ export const InterStoreTransferPage: React.FC = () => {
     const current = await storeService.getCurrentStore();
     setSourceStore(current);
 
-    const destOptions = allSt.filter((s: BranchStore) => s.id !== current.id);
-    if (destOptions.length > 0 && !destStoreId) {
+    const destOptions = allSt.filter((s: BranchStore) => String(s.id) !== String(current.id));
+    if (destOptions.length > 0 && (!destStoreId || String(destStoreId) === String(current.id))) {
       setDestStoreId(destOptions[0].id);
     }
 
@@ -150,7 +150,7 @@ export const InterStoreTransferPage: React.FC = () => {
   };
 
   const destinationStore = useMemo(() => {
-    return stores.find((s) => s.id === destStoreId) || null;
+    return stores.find((s) => String(s.id) === String(destStoreId)) || null;
   }, [stores, destStoreId]);
 
   const gstTreatment: TransferGstTreatment = useMemo(() => {
@@ -952,10 +952,10 @@ export const InterStoreTransferPage: React.FC = () => {
                   className="w-full rounded-btn border border-border-main bg-surface p-2.5 text-xs font-semibold text-text-main focus:border-accent focus:outline-none"
                 >
                   {stores
-                    .filter((s) => !sourceStore || s.id !== sourceStore.id)
+                    .filter((s) => !sourceStore || String(s.id) !== String(sourceStore.id))
                     .map((s) => (
                       <option key={s.id} value={s.id}>
-                        {s.name} ({s.city})
+                        {s.name} {s.code ? `(${s.code})` : s.city ? `(${s.city})` : ""}
                       </option>
                     ))}
                 </select>

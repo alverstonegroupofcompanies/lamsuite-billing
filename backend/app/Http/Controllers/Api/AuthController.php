@@ -216,7 +216,7 @@ class AuthController
             $clientIp,
             $counter->location_name,
             $request->userAgent(),
-            $request->input('app_version', '2.0.26'),
+            $request->input('app_version', '2.0.27'),
             'Cashier',
             $publicIp
         );
@@ -389,7 +389,7 @@ class AuthController
             $clientIp,
             $counter->location_name,
             $request->userAgent(),
-            $request->input('app_version', '2.0.26'),
+            $request->input('app_version', '2.0.27'),
             $user->role ?: 'Store Owner',
             $publicIp
         );
@@ -547,9 +547,14 @@ class AuthController
                     'id' => (string)$s->id,
                     'name' => $s->name,
                     'code' => $s->code,
+                    'phone' => $s->phone ?? '',
+                    'email' => $s->email,
+                    'address' => $s->address ?? '',
                     'city' => $s->address ? (trim(explode(',', $s->address)[0]) ?? '') : '',
                     'state_code' => $s->state_code ?? '32',
-                    'gstin' => $s->gstin,
+                    'gstin' => $s->gstin ?? '',
+                    'drug_license_numbers' => $s->drug_license_numbers ?? [],
+                    'fssai_no' => $s->fssai_no,
                     'is_main' => $s->code === 'MAIN' || $s->code === 'STORE-01',
                     'is_active' => (bool)$s->is_active,
                 ];

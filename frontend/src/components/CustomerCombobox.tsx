@@ -134,6 +134,11 @@ export const CustomerCombobox: React.FC<CustomerComboboxProps> = ({
     }
   }, [inputRef]);
 
+  // Warm up parties cache from database on mount
+  useEffect(() => {
+    partiesStore.ensurePartiesPopulated().catch(() => {});
+  }, []);
+
   // Live customer search with debouncing
   useEffect(() => {
     let active = true;

@@ -94,6 +94,11 @@ Route::post('/invoices', [InvoiceController::class, 'store']);
 Route::get('/invoices/{id}', [InvoiceController::class, 'show']);
 Route::post('/invoices/{id}/cancel', [InvoiceController::class, 'cancel']);
 
+// Terminal Customer Lookups & Registration
+Route::get('/customers', [CustomerController::class, 'index']);
+Route::post('/customers', [CustomerController::class, 'store']);
+Route::get('/customers/{id}', [CustomerController::class, 'show']);
+
 // Electronic Dispatch & WhatsApp Gateway (OpenWA)
 Route::post('/whatsapp/send-invoice', [WhatsAppController::class, 'sendInvoice']);
 Route::post('/whatsapp/test-connection', [WhatsAppController::class, 'testConnection']);

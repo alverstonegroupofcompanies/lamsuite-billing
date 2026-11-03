@@ -1,5 +1,6 @@
 import { sqliteStorage } from "../db/sqliteStorage";
 import { syncQueueService } from "../sync/syncQueueService";
+import { getResolvedApiBaseUrl } from "../../config/env";
 
 export interface Customer {
   id: string;
@@ -268,14 +269,105 @@ export class PartiesStore {
 
     await this.upsertCustomer(newCustomer);
 
-    // Queue for sync
+    // Queue for sync and attempt live write to backend API
     try {
       await syncQueueService.enqueue("customer", id, "create", newCustomer as unknown as Record<string, unknown>);
+      const baseUrl = getResolvedApiBaseUrl();
+      fetch(`${baseUrl}/api/customers`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({
+          name: newCustomer.name,
+          phone: newCustomer.phone,
+          gstin: newCustomer.gstin,
+          address: newCustomer.address,
+        }),
+      }).then(async (res) => {
+        if (res.ok) {
+          const json = await res.json();
+          if (json.customer?.id) {
+            newCustomer.id = String(json.customer.id);
+            await this.upsertCustomer(newCustomer);
+          }
+        }
+      }).catch(() => {});
     } catch {
       // Sync enqueue silent fallback if queue not ready
     }
 
     return newCustomer;
+  }
+
+  /**
+   * Pulls real customers and parties from backend database into local SQLite cache.
+   * Purges hardcoded mock/sample customer records if real data is available.
+   */
+  async ensurePartiesPopulated(force = false): Promise<{ count: number; source: string }> {
+    try {
+      const baseUrl = getResolvedApiBaseUrl();
+      const res = await fetch(`${baseUrl}/api/customers?limit=200`, {
+        headers: { Accept: "application/json" },
+      });
+      if (res.ok) {
+        const json = await res.json();
+        const rawList = Array.isArray(json.data) ? json.data : Array.isArray(json) ? json : [];
+        if (rawList.length > 0) {
+          // Remove legacy mock sample records
+          const existing = await sqliteStorage.findAll<Customer>("customers");
+          for (const old of existing) {
+            if (old.id === "cust_1" || old.id === "cust_2" || old.id === "cust_3" || old.id === "cust_4" || old.id === "cust_5" || old.id === "cust_seed_1") {
+              await sqliteStorage.deleteRecord("customers", old.id).catch(() => {});
+            }
+          }
+
+          let savedCount = 0;
+          for (const c of rawList) {
+            const cust: Customer = {
+              id: String(c.id),
+              customer_code: c.reg_no || c.customer_code || `CUST-${c.id}`,
+              name: c.name,
+              phone: c.phone || "",
+              gstin: c.gstin || undefined,
+              address: c.address || undefined,
+              place_of_supply: c.state_code ? `${c.state_code}-State` : undefined,
+              outstanding_balance: c.current_balance !== undefined ? Number(c.current_balance) : (c.outstanding_balance !== undefined ? Number(c.outstanding_balance) : 0),
+              credit_limit: c.credit_limit !== undefined ? Number(c.credit_limit) : 0,
+              is_active: Boolean(c.is_active !== false),
+              created_at: c.created_at ? new Date(c.created_at).getTime() : Date.now(),
+              updated_at: c.updated_at ? new Date(c.updated_at).getTime() : Date.now(),
+            };
+            await sqliteStorage.insertRecord("customers", cust.id, cust as unknown as Record<string, unknown>);
+            savedCount++;
+          }
+          return { count: savedCount, source: "backend_db" };
+        }
+      }
+    } catch (_) {}
+
+    // Fallback: check sync delta pull
+    try {
+      const baseUrl = getResolvedApiBaseUrl();
+      const deltaRes = await fetch(`${baseUrl}/api/sync/pull/deltas?since_watermark=0`);
+      if (deltaRes.ok) {
+        const delta = await deltaRes.json();
+        if (Array.isArray(delta.parties) && delta.parties.length > 0) {
+          for (const party of delta.parties) {
+            const normalizedParty: PartyMaster = {
+              ...party,
+              id: String(party.id),
+              is_active: Boolean(party.is_active !== false),
+              credit_limit: party.credit_limit !== undefined ? Number(party.credit_limit) : undefined,
+              outstanding_balance: party.current_balance !== undefined ? Number(party.current_balance) : (party.outstanding_balance !== undefined ? Number(party.outstanding_balance) : 0),
+            };
+            await this.upsertParty(normalizedParty);
+          }
+          return { count: delta.parties.length, source: "sync_deltas" };
+        }
+      }
+    } catch (_) {}
+
+    const local = await sqliteStorage.findAll<Customer>("customers");
+    return { count: local.length, source: "sqlite_cache" };
   }
 
   async seedSampleCustomersIfEmpty(): Promise<void> {

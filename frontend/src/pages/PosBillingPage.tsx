@@ -76,6 +76,7 @@ import { BillDiscountModal } from "../components/BillDiscountModal";
 import { RoundOffModal } from "../components/RoundOffModal";
 import { calculateDerivedLooseRate, formatQuantityDisplay, formatExpiryDisplay } from "../lib/billing/unitConversion";
 import { partiesStore, type Customer, normalizeIndianPhone } from "../lib/masters/partiesStore";
+import { syncQueueService } from "../lib/sync/syncQueueService";
 import { unitsStore } from "../lib/masters/unitsStore";
 import { useModalEscape } from "../lib/ui/modalEscapeManager";
 
@@ -2356,13 +2357,60 @@ export const PosBillingPage: React.FC = () => {
         return;
       }
 
+      // Auto-save and sync customer if named customer or phone number entered
+      let activeCust = selectedCustomer;
+      const cleanPhone = customerPhone?.trim() || "";
+      const cleanName = customerName?.trim() || "";
+      const isNamedCustomer = cleanName !== "" && cleanName.toLowerCase() !== "walk-in" && cleanName.toLowerCase() !== "walk-in customer";
+
+      if (!activeCust && (isNamedCustomer || cleanPhone.length >= 10)) {
+        if (cleanPhone) {
+          activeCust = await partiesStore.findCustomerByPhone(cleanPhone).catch(() => null);
+        }
+        if (!activeCust && isNamedCustomer) {
+          const matches = await partiesStore.searchCustomers(cleanName, 5).catch(() => []);
+          activeCust = matches.find((m) => m.name.toLowerCase() === cleanName.toLowerCase()) || null;
+        }
+
+        if (activeCust) {
+          if ((cleanPhone && activeCust.phone !== cleanPhone) || (customerGstin && activeCust.gstin !== customerGstin)) {
+            activeCust.phone = cleanPhone || activeCust.phone;
+            activeCust.gstin = customerGstin?.trim().toUpperCase() || activeCust.gstin;
+            await partiesStore.upsertCustomer(activeCust).catch(() => {});
+            syncQueueService.enqueue("customer", activeCust.id, "update", activeCust as unknown as Record<string, unknown>).catch(() => {});
+          }
+        } else {
+          const created = await partiesStore.quickCreateCustomer({
+            name: isNamedCustomer ? cleanName : `Customer ${cleanPhone.slice(-4)}`,
+            phone: cleanPhone || undefined,
+            gstin: customerGstin?.trim().toUpperCase() || undefined,
+          }).catch(() => null);
+          if (created) {
+            activeCust = created;
+          }
+        }
+      } else if (activeCust) {
+        if ((cleanPhone && activeCust.phone !== cleanPhone) || (customerGstin && activeCust.gstin !== customerGstin)) {
+          activeCust.phone = cleanPhone || activeCust.phone;
+          activeCust.gstin = customerGstin?.trim().toUpperCase() || activeCust.gstin;
+          await partiesStore.upsertCustomer(activeCust).catch(() => {});
+          syncQueueService.enqueue("customer", activeCust.id, "update", activeCust as unknown as Record<string, unknown>).catch(() => {});
+        }
+      }
+
+      if (activeCust) {
+        setSelectedCustomer(activeCust);
+        setCustomerName(activeCust.name);
+        if (activeCust.phone) setCustomerPhone(activeCust.phone);
+      }
+
       // Sync customer details to cart service
       posCartService.setCustomer(
-        selectedCustomer?.id || "",
-        customerName || "Walk-in Customer",
-        customerGstin || "",
-        selectedCustomer?.place_of_supply || "32-Kerala",
-        customerPhone || ""
+        activeCust?.id || selectedCustomer?.id || "",
+        activeCust?.name || customerName || "Walk-in Customer",
+        customerGstin || activeCust?.gstin || "",
+        activeCust?.place_of_supply || selectedCustomer?.place_of_supply || "32-Kerala",
+        activeCust?.phone || customerPhone || ""
       );
 
       const appSettings = companySettingsService.getSettings();

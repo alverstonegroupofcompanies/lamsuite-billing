@@ -475,7 +475,7 @@ export const PurchaseReturnPage: React.FC = () => {
                     <td className="px-4 py-3 font-mono font-semibold text-accent tabular-nums">{r.original_purchase_number || "—"}</td>
                     <td className="px-4 py-3 font-semibold text-text-main">{r.supplier_name}</td>
                     <td className="px-4 py-3 text-right font-mono font-bold text-text-main tabular-nums">
-                      ₹ {r.grand_total.toFixed(2)}
+                      ₹ {Number(r.grand_total || 0).toFixed(2)}
                     </td>
                     <td className="px-4 py-3 text-text-muted">
                       <span className="rounded-full bg-canvas border border-border-main px-2.5 py-0.5 text-[10px] font-medium text-text-muted">
@@ -595,7 +595,7 @@ export const PurchaseReturnPage: React.FC = () => {
                             </div>
                             <div className="text-right">
                               {p.grand_total != null && (
-                                <div className="font-mono font-bold text-slate-900">₹ {p.grand_total.toFixed(2)}</div>
+                                <div className="font-mono font-bold text-slate-900">₹ {Number(p.grand_total || 0).toFixed(2)}</div>
                               )}
                               <div className="text-[10px] text-slate-400">{p.purchase_date}</div>
                             </div>

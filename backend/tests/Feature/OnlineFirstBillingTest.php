@@ -356,4 +356,34 @@ class OnlineFirstBillingTest extends TestCase
         $this->assertEquals('TEMP-C01-999', $response->json('temp_mapped_from'));
         $this->assertStringStartsWith('C01-INV-', $response->json('invoice.invoice_number'));
     }
+
+    public function test_invoice_creation_auto_creates_and_links_customer_in_db(): void
+    {
+        $response = $this->withHeader('X-Store-Id', $this->store->id)
+            ->postJson('/api/invoices', [
+                'counter_code' => 'C01',
+                'customer_name' => 'Kavya Rajesh',
+                'customer_phone' => '9847123999',
+                'customer_gstin' => '32AAACB1111Q1ZZ',
+                'items' => [
+                    [
+                        'product_id' => $this->product->id,
+                        'batch_id' => $this->batch->id,
+                        'qty' => 1,
+                        'unit_price' => 18.00,
+                    ],
+                ],
+            ]);
+
+        $response->assertStatus(201);
+        $invoiceCustomerId = $response->json('invoice.customer_id');
+        $this->assertNotNull($invoiceCustomerId);
+
+        $savedCustomer = Party::find($invoiceCustomerId);
+        $this->assertNotNull($savedCustomer);
+        $this->assertEquals('Kavya Rajesh', $savedCustomer->name);
+        $this->assertEquals('9847123999', $savedCustomer->phone);
+        $this->assertEquals('32AAACB1111Q1ZZ', $savedCustomer->gstin);
+        $this->assertEquals('customer', $savedCustomer->type);
+    }
 }

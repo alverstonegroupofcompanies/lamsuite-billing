@@ -160,6 +160,10 @@ export const MastersPage: React.FC = () => {
       const allBatches = await sqliteStorage.findAll<ProductBatch>("product_batches");
       setBatches(allBatches);
 
+      const existingParties = await partiesStore.getAllParties();
+      if (forceSync || !existingParties || existingParties.length === 0 || existingParties.some((p) => p.id === "cust_1" || p.id === "cust_seed_1")) {
+        await partiesStore.ensurePartiesPopulated(forceSync).catch(() => {});
+      }
       const allParties = await partiesStore.getAllParties();
       setParties(allParties);
 
@@ -647,6 +651,23 @@ export const MastersPage: React.FC = () => {
           )}
           {activeTab === "parties" && (
             <>
+              <button
+                onClick={async () => {
+                  showNotification("Syncing parties from database...", "success");
+                  setIsSyncing(true);
+                  await partiesStore.ensurePartiesPopulated(true);
+                  const allParties = await partiesStore.getAllParties();
+                  setParties(allParties);
+                  setIsSyncing(false);
+                  showNotification("Parties master updated from database!", "success");
+                }}
+                disabled={isSyncing}
+                className="flex items-center gap-1.5 rounded-btn border border-border-main bg-surface px-3 py-2 text-xs font-semibold text-text-main shadow-xs hover:bg-canvas cursor-pointer transition-colors disabled:opacity-50"
+                title="Fetch latest customers and suppliers from database"
+              >
+                <RefreshCw className={`h-3.5 w-3.5 text-accent ${isSyncing ? "animate-spin" : ""}`} />
+                <span>{isSyncing ? "Syncing..." : "Sync Parties"}</span>
+              </button>
               <button
                 onClick={() =>
                   setImportEntityId(
