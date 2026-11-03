@@ -2053,16 +2053,10 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
                             if (res.success) {
                               setStatusMessage({ text: `Invoice #${data.invoice_number} sent successfully via WhatsApp!`, type: "success" });
                             } else {
-                              if (res.fallbackUrl) {
-                                setStatusMessage({ text: res.error || "OpenWA unavailable. Opening WhatsApp Web fallback...", type: "error" });
-                                whatsappService.openManualShare(phone, data as InvoicePrintData);
-                              } else {
-                                setStatusMessage({ text: res.error || "Failed to dispatch WhatsApp bill.", type: "error" });
-                              }
+                              setStatusMessage({ text: res.error || "Failed to dispatch WhatsApp bill via OpenWA.", type: "error" });
                             }
                           } catch (err: any) {
-                            setStatusMessage({ text: err?.message || "WhatsApp dispatch error.", type: "error" });
-                            whatsappService.openManualShare(phone, data as InvoicePrintData);
+                            setStatusMessage({ text: err?.message || "WhatsApp dispatch error via OpenWA.", type: "error" });
                           } finally {
                             setIsSendingWhatsApp(false);
                           }

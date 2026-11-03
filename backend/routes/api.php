@@ -103,6 +103,7 @@ Route::get('/customers/{id}', [CustomerController::class, 'show']);
 Route::post('/whatsapp/send-invoice', [WhatsAppController::class, 'sendInvoice']);
 Route::post('/whatsapp/test-connection', [WhatsAppController::class, 'testConnection']);
 Route::get('/whatsapp/sessions', [WhatsAppController::class, 'sessions']);
+Route::get('/whatsapp/config', [WhatsAppController::class, 'getConfig']);
 
 // Distributed Live Held Bills across all counters
 Route::get('/held-bills', [HeldBillController::class, 'index']);

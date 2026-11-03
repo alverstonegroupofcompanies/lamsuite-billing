@@ -194,4 +194,73 @@ class WhatsAppIntegrationTest extends TestCase
         $saved = CompanySetting::where('store_id', $this->store->id)->where('key', 'whatsapp')->first();
         $this->assertEquals('new_rotated_key_12345', $saved->value['api_key']);
     }
+
+    public function test_send_invoice_falls_back_to_text_when_pdf_fails(): void
+    {
+        Http::fake([
+            'https://wa-api.alverstone.in/api/sessions/default/messages/send-document' => Http::response([
+                'error' => 'Media transfer rejected',
+            ], 400),
+            'https://wa-api.alverstone.in/api/sessions/default/messages/send-text' => Http::response([
+                'id' => 'msg_text_fallback_123',
+                'status' => 'SENT',
+            ], 200),
+        ]);
+
+        CompanySetting::create([
+            'store_id' => $this->store->id,
+            'key' => 'whatsapp',
+            'value' => [
+                'enabled' => true,
+                'api_url' => 'https://wa-api.alverstone.in',
+                'api_key' => 'secret_openwa_key_test',
+                'session_id' => 'default',
+            ],
+            'is_secret' => true,
+        ]);
+
+        $response = $this->postJson('/api/whatsapp/send-invoice', [
+            'phone' => '9876543210',
+            'caption' => '*Invoice #INV-1002* Total: Rs 850',
+            'pdf_base64' => base64_encode('%PDF-1.4 dummy pdf content'),
+            'filename' => 'Invoice_INV-1002.pdf',
+        ]);
+
+        $response->assertStatus(200)
+            ->assertJson([
+                'success' => true,
+                'chatId' => '919876543210@c.us',
+                'message' => 'Invoice summary dispatched successfully via WhatsApp',
+            ]);
+
+        Http::assertSent(function ($request) {
+            return $request->url() === 'https://wa-api.alverstone.in/api/sessions/default/messages/send-text'
+                && $request['chatId'] === '919876543210@c.us';
+        });
+    }
+
+    public function test_get_whatsapp_config(): void
+    {
+        CompanySetting::create([
+            'store_id' => $this->store->id,
+            'key' => 'whatsapp',
+            'value' => [
+                'enabled' => true,
+                'api_url' => 'https://wa-api.alverstone.in',
+                'api_key' => 'secret_key',
+                'session_id' => 'default',
+                'send_pdf' => true,
+            ],
+            'is_secret' => true,
+        ]);
+
+        $response = $this->getJson('/api/whatsapp/config');
+        $response->assertStatus(200)
+            ->assertJson([
+                'success' => true,
+                'enabled' => true,
+                'api_url' => 'https://wa-api.alverstone.in',
+                'has_api_key' => true,
+            ]);
+    }
 }

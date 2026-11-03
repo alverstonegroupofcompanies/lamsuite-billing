@@ -24,12 +24,19 @@ class WhatsAppController extends Controller
         }
 
         $setting = CompanySetting::where('store_id', $resolvedStoreId)->where('key', 'whatsapp')->first();
+        if (!$setting) {
+            $setting = CompanySetting::where('key', 'whatsapp')->first();
+        }
         $config = $setting ? ($setting->value ?? []) : [];
 
-        $finalApiUrl = $apiUrl ?: ($config['api_url'] ?? 'https://wa-api.alverstone.in');
-        $finalApiKey = $apiKey ?: ($config['api_key'] ?? '');
-        $finalSessionId = $sessionId ?: ($config['session_id'] ?? 'default');
-        $enabled = isset($config['enabled']) ? (bool)$config['enabled'] : false;
+        $envApiKey = env('OPENWA_API_KEY', env('WHATSAPP_API_KEY', ''));
+        $envApiUrl = env('OPENWA_API_URL', env('WHATSAPP_API_URL', 'https://wa-api.alverstone.in'));
+        $envSessionId = env('OPENWA_SESSION_ID', env('WHATSAPP_SESSION_ID', 'default'));
+
+        $finalApiUrl = $apiUrl ?: ($config['api_url'] ?? $envApiUrl);
+        $finalApiKey = $apiKey ?: ($config['api_key'] ?? $envApiKey);
+        $finalSessionId = $sessionId ?: ($config['session_id'] ?? $envSessionId);
+        $enabled = isset($config['enabled']) ? (bool)$config['enabled'] : (!empty($finalApiKey));
 
         return [
             'store_id' => $resolvedStoreId,
@@ -82,7 +89,7 @@ class WhatsAppController extends Controller
         if (empty($config['api_key'])) {
             return response()->json([
                 'success' => false,
-                'error' => 'OpenWA API key is not configured. Please enter your API key in Admin Panel Settings.',
+                'error' => 'OpenWA API key is not configured. Please enter your API key in Admin Panel Settings or Desktop Settings.',
             ], 422);
         }
 
@@ -127,6 +134,32 @@ class WhatsAppController extends Controller
                     'result' => $body,
                     'message' => 'Invoice dispatched successfully via WhatsApp',
                 ]);
+            }
+
+            // Graceful Fallback: If PDF send-document returned an error, attempt to deliver text summary via send-text
+            if ($hasPdf) {
+                Log::info('OpenWA send-document returned ' . $response->status() . '. Attempting fallback to text summary dispatch...', [
+                    'chatId' => $chatId,
+                ]);
+
+                $textEndpoint = "{$apiUrl}/api/sessions/{$sessionId}/messages/send-text";
+                $textResponse = Http::withHeaders([
+                    'X-API-Key' => $apiKey,
+                    'Content-Type' => 'application/json',
+                ])->timeout(20)->post($textEndpoint, [
+                    'chatId' => $chatId,
+                    'text' => $caption,
+                ]);
+
+                if ($textResponse->successful()) {
+                    return response()->json([
+                        'success' => true,
+                        'chatId' => $chatId,
+                        'sessionId' => $sessionId,
+                        'result' => $textResponse->json(),
+                        'message' => 'Invoice summary dispatched successfully via WhatsApp',
+                    ]);
+                }
             }
 
             $status = $response->status();
@@ -299,5 +332,21 @@ class WhatsAppController extends Controller
                 'error' => 'Cannot connect to OpenWA: ' . $e->getMessage(),
             ], 503);
         }
+    }
+
+    /**
+     * Get the current WhatsApp gateway status and configuration (masked).
+     */
+    public function getConfig(Request $request): JsonResponse
+    {
+        $config = $this->resolveConfig($request->query('store_id'));
+        return response()->json([
+            'success' => true,
+            'enabled' => $config['enabled'],
+            'api_url' => $config['api_url'],
+            'session_id' => $config['session_id'],
+            'has_api_key' => !empty($config['api_key']),
+            'send_pdf' => $config['send_pdf'],
+        ]);
     }
 }

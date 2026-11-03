@@ -107,11 +107,36 @@ export class WhatsAppService {
     const fallbackUrl = generateWhatsAppShareUrl(phone, data);
 
     try {
+      const baseUrl = getResolvedApiBaseUrl();
       const settings = await companySettingsService.loadSettings();
       const waConfig = settings.whatsapp;
 
-      // If integration is disabled or provider is manual link only:
-      if (!waConfig || !waConfig.enabled || waConfig.provider === "manual_link") {
+      let isEnabled = waConfig?.enabled ?? true;
+      let apiUrl = waConfig?.apiUrl || "https://wa-api.alverstone.in";
+      let sessionId = waConfig?.sessionId || "default";
+      let apiKey = waConfig?.apiKey || undefined;
+
+      // If local config does not have apiKey, verify if backend has it configured
+      if (!apiKey) {
+        try {
+          const cfgRes = await fetch(`${baseUrl}/api/whatsapp/config`, {
+            headers: { Accept: "application/json" },
+          });
+          if (cfgRes.ok) {
+            const serverCfg = await cfgRes.json();
+            if (serverCfg.success && serverCfg.has_api_key) {
+              isEnabled = true;
+              if (serverCfg.api_url) apiUrl = serverCfg.api_url;
+              if (serverCfg.session_id) sessionId = serverCfg.session_id;
+            }
+          }
+        } catch {
+          // Ignore probe error, continue with relay dispatch
+        }
+      }
+
+      // If explicitly disabled and provider is manual link only:
+      if (waConfig && waConfig.enabled === false && waConfig.provider === "manual_link") {
         return {
           success: false,
           fallbackUrl,
@@ -119,8 +144,8 @@ export class WhatsAppService {
         };
       }
 
-      const caption = this.buildCaption(data, waConfig.customCaption);
-      const shouldSendPdf = options?.sendPdf ?? (waConfig.sendPdfInvoice ?? true);
+      const caption = this.buildCaption(data, waConfig?.customCaption);
+      const shouldSendPdf = options?.sendPdf ?? (waConfig?.sendPdfInvoice ?? true);
 
       let pdfBase64: string | undefined;
       const cleanInv = data.invoice_number.replace(/[^a-zA-Z0-9_-]/g, "_");
@@ -135,10 +160,9 @@ export class WhatsAppService {
         }
       }
 
-      const baseUrl = getResolvedApiBaseUrl();
       const relayEndpoint = `${baseUrl}/api/whatsapp/send-invoice`;
 
-      // Dispatch through backend relay
+      // Dispatch through backend relay to OpenWA REST API
       const response = await fetch(relayEndpoint, {
         method: "POST",
         headers: {
@@ -150,9 +174,9 @@ export class WhatsAppService {
           caption,
           pdf_base64: pdfBase64,
           filename,
-          api_url: waConfig.apiUrl,
-          api_key: waConfig.apiKey || undefined,
-          session_id: waConfig.sessionId || "default",
+          api_url: apiUrl,
+          api_key: apiKey,
+          session_id: sessionId,
           store_id: settings.store_id || undefined,
         }),
       });
@@ -249,6 +273,29 @@ export class WhatsAppService {
         valid: false,
         error: err?.message || "Could not reach OpenWA test endpoint",
       };
+    }
+  }
+
+  /**
+   * Check if backend has active OpenWA configuration.
+   */
+  async getServerConfig(): Promise<{ success: boolean; enabled: boolean; hasApiKey: boolean; apiUrl?: string; sessionId?: string }> {
+    try {
+      const baseUrl = getResolvedApiBaseUrl();
+      const res = await fetch(`${baseUrl}/api/whatsapp/config`, { headers: { Accept: "application/json" } });
+      if (res.ok) {
+        const data = await res.json();
+        return {
+          success: true,
+          enabled: !!data.enabled,
+          hasApiKey: !!data.has_api_key,
+          apiUrl: data.api_url,
+          sessionId: data.session_id,
+        };
+      }
+      return { success: false, enabled: false, hasApiKey: false };
+    } catch {
+      return { success: false, enabled: false, hasApiKey: false };
     }
   }
 

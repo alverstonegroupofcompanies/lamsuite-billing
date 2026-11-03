@@ -2313,16 +2313,10 @@ export const PosBillingPage: React.FC = () => {
       if (res.success) {
         showNotification(`Invoice #${data.invoice_number} sent to ${customerPhone} via WhatsApp!`, "success");
       } else {
-        if (res.fallbackUrl) {
-          showNotification(res.error || "WhatsApp Gateway unavailable. Opening WhatsApp Web fallback...", "error");
-          whatsappService.openManualShare(customerPhone, data);
-        } else {
-          showNotification(res.error || "Failed to send WhatsApp message", "error");
-        }
+        showNotification(res.error || "Failed to send WhatsApp message via OpenWA", "error");
       }
     } catch (err: any) {
-      showNotification(err?.message || "Error sending WhatsApp invoice", "error");
-      whatsappService.openManualShare(customerPhone, data);
+      showNotification(err?.message || "Error sending WhatsApp invoice via OpenWA", "error");
     } finally {
       setIsSendingWhatsApp(false);
     }

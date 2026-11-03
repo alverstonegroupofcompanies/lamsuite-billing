@@ -747,16 +747,10 @@ export const BillsPage: React.FC = () => {
       if (res.success) {
         showNotification(`Invoice #${selectedInvoice.invoice_number} dispatched to customer WhatsApp!`, "success");
       } else {
-        if (res.fallbackUrl) {
-          showNotification(res.error || "WhatsApp Gateway unavailable. Opening WhatsApp Web fallback...", "error");
-          whatsappService.openManualShare(selectedInvoice.customer_phone, printData);
-        } else {
-          showNotification(res.error || "Failed to dispatch WhatsApp bill", "error");
-        }
+        showNotification(res.error || "Failed to dispatch WhatsApp bill via OpenWA", "error");
       }
     } catch (err: any) {
-      showNotification(err?.message || "Error dispatching WhatsApp bill", "error");
-      whatsappService.openManualShare(selectedInvoice.customer_phone, printData);
+      showNotification(err?.message || "Error dispatching WhatsApp bill via OpenWA", "error");
     } finally {
       setIsSendingWhatsApp(false);
     }
