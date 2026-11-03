@@ -216,7 +216,7 @@ class AuthController
             $clientIp,
             $counter->location_name,
             $request->userAgent(),
-            $request->input('app_version', '2.0.25'),
+            $request->input('app_version', '2.0.26'),
             'Cashier',
             $publicIp
         );
@@ -389,7 +389,7 @@ class AuthController
             $clientIp,
             $counter->location_name,
             $request->userAgent(),
-            $request->input('app_version', '2.0.25'),
+            $request->input('app_version', '2.0.26'),
             $user->role ?: 'Store Owner',
             $publicIp
         );
