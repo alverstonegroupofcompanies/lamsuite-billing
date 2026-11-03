@@ -11,7 +11,7 @@ use Symfony\Component\HttpFoundation\BinaryFileResponse;
 
 class DesktopUpdateController
 {
-    private const CURRENT_APP_VERSION = '2.0.24';
+    private const CURRENT_APP_VERSION = '2.0.25';
     private const DEFAULT_MIN_VERSION = '2.0.21';
 
     /**
@@ -208,6 +208,17 @@ class DesktopUpdateController
      */
     private function getLatestVersion(): string
     {
+        $manifestPath = storage_path('app/updates/latest.json');
+        if (!File::exists($manifestPath)) {
+            $manifestPath = '/opt/lamsuite/updates/latest.json';
+        }
+        if (File::exists($manifestPath)) {
+            $manifest = json_decode(File::get($manifestPath), true);
+            if (!empty($manifest['version'])) {
+                return (string)$manifest['version'];
+            }
+        }
+
         $latest = CompanySetting::where('key', 'latest_desktop_release_version')
             ->latest()
             ->first();

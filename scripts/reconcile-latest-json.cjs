@@ -130,7 +130,9 @@ async function run() {
       console.warn(`[WARNING] Asset "${name}" contains spaces! Ensure product and artifact names avoid spaces.`);
     }
 
-    const publicDownloadUrl = `https://github.com/${GITHUB_REPOSITORY}/releases/download/${tagName}/${encodeURIComponent(name).replace(/%2E/g, '.')}`;
+    // Under Option B (Private GitHub Repo), canonical download URLs serve directly from the LamStone API server
+    const UPDATER_BASE_URL = (process.env.UPDATER_BASE_URL || 'https://api.lamstonehealthcare.com').replace(/\/$/, '');
+    const publicDownloadUrl = `${UPDATER_BASE_URL}/api/app/update/download/${encodeURIComponent(name).replace(/%2E/g, '.')}`;
 
     // Standard Windows x86_64
     if (
@@ -263,7 +265,7 @@ async function run() {
       throw new Error(`CRITICAL: Legacy asset ${legacySetupAsset.name} exists but signature is missing or empty!`);
     }
 
-    const legacyDownloadUrl = `https://github.com/${GITHUB_REPOSITORY}/releases/download/${tagName}/${encodeURIComponent(legacySetupAsset.name).replace(/%2E/g, '.')}`;
+    const legacyDownloadUrl = `${UPDATER_BASE_URL}/api/app/update/download/${encodeURIComponent(legacySetupAsset.name).replace(/%2E/g, '.')}`;
 
     const legacyManifest = {
       version: tagName.replace(/^v/, ''),

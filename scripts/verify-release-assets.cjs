@@ -242,17 +242,11 @@ async function verifyRelease() {
             console.log(`  [PASS] Asset "${urlFilename}" confirmed on release (${matchingAsset.size} bytes)`);
           }
 
-          // Verify URL resolution following redirects
+          // Verify URL resolution following redirects (strictly public unauthenticated HTTP 200)
           console.log(`  Testing download resolution for: ${platData.url}`);
           const res = await followUrl(platData.url, 5, false);
-          if (!res.ok) {
-            // Check if repo is private and requires token or proxy
-            const authRes = await followUrl(`https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/assets/${matchingAsset?.id}`, 5, true);
-            if (!authRes.ok && !res.ok) {
-              errors.push(`Platform "${platform}" URL failed to resolve (${res.statusCode || res.error}): ${platData.url}`);
-            } else {
-              console.log(`  [INFO] Public request status: ${res.statusCode}. Verified via asset storage ID: ${matchingAsset?.id}`);
-            }
+          if (!res.ok || res.statusCode !== 200) {
+            errors.push(`Platform "${platform}" public download URL failed to resolve (status: ${res.statusCode || res.error}): ${platData.url}`);
           } else {
             console.log(`  [PASS] URL resolves successfully with HTTP ${res.statusCode} (${res.contentLength} bytes)`);
           }
@@ -288,7 +282,13 @@ async function verifyRelease() {
         if (!matchingLegacyAsset) {
           errors.push(`latest-legacy-win7.json references asset "${legacyFilename}" not found on release.`);
         } else {
-          console.log(`[PASS] Legacy asset "${legacyFilename}" verified (${matchingLegacyAsset.size} bytes)`);
+          console.log(`  Testing legacy download resolution for: ${legacyPlat.url}`);
+        const legacyRes = await followUrl(legacyPlat.url, 5, false);
+        if (!legacyRes.ok || legacyRes.statusCode !== 200) {
+          errors.push(`Legacy Windows platform public download URL failed to resolve (status: ${legacyRes.statusCode || legacyRes.error}): ${legacyPlat.url}`);
+        } else {
+          console.log(`  [PASS] Legacy URL resolves successfully with HTTP ${legacyRes.statusCode} (${legacyRes.contentLength} bytes)`);
+        }
         }
       }
     } catch (err) {

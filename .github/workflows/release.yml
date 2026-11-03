@@ -400,37 +400,12 @@ jobs:
           GITHUB_REPOSITORY: ${{ github.repository }}
           RELEASE_ID: ${{ needs.create-release.outputs.release_id }}
           RELEASE_TAG: ${{ needs.validate-and-gate.outputs.version_tag }}
+          UPDATER_BASE_URL: https://api.lamstonehealthcare.com
         run: |
           node scripts/reconcile-latest-json.cjs
 
   # ----------------------------------------------------------------------------
-  # Job 6: Verification Gate Check
-  # ----------------------------------------------------------------------------
-  verify-release:
-    name: Verify Release Assets & Updater Signatures
-    needs: [validate-and-gate, publish-release]
-    permissions:
-      contents: write
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js 22 LTS
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-
-      - name: Verify All Installers, Signatures, and Manifest
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITHUB_REPOSITORY: ${{ github.repository }}
-          RELEASE_TAG: ${{ needs.validate-and-gate.outputs.version_tag }}
-        run: |
-          node scripts/verify-release-assets.cjs "${RELEASE_TAG}"
-
-  # ----------------------------------------------------------------------------
-  # Job 7: Deploy Updater Assets to Private Hosting Server (Key-based SSH)
+  # Job 6: Deploy Updater Assets to Private Hosting Server (Key-based SSH)
   # ----------------------------------------------------------------------------
   deploy-updater:
     name: Deploy to Updates Server
@@ -510,3 +485,29 @@ jobs:
               sudo chmod -R 755 /opt/lamsuite/updates || true
               echo 'Updater files successfully synced and permissions verified.'
             fi
+
+  # ----------------------------------------------------------------------------
+  # Job 7: Strict Release Verification Gate (Runs after live updates server deployment)
+  # ----------------------------------------------------------------------------
+  verify-release:
+    name: Verify Release Assets & Updater Signatures
+    needs: [validate-and-gate, publish-release, deploy-updater]
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22 LTS
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Verify All Installers, Signatures, and Manifest
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          RELEASE_TAG: ${{ needs.validate-and-gate.outputs.version_tag }}
+        run: |
+          node scripts/verify-release-assets.cjs "${RELEASE_TAG}"

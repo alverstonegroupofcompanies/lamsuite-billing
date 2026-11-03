@@ -289,8 +289,18 @@ jobs:
             docker compose run --rm --no-deps api php artisan route:cache
 
             DEPLOY_PHASE="service-start"
-            echo "--> Starting application services..."
-            docker compose --profile web up -d --remove-orphans
+            echo "--> Purging orphaned conflict containers..."
+            for c in $(docker ps -a --filter "name=lamsuite" --format "{{.ID}} {{.Names}}"); do
+              cid=$(echo "$c" | awk '{print $1}')
+              cname=$(echo "$c" | awk '{print $2}')
+              if [[ "$cname" =~ ^[0-9a-f]{12}_lamsuite ]]; then
+                echo "Removing orphaned conflict container: $cname ($cid)"
+                docker rm -f "$cid" 2>/dev/null || true
+              fi
+            done
+
+            echo "--> Starting application services with forced recreation..."
+            docker compose --profile web up -d --force-recreate --remove-orphans
 
             DEPLOY_PHASE="health-check"
             echo "--> Checking deployment health..."
@@ -300,11 +310,13 @@ jobs:
               API_HEALTH=$(curl -sk -o /dev/null -w "%{http_code}" "https://${SUBDOMAIN_API}.${DOMAIN}/up" || true)
               PANEL_HEALTH=$(curl -sk -o /dev/null -w "%{http_code}" "https://${SUBDOMAIN_PANEL}.${DOMAIN}/health" || true)
               MCP_HEALTH=$(curl -sk -o /dev/null -w "%{http_code}" "https://${SUBDOMAIN_MCP}.${DOMAIN}/health" || true)
+              UPDATE_HEALTH=$(curl -sk -o /dev/null -w "%{http_code}" "https://${SUBDOMAIN_API}.${DOMAIN}/api/app/update/latest.json" || true)
 
               if [ "$API_HEALTH" = "200" ] &&
                 [ "$PANEL_HEALTH" = "200" ] &&
-                [ "$MCP_HEALTH" = "200" ]; then
-                echo "All health checks passed."
+                [ "$MCP_HEALTH" = "200" ] &&
+                [ "$UPDATE_HEALTH" = "200" ]; then
+                echo "All health checks passed (including updater manifest endpoint)."
                 trap - ERR
                 echo "sha-$COMMIT_SHA" > .current_deploy_tag
                 echo "Deployment successfully verified."
