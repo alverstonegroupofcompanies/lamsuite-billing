@@ -283,12 +283,12 @@ async function verifyRelease() {
           errors.push(`latest-legacy-win7.json references asset "${legacyFilename}" not found on release.`);
         } else {
           console.log(`  Testing legacy download resolution for: ${legacyPlat.url}`);
-        const legacyRes = await followUrl(legacyPlat.url, 5, false);
-        if (!legacyRes.ok || legacyRes.statusCode !== 200) {
-          errors.push(`Legacy Windows platform public download URL failed to resolve (status: ${legacyRes.statusCode || legacyRes.error}): ${legacyPlat.url}`);
-        } else {
-          console.log(`  [PASS] Legacy URL resolves successfully with HTTP ${legacyRes.statusCode} (${legacyRes.contentLength} bytes)`);
-        }
+          const legacyRes = await followUrl(legacyPlat.url, 5, false);
+          if (!legacyRes.ok || legacyRes.statusCode !== 200) {
+            errors.push(`Legacy Windows platform public download URL failed to resolve (status: ${legacyRes.statusCode || legacyRes.error}): ${legacyPlat.url}`);
+          } else {
+            console.log(`  [PASS] Legacy URL resolves successfully with HTTP ${legacyRes.statusCode} (${legacyRes.contentLength} bytes)`);
+          }
         }
       }
     } catch (err) {
