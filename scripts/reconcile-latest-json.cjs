@@ -21,6 +21,7 @@ const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
 const GITHUB_REPOSITORY = process.env.GITHUB_REPOSITORY;
 const RELEASE_ID = process.env.RELEASE_ID;
 const RELEASE_TAG = process.env.RELEASE_TAG;
+const UPDATER_BASE_URL = (process.env.UPDATER_BASE_URL || 'https://api.lamstonehealthcare.com').replace(/\/$/, '');
 
 if (!GITHUB_TOKEN || !GITHUB_REPOSITORY) {
   console.error('[ERROR] GITHUB_TOKEN and GITHUB_REPOSITORY are required.');
@@ -131,7 +132,6 @@ async function run() {
     }
 
     // Under Option B (Private GitHub Repo), canonical download URLs serve directly from the LamStone API server
-    const UPDATER_BASE_URL = (process.env.UPDATER_BASE_URL || 'https://api.lamstonehealthcare.com').replace(/\/$/, '');
     const publicDownloadUrl = `${UPDATER_BASE_URL}/api/app/update/download/${encodeURIComponent(name).replace(/%2E/g, '.')}`;
 
     // Standard Windows x86_64
