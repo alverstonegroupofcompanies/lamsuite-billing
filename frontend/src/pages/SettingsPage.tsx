@@ -40,6 +40,15 @@ import {
   Check,
   ExternalLink,
   MessageCircle,
+  Users,
+  Package,
+  ShoppingCart,
+  ArrowRightLeft,
+  ArrowUpDown,
+  Search,
+  Filter,
+  CheckCircle2,
+  X,
 } from "lucide-react";
 import {
   companySettingsService,
@@ -81,7 +90,7 @@ import { storeRegistryService } from "../lib/auth/storeRegistryService";
 
 export const SettingsPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState<
-    "general" | "billing" | "sequences" | "printing" | "columns" | "security" | "integrations" | "sync_devices" | "backup_reset" | "tools" | "updates"
+    "general" | "billing" | "sequences" | "printing" | "columns" | "security" | "integrations" | "offline_sync" | "sync_devices" | "backup_reset" | "tools" | "updates"
   >("general");
 
   const [billingSubTab, setBillingSubTab] = useState<"taxes" | "payments">("taxes");
@@ -96,6 +105,12 @@ export const SettingsPage: React.FC = () => {
   const [syncQueue, setSyncQueue] = useState<SyncQueueItem[]>([]);
   const [isSyncing, setIsSyncing] = useState(false);
   const [watermark, setWatermark] = useState<number>(0);
+  const [syncFilter, setSyncFilter] = useState<"all" | "unsynced" | "pending" | "failed" | "synced">("unsynced");
+  const [syncEntityTypeFilter, setSyncEntityTypeFilter] = useState<string>("all");
+  const [syncSearchQuery, setSyncSearchQuery] = useState<string>("");
+  const [syncingItemId, setSyncingItemId] = useState<string | null>(null);
+  const [selectedPayloadItem, setSelectedPayloadItem] = useState<SyncQueueItem | null>(null);
+  const [isScanningOffline, setIsScanningOffline] = useState(false);
 
   // Backup & Reset state
   const [latestBackup, setLatestBackup] = useState<BackupPackage | null>(null);
@@ -409,11 +424,89 @@ export const SettingsPage: React.FC = () => {
       const result = await syncQueueService.processQueue();
       const queue = await sqliteStorage.findAll<SyncQueueItem>("sync_queue");
       setSyncQueue(queue);
-      showNotification(`Sync complete: ${result.processed} pushed, ${result.failed} failed`);
+      showNotification(`Sync complete: ${result.processed} pushed to database, ${result.failed} failed`);
     } catch (err) {
       showNotification("Sync queue processing failed", "error");
     } finally {
       setIsSyncing(false);
+    }
+  };
+
+  // Sync a single queue item to database immediately
+  const handleSyncSingleItem = async (itemId: string) => {
+    setSyncingItemId(itemId);
+    try {
+      const res = await syncQueueService.syncSingleItem(itemId);
+      const queue = await sqliteStorage.findAll<SyncQueueItem>("sync_queue");
+      setSyncQueue(queue);
+      if (res.success) {
+        showNotification("Item synced to database successfully!", "success");
+      } else {
+        showNotification(res.error || "Failed to sync item to database", "error");
+      }
+    } catch (err: any) {
+      showNotification(err?.message || "Sync execution error", "error");
+    } finally {
+      setSyncingItemId(null);
+    }
+  };
+
+  // Force sync all unsynced (pending + failed) items immediately
+  const handleForceSyncAll = async () => {
+    setIsSyncing(true);
+    try {
+      const result = await syncQueueService.forceSyncAll();
+      const queue = await sqliteStorage.findAll<SyncQueueItem>("sync_queue");
+      setSyncQueue(queue);
+      showNotification(`Full sync complete: ${result.processed} pushed to database, ${result.failed} failed`);
+    } catch (err: any) {
+      showNotification(err?.message || "Sync operation failed", "error");
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  // Discover and queue any local offline bills not yet in sync queue
+  const handleDiscoverOfflineInvoices = async () => {
+    setIsScanningOffline(true);
+    try {
+      const count = await syncQueueService.discoverUnsyncedInvoices();
+      const queue = await sqliteStorage.findAll<SyncQueueItem>("sync_queue");
+      setSyncQueue(queue);
+      if (count > 0) {
+        showNotification(`Discovered & queued ${count} offline bill(s) for database sync!`, "success");
+      } else {
+        showNotification("All offline bills are already tracked in sync queue.");
+      }
+    } catch (err: any) {
+      showNotification(err?.message || "Error scanning offline bills", "error");
+    } finally {
+      setIsScanningOffline(false);
+    }
+  };
+
+  // Delete a queue item
+  const handleDeleteQueueItem = async (itemId: string) => {
+    if (!window.confirm("Are you sure you want to remove this item from the sync queue?")) return;
+    try {
+      await syncQueueService.deleteQueueItem(itemId);
+      const queue = await sqliteStorage.findAll<SyncQueueItem>("sync_queue");
+      setSyncQueue(queue);
+      showNotification("Item removed from sync queue");
+    } catch (err: any) {
+      showNotification("Failed to delete queue item", "error");
+    }
+  };
+
+  // Clear all synced items
+  const handleClearSyncedItems = async () => {
+    try {
+      const cleared = await syncQueueService.clearSyncedItems();
+      const queue = await sqliteStorage.findAll<SyncQueueItem>("sync_queue");
+      setSyncQueue(queue);
+      showNotification(`Cleared ${cleared} synced item(s) from history`);
+    } catch (err: any) {
+      showNotification("Failed to clear synced history", "error");
     }
   };
 
@@ -508,6 +601,152 @@ export const SettingsPage: React.FC = () => {
     }
   };
 
+  // Auto-refresh queue when switching to sync tabs
+  useEffect(() => {
+    if (activeTab === "offline_sync" || activeTab === "sync_devices") {
+      sqliteStorage.findAll<SyncQueueItem>("sync_queue").then((q) => setSyncQueue(q)).catch(() => {});
+    }
+  }, [activeTab]);
+
+  // Filtered queue for Offline Database Sync tab
+  const filteredSyncQueue = syncQueue.filter((item) => {
+    // 1. Status Filter
+    if (syncFilter === "unsynced") {
+      if (item.status === "synced") return false;
+    } else if (syncFilter !== "all") {
+      if (item.status !== syncFilter) return false;
+    }
+
+    // 2. Entity Type Filter
+    if (syncEntityTypeFilter !== "all") {
+      if (item.entity_type !== syncEntityTypeFilter) return false;
+    }
+
+    // 3. Search Query
+    if (syncSearchQuery.trim()) {
+      const q = syncSearchQuery.toLowerCase();
+      const matchId = item.entity_id?.toLowerCase().includes(q);
+      const matchType = item.entity_type?.toLowerCase().includes(q);
+      const matchError = item.last_error?.toLowerCase().includes(q);
+      const matchPayload = item.payload_json?.toLowerCase().includes(q);
+      if (!matchId && !matchType && !matchError && !matchPayload) return false;
+    }
+
+    return true;
+  });
+
+  const getPayloadSummary = (item: SyncQueueItem) => {
+    try {
+      const data = JSON.parse(item.payload_json || "{}");
+      if (item.entity_type === "invoice") {
+        const invNum = data.invoice_number || data.invoice_no || item.entity_id;
+        const total = data.total_amount ?? data.grand_total ?? data.net_amount ?? 0;
+        const cust = data.customer_name || data.customer?.name || "Cash Customer";
+        const itemsCount = Array.isArray(data.items) ? data.items.length : 0;
+        return {
+          title: `Invoice #${invNum}`,
+          subtitle: `${cust} • ${itemsCount} item${itemsCount === 1 ? "" : "s"}`,
+          amount: Number(total),
+        };
+      }
+      if (item.entity_type === "customer" || item.entity_type === "party") {
+        const name = data.name || data.customer_name || item.entity_id;
+        const phone = data.phone || data.mobile || "";
+        return {
+          title: `Customer: ${name}`,
+          subtitle: phone ? `Phone: ${phone}` : "Customer Record",
+          amount: null,
+        };
+      }
+      if (item.entity_type === "product") {
+        const name = data.name || data.item_name || item.entity_id;
+        const code = data.barcode || data.item_code || data.sku || "";
+        return {
+          title: `Product: ${name}`,
+          subtitle: code ? `Code: ${code}` : "Inventory Catalog Item",
+          amount: data.selling_price || data.sale_price ? Number(data.selling_price || data.sale_price) : null,
+        };
+      }
+      if (item.entity_type === "stock_adjustment" || item.entity_type === "stock_event") {
+        const reason = data.reason || data.adjustment_type || "Stock adjustment";
+        const itemsCount = Array.isArray(data.items) ? data.items.length : 1;
+        return {
+          title: `Stock Adjustment #${item.entity_id.slice(0, 8)}`,
+          subtitle: `${reason} • ${itemsCount} item${itemsCount === 1 ? "" : "s"}`,
+          amount: null,
+        };
+      }
+      if (item.entity_type === "purchase" || item.entity_type === "purchase_order") {
+        const billNo = data.bill_number || data.invoice_number || item.entity_id;
+        const supplier = data.supplier_name || "Supplier";
+        const total = data.grand_total ?? data.total_amount ?? 0;
+        return {
+          title: `Purchase #${billNo}`,
+          subtitle: `${supplier}`,
+          amount: Number(total),
+        };
+      }
+      if (item.entity_type === "payment" || item.entity_type === "customer_payment") {
+        const ref = data.payment_ref || item.entity_id;
+        const amount = data.amount ?? 0;
+        const mode = data.payment_mode || "Cash";
+        return {
+          title: `Payment #${ref}`,
+          subtitle: `Mode: ${mode}`,
+          amount: Number(amount),
+        };
+      }
+      if (item.entity_type === "transfer") {
+        const dest = data.destination_store_id || data.to_branch || "Branch";
+        return {
+          title: `Stock Transfer #${item.entity_id.slice(0, 8)}`,
+          subtitle: `Target Branch: ${dest}`,
+          amount: null,
+        };
+      }
+      return {
+        title: `${item.entity_type.toUpperCase()} #${item.entity_id.slice(0, 8)}`,
+        subtitle: `Action: ${item.action}`,
+        amount: null,
+      };
+    } catch {
+      return {
+        title: `${item.entity_type.toUpperCase()} #${item.entity_id}`,
+        subtitle: `Action: ${item.action}`,
+        amount: null,
+      };
+    }
+  };
+
+  const getEntityIcon = (entityType: string) => {
+    switch (entityType) {
+      case "invoice":
+        return <ShoppingCart className="h-4 w-4 text-emerald-600" />;
+      case "customer":
+      case "party":
+        return <Users className="h-4 w-4 text-blue-600" />;
+      case "product":
+        return <Package className="h-4 w-4 text-purple-600" />;
+      case "transfer":
+      case "stock_adjustment":
+      case "stock_event":
+        return <ArrowRightLeft className="h-4 w-4 text-amber-600" />;
+      default:
+        return <Database className="h-4 w-4 text-slate-500" />;
+    }
+  };
+
+  const formatRelativeTime = (timestamp: number) => {
+    const diffSec = Math.floor((Date.now() - timestamp) / 1000);
+    if (diffSec < 60) return "Just now";
+    const diffMin = Math.floor(diffSec / 60);
+    if (diffMin < 60) return `${diffMin}m ago`;
+    const diffHours = Math.floor(diffMin / 60);
+    if (diffHours < 24) return `${diffHours}h ago`;
+    const diffDays = Math.floor(diffHours / 24);
+    return `${diffDays}d ago`;
+  };
+
   return (
     <div className="flex h-full flex-col gap-4">
       {/* Toast Alert */}
@@ -557,25 +796,39 @@ export const SettingsPage: React.FC = () => {
             { id: "printing", label: "Printing & Templates", icon: Printer },
             { id: "columns", label: "POS Column Settings", icon: Sliders },
             { id: "security", label: "Security & Cashiers", icon: ShieldCheck },
-            { id: "integrations", label: "Wallet & SMTP Mailer", icon: Mail },
+            { id: "integrations", label: "Wallet & WhatsApp Gateway", icon: Mail },
+            {
+              id: "offline_sync",
+              label: "Offline Database Sync",
+              icon: ArrowUpDown,
+              badge: syncQueue.filter((q) => q.status !== "synced").length,
+            },
             { id: "sync_devices", label: "Logged-In Devices", icon: Laptop },
             { id: "backup_reset", label: "Backup & Danger Zone", icon: Database },
             { id: "tools", label: "Testing Tools", icon: Play },
           ].map((item) => {
             const Icon = item.icon;
             const isActive = activeTab === item.id;
+            const badgeCount = (item as any).badge ?? 0;
             return (
               <button
                 key={item.id}
                 onClick={() => setActiveTab(item.id as any)}
-                className={`flex w-full items-center gap-2.5 rounded-btn px-3 py-2 text-left font-medium transition-colors ${
+                className={`flex w-full items-center justify-between rounded-btn px-3 py-2 text-left font-medium transition-colors ${
                   isActive
                     ? "bg-accent-soft text-accent font-semibold"
                     : "text-text-muted hover:bg-canvas hover:text-text-main"
                 }`}
               >
-                <Icon className={`h-4 w-4 ${isActive ? "text-accent" : "text-text-muted"}`} />
-                <span>{item.label}</span>
+                <div className="flex items-center gap-2.5 truncate">
+                  <Icon className={`h-4 w-4 shrink-0 ${isActive ? "text-accent" : "text-text-muted"}`} />
+                  <span className="truncate">{item.label}</span>
+                </div>
+                {badgeCount > 0 && (
+                  <span className="shrink-0 rounded-full bg-amber-500/15 text-amber-700 dark:text-amber-300 font-bold px-1.5 py-0.5 text-[10px]">
+                    {badgeCount}
+                  </span>
+                )}
               </button>
             );
           })}
@@ -3473,6 +3726,432 @@ export const SettingsPage: React.FC = () => {
                   </button>
                 </div>
               </div>
+            </div>
+          )}
+
+          {/* TAB: Offline to Database Sync */}
+          {activeTab === "offline_sync" && (
+            <div className="space-y-6">
+              {/* Header */}
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                <div>
+                  <h2 className="text-base font-bold text-text-main flex items-center gap-2">
+                    <ArrowUpDown className="h-5 w-5 text-accent" />
+                    <span>Offline to Database Sync</span>
+                    {syncQueue.filter((q) => q.status !== "synced").length > 0 && (
+                      <span className="text-xs px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 font-semibold">
+                        {syncQueue.filter((q) => q.status !== "synced").length} unsynced
+                      </span>
+                    )}
+                  </h2>
+                  <p className="text-xs text-text-muted mt-0.5">
+                    View offline bills, customers, adjustments, and transactions stored locally in SQLite and push them to the central MySQL server database.
+                  </p>
+                </div>
+                <div className="flex items-center flex-wrap gap-2">
+                  <button
+                    onClick={handleDiscoverOfflineInvoices}
+                    disabled={isScanningOffline}
+                    title="Scan SQLite invoices table for any offline bills not yet tracked in sync queue"
+                    className="flex items-center gap-1.5 rounded-btn border border-border-main bg-surface px-3 py-1.5 text-xs font-semibold text-text-main hover:bg-canvas disabled:opacity-50 transition-colors shadow-xs"
+                  >
+                    <Search className={`h-3.5 w-3.5 ${isScanningOffline ? "animate-spin text-accent" : ""}`} />
+                    <span>{isScanningOffline ? "Scanning..." : "Scan Offline Bills"}</span>
+                  </button>
+
+                  <button
+                    onClick={handleClearSyncedItems}
+                    disabled={syncQueue.filter((q) => q.status === "synced").length === 0}
+                    title="Purge successfully synced history items"
+                    className="flex items-center gap-1.5 rounded-btn border border-border-main bg-surface px-3 py-1.5 text-xs font-semibold text-text-muted hover:text-text-main hover:bg-canvas disabled:opacity-40 transition-colors shadow-xs"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                    <span>Clear Synced</span>
+                  </button>
+
+                  <button
+                    onClick={async () => {
+                      const queue = await sqliteStorage.findAll<SyncQueueItem>("sync_queue");
+                      setSyncQueue(queue);
+                    }}
+                    title="Refresh sync queue from SQLite"
+                    className="flex items-center gap-1.5 rounded-btn border border-border-main bg-surface px-3 py-1.5 text-xs font-semibold text-text-main hover:bg-canvas transition-colors shadow-xs"
+                  >
+                    <RefreshCw className="h-3.5 w-3.5" />
+                    <span>Refresh</span>
+                  </button>
+
+                  <button
+                    onClick={handleForceSyncAll}
+                    disabled={isSyncing || syncQueue.filter((q) => q.status !== "synced").length === 0}
+                    className="flex items-center gap-1.5 rounded-btn bg-accent px-3.5 py-1.5 text-xs font-semibold text-white shadow-xs hover:bg-accent/90 disabled:opacity-50 transition-colors"
+                  >
+                    <RefreshCw className={`h-3.5 w-3.5 ${isSyncing ? "animate-spin" : ""}`} />
+                    <span>{isSyncing ? "Syncing..." : "Sync All to Database"}</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Status Metric Cards */}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                <div className="rounded-card border border-border-main bg-surface p-3.5 shadow-xs">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-bold uppercase tracking-wider text-text-muted">Pending Push</span>
+                    <Clock className="h-4 w-4 text-amber-500" />
+                  </div>
+                  <p className="text-2xl font-bold text-amber-600 mt-1">
+                    {syncQueue.filter((q) => q.status === "pending").length}
+                  </p>
+                  <span className="text-[11px] text-text-muted">Awaiting sync cycle</span>
+                </div>
+
+                <div className="rounded-card border border-border-main bg-surface p-3.5 shadow-xs">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-bold uppercase tracking-wider text-text-muted">Failed / Errors</span>
+                    <AlertCircle className="h-4 w-4 text-rose-500" />
+                  </div>
+                  <p className="text-2xl font-bold text-rose-600 mt-1">
+                    {syncQueue.filter((q) => q.status === "failed").length}
+                  </p>
+                  <span className="text-[11px] text-text-muted">Click "Sync Now" to retry</span>
+                </div>
+
+                <div className="rounded-card border border-border-main bg-surface p-3.5 shadow-xs">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-bold uppercase tracking-wider text-text-muted">Synced to DB</span>
+                    <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+                  </div>
+                  <p className="text-2xl font-bold text-emerald-600 mt-1">
+                    {syncQueue.filter((q) => q.status === "synced").length}
+                  </p>
+                  <span className="text-[11px] text-text-muted">Saved on central MySQL</span>
+                </div>
+
+                <div className="rounded-card border border-border-main bg-surface p-3.5 shadow-xs">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-bold uppercase tracking-wider text-text-muted">Network Status</span>
+                    <span className={`h-2.5 w-2.5 rounded-full ${navigator.onLine ? "bg-emerald-500 animate-pulse" : "bg-rose-500"}`} />
+                  </div>
+                  <p className="text-base font-bold text-text-main mt-2">
+                    {navigator.onLine ? "Online (Server Reachable)" : "Offline (Local Only)"}
+                  </p>
+                  <span className="text-[11px] text-text-muted">
+                    {navigator.onLine ? "Auto-sync active" : "Changes queued in SQLite"}
+                  </span>
+                </div>
+              </div>
+
+              {/* Filters & Search Toolbar */}
+              <div className="rounded-card border border-border-main bg-surface p-3 space-y-3 shadow-xs">
+                <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                  {/* Status Pills */}
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    {[
+                      { id: "unsynced", label: "Unsynced", count: syncQueue.filter((q) => q.status !== "synced").length },
+                      { id: "pending", label: "Pending", count: syncQueue.filter((q) => q.status === "pending").length },
+                      { id: "failed", label: "Failed", count: syncQueue.filter((q) => q.status === "failed").length },
+                      { id: "synced", label: "Synced", count: syncQueue.filter((q) => q.status === "synced").length },
+                      { id: "all", label: "All Records", count: syncQueue.length },
+                    ].map((tab) => (
+                      <button
+                        key={tab.id}
+                        onClick={() => setSyncFilter(tab.id as any)}
+                        className={`flex items-center gap-1.5 rounded-btn px-2.5 py-1 text-xs font-semibold transition-colors ${
+                          syncFilter === tab.id
+                            ? "bg-accent text-white shadow-xs"
+                            : "bg-canvas text-text-muted hover:text-text-main hover:bg-border-main/50"
+                        }`}
+                      >
+                        <span>{tab.label}</span>
+                        <span className={`rounded-full px-1.5 py-0.2 text-[10px] font-bold ${
+                          syncFilter === tab.id ? "bg-white/20 text-white" : "bg-surface text-text-muted"
+                        }`}>
+                          {tab.count}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Search Input */}
+                  <div className="relative min-w-[220px]">
+                    <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-text-muted" />
+                    <input
+                      type="text"
+                      value={syncSearchQuery}
+                      onChange={(e) => setSyncSearchQuery(e.target.value)}
+                      placeholder="Search ID, invoice #, error..."
+                      className="w-full rounded-btn border border-border-main bg-canvas pl-8 pr-3 py-1.5 text-xs text-text-main placeholder:text-text-muted focus:outline-none focus:ring-1 focus:ring-accent"
+                    />
+                    {syncSearchQuery && (
+                      <button
+                        onClick={() => setSyncSearchQuery("")}
+                        className="absolute right-2.5 top-2.5 text-text-muted hover:text-text-main"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Entity Type Filter Bar */}
+                <div className="flex items-center gap-1.5 overflow-x-auto pt-1 border-t border-border-main/60 text-xs">
+                  <span className="text-[11px] font-semibold text-text-muted mr-1 flex items-center gap-1">
+                    <Filter className="h-3 w-3" /> Type:
+                  </span>
+                  {[
+                    { id: "all", label: "All Types" },
+                    { id: "invoice", label: "Invoices" },
+                    { id: "customer", label: "Customers" },
+                    { id: "product", label: "Products" },
+                    { id: "stock_adjustment", label: "Stock Adjustments" },
+                    { id: "purchase", label: "Purchases" },
+                    { id: "payment", label: "Payments" },
+                    { id: "transfer", label: "Transfers" },
+                  ].map((t) => (
+                    <button
+                      key={t.id}
+                      onClick={() => setSyncEntityTypeFilter(t.id)}
+                      className={`rounded-btn px-2 py-0.5 text-[11px] font-medium whitespace-nowrap transition-colors ${
+                        syncEntityTypeFilter === t.id
+                          ? "bg-accent-soft text-accent font-semibold"
+                          : "text-text-muted hover:text-text-main"
+                      }`}
+                    >
+                      {t.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Items Table */}
+              <div className="rounded-card border border-border-main bg-surface shadow-xs overflow-hidden">
+                {filteredSyncQueue.length === 0 ? (
+                  <div className="p-12 text-center">
+                    <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 mb-3">
+                      <CheckCircle2 className="h-6 w-6" />
+                    </div>
+                    <h3 className="text-sm font-bold text-text-main">
+                      {syncFilter === "unsynced"
+                        ? "No unsynced items found!"
+                        : "No matching sync queue records"}
+                    </h3>
+                    <p className="text-xs text-text-muted max-w-sm mx-auto mt-1">
+                      {syncFilter === "unsynced"
+                        ? "All local sales, customers, and inventory events have been successfully synced with the server database."
+                        : "Try selecting a different filter or clearing your search query."}
+                    </p>
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-xs">
+                      <thead className="border-b border-border-main bg-canvas/60 text-text-muted uppercase text-[10px] font-bold">
+                        <tr>
+                          <th className="px-3.5 py-2.5">Entity / Item Details</th>
+                          <th className="px-3 py-2.5">Action</th>
+                          <th className="px-3 py-2.5">Queued Time</th>
+                          <th className="px-3 py-2.5">Sync Status</th>
+                          <th className="px-3 py-2.5">Retries</th>
+                          <th className="px-3 py-2.5 text-right">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-border-main">
+                        {filteredSyncQueue.map((item) => {
+                          const summary = getPayloadSummary(item);
+                          const isItemSyncing = syncingItemId === item.id;
+                          return (
+                            <tr key={item.id} className="hover:bg-canvas/50 transition-colors">
+                              {/* Entity / Details */}
+                              <td className="px-3.5 py-3">
+                                <div className="flex items-start gap-2.5">
+                                  <div className="mt-0.5 rounded-btn bg-canvas p-1.5 border border-border-main/50">
+                                    {getEntityIcon(item.entity_type)}
+                                  </div>
+                                  <div>
+                                    <div className="flex items-center gap-1.5">
+                                      <span className="font-semibold text-text-main">{summary.title}</span>
+                                      <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-canvas text-text-muted border border-border-main/40 uppercase">
+                                        {item.entity_type}
+                                      </span>
+                                    </div>
+                                    <p className="text-[11px] text-text-muted mt-0.5">{summary.subtitle}</p>
+                                    {summary.amount !== null && (
+                                      <p className="text-[11px] font-semibold text-text-main mt-0.5">
+                                        ₹{summary.amount.toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+                                      </p>
+                                    )}
+                                    {item.status === "failed" && item.last_error && (
+                                      <div className="mt-1.5 rounded bg-rose-50 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-900/40 p-1.5 text-[10px] text-rose-700 dark:text-rose-300">
+                                        <span className="font-bold">Error:</span> {item.last_error}
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              </td>
+
+                              {/* Action */}
+                              <td className="px-3 py-3">
+                                <span className={`inline-block rounded px-1.5 py-0.5 text-[10px] font-bold uppercase ${
+                                  item.action === "create"
+                                    ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300"
+                                    : item.action === "update"
+                                    ? "bg-blue-100 text-blue-800 dark:bg-blue-950/50 dark:text-blue-300"
+                                    : "bg-rose-100 text-rose-800 dark:bg-rose-950/50 dark:text-rose-300"
+                                }`}>
+                                  {item.action}
+                                </span>
+                              </td>
+
+                              {/* Queued Time */}
+                              <td className="px-3 py-3 text-text-muted whitespace-nowrap">
+                                <div className="text-[11px] text-text-main font-medium">
+                                  {formatRelativeTime(item.created_at)}
+                                </div>
+                                <div className="text-[10px] font-mono">
+                                  {new Date(item.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                                </div>
+                              </td>
+
+                              {/* Status */}
+                              <td className="px-3 py-3 whitespace-nowrap">
+                                {item.status === "synced" ? (
+                                  <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 dark:bg-emerald-950/40 px-2 py-0.5 text-[11px] font-semibold text-emerald-800 dark:text-emerald-300">
+                                    <CheckCircle2 className="h-3 w-3" /> Synced
+                                  </span>
+                                ) : item.status === "failed" ? (
+                                  <span className="inline-flex items-center gap-1 rounded-full bg-rose-100 dark:bg-rose-950/40 px-2 py-0.5 text-[11px] font-semibold text-rose-800 dark:text-rose-300">
+                                    <AlertCircle className="h-3 w-3" /> Failed
+                                  </span>
+                                ) : item.status === "in_progress" ? (
+                                  <span className="inline-flex items-center gap-1 rounded-full bg-blue-100 dark:bg-blue-950/40 px-2 py-0.5 text-[11px] font-semibold text-blue-800 dark:text-blue-300">
+                                    <RefreshCw className="h-3 w-3 animate-spin" /> In Progress
+                                  </span>
+                                ) : (
+                                  <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 dark:bg-amber-950/40 px-2 py-0.5 text-[11px] font-semibold text-amber-800 dark:text-amber-300">
+                                    <Clock className="h-3 w-3" /> Pending
+                                  </span>
+                                )}
+                              </td>
+
+                              {/* Retries */}
+                              <td className="px-3 py-3 text-[11px] font-mono text-text-muted">
+                                {item.retry_count > 0 ? (
+                                  <span className="font-semibold text-amber-700 dark:text-amber-400">
+                                    {item.retry_count} {item.retry_count === 1 ? "retry" : "retries"}
+                                  </span>
+                                ) : (
+                                  "0"
+                                )}
+                              </td>
+
+                              {/* Actions */}
+                              <td className="px-3 py-3 text-right whitespace-nowrap">
+                                <div className="flex items-center justify-end gap-1.5">
+                                  {item.status !== "synced" && (
+                                    <button
+                                      onClick={() => handleSyncSingleItem(item.id)}
+                                      disabled={isItemSyncing || isSyncing}
+                                      className="flex items-center gap-1 rounded-btn bg-accent px-2.5 py-1 text-[11px] font-semibold text-white shadow-xs hover:bg-accent/90 disabled:opacity-50 transition-colors"
+                                      title="Push this item to database now"
+                                    >
+                                      <RefreshCw className={`h-3 w-3 ${isItemSyncing ? "animate-spin" : ""}`} />
+                                      <span>{isItemSyncing ? "Syncing..." : "Sync Now"}</span>
+                                    </button>
+                                  )}
+                                  <button
+                                    onClick={() => setSelectedPayloadItem(item)}
+                                    className="rounded-btn border border-border-main bg-canvas p-1 text-text-muted hover:text-text-main hover:bg-border-main/50 transition-colors"
+                                    title="View JSON Payload"
+                                  >
+                                    <Eye className="h-3.5 w-3.5" />
+                                  </button>
+                                  <button
+                                    onClick={() => handleDeleteQueueItem(item.id)}
+                                    className="rounded-btn border border-border-main bg-canvas p-1 text-text-muted hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors"
+                                    title="Delete from sync queue"
+                                  >
+                                    <Trash2 className="h-3.5 w-3.5" />
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+
+              {/* Payload Inspector Modal */}
+              {selectedPayloadItem && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+                  <div className="w-full max-w-2xl rounded-card border border-border-main bg-surface shadow-xl flex flex-col max-h-[85vh]">
+                    <div className="flex items-center justify-between border-b border-border-main p-4">
+                      <div>
+                        <h3 className="text-sm font-bold text-text-main flex items-center gap-2">
+                          <Eye className="h-4 w-4 text-accent" />
+                          <span>Payload Inspector: {selectedPayloadItem.entity_type.toUpperCase()}</span>
+                          <span className="font-mono text-xs text-text-muted">#{selectedPayloadItem.entity_id}</span>
+                        </h3>
+                        <p className="text-xs text-text-muted mt-0.5">
+                          Action: <strong className="uppercase">{selectedPayloadItem.action}</strong> • Status: <strong className="uppercase">{selectedPayloadItem.status}</strong> • Retries: {selectedPayloadItem.retry_count}
+                        </p>
+                      </div>
+                      <button
+                        onClick={() => setSelectedPayloadItem(null)}
+                        className="rounded-btn p-1 text-text-muted hover:text-text-main hover:bg-canvas"
+                      >
+                        <X className="h-5 w-5" />
+                      </button>
+                    </div>
+
+                    {selectedPayloadItem.last_error && (
+                      <div className="bg-rose-50 dark:bg-rose-950/30 border-b border-rose-200 dark:border-rose-900/40 p-3 text-xs text-rose-800 dark:text-rose-200">
+                        <strong className="font-bold">Last Error: </strong> {selectedPayloadItem.last_error}
+                      </div>
+                    )}
+
+                    <div className="flex-1 overflow-auto p-4 bg-slate-900 text-slate-100 font-mono text-xs rounded-b">
+                      <pre className="whitespace-pre-wrap break-all">
+                        {(() => {
+                          try {
+                            return JSON.stringify(JSON.parse(selectedPayloadItem.payload_json), null, 2);
+                          } catch {
+                            return selectedPayloadItem.payload_json;
+                          }
+                        })()}
+                      </pre>
+                    </div>
+
+                    <div className="flex items-center justify-between border-t border-border-main p-3 bg-canvas/40">
+                      <div className="text-[11px] text-text-muted font-mono">
+                        Queued: {new Date(selectedPayloadItem.created_at).toLocaleString()}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {selectedPayloadItem.status !== "synced" && (
+                          <button
+                            onClick={async () => {
+                              await handleSyncSingleItem(selectedPayloadItem.id);
+                              setSelectedPayloadItem(null);
+                            }}
+                            disabled={syncingItemId === selectedPayloadItem.id}
+                            className="flex items-center gap-1.5 rounded-btn bg-accent px-3 py-1.5 text-xs font-semibold text-white hover:bg-accent/90"
+                          >
+                            <RefreshCw className={`h-3.5 w-3.5 ${syncingItemId === selectedPayloadItem.id ? "animate-spin" : ""}`} />
+                            <span>Sync to Database Now</span>
+                          </button>
+                        )}
+                        <button
+                          onClick={() => setSelectedPayloadItem(null)}
+                          className="rounded-btn border border-border-main bg-surface px-3 py-1.5 text-xs font-semibold text-text-main hover:bg-canvas"
+                        >
+                          Close
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 

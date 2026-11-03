@@ -355,6 +355,154 @@ export class SyncQueueService {
     return { processed, failed };
   }
 
+  /**
+   * Sync a single specific item from the queue immediately to the database.
+   */
+  async syncSingleItem(itemId: string, apiClient: SyncApiClient = defaultBackendApiClient): Promise<{ success: boolean; error?: string }> {
+    const item = await sqliteStorage.findById<SyncQueueItem>("sync_queue", itemId);
+    if (!item) {
+      return { success: false, error: "Queue item not found" };
+    }
+
+    try {
+      item.status = "in_progress";
+      await sqliteStorage.insertRecord("sync_queue", item.id, item as unknown as Record<string, unknown>);
+      this.notifyListeners();
+
+      let payload: Record<string, unknown> = {};
+      try {
+        payload = JSON.parse(item.payload_json);
+      } catch (_) {}
+
+      const activeStoreId = String(storeRegistryService.getActiveStore()?.id || "1");
+      if (!payload.store_id) {
+        payload.store_id = activeStoreId;
+      }
+
+      if (typeof apiClient.pushBatch === "function") {
+        const res = await apiClient.pushBatch([
+          {
+            id: item.id,
+            entity_type: item.entity_type,
+            action: item.action,
+            payload,
+          },
+        ]);
+
+        if (res.success || res.results?.processed > 0) {
+          item.status = "synced";
+          item.last_error = undefined;
+          await sqliteStorage.insertRecord("sync_queue", item.id, item as unknown as Record<string, unknown>);
+          this.lastSyncedAt = Date.now();
+          this.notifyListeners();
+          return { success: true };
+        } else {
+          const errDetail = (res as any).results?.errors?.[0]?.error || (res as any).error || "Server rejected item";
+          throw new Error(errDetail);
+        }
+      } else if (item.entity_type === "invoice" && apiClient.pushInvoices) {
+        const res = await apiClient.pushInvoices([payload]);
+        if (res.success) {
+          item.status = "synced";
+          item.last_error = undefined;
+          await sqliteStorage.insertRecord("sync_queue", item.id, item as unknown as Record<string, unknown>);
+          this.lastSyncedAt = Date.now();
+          this.notifyListeners();
+          return { success: true };
+        } else {
+          throw new Error("Server rejected invoice");
+        }
+      } else {
+        throw new Error("No compatible API push method available");
+      }
+    } catch (err: any) {
+      const retryCount = (item.retry_count || 0) + 1;
+      item.status = "failed";
+      item.retry_count = retryCount;
+      item.last_error = err?.message || String(err);
+      item.next_retry_at = Date.now() + this.calculateBackoffMs(retryCount);
+      await sqliteStorage.insertRecord("sync_queue", item.id, item as unknown as Record<string, unknown>);
+      this.notifyListeners();
+      return { success: false, error: item.last_error };
+    }
+  }
+
+  /**
+   * Force sync all pending and failed items immediately, resetting retry backoffs.
+   */
+  async forceSyncAll(apiClient: SyncApiClient = defaultBackendApiClient): Promise<{ processed: number; failed: number }> {
+    const all = await sqliteStorage.findAll<SyncQueueItem>("sync_queue");
+    for (const item of all) {
+      if (item.status === "failed") {
+        item.status = "pending";
+        item.next_retry_at = 0;
+        await sqliteStorage.insertRecord("sync_queue", item.id, item as unknown as Record<string, unknown>);
+      }
+    }
+    return await this.processQueue(apiClient);
+  }
+
+  /**
+   * Delete an item from the sync queue (e.g. invalid or corrupted record).
+   */
+  async deleteQueueItem(itemId: string): Promise<boolean> {
+    try {
+      await sqliteStorage.deleteRecord("sync_queue", itemId);
+      this.notifyListeners();
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Clear all items already marked as synced.
+   */
+  async clearSyncedItems(): Promise<number> {
+    const all = await sqliteStorage.findAll<SyncQueueItem>("sync_queue");
+    let count = 0;
+    for (const item of all) {
+      if (item.status === "synced") {
+        await sqliteStorage.deleteRecord("sync_queue", item.id);
+        count++;
+      }
+    }
+    this.notifyListeners();
+    return count;
+  }
+
+  /**
+   * Scan local SQLite invoices table for any offline bills not yet present in sync_queue.
+   */
+  async discoverUnsyncedInvoices(): Promise<number> {
+    try {
+      const localInvoices = await sqliteStorage.findAll<any>("invoices");
+      const existingQueue = await sqliteStorage.findAll<SyncQueueItem>("sync_queue");
+      const existingEntityIds = new Set(existingQueue.map((q) => q.entity_id));
+
+      let enqueued = 0;
+      for (const inv of localInvoices) {
+        const isPending =
+          inv.sync_state === "pending" ||
+          inv.sync_status === "pending" ||
+          inv.is_offline_temp === true ||
+          inv.is_offline === true;
+
+        if (isPending && !existingEntityIds.has(inv.id)) {
+          await this.enqueue("invoice", inv.id, "create", {
+            ...inv,
+            invoice_number: inv.invoice_number,
+            store_id: inv.store_id,
+          });
+          enqueued++;
+        }
+      }
+      return enqueued;
+    } catch {
+      return 0;
+    }
+  }
+
   stopAutoSync(): void {
     if (this.autoSyncInterval) {
       clearInterval(this.autoSyncInterval);

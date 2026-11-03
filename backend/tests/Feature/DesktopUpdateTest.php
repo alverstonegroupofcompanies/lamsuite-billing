@@ -44,7 +44,7 @@ class DesktopUpdateTest extends TestCase
 
     public function test_dynamic_update_returns_204_when_up_to_date(): void
     {
-        $response = $this->getJson('/api/app/update/windows-x86_64/2.0.28');
+        $response = $this->getJson('/api/app/update/windows-x86_64/2.0.29');
 
         $response->assertStatus(204);
     }
@@ -69,11 +69,11 @@ class DesktopUpdateTest extends TestCase
         if (!\Illuminate\Support\Facades\File::exists($fakeDir)) {
             \Illuminate\Support\Facades\File::makeDirectory($fakeDir, 0755, true);
         }
-        $fakeFile = "{$fakeDir}/LamSuite-Billing_2.0.28_x64-setup.nsis.zip";
+        $fakeFile = "{$fakeDir}/LamSuite-Billing_2.0.29_x64-setup.nsis.zip";
         \Illuminate\Support\Facades\File::put($fakeFile, "DUMMY_ZIP_CONTENT");
 
         try {
-            $response = $this->get('/api/app/update/download/LamSuite-Billing_2.0.28_x64-setup.nsis.zip');
+            $response = $this->get('/api/app/update/download/LamSuite-Billing_2.0.29_x64-setup.nsis.zip');
             $response->assertStatus(200);
             $response->assertHeader('Content-Type', 'application/octet-stream');
         } finally {

@@ -41,7 +41,7 @@ export interface UpdateSettingsConfig {
 
 export type UpdateProgressCallback = (status: UpdateStatusResult) => void;
 
-const CURRENT_VERSION = "2.0.28";
+const CURRENT_VERSION = "2.0.29";
 const STORAGE_KEY_CONFIG = "lamsuite_updater_config";
 const STORAGE_KEY_DIAGNOSTICS = "lamsuite_updater_diagnostics";
 

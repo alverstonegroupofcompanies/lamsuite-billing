@@ -71,4 +71,33 @@ describe("Sync Queue Service (SYNC-002, SYNC-003)", () => {
     expect(all[0].retry_count).toBe(1);
     expect(all[0].last_error).toContain("503 Service Unavailable");
   });
+
+  it("syncs a single specific item individually via syncSingleItem", async () => {
+    const qId = await syncQueueService.enqueue("invoice", "inv_single_1", "create", { amount: 500 });
+
+    const mockApi: SyncApiClient = {
+      pushBatch: async (items) => ({
+        success: true,
+        results: { total: items.length, processed: items.length, failed: 0 },
+      }),
+    };
+
+    const res = await syncQueueService.syncSingleItem(qId, mockApi);
+    expect(res.success).toBe(true);
+
+    const updated = await sqliteStorage.findById<{ status: string }>("sync_queue", qId);
+    expect(updated?.status).toBe("synced");
+  });
+
+  it("deletes a queue item and clears synced items", async () => {
+    const q1 = await syncQueueService.enqueue("invoice", "inv_del_1", "create", { amount: 100 });
+    const q2 = await syncQueueService.enqueue("invoice", "inv_del_2", "create", { amount: 200 });
+
+    const deleted = await syncQueueService.deleteQueueItem(q1);
+    expect(deleted).toBe(true);
+
+    const remaining = await sqliteStorage.findAll("sync_queue");
+    expect(remaining.length).toBe(1);
+    expect((remaining[0] as any).id).toBe(q2);
+  });
 });
