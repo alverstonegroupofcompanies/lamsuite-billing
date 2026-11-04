@@ -1049,6 +1049,7 @@ export const SettingsPage: React.FC = () => {
             <SoftwareUpdatesTab
               onFoundUpdate={(info) => setFoundUpdate(info)}
               showNotification={showNotification}
+              onNavigateToSync={() => setActiveTab("offline_sync")}
             />
           )}
 

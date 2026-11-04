@@ -22,15 +22,18 @@ import {
   type UpdateInfo,
   type UpdateSettingsConfig,
 } from "../../lib/settings/autoUpdateService";
+import { syncQueueService } from "../../lib/sync/syncQueueService";
 
 interface SoftwareUpdatesTabProps {
   onFoundUpdate: (info: UpdateInfo) => void;
   showNotification: (msg: string, type?: "success" | "error") => void;
+  onNavigateToSync?: () => void;
 }
 
 export const SoftwareUpdatesTab: React.FC<SoftwareUpdatesTabProps> = ({
   onFoundUpdate,
   showNotification,
+  onNavigateToSync,
 }) => {
   const [config, setConfig] = useState<UpdateSettingsConfig>(autoUpdateService.getConfig());
   const [isChecking, setIsChecking] = useState<boolean>(false);
@@ -53,7 +56,19 @@ export const SoftwareUpdatesTab: React.FC<SoftwareUpdatesTabProps> = ({
     if (diag) {
       setLastDiagnostic(diag);
     }
-    autoUpdateService.getUnsyncedBillsCount().then(setUnsyncedCount);
+
+    const refreshCount = () => {
+      autoUpdateService.getUnsyncedBillsCount().then(setUnsyncedCount);
+    };
+    refreshCount();
+
+    const unsub = syncQueueService.subscribe(() => {
+      refreshCount();
+    });
+
+    return () => {
+      unsub();
+    };
   }, []);
 
   const handleCheckNow = async () => {
@@ -150,9 +165,19 @@ export const SoftwareUpdatesTab: React.FC<SoftwareUpdatesTabProps> = ({
                 <strong>{unsyncedCount} unsynced bill(s)</strong> in local offline queue. Pending bills will remain safe during update.
               </span>
             </div>
-            <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 bg-amber-100 text-amber-800 rounded">
-              Sync Queue
-            </span>
+            {onNavigateToSync ? (
+              <button
+                type="button"
+                onClick={onNavigateToSync}
+                className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 bg-amber-200 hover:bg-amber-300 text-amber-900 rounded transition cursor-pointer"
+              >
+                Sync Queue
+              </button>
+            ) : (
+              <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 bg-amber-100 text-amber-800 rounded">
+                Sync Queue
+              </span>
+            )}
           </div>
         )}
 

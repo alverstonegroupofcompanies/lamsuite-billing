@@ -150,7 +150,7 @@ describe("AutoUpdateService - Mocked Feed Scenarios", () => {
 
   it("1. Mocked feed returning no update -> Up to date state", async () => {
     const mockFeed = {
-      version: "2.0.29",
+      version: "2.0.30",
       notes: "Current version",
       pub_date: new Date().toISOString(),
       platforms: {},
@@ -162,7 +162,7 @@ describe("AutoUpdateService - Mocked Feed Scenarios", () => {
 
     const result = await autoUpdateService.checkForUpdates();
     expect(result.shouldUpdate).toBe(false);
-    expect(result.message).toContain("Already up to date (version 2.0.29)");
+    expect(result.message).toContain("Already up to date (version 2.0.30)");
     expect(result.diagnostic?.status).toBe(200);
   });
 
@@ -235,6 +235,21 @@ describe("AutoUpdateService - Unsynced Offline Bills Safety Gate", () => {
     await expect(autoUpdateService.installAndRestart()).rejects.toThrow(
       "You have 1 unsynced bill(s) pending. Updating will restart the application. Please sync all pending transactions before updating."
     );
+  });
+
+  it("Ignores already synced items in SQLite sync_queue and correctly returns 0 unsynced", async () => {
+    // Insert an item with status === "synced"
+    await sqliteStorage.insertRecord("sync_queue", "sync_tx_synced_001", {
+      id: "sync_tx_synced_001",
+      table_name: "invoices",
+      status: "synced",
+      action: "insert",
+      payload: { invoice_number: "INV-SYNCED-001", grand_total: 1500 },
+      created_at: new Date().toISOString(),
+    });
+
+    const count = await autoUpdateService.getUnsyncedBillsCount();
+    expect(count).toBe(0);
   });
 
   it("Captures download failure (404), formats exact message with URL, and notifies deviceSessionService", async () => {

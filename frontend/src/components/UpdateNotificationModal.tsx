@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { Download, RefreshCw, AlertCircle, CheckCircle2, X, AlertTriangle, Layers } from "lucide-react";
 import { autoUpdateService, type UpdateInfo } from "../lib/settings/autoUpdateService";
+import { syncQueueService } from "../lib/sync/syncQueueService";
 
 interface UpdateModalProps {
   updateInfo: UpdateInfo;
@@ -16,9 +17,20 @@ export const UpdateNotificationModal: React.FC<UpdateModalProps> = ({ updateInfo
   const [showUnsyncedWarning, setShowUnsyncedWarning] = useState<boolean>(false);
 
   useEffect(() => {
-    autoUpdateService.getUnsyncedBillsCount().then((count) => {
-      setUnsyncedCount(count);
+    const refreshCount = () => {
+      autoUpdateService.getUnsyncedBillsCount().then((count) => {
+        setUnsyncedCount(count);
+      });
+    };
+    refreshCount();
+
+    const unsub = syncQueueService.subscribe(() => {
+      refreshCount();
     });
+
+    return () => {
+      unsub();
+    };
   }, []);
 
   const handleStartUpdate = async (ignoreWarning: boolean = false) => {

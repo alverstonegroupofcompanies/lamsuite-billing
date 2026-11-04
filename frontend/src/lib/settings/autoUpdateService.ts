@@ -41,7 +41,7 @@ export interface UpdateSettingsConfig {
 
 export type UpdateProgressCallback = (status: UpdateStatusResult) => void;
 
-const CURRENT_VERSION = "2.0.29";
+const CURRENT_VERSION = "2.0.30";
 const STORAGE_KEY_CONFIG = "lamsuite_updater_config";
 const STORAGE_KEY_DIAGNOSTICS = "lamsuite_updater_diagnostics";
 
@@ -531,7 +531,7 @@ class AutoUpdateService {
   public async getUnsyncedBillsCount(): Promise<number> {
     try {
       const items = await sqliteStorage.findAll<any>("sync_queue");
-      return (items || []).length;
+      return (items || []).filter((item: any) => item.status !== "synced").length;
     } catch (e) {
       console.warn("[AutoUpdate] Failed checking sync_queue:", e);
       return 0;
