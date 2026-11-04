@@ -150,7 +150,7 @@ describe("AutoUpdateService - Mocked Feed Scenarios", () => {
 
   it("1. Mocked feed returning no update -> Up to date state", async () => {
     const mockFeed = {
-      version: "2.0.31",
+      version: "2.0.32",
       notes: "Current version",
       pub_date: new Date().toISOString(),
       platforms: {},
@@ -162,7 +162,7 @@ describe("AutoUpdateService - Mocked Feed Scenarios", () => {
 
     const result = await autoUpdateService.checkForUpdates();
     expect(result.shouldUpdate).toBe(false);
-    expect(result.message).toContain("Already up to date (version 2.0.31)");
+    expect(result.message).toContain("Already up to date (version 2.0.32)");
     expect(result.diagnostic?.status).toBe(200);
   });
 
@@ -271,6 +271,28 @@ describe("AutoUpdateService - Unsynced Offline Bills Safety Gate", () => {
       testUrl,
       404,
       expect.stringContaining("404")
+    );
+  });
+
+  it("Captures signature verification failure and preserves specific signature error message", async () => {
+    vi.spyOn(autoUpdateService, "isTauri").mockReturnValue(true);
+    const { deviceSessionService } = await import("../devices/deviceSessionService");
+    const reportSpy = vi.spyOn(deviceSessionService, "reportUpdateFailure").mockResolvedValue(true);
+
+    vi.mocked(tauriUpdater.installUpdate).mockRejectedValue(
+      new Error("verify signature error: The signature verification failed")
+    );
+
+    const testUrl = "https://api.lamstonehealthcare.com/api/app/update/download/LamSuite-Billing_2.0.32_x64-setup.nsis.zip";
+
+    await expect(
+      autoUpdateService.installAndRestart(undefined, true, testUrl)
+    ).rejects.toThrow("Installation failed: signature verification failed");
+
+    expect(reportSpy).toHaveBeenCalledWith(
+      testUrl,
+      422,
+      expect.stringContaining("signature verification failed")
     );
   });
 });

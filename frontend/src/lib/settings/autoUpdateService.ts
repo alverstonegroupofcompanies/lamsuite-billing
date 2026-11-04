@@ -41,7 +41,7 @@ export interface UpdateSettingsConfig {
 
 export type UpdateProgressCallback = (status: UpdateStatusResult) => void;
 
-const CURRENT_VERSION = "2.0.31";
+const CURRENT_VERSION = "2.0.32";
 const STORAGE_KEY_CONFIG = "lamsuite_updater_config";
 const STORAGE_KEY_DIAGNOSTICS = "lamsuite_updater_diagnostics";
 
@@ -583,12 +583,15 @@ class AutoUpdateService {
     } catch (err: any) {
       console.error("[AutoUpdate] Installation failed:", err);
       const rawMsg = typeof err === "string" ? err : (err?.message || String(err));
+      const isSignatureError = /signature/i.test(rawMsg) || /verification failed/i.test(rawMsg);
       const statusMatch = rawMsg.match(/status:\s*(\d{3})/i) || rawMsg.match(/\b(\d{3})\b/);
-      const statusCode = statusMatch ? parseInt(statusMatch[1], 10) : 404;
+      const statusCode = statusMatch ? parseInt(statusMatch[1], 10) : (isSignatureError ? 422 : 404);
 
       const urlMatch = rawMsg.match(/https?:\/\/[^\s"',)]+/);
       const failingUrl = urlMatch ? urlMatch[0] : targetUrl;
-      const formattedError = `Download failed (${statusCode}): ${failingUrl}`;
+      const formattedError = isSignatureError
+        ? `Installation failed: signature verification failed. Update package signature does not match or server returned invalid payload.`
+        : `Download failed (${statusCode}): ${failingUrl}`;
 
       console.error(`[AutoUpdate] ${formattedError}`);
 
