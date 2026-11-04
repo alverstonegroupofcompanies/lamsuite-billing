@@ -622,6 +622,14 @@ export const MIGRATIONS: Migration[] = [
       CREATE INDEX IF NOT EXISTS idx_invoice_payments_ref ON invoice_payments(reference_no);
       CREATE INDEX IF NOT EXISTS idx_invoice_payments_mode ON invoice_payments(payment_mode);
       CREATE INDEX IF NOT EXISTS idx_invoice_payments_status ON invoice_payments(status);
+
+      CREATE TABLE IF NOT EXISTS store_settings (
+        id TEXT PRIMARY KEY,
+        store_id TEXT,
+        settings_json TEXT,
+        created_at INTEGER,
+        updated_at INTEGER
+      );
     `,
   },
 ];

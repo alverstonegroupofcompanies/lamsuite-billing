@@ -67,6 +67,11 @@ Route::post('/sync/push/transfers', [SyncController::class, 'pushTransfers']);
 Route::post('/sync/push/staff', [SyncController::class, 'pushStaff']);
 Route::get('/sync/pull/deltas', [SyncController::class, 'pullDeltas']);
 
+// Central Store Configuration & Sync for all Terminals & Devices
+Route::get('/settings', [AdminSettingController::class, 'index']);
+Route::post('/settings', [AdminSettingController::class, 'update']);
+Route::put('/settings', [AdminSettingController::class, 'update']);
+
 // Centralized Device Session Tracking & Logged-In Devices (Item 2)
 Route::get('/public-ip', [DeviceSessionController::class, 'publicIp']);
 Route::get('/network/public-ip', [DeviceSessionController::class, 'publicIp']);
@@ -257,15 +262,23 @@ Route::middleware(['auth:sanctum', 'session.timeout', 'ip.allowlist', 'scope.sto
     Route::get('/products', [AdminMasterController::class, 'products'])->middleware('rbac:masters,view');
     Route::post('/products', [AdminMasterController::class, 'storeProduct'])->middleware('rbac:masters,create');
     Route::put('/products/{id}', [AdminMasterController::class, 'updateProduct'])->middleware('rbac:masters,edit');
+    Route::delete('/products/{id}', [AdminMasterController::class, 'deleteProduct'])->middleware('rbac:masters,delete');
     Route::post('/products/{id}/batches', [AdminMasterController::class, 'addBatch'])->middleware('rbac:masters,create');
     Route::post('/products/bulk-edit', [AdminMasterController::class, 'bulkEditProducts'])->middleware('rbac:masters,edit');
 
+    Route::get('/batches', [AdminMasterController::class, 'batches'])->middleware('rbac:masters,view');
+    Route::put('/batches/{id}', [AdminMasterController::class, 'updateBatch'])->middleware('rbac:masters,edit');
+    Route::delete('/batches/{id}', [AdminMasterController::class, 'deleteBatch'])->middleware('rbac:masters,delete');
+
     Route::get('/lookups', [AdminMasterController::class, 'lookups'])->middleware('rbac:masters,view');
     Route::post('/lookups', [AdminMasterController::class, 'storeLookup'])->middleware('rbac:masters,create');
+    Route::put('/lookups/{id}', [AdminMasterController::class, 'updateLookup'])->middleware('rbac:masters,edit');
+    Route::delete('/lookups/{id}', [AdminMasterController::class, 'deleteLookup'])->middleware('rbac:masters,delete');
 
     Route::get('/parties', [AdminMasterController::class, 'parties'])->middleware('rbac:masters,view');
     Route::post('/parties', [AdminMasterController::class, 'storeParty'])->middleware('rbac:masters,create');
     Route::put('/parties/{id}', [AdminMasterController::class, 'updateParty'])->middleware('rbac:masters,edit');
+    Route::delete('/parties/{id}', [AdminMasterController::class, 'deleteParty'])->middleware('rbac:masters,delete');
 
     Route::post('/masters/merge', [AdminMasterController::class, 'mergeDuplicates'])->middleware('rbac:masters,edit');
     Route::post('/masters/import', [AdminMasterController::class, 'import'])->middleware('rbac:masters,create');

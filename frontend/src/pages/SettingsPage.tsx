@@ -334,6 +334,17 @@ export const SettingsPage: React.FC = () => {
       setSyncQueue(queue);
 
       setWatermark(cloudDeltaSyncService.getWatermark());
+
+      // If online, sync latest authoritative store settings from central database
+      if (typeof navigator !== "undefined" && navigator.onLine) {
+        companySettingsService.fetchRemoteSettings(cfg.store_id).then((fresh) => {
+          setSettings(fresh);
+          if (fresh.workspace) {
+            applyWorkspaceSettings(fresh.workspace);
+          }
+          setDrugLicenseInput(fresh.drug_license_numbers ? fresh.drug_license_numbers.join(", ") : "");
+        }).catch(() => {});
+      }
     } catch (err) {
       console.error("Failed loading settings:", err);
     }
@@ -360,7 +371,7 @@ export const SettingsPage: React.FC = () => {
       if (updated.workspace) {
         applyWorkspaceSettings(updated.workspace);
       }
-      showNotification("Configuration updated and saved successfully!");
+      showNotification("Configuration updated and saved to database successfully!");
     } catch (err) {
       showNotification("Failed to save settings", "error");
     }

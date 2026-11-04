@@ -352,6 +352,13 @@ export class StoreDeviceService {
       console.warn("Registry registration notice:", e);
     }
 
+    try {
+      const { companySettingsService } = await import("../settings/companySettingsService");
+      await companySettingsService.fetchRemoteSettings(storeProfile.store_id);
+    } catch (e) {
+      console.warn("Owner settings sync notice:", e);
+    }
+
     onProgress?.("Owner enrollment completed!", 100);
     return storeProfile;
   }
@@ -746,6 +753,13 @@ export class StoreDeviceService {
       });
     } catch (e) {
       console.warn("Registry registration notice:", e);
+    }
+
+    try {
+      const { companySettingsService } = await import("../settings/companySettingsService");
+      await companySettingsService.fetchRemoteSettings(profileData.store_id);
+    } catch (e) {
+      console.warn("Remote settings sync notice:", e);
     }
 
     onProgress?.("Workstation ready!", 100);

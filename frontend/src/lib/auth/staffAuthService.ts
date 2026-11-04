@@ -393,6 +393,12 @@ export class StaffAuthService {
             if (body.token) {
               onlineToken = body.token;
             }
+            if (body.settings) {
+              try {
+                const { companySettingsService } = await import("../settings/companySettingsService");
+                await companySettingsService.updateLocalFromRemote(body.settings);
+              } catch (_) {}
+            }
           }
         } else if (res.status === 401 || res.status === 403 || res.status === 422 || res.status === 423) {
           const err = await res.json().catch(() => ({}));
@@ -494,6 +500,12 @@ export class StaffAuthService {
             };
             if (body.token) {
               onlineToken = body.token;
+            }
+            if (body.settings) {
+              try {
+                const { companySettingsService } = await import("../settings/companySettingsService");
+                await companySettingsService.updateLocalFromRemote(body.settings);
+              } catch (_) {}
             }
           }
         } else if (res.status === 401 || res.status === 403 || res.status === 422 || res.status === 423) {

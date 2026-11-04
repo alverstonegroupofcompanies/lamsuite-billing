@@ -1,4 +1,5 @@
 import { sqliteStorage } from "../db/sqliteStorage";
+import { getResolvedApiBaseUrl } from "../../config/env";
 
 const memoryFallbackStorage = new Map<string, string>();
 
@@ -1221,6 +1222,224 @@ export class CompanySettingsService {
       "active_config",
       this.currentSettings as unknown as Record<string, unknown>
     );
+
+    // Save settings directly to central database so all devices on this store share identical configuration
+    await this.pushSettingsToServer(this.currentSettings);
+
+    return { ...this.currentSettings };
+  }
+
+  /**
+   * Pushes store settings to central backend DB. If offline or server unreachable,
+   * enqueues an update in sync_queue for automatic background synchronization.
+   */
+  async pushSettingsToServer(settingsToSave: CompanySettings): Promise<boolean> {
+    const storeId = String(settingsToSave.store_id || "1");
+    const baseUrl = getResolvedApiBaseUrl();
+
+    try {
+      const token = safeStorage.getItem("staff_token");
+      const res = await fetch(`${baseUrl}/api/settings`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+          "X-Store-Id": storeId,
+          "Store-Id": storeId,
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({
+          ...settingsToSave,
+          store_id: storeId,
+        }),
+      });
+
+      if (res.ok) {
+        return true;
+      }
+    } catch (_) {
+      // Server unreachable or offline
+    }
+
+    try {
+      const queueId = `sync_set_${Date.now()}_${Math.random().toString(16).slice(2, 6)}`;
+      await sqliteStorage.insertRecord("sync_queue", queueId, {
+        id: queueId,
+        entity_type: "settings",
+        entity_id: storeId,
+        action: "update",
+        payload_json: JSON.stringify({
+          ...settingsToSave,
+          store_id: storeId,
+        }),
+        status: "pending",
+        retry_count: 0,
+        created_at: Date.now(),
+      });
+    } catch (_) {}
+
+    return false;
+  }
+
+  /**
+   * Fetches the latest authoritative store settings from the central database
+   * and saves them to local SQLite DB so all devices on this store share the exact settings.
+   */
+  async fetchRemoteSettings(storeId?: string): Promise<CompanySettings> {
+    const activeStore = String(storeId || this.currentSettings.store_id || "1");
+    const baseUrl = getResolvedApiBaseUrl();
+
+    try {
+      const token = safeStorage.getItem("staff_token");
+      const res = await fetch(`${baseUrl}/api/settings?store_id=${activeStore}`, {
+        headers: {
+          Accept: "application/json",
+          "X-Store-Id": activeStore,
+          "Store-Id": activeStore,
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+      });
+
+      if (res.ok) {
+        const remoteData = await res.json();
+        return await this.updateLocalFromRemote(remoteData);
+      }
+    } catch (_) {
+      // Server unreachable or offline: fallback to local database
+    }
+
+    return this.getSettings();
+  }
+
+  async syncSettingsWithServer(storeId?: string): Promise<CompanySettings> {
+    return await this.fetchRemoteSettings(storeId);
+  }
+
+  /**
+   * Ingests remote settings payload received from database (via staff login, delta sync, or /api/settings),
+   * merges with local defaults, and updates SQLite store_settings table.
+   */
+  async updateLocalFromRemote(remotePayload: any): Promise<CompanySettings> {
+    if (!remotePayload || typeof remotePayload !== "object") {
+      return { ...this.currentSettings };
+    }
+
+    const payload = remotePayload.settings || remotePayload;
+
+    // Handle nested or flat billing configurations
+    const billing = payload.billing || {};
+    const taxMode = payload.tax_mode || billing.tax_mode || this.currentSettings.tax_mode;
+    const purchaseTaxMode = payload.purchase_tax_mode || billing.purchase_tax_mode || this.currentSettings.purchase_tax_mode;
+    const gstType = payload.gst_type || billing.gst_type || this.currentSettings.gst_type;
+    const allowTaxOverride = payload.allow_tax_override_per_bill !== undefined
+      ? Boolean(payload.allow_tax_override_per_bill)
+      : (billing.allow_tax_override_per_bill !== undefined ? Boolean(billing.allow_tax_override_per_bill) : this.currentSettings.allow_tax_override_per_bill);
+    const defaultHsn = payload.default_hsn_code || billing.default_hsn_code || this.currentSettings.default_hsn_code;
+    const creditPeriodDays = payload.credit_period_days !== undefined
+      ? Number(payload.credit_period_days)
+      : (billing.credit_period_days !== undefined ? Number(billing.credit_period_days) : this.currentSettings.credit_period_days);
+    const defaultDiscount = payload.default_discount_percent !== undefined
+      ? Number(payload.default_discount_percent)
+      : (billing.default_discount_percent !== undefined ? Number(billing.default_discount_percent) : this.currentSettings.default_discount_percent);
+    const defaultPaymentMode = payload.default_payment_mode || billing.default_payment_mode || this.currentSettings.default_payment_mode;
+    const roundOffEnabled = payload.round_off_enabled !== undefined
+      ? Boolean(payload.round_off_enabled)
+      : (billing.round_off_enabled !== undefined ? Boolean(billing.round_off_enabled) : this.currentSettings.round_off_enabled);
+    const defaultRateBasis = payload.default_rate_basis || billing.default_rate_basis || this.currentSettings.default_rate_basis;
+
+    // Sequences
+    const sequences = payload.sequences || {};
+    const invoicePrefix = sequences.invoicePrefix || sequences.invoice_prefix || payload.invoice_prefix || this.currentSettings.invoice_prefix;
+    const nextInvoiceNumber = sequences.nextInvoiceNumber || sequences.next_invoice_number || payload.next_invoice_number || this.currentSettings.next_invoice_number;
+
+    const mergedSequences = {
+      ...this.currentSettings.sequences,
+      ...sequences,
+      invoicePrefix,
+      nextInvoiceNumber,
+    };
+
+    this.currentSettings = {
+      ...this.currentSettings,
+      store_id: String(payload.store_id || this.currentSettings.store_id),
+      store_name: payload.store_name || payload.name || this.currentSettings.store_name,
+      display_name: payload.display_name || this.currentSettings.display_name,
+      phone: payload.phone !== undefined ? payload.phone : this.currentSettings.phone,
+      email: payload.email !== undefined ? payload.email : this.currentSettings.email,
+      address: payload.address !== undefined ? payload.address : this.currentSettings.address,
+      state_code: payload.state_code || this.currentSettings.state_code,
+      gstin: payload.gstin !== undefined ? payload.gstin : this.currentSettings.gstin,
+      drug_license_numbers: Array.isArray(payload.drug_license_numbers) ? payload.drug_license_numbers : this.currentSettings.drug_license_numbers,
+      fssai_no: payload.fssai_no !== undefined ? payload.fssai_no : this.currentSettings.fssai_no,
+      currency_symbol: payload.currency_symbol || this.currentSettings.currency_symbol,
+
+      store_type: payload.store_type || this.currentSettings.store_type,
+      gst_type: gstType,
+      allow_tax_override_per_bill: allowTaxOverride,
+      tax_mode: taxMode,
+      purchase_tax_mode: purchaseTaxMode,
+      default_hsn_code: defaultHsn,
+      credit_period_days: creditPeriodDays,
+      default_discount_percent: defaultDiscount,
+      default_payment_mode: defaultPaymentMode,
+      round_off_enabled: roundOffEnabled,
+      default_rate_basis: defaultRateBasis,
+
+      sequences: mergedSequences,
+      invoice_prefix: invoicePrefix,
+      next_invoice_number: nextInvoiceNumber,
+
+      printing: { ...this.currentSettings.printing, ...(payload.printing || {}) },
+      workspace: { ...this.currentSettings.workspace, ...(payload.workspace || {}) },
+      security: { ...this.currentSettings.security, ...(payload.security || {}) },
+      inventory: { ...this.currentSettings.inventory, ...(payload.inventory || {}) },
+      wallet: { ...this.currentSettings.wallet, ...(payload.wallet || {}) },
+      smtp: { ...this.currentSettings.smtp, ...(payload.smtp || {}) },
+      whatsapp: { ...this.currentSettings.whatsapp, ...(payload.whatsapp || {}) },
+      keyboard: { ...this.currentSettings.keyboard, ...(payload.keyboard || {}) },
+      payments: {
+        ...this.currentSettings.payments,
+        ...(payload.payments || {}),
+        modes: payload.payments?.modes?.length ? payload.payments.modes : this.currentSettings.payments.modes,
+      },
+
+      invoice_columns: Array.isArray(payload.invoice_columns) && payload.invoice_columns.length > 0
+        ? payload.invoice_columns
+        : this.currentSettings.invoice_columns,
+      header_fields: Array.isArray(payload.header_fields) && payload.header_fields.length > 0
+        ? payload.header_fields
+        : this.currentSettings.header_fields,
+      active_billing_preset: payload.active_billing_preset || this.currentSettings.active_billing_preset,
+      saved_billing_presets: Array.isArray(payload.saved_billing_presets) && payload.saved_billing_presets.length > 0
+        ? payload.saved_billing_presets
+        : this.currentSettings.saved_billing_presets,
+
+      purchase_columns: Array.isArray(payload.purchase_columns) && payload.purchase_columns.length > 0
+        ? payload.purchase_columns
+        : this.currentSettings.purchase_columns,
+      purchase_header_fields: Array.isArray(payload.purchase_header_fields) && payload.purchase_header_fields.length > 0
+        ? payload.purchase_header_fields
+        : this.currentSettings.purchase_header_fields,
+      active_purchase_preset: payload.active_purchase_preset || this.currentSettings.active_purchase_preset,
+      saved_purchase_presets: Array.isArray(payload.saved_purchase_presets) && payload.saved_purchase_presets.length > 0
+        ? payload.saved_purchase_presets
+        : this.currentSettings.saved_purchase_presets,
+
+      enable_pts: payload.enable_pts !== undefined ? Boolean(payload.enable_pts) : this.currentSettings.enable_pts,
+      enable_ptss: payload.enable_ptss !== undefined ? Boolean(payload.enable_ptss) : this.currentSettings.enable_ptss,
+      freight_is_taxable: payload.freight_is_taxable !== undefined ? Boolean(payload.freight_is_taxable) : this.currentSettings.freight_is_taxable,
+      enabled_menu_items: Array.isArray(payload.enabled_menu_items) && payload.enabled_menu_items.length > 0
+        ? payload.enabled_menu_items
+        : this.currentSettings.enabled_menu_items,
+      is_active: payload.is_active !== undefined ? Boolean(payload.is_active) : this.currentSettings.is_active,
+    };
+
+    await sqliteStorage.insertRecord(
+      "store_settings",
+      "active_config",
+      this.currentSettings as unknown as Record<string, unknown>
+    );
+
     return { ...this.currentSettings };
   }
 

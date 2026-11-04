@@ -1,4 +1,5 @@
 import { sqliteStorage } from "../db/sqliteStorage";
+import { syncQueueService } from "../sync/syncQueueService";
 
 export interface UnitMaster {
   id: string;
@@ -179,6 +180,19 @@ export class UnitsStore {
       is_active: is_active ? 1 : 0,
     });
 
+    try {
+      await syncQueueService.enqueue("unit", id, "update", {
+        id,
+        type: "unit",
+        name,
+        symbol,
+        precision,
+        is_active,
+      } as unknown as Record<string, unknown>);
+    } catch {
+      // offline/background
+    }
+
     return fullUnit;
   }
 
@@ -186,7 +200,15 @@ export class UnitsStore {
    * Delete a unit by ID from master_lookups
    */
   async deleteUnit(id: string): Promise<boolean> {
-    return await sqliteStorage.deleteRecord("master_lookups", id);
+    const deleted = await sqliteStorage.deleteRecord("master_lookups", id);
+    if (deleted) {
+      try {
+        await syncQueueService.enqueue("unit", id, "delete", { id, type: "unit" });
+      } catch {
+        // offline/background
+      }
+    }
+    return deleted;
   }
 }
 

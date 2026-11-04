@@ -515,8 +515,17 @@ export class PartiesStore {
     }
 
     try {
-      await syncQueueService.enqueue("customer", party.id, "update", party as unknown as Record<string, unknown>);
+      await syncQueueService.enqueue("party", party.id, "update", party as unknown as Record<string, unknown>);
     } catch (_) {}
+  }
+
+  async deleteParty(id: string, type: "customer" | "supplier" | "doctor" | "patient" = "customer"): Promise<boolean> {
+    const table = type === "customer" ? "customers" : type === "supplier" ? "suppliers" : type === "doctor" ? "doctors" : "patients";
+    const res = await sqliteStorage.deleteRecord(table, id);
+    try {
+      await syncQueueService.enqueue("party", id, "delete", { id, type });
+    } catch (_) {}
+    return res;
   }
 
   async getAllParties(): Promise<PartyMaster[]> {

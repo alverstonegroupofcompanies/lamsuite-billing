@@ -321,6 +321,7 @@ class StaffAuthController
                 'code' => $store->code,
                 'tax_mode' => $store->tax_mode,
             ],
+            'settings' => (new AdminSettingController())->getSettingsPayload($store),
         ]);
     }
 

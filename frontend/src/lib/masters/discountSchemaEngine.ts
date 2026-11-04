@@ -1,3 +1,6 @@
+import { sqliteStorage } from "../db/sqliteStorage";
+import { syncQueueService } from "../sync/syncQueueService";
+
 export interface DiscountSchema {
   id: string;
   name: string;
@@ -45,13 +48,93 @@ export class DiscountSchemaEngine {
     },
   ];
 
-  registerRule(rule: DiscountRule): void {
+  async registerRule(rule: DiscountRule): Promise<void> {
     const existingIdx = this.activeRules.findIndex((r) => r.rule_id === rule.rule_id);
     if (existingIdx >= 0) {
       this.activeRules[existingIdx] = rule;
     } else {
       this.activeRules.push(rule);
     }
+
+    try {
+      await sqliteStorage.insertRecord("master_lookups", rule.rule_id, {
+        id: rule.rule_id,
+        type: "discount_schema",
+        name: rule.name,
+        code: rule.rule_id,
+        config: JSON.stringify({
+          rule_type: rule.rule_type,
+          discount_percent: rule.discount_percent,
+          min_quantity: rule.min_quantity,
+          free_quantity: rule.free_quantity,
+        }),
+        is_active: rule.is_active ? 1 : 0,
+      });
+
+      await syncQueueService.enqueue("discount_schema", rule.rule_id, "update", {
+        type: "discount_schema",
+        name: rule.name,
+        code: rule.rule_id,
+        config: {
+          rule_type: rule.rule_type,
+          discount_percent: rule.discount_percent,
+          min_quantity: rule.min_quantity,
+          free_quantity: rule.free_quantity,
+        },
+        is_active: rule.is_active,
+      });
+    } catch {
+      // offline / in-memory fallback
+    }
+  }
+
+  async deleteRule(ruleId: string): Promise<void> {
+    this.activeRules = this.activeRules.filter((r) => r.rule_id !== ruleId);
+    try {
+      await sqliteStorage.deleteRecord("master_lookups", ruleId);
+      await syncQueueService.enqueue("discount_schema", ruleId, "delete", { rule_id: ruleId });
+    } catch {
+      // offline / in-memory fallback
+    }
+  }
+
+  async loadRulesFromDb(): Promise<DiscountRule[]> {
+    try {
+      const records = await sqliteStorage.findAll<any>("master_lookups");
+      const rules = records
+        .filter((r) => r && r.type === "discount_schema")
+        .map((r) => {
+          let config: any = {};
+          if (typeof r.config === "string") {
+            try { config = JSON.parse(r.config); } catch {}
+          } else if (r.config && typeof r.config === "object") {
+            config = r.config;
+          }
+          return {
+            rule_id: String(r.id || r.code),
+            name: String(r.name),
+            rule_type: (config.rule_type || "percentage") as "percentage" | "buy_x_get_y" | "customer_type",
+            discount_percent: Number(config.discount_percent || 0),
+            min_quantity: Number(config.min_quantity || 1),
+            free_quantity: Number(config.free_quantity || 0),
+            is_active: r.is_active === 1 || r.is_active === true,
+          };
+        });
+
+      if (rules.length > 0) {
+        for (const rule of rules) {
+          const idx = this.activeRules.findIndex((ar) => ar.rule_id === rule.rule_id);
+          if (idx >= 0) {
+            this.activeRules[idx] = rule;
+          } else {
+            this.activeRules.push(rule);
+          }
+        }
+      }
+    } catch {
+      // fallback to initial
+    }
+    return this.getAllRules();
   }
 
   getAllRules(): DiscountRule[] {

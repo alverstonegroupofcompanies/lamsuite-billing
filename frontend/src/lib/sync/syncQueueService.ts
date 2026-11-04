@@ -19,7 +19,12 @@ export interface SyncQueueItem {
     | "purchase_return"
     | "transfer"
     | "staff"
-    | "staff_user";
+    | "staff_user"
+    | "unit"
+    | "discount_schema"
+    | "lookup"
+    | "settings"
+    | "setting";
   entity_id: string;
   action: "create" | "update" | "delete";
   payload_json: string;

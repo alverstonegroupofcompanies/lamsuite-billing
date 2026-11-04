@@ -459,8 +459,12 @@ export class StoreRegistryService {
     this.registry.active_store_id = idStr;
     await this.saveRegistry();
 
-    // 5. Reload company settings for the new store
-    await companySettingsService.loadSettings();
+    // 5. Reload company settings for the new store from database or local fallback
+    try {
+      await companySettingsService.fetchRemoteSettings(idStr);
+    } catch (_) {
+      await companySettingsService.loadSettings();
+    }
 
     // 6. Broadcast device presence heartbeat under new active store
     deviceSessionService.sendHeartbeat({ store_id: idStr }).catch(() => {});

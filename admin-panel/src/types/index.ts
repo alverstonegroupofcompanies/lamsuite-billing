@@ -138,6 +138,28 @@ export interface Party {
   version: number;
 }
 
+export interface MasterLookup {
+  id: number;
+  store_id: number | null;
+  type:
+    | "unit"
+    | "group"
+    | "brand"
+    | "manufacturer"
+    | "discount_schema"
+    | "tax_rate"
+    | "expense_head"
+    | "bank"
+    | string;
+  code?: string;
+  name: string;
+  description?: string;
+  config?: Record<string, any>;
+  is_active: boolean;
+  created_at?: string;
+  updated_at?: string;
+}
+
 export interface InvoiceItem {
   id: number;
   invoice_id: number;

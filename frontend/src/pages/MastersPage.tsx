@@ -167,7 +167,7 @@ export const MastersPage: React.FC = () => {
       const allParties = await partiesStore.getAllParties();
       setParties(allParties);
 
-      const rules = discountSchemaEngine.getAllRules();
+      const rules = await discountSchemaEngine.loadRulesFromDb();
       setDiscountRules(rules);
 
       const allUnits = await unitsStore.getAllUnits(true);
@@ -378,7 +378,7 @@ export const MastersPage: React.FC = () => {
   };
 
   // Save Discount Rule
-  const handleSaveDiscountRule = (e: React.FormEvent) => {
+  const handleSaveDiscountRule = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!discForm.name || !discForm.rule_type) {
       showNotification("Rule Name is required", "error");
@@ -395,7 +395,7 @@ export const MastersPage: React.FC = () => {
       is_active: discForm.is_active ?? true,
     };
 
-    discountSchemaEngine.registerRule(rule);
+    await discountSchemaEngine.registerRule(rule);
     showNotification(`Discount schema "${rule.name}" added`);
     setIsDiscountModalOpen(false);
     loadData();

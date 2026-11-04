@@ -7,6 +7,7 @@ export interface MasterDeltaResponse {
   products: ProductItem[];
   batches: ProductBatch[];
   parties: PartyMaster[];
+  settings?: any;
 }
 
 export interface CloudDeltaApiClient {
@@ -98,7 +99,15 @@ export class CloudDeltaSyncService {
       }
     }
 
-    // 4. Update watermark
+    // 4. Ingest Settings if delivered in delta
+    if (delta.settings) {
+      try {
+        const { companySettingsService } = await import("../settings/companySettingsService");
+        await companySettingsService.updateLocalFromRemote(delta.settings);
+      } catch (_) {}
+    }
+
+    // 5. Update watermark
     this.lastWatermark = delta.watermark;
 
     return {

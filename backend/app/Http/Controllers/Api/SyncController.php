@@ -17,6 +17,7 @@ use App\Models\StockTransfer;
 use App\Models\StockTransferItem;
 use App\Models\Expense;
 use App\Models\CustomerPayment;
+use App\Models\MasterLookup;
 use App\Models\SyncEvent;
 use App\Models\Store;
 
@@ -104,6 +105,22 @@ class SyncController
                     case 'staff':
                     case 'staff_user':
                         $this->upsertSingleStaffUser($request, $payload);
+                        break;
+                    case 'settings':
+                    case 'setting':
+                        $this->upsertSingleSettings($request, $payload);
+                        break;
+                    case 'lookup':
+                    case 'master_lookup':
+                    case 'unit':
+                    case 'group':
+                    case 'brand':
+                    case 'manufacturer':
+                    case 'discount_schema':
+                    case 'tax_rate':
+                    case 'expense_head':
+                    case 'bank':
+                        $this->upsertSingleLookup($request, $payload, $entityType);
                         break;
                     default:
                         // Record as generic sync event
@@ -442,6 +459,35 @@ class SyncController
         ]);
 
         return $p;
+    }
+
+    private function upsertSingleLookup(Request $request, array $lookup, string $entityType = 'unit'): MasterLookup
+    {
+        $storeId = $this->resolveStoreId($request, $lookup);
+        $type = $lookup['type'] ?? ($entityType !== 'lookup' && $entityType !== 'master_lookup' ? $entityType : 'unit');
+        $code = $lookup['code'] ?? ($lookup['symbol'] ?? null);
+        $name = trim((string)($lookup['name'] ?? 'Unnamed'));
+
+        $record = MasterLookup::updateOrCreate(
+            [
+                'store_id' => $storeId,
+                'type' => $type,
+                'name' => $name,
+            ],
+            [
+                'code' => $code,
+                'description' => $lookup['description'] ?? null,
+                'config' => $lookup['config'] ?? (isset($lookup['precision']) ? ['precision' => $lookup['precision']] : null),
+                'is_active' => isset($lookup['is_active']) ? (bool)$lookup['is_active'] : true,
+            ]
+        );
+
+        $this->recordSyncEvent($request, 'lookup', (string)$record->id, 'update', [
+            'type' => $record->type,
+            'name' => $record->name,
+        ]);
+
+        return $record;
     }
 
     /**
@@ -818,6 +864,18 @@ class SyncController
         ]);
     }
 
+    private function upsertSingleSettings(Request $request, array $payload): void
+    {
+        $storeId = $this->resolveStoreId($request, $payload);
+        $store = Store::find($storeId) ?? Store::first();
+        if (!$store) return;
+
+        $updateReq = new Request();
+        $updateReq->replace($payload);
+        $updateReq->attributes->set('active_store_id', $store->id);
+        (new AdminSettingController())->update($updateReq);
+    }
+
     /**
      * Pull master deltas updated since watermark timestamp.
      */
@@ -829,12 +887,19 @@ class SyncController
         $products = Product::where('updated_at', '>=', $sinceDate)->get();
         $batches = ProductBatch::where('updated_at', '>=', $sinceDate)->get();
         $parties = Party::where('updated_at', '>=', $sinceDate)->get();
+        $lookups = MasterLookup::where('updated_at', '>=', $sinceDate)->get();
+
+        $storeId = $this->resolveStoreId($request);
+        $store = Store::find($storeId) ?? Store::first();
+        $settings = $store ? (new AdminSettingController())->getSettingsPayload($store) : null;
 
         return response()->json([
             'watermark' => (int) (microtime(true) * 1000),
             'products' => $products,
             'batches' => $batches,
             'parties' => $parties,
+            'lookups' => $lookups,
+            'settings' => $settings,
         ]);
     }
 
