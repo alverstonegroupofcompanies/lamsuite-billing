@@ -150,7 +150,7 @@ describe("AutoUpdateService - Mocked Feed Scenarios", () => {
 
   it("1. Mocked feed returning no update -> Up to date state", async () => {
     const mockFeed = {
-      version: "2.0.30",
+      version: "2.0.31",
       notes: "Current version",
       pub_date: new Date().toISOString(),
       platforms: {},
@@ -162,7 +162,7 @@ describe("AutoUpdateService - Mocked Feed Scenarios", () => {
 
     const result = await autoUpdateService.checkForUpdates();
     expect(result.shouldUpdate).toBe(false);
-    expect(result.message).toContain("Already up to date (version 2.0.30)");
+    expect(result.message).toContain("Already up to date (version 2.0.31)");
     expect(result.diagnostic?.status).toBe(200);
   });
 

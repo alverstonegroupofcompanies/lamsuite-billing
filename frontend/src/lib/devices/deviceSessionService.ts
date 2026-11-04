@@ -4,6 +4,7 @@ import { storeRegistryService } from "../auth/storeRegistryService";
 import { syncQueueService } from "../sync/syncQueueService";
 import { staffAuthService } from "../auth/staffAuthService";
 import { publicIpService } from "../network/publicIpService";
+import { deviceIpService, formatIpv4 } from "../network/deviceIpService";
 import { getOrCreateClientDeviceUuid, detectDeviceFriendlyName } from "../auth/clientDeviceIdentifier";
 
 function getStoredToken(): string | null {
@@ -30,6 +31,7 @@ export interface LoggedInDevice {
   user_name: string | null;
   user_role: string | null;
   ip_address: string | null;
+  device_ipv4?: string | null;
   public_ip?: string | null;
   location: string | null;
   status: DeviceStatus;
@@ -116,15 +118,25 @@ export class DeviceSessionService {
       };
 
       if (Array.isArray(data.devices)) {
-        this.cachedDevices = data.devices.map((d: any) => ({
-          ...d,
-          public_ip: d.public_ip || (d.is_this_device && data.caller_public_ip ? data.caller_public_ip : null),
-          is_this_device: Boolean(d.is_this_device || (clientUuid && d.device_uuid === clientUuid)),
-          status: (["Active", "Idle", "Offline", "Locked", "Revoked"].includes(d.status) ? d.status : "Offline") as DeviceStatus,
-          sign_in_time: d.sign_in_time || d.login_time || null,
-          last_seen: d.last_seen || d.last_active || null,
-          unsynced_items_count: Number(d.unsynced_items_count) || 0,
-        }));
+        const localIpv4 = await deviceIpService.getLocalIpv4().catch(() => "127.0.0.1");
+        this.cachedDevices = data.devices.map((d: any) => {
+          const isThis = Boolean(d.is_this_device || (clientUuid && d.device_uuid === clientUuid));
+          const cleanIpv4 = formatIpv4(
+            d.device_ipv4 || d.ip_address || (isThis ? localIpv4 : null),
+            isThis ? localIpv4 : (d.ip_address ? formatIpv4(d.ip_address, d.ip_address) : "127.0.0.1")
+          );
+          return {
+            ...d,
+            ip_address: d.ip_address ? formatIpv4(d.ip_address, d.ip_address) : (isThis ? localIpv4 : null),
+            device_ipv4: cleanIpv4,
+            public_ip: d.public_ip || (isThis && data.caller_public_ip ? data.caller_public_ip : null),
+            is_this_device: isThis,
+            status: (["Active", "Idle", "Offline", "Locked", "Revoked"].includes(d.status) ? d.status : "Offline") as DeviceStatus,
+            sign_in_time: d.sign_in_time || d.login_time || null,
+            last_seen: d.last_seen || d.last_active || null,
+            unsynced_items_count: Number(d.unsynced_items_count) || 0,
+          };
+        });
         this.notify();
         return this.cachedDevices;
       }
@@ -135,6 +147,7 @@ export class DeviceSessionService {
       }
 
       const publicIp = await publicIpService.getPublicIp().catch(() => null);
+      const localIpv4 = await deviceIpService.getLocalIpv4().catch(() => "127.0.0.1");
 
       if (profile) {
         const fallback: LoggedInDevice = {
@@ -148,14 +161,15 @@ export class DeviceSessionService {
           store_code: profile.store_code || "STORE-01",
           user_name: staffAuthService.getCurrentSession()?.user.full_name || "Cashier",
           user_role: staffAuthService.getCurrentSession()?.user.role || "Admin",
-          ip_address: "127.0.0.1",
+          ip_address: localIpv4,
+          device_ipv4: localIpv4,
           public_ip: publicIp,
           location: profile.location_name || null,
           login_time: new Date(profile.registered_at || Date.now()).toISOString(),
           sign_in_time: new Date(profile.registered_at || Date.now()).toISOString(),
           last_active: new Date().toISOString(),
           last_seen: new Date().toISOString(),
-          app_version: "2.0.30",
+          app_version: "2.0.31",
           unsynced_items_count: 0,
           is_this_device: true,
           status: "Active",
@@ -195,6 +209,7 @@ export class DeviceSessionService {
       const staff = staffAuthService.getCurrentSession();
       const userRole = staff?.user.role === "admin" ? "Store Admin" : (staff?.user.role || "Cashier");
       const publicIp = await publicIpService.getPublicIp().catch(() => null);
+      const localIpv4 = await deviceIpService.getLocalIpv4().catch(() => null);
 
       const res = await fetch(`${API_BASE_URL}/api/device-sessions/heartbeat`, {
         method: "POST",
@@ -208,12 +223,13 @@ export class DeviceSessionService {
           device_uuid: deviceUuid,
           device_name: profile?.device_name || detectDeviceFriendlyName(),
           counter_name: profile?.counter_name || "Counter 01",
-          app_version: params?.app_version || "2.0.30",
+          app_version: params?.app_version || "2.0.31",
           unsynced_items_count: unsynced,
           status: params?.status || "Active",
           user_role: userRole,
           store_id: storeId,
           public_ip: publicIp || undefined,
+          device_ipv4: localIpv4 || undefined,
           update_status: params?.update_status,
           update_error: params?.update_error,
           last_error: params?.last_error,

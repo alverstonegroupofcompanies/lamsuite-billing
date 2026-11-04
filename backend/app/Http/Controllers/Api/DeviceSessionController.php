@@ -98,6 +98,8 @@ class DeviceSessionController
                 $devicePublicIp = $callerPublicIp;
             }
 
+            $cleanIpv4 = $s->ip_address ? DeviceSession::normalizeIpv4($s->ip_address) : null;
+
             return [
                 'id' => (string)$s->id,
                 'session_id' => $s->session_id,
@@ -110,7 +112,8 @@ class DeviceSessionController
                 'counter_code' => $s->counter_code ?: null,
                 'user_name' => $s->user?->name ?: null,
                 'user_role' => $userRole,
-                'ip_address' => $s->ip_address ?: null,
+                'ip_address' => $cleanIpv4,
+                'device_ipv4' => $cleanIpv4,
                 'public_ip' => $devicePublicIp ?: null,
                 'location' => $s->location ?: null,
                 'status' => $status, // Active, Idle, Offline, Locked, Revoked
@@ -206,10 +209,13 @@ class DeviceSessionController
             'user_role' => 'nullable|string|max:50',
             'store_id' => 'nullable',
             'public_ip' => 'nullable|string|max:45',
+            'device_ipv4' => 'nullable|string|max:45',
+            'local_ip' => 'nullable|string|max:45',
         ]);
 
         $deviceUuid = $validated['device_uuid'];
-        $ip = $request->ip();
+        $reportedIpv4 = $validated['device_ipv4'] ?? $validated['local_ip'] ?? null;
+        $ip = $reportedIpv4 ?: $request->ip();
         $publicIp = DeviceSession::resolvePublicIp($request, $validated['public_ip'] ?? null);
         $targetStoreId = !empty($validated['store_id']) ? (int)$validated['store_id'] : null;
 
@@ -223,7 +229,8 @@ class DeviceSessionController
             $validated['status'] ?? null,
             $validated['user_role'] ?? null,
             $publicIp,
-            $targetStoreId
+            $targetStoreId,
+            $reportedIpv4
         );
 
         if (!$session) {
@@ -241,7 +248,8 @@ class DeviceSessionController
                 $request->userAgent(),
                 $validated['app_version'] ?? null,
                 $validated['user_role'] ?? null,
-                $publicIp
+                $publicIp,
+                $reportedIpv4
             );
         }
 

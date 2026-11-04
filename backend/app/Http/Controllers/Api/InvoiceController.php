@@ -79,7 +79,7 @@ class InvoiceController
         $totalStoreInvoices = Invoice::where('store_id', $storeId)->count();
 
         $builder = Invoice::where('store_id', $storeId)
-            ->with(['items', 'payments'])
+            ->with(['items', 'payments', 'customer'])
             ->orderBy('id', 'desc');
 
         if ($startDate && $endDate) {
@@ -304,6 +304,12 @@ class InvoiceController
                     'external_id' => $customerId ?: ('cust_' . time() . '_' . substr(md5(uniqid()), 0, 6)),
                 ]);
             }
+        }
+
+        // If party already found but phone is missing in party record, save customer_phone to party
+        if ($party && empty($party->phone) && !empty($validated['customer_phone'])) {
+            $party->phone = trim($validated['customer_phone']);
+            $party->save();
         }
 
         // 4. Check Store Settings (e.g. Negative Stock Allowed)
@@ -697,7 +703,7 @@ class InvoiceController
                     'customer_id' => $party ? $party->id : null,
                     'customer_name' => $party ? $party->name : ($validated['customer_name'] ?? 'Walk-in Customer'),
                     'customer_gstin' => $party ? $party->gstin : ($validated['customer_gstin'] ?? null),
-                    'customer_phone' => $party ? $party->phone : ($validated['customer_phone'] ?? null),
+                    'customer_phone' => !empty($validated['customer_phone']) ? $validated['customer_phone'] : ($party ? $party->phone : null),
                     'place_of_supply' => $validated['place_of_supply'] ?? ($party ? $party->state_code : '32-Kerala'),
                     'subtotal' => $calculatedSubtotal,
                     'taxable_subtotal' => $taxableSubtotal,
@@ -854,7 +860,7 @@ class InvoiceController
                 );
 
                 return [
-                    'invoice' => $invoice->load(['items', 'payments']),
+                    'invoice' => $invoice->load(['items', 'payments', 'customer']),
                     'affected_batches' => $affectedBatchStockUpdates,
                     'temp_mapped_from' => $tempMappedFrom,
                 ];
@@ -882,7 +888,7 @@ class InvoiceController
 
     public function show(string $id): JsonResponse
     {
-        $invoice = Invoice::with(['items', 'payments'])->findOrFail($id);
+        $invoice = Invoice::with(['items', 'payments', 'customer'])->findOrFail($id);
         return response()->json($invoice);
     }
 

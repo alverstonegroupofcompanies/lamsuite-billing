@@ -412,15 +412,33 @@ export const PosBillingPage: React.FC = () => {
       setOriginalInvoiceItems(details.items);
       setInvoiceNumber(details.invoice.invoice_number);
       setCustomerName(details.invoice.customer_name || "Walk-in Customer");
-      setCustomerPhone(details.invoice.customer_phone || "");
-      setCustomerGstin(details.invoice.customer_gstin || "");
-
+      let resolvedPhone = details.invoice.customer_phone || "";
+      let matchedCust: Customer | null = null;
       if (details.invoice.customer_id) {
-        const cust = await partiesStore.getCustomerById(details.invoice.customer_id);
-        setSelectedCustomer(cust);
-      } else {
-        setSelectedCustomer(null);
+        matchedCust = await partiesStore.getCustomerById(details.invoice.customer_id);
+      } else if (
+        details.invoice.customer_name &&
+        details.invoice.customer_name.toLowerCase() !== "walk-in" &&
+        details.invoice.customer_name.toLowerCase() !== "walk-in customer"
+      ) {
+        const matches = await partiesStore.searchCustomers(details.invoice.customer_name, 5);
+        matchedCust = matches.find((m) => m.name.toLowerCase() === details.invoice.customer_name?.toLowerCase()) || matches[0] || null;
       }
+
+      if (!resolvedPhone && matchedCust?.phone) {
+        resolvedPhone = matchedCust.phone;
+      }
+      setSelectedCustomer(matchedCust);
+      setCustomerPhone(resolvedPhone);
+      setCustomerGstin(details.invoice.customer_gstin || matchedCust?.gstin || "");
+
+      posCartService.setCustomer(
+        matchedCust?.id || details.invoice.customer_id || "",
+        details.invoice.customer_name || "Walk-in Customer",
+        details.invoice.customer_gstin || matchedCust?.gstin || "",
+        details.invoice.place_of_supply || matchedCust?.place_of_supply || "32-Kerala",
+        resolvedPhone
+      );
 
       // Populate cart lines with previous invoice items
       posCartService.clearCart();
@@ -2404,7 +2422,7 @@ export const PosBillingPage: React.FC = () => {
         activeCust?.name || customerName || "Walk-in Customer",
         customerGstin || activeCust?.gstin || "",
         activeCust?.place_of_supply || selectedCustomer?.place_of_supply || "32-Kerala",
-        activeCust?.phone || customerPhone || ""
+        customerPhone || activeCust?.phone || selectedCustomer?.phone || ""
       );
 
       const appSettings = companySettingsService.getSettings();

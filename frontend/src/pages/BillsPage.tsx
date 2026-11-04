@@ -48,6 +48,7 @@ import { sqliteStorage } from "../lib/db/sqliteStorage";
 import { onlineTransactionService } from "../lib/sync/onlineTransactionService";
 import { storeRegistryService, type RegisteredStoreRecord } from "../lib/auth/storeRegistryService";
 import { storeDeviceService, type StoreDeviceProfile } from "../lib/auth/storeDeviceService";
+import { partiesStore } from "../lib/masters/partiesStore";
 import { PrintPreviewModal } from "../components/PrintPreviewModal";
 import { useModalEscape } from "../lib/ui/modalEscapeManager";
 
@@ -258,8 +259,9 @@ export const BillsPage: React.FC = () => {
                 module_key: "invoice",
                 invoice_number: sinv.invoice_number,
                 invoice_date: sinv.invoice_date,
+                customer_id: sinv.customer_id ? String(sinv.customer_id) : undefined,
                 customer_name: sinv.customer_name || "Walk-in Customer",
-                customer_phone: sinv.customer_phone || "",
+                customer_phone: sinv.customer_phone || sinv.customer?.phone || (sinv as any).phone || "",
                 customer_gstin: sinv.customer_gstin || "",
                 subtotal: Number(sinv.subtotal) || 0,
                 discount_total: Number(sinv.discount_total) || 0,
@@ -305,8 +307,9 @@ export const BillsPage: React.FC = () => {
               module_key: "invoice",
               invoice_number: sinv.invoice_number,
               invoice_date: sinv.invoice_date,
+              customer_id: sinv.customer_id ? String(sinv.customer_id) : undefined,
               customer_name: sinv.customer_name || "Walk-in Customer",
-              customer_phone: sinv.customer_phone || "",
+              customer_phone: sinv.customer_phone || sinv.customer?.phone || (sinv as any).phone || "",
               customer_gstin: sinv.customer_gstin || "",
               subtotal: Number(sinv.subtotal) || 0,
               discount_total: Number(sinv.discount_total) || 0,
@@ -411,8 +414,9 @@ export const BillsPage: React.FC = () => {
             module_key: "invoice",
             invoice_number: sinv.invoice_number,
             invoice_date: sinv.invoice_date,
+            customer_id: sinv.customer_id ? String(sinv.customer_id) : undefined,
             customer_name: sinv.customer_name || "Walk-in Customer",
-            customer_phone: sinv.customer_phone || "",
+            customer_phone: sinv.customer_phone || sinv.customer?.phone || (sinv as any).phone || "",
             customer_gstin: sinv.customer_gstin || "",
             subtotal: Number(sinv.subtotal) || 0,
             discount_total: Number(sinv.discount_total) || 0,
@@ -598,6 +602,21 @@ export const BillsPage: React.FC = () => {
       showNotification("Could not load invoice details", "error");
       return;
     }
+    if (!details.invoice.customer_phone) {
+      if (invoice.customer_phone) {
+        details.invoice.customer_phone = invoice.customer_phone;
+      } else if (details.invoice.customer_id) {
+        const cust = await partiesStore.getCustomerById(details.invoice.customer_id);
+        if (cust?.phone) {
+          details.invoice.customer_phone = cust.phone;
+        }
+      } else if (details.invoice.customer_name && details.invoice.customer_name.toLowerCase() !== "walk-in customer") {
+        const matches = await partiesStore.searchCustomers(details.invoice.customer_name);
+        if (matches[0]?.phone) {
+          details.invoice.customer_phone = matches[0].phone;
+        }
+      }
+    }
     setSelectedInvoice(details.invoice);
     setSelectedInvoiceItems(details.items);
     setSelectedInvoiceAudit(details.auditLog);
@@ -620,7 +639,7 @@ export const BillsPage: React.FC = () => {
       fssai_no: header.fssai_no,
       place_of_supply: invoice.place_of_supply || "32-Kerala",
       customer_name: invoice.customer_name || "Walk-in Customer",
-      customer_phone: invoice.customer_phone || "",
+      customer_phone: invoice.customer_phone || (invoice as any).customer?.phone || "",
       customer_gstin: invoice.customer_gstin || undefined,
       payment_mode: invoice.payment_mode || "Cash",
       payment_status: (invoice as any).payment_status || "Paid",
@@ -773,6 +792,13 @@ export const BillsPage: React.FC = () => {
 
     // Clear cart and populate with selected invoice items
     posCartService.clearCart();
+    posCartService.setCustomer(
+      selectedInvoice.customer_id || "",
+      selectedInvoice.customer_name || "Walk-in Customer",
+      selectedInvoice.customer_gstin || "",
+      selectedInvoice.place_of_supply || "32-Kerala",
+      selectedInvoice.customer_phone || ""
+    );
 
     for (const it of selectedInvoiceItems) {
       const batches: ProductBatch[] = await productsStore.getBatchesForProduct(it.product_id, false);

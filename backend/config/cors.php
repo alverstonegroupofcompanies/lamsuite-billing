@@ -4,8 +4,9 @@ $domain = env('DOMAIN', 'example.com');
 $customOrigins = array_filter(array_map('trim', explode(',', env('CORS_ALLOWED_ORIGINS', ''))));
 
 $defaultOrigins = [
-    "https://panel.{$domain}",
     "https://app.{$domain}",
+    "https://web.{$domain}",
+    "https://panel.{$domain}",
     "https://{$domain}",
     'tauri://localhost',
     'https://tauri.localhost',

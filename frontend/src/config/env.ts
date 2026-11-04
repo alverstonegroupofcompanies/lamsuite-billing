@@ -45,7 +45,10 @@ function resolveApiBaseUrl(): string {
         return buildTimeEnv.replace(/\/+$/, "");
       }
 
-      // Auto-infer: app.<domain> -> https://api.<domain>
+      // Auto-infer: web.<domain> or app.<domain> -> https://api.<domain>
+      if (hostname.startsWith("web.")) {
+        return `${protocol}//api.${hostname.slice(4)}`.replace(/\/+$/, "");
+      }
       if (hostname.startsWith("app.")) {
         return `${protocol}//api.${hostname.slice(4)}`.replace(/\/+$/, "");
       }
@@ -104,14 +107,18 @@ function resolvePanelPortalUrl(): string {
         return buildTimeEnv.replace(/\/+$/, "");
       }
 
+      if (hostname.startsWith("web.")) {
+        return `${protocol}//app.${hostname.slice(4)}`.replace(/\/+$/, "");
+      }
+
       if (hostname.startsWith("app.")) {
-        return `${protocol}//panel.${hostname.slice(4)}`.replace(/\/+$/, "");
+        return `${protocol}//app.${hostname.slice(4)}`.replace(/\/+$/, "");
       }
 
       const parts = hostname.split(".");
       if (parts.length >= 2) {
         const rootDomain = parts.slice(1).join(".");
-        return `${protocol}//panel.${rootDomain}`.replace(/\/+$/, "");
+        return `${protocol}//app.${rootDomain}`.replace(/\/+$/, "");
       }
     }
   }
@@ -120,7 +127,7 @@ function resolvePanelPortalUrl(): string {
     return buildTimeEnv.replace(/\/+$/, "");
   }
 
-  return "https://panel.example.com";
+  return "https://app.example.com";
 }
 
 export const PANEL_PORTAL_URL: string = resolvePanelPortalUrl();

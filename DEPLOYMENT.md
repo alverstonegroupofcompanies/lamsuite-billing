@@ -13,9 +13,9 @@ All subdomains route through Traefik v3 using automatic Let's Encrypt TLS certif
 | :--- | :--- | :--- | :--- |
 | **`api.${DOMAIN}`** | `api` (Laravel) | 8000 | REST API backend (`/api`, `/up`) |
 | **`ws.${DOMAIN}`** | `reverb` (Reverb) | 8080 | Real-time WebSockets for online-first sync |
-| **`panel.${DOMAIN}`** | `panel` (Nginx) | 80 | React Admin Panel static SPA *(strictly "panel")* |
+| **`app.${DOMAIN}`** | `panel` (Nginx) | 80 | Central Admin Panel static SPA *(formerly panel)* |
+| **`web.${DOMAIN}`** | `web` (Nginx) | 80 | Web version of billing UI *(formerly app)* |
 | **`mcp.${DOMAIN}`** | `mcp` (Node 22) | 3000 | MCP server HTTP SSE endpoint (authenticated) |
-| **`app.${DOMAIN}`** | `web` (Optional) | 80 | Web version of billing UI (disabled by default) |
 | **`updates.${DOMAIN}`**| `updates` (Optional) | 80 | Tauri auto-updater binaries & manifests |
 | **`traefik.${DOMAIN}`**| `traefik` (Internal) | 8080 | Traefik dashboard (protected by HTTP BasicAuth) |
 
@@ -33,9 +33,10 @@ Point your DNS to your Linux server's public IPv4 address (`YOUR_SERVER_IP`):
 | :--- | :--- | :--- | :--- |
 | **A** | `api.yourdomain.com` | `YOUR_SERVER_IP` | 300 |
 | **A** | `ws.yourdomain.com` | `YOUR_SERVER_IP` | 300 |
+| **A** | `app.yourdomain.com` | `YOUR_SERVER_IP` | 300 |
+| **A** | `web.yourdomain.com` | `YOUR_SERVER_IP` | 300 |
 | **A** | `panel.yourdomain.com` | `YOUR_SERVER_IP` | 300 |
 | **A** | `mcp.yourdomain.com` | `YOUR_SERVER_IP` | 300 |
-| **A** | `app.yourdomain.com` | `YOUR_SERVER_IP` | 300 |
 | **A** | `updates.yourdomain.com` | `YOUR_SERVER_IP` | 300 |
 | **A** | `traefik.yourdomain.com` | `YOUR_SERVER_IP` | 300 |
 
@@ -126,8 +127,11 @@ Verify HTTPS endpoints:
 curl -I https://api.yourdomain.com/up
 # Expect: HTTP/2 200
 
-curl -I https://panel.yourdomain.com/health
-# Expect: HTTP/2 200
+curl -I https://app.yourdomain.com/health
+# Expect: HTTP/2 200 (Admin Panel)
+
+curl -I https://web.yourdomain.com/health
+# Expect: HTTP/2 200 (Web Billing)
 
 curl -I https://mcp.yourdomain.com/health
 # Expect: HTTP/2 200
@@ -163,8 +167,8 @@ Run `docker compose up -d dummy-site`. Traefik immediately requests a Let's Encr
 Configure `frontend/.env` before building installer binaries:
 ```ini
 VITE_API_BASE_URL=https://api.yourdomain.com
-VITE_PANEL_PORTAL_URL=https://panel.yourdomain.com
-VITE_ADMIN_PORTAL_URL=https://panel.yourdomain.com
+VITE_PANEL_PORTAL_URL=https://app.yourdomain.com
+VITE_ADMIN_PORTAL_URL=https://app.yourdomain.com
 ```
 
 ### MCP Client Connection

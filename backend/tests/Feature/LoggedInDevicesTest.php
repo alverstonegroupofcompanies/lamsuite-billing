@@ -343,4 +343,41 @@ class LoggedInDevicesTest extends TestCase
         $resS1->assertStatus(200);
         $this->assertGreaterThanOrEqual(1, $resS1->json('other_stores_active_count'));
     }
+
+    /**
+     * 10. Device sessions reports device_ipv4 and normalizes mapped IPv6.
+     */
+    public function test_device_sessions_reports_device_ipv4_and_normalizes_ip(): void
+    {
+        $session = DeviceSession::recordLogin(
+            $this->store->id,
+            'uuid_ipv4_test',
+            'Workstation 3',
+            null,
+            'Counter 03',
+            'C03',
+            null,
+            '::ffff:192.168.0.131'
+        );
+
+        $res = $this->getJson('/api/device-sessions?store_id=' . $this->store->id);
+        $res->assertStatus(200);
+
+        $dev = collect($res->json('devices'))->firstWhere('device_uuid', 'uuid_ipv4_test');
+        $this->assertNotNull($dev);
+        $this->assertEquals('192.168.0.131', $dev['device_ipv4']);
+        $this->assertEquals('192.168.0.131', $dev['ip_address']);
+
+        // Heartbeat with device_ipv4 updates session
+        $hbRes = $this->postJson('/api/device-sessions/heartbeat', [
+            'device_uuid' => 'uuid_ipv4_test',
+            'device_ipv4' => '192.168.0.145',
+            'store_id' => $this->store->id,
+        ]);
+        $hbRes->assertStatus(200);
+
+        $res2 = $this->getJson('/api/device-sessions?store_id=' . $this->store->id);
+        $dev2 = collect($res2->json('devices'))->firstWhere('device_uuid', 'uuid_ipv4_test');
+        $this->assertEquals('192.168.0.145', $dev2['device_ipv4']);
+    }
 }

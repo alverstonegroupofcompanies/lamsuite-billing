@@ -17,6 +17,9 @@ function initDefaultMockHandlers() {
     inMemorySecureVault.delete(args.key);
     return { success: true };
   });
+  mockHandlers.set("get_device_ipv4", () => {
+    return "127.0.0.1";
+  });
 }
 
 initDefaultMockHandlers();

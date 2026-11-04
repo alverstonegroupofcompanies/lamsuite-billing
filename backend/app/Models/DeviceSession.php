@@ -93,6 +93,26 @@ class DeviceSession extends Model
     }
 
     /**
+     * Normalize IP address into standard clean IPv4 representation.
+     */
+    public static function normalizeIpv4(?string $ip): ?string
+    {
+        if (!$ip) return null;
+        $ip = trim($ip);
+        if ($ip === '::1' || $ip === '0:0:0:0:0:0:0:1') return '127.0.0.1';
+        if (str_starts_with(strtolower($ip), '::ffff:')) {
+            $ip = substr($ip, 7);
+        }
+        if (str_contains($ip, ':') && substr_count($ip, ':') === 1) {
+            $parts = explode(':', $ip);
+            if (filter_var($parts[0], FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
+                return $parts[0];
+            }
+        }
+        return $ip;
+    }
+
+    /**
      * Resolve the client's actual public IP address from standard proxy headers,
      * reverse-proxy forward chains, or client self-reporting.
      */
@@ -158,7 +178,8 @@ class DeviceSession extends Model
         ?string $userAgent = null,
         ?string $appVersion = null,
         ?string $userRole = null,
-        ?string $publicIp = null
+        ?string $publicIp = null,
+        ?string $deviceIpv4 = null
     ): self {
         // Expire prior active sessions for this device
         self::where('device_uuid', $deviceUuid)
@@ -189,6 +210,8 @@ class DeviceSession extends Model
             $userRole = $user?->role ?: ($user?->is_admin ? 'Admin' : 'Cashier');
         }
 
+        $effectiveIp = self::normalizeIpv4($deviceIpv4 ?: $ipAddress);
+
         return self::create([
             'store_id' => $storeId,
             'user_id' => $userId,
@@ -199,7 +222,7 @@ class DeviceSession extends Model
             'device_name' => $deviceName ?: null,
             'counter_name' => $counterName ?: null,
             'counter_code' => $counterCode ?: null,
-            'ip_address' => $ipAddress ?: null,
+            'ip_address' => $effectiveIp ?: null,
             'public_ip' => $publicIp ?: null,
             'location' => $location ?: null,
             'login_time' => now(),
@@ -225,7 +248,8 @@ class DeviceSession extends Model
         ?string $status = null,
         ?string $userRole = null,
         ?string $publicIp = null,
-        int|string|null $storeId = null
+        int|string|null $storeId = null,
+        ?string $deviceIpv4 = null
     ): ?self {
         $session = self::where('device_uuid', $deviceUuid)
             ->where('is_active', true)
@@ -239,8 +263,9 @@ class DeviceSession extends Model
             if ($storeId && (int)$session->store_id !== (int)$storeId) {
                 $updates['store_id'] = (int)$storeId;
             }
-            if ($ipAddress) {
-                $updates['ip_address'] = $ipAddress;
+            $effectiveIp = self::normalizeIpv4($deviceIpv4 ?: $ipAddress);
+            if ($effectiveIp) {
+                $updates['ip_address'] = $effectiveIp;
             }
             if ($publicIp) {
                 $updates['public_ip'] = $publicIp;

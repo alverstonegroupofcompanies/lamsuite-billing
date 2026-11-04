@@ -101,7 +101,12 @@ export class PartiesStore {
   }
 
   async getCustomerById(id: string): Promise<Customer | null> {
-    return await sqliteStorage.findById<Customer>("customers", id);
+    if (!id) return null;
+    const direct = await sqliteStorage.findById<Customer>("customers", id);
+    if (direct) return direct;
+    const all = await this.getAllCustomers();
+    const strId = String(id);
+    return all.find((c) => String(c.id) === strId || String((c as any).server_id) === strId || String((c as any).external_id) === strId) || null;
   }
 
   async getAllCustomers(): Promise<Customer[]> {

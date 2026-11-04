@@ -28,6 +28,7 @@ import {
 } from "../../lib/devices/deviceSessionService";
 import { storeRegistryService } from "../../lib/auth/storeRegistryService";
 import { publicIpService } from "../../lib/network/publicIpService";
+import { deviceIpService } from "../../lib/network/deviceIpService";
 
 export interface LoggedInDevicesTableProps {
   autoRefreshIntervalMs?: number;
@@ -47,6 +48,7 @@ export const LoggedInDevicesTable: React.FC<LoggedInDevicesTableProps> = ({
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [storeFilter, setStoreFilter] = useState<string>("current");
   const [callerPublicIp, setCallerPublicIp] = useState<string | null>(null);
+  const [thisDeviceIpv4, setThisDeviceIpv4] = useState<string | null>(null);
   const [otherStoresActiveCount, setOtherStoresActiveCount] = useState<number>(0);
   const [otherActiveStores, setOtherActiveStores] = useState<any[]>([]);
   const [activeActionId, setActiveActionId] = useState<string | null>(null);
@@ -78,6 +80,10 @@ export const LoggedInDevicesTable: React.FC<LoggedInDevicesTableProps> = ({
           pubIp = await publicIpService.getPublicIp().catch(() => null);
         }
         setCallerPublicIp(pubIp);
+
+        const localIpv4 = await deviceIpService.getLocalIpv4().catch(() => null);
+        setThisDeviceIpv4(localIpv4);
+
         setOtherStoresActiveCount(meta.other_stores_active_count || 0);
         setOtherActiveStores(meta.other_active_stores || []);
 
@@ -287,6 +293,20 @@ export const LoggedInDevicesTable: React.FC<LoggedInDevicesTableProps> = ({
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
+          {/* This Workstation Local IPv4 Badge */}
+          {thisDeviceIpv4 && (
+            <div
+              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-blue-200 bg-blue-50 text-blue-900 text-xs font-mono font-medium shadow-2xs dark:border-blue-800 dark:bg-blue-950/60 dark:text-blue-200"
+              title="This workstation's detected local network IPv4 address"
+            >
+              <span className="text-[9px] font-extrabold uppercase px-1 py-0.2 rounded bg-blue-200/80 text-blue-800 dark:bg-blue-900 dark:text-blue-200">
+                IPv4
+              </span>
+              <span>This Device:</span>
+              <span className="font-bold">{thisDeviceIpv4}</span>
+            </div>
+          )}
+
           {/* Public IP Badge */}
           {callerPublicIp && (
             <div
@@ -430,7 +450,7 @@ export const LoggedInDevicesTable: React.FC<LoggedInDevicesTableProps> = ({
                 <tr className="bg-[var(--color-surface-subtle)] border-b border-[var(--color-border)] text-[11px] font-semibold text-[var(--color-text-muted)] uppercase tracking-wider">
                   <th className="py-3 px-4">Workstation / Counter</th>
                   <th className="py-3 px-4">Signed-In User</th>
-                  <th className="py-3 px-4">IP & Location</th>
+                  <th className="py-3 px-4">Device IPv4</th>
                   <th className="py-3 px-4">Status</th>
                   <th className="py-3 px-4">Sign-In Time</th>
                   <th className="py-3 px-4">Last Seen</th>
@@ -494,33 +514,38 @@ export const LoggedInDevicesTable: React.FC<LoggedInDevicesTableProps> = ({
                         </div>
                       </td>
 
-                      {/* IP & Location */}
+                      {/* Device IPv4 */}
                       <td className="py-3 px-4">
-                        <div>
-                          {device.public_ip ? (
-                            <div className="flex items-center gap-1.5">
-                              <span
-                                className="inline-flex items-center gap-1 font-mono text-[11px] font-bold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200"
-                                title="Public WAN IP Address"
-                              >
-                                <Globe className="w-3 h-3 text-emerald-600 shrink-0" />
-                                {device.public_ip}
+                        <div className="space-y-1">
+                          {/* Workstation Local / Device IPv4 */}
+                          <div className="flex items-center gap-1.5">
+                            <span
+                              className="inline-flex items-center gap-1.5 font-mono text-[11px] font-bold text-slate-900 bg-slate-100 dark:bg-slate-800 dark:text-slate-100 px-2 py-0.5 rounded border border-slate-300 dark:border-slate-700 shadow-2xs"
+                              title="Workstation Local / Device IPv4 Address"
+                            >
+                              <span className="text-[9px] font-extrabold uppercase px-1 py-0.2 rounded bg-blue-100 text-blue-700 dark:bg-blue-900/60 dark:text-blue-200">
+                                IPv4
                               </span>
-                            </div>
-                          ) : (
-                            <div className="font-mono text-[11px] text-[var(--color-text)]">
-                              {device.ip_address || "127.0.0.1"}
+                              <span>
+                                {device.device_ipv4 || device.ip_address || (device.is_this_device && thisDeviceIpv4 ? thisDeviceIpv4 : "127.0.0.1")}
+                              </span>
+                            </span>
+                          </div>
+
+                          {/* Public WAN IP if available and different from IPv4 */}
+                          {device.public_ip && device.public_ip !== (device.device_ipv4 || device.ip_address) && (
+                            <div
+                              className="inline-flex items-center gap-1 text-[10px] text-emerald-700 dark:text-emerald-400 font-mono"
+                              title="Public WAN IP Address"
+                            >
+                              <Globe className="w-3 h-3 text-emerald-600 shrink-0" />
+                              <span>WAN: {device.public_ip}</span>
                             </div>
                           )}
 
-                          {device.public_ip && device.ip_address && device.ip_address !== device.public_ip && (
-                            <div className="text-[10px] text-[var(--color-text-muted)] font-mono mt-0.5" title="Local Network / Loopback IP">
-                              LAN: {device.ip_address}
-                            </div>
-                          )}
-
+                          {/* Location */}
                           {device.location ? (
-                            <div className="text-[10px] text-[var(--color-text-muted)] flex items-center gap-1 mt-0.5">
+                            <div className="text-[10px] text-[var(--color-text-muted)] flex items-center gap-1">
                               <MapPin className="w-3 h-3 text-[var(--color-text-muted)] shrink-0" />
                               <span>{device.location}</span>
                             </div>
@@ -555,7 +580,7 @@ export const LoggedInDevicesTable: React.FC<LoggedInDevicesTableProps> = ({
                       <td className="py-3 px-4">
                         <div className="flex flex-col gap-0.5">
                           <span className="font-mono text-[11px] text-[var(--color-text)]">
-                            v{device.app_version || "2.0.30"}
+                            v{device.app_version || "2.0.31"}
                           </span>
                           {device.unsynced_items_count > 0 ? (
                             <span className="inline-flex items-center gap-1 text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.2 rounded w-fit">

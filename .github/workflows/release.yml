@@ -186,7 +186,7 @@ jobs:
         working-directory: frontend
         env:
           VITE_API_BASE_URL: https://api.lamstonehealthcare.com
-          VITE_ADMIN_PORTAL_URL: https://panel.lamstonehealthcare.com
+          VITE_ADMIN_PORTAL_URL: https://app.lamstonehealthcare.com
         run: npm run build
 
       - name: Prepare & Verify Tauri Signing Key
@@ -256,7 +256,7 @@ jobs:
         working-directory: frontend
         env:
           VITE_API_BASE_URL: https://api.lamstonehealthcare.com
-          VITE_ADMIN_PORTAL_URL: https://panel.lamstonehealthcare.com
+          VITE_ADMIN_PORTAL_URL: https://app.lamstonehealthcare.com
         run: npm run build
 
       - name: Stage Fixed WebView2 Runtime 109

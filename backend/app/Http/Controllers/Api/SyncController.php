@@ -188,11 +188,21 @@ class SyncController
 
         // Resolve customer_id if party exists
         $customerId = $inv['customer_id'] ?? null;
-        if ($customerId && !is_numeric($customerId)) {
-            $matchedParty = Party::where('external_id', $customerId)
-                ->orWhere('phone', $inv['customer_phone'] ?? '')
-                ->first();
-            $customerId = $matchedParty ? $matchedParty->id : null;
+        $matchedParty = null;
+        if ($customerId) {
+            $matchedParty = is_numeric($customerId)
+                ? Party::find($customerId)
+                : Party::where('external_id', $customerId)->first();
+        }
+        if (!$matchedParty && !empty($inv['customer_phone'])) {
+            $matchedParty = Party::where('phone', $inv['customer_phone'])->first();
+            if ($matchedParty) {
+                $customerId = $matchedParty->id;
+            }
+        }
+        if ($matchedParty && empty($matchedParty->phone) && !empty($inv['customer_phone'])) {
+            $matchedParty->phone = $inv['customer_phone'];
+            $matchedParty->save();
         }
 
         $invoiceDate = !empty($inv['invoice_date'])
@@ -210,6 +220,7 @@ class SyncController
             'due_date' => !empty($inv['due_date']) ? substr($inv['due_date'], 0, 10) : null,
             'customer_id' => $customerId,
             'customer_name' => $inv['customer_name'] ?? 'Walk-in Customer',
+            'customer_phone' => $inv['customer_phone'] ?? ($matchedParty ? $matchedParty->phone : null),
             'customer_gstin' => $inv['customer_gstin'] ?? null,
             'place_of_supply' => $inv['place_of_supply'] ?? null,
             'subtotal' => $inv['subtotal'] ?? 0,

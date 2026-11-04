@@ -20,6 +20,7 @@ class Invoice extends Model
         'due_date',
         'customer_id',
         'customer_name',
+        'customer_phone',
         'customer_gstin',
         'place_of_supply',
         'subtotal',
@@ -90,6 +91,15 @@ class Invoice extends Model
     public function items(): HasMany
     {
         return $this->hasMany(InvoiceItem::class);
+    }
+
+    public function getCustomerPhoneAttribute($value): ?string
+    {
+        if (!empty($value)) {
+            return $value;
+        }
+
+        return $this->customer ? $this->customer->phone : null;
     }
 
     public function payments(): HasMany

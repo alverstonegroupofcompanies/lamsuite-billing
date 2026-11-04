@@ -706,6 +706,7 @@ export class OnlineTransactionService {
     // Upsert invoice in local cache under both localId and server numeric ID
     const invRow = {
       ...serverInvoice,
+      customer_phone: serverInvoice.customer_phone || serverInvoice.customer?.phone || (serverInvoice as any).phone || "",
       store_id: storeId,
       id: localId,
       server_id: serverInvoice.id,

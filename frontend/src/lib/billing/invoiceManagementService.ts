@@ -1,5 +1,6 @@
 import { sqliteStorage } from "../db/sqliteStorage";
 import { productsStore, type ProductBatch, type ProductItem } from "../masters/productsStore";
+import { partiesStore } from "../masters/partiesStore";
 import { syncQueueService } from "../sync/syncQueueService";
 import { storeRegistryService } from "../auth/storeRegistryService";
 import type { PosCartLine } from "./posCartService";
@@ -121,6 +122,30 @@ export class InvoiceManagementService {
   async listInvoices(filters?: InvoiceFilterCriteria): Promise<InvoiceRecord[]> {
     const allInvoices = await sqliteStorage.findAll<InvoiceRecord>("invoices");
     const allItems = await sqliteStorage.findAll<InvoiceItemRecord>("invoice_items");
+    const allCustomers = await sqliteStorage.findAll<any>("customers").catch(() => []);
+
+    const phoneByCustId = new Map<string, string>();
+    const phoneByCustName = new Map<string, string>();
+    for (const c of allCustomers) {
+      if (c.phone) {
+        if (c.id) phoneByCustId.set(String(c.id), c.phone);
+        if (c.server_id) phoneByCustId.set(String(c.server_id), c.phone);
+        if (c.external_id) phoneByCustId.set(String(c.external_id), c.phone);
+        if (c.name && c.name.toLowerCase() !== "walk-in customer") {
+          phoneByCustName.set(c.name.toLowerCase(), c.phone);
+        }
+      }
+    }
+
+    for (const inv of allInvoices) {
+      if (!inv.customer_phone) {
+        if (inv.customer_id && phoneByCustId.has(String(inv.customer_id))) {
+          inv.customer_phone = phoneByCustId.get(String(inv.customer_id));
+        } else if (inv.customer_name && phoneByCustName.has(inv.customer_name.toLowerCase())) {
+          inv.customer_phone = phoneByCustName.get(inv.customer_name.toLowerCase());
+        }
+      }
+    }
 
     // Map invoice_id -> array of items for product-level searching
     const itemsByInvoice = new Map<string, InvoiceItemRecord[]>();
@@ -259,6 +284,25 @@ export class InvoiceManagementService {
     );
 
     if (!invoice) return null;
+
+    if (!invoice.customer_phone) {
+      if (invoice.customer_id) {
+        try {
+          const cust = await partiesStore.getCustomerById(String(invoice.customer_id));
+          if (cust?.phone) {
+            invoice.customer_phone = cust.phone;
+          }
+        } catch {}
+      }
+      if (!invoice.customer_phone && invoice.customer_name && invoice.customer_name.toLowerCase() !== "walk-in customer") {
+        try {
+          const matches = await partiesStore.searchCustomers(invoice.customer_name, 1);
+          if (matches[0]?.phone) {
+            invoice.customer_phone = matches[0].phone;
+          }
+        } catch {}
+      }
+    }
 
     const allItems = await sqliteStorage.findAll<InvoiceItemRecord>("invoice_items");
     const items = allItems.filter((it) => it.invoice_id === invoice.id);

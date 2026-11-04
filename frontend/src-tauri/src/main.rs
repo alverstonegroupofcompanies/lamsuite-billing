@@ -658,13 +658,33 @@ fn reveal_file(path: String) -> Result<Value, String> {
     Ok(json!({ "success": true }))
 }
 
+fn get_device_ipv4_addr() -> String {
+    use std::net::UdpSocket;
+    if let Ok(socket) = UdpSocket::bind("0.0.0.0:0") {
+        if socket.connect("8.8.8.8:80").is_ok() {
+            if let Ok(addr) = socket.local_addr() {
+                let ip = addr.ip().to_string();
+                if ip != "0.0.0.0" {
+                    return ip;
+                }
+            }
+        }
+    }
+    "127.0.0.1".to_string()
+}
+
+#[tauri::command]
+fn get_device_ipv4() -> Result<String, String> {
+    Ok(get_device_ipv4_addr())
+}
+
 #[tauri::command]
 fn lan_discover_main(port: Option<u16>) -> Result<Option<Value>, String> {
     let p = port.unwrap_or(8089);
     Ok(Some(json!({
         "station_id": "main_store_station",
         "station_name": "Store Main Counter Server",
-        "ip_address": "127.0.0.1",
+        "ip_address": get_device_ipv4_addr(),
         "port": p,
         "is_main": true,
         "version": "2.0.0"
@@ -1062,6 +1082,7 @@ fn main() {
             open_file,
             reveal_file,
             lan_discover_main,
+            get_device_ipv4,
             secure_store_set,
             secure_store_get,
             secure_store_delete
