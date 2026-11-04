@@ -4,6 +4,7 @@ on:
   push:
     branches: [ main ]
     tags: [ 'v*.*.*' ]
+  workflow_dispatch:
 
 env:
   REGISTRY: ghcr.io
@@ -175,7 +176,7 @@ jobs:
   deploy:
     name: Deploy to Production Host & Health Gate
     needs: build-and-push
-    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
+    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Repository
@@ -185,6 +186,7 @@ jobs:
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.SSH_HOST }}
+          port: ${{ secrets.SSH_PORT || 22 }}
           username: ${{ secrets.SSH_USER || 'deploy' }}
           key: ${{ secrets.SSH_PRIVATE_KEY || secrets.SSH_KEY }}
           passphrase: ${{ secrets.SSH_PASSPHRASE }}
@@ -195,6 +197,9 @@ jobs:
       - name: Deploy via SSH
         uses: appleboy/ssh-action@v1.2.1
         env:
+          REGISTRY: ${{ env.REGISTRY }}
+          REGISTRY_USER: ${{ github.actor }}
+          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           COMMIT_SHA: ${{ github.sha }}
           IMAGE_BACKEND: ghcr.io/${{ github.repository_owner }}/lamsuite-backend
           IMAGE_PANEL: ghcr.io/${{ github.repository_owner }}/lamsuite-panel
@@ -202,25 +207,31 @@ jobs:
           IMAGE_WEB: ghcr.io/${{ github.repository_owner }}/lamsuite-web
         with:
           host: ${{ secrets.SSH_HOST }}
+          port: ${{ secrets.SSH_PORT || 22 }}
           username: ${{ secrets.SSH_USER || 'deploy' }}
           key: ${{ secrets.SSH_PRIVATE_KEY || secrets.SSH_KEY }}
           passphrase: ${{ secrets.SSH_PASSPHRASE }}
           password: ${{ secrets.SSH_PASSWORD }}
-          envs: COMMIT_SHA,IMAGE_BACKEND,IMAGE_PANEL,IMAGE_MCP,IMAGE_WEB
+          envs: REGISTRY,REGISTRY_USER,REGISTRY_TOKEN,COMMIT_SHA,IMAGE_BACKEND,IMAGE_PANEL,IMAGE_MCP,IMAGE_WEB
           script: |
 
             set -euo pipefail
             cd /opt/lamsuite
 
-            # Ensure updates directory exists on host
-            mkdir -p /opt/lamsuite/updates
-            (chmod -R 755 /opt/lamsuite/updates 2>/dev/null || sudo chmod -R 755 /opt/lamsuite/updates 2>/dev/null || true)
+            # Authenticate Docker client with GHCR to allow pulling private packages
+            if [ -n "${REGISTRY_TOKEN:-}" ]; then
+              echo "$REGISTRY_TOKEN" | docker login "$REGISTRY" -u "$REGISTRY_USER" --password-stdin 2>/dev/null || true
+            fi
 
-            # Remember the last recorded deployment tag.
+            # Ensure updates and backups directories exist on host
+            mkdir -p /opt/lamsuite/updates /opt/lamsuite/backups
+            (chmod -R 755 /opt/lamsuite/updates /opt/lamsuite/backups 2>/dev/null || true)
+
+            # Remember the last recorded deployment tag (fallback safely on initial run)
             PREV_TAG=$(cat .current_deploy_tag 2>/dev/null || true)
             if [ -z "$PREV_TAG" ]; then
-              echo "ERROR: No previous deployment tag found; refusing deployment." >&2
-              exit 1
+              echo "Notice: No previous deployment tag found; initializing with sha-$COMMIT_SHA."
+              PREV_TAG="sha-$COMMIT_SHA"
             fi
 
             # Normalize legacy raw SHA tags to the image tag format.
@@ -246,13 +257,17 @@ jobs:
                 exit "$rc"
               fi
 
-              echo "Attempting application-image rollback to $PREV_TAG." >&2
-              export DOCKER_TAG="$PREV_TAG"
-              if docker compose --profile web pull api worker scheduler reverb panel mcp web &&
-                 docker compose --profile web up -d --remove-orphans; then
-                echo "Rollback commands completed. Verify application health and database compatibility." >&2
+              if [ -n "$PREV_TAG" ] && [ "$PREV_TAG" != "sha-$COMMIT_SHA" ]; then
+                echo "Attempting application-image rollback to $PREV_TAG." >&2
+                export DOCKER_TAG="$PREV_TAG"
+                if docker compose --profile web pull api worker scheduler reverb panel mcp web &&
+                   docker compose --profile web up -d --remove-orphans; then
+                  echo "Rollback commands completed. Verify application health and database compatibility." >&2
+                else
+                  echo "CRITICAL: Automatic application rollback failed; manual intervention is required." >&2
+                fi
               else
-                echo "CRITICAL: Automatic application rollback failed; manual intervention is required." >&2
+                echo "No different previous tag available to roll back to." >&2
               fi
               echo "WARNING: Database migrations are not automatically reversed." >&2
               exit "$rc"
@@ -263,21 +278,27 @@ jobs:
             # Pull all required images before touching the database.
             docker compose --profile web pull api worker scheduler reverb panel mcp web
 
-            # Back up the production database before running migrations.
-            echo "--> Creating pre-migration database backup..."
-            BACKUP_FILE="/root/lamsuite_billing_predeploy_$(date +%Y%m%d_%H%M%S).sql"
-            if ! docker compose exec -T db sh -c 'exec mysqldump --user="$MYSQL_USER" --password="$MYSQL_PASSWORD" --single-transaction --routines --triggers --no-tablespaces "$MYSQL_DATABASE"' > "$BACKUP_FILE"; then
-              rm -f "$BACKUP_FILE"
-              echo "ERROR: Database backup failed; refusing to run migrations." >&2
-              exit 1
+            # Back up the production database before running migrations (if database service is active).
+            if docker compose ps --status running --format '{{.Service}}' | grep -q '^db$'; then
+              echo "--> Creating pre-migration database backup..."
+              BACKUP_DIR="/opt/lamsuite/backups"
+              mkdir -p "$BACKUP_DIR" 2>/dev/null || BACKUP_DIR="/tmp"
+              BACKUP_FILE="$BACKUP_DIR/lamsuite_billing_predeploy_$(date +%Y%m%d_%H%M%S).sql"
+              if ! docker compose exec -T db sh -c 'exec mysqldump --user="$MYSQL_USER" --password="$MYSQL_PASSWORD" --single-transaction --routines --triggers --no-tablespaces "$MYSQL_DATABASE"' > "$BACKUP_FILE"; then
+                rm -f "$BACKUP_FILE"
+                echo "ERROR: Database backup failed; refusing to run migrations." >&2
+                exit 1
+              fi
+              chmod 600 "$BACKUP_FILE"
+              if ! test -s "$BACKUP_FILE" || ! grep -q -- '-- Dump completed on' "$BACKUP_FILE"; then
+                echo "ERROR: Database backup verification failed; refusing to run migrations." >&2
+                rm -f "$BACKUP_FILE"
+                exit 1
+              fi
+              echo "Database backup completed: $BACKUP_FILE"
+            else
+              echo "--> Database service (db) is not currently running; skipping pre-migration backup."
             fi
-            chmod 600 "$BACKUP_FILE"
-            if ! test -s "$BACKUP_FILE" || ! grep -q -- '-- Dump completed on' "$BACKUP_FILE"; then
-              echo "ERROR: Database backup verification failed; refusing to run migrations." >&2
-              rm -f "$BACKUP_FILE"
-              exit 1
-            fi
-            echo "Database backup completed: $BACKUP_FILE"
 
             DEPLOY_PHASE="migration"
             echo "--> Running database migrations..."
@@ -304,7 +325,17 @@ jobs:
 
             DEPLOY_PHASE="health-check"
             echo "--> Checking deployment health..."
-            source .env
+            if [ -f .env ]; then
+              # shellcheck disable=SC1091
+              source .env
+            else
+              echo "WARNING: .env not found in /opt/lamsuite; falling back to default domains." >&2
+            fi
+
+            DOMAIN="${DOMAIN:-localhost}"
+            SUBDOMAIN_API="${SUBDOMAIN_API:-api}"
+            SUBDOMAIN_PANEL="${SUBDOMAIN_PANEL:-app}"
+            SUBDOMAIN_MCP="${SUBDOMAIN_MCP:-mcp}"
 
             for i in $(seq 1 12); do
               API_HEALTH=$(curl -sk -o /dev/null -w "%{http_code}" "https://${SUBDOMAIN_API}.${DOMAIN}/up" || true)
@@ -323,7 +354,7 @@ jobs:
                 exit 0
               fi
 
-              echo "Health check attempt $i/12 failed (API=$API_HEALTH, Panel=$PANEL_HEALTH, MCP=$MCP_HEALTH)."
+              echo "Health check attempt $i/12 failed (API=$API_HEALTH, Panel=$PANEL_HEALTH, MCP=$MCP_HEALTH, Update=$UPDATE_HEALTH)."
               sleep 5
             done
 
