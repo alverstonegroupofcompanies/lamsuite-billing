@@ -150,7 +150,7 @@ describe("AutoUpdateService - Mocked Feed Scenarios", () => {
 
   it("1. Mocked feed returning no update -> Up to date state", async () => {
     const mockFeed = {
-      version: "2.0.32",
+      version: "2.0.33",
       notes: "Current version",
       pub_date: new Date().toISOString(),
       platforms: {},
@@ -162,7 +162,7 @@ describe("AutoUpdateService - Mocked Feed Scenarios", () => {
 
     const result = await autoUpdateService.checkForUpdates();
     expect(result.shouldUpdate).toBe(false);
-    expect(result.message).toContain("Already up to date (version 2.0.32)");
+    expect(result.message).toContain("Already up to date (version 2.0.33)");
     expect(result.diagnostic?.status).toBe(200);
   });
 
@@ -283,7 +283,7 @@ describe("AutoUpdateService - Unsynced Offline Bills Safety Gate", () => {
       new Error("verify signature error: The signature verification failed")
     );
 
-    const testUrl = "https://api.lamstonehealthcare.com/api/app/update/download/LamSuite-Billing_2.0.32_x64-setup.nsis.zip";
+    const testUrl = "https://api.lamstonehealthcare.com/api/app/update/download/LamSuite-Billing_2.0.33_x64-setup.nsis.zip";
 
     await expect(
       autoUpdateService.installAndRestart(undefined, true, testUrl)
