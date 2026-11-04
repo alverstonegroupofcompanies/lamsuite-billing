@@ -99,7 +99,20 @@ function followUrl(url, maxRedirects = 5, useAuth = false) {
         }
 
         const contentLength = parseInt(res.headers['content-length'] || '0', 10);
+        const contentType = res.headers['content-type'] || '';
         let bytesRead = 0;
+
+        // If server returns JSON or HTML error instead of binary updater payload, treat as failure
+        if (contentType.includes('application/json') || contentType.includes('text/html')) {
+          res.resume();
+          return resolve({
+            ok: false,
+            statusCode: res.statusCode,
+            contentType,
+            error: `Server responded with '${contentType}' instead of binary package. (API server may be running outdated route table or missing download route)`,
+            url,
+          });
+        }
         
         // Read stream to verify data is actually served
         res.on('data', (chunk) => {
@@ -111,6 +124,7 @@ function followUrl(url, maxRedirects = 5, useAuth = false) {
               ok: res.statusCode === 200,
               statusCode: res.statusCode,
               contentLength: contentLength || bytesRead,
+              contentType,
               url,
             });
           }
@@ -121,6 +135,7 @@ function followUrl(url, maxRedirects = 5, useAuth = false) {
             ok: res.statusCode === 200,
             statusCode: res.statusCode,
             contentLength: contentLength || bytesRead,
+            contentType,
             url,
           });
         });
@@ -139,6 +154,24 @@ function followUrl(url, maxRedirects = 5, useAuth = false) {
       resolve({ ok: false, error: err.message, statusCode: 0, url });
     }
   });
+}
+
+async function followUrlWithRetry(url, maxRetries = 6, delayMs = 5000) {
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    const res = await followUrl(url, 5, false);
+    if (res.ok && res.statusCode === 200) {
+      return res;
+    }
+
+    const isTransient = [0, 502, 503, 504, 429].includes(res.statusCode) || !res.statusCode;
+    if (isTransient && attempt < maxRetries) {
+      console.warn(`  [RETRY ${attempt}/${maxRetries}] URL returned HTTP ${res.statusCode || res.error}. Server may be restarting or warming caches. Waiting ${delayMs / 1000}s...`);
+      await new Promise(r => setTimeout(r, delayMs));
+      continue;
+    }
+
+    return res;
+  }
 }
 
 async function verifyRelease() {
@@ -244,7 +277,7 @@ async function verifyRelease() {
 
           // Verify URL resolution following redirects (strictly public unauthenticated HTTP 200)
           console.log(`  Testing download resolution for: ${platData.url}`);
-          const res = await followUrl(platData.url, 5, false);
+          const res = await followUrlWithRetry(platData.url, 6, 5000);
           if (!res.ok || res.statusCode !== 200) {
             errors.push(`Platform "${platform}" public download URL failed to resolve (status: ${res.statusCode || res.error}): ${platData.url}`);
           } else {
@@ -283,7 +316,7 @@ async function verifyRelease() {
           errors.push(`latest-legacy-win7.json references asset "${legacyFilename}" not found on release.`);
         } else {
           console.log(`  Testing legacy download resolution for: ${legacyPlat.url}`);
-          const legacyRes = await followUrl(legacyPlat.url, 5, false);
+          const legacyRes = await followUrlWithRetry(legacyPlat.url, 6, 5000);
           if (!legacyRes.ok || legacyRes.statusCode !== 200) {
             errors.push(`Legacy Windows platform public download URL failed to resolve (status: ${legacyRes.statusCode || legacyRes.error}): ${legacyPlat.url}`);
           } else {

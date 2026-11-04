@@ -462,6 +462,7 @@ jobs:
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.SSH_HOST }}
+          port: ${{ secrets.SSH_PORT || 22 }}
           username: ${{ secrets.SSH_USER || 'deploy' }}
           key: ${{ secrets.SSH_PRIVATE_KEY || secrets.SSH_KEY }}
           passphrase: ${{ secrets.SSH_PASSPHRASE }}
@@ -475,6 +476,7 @@ jobs:
         uses: appleboy/ssh-action@v1.2.1
         with:
           host: ${{ secrets.SSH_HOST }}
+          port: ${{ secrets.SSH_PORT || 22 }}
           username: ${{ secrets.SSH_USER || 'deploy' }}
           key: ${{ secrets.SSH_PRIVATE_KEY || secrets.SSH_KEY }}
           passphrase: ${{ secrets.SSH_PASSPHRASE }}
@@ -484,6 +486,11 @@ jobs:
             if [ -d /opt/lamsuite/updates ]; then
               sudo chmod -R 755 /opt/lamsuite/updates || true
               echo 'Updater files successfully synced and permissions verified.'
+            fi
+            if docker ps --format '{{.Names}}' 2>/dev/null | grep -q 'lamsuite-api'; then
+              echo 'Refreshing route cache in lamsuite-api container...'
+              docker exec lamsuite-api php artisan route:clear 2>/dev/null || true
+              docker exec lamsuite-api php artisan route:cache 2>/dev/null || true
             fi
 
   # ----------------------------------------------------------------------------
