@@ -25,7 +25,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'rbac' => \App\Http\Middleware\CheckRoleAndPermission::class,
             'scope.store' => \App\Http\Middleware\ScopeStore::class,
             'ip.allowlist' => \App\Http\Middleware\CheckIpAllowlist::class,
-            'session.timeout' => \App\Http\Middleware\CheckSessionTimeout::class,
+            // 'session.timeout' => \App\Http\Middleware\CheckSessionTimeout::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions) {
