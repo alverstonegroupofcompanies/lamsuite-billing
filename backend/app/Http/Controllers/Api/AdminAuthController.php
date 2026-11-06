@@ -219,7 +219,7 @@ class AdminAuthController
         $request->validate(['code' => 'required|string']);
         $user = $request->user();
 
-        if ($request->code !== '123456' && !$this->verifyTotpSecret($user->totp_secret, $request->code)) {
+        if (!$this->verifyTotpSecret($user->totp_secret, $request->code)) {
             return response()->json(['message' => 'Invalid TOTP code. Unable to enable 2FA.'], 422);
         }
 

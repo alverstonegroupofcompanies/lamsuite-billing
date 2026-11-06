@@ -91,7 +91,9 @@ export const TopNav: React.FC<TopNavProps> = ({ enabledMenus, onOpenShortcutsHel
           id: "bills",
           name: "Past Bills & Invoices",
           path: "/bills",
-          key: "F6",
+          key: "F6", // Past Bills (still F6)
+    // Note: Hold/Recall shortcuts are now Alt+H / Alt+L (handled in POS screen)
+
           icon: FileText,
           description: "Search, reprint, and manage sales invoices",
         },

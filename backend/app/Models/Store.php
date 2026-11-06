@@ -33,6 +33,7 @@ class Store extends Model
         'enabled_menu_items',
         'feature_flags',
         'version',
+        'timezone',
     ];
 
     protected $casts = [

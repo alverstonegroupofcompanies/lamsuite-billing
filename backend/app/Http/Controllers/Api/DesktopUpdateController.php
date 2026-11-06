@@ -11,7 +11,7 @@ use Symfony\Component\HttpFoundation\BinaryFileResponse;
 
 class DesktopUpdateController
 {
-    private const CURRENT_APP_VERSION = '2.0.34';
+    private const CURRENT_APP_VERSION = '2.0.35';
     private const DEFAULT_MIN_VERSION = '2.0.21';
 
     /**
