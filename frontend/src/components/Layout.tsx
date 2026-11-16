@@ -3,6 +3,7 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
   Wifi,
   WifiOff,
+  Languages,
   User,
   Clock,
   Search,
@@ -26,6 +27,7 @@ import { storeRegistryService, type RegisteredStoreRecord, STORE_PRESET_COLORS }
 import { Lock, Users, Building2 } from "lucide-react";
 import { APP_FULL_VERSION } from "../config/version";
 import { shortcutDispatcher } from "../lib/keyboard/shortcutDispatcher";
+import { useI18n } from "../lib/i18n/I18nContext";
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -34,6 +36,7 @@ interface LayoutProps {
 }
 
 export const Layout: React.FC<LayoutProps> = ({ children, onOpenGateway, onAddNewStore }) => {
+  const { t, locale, toggleLocale } = useI18n();
   const location = useLocation();
   const navigate = useNavigate();
   const [time, setTime] = useState<string>(new Date().toLocaleTimeString());
@@ -334,7 +337,7 @@ export const Layout: React.FC<LayoutProps> = ({ children, onOpenGateway, onAddNe
                   {APP_FULL_VERSION}
                 </span>
               </div>
-              <p className="text-[11px] text-[var(--color-text-muted)] font-medium whitespace-nowrap">Retail & Pharmacy POS</p>
+              <p className="text-[11px] text-[var(--color-text-muted)] font-medium whitespace-nowrap">{t("layout.brand_subtitle")}</p>
             </div>
           </Link>
 
@@ -372,7 +375,7 @@ export const Layout: React.FC<LayoutProps> = ({ children, onOpenGateway, onAddNe
           >
             <div className="flex items-center gap-2">
               <Search className="h-3.5 w-3.5 text-[var(--color-text-faint)]" />
-              <span className="truncate">Search actions, modules, or tools...</span>
+              <span className="truncate">{t("layout.search_placeholder")}</span>
             </div>
             <kbd className="rounded-[6px] border border-[var(--color-border)] bg-[var(--color-surface)] px-1.5 py-0.5 text-[10px] font-mono text-[var(--color-text-muted)] shadow-2xs shrink-0">
               Ctrl+K
@@ -382,6 +385,15 @@ export const Layout: React.FC<LayoutProps> = ({ children, onOpenGateway, onAddNe
 
         {/* Status Indicators */}
         <div className="flex items-center gap-3 text-xs font-medium text-[var(--color-text-muted)] shrink-0">
+          <button
+            onClick={toggleLocale}
+            title={t("layout.language")}
+            className="flex items-center gap-1 rounded-[8px] px-1.5 py-1 text-[10px] font-bold text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)] cursor-pointer"
+          >
+            <Languages className="h-4 w-4" />
+            <span>{locale === "en" ? "ML" : "EN"}</span>
+          </button>
+
           <button
             onClick={toggleFullscreen}
             title="Toggle Fullscreen (F11)"
@@ -397,7 +409,7 @@ export const Layout: React.FC<LayoutProps> = ({ children, onOpenGateway, onAddNe
           >
             <User className="h-3.5 w-3.5 text-[var(--color-accent)]" />
             <span className="whitespace-nowrap font-bold text-[var(--color-text)]">
-              {session?.user.full_name || "Cashier"}
+              {session?.user.full_name || t("layout.cashier")}
             </span>
             <span className="text-[10px] font-mono bg-[var(--color-accent-soft)] text-[var(--color-accent)] font-bold px-1.5 py-0.2 rounded-full uppercase">
               {session?.counterCode || "C01"}

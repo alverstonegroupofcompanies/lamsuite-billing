@@ -71,6 +71,32 @@ export class StoreDeviceService {
     return Boolean(profile && profile.device_id && profile.store_id);
   }
 
+  async getDeviceToken(): Promise<string | null> {
+    return await invokeCommand<string | null>("secure_store_get", { key: "device_token" }).catch(() => null);
+  }
+
+  /**
+   * Headers that authenticate this workstation to device-scoped backend routes.
+   * The legacy `device_token` key always tracks the active store, so the store
+   * header is required to let the server reject a mismatched token.
+   */
+  async getDeviceAuthHeaders(): Promise<Record<string, string>> {
+    const headers: Record<string, string> = {};
+    try {
+      const profile = await this.getDeviceProfile();
+      const token = await this.getDeviceToken();
+      if (token) headers["X-Device-Token"] = token;
+      if (profile?.device_uuid) headers["X-Device-UUID"] = profile.device_uuid;
+      if (profile?.store_id) {
+        headers["X-Store-Id"] = String(profile.store_id);
+        headers["Store-Id"] = String(profile.store_id);
+      }
+    } catch (_) {
+      // Unregistered or secure store unavailable: callers proceed without headers.
+    }
+    return headers;
+  }
+
   async getDeviceProfile(): Promise<StoreDeviceProfile | null> {
     if (this.activeProfile) return this.activeProfile;
 

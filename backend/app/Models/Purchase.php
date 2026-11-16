@@ -17,6 +17,7 @@ class Purchase extends Model
         'supplier_gstin',
         'invoice_number',
         'invoice_date',
+        'expected_delivery_date',
         'module_key',
         'subtotal',
         'tax_total',
@@ -35,11 +36,13 @@ class Purchase extends Model
         'paid_amount',
         'status',
         'cancel_reason',
+        'notes',
         'version',
     ];
 
     protected $casts = [
         'invoice_date' => 'date:Y-m-d',
+        'expected_delivery_date' => 'date:Y-m-d',
         'subtotal' => 'decimal:2',
         'tax_total' => 'decimal:2',
         'cgst_total' => 'decimal:2',

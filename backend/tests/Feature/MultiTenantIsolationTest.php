@@ -121,4 +121,92 @@ class MultiTenantIsolationTest extends TestCase
 
         $response->assertStatus(200);
     }
+
+    public function test_super_admin_all_stores_scope_returns_consolidated_data(): void
+    {
+        Product::create([
+            'store_id' => $this->store1->id,
+            'name' => 'Product PKD',
+            'barcode' => 'PKD001',
+            'hsn_sac_code' => '3004',
+            'mrp' => 100,
+            'sel_rate' => 90,
+            'gst_percent' => 12,
+            'current_stock' => 10,
+        ]);
+
+        Product::create([
+            'store_id' => $this->store2->id,
+            'name' => 'Product KCH',
+            'barcode' => 'KCH001',
+            'hsn_sac_code' => '3004',
+            'mrp' => 200,
+            'sel_rate' => 180,
+            'gst_percent' => 12,
+            'current_stock' => 20,
+        ]);
+
+        $response = $this->actingAs($this->superAdmin, 'sanctum')
+            ->withHeaders(['X-Store-Scope' => 'all'])
+            ->getJson('/api/admin/products');
+
+        $response->assertStatus(200);
+        $names = collect($response->json('data'))->pluck('name')->all();
+
+        $this->assertContains('Product PKD', $names);
+        $this->assertContains('Product KCH', $names);
+    }
+
+    public function test_single_store_manager_cannot_use_all_stores_scope(): void
+    {
+        $response = $this->actingAs($this->managerStore1, 'sanctum')
+            ->withHeaders(['X-Store-Scope' => 'all'])
+            ->getJson('/api/admin/products');
+
+        $response->assertStatus(403);
+        $response->assertJsonFragment([
+            'message' => 'All Stores scope requires access to every store.',
+        ]);
+    }
+
+    public function test_all_stores_scope_is_read_only(): void
+    {
+        $response = $this->actingAs($this->superAdmin, 'sanctum')
+            ->withHeaders(['X-Store-Scope' => 'all'])
+            ->postJson('/api/admin/products', [
+                'name' => 'New Product',
+                'barcode' => 'NEW001',
+                'mrp' => 50,
+                'sel_rate' => 45,
+                'gst_percent' => 12,
+            ]);
+
+        $response->assertStatus(422);
+        $response->assertJsonFragment([
+            'message' => 'All Stores scope is read-only. Select a specific store before making changes.',
+        ]);
+    }
+
+    public function test_all_stores_scope_keeps_session_endpoints_working(): void
+    {
+        $response = $this->actingAs($this->superAdmin, 'sanctum')
+            ->withHeaders(['X-Store-Scope' => 'all'])
+            ->postJson('/api/admin/logout');
+
+        $response->assertStatus(200);
+        $response->assertJsonFragment(['success' => true]);
+    }
+
+    public function test_me_endpoint_exposes_all_stores_capability(): void
+    {
+        $this->actingAs($this->superAdmin, 'sanctum')
+            ->getJson('/api/admin/me')
+            ->assertStatus(200)
+            ->assertJsonPath('can_view_all_stores', true);
+
+        $this->actingAs($this->managerStore1, 'sanctum')
+            ->getJson('/api/admin/me')
+            ->assertStatus(200)
+            ->assertJsonPath('can_view_all_stores', false);
+    }
 }

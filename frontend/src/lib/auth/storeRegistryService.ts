@@ -678,6 +678,9 @@ export class StoreRegistryService {
         key: "device_token",
         value: token,
       }).catch(() => {});
+    } else {
+      // Never leave the previous store's token active for the new store.
+      await invokeCommand("secure_store_delete", { key: "device_token" }).catch(() => {});
     }
 
     // 3. Clear transient singletons & active cart

@@ -8,11 +8,14 @@ use App\Models\Party;
 use App\Models\Product;
 use App\Models\ProductBatch;
 use App\Models\Purchase;
+use App\Models\ScheduledReport;
 use App\Models\Store;
+use App\Services\Reports\ScheduledReportService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\Rule;
 
 class AdminReportController
 {
@@ -259,27 +262,179 @@ class AdminReportController
      */
     public function scheduledReports(Request $request): JsonResponse
     {
-        return response()->json([
-            'schedules' => [
-                [
-                    'id' => 1,
-                    'name' => 'Daily Sales & Collection Digest',
-                    'frequency' => 'daily_at_21_00',
-                    'recipients' => ['owner@lamstone.in', 'accounts@lamstone.in'],
-                    'report_type' => 'daily_sales',
-                    'is_active' => true,
-                    'last_sent' => Carbon::yesterday()->setTime(21, 0)->toIso8601String(),
-                ],
-                [
-                    'id' => 2,
-                    'name' => 'Weekly GSTR-1 Pre-check',
-                    'frequency' => 'weekly_sunday',
-                    'recipients' => ['ca@lamstone.in'],
-                    'report_type' => 'gstr1',
-                    'is_active' => true,
-                    'last_sent' => Carbon::now()->startOfWeek()->subDay()->toIso8601String(),
-                ],
-            ],
+        $storeId = $request->get('active_store_id');
+
+        $schedules = ScheduledReport::with('store:id,name,code')
+            ->when($storeId, fn ($q) => $q->where('store_id', $storeId))
+            ->orderBy('name')
+            ->get()
+            ->map(fn (ScheduledReport $schedule) => $this->schedulePayload($schedule))
+            ->values();
+
+        return response()->json(['schedules' => $schedules]);
+    }
+
+    public function storeScheduledReport(Request $request): JsonResponse
+    {
+        $validated = $this->validateSchedule($request);
+        $storeId = $this->resolveScheduleStoreId($request, $validated);
+
+        $schedule = ScheduledReport::create([
+            'store_id' => $storeId,
+            'name' => $validated['name'],
+            'report_type' => $validated['report_type'],
+            'frequency' => $validated['frequency'],
+            'send_time' => $validated['send_time'],
+            'day_of_week' => $validated['day_of_week'] ?? null,
+            'day_of_month' => $validated['day_of_month'] ?? null,
+            'recipients' => array_values(array_unique($validated['recipients'])),
+            'is_active' => $validated['is_active'] ?? true,
+            'created_by' => $request->user()->id,
         ]);
+
+        return response()->json([
+            'message' => 'Scheduled report created.',
+            'schedule' => $this->schedulePayload($schedule->load('store:id,name,code')),
+        ], 201);
+    }
+
+    public function updateScheduledReport(Request $request, int $id): JsonResponse
+    {
+        $schedule = $this->findScheduleForUser($request, $id);
+        $validated = $this->validateSchedule($request);
+
+        $schedule->fill([
+            'name' => $validated['name'],
+            'report_type' => $validated['report_type'],
+            'frequency' => $validated['frequency'],
+            'send_time' => $validated['send_time'],
+            'day_of_week' => $validated['day_of_week'] ?? null,
+            'day_of_month' => $validated['day_of_month'] ?? null,
+            'recipients' => array_values(array_unique($validated['recipients'])),
+        ]);
+
+        if (array_key_exists('is_active', $validated)) {
+            $schedule->is_active = (bool) $validated['is_active'];
+        }
+
+        $schedule->save();
+
+        return response()->json([
+            'message' => 'Scheduled report updated.',
+            'schedule' => $this->schedulePayload($schedule->load('store:id,name,code')),
+        ]);
+    }
+
+    public function destroyScheduledReport(Request $request, int $id): JsonResponse
+    {
+        $schedule = $this->findScheduleForUser($request, $id);
+        $schedule->delete();
+
+        return response()->json(['message' => 'Scheduled report deleted.']);
+    }
+
+    public function runScheduledReport(Request $request, int $id, ScheduledReportService $service): JsonResponse
+    {
+        $schedule = $this->findScheduleForUser($request, $id);
+
+        try {
+            $result = $service->deliver($schedule);
+        } catch (\Throwable $e) {
+            $service->markFailed($schedule, $e);
+
+            return response()->json([
+                'message' => 'Failed to send scheduled report: ' . $e->getMessage(),
+                'schedule' => $this->schedulePayload($schedule->fresh()),
+            ], 422);
+        }
+
+        return response()->json([
+            'message' => 'Scheduled report sent to ' . implode(', ', $result['recipients']) . '.',
+            'schedule' => $this->schedulePayload($schedule->fresh()),
+        ]);
+    }
+
+    private function validateSchedule(Request $request): array
+    {
+        return $request->validate([
+            'name' => 'required|string|max:120',
+            'report_type' => ['required', Rule::in(ScheduledReport::REPORT_TYPES)],
+            'frequency' => ['required', Rule::in(ScheduledReport::FREQUENCIES)],
+            'send_time' => ['required', 'regex:/^([01]\d|2[0-3]):[0-5]\d$/'],
+            'day_of_week' => 'required_if:frequency,weekly|nullable|integer|min:0|max:6',
+            'day_of_month' => 'required_if:frequency,monthly|nullable|integer|min:1|max:31',
+            'recipients' => 'required|array|min:1',
+            'recipients.*' => 'required|email',
+            'is_active' => 'sometimes|boolean',
+            'store_id' => 'sometimes|nullable|integer|exists:stores,id',
+        ]);
+    }
+
+    private function resolveScheduleStoreId(Request $request, array $validated): ?int
+    {
+        $user = $request->user();
+
+        if (array_key_exists('store_id', $validated)) {
+            $storeId = $validated['store_id'] !== null ? (int) $validated['store_id'] : null;
+            if ($storeId !== null && !$user->canAccessStore($storeId)) {
+                abort(403, 'You do not have access to the selected store.');
+            }
+            if ($storeId === null && !$user->canViewAllStores()) {
+                abort(403, 'Consolidated schedules require access to every store.');
+            }
+
+            return $storeId;
+        }
+
+        $activeStoreId = $request->get('active_store_id');
+
+        if ($activeStoreId === null && !$user->canViewAllStores()) {
+            abort(403, 'Select a store before creating a scheduled report.');
+        }
+
+        return $activeStoreId !== null ? (int) $activeStoreId : null;
+    }
+
+    private function findScheduleForUser(Request $request, int $id): ScheduledReport
+    {
+        $schedule = ScheduledReport::find($id);
+
+        if (!$schedule) {
+            abort(404, 'Scheduled report not found.');
+        }
+
+        $user = $request->user();
+
+        if ($schedule->store_id === null) {
+            if (!$user->canViewAllStores()) {
+                abort(403, 'Consolidated schedules require access to every store.');
+            }
+        } elseif (!$user->canAccessStore($schedule->store_id)) {
+            abort(403, 'You do not have access to this scheduled report.');
+        }
+
+        return $schedule;
+    }
+
+    private function schedulePayload(ScheduledReport $schedule): array
+    {
+        return [
+            'id' => $schedule->id,
+            'store_id' => $schedule->store_id,
+            'store_name' => $schedule->store?->name ?? 'All Stores',
+            'name' => $schedule->name,
+            'report_type' => $schedule->report_type,
+            'frequency' => $schedule->frequency,
+            'frequency_label' => $schedule->frequencyLabel(),
+            'send_time' => $schedule->send_time,
+            'day_of_week' => $schedule->day_of_week,
+            'day_of_month' => $schedule->day_of_month,
+            'recipients' => $schedule->recipients ?? [],
+            'is_active' => $schedule->is_active,
+            'last_sent_at' => $schedule->last_sent_at?->toIso8601String(),
+            'last_status' => $schedule->last_status,
+            'last_error' => $schedule->last_error,
+            'created_at' => $schedule->created_at?->toIso8601String(),
+        ];
     }
 }

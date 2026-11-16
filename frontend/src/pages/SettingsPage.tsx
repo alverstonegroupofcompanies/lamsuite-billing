@@ -114,7 +114,10 @@ export const SettingsPage: React.FC = () => {
 
   // Backup & Reset state
   const [latestBackup, setLatestBackup] = useState<BackupPackage | null>(null);
-  const [restoreJsonInput, setRestoreJsonInput] = useState("");
+  const [restorePreview, setRestorePreview] = useState<BackupPackage | null>(null);
+  const [restoreFileName, setRestoreFileName] = useState("");
+  const [restoreConfirmPhrase, setRestoreConfirmPhrase] = useState("");
+  const restoreFileInputRef = React.useRef<HTMLInputElement>(null);
   const [isRestoring, setIsRestoring] = useState(false);
   const [resetConfirmPhrase, setResetConfirmPhrase] = useState("");
   const [resetScope, setResetScope] = useState<"transactions_only" | "full_factory_reset">("transactions_only");
@@ -568,18 +571,57 @@ export const SettingsPage: React.FC = () => {
     showNotification("Backup file downloaded");
   };
 
+  const handleRestoreFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    try {
+      const text = await file.text();
+      const pkg = backupService.deserializeBackup(text);
+      if (!pkg || !Array.isArray(pkg.manifest) || !pkg.data || typeof pkg.data !== "object") {
+        throw new Error("File is not a LamSuite backup package");
+      }
+      if (pkg.schema_version > (await sqliteStorage.getDatabaseVersion())) {
+        throw new Error(`Backup was created by a newer app schema (v${pkg.schema_version})`);
+      }
+      const totalRecords = pkg.manifest.reduce((sum, m) => sum + (Number(m.record_count) || 0), 0);
+      if (totalRecords === 0) {
+        throw new Error("Backup package contains no records");
+      }
+      setRestorePreview(pkg);
+      setRestoreFileName(file.name);
+      setRestoreConfirmPhrase("");
+      showNotification(`Backup loaded: ${pkg.manifest.length} tables, ${totalRecords} records`);
+    } catch (err: any) {
+      setRestorePreview(null);
+      setRestoreFileName(file.name);
+      showNotification(`Cannot read backup: ${err.message}`, "error");
+    } finally {
+      if (restoreFileInputRef.current) restoreFileInputRef.current.value = "";
+    }
+  };
+
   const handleRestoreBackup = async () => {
-    if (!restoreJsonInput.trim()) {
-      showNotification("Please paste valid JSON backup package", "error");
+    if (!restorePreview) {
+      showNotification("Choose a backup file first", "error");
+      return;
+    }
+    if (restoreConfirmPhrase.trim().toUpperCase() !== "RESTORE") {
+      showNotification('Type "RESTORE" to confirm', "error");
       return;
     }
 
     setIsRestoring(true);
     try {
-      const pkg = backupService.deserializeBackup(restoreJsonInput);
-      const res = await backupService.restoreFromSnapshot(pkg);
-      showNotification(`Restored ${res.totalRecordsRestored} records across ${res.restoredTables.length} tables!`);
-      setRestoreJsonInput("");
+      const res = await backupService.restoreFromSnapshot(restorePreview);
+      showNotification(
+        `Restored ${res.totalRecordsRestored} records across ${res.restoredTables.length} tables!${
+          res.skippedTables.length ? ` Skipped ${res.skippedTables.length} unknown tables.` : ""
+        }`
+      );
+      setRestorePreview(null);
+      setRestoreFileName("");
+      setRestoreConfirmPhrase("");
       loadData();
     } catch (err: any) {
       showNotification(`Restore failed: ${err.message}`, "error");
@@ -1867,7 +1909,7 @@ export const SettingsPage: React.FC = () => {
                   <div>
                     <label className="block text-[11px] font-semibold uppercase text-slate-600">Credit Limit Breach Action</label>
                     <select
-                      value={settings.payments?.creditPolicy || "warn_on_exceed"}
+                      value={settings.payments?.creditPolicy || "block_on_exceed"}
                       onChange={(e) =>
                         setSettings({
                           ...settings,
@@ -4311,6 +4353,82 @@ export const SettingsPage: React.FC = () => {
                   </button>
                 </div>
               )}
+
+              {/* Restore From Backup */}
+              <div className="rounded-lg border border-slate-200 p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="text-xs font-bold text-slate-800">Restore From Backup File</div>
+                    <div className="text-[11px] text-slate-500">
+                      Load a JSON snapshot. Records are merged by ID — existing rows with the same ID are overwritten, other current data is kept.
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => restoreFileInputRef.current?.click()}
+                    className="flex items-center gap-1.5 rounded border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                  >
+                    <Upload className="h-3.5 w-3.5" />
+                    <span>Choose Backup File</span>
+                  </button>
+                  <input
+                    ref={restoreFileInputRef}
+                    type="file"
+                    accept="application/json,.json"
+                    className="hidden"
+                    onChange={handleRestoreFileSelect}
+                  />
+                </div>
+
+                {restoreFileName && !restorePreview && (
+                  <div className="rounded border border-rose-200 bg-rose-50 px-3 py-2 text-[11px] font-medium text-rose-700">
+                    {restoreFileName} could not be used as a backup package.
+                  </div>
+                )}
+
+                {restorePreview && (
+                  <div className="rounded border border-slate-200 bg-slate-50/60 p-3 space-y-2 text-[11px]">
+                    <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+                      <span className="font-mono font-bold text-slate-800">{restorePreview.backup_id}</span>
+                      <span className="text-slate-500">
+                        {restorePreview.created_at_iso
+                          ? new Date(restorePreview.created_at_iso).toLocaleString()
+                          : new Date(restorePreview.created_at).toLocaleString()}
+                      </span>
+                      <span className="text-slate-500">App v{restorePreview.app_version}</span>
+                      <span className="text-slate-500">
+                        {restorePreview.manifest.reduce((sum, m) => sum + (Number(m.record_count) || 0), 0)} records /{" "}
+                        {restorePreview.manifest.length} tables
+                      </span>
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {restorePreview.manifest.map((m) => (
+                        <span key={m.table_name} className="rounded bg-white px-1.5 py-0.5 font-mono text-[10px] text-slate-600 border border-slate-200">
+                          {m.table_name}: {m.record_count}
+                        </span>
+                      ))}
+                    </div>
+                    <div className="flex items-center gap-2 pt-1">
+                      <input
+                        type="text"
+                        placeholder='Type "RESTORE" to confirm'
+                        value={restoreConfirmPhrase}
+                        onChange={(e) => setRestoreConfirmPhrase(e.target.value)}
+                        className="w-56 rounded border border-slate-300 bg-white p-1.5 text-xs font-mono uppercase"
+                      />
+                      <button
+                        type="button"
+                        onClick={handleRestoreBackup}
+                        disabled={isRestoring || restoreConfirmPhrase.trim().toUpperCase() !== "RESTORE"}
+                        className="flex items-center gap-1.5 rounded bg-slate-800 px-3 py-1.5 text-xs font-bold text-white hover:bg-slate-900 disabled:opacity-40"
+                      >
+                        <RotateCcw className={`h-3.5 w-3.5 ${isRestoring ? "animate-spin" : ""}`} />
+                        <span>{isRestoring ? "Restoring..." : "Restore Backup"}</span>
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
 
               {/* Danger Zone */}
               <div className="rounded-lg border border-rose-200 bg-rose-50/50 p-4 space-y-3">

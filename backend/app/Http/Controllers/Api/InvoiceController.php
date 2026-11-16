@@ -20,6 +20,8 @@ use App\Models\StockLedgerEntry;
 use App\Models\Store;
 use App\Models\SyncEvent;
 use App\Services\Tax\TaxEngine;
+use App\Services\Compliance\ComplianceService;
+use App\Services\Webhook\WebhookOutboxService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -130,6 +132,9 @@ class InvoiceController
 
         $perPage = min(500, max(1, (int)$request->query('per_page', 20)));
         $paginated = $builder->paginate($perPage);
+
+        $compliance = app(ComplianceService::class);
+        $paginated->getCollection()->transform(fn (Invoice $invoice) => $compliance->decorate($invoice));
 
         $response = $paginated->toArray();
         $response['total_store_invoices'] = $totalStoreInvoices;
@@ -663,6 +668,7 @@ class InvoiceController
                 $creditPortion = 0.0;
                 $cashPortion = 0.0;
                 $digitalPortion = 0.0;
+                $giftCardPortion = 0.0;
                 $totalPaid = 0.0;
 
                 if (!empty($rawPayments) && is_array($rawPayments)) {
@@ -671,22 +677,34 @@ class InvoiceController
                         $pAmt = (float)($p['amount'] ?? 0);
                         if ($pAmt <= 0) continue;
 
+                        $upperMode = strtoupper($pMode);
+                        $isGiftCard = in_array($upperMode, ['GIFT CARD', 'GIFT VOUCHER', 'GIFT_VOUCHER', 'GIFT_CARD', 'GIFTCARD'], true);
+                        $extraFields = is_array($p['extra_fields'] ?? null) ? $p['extra_fields'] : [];
+                        if ($isGiftCard && empty($extraFields['gift_card_code'])) {
+                            $candidateCode = $extraFields['card_code'] ?? $p['reference_no'] ?? null;
+                            if (!empty($candidateCode)) {
+                                $extraFields['gift_card_code'] = (string) $candidateCode;
+                            }
+                        }
+
                         $paymentLines[] = [
                             'mode' => $pMode,
                             'amount' => $pAmt,
                             'reference_no' => $p['reference_no'] ?? null,
                             'status' => $p['status'] ?? 'received',
-                            'extra_fields' => $p['extra_fields'] ?? null,
+                            'extra_fields' => $extraFields ?: null,
                             'notes' => $p['notes'] ?? null,
+                            'is_gift_card' => $isGiftCard,
                         ];
 
-                        $upperMode = strtoupper($pMode);
                         if ($upperMode === 'CREDIT' || $upperMode === 'UDHARI') {
                             $creditPortion += $pAmt;
                         } else {
                             $totalPaid += $pAmt;
                             if ($upperMode === 'CASH') {
                                 $cashPortion += $pAmt;
+                            } elseif ($isGiftCard) {
+                                $giftCardPortion += $pAmt;
                             } else {
                                 $digitalPortion += $pAmt;
                             }
@@ -823,6 +841,24 @@ class InvoiceController
                     ]);
                 }
 
+                // Redeem gift card tenders atomically with the sale
+                if ($giftCardPortion > 0) {
+                    $giftCardService = app(\App\Services\Payments\GiftCardService::class);
+                    foreach ($paymentLines as $pLine) {
+                        if (empty($pLine['is_gift_card'])) continue;
+                        $code = $pLine['extra_fields']['gift_card_code'] ?? $pLine['reference_no'] ?? '';
+                        $giftCardService->redeem(
+                            $storeId,
+                            (string) $code,
+                            (float) $pLine['amount'],
+                            $invoice->id,
+                            'invoice',
+                            (string) $invoice->id,
+                            $request->user()?->id
+                        );
+                    }
+                }
+
                 // Insert Invoice Payments
                 foreach ($paymentLines as $pLine) {
                     InvoicePayment::create([
@@ -917,6 +953,24 @@ class InvoiceController
                 ];
             });
 
+            $invoice = $result['invoice'];
+            app(WebhookOutboxService::class)->enqueue(
+                'invoice.created',
+                [
+                    'id' => $invoice->id,
+                    'invoice_number' => $invoice->invoice_number,
+                    'grand_total' => (float) $invoice->grand_total,
+                    'customer_id' => $invoice->customer_id,
+                    'customer_name' => $invoice->customer_name,
+                    'payment_mode' => $invoice->payment_mode,
+                    'counter_code' => $invoice->counter_code,
+                    'invoice_date' => optional($invoice->created_at)->toIso8601String(),
+                ],
+                $storeId,
+                'invoice',
+                (string) $invoice->id
+            );
+
             return response()->json([
                 'success' => true,
                 'invoice' => $result['invoice'],
@@ -945,6 +999,8 @@ class InvoiceController
             ->where('id', $id)
             ->orWhere('invoice_number', $id)
             ->firstOrFail();
+        app(ComplianceService::class)->decorate($invoice);
+
         return response()->json($invoice);
     }
 
@@ -968,7 +1024,10 @@ class InvoiceController
 
         $reason = $request->input('reason', 'Cancelled by operator');
 
-        DB::transaction(function () use ($invoice, $reason) {
+        app(\App\Services\DayClose\StoreDayCloseService::class)
+            ->assertDayOpen((int) $invoice->store_id, $invoice->invoice_date?->toDateString());
+
+        DB::transaction(function () use ($invoice, $reason, $request) {
             $invoice->update([
                 'status' => 'cancelled',
                 'cancel_reason' => $reason,
@@ -989,6 +1048,26 @@ class InvoiceController
 
             // Mark associated payments refunded
             $invoice->payments()->update(['status' => 'refunded']);
+
+            // Return gift card value used on this invoice
+            $giftCardService = app(\App\Services\Payments\GiftCardService::class);
+            foreach ($invoice->payments as $payment) {
+                $mode = strtoupper(trim((string) $payment->payment_mode));
+                if (!in_array($mode, ['GIFT CARD', 'GIFT VOUCHER', 'GIFT_VOUCHER', 'GIFT_CARD', 'GIFTCARD'], true)) {
+                    continue;
+                }
+                $code = $payment->extra_fields['gift_card_code'] ?? $payment->reference_no ?? null;
+                if (!$code) continue;
+                try {
+                    $giftCardService->refund($invoice->store_id, (string) $code, (float) $payment->amount, $invoice->id, $request->user()?->id);
+                } catch (\Throwable $e) {
+                    \Illuminate\Support\Facades\Log::warning('[GiftCard] Refund on cancellation failed', [
+                        'invoice_id' => $invoice->id,
+                        'payment_id' => $payment->id,
+                        'error' => $e->getMessage(),
+                    ]);
+                }
+            }
 
             // Revert stock for each item
             foreach ($invoice->items as $item) {
@@ -1057,6 +1136,21 @@ class InvoiceController
                 'status' => 'resolved',
             ]);
         });
+
+        app(WebhookOutboxService::class)->enqueue(
+            'invoice.cancelled',
+            [
+                'id' => $invoice->id,
+                'invoice_number' => $invoice->invoice_number,
+                'grand_total' => (float) $invoice->grand_total,
+                'customer_id' => $invoice->customer_id,
+                'reason' => $reason,
+                'cancelled_at' => optional($invoice->cancelled_at)->toIso8601String() ?? now()->toIso8601String(),
+            ],
+            $invoice->store_id,
+            'invoice',
+            (string) $invoice->id
+        );
 
         return response()->json([
             'success' => true,

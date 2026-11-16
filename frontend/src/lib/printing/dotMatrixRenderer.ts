@@ -370,7 +370,7 @@ export class DotMatrixRenderer {
     // 2. Title & Copy Marker (Centered in 60 columns)
     const isDup = options?.isDuplicate || options?.copyMarker;
     const dupText = options?.copyMarker || "DUPLICATE COPY";
-    headerLines.push(leftMargin + this.center("TAX INVOICE", cols));
+    headerLines.push(leftMargin + this.center(data.document_title || "TAX INVOICE", cols));
     if (isDup) {
       headerLines.push(leftMargin + this.center(`*** ${dupText} ***`, cols));
     }
@@ -554,6 +554,14 @@ export class DotMatrixRenderer {
     if (data.upi_vpa) {
       footerLines.push(leftMargin + `UPI ID: ${data.upi_vpa}`);
     }
+    if (data.irn) {
+      this.wrapText(`IRN: ${data.irn}`, cols).forEach((l) => footerLines.push(leftMargin + l));
+    }
+    if (data.ewb_number) {
+      this.wrapText(`EWB: ${data.ewb_number}${data.ewb_valid_until ? ` (valid till ${data.ewb_valid_until})` : ""}`, cols).forEach((l) =>
+        footerLines.push(leftMargin + l)
+      );
+    }
 
     if (options?.showTerms !== false && data.terms_and_conditions) {
       const terms = this.wrapText(`Terms: ${data.terms_and_conditions}`, cols);
@@ -629,11 +637,11 @@ export class DotMatrixRenderer {
     const isDup = options?.isDuplicate || options?.copyMarker;
     const dupText = options?.copyMarker || "DUPLICATE COPY";
     if (isDup) {
-      const title = "TAX INVOICE";
+      const title = data.document_title || "TAX INVOICE";
       const dupTag = `*** ${dupText} ***`;
       headerLines.push(leftMargin + title + " ".repeat(Math.max(1, cols - title.length - dupTag.length)) + dupTag);
     } else {
-      headerLines.push(leftMargin + this.center("TAX INVOICE", cols));
+      headerLines.push(leftMargin + this.center(data.document_title || "TAX INVOICE", cols));
     }
 
     headerLines.push(divSingle);
@@ -805,6 +813,14 @@ export class DotMatrixRenderer {
     if (data.upi_vpa) {
       footerLines.push(leftMargin + `UPI ID: ${data.upi_vpa}`);
     }
+    if (data.irn) {
+      this.wrapText(`IRN: ${data.irn}`, cols).forEach((l) => footerLines.push(leftMargin + l));
+    }
+    if (data.ewb_number) {
+      this.wrapText(`EWB: ${data.ewb_number}${data.ewb_valid_until ? ` (valid till ${data.ewb_valid_until})` : ""}`, cols).forEach((l) =>
+        footerLines.push(leftMargin + l)
+      );
+    }
 
     // Terms
     if (options?.showTerms !== false && data.terms_and_conditions) {
@@ -874,11 +890,11 @@ export class DotMatrixRenderer {
     const isDup = options?.isDuplicate || options?.copyMarker;
     const dupText = options?.copyMarker || "DUPLICATE COPY";
     if (isDup) {
-      const title = "TAX INVOICE";
+      const title = data.document_title || "TAX INVOICE";
       const dupTag = `*** ${dupText} ***`;
       headerLines.push(leftMargin + title + " ".repeat(Math.max(1, cols - title.length - dupTag.length)) + dupTag);
     } else {
-      headerLines.push(leftMargin + this.center("TAX INVOICE", cols));
+      headerLines.push(leftMargin + this.center(data.document_title || "TAX INVOICE", cols));
     }
 
     headerLines.push(divSingle);
@@ -982,6 +998,8 @@ export class DotMatrixRenderer {
     const words = data.amount_in_words || numberToWordsIndian(data.grand_total);
     footerLines.push(leftMargin + `Amount in Words: ${words}`);
     if (data.upi_vpa) footerLines.push(leftMargin + `UPI ID: ${data.upi_vpa}`);
+    if (data.irn) footerLines.push(leftMargin + `IRN: ${data.irn}`);
+    if (data.ewb_number) footerLines.push(leftMargin + `EWB: ${data.ewb_number}${data.ewb_valid_until ? ` (valid till ${data.ewb_valid_until})` : ""}`);
     if (options?.showTerms !== false && data.terms_and_conditions) {
       footerLines.push(leftMargin + `Terms: ${data.terms_and_conditions}`);
     }
@@ -1042,11 +1060,11 @@ export class DotMatrixRenderer {
     const isDup = options?.isDuplicate || options?.copyMarker;
     const dupText = options?.copyMarker || "DUPLICATE COPY";
     if (isDup) {
-      const title = "TAX INVOICE";
+      const title = data.document_title || "TAX INVOICE";
       const dupTag = `*** ${dupText} ***`;
       headerLines.push(leftMargin + title + " ".repeat(Math.max(1, cols - title.length - dupTag.length)) + dupTag);
     } else {
-      headerLines.push(leftMargin + this.center("TAX INVOICE", cols));
+      headerLines.push(leftMargin + this.center(data.document_title || "TAX INVOICE", cols));
     }
 
     headerLines.push(divSingle);
@@ -1159,6 +1177,14 @@ export class DotMatrixRenderer {
     footerLines.push(leftMargin + `Amount in Words: ${words}`);
     if (data.upi_vpa) {
       footerLines.push(leftMargin + `UPI ID: ${data.upi_vpa}`);
+    }
+    if (data.irn) {
+      this.wrapText(`IRN: ${data.irn}`, cols).forEach((l) => footerLines.push(leftMargin + l));
+    }
+    if (data.ewb_number) {
+      this.wrapText(`EWB: ${data.ewb_number}${data.ewb_valid_until ? ` (valid till ${data.ewb_valid_until})` : ""}`, cols).forEach((l) =>
+        footerLines.push(leftMargin + l)
+      );
     }
     if (options?.showTerms !== false && data.terms_and_conditions) {
       footerLines.push(leftMargin + `Terms: ${data.terms_and_conditions}`);
@@ -1774,6 +1800,7 @@ export class DotMatrixRenderer {
             // Detect bold lines (store name, TAX INVOICE, GRAND TOTAL, headers)
             const isBoldLine =
               rawLine.includes("TAX INVOICE") ||
+              rawLine.includes("QUOTATION") ||
               rawLine.includes("GRAND TOTAL") ||
               rawLine.includes("Item Description") ||
               rawLine.includes("========================================");

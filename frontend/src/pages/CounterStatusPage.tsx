@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { Monitor, RefreshCw } from "lucide-react";
 import { LoggedInDevicesTable } from "../components/devices/LoggedInDevicesTable";
+import { CashShiftPanel } from "../components/devices/CashShiftPanel";
 
 export const CounterStatusPage: React.FC = () => {
   const [deviceCounts, setDeviceCounts] = useState<{ active: number; total: number }>({
@@ -31,6 +32,9 @@ export const CounterStatusPage: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {/* Cash shift open/close and drawer count for the signed-in counter */}
+      <CashShiftPanel />
 
       {/* Real-time backend connected devices table (Item 2) */}
       <LoggedInDevicesTable

@@ -34,6 +34,8 @@ export interface PosCartLine {
   shortageQty?: number;
   isAdhocBatch?: boolean;
   availableStockSnapshot?: number;
+  price_list_applied?: boolean;
+  price_list_name?: string;
 }
 
 export interface PosPrescriptionMeta {
@@ -65,6 +67,8 @@ export class PosCartService {
   private allowTaxOverride: boolean = false;
   private isInterState = false;
   private prescriptionMeta: PosPrescriptionMeta = {};
+  private priceListItems: Record<string, { rate: number; discount_percent: number; min_qty: number }> = {};
+  private priceListName: string | null = null;
 
   getLines(): PosCartLine[] {
     return [...this.lines];
@@ -129,6 +133,11 @@ export class PosCartService {
   }
 
   setCustomer(id: string, name: string, gstin = "", placeOfSupply = "", phone = "") {
+    if (String(id || "") !== String(this.customerId || "")) {
+      // Customer changed: drop the previous customer's negotiated rates until the
+      // new price list resolves, so one customer's rates never leak into another.
+      this.setPriceListPricing(null, []);
+    }
     this.customerId = id;
     this.customerName = name;
     this.customerGstin = gstin;
@@ -156,6 +165,62 @@ export class PosCartService {
       customerGstin: this.customerGstin,
       placeOfSupply: this.placeOfSupply,
     };
+  }
+
+  /** Apply a customer-specific price list. Empty items clears negotiated pricing. */
+  setPriceListPricing(
+    listName: string | null,
+    items: Array<{ product_id: number | string; rate: number; discount_percent?: number; min_qty?: number }>
+  ) {
+    const map: Record<string, { rate: number; discount_percent: number; min_qty: number }> = {};
+    for (const item of items || []) {
+      if (!item || item.product_id === undefined || item.product_id === null) continue;
+      map[String(item.product_id)] = {
+        rate: Math.max(0, Number(item.rate) || 0),
+        discount_percent: Math.max(0, Number(item.discount_percent) || 0),
+        min_qty: Math.max(0, Number(item.min_qty) || 0),
+      };
+    }
+    this.priceListItems = map;
+    this.priceListName = listName && Object.keys(map).length > 0 ? listName : null;
+    this.lines = this.lines.map((line) => {
+      const base = { ...line } as Omit<PosCartLine, "calculated">;
+      this.applyPriceListPricing(base);
+      return { ...base, calculated: this.calculateLine(base) };
+    });
+  }
+
+  getPriceListContext(): { name: string | null; productCount: number } {
+    return { name: this.priceListName, productCount: Object.keys(this.priceListItems).length };
+  }
+
+  private effectiveQty(line: Pick<PosCartLine, "qty" | "loose_qty" | "product">): number {
+    const unitsPerPack = Math.max(1, Number(line.product?.units_per_pack) || 1);
+    return Math.max(0, Number(line.qty) || 0) + Math.max(0, Number(line.loose_qty) || 0) / unitsPerPack;
+  }
+
+  private baseLinePrice(line: Pick<PosCartLine, "product" | "selectedBatch">): number {
+    return line.selectedBatch?.selling_rate || line.product?.sel_rate || line.product?.mrp || 0;
+  }
+
+  private applyPriceListPricing(line: Omit<PosCartLine, "calculated"> | PosCartLine): void {
+    // A manually edited price always wins over the negotiated list.
+    if (line.price_list_applied === false) return;
+
+    const item = this.priceListItems[String(line.product?.id)];
+    const qualifies = Boolean(item) && this.effectiveQty(line) >= item!.min_qty;
+
+    if (item && qualifies) {
+      line.unit_price = item.rate;
+      if (!line.discount_manual) line.discount_percent = item.discount_percent;
+      line.price_list_applied = true;
+      line.price_list_name = this.priceListName || undefined;
+    } else if (line.price_list_applied) {
+      line.unit_price = this.baseLinePrice(line);
+      if (!line.discount_manual) line.discount_percent = 0;
+      line.price_list_applied = undefined;
+      line.price_list_name = undefined;
+    }
   }
 
   setBillDiscount(type: "percent" | "amount", value: number) {
@@ -279,18 +344,18 @@ export class PosCartService {
       const isNegative = requestedBaseUnits > availableStock || availableStock <= 0;
       const shortage = Math.max(0, requestedBaseUnits - Math.max(0, availableStock));
 
-      const updatedLine: PosCartLine = {
+      const updatedBase: Omit<PosCartLine, "calculated"> = {
         ...existing,
         qty: updatedQty,
         loose_qty: updatedLoose,
         isNegativeStock: isNegative,
         shortageQty: shortage,
         availableStockSnapshot: availableStock,
-        calculated: this.calculateLine({
-          ...existing,
-          qty: updatedQty,
-          loose_qty: updatedLoose,
-        }),
+      };
+      this.applyPriceListPricing(updatedBase);
+      const updatedLine: PosCartLine = {
+        ...updatedBase,
+        calculated: this.calculateLine(updatedBase),
       };
       this.lines[existingIndex] = updatedLine;
       return { success: true, line: updatedLine };
@@ -316,6 +381,8 @@ export class PosCartService {
       isAdhocBatch: options?.isAdhocBatch || batch.batch_no === "NO_BATCH",
       availableStockSnapshot: availableStock,
     };
+
+    this.applyPriceListPricing(baseLine);
 
     const newLine: PosCartLine = {
       ...baseLine,
@@ -403,6 +470,7 @@ export class PosCartService {
       line.loose_qty = newLoose;
       line.isNegativeStock = isNegative;
       line.shortageQty = shortage;
+      this.applyPriceListPricing(line);
       line.calculated = this.calculateLine(line);
     }
   }
@@ -419,6 +487,8 @@ export class PosCartService {
       if (rateBasis) {
         line.rate_basis = rateBasis;
       }
+      line.price_list_applied = false;
+      line.price_list_name = undefined;
       line.calculated = this.calculateLine(line);
     }
   }
@@ -546,6 +616,8 @@ export class PosCartService {
   }
 
   resetCart() {
+    this.priceListItems = {};
+    this.priceListName = null;
     this.clearCart();
   }
 

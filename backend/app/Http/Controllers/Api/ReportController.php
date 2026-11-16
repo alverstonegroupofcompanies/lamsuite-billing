@@ -24,6 +24,11 @@ class ReportController
      */
     protected function resolveStoreId(Request $request): ?int
     {
+        // All Stores consolidated scope: never fall back to the user's home store
+        if ($request->attributes->get('store_scope_all')) {
+            return null;
+        }
+
         $storeParam = $request->header('X-Store-Id')
             ?: $request->query('store_id')
             ?: $request->input('store_id')

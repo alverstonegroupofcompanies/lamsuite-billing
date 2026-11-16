@@ -26,6 +26,7 @@ class PurchaseEntryParityTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
+        $this->withoutMiddleware(\App\Http\Middleware\AuthenticateDevice::class);
 
         $this->pharmacy = Store::create([
             'name' => 'Parity Pharmacy',

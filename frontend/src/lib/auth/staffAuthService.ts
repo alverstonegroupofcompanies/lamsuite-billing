@@ -114,8 +114,9 @@ export class StaffAuthService {
     }
     const activeStore = String(storeId || (await storeDeviceService.getDeviceProfile())?.store_id || "1");
     try {
+      const deviceHeaders = await storeDeviceService.getDeviceAuthHeaders();
       const res = await fetch(`${API_BASE_URL}/api/staff/offline-cache?store_id=${activeStore}`, {
-        headers: { Accept: "application/json" },
+        headers: { Accept: "application/json", ...deviceHeaders },
       });
       if (res.ok) {
         const body = await res.json();
@@ -314,19 +315,6 @@ export class StaffAuthService {
         enabled_menus: u.enabled_menus_json ? JSON.parse(u.enabled_menus_json) : [],
       }))
     );
-  }
-
-  async isBiometricsAvailable(): Promise<boolean> {
-    try {
-      if (
-        typeof window !== "undefined" &&
-        window.PublicKeyCredential &&
-        typeof window.PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable === "function"
-      ) {
-        return await window.PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable();
-      }
-    } catch (_) {}
-    return false;
   }
 
   async authenticateWithPin(
@@ -575,31 +563,6 @@ export class StaffAuthService {
     return await this.establishSession(user);
   }
 
-  async authenticateWithBiometrics(
-    usernameOrId: string
-  ): Promise<{ success: boolean; error?: string; user?: StaffUser }> {
-    const user = await this.findStaff(usernameOrId);
-    if (!user) return { success: false, error: "Staff member not found." };
-
-    if (!user.biometric_registered) {
-      return {
-        success: false,
-        error: "Biometric sign-in is not registered for this account. Use PIN or Password.",
-      };
-    }
-
-    const available = await this.isBiometricsAvailable();
-    if (!available) {
-      return {
-        success: false,
-        error: "Windows Hello / biometric authenticator is unavailable on this hardware. Use PIN fallback.",
-      };
-    }
-
-    // Biometric verified through platform dialog
-    return await this.establishSession(user);
-  }
-
   async adminUnlock(
     adminUsername: string,
     adminPinOrPassword: string,
@@ -610,11 +573,13 @@ export class StaffAuthService {
     // 1. ONLINE FIRST: Call backend cloud unlock API if connected
     if (typeof window !== "undefined" && navigator.onLine && (typeof process === "undefined" || process.env.NODE_ENV !== "test")) {
       try {
+        const deviceHeaders = await storeDeviceService.getDeviceAuthHeaders();
         const res = await fetch(`${API_BASE_URL}/api/staff/admin-unlock`, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
             Accept: "application/json",
+            ...deviceHeaders,
           },
           body: JSON.stringify({
             admin_username: adminUsername.trim(),
@@ -630,8 +595,13 @@ export class StaffAuthService {
             await this.persistUserRecord(target).catch(() => {});
           }
           return { success: true };
-        } else {
-          const err = await res.json().catch(() => ({}));
+        }
+
+        const err = await res.json().catch(() => ({}));
+        // Device is unpaired/revoked: the server cannot scope the request, so
+        // fall back to the local administrator check instead of misreporting
+        // the credentials as invalid.
+        if (err?.error !== "DEVICE_AUTH_FAILED") {
           return { success: false, error: err.message || "Invalid administrator credentials or unlock denied." };
         }
       } catch (_) {
@@ -1023,12 +993,14 @@ export class StaffAuthService {
     })();
 
     try {
+      const deviceHeaders = await storeDeviceService.getDeviceAuthHeaders();
       const res = await fetch(`${API_BASE_URL}/api/sync/push/security-audit`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Accept: "application/json",
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          ...deviceHeaders,
         },
         body: JSON.stringify({
           store_id: profile?.store_id || "1",

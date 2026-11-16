@@ -1,6 +1,8 @@
 import React from "react";
 import { Link, useLocation } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
+import { useI18n } from "../i18n/I18nContext";
+import { TranslationKey } from "../i18n/dictionaries";
 import {
   LayoutDashboard,
   Store,
@@ -15,6 +17,14 @@ import {
   Settings,
   ShieldCheck,
   Building2,
+  CreditCard,
+  GitCompareArrows,
+  BadgeIndianRupee,
+  ClipboardList,
+  Gift,
+  FileSpreadsheet,
+  Link2,
+  Wallet,
 } from "lucide-react";
 
 interface SidebarProps {
@@ -25,14 +35,27 @@ interface SidebarProps {
 export const Sidebar: React.FC<SidebarProps> = ({ isOpen = false, onClose }) => {
   const location = useLocation();
   const { user, hasPermission } = useAuth();
+  const { t } = useI18n();
 
-  const navSections = [
+  const navSections: Array<{
+    id: string;
+    titleKey: TranslationKey;
+    items: Array<{
+      id: string;
+      nameKey: TranslationKey;
+      path: string;
+      icon: React.ElementType;
+      shortcut: string;
+      visible: boolean;
+    }>;
+  }> = [
     {
-      title: "Overview",
+      id: "overview",
+      titleKey: "nav.section.overview",
       items: [
         {
           id: "dashboard",
-          name: "Dashboard",
+          nameKey: "nav.dashboard",
           path: "/",
           icon: LayoutDashboard,
           shortcut: "Alt+1",
@@ -41,11 +64,12 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen = false, onClose }) => 
       ],
     },
     {
-      title: "Stores & Fleet",
+      id: "stores",
+      titleKey: "nav.section.stores",
       items: [
         {
           id: "stores",
-          name: "Stores",
+          nameKey: "nav.stores",
           path: "/stores",
           icon: Store,
           shortcut: "Alt+2",
@@ -53,7 +77,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen = false, onClose }) => 
         },
         {
           id: "devices",
-          name: "Devices / Counters",
+          nameKey: "nav.devices",
           path: "/devices",
           icon: Cpu,
           shortcut: "Alt+3",
@@ -61,7 +85,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen = false, onClose }) => 
         },
         {
           id: "features",
-          name: "Menu & Feature Control",
+          nameKey: "nav.features",
           path: "/features",
           icon: ToggleLeft,
           shortcut: "Alt+4",
@@ -70,11 +94,12 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen = false, onClose }) => 
       ],
     },
     {
-      title: "Identity & Staff",
+      id: "staff",
+      titleKey: "nav.section.staff",
       items: [
         {
           id: "users",
-          name: "Users & Roles",
+          nameKey: "nav.users",
           path: "/users",
           icon: Users,
           shortcut: "Alt+5",
@@ -83,11 +108,12 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen = false, onClose }) => 
       ],
     },
     {
-      title: "Catalog & Operations",
+      id: "operations",
+      titleKey: "nav.section.operations",
       items: [
         {
           id: "masters",
-          name: "Master Data",
+          nameKey: "nav.masters",
           path: "/masters",
           icon: Database,
           shortcut: "Alt+6",
@@ -95,7 +121,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen = false, onClose }) => 
         },
         {
           id: "transactions",
-          name: "Transactions",
+          nameKey: "nav.transactions",
           path: "/transactions",
           icon: Receipt,
           shortcut: "Alt+7",
@@ -103,28 +129,107 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen = false, onClose }) => 
         },
         {
           id: "inventory",
-          name: "Inventory & Stock",
+          nameKey: "nav.inventory",
           path: "/inventory",
           icon: Boxes,
           shortcut: "Alt+8",
           visible: hasPermission("inventory", "view"),
         },
+        {
+          id: "pricing",
+          nameKey: "nav.pricing",
+          path: "/price-lists",
+          icon: BadgeIndianRupee,
+          shortcut: "Alt+P",
+          visible: hasPermission("pricing", "view"),
+        },
+        {
+          id: "sales_orders",
+          nameKey: "nav.sales_orders",
+          path: "/sales-orders",
+          icon: ClipboardList,
+          shortcut: "Alt+O",
+          visible: hasPermission("sales_orders", "view"),
+        },
+        {
+          id: "loyalty",
+          nameKey: "nav.loyalty",
+          path: "/loyalty",
+          icon: Gift,
+          shortcut: "Alt+L",
+          visible: hasPermission("loyalty", "view"),
+        },
+        {
+          id: "portal_access",
+          nameKey: "nav.portal_access",
+          path: "/portal-access",
+          icon: Link2,
+          shortcut: "Alt+B",
+          visible: hasPermission("masters", "view"),
+        },
       ],
     },
     {
-      title: "Statutory & Analytics",
+      id: "payments",
+      titleKey: "nav.section.payments",
+      items: [
+        {
+          id: "gift_cards",
+          nameKey: "nav.gift_cards",
+          path: "/gift-cards",
+          icon: CreditCard,
+          shortcut: "Alt+G",
+          visible: hasPermission("transactions", "view"),
+        },
+        {
+          id: "settlements",
+          nameKey: "nav.settlements",
+          path: "/settlements",
+          icon: GitCompareArrows,
+          shortcut: "Alt+R",
+          visible: hasPermission("transactions", "view"),
+        },
+        {
+          id: "day_close",
+          nameKey: "nav.day_close",
+          path: "/day-close",
+          icon: Wallet,
+          shortcut: "Alt+D",
+          visible: hasPermission("transactions", "view"),
+        },
+      ],
+    },
+    {
+      id: "statutory",
+      titleKey: "nav.section.statutory",
       items: [
         {
           id: "reports",
-          name: "Reports & GST",
+          nameKey: "nav.reports",
           path: "/reports",
           icon: FileBarChart2,
           shortcut: "Alt+9",
           visible: hasPermission("reports", "view"),
         },
         {
+          id: "compliance",
+          nameKey: "nav.compliance",
+          path: "/compliance",
+          icon: ShieldCheck,
+          shortcut: "Alt+E",
+          visible: hasPermission("compliance", "view"),
+        },
+        {
+          id: "accounting_exports",
+          nameKey: "nav.accounting_exports",
+          path: "/accounting-exports",
+          icon: FileSpreadsheet,
+          shortcut: "Alt+X",
+          visible: hasPermission("reports", "view"),
+        },
+        {
           id: "sync",
-          name: "Sync Center",
+          nameKey: "nav.sync",
           path: "/sync",
           icon: RefreshCw,
           shortcut: "Alt+S",
@@ -133,11 +238,12 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen = false, onClose }) => 
       ],
     },
     {
-      title: "System & Governance",
+      id: "system",
+      titleKey: "nav.section.system",
       items: [
         {
           id: "settings",
-          name: "Company Settings",
+          nameKey: "nav.settings",
           path: "/settings",
           icon: Settings,
           shortcut: "Alt+C",
@@ -145,7 +251,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen = false, onClose }) => 
         },
         {
           id: "audit",
-          name: "Audit Log",
+          nameKey: "nav.audit",
           path: "/audit",
           icon: ShieldCheck,
           shortcut: "Alt+A",
@@ -153,7 +259,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen = false, onClose }) => 
         },
         {
           id: "migrations",
-          name: "Migration Hub",
+          nameKey: "nav.migrations",
           path: "/migrations",
           icon: Database,
           shortcut: "Alt+M",
@@ -200,9 +306,9 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen = false, onClose }) => 
             if (visibleItems.length === 0) return null;
 
             return (
-              <div key={section.title} className="space-y-1">
+              <div key={section.id} className="space-y-1">
                 <div className="px-3 text-[10px] font-bold uppercase tracking-wider text-slate-500">
-                  {section.title}
+                  {t(section.titleKey)}
                 </div>
                 {visibleItems.map((item) => {
                   const isActive =
@@ -224,7 +330,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen = false, onClose }) => 
                     >
                       <div className="flex items-center gap-2.5">
                         <Icon className={`w-4 h-4 ${isActive ? "text-white" : "text-slate-400"}`} />
-                        <span>{item.name}</span>
+                        <span>{t(item.nameKey)}</span>
                       </div>
                       <span className="text-[10px] opacity-40 font-mono hidden lg:inline">
                         {item.shortcut}

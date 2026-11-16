@@ -17,10 +17,12 @@ use App\Models\StockTransfer;
 use App\Models\StockTransferItem;
 use App\Models\Expense;
 use App\Models\CustomerPayment;
+use App\Models\InvoicePayment;
 use App\Models\MasterLookup;
 use App\Models\SyncEvent;
 use App\Models\Store;
 use App\Models\AuditLog;
+use App\Services\Payments\GiftCardService;
 use App\Services\StockAdjustmentService;
 use Illuminate\Validation\ValidationException;
 
@@ -35,6 +37,12 @@ class SyncController
      */
     private function resolveStoreId(Request $request, $itemData = []): int
     {
+        // A paired device may only write to the store its token was issued for.
+        $deviceStoreId = $request->attributes->get('device_store_id');
+        if (!empty($deviceStoreId)) {
+            return (int) $deviceStoreId;
+        }
+
         $candidate = is_array($itemData) ? ($itemData['store_id'] ?? $itemData['store_code'] ?? null) : null;
         if (!$candidate) {
             $candidate = $request->header('X-Store-Id') ?: $request->header('Store-Id');
@@ -108,6 +116,9 @@ class SyncController
                     case 'purchase':
                         $this->upsertSinglePurchase($request, $payload);
                         break;
+                    case 'purchase_order':
+                        $this->upsertSinglePurchaseOrder($request, $payload);
+                        break;
                     case 'stock_event':
                     case 'stock_adjustment':
                         $this->upsertSingleStockEvent($request, $payload);
@@ -118,6 +129,9 @@ class SyncController
                         break;
                     case 'payment':
                         $this->upsertSinglePayment($request, $payload);
+                        break;
+                    case 'expense':
+                        $this->upsertSingleExpense($request, $payload);
                         break;
                     case 'staff':
                     case 'staff_user':
@@ -366,8 +380,7 @@ class SyncController
         }
 
         // Upsert invoice line items if present
-        if (!empty($inv['items']) && is_array($inv['items'])) {
-            // Delete previous synced items to maintain idempotent consistency
+        if (!empty($inv['items']) && is_array($inv['items'])) {            // Delete previous synced items to maintain idempotent consistency
             InvoiceItem::where('invoice_id', $invoice->id)->delete();
 
             foreach ($inv['items'] as $item) {
@@ -406,6 +419,9 @@ class SyncController
             }
         }
 
+        // Ingest tender lines so offline references reconcile and gift cards redeem
+        $this->syncInvoicePayments($invoice, $inv, $matchedParty);
+
         // Record in sync_events for Admin Sync Center visibility
         $this->recordSyncEvent($request, 'invoice', (string)$invoice->id, 'create', [
             'invoice_number' => $invoice->invoice_number,
@@ -415,6 +431,113 @@ class SyncController
         ]);
 
         return $invoice;
+    }
+
+    /**
+     * Recreate invoice payment lines for offline-synced bills, redeem gift card
+     * tenders, and carry the credit portion into the customer ledger.
+     */
+    private function syncInvoicePayments(Invoice $invoice, array $inv, ?Party $matchedParty): void
+    {
+        if ($invoice->payments()->exists()) {
+            return;
+        }
+
+        $raw = $inv['payments'] ?? null;
+        if (is_string($raw)) {
+            $raw = json_decode($raw, true) ?: [];
+        }
+
+        $lines = [];
+        if (is_array($raw) && $raw !== []) {
+            foreach ($raw as $p) {
+                if (!is_array($p)) continue;
+                $amount = round((float) ($p['amount'] ?? 0), 2);
+                if ($amount <= 0) continue;
+
+                $extra = $p['extra_fields'] ?? null;
+                if (is_string($extra)) {
+                    $extra = json_decode($extra, true) ?: null;
+                }
+
+                $lines[] = [
+                    'mode' => trim((string) ($p['mode'] ?? $p['payment_mode'] ?? 'Cash')) ?: 'Cash',
+                    'amount' => $amount,
+                    'reference_no' => $p['reference_no'] ?? ($p['reference'] ?? null),
+                    'status' => $p['status'] ?? 'received',
+                    'extra_fields' => is_array($extra) ? $extra : null,
+                    'notes' => $p['notes'] ?? null,
+                ];
+            }
+        } elseif (round((float) ($inv['paid_amount'] ?? 0), 2) > 0) {
+            $lines[] = [
+                'mode' => trim((string) ($inv['payment_mode'] ?? 'Cash')) ?: 'Cash',
+                'amount' => round((float) $inv['paid_amount'], 2),
+                'reference_no' => null,
+                'status' => 'received',
+                'extra_fields' => null,
+                'notes' => 'Derived from invoice paid amount',
+            ];
+        }
+
+        if (empty($lines)) {
+            return;
+        }
+
+        $creditPortion = 0.0;
+        foreach ($lines as $line) {
+            if (in_array(strtoupper($line['mode']), ['CREDIT', 'UDHARI'], true)) {
+                $creditPortion += $line['amount'];
+            }
+        }
+
+        if ($creditPortion > 0) {
+            if (!$matchedParty || stripos($matchedParty->name, 'Walk-in') !== false) {
+                throw new \InvalidArgumentException('Credit sale requires a registered customer account (Walk-in credit is not permitted).');
+            }
+        }
+
+        DB::transaction(function () use ($invoice, $lines, $creditPortion, $matchedParty) {
+            foreach ($lines as $line) {
+                InvoicePayment::create([
+                    'store_id' => $invoice->store_id,
+                    'invoice_id' => $invoice->id,
+                    'counter_code' => $invoice->counter_code,
+                    'payment_mode' => $line['mode'],
+                    'amount' => $line['amount'],
+                    'reference_no' => $line['reference_no'],
+                    'status' => $line['status'],
+                    'extra_fields' => $line['extra_fields'],
+                    'notes' => $line['notes'],
+                    'received_by' => $invoice->counter_code ? 'Counter ' . $invoice->counter_code : null,
+                ]);
+            }
+
+            $giftCardService = app(GiftCardService::class);
+            foreach ($lines as $line) {
+                if (!$this->isGiftCardMode($line['mode'])) continue;
+                $code = $line['extra_fields']['gift_card_code'] ?? $line['reference_no'] ?? '';
+                $giftCardService->redeem(
+                    (int) $invoice->store_id,
+                    (string) $code,
+                    $line['amount'],
+                    $invoice->id,
+                    'invoice',
+                    (string) $invoice->id
+                );
+            }
+
+            if ($creditPortion > 0 && $matchedParty) {
+                $matchedParty->increment('current_balance', $creditPortion);
+            }
+        });
+    }
+
+    private function isGiftCardMode(string $mode): bool
+    {
+        return in_array(strtoupper(trim($mode)), [
+            'GIFT CARD', 'GIFT VOUCHER', 'GIFT_VOUCHER', 'GIFT_CARD', 'GIFTCARD', 'GIFT VOUCHERS',
+        ], true);
     }
 
     /**
@@ -695,6 +818,102 @@ class SyncController
     }
 
     /**
+     * Upsert a purchase order / purchase requisition pushed from the desktop.
+     * The desktop PO payload differs from a received purchase: it uses
+     * po_number/po_date and ordered_qty instead of invoice_number/qty.
+     */
+    private function upsertSinglePurchaseOrder(Request $request, array $po): Purchase
+    {
+        $storeId = $this->resolveStoreId($request, $po);
+        $poNumber = $po['po_number'] ?? $po['invoice_number'] ?? null;
+        if (!$poNumber) {
+            throw new \InvalidArgumentException('Purchase order is missing po_number');
+        }
+
+        $rawDate = $po['po_date'] ?? $po['invoice_date'] ?? null;
+        $poDate = !empty($rawDate)
+            ? (strlen($rawDate) === 10 ? $rawDate : substr($rawDate, 0, 10))
+            : now()->toDateString();
+
+        $moduleKey = in_array($po['module_key'] ?? 'po', ['pr', 'order', 'requisition'], true)
+            ? 'order'
+            : 'purchase_order';
+
+        $supplierId = $po['supplier_id'] ?? null;
+        if ($supplierId && !is_numeric($supplierId)) {
+            $supplierId = Party::where('external_id', $supplierId)->value('id');
+        }
+
+        $total = (float) ($po['grand_total'] ?? $po['total_amount'] ?? 0);
+
+        $purchase = Purchase::firstOrNew([
+            'store_id' => $storeId,
+            'invoice_number' => $poNumber,
+        ]);
+
+        $purchase->fill([
+            'supplier_id' => $supplierId ?: null,
+            'supplier_name' => $po['supplier_name'] ?? 'Supplier',
+            'invoice_date' => $poDate,
+            'expected_delivery_date' => !empty($po['expected_delivery_date']) ? substr($po['expected_delivery_date'], 0, 10) : null,
+            'module_key' => $moduleKey,
+            'subtotal' => $po['subtotal'] ?? $total,
+            'tax_total' => $po['tax_total'] ?? 0,
+            'grand_total' => $total,
+            'paid_amount' => 0,
+            'status' => $po['status'] ?? 'pending',
+            'notes' => $po['notes'] ?? null,
+        ]);
+        $purchase->version = ($purchase->version ?? 0) + 1;
+        $purchase->save();
+
+        if (!empty($po['items']) && is_array($po['items'])) {
+            PurchaseItem::where('purchase_id', $purchase->id)->delete();
+
+            foreach ($po['items'] as $item) {
+                $productId = $item['product_id'] ?? null;
+                if ($productId && !is_numeric($productId)) {
+                    $productId = Product::where('external_id', $productId)
+                        ->orWhere('name', $item['product_name'] ?? '')
+                        ->value('id');
+                }
+
+                $qty = (float) ($item['ordered_qty'] ?? $item['qty'] ?? 1);
+                $rate = (float) ($item['purchase_rate'] ?? $item['unit_price'] ?? 0);
+                $gstPercent = (float) ($item['gst_percent'] ?? 0);
+                $taxable = $item['taxable_amount'] ?? round($qty * $rate, 2);
+                $tax = $item['tax_amount'] ?? round($taxable * $gstPercent / 100, 2);
+
+                PurchaseItem::create([
+                    'purchase_id' => $purchase->id,
+                    'product_id' => $productId ?: null,
+                    'product_name' => $item['product_name'] ?? 'Item',
+                    'hsn_code' => $item['hsn_code'] ?? null,
+                    'batch_no' => $item['batch_no'] ?? '',
+                    'expiry_date' => !empty($item['expiry_date']) ? substr($item['expiry_date'], 0, 10) : null,
+                    'qty' => $qty,
+                    'received_qty' => $item['received_qty'] ?? 0,
+                    'purchase_rate' => $rate,
+                    'mrp' => $item['mrp'] ?? 0,
+                    'gst_percent' => $gstPercent,
+                    'taxable_amount' => $taxable,
+                    'tax_amount' => $tax,
+                    'total_amount' => $item['total_amount'] ?? round($taxable + $tax, 2),
+                ]);
+            }
+        }
+
+        $this->recordSyncEvent($request, 'purchase_order', (string) $purchase->id, 'create', [
+            'po_number' => $purchase->invoice_number,
+            'supplier' => $purchase->supplier_name,
+            'grand_total' => $purchase->grand_total,
+            'status' => $purchase->status,
+        ]);
+
+        return $purchase;
+    }
+
+    /**
      * Upsert stock adjustment.
      */
     private function upsertSingleStockEvent(Request $request, array $event): void
@@ -881,6 +1100,57 @@ class SyncController
         }
 
         $this->recordSyncEvent($request, 'payment', $payment['id'] ?? uniqid(), 'create', $payment);
+    }
+
+    /**
+     * Idempotent expense ingestion from offline terminals (keyed by expense_number).
+     */
+    private function upsertSingleExpense(Request $request, array $expense): void
+    {
+        $storeId = $this->resolveStoreId($request, $expense);
+        $head = trim((string) ($expense['expense_head'] ?? ''));
+        $amount = round((float) ($expense['amount'] ?? 0), 2);
+
+        if ($head === '') {
+            throw new \InvalidArgumentException('expense_head is required.');
+        }
+
+        if ($amount <= 0) {
+            throw new \InvalidArgumentException('Expense amount must be greater than zero.');
+        }
+
+        $attributes = [
+            'expense_head' => $head,
+            'amount' => $amount,
+            'payment_mode' => $expense['payment_mode'] ?? 'Cash',
+            'reference_no' => $expense['reference_no'] ?? null,
+            'notes' => $expense['notes'] ?? null,
+            'expense_date' => !empty($expense['expense_date'])
+                ? substr((string) $expense['expense_date'], 0, 10)
+                : now()->toDateString(),
+        ];
+
+        $expenseNumber = trim((string) ($expense['expense_number'] ?? ''));
+
+        if ($expenseNumber !== '') {
+            Expense::updateOrCreate(
+                ['store_id' => $storeId, 'expense_number' => $expenseNumber],
+                $attributes
+            );
+        } else {
+            Expense::firstOrCreate(
+                [
+                    'store_id' => $storeId,
+                    'expense_head' => $head,
+                    'amount' => $amount,
+                    'expense_date' => $attributes['expense_date'],
+                    'reference_no' => $attributes['reference_no'],
+                ],
+                $attributes
+            );
+        }
+
+        $this->recordSyncEvent($request, 'expense', $expense['id'] ?? uniqid(), 'create', $expense);
     }
 
     /**

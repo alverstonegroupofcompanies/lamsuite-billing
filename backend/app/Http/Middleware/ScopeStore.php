@@ -16,6 +16,40 @@ class ScopeStore
             return response()->json(['message' => 'Unauthenticated.'], 401);
         }
 
+        // Consolidated "All Stores" read scope (no single-store attribute)
+        if (strtolower((string) $request->header('X-Store-Scope')) === 'all') {
+            // Session/auth endpoints are store-independent and must keep working
+            $storeIndependent = $request->is(
+                'api/admin/logout',
+                'api/admin/stop-impersonate',
+                'api/admin/switch-store',
+                'api/admin/impersonate',
+                'api/admin/password-reset',
+                'api/admin/me/preferences',
+                'api/admin/2fa/*',
+                'api/admin/reports/scheduled',
+                'api/admin/reports/scheduled/*'
+            );
+
+            if (!$storeIndependent && !$request->isMethod('GET') && !$request->isMethod('HEAD')) {
+                return response()->json([
+                    'message' => 'All Stores scope is read-only. Select a specific store before making changes.',
+                ], 422);
+            }
+
+            if (!$user->canViewAllStores()) {
+                return response()->json([
+                    'message' => 'All Stores scope requires access to every store.',
+                ], 403);
+            }
+
+            $request->attributes->set('active_store_id', null);
+            $request->attributes->set('store_scope_all', true);
+            $request->attributes->set('accessible_store_ids', null);
+
+            return $next($request);
+        }
+
         // Determine requested store ID
         $requestedStoreId = $request->header('X-Store-Id')
             ?? $request->query('store_id')

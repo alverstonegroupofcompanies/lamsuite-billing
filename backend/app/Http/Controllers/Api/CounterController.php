@@ -407,28 +407,62 @@ class CounterController
             'notes' => 'nullable|string',
         ]);
 
-        $shift = CounterShift::create([
-            'store_id' => $counter->store_id,
-            'counter_id' => $counter->id,
-            'opened_by_user_id' => $request->user()?->id,
+        $shift = CounterShift::where('counter_id', $counter->id)
+            ->where('status', 'open')
+            ->latest('opened_at')
+            ->first();
+
+        $attributes = [
             'closed_by_user_id' => $request->user()?->id,
-            'opening_float' => 0.00,
-            'cash_sales' => $validated['cash_sales'] ?? 0.00,
-            'digital_sales' => $validated['digital_sales'] ?? 0.00,
-            'cash_refunds' => $validated['cash_refunds'] ?? 0.00,
-            'cash_drops' => $validated['cash_drops'] ?? 0.00,
+            'cash_sales' => $validated['cash_sales'] ?? ($shift->cash_sales ?? 0),
+            'digital_sales' => $validated['digital_sales'] ?? ($shift->digital_sales ?? 0),
+            'cash_refunds' => $validated['cash_refunds'] ?? ($shift->cash_refunds ?? 0),
+            'cash_drops' => $validated['cash_drops'] ?? ($shift->cash_drops ?? 0),
             'closing_cash_actual' => $validated['closing_cash_actual'],
-            'closing_discrepancy' => $validated['closing_discrepancy'] ?? 0.00,
             'status' => 'closed',
-            'opened_at' => now()->startOfDay(),
             'closed_at' => now(),
-            'notes' => $validated['notes'] ?? null,
-        ]);
+            'notes' => $validated['notes'] ?? ($shift->notes ?? null),
+        ];
+
+        $openingFloat = (float) ($shift->opening_float ?? 0);
+        $expected = $openingFloat
+            + (float) $attributes['cash_sales']
+            - (float) $attributes['cash_refunds']
+            - (float) $attributes['cash_drops'];
+
+        $attributes['closing_discrepancy'] = $validated['closing_discrepancy']
+            ?? round((float) $validated['closing_cash_actual'] - $expected, 2);
+
+        if ($shift) {
+            $shift->update($attributes);
+            $shift = $shift->fresh();
+        } else {
+            $shift = CounterShift::create(array_merge($attributes, [
+                'store_id' => $counter->store_id,
+                'counter_id' => $counter->id,
+                'opened_by_user_id' => $request->user()?->id,
+                'opening_float' => 0.00,
+                'opened_at' => now()->startOfDay(),
+            ]));
+        }
+
+        AuditLog::log(
+            'counter_shift_closed',
+            'CounterShift',
+            (string) $shift->id,
+            null,
+            [
+                'closing_cash_actual' => (float) $shift->closing_cash_actual,
+                'closing_discrepancy' => (float) $shift->closing_discrepancy,
+            ],
+            $counter->store_id,
+            $request->user()?->id
+        );
 
         return response()->json([
             'success' => true,
             'shift' => $shift,
-            'message' => "Shift closed for counter {$counter->counter_code}.",
+            'message' => "Shift closed for counter {$counter->counter_code}. Variance ₹" . number_format((float) $shift->closing_discrepancy, 2) . '.',
         ]);
     }
 
@@ -437,54 +471,32 @@ class CounterController
      */
     public function closeStoreDay(Request $request): JsonResponse
     {
-        $storeId = $request->header('X-Store-Id') ?: $request->input('store_id', 1);
-        $closeDate = $request->input('close_date', now()->toDateString());
+        $storeId = (int) ($request->get('active_store_id')
+            ?: $request->header('X-Store-Id')
+            ?: $request->input('store_id')
+            ?: $request->user()?->store_id);
+        $closeDate = (string) $request->input('close_date', now()->toDateString());
 
-        // Consolidate all invoices for this store & date across all counters
-        $invoices = DB::table('invoices')
-            ->where('store_id', $storeId)
-            ->whereDate('invoice_date', $closeDate)
-            ->where('status', '!=', 'cancelled')
-            ->get();
-
-        $grossSales = $invoices->sum('total_amount');
-        $taxCollected = $invoices->sum('tax_amount');
-        $totalBills = $invoices->count();
-
-        // Breakdown per counter
-        $breakdowns = [];
-        $counters = Counter::where('store_id', $storeId)->get();
-        foreach ($counters as $c) {
-            $cInvoices = $invoices->where('counter_code', $c->counter_code);
-            $breakdowns[$c->counter_code] = [
-                'counter_id' => $c->id,
-                'counter_name' => $c->counter_name,
-                'location_name' => $c->location_name,
-                'bills_count' => $cInvoices->count(),
-                'gross_total' => round($cInvoices->sum('total_amount'), 2),
-                'tax_total' => round($cInvoices->sum('tax_amount'), 2),
-            ];
+        if (! $storeId) {
+            return response()->json([
+                'success' => false,
+                'error' => 'STORE_REQUIRED',
+                'message' => 'A store is required to close the day.',
+            ], 422);
         }
 
-        $dayClose = StoreDayClose::updateOrCreate(
-            ['store_id' => $storeId, 'close_date' => $closeDate],
-            [
-                'total_gross_sales' => $grossSales,
-                'total_tax_collected' => $taxCollected,
-                'total_cash_collected' => $grossSales, // aggregated
-                'total_digital_collected' => 0.00,
-                'total_refunds' => 0.00,
-                'net_cash_in_hand' => $grossSales,
-                'total_bills_count' => $totalBills,
-                'counter_breakdowns' => $breakdowns,
-                'closed_by_user_id' => $request->user()?->id,
-                'reconciliation_notes' => $request->input('notes', 'Automated store day close consolidation'),
-            ]
-        );
+        $service = app(\App\Services\DayClose\StoreDayCloseService::class);
+
+        try {
+            $dayClose = $service->close($storeId, $closeDate, $request->user()?->id, $request->input('notes'));
+        } catch (\App\Exceptions\BusinessRuleException $e) {
+            return $e->render();
+        }
 
         return response()->json([
             'success' => true,
             'day_close' => $dayClose,
+            'summary' => $service->summary($storeId, $closeDate),
             'message' => "Store day close consolidated for date {$closeDate}.",
         ]);
     }

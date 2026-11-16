@@ -19,6 +19,7 @@ use App\Models\StockAdjustment;
 use App\Models\StockTransfer;
 use App\Models\Store;
 use App\Models\SupplierPayment;
+use App\Services\Webhook\WebhookOutboxService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
@@ -560,6 +561,253 @@ class AdminTransactionController
         return response()->json($paginated);
     }
 
+    public function storeQuotation(Request $request): JsonResponse
+    {
+        return $this->saveQuotation($request);
+    }
+
+    public function updateQuotation(Request $request, int $id): JsonResponse
+    {
+        $quotation = Invoice::where('module_key', 'quotation')->find($id);
+        if (!$quotation) {
+            return response()->json(['message' => 'Quotation not found.'], 404);
+        }
+
+        return $this->saveQuotation($request, $quotation);
+    }
+
+    public function destroyQuotation(Request $request, int $id): JsonResponse
+    {
+        $quotation = Invoice::where('module_key', 'quotation')->find($id);
+        if (!$quotation) {
+            return response()->json(['message' => 'Quotation not found.'], 404);
+        }
+
+        $this->assertStoreAccess($request, (int) $quotation->store_id);
+
+        if ($quotation->status === 'converted') {
+            return response()->json(['message' => 'Converted quotations cannot be deleted.'], 422);
+        }
+
+        $snapshot = $quotation->only(['invoice_number', 'customer_name', 'grand_total', 'status']);
+        $storeId = (int) $quotation->store_id;
+        InvoiceItem::where('invoice_id', $quotation->id)->delete();
+        $quotation->delete();
+
+        AuditLog::log('delete_quotation', 'Invoice', (string) $id, $snapshot, null, $storeId, $request->user()?->id);
+
+        return response()->json(['success' => true, 'message' => 'Quotation deleted.']);
+    }
+
+    public function convertQuotation(Request $request, int $id): JsonResponse
+    {
+        $quotation = Invoice::with('items')->where('module_key', 'quotation')->find($id);
+        if (!$quotation) {
+            return response()->json(['message' => 'Quotation not found.'], 404);
+        }
+
+        $this->assertStoreAccess($request, (int) $quotation->store_id);
+
+        if ($quotation->status === 'converted') {
+            return response()->json(['message' => 'This quotation has already been converted.'], 422);
+        }
+        if ($quotation->status === 'cancelled') {
+            return response()->json(['message' => 'Cancelled quotations cannot be converted.'], 422);
+        }
+        if (!$quotation->customer_id) {
+            return response()->json([
+                'message' => 'Attach a registered customer to the quotation before converting it to a credit invoice.',
+            ], 422);
+        }
+
+        DB::beginTransaction();
+        try {
+            $invoice = Invoice::create([
+                'store_id' => $quotation->store_id,
+                'module_key' => 'invoice',
+                'invoice_number' => $this->nextInvoiceNumber((int) $quotation->store_id),
+                'invoice_date' => now()->toDateString(),
+                'customer_id' => $quotation->customer_id,
+                'customer_name' => $quotation->customer_name,
+                'customer_phone' => $quotation->customer_phone,
+                'customer_gstin' => $quotation->customer_gstin,
+                'place_of_supply' => $quotation->place_of_supply,
+                'subtotal' => $quotation->subtotal,
+                'taxable_subtotal' => $quotation->taxable_subtotal,
+                'discount_total' => $quotation->discount_total,
+                'tax_total' => $quotation->tax_total,
+                'cgst_total' => $quotation->cgst_total,
+                'sgst_total' => $quotation->sgst_total,
+                'igst_total' => $quotation->igst_total,
+                'cess_total' => $quotation->cess_total,
+                'round_off' => $quotation->round_off,
+                'grand_total' => $quotation->grand_total,
+                'paid_amount' => 0,
+                'payment_mode' => 'Credit',
+                'status' => 'issued',
+            ]);
+
+            foreach ($quotation->items as $item) {
+                InvoiceItem::create([
+                    'invoice_id' => $invoice->id,
+                    'product_id' => $item->product_id,
+                    'product_name' => $item->product_name,
+                    'batch_no' => $item->batch_no,
+                    'expiry_date' => $item->expiry_date,
+                    'qty' => $item->qty,
+                    'loose_qty' => $item->loose_qty ?? 0,
+                    'units_per_pack' => $item->units_per_pack ?? 1,
+                    'unit_price' => $item->unit_price,
+                    'mrp' => $item->mrp ?? null,
+                    'discount_percent' => $item->discount_percent,
+                    'discount_amount' => $item->discount_amount,
+                    'taxable_amount' => $item->taxable_amount,
+                    'gst_percent' => $item->gst_percent,
+                    'cgst_amount' => $item->cgst_amount,
+                    'sgst_amount' => $item->sgst_amount,
+                    'igst_amount' => $item->igst_amount,
+                    'cess_amount' => $item->cess_amount,
+                    'tax_amount' => $item->tax_amount,
+                    'total_amount' => $item->total_amount,
+                ]);
+            }
+
+            $quotation->update([
+                'status' => 'converted',
+                'version' => (int) $quotation->version + 1,
+            ]);
+
+            Party::whereKey($quotation->customer_id)->increment('current_balance', (float) $quotation->grand_total);
+
+            AuditLog::log(
+                'convert_quotation',
+                'Invoice',
+                (string) $quotation->id,
+                ['status' => 'issued'],
+                ['status' => 'converted', 'invoice_id' => $invoice->id, 'invoice_number' => $invoice->invoice_number],
+                (int) $quotation->store_id,
+                $request->user()?->id
+            );
+
+            DB::commit();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Quotation converted to credit invoice.',
+                'invoice' => $invoice->fresh()->load('items'),
+                'quotation' => $quotation->fresh(),
+            ], 201);
+        } catch (\Throwable $e) {
+            DB::rollBack();
+            return response()->json(['message' => 'Conversion failed: ' . $e->getMessage()], 500);
+        }
+    }
+
+    private function saveQuotation(Request $request, ?Invoice $quotation = null): JsonResponse
+    {
+        $validated = $request->validate([
+            'customer_id' => 'nullable|integer|exists:parties,id',
+            'customer_name' => 'nullable|string|max:190',
+            'customer_phone' => 'nullable|string|max:30',
+            'customer_gstin' => 'nullable|string|max:20',
+            'place_of_supply' => 'nullable|string|max:10',
+            'invoice_date' => 'required|date',
+            'valid_until' => 'nullable|date',
+            'status' => 'nullable|in:draft,issued',
+            'items' => 'required|array|min:1',
+            'items.*.product_id' => 'nullable',
+            'items.*.product_name' => 'required|string|max:190',
+            'items.*.hsn_code' => 'nullable|string|max:20',
+            'items.*.qty' => 'required|numeric|min:0.01',
+            'items.*.unit_price' => 'required|numeric|min:0',
+            'items.*.discount_percent' => 'nullable|numeric|min:0|max:100',
+            'items.*.discount_amount' => 'nullable|numeric|min:0',
+            'items.*.gst_percent' => 'nullable|numeric|min:0|max:50',
+        ]);
+
+        if ($quotation && !in_array($quotation->status, ['draft', 'issued'], true)) {
+            return response()->json(['message' => "A {$quotation->status} quotation cannot be edited."], 422);
+        }
+
+        $storeId = $quotation
+            ? (int) $quotation->store_id
+            : $this->resolveTransactionStoreId($request);
+
+        $this->assertStoreAccess($request, $storeId);
+        $store = Store::find($storeId);
+        $totals = $this->computeDocumentTotals($validated['items'], $store, $validated['place_of_supply'] ?? null);
+
+        $customerId = $validated['customer_id'] ?? $quotation?->customer_id;
+        $customerName = $validated['customer_name']
+            ?? ($customerId ? Party::whereKey($customerId)->value('name') : null)
+            ?? 'Walk-in Customer';
+
+        $data = [
+            'store_id' => $storeId,
+            'module_key' => 'quotation',
+            'invoice_date' => $validated['invoice_date'],
+            'due_date' => $validated['valid_until'] ?? null,
+            'customer_id' => $customerId,
+            'customer_name' => $customerName,
+            'customer_phone' => $validated['customer_phone'] ?? null,
+            'customer_gstin' => $validated['customer_gstin'] ?? null,
+            'place_of_supply' => $validated['place_of_supply'] ?? null,
+            'subtotal' => $totals['subtotal'],
+            'taxable_subtotal' => $totals['subtotal'],
+            'discount_total' => $totals['discount_total'],
+            'tax_total' => $totals['tax_total'],
+            'cgst_total' => $totals['cgst_total'],
+            'sgst_total' => $totals['sgst_total'],
+            'igst_total' => $totals['igst_total'],
+            'cess_total' => 0,
+            'round_off' => 0,
+            'grand_total' => $totals['grand_total'],
+            'paid_amount' => 0,
+            'payment_mode' => 'Quotation',
+            'status' => $validated['status'] ?? ($quotation?->status ?? 'issued'),
+        ];
+
+        DB::beginTransaction();
+        try {
+            if ($quotation) {
+                $data['version'] = (int) $quotation->version + 1;
+                $quotation->update($data);
+                InvoiceItem::where('invoice_id', $quotation->id)->delete();
+                $target = $quotation;
+                $action = 'update_quotation';
+            } else {
+                $data['invoice_number'] = $this->nextQuotationNumber($storeId);
+                $target = Invoice::create($data);
+                $action = 'create_quotation';
+            }
+
+            foreach ($totals['lines'] as $line) {
+                InvoiceItem::create(array_merge($line, ['invoice_id' => $target->id]));
+            }
+
+            AuditLog::log(
+                $action,
+                'Invoice',
+                (string) $target->id,
+                null,
+                ['invoice_number' => $target->invoice_number, 'grand_total' => $target->grand_total, 'items' => count($totals['lines'])],
+                $storeId,
+                $request->user()?->id
+            );
+
+            DB::commit();
+        } catch (\Throwable $e) {
+            DB::rollBack();
+            return response()->json(['message' => 'Failed to save quotation: ' . $e->getMessage()], 500);
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => $quotation ? 'Quotation updated.' : 'Quotation created.',
+            'quotation' => $target->fresh()->load('items', 'customer:id,name,phone,gstin'),
+        ], $quotation ? 200 : 201);
+    }
+
     /**
      * Cancel an invoice with stock restoration, ledger adjustment, and GST lock verification.
      */
@@ -787,6 +1035,265 @@ class AdminTransactionController
         return response()->json($query->paginate($perPage));
     }
 
+    public function storePurchaseOrder(Request $request): JsonResponse
+    {
+        return $this->savePurchaseOrder($request);
+    }
+
+    public function updatePurchaseOrder(Request $request, int $id): JsonResponse
+    {
+        $order = Purchase::whereIn('module_key', ['purchase_order', 'order'])->find($id);
+        if (!$order) {
+            return response()->json(['message' => 'Purchase order not found.'], 404);
+        }
+
+        return $this->savePurchaseOrder($request, $order);
+    }
+
+    public function destroyPurchaseOrder(Request $request, int $id): JsonResponse
+    {
+        $order = Purchase::whereIn('module_key', ['purchase_order', 'order'])->find($id);
+        if (!$order) {
+            return response()->json(['message' => 'Purchase order not found.'], 404);
+        }
+
+        $this->assertStoreAccess($request, (int) $order->store_id);
+
+        if (in_array($order->status, ['completed', 'received'], true)) {
+            return response()->json(['message' => 'Received purchase orders cannot be deleted.'], 422);
+        }
+
+        $snapshot = $order->only(['invoice_number', 'supplier_name', 'grand_total', 'status']);
+        $storeId = (int) $order->store_id;
+        PurchaseItem::where('purchase_id', $order->id)->delete();
+        $order->delete();
+
+        AuditLog::log('delete_purchase_order', 'Purchase', (string) $id, $snapshot, null, $storeId, $request->user()?->id);
+
+        return response()->json(['success' => true, 'message' => 'Purchase order deleted.']);
+    }
+
+    public function receivePurchaseOrder(Request $request, int $id): JsonResponse
+    {
+        $order = Purchase::with('items')->whereIn('module_key', ['purchase_order', 'order'])->find($id);
+        if (!$order) {
+            return response()->json(['message' => 'Purchase order not found.'], 404);
+        }
+
+        $this->assertStoreAccess($request, (int) $order->store_id);
+
+        if (in_array($order->status, ['completed', 'received', 'cancelled'], true)) {
+            return response()->json(['message' => "A {$order->status} purchase order cannot be received."], 422);
+        }
+
+        $validated = $request->validate([
+            'supplier_invoice_no' => 'nullable|string|max:50',
+            'invoice_date' => 'nullable|date',
+            'notes' => 'nullable|string|max:1000',
+        ]);
+
+        $pending = $order->items->filter(fn ($item) => (float) $item->qty - (float) $item->received_qty > 0);
+        if ($pending->isEmpty()) {
+            return response()->json(['message' => 'All quantities on this purchase order have already been received.'], 422);
+        }
+
+        DB::beginTransaction();
+        try {
+            $purchase = Purchase::create([
+                'store_id' => $order->store_id,
+                'supplier_id' => $order->supplier_id,
+                'supplier_name' => $order->supplier_name,
+                'supplier_gstin' => $order->supplier_gstin,
+                'invoice_number' => $validated['supplier_invoice_no'] ?? $this->nextGoodsReceiptNumber((int) $order->store_id),
+                'invoice_date' => $validated['invoice_date'] ?? now()->toDateString(),
+                'module_key' => 'purchase',
+                'subtotal' => $order->subtotal,
+                'tax_total' => $order->tax_total,
+                'cgst_total' => $order->cgst_total,
+                'sgst_total' => $order->sgst_total,
+                'igst_total' => $order->igst_total,
+                'cess_total' => $order->cess_total,
+                'is_interstate' => $order->is_interstate,
+                'is_rcm' => $order->is_rcm,
+                'itc_eligibility' => $order->itc_eligibility,
+                'grand_total' => $order->grand_total,
+                'paid_amount' => 0,
+                'status' => 'received',
+                'notes' => $validated['notes'] ?? "Goods receipt against {$order->invoice_number}",
+            ]);
+
+            foreach ($pending as $item) {
+                $qty = round((float) $item->qty - (float) $item->received_qty, 2);
+
+                PurchaseItem::create([
+                    'purchase_id' => $purchase->id,
+                    'product_id' => $item->product_id,
+                    'product_name' => $item->product_name,
+                    'hsn_code' => $item->hsn_code,
+                    'batch_no' => $item->batch_no ?? '',
+                    'expiry_date' => $item->expiry_date,
+                    'qty' => $qty,
+                    'received_qty' => $qty,
+                    'purchase_rate' => $item->purchase_rate,
+                    'mrp' => $item->mrp,
+                    'gst_percent' => $item->gst_percent,
+                    'taxable_amount' => $item->taxable_amount,
+                    'tax_amount' => $item->tax_amount,
+                    'total_amount' => $item->total_amount,
+                ]);
+
+                $item->update(['received_qty' => (float) $item->received_qty + $qty]);
+            }
+
+            $previousStatus = $order->status;
+            $order->update([
+                'status' => 'completed',
+                'version' => (int) $order->version + 1,
+                'notes' => trim(($order->notes ?? '') . " | Received via {$purchase->invoice_number}"),
+            ]);
+
+            AuditLog::log(
+                'receive_purchase_order',
+                'Purchase',
+                (string) $order->id,
+                ['status' => $previousStatus],
+                ['status' => 'completed', 'purchase_id' => $purchase->id, 'invoice_number' => $purchase->invoice_number],
+                (int) $order->store_id,
+                $request->user()?->id
+            );
+
+            DB::commit();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Goods receipt recorded and purchase order completed.',
+                'purchase' => $purchase->fresh()->load('items'),
+                'purchase_order' => $order->fresh()->load('items'),
+            ], 201);
+        } catch (\Throwable $e) {
+            DB::rollBack();
+            return response()->json(['message' => 'Goods receipt failed: ' . $e->getMessage()], 500);
+        }
+    }
+
+    private function savePurchaseOrder(Request $request, ?Purchase $order = null): JsonResponse
+    {
+        $validated = $request->validate([
+            'module_key' => 'nullable|in:po,pr,purchase_order,order',
+            'supplier_id' => 'nullable|integer|exists:parties,id',
+            'supplier_name' => 'required|string|max:190',
+            'supplier_gstin' => 'nullable|string|max:20',
+            'po_number' => 'nullable|string|max:50',
+            'invoice_date' => 'required|date',
+            'expected_delivery_date' => 'nullable|date',
+            'notes' => 'nullable|string|max:1000',
+            'status' => 'nullable|in:draft,pending',
+            'items' => 'required|array|min:1',
+            'items.*.product_id' => 'nullable',
+            'items.*.product_name' => 'required|string|max:190',
+            'items.*.hsn_code' => 'nullable|string|max:20',
+            'items.*.qty' => 'required|numeric|min:0.01',
+            'items.*.purchase_rate' => 'required|numeric|min:0',
+            'items.*.gst_percent' => 'nullable|numeric|min:0|max:50',
+        ]);
+
+        if ($order && in_array($order->status, ['completed', 'received', 'cancelled'], true)) {
+            return response()->json(['message' => "A {$order->status} purchase order cannot be edited."], 422);
+        }
+
+        $storeId = $order
+            ? (int) $order->store_id
+            : $this->resolveTransactionStoreId($request);
+
+        $this->assertStoreAccess($request, $storeId);
+
+        $rawModule = $validated['module_key'] ?? ($order?->module_key ?? 'purchase_order');
+        $moduleKey = in_array($rawModule, ['pr', 'order'], true) ? 'order' : 'purchase_order';
+
+        $lines = [];
+        $subtotal = 0.0;
+        $taxTotal = 0.0;
+        foreach ($validated['items'] as $raw) {
+            $qty = (float) $raw['qty'];
+            $rate = (float) $raw['purchase_rate'];
+            $gst = (float) ($raw['gst_percent'] ?? 0);
+            $taxable = round($qty * $rate, 2);
+            $tax = round($taxable * $gst / 100, 2);
+            $subtotal += $taxable;
+            $taxTotal += $tax;
+
+            $lines[] = [
+                'product_id' => is_numeric($raw['product_id'] ?? null) ? (int) $raw['product_id'] : null,
+                'product_name' => $raw['product_name'],
+                'hsn_code' => $raw['hsn_code'] ?? null,
+                'batch_no' => '',
+                'qty' => $qty,
+                'received_qty' => 0,
+                'purchase_rate' => $rate,
+                'mrp' => 0,
+                'gst_percent' => $gst,
+                'taxable_amount' => $taxable,
+                'tax_amount' => $tax,
+                'total_amount' => round($taxable + $tax, 2),
+            ];
+        }
+
+        $data = [
+            'store_id' => $storeId,
+            'supplier_id' => $validated['supplier_id'] ?? $order?->supplier_id,
+            'supplier_name' => $validated['supplier_name'],
+            'supplier_gstin' => $validated['supplier_gstin'] ?? null,
+            'invoice_date' => $validated['invoice_date'],
+            'expected_delivery_date' => $validated['expected_delivery_date'] ?? null,
+            'module_key' => $moduleKey,
+            'subtotal' => round($subtotal, 2),
+            'tax_total' => round($taxTotal, 2),
+            'grand_total' => round($subtotal + $taxTotal, 2),
+            'status' => $validated['status'] ?? ($order?->status ?? 'pending'),
+            'notes' => $validated['notes'] ?? null,
+        ];
+
+        DB::beginTransaction();
+        try {
+            if ($order) {
+                $data['version'] = (int) $order->version + 1;
+                $order->update($data);
+                PurchaseItem::where('purchase_id', $order->id)->delete();
+                $target = $order;
+                $action = 'update_purchase_order';
+            } else {
+                $data['invoice_number'] = $validated['po_number'] ?? $this->nextPurchaseOrderNumber($storeId, $moduleKey);
+                $target = Purchase::create($data);
+                $action = 'create_purchase_order';
+            }
+
+            foreach ($lines as $line) {
+                PurchaseItem::create(array_merge($line, ['purchase_id' => $target->id]));
+            }
+
+            AuditLog::log(
+                $action,
+                'Purchase',
+                (string) $target->id,
+                null,
+                ['po_number' => $target->invoice_number, 'supplier' => $target->supplier_name, 'grand_total' => $target->grand_total],
+                $storeId,
+                $request->user()?->id
+            );
+
+            DB::commit();
+        } catch (\Throwable $e) {
+            DB::rollBack();
+            return response()->json(['message' => 'Failed to save purchase order: ' . $e->getMessage()], 500);
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => $order ? 'Purchase order updated.' : 'Purchase order created.',
+            'purchase_order' => $target->fresh()->load('items', 'supplier'),
+        ], $order ? 200 : 201);
+    }
+
     /**
      * Held Bills list and details.
      */
@@ -877,9 +1384,159 @@ class AdminTransactionController
         $storeId = $request->get('active_store_id');
         $query = Expense::with('creator:id,name')
             ->when($storeId, fn($q) => $q->where('store_id', $storeId))
-            ->orderBy('expense_date', 'desc');
+            ->when($request->query('start_date'), fn($q, $date) => $q->whereDate('expense_date', '>=', $date))
+            ->when($request->query('end_date'), fn($q, $date) => $q->whereDate('expense_date', '<=', $date))
+            ->when($request->query('payment_mode'), fn($q, $mode) => $q->where('payment_mode', $mode))
+            ->when($request->query('search'), function ($q, $search) {
+                $q->where(function ($sub) use ($search) {
+                    $sub->where('expense_head', 'like', "%{$search}%")
+                        ->orWhere('reference_no', 'like', "%{$search}%")
+                        ->orWhere('notes', 'like', "%{$search}%");
+                });
+            })
+            ->orderByDesc('expense_date')
+            ->orderByDesc('id');
 
-        return response()->json($query->paginate(20));
+        $perPage = (int) $request->query('per_page', 50);
+
+        return response()->json($query->paginate($perPage ?: 50));
+    }
+
+    public function storeExpense(Request $request): JsonResponse
+    {
+        $validated = $this->validateExpense($request);
+        $user = $request->user();
+
+        $storeId = isset($validated['store_id']) && $validated['store_id'] !== null
+            ? (int) $validated['store_id']
+            : (int) $request->get('active_store_id');
+
+        if (!$storeId) {
+            return response()->json([
+                'message' => 'Select a store before recording an expense.',
+            ], 422);
+        }
+
+        if (!$user || !$user->canAccessStore($storeId)) {
+            abort(403, 'You do not have access to the selected store.');
+        }
+
+        $expense = Expense::create([
+            'store_id' => $storeId,
+            'expense_number' => $this->nextExpenseNumber($storeId),
+            'expense_head' => $validated['expense_head'],
+            'amount' => $validated['amount'],
+            'payment_mode' => $validated['payment_mode'] ?? 'Cash',
+            'reference_no' => $validated['reference_no'] ?? null,
+            'notes' => $validated['notes'] ?? null,
+            'expense_date' => $validated['expense_date'],
+            'created_by' => $user->id,
+        ]);
+
+        AuditLog::log(
+            'record_expense',
+            'Expense',
+            (string) $expense->id,
+            null,
+            ['expense_head' => $expense->expense_head, 'amount' => $expense->amount, 'payment_mode' => $expense->payment_mode],
+            $storeId,
+            $user->id
+        );
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Expense recorded.',
+            'expense' => $expense->load('creator:id,name'),
+        ], 201);
+    }
+
+    public function updateExpense(Request $request, int $id): JsonResponse
+    {
+        $expense = Expense::find($id);
+        if (!$expense) {
+            abort(404, 'Expense not found.');
+        }
+
+        $user = $request->user();
+        if (!$user || !$user->canAccessStore((int) $expense->store_id)) {
+            abort(403, 'You do not have access to this expense.');
+        }
+
+        $validated = $this->validateExpense($request);
+        unset($validated['store_id']);
+
+        $previous = $expense->only(['expense_head', 'amount', 'payment_mode', 'expense_date']);
+        $expense->update($validated);
+
+        AuditLog::log(
+            'update_expense',
+            'Expense',
+            (string) $expense->id,
+            $previous,
+            $expense->only(['expense_head', 'amount', 'payment_mode', 'expense_date']),
+            (int) $expense->store_id,
+            $user->id
+        );
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Expense updated.',
+            'expense' => $expense->fresh()->load('creator:id,name'),
+        ]);
+    }
+
+    public function destroyExpense(Request $request, int $id): JsonResponse
+    {
+        $expense = Expense::find($id);
+        if (!$expense) {
+            abort(404, 'Expense not found.');
+        }
+
+        $user = $request->user();
+        if (!$user || !$user->canAccessStore((int) $expense->store_id)) {
+            abort(403, 'You do not have access to this expense.');
+        }
+
+        $storeId = (int) $expense->store_id;
+        $snapshot = $expense->only(['expense_number', 'expense_head', 'amount', 'expense_date']);
+        $expense->delete();
+
+        AuditLog::log(
+            'delete_expense',
+            'Expense',
+            (string) $id,
+            $snapshot,
+            null,
+            $storeId,
+            $user->id
+        );
+
+        return response()->json(['success' => true, 'message' => 'Expense deleted.']);
+    }
+
+    private function validateExpense(Request $request): array
+    {
+        return $request->validate([
+            'expense_head' => 'required|string|max:100',
+            'amount' => 'required|numeric|min:0.01',
+            'payment_mode' => 'nullable|string|max:30',
+            'reference_no' => 'nullable|string|max:50',
+            'notes' => 'nullable|string|max:1000',
+            'expense_date' => 'required|date',
+            'store_id' => 'sometimes|nullable|integer|exists:stores,id',
+        ]);
+    }
+
+    private function nextExpenseNumber(int $storeId): string
+    {
+        $sequence = Expense::where('store_id', $storeId)->count();
+
+        do {
+            $sequence++;
+            $number = 'EXP-' . str_pad((string) $sequence, 5, '0', STR_PAD_LEFT);
+        } while (Expense::where('store_id', $storeId)->where('expense_number', $number)->exists());
+
+        return $number;
     }
 
     public function customerPayments(Request $request): JsonResponse
@@ -925,6 +1582,24 @@ class AdminTransactionController
             );
 
             DB::commit();
+
+            app(WebhookOutboxService::class)->enqueue(
+                'payment.received',
+                [
+                    'id' => $payment->id,
+                    'customer_id' => $payment->customer_id,
+                    'customer_name' => $customer->name,
+                    'amount' => (float) $payment->amount,
+                    'payment_mode' => $payment->payment_mode,
+                    'reference_no' => $payment->reference_no,
+                    'payment_date' => optional($payment->payment_date)->toDateString(),
+                    'new_balance' => (float) $customer->current_balance,
+                ],
+                (int) $validated['store_id'],
+                'customer_payment',
+                (string) $payment->id
+            );
+
             return response()->json([
                 'success' => true,
                 'payment' => $payment->load(['customer:id,name,phone', 'creator:id,name']),
@@ -1071,6 +1746,7 @@ class AdminTransactionController
 
         $purchases = Purchase::where('supplier_id', $supplier->id)
             ->where('status', '!=', 'cancelled')
+            ->whereNotIn('module_key', ['purchase_order', 'order'])
             ->select('id', 'invoice_number as doc_number', 'invoice_date as doc_date', 'module_key', 'grand_total', 'paid_amount')
             ->get();
 
@@ -1116,5 +1792,157 @@ class AdminTransactionController
             'current_balance' => (float)$supplier->current_balance,
             'transactions' => $rows,
         ]);
+    }
+
+    private function resolveTransactionStoreId(Request $request): int
+    {
+        $storeId = (int) ($request->input('store_id') ?: $request->get('active_store_id'));
+        if (!$storeId) {
+            abort(422, 'Select a store before saving this document.');
+        }
+
+        $this->assertStoreAccess($request, $storeId);
+
+        return $storeId;
+    }
+
+    private function assertStoreAccess(Request $request, int $storeId): void
+    {
+        $user = $request->user();
+        if (!$user || !$user->canAccessStore($storeId)) {
+            abort(403, 'You do not have access to the selected store.');
+        }
+    }
+
+    /**
+     * Line-level GST split used by admin-authored quotations.
+     * Intra-state supply splits CGST/SGST evenly, inter-state becomes IGST.
+     */
+    private function computeDocumentTotals(array $items, ?Store $store, ?string $placeOfSupply): array
+    {
+        $interState = $store && $store->state_code && $placeOfSupply
+            ? $placeOfSupply !== $store->state_code
+            : false;
+
+        $lines = [];
+        $subtotal = 0.0;
+        $discountTotal = 0.0;
+        $taxTotal = 0.0;
+        $cgstTotal = 0.0;
+        $sgstTotal = 0.0;
+        $igstTotal = 0.0;
+
+        foreach ($items as $raw) {
+            $qty = (float) $raw['qty'];
+            $price = (float) $raw['unit_price'];
+            $discPercent = (float) ($raw['discount_percent'] ?? 0);
+            $gross = round($qty * $price, 2);
+            $discount = isset($raw['discount_amount'])
+                ? round((float) $raw['discount_amount'], 2)
+                : round($gross * $discPercent / 100, 2);
+            $taxable = round(max(0, $gross - $discount), 2);
+            $gst = (float) ($raw['gst_percent'] ?? 0);
+            $tax = round($taxable * $gst / 100, 2);
+
+            $cgst = $interState ? 0.0 : round($tax / 2, 2);
+            $sgst = $interState ? 0.0 : round($tax - $cgst, 2);
+            $igst = $interState ? $tax : 0.0;
+
+            $subtotal += $taxable;
+            $discountTotal += $discount;
+            $taxTotal += $tax;
+            $cgstTotal += $cgst;
+            $sgstTotal += $sgst;
+            $igstTotal += $igst;
+
+            $lines[] = [
+                'product_id' => is_numeric($raw['product_id'] ?? null) ? (int) $raw['product_id'] : null,
+                'product_name' => $raw['product_name'],
+                'batch_no' => null,
+                'qty' => $qty,
+                'unit_price' => $price,
+                'discount_percent' => $discPercent,
+                'discount_amount' => $discount,
+                'taxable_amount' => $taxable,
+                'gst_percent' => $gst,
+                'cgst_amount' => $cgst,
+                'sgst_amount' => $sgst,
+                'igst_amount' => $igst,
+                'cess_amount' => 0,
+                'tax_amount' => $tax,
+                'total_amount' => round($taxable + $tax, 2),
+            ];
+        }
+
+        return [
+            'lines' => $lines,
+            'subtotal' => round($subtotal, 2),
+            'discount_total' => round($discountTotal, 2),
+            'tax_total' => round($taxTotal, 2),
+            'cgst_total' => round($cgstTotal, 2),
+            'sgst_total' => round($sgstTotal, 2),
+            'igst_total' => round($igstTotal, 2),
+            'grand_total' => round($subtotal + $taxTotal, 2),
+        ];
+    }
+
+    private function nextQuotationNumber(int $storeId): string
+    {
+        $prefix = 'QUO-' . now()->format('Ym') . '-';
+        $last = Invoice::where('store_id', $storeId)
+            ->where('module_key', 'quotation')
+            ->where('invoice_number', 'like', $prefix . '%')
+            ->orderByDesc('id')
+            ->value('invoice_number');
+
+        return $prefix . $this->nextSequence($last, $prefix);
+    }
+
+    private function nextInvoiceNumber(int $storeId): string
+    {
+        $prefix = (Store::whereKey($storeId)->value('invoice_prefix') ?: 'INV') . '-' . now()->format('Ymd') . '-';
+        $last = Invoice::where('store_id', $storeId)
+            ->where('invoice_number', 'like', $prefix . '%')
+            ->orderByDesc('id')
+            ->value('invoice_number');
+
+        return $prefix . $this->nextSequence($last, $prefix);
+    }
+
+    private function nextPurchaseOrderNumber(int $storeId, string $moduleKey): string
+    {
+        $prefix = ($moduleKey === 'order' ? 'PR' : 'PO') . '-' . $this->indianFinancialYear() . '-';
+        $last = Purchase::where('store_id', $storeId)
+            ->where('invoice_number', 'like', $prefix . '%')
+            ->orderByDesc('id')
+            ->value('invoice_number');
+
+        return $prefix . $this->nextSequence($last, $prefix);
+    }
+
+    private function nextGoodsReceiptNumber(int $storeId): string
+    {
+        $prefix = 'GRN-' . $storeId . '-' . now()->format('Ymd') . '-';
+        $last = Purchase::where('store_id', $storeId)
+            ->where('invoice_number', 'like', $prefix . '%')
+            ->orderByDesc('id')
+            ->value('invoice_number');
+
+        return $prefix . $this->nextSequence($last, $prefix);
+    }
+
+    private function nextSequence(?string $last, string $prefix): string
+    {
+        $next = $last ? ((int) substr($last, strlen($prefix))) + 1 : 1;
+
+        return str_pad((string) $next, 4, '0', STR_PAD_LEFT);
+    }
+
+    private function indianFinancialYear(): string
+    {
+        $now = now();
+        $startYear = $now->month >= 4 ? $now->year : $now->year - 1;
+
+        return substr((string) $startYear, -2) . '-' . substr((string) ($startYear + 1), -2);
     }
 }

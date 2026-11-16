@@ -424,18 +424,17 @@ class StaffAuthController
      */
     public function offlineCache(Request $request): JsonResponse
     {
-        $storeId = $request->header('X-Store-Id') ?: $request->query('store_id', 1);
-
-        $store = is_numeric($storeId)
-            ? Store::find($storeId)
-            : Store::where('code', $storeId)->first();
+        // The device token (enforced by the device.auth middleware) is the only
+        // trusted source for the store scope. Never fall back to request input.
+        $store = Store::find((int) $request->attributes->get('device_store_id'));
 
         if (!$store) {
             return response()->json(['error' => 'Store not found'], 404);
         }
 
+        // Only staff explicitly attached to this store are cached. Global
+        // (store_id NULL) super-admin accounts stay server-side only.
         $users = User::where('store_id', $store->id)
-            ->orWhereNull('store_id')
             ->orWhereJsonContains('allowed_store_ids', (int)$store->id)
             ->orWhereJsonContains('allowed_store_ids', (string)$store->id)
             ->get();
@@ -467,7 +466,7 @@ class StaffAuthController
             'store_id' => (string)$store->id,
             'staff' => $staffData,
             'cached_at' => now()->toIso8601String(),
-        ]);
+        ])->header('Cache-Control', 'no-store, private');
     }
 
     /**
@@ -533,6 +532,11 @@ class StaffAuthController
             'admin_password' => 'required|string',
         ]);
 
+        $storeId = (int) $request->attributes->get('device_store_id');
+        if ($storeId <= 0) {
+            return response()->json(['message' => 'Device store context is required.'], 403);
+        }
+
         $adminUsername = trim($validated['admin_username']);
         $admin = User::where(function ($q) use ($adminUsername) {
             $q->where('username', $adminUsername)
@@ -540,28 +544,58 @@ class StaffAuthController
             if (is_numeric($adminUsername)) {
                 $q->orWhere('id', (int)$adminUsername);
             }
-        })->whereIn('role', ['super_admin', 'store_owner', 'owner', 'admin', 'manager'])->first();
+        })
+            ->whereIn('role', ['super_admin', 'store_owner', 'owner', 'admin', 'manager'])
+            ->where(function ($q) use ($storeId) {
+                $q->where('store_id', $storeId)
+                  ->orWhereNull('store_id')
+                  ->orWhereJsonContains('allowed_store_ids', $storeId)
+                  ->orWhereJsonContains('allowed_store_ids', (string)$storeId);
+            })
+            ->first();
 
-        if (!$admin) {
-            return response()->json(['message' => 'Admin user not found or insufficient privileges.'], 403);
-        }
-
-        $isValid = Hash::check($validated['admin_password'], $admin->password);
-        if (!$isValid && !empty($admin->pin_hash)) {
+        $isValid = $admin
+            && Hash::check($validated['admin_password'], $admin->password);
+        if (!$isValid && $admin && !empty($admin->pin_hash)) {
             $isValid = Hash::check($validated['admin_password'], $admin->pin_hash);
         }
 
         if (!$isValid) {
+            AuditLog::log(
+                'staff_admin_unlock_failed',
+                'User',
+                $admin ? (string)$admin->id : 'unknown',
+                null,
+                [
+                    'reason' => 'invalid_admin_credentials',
+                    'admin_username' => $adminUsername,
+                    'store_id' => $storeId,
+                    'ip' => $request->ip(),
+                ],
+                $storeId,
+                $admin?->id
+            );
+
             return response()->json(['message' => 'Invalid administrative credentials.'], 403);
         }
 
         $targetUserId = trim((string)$validated['user_id']);
-        $targetUser = is_numeric($targetUserId)
-            ? User::find($targetUserId)
-            : User::where('username', $targetUserId)->orWhere('email', $targetUserId)->first();
+        $targetUser = User::where(function ($q) use ($targetUserId) {
+            if (is_numeric($targetUserId)) {
+                $q->where('id', (int)$targetUserId);
+            } else {
+                $q->where('username', $targetUserId)->orWhere('email', $targetUserId);
+            }
+        })
+            ->where(function ($q) use ($storeId) {
+                $q->where('store_id', $storeId)
+                  ->orWhereJsonContains('allowed_store_ids', $storeId)
+                  ->orWhereJsonContains('allowed_store_ids', (string)$storeId);
+            })
+            ->first();
 
         if (!$targetUser) {
-            return response()->json(['message' => 'Target user not found.'], 404);
+            return response()->json(['message' => 'Target user not found in this store.'], 404);
         }
 
         $targetUser->update([

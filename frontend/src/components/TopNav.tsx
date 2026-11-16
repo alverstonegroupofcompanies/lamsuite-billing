@@ -22,6 +22,7 @@ import {
   Layers,
 } from "lucide-react";
 import { APP_FULL_VERSION } from "../config/version";
+import { useI18n } from "../lib/i18n/I18nContext";
 
 export interface NavChildItem {
   id: string;
@@ -59,6 +60,7 @@ interface TopNavProps {
 }
 
 export const TopNav: React.FC<TopNavProps> = ({ enabledMenus, onOpenShortcutsHelp }) => {
+  const { t } = useI18n();
   const location = useLocation();
   const navigate = useNavigate();
   const [openDropdownId, setOpenDropdownId] = useState<string | null>(null);
@@ -70,135 +72,135 @@ export const TopNav: React.FC<TopNavProps> = ({ enabledMenus, onOpenShortcutsHel
   const navHierarchy: NavItemConfig[] = [
     {
       id: "dashboard",
-      name: "Dashboard",
+      name: t("nav.dashboard"),
       path: "/dashboard",
       key: "Home",
       icon: LayoutDashboard,
     },
     {
       id: "pos",
-      name: "POS Billing",
+      name: t("nav.pos"),
       path: "/pos",
       key: "F1",
       icon: ShoppingCart,
     },
     {
       id: "sales_group",
-      name: "Sales & Bills",
+      name: t("nav.sales_group"),
       icon: FileText,
       children: [
         {
           id: "bills",
-          name: "Past Bills & Invoices",
+          name: t("nav.bills"),
           path: "/bills",
           key: "F6", // Past Bills (still F6)
     // Note: Hold/Recall shortcuts are now Alt+H / Alt+L (handled in POS screen)
 
           icon: FileText,
-          description: "Search, reprint, and manage sales invoices",
+          description: t("nav.bills.desc"),
         },
         {
           id: "sales_returns",
-          name: "Sales Returns & Credit Notes",
+          name: t("nav.sales_returns"),
           path: "/returns/sales",
           key: "F7",
           icon: Undo2,
-          description: "Customer returns, batch restock & refunds",
+          description: t("nav.sales_returns.desc"),
         },
         {
           id: "customer_debit_notes",
-          name: "Customer Debit Notes (B2B)",
+          name: t("nav.customer_debit_notes"),
           path: "/returns/debit-notes",
           key: "Shift+F7",
           icon: Building2,
-          description: "Multi-invoice reconciliation & GST credit notes",
+          description: t("nav.customer_debit_notes.desc"),
         },
       ],
     },
     {
       id: "purchases_group",
-      name: "Purchases",
+      name: t("nav.purchases_group"),
       icon: Truck,
       children: [
         {
           id: "purchases",
-          name: "Inward Purchases",
+          name: t("nav.purchases"),
           path: "/purchases",
           key: "F2",
           icon: Truck,
-          description: "Supplier invoices, batch entry & ITC",
+          description: t("nav.purchases.desc"),
         },
         {
           id: "purchase_returns",
-          name: "Purchase Returns (Debit Notes)",
+          name: t("nav.purchase_returns"),
           path: "/returns/purchases",
           key: "Shift+F2",
           icon: ArrowUpFromLine,
-          description: "Stock debit notes & supplier return notes",
+          description: t("nav.purchase_returns.desc"),
         },
       ],
     },
     {
       id: "stock_group",
-      name: "Inventory",
+      name: t("nav.stock_group"),
       icon: Package,
       children: [
         {
           id: "stock",
-          name: "Stock Ledger & Adjustments",
+          name: t("nav.stock"),
           path: "/stock",
           key: "F3",
           icon: Package,
-          description: "Audit ledger, write-offs, reconciliation & near-expiry",
+          description: t("nav.stock.desc"),
         },
         {
           id: "stock_transfers",
-          name: "Inter-Store Transfers",
+          name: t("nav.stock_transfers"),
           path: "/stock/transfers",
           key: "Shift+F3",
           icon: ArrowRightLeft,
-          description: "Multi-item branch dispatch, receipt & delivery challan",
+          description: t("nav.stock_transfers.desc"),
         },
       ],
     },
     {
       id: "reports",
-      name: "Reports",
+      name: t("nav.reports"),
       path: "/reports",
       key: "F4",
       icon: FileBarChart,
     },
     {
       id: "masters",
-      name: "Masters",
+      name: t("nav.masters"),
       path: "/masters",
       key: "F5",
       icon: Database,
     },
     {
       id: "import_export",
-      name: "Import / Export",
+      name: t("nav.import_export"),
       path: "/import-export",
       key: "F9",
       icon: Layers,
     },
     {
       id: "migration",
-      name: "Data Migration",
+      name: t("nav.migration"),
       path: "/migration",
       key: "Shift+F9",
       icon: Database,
     },
     {
       id: "settings",
-      name: "Settings",
+      name: t("nav.settings"),
       path: "/settings",
       key: "F10",
       icon: Settings,
     },
     {
       id: "counters",
-      name: "Counters",
+      name: t("nav.counters"),
       path: "/counters",
       key: "F8",
       icon: Monitor,
@@ -307,7 +309,7 @@ export const TopNav: React.FC<TopNavProps> = ({ enabledMenus, onOpenShortcutsHel
     <nav
       className="flex h-11 items-center justify-between border-b border-[var(--color-nav-border)] bg-[var(--color-nav-bg)] px-3 text-[var(--color-nav-text)] select-none z-30"
       role="menubar"
-      aria-label="Main Navigation"
+      aria-label={t("nav.label")}
     >
       {/* Left: Navigation Items */}
       <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto no-scrollbar py-1 xl:gap-1.5">
@@ -388,18 +390,18 @@ export const TopNav: React.FC<TopNavProps> = ({ enabledMenus, onOpenShortcutsHel
       <div className="flex shrink-0 items-center gap-2 pl-2">
         <Link
           to="/settings"
-          title={`Installed Version: ${APP_FULL_VERSION} (Click to open Settings & Software Updates)`}
+          title={t("layout.version_title", { version: APP_FULL_VERSION })}
           className="hidden 2xl:inline-flex items-center rounded-[6px] bg-[var(--color-nav-hover)] px-2 py-0.5 font-mono text-[10px] font-semibold text-[#C9D8D3] border border-[var(--color-nav-border)] hover:text-white hover:border-[var(--color-accent)] transition-colors cursor-pointer"
         >
           {APP_FULL_VERSION}
         </Link>
         <button
           onClick={onOpenShortcutsHelp}
-          title="View Keyboard Shortcuts & Cheatsheet"
+          title={t("layout.shortcuts_title")}
           className="flex h-7 items-center gap-1.5 rounded-[8px] bg-[var(--color-nav-hover)] px-2 text-[11px] font-medium text-[var(--color-nav-text)] hover:text-white transition-colors border border-[var(--color-nav-border)] 2xl:px-2.5"
         >
           <Keyboard className="h-3.5 w-3.5 text-[#C9D8D3]" />
-          <span className="hidden 2xl:inline">Shortcuts</span>
+          <span className="hidden 2xl:inline">{t("layout.shortcuts")}</span>
         </button>
       </div>
 

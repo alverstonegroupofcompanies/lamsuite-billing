@@ -6,12 +6,14 @@ import type { ProductBatch, ProductItem } from "../masters/productsStore";
 
 export interface InvoiceRecord {
   id: string;
-  module_key: string; // 'invoice' | 'credit_note' | 'sales_return'
+  module_key: string; // 'invoice' | 'credit_note' | 'sales_return' | 'quotation'
+  store_id?: string;
   invoice_number: string;
   invoice_date: string; // YYYY-MM-DD
   due_date?: string;
   customer_id?: string;
   customer_name?: string;
+  customer_phone?: string;
   customer_gstin?: string;
   place_of_supply?: string; // State code or name, e.g. "32" or "32-Kerala"
   store_state_code?: string;
@@ -29,6 +31,7 @@ export interface InvoiceRecord {
   paid_amount: number;
   payment_mode: string; // 'Cash' | 'UPI' | 'Card' | 'Credit' | 'Bank Transfer' | 'Cheque'
   status: string; // 'issued' | 'cancelled' | 'converted'
+  sync_state?: string;
   original_invoice_number?: string;
   created_at: number;
 }

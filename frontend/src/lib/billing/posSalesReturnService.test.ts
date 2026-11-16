@@ -74,10 +74,68 @@ describe("Sales Returns & Quotations (RET-001, RET-002)", () => {
 
       expect(qRes.success).toBe(true);
 
+      const stored = await sqliteStorage.findById<{
+        module_key: string;
+        status: string;
+        sync_state: string;
+      }>("invoices", qRes.quotationId);
+      expect(stored?.module_key).toBe("quotation");
+      expect(stored?.status).toBe("issued");
+      expect(stored?.sync_state).toBe("pending");
+
       const convRes = await posSalesReturnService.convertQuotationToInvoice(qRes.quotationId);
       expect(convRes.success).toBe(true);
       expect(convRes.quotation.status).toBe("converted");
       expect(convRes.quotation.grand_total).toBe(1180); // 1000 + 180 tax
+
+      const storedAfter = await sqliteStorage.findById<{ status: string }>("invoices", qRes.quotationId);
+      expect(storedAfter?.status).toBe("converted");
+    });
+
+    it("enqueues quotation sync and collapses conversion into a single pending update", async () => {
+      const qRes = await posSalesReturnService.createQuotation(undefined, "Acme Traders", [
+        {
+          product_id: "p1",
+          product_name: "Thermometer",
+          batch_id: "b1",
+          qty: 2,
+          unit_price: 300,
+          gst_percent: 18,
+          discount_percent: 10,
+        },
+      ]);
+
+      let queue = await sqliteStorage.findAll<{
+        entity_type: string;
+        action: string;
+        payload_json: string;
+      }>("sync_queue");
+      const created = queue.find((q) => q.entity_type === "invoice");
+      expect(created).toBeTruthy();
+      expect(created?.action).toBe("create");
+      const createPayload = JSON.parse(created!.payload_json);
+      expect(createPayload.module_key).toBe("quotation");
+      expect(createPayload.customer_name).toBe("Acme Traders");
+      expect(Array.isArray(createPayload.items)).toBe(true);
+      expect(createPayload.items.length).toBe(1);
+
+      await posSalesReturnService.convertQuotationToInvoice(qRes.quotationId);
+
+      queue = await sqliteStorage.findAll<{
+        entity_type: string;
+        action: string;
+        payload_json: string;
+      }>("sync_queue");
+      const invoiceItems = queue.filter((q) => q.entity_type === "invoice");
+      expect(invoiceItems.length).toBe(1);
+      expect(invoiceItems[0].action).toBe("update");
+      expect(JSON.parse(invoiceItems[0].payload_json).status).toBe("converted");
+    });
+
+    it("rejects an empty quotation", async () => {
+      await expect(
+        posSalesReturnService.createQuotation(undefined, "Nobody", [])
+      ).rejects.toThrow(/without line items/i);
     });
   });
 });

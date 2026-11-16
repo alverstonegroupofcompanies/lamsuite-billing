@@ -398,6 +398,32 @@ describe("Printing Engine & Document Layouts (PRN-001, PRN-002, PRN-005)", () =>
       expect(html).not.toContain("font-family: monospace;");
     });
 
+    it("renders quotations with a QUOTATION title instead of the statutory tax invoice label", () => {
+      const quoteData: InvoicePrintData = {
+        invoice_number: "QUO-501",
+        invoice_date: "2026-10-01",
+        document_title: "QUOTATION",
+        store_name: "LamStone Specialty Pharmacy",
+        customer_name: "Anshad",
+        lines: [
+          { description: "Amoxicillin 500mg", hsn_code: "300490", batch_no: "AMX-1", expiry_date: "05/27", qty: 1, rate: 100, gst_percent: 12, amount: 100 },
+        ],
+        subtotal: 89.29,
+        tax_total: 10.71,
+        round_off: 0,
+        grand_total: 100,
+      };
+
+      const html = printingEngine.generateInvoiceHtml(quoteData);
+      expect(html).toContain("QUOTATION");
+      expect(html).not.toContain("TAX INVOICE");
+      expect(html).not.toContain("Tax Invoice");
+
+      const text = printingEngine.generateDotMatrixText(quoteData);
+      expect(text).toContain("QUOTATION");
+      expect(text).not.toContain("TAX INVOICE");
+    });
+
     it("lays out footer as a non-overlapping grid without absolute positioning", () => {
       const invoiceData: InvoicePrintData = {
         invoice_number: "INV-GRID-TEST",

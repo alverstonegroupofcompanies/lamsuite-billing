@@ -22,6 +22,7 @@ class RemoteCounterSyncTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
+        $this->withoutMiddleware(\App\Http\Middleware\AuthenticateDevice::class);
 
         $this->store = Store::create([
             'name' => 'LamStone Main Pharmacy',

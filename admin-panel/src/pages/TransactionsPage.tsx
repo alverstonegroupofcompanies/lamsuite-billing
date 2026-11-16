@@ -5,6 +5,8 @@ import { formatINR, formatDate, formatDateTime, formatIndianNumber } from "../ut
 import { useAuth } from "../context/AuthContext";
 import { ConfirmModal } from "../components/ConfirmModal";
 import { ConflictModal } from "../components/ConflictModal";
+import { DocumentEditorModal, type DocumentKind } from "../components/transactions/DocumentEditorModal";
+import { CustomerReceiptModal } from "../components/transactions/CustomerReceiptModal";
 import {
   Receipt,
   Search,
@@ -30,7 +32,25 @@ import {
   KeyRound,
   Copy,
   ShieldCheck,
+  Pencil,
+  Trash2,
 } from "lucide-react";
+
+const todayInputValue = () => {
+  const d = new Date();
+  return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+};
+
+// Backend date casts serialize as UTC ISO (e.g. 2026-11-16T18:30:00Z for IST
+// midnight on the 17th); slice(0, 10) would shift the day back.
+const toDateInputValue = (value: unknown): string => {
+  if (!value) return "";
+  const raw = String(value);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+  const d = new Date(raw);
+  if (isNaN(d.getTime())) return raw.slice(0, 10);
+  return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+};
 
 export const TransactionsPage: React.FC = () => {
   const { hasPermission, activeStore, role } = useAuth();
@@ -106,6 +126,24 @@ export const TransactionsPage: React.FC = () => {
   const [supplierPayRef, setSupplierPayRef] = useState("");
   const [supplierPayNotes, setSupplierPayNotes] = useState("");
   const [suppliersList, setSuppliersList] = useState<any[]>([]);
+
+  // Expense Voucher Modal
+  const [isExpenseModalOpen, setIsExpenseModalOpen] = useState(false);
+  const [editingExpense, setEditingExpense] = useState<any | null>(null);
+  const [expenseHead, setExpenseHead] = useState("");
+  const [expenseAmount, setExpenseAmount] = useState("");
+  const [expenseMode, setExpenseMode] = useState("Cash");
+  const [expenseRef, setExpenseRef] = useState("");
+  const [expenseNotes, setExpenseNotes] = useState("");
+  const [expenseDate, setExpenseDate] = useState(todayInputValue());
+  const [isSavingExpense, setIsSavingExpense] = useState(false);
+  const [expenseDeleteTarget, setExpenseDeleteTarget] = useState<any | null>(null);
+  const [expenseFeedback, setExpenseFeedback] = useState<{ kind: "success" | "error"; message: string } | null>(null);
+
+  // Quotation / purchase-order editor + customer receipt
+  const [docEditor, setDocEditor] = useState<{ kind: DocumentKind; doc: any | null } | null>(null);
+  const [isReceiptModalOpen, setIsReceiptModalOpen] = useState(false);
+  const [actionFeedback, setActionFeedback] = useState<{ kind: "success" | "error"; message: string } | null>(null);
 
   const isPharmacy = Boolean(activeStore && (activeStore.store_type || "pharmacy") === "pharmacy");
 
@@ -210,8 +248,20 @@ export const TransactionsPage: React.FC = () => {
         const res = await api.get<{ data: any[] }>("/admin/stock/transfers", storeParam);
         setTransfers(res.data || []);
       } else if (activeTab === "expenses") {
-        const res = await api.get<{ data: any[] }>("/admin/expenses", storeParam);
+        const res = await api.get<{
+          data: any[];
+          current_page?: number;
+          last_page?: number;
+          total?: number;
+        }>("/admin/expenses", {
+          ...storeParam,
+          search,
+          page,
+          per_page: perPage,
+        });
         setExpenses(res.data || []);
+        if (res.last_page !== undefined) setTotalPages(res.last_page);
+        if (res.total !== undefined) setTotalCount(res.total);
       } else if (activeTab === "payments") {
         const res = await api.get<{ data: any[] }>("/admin/customer-payments", storeParam);
         setPayments(res.data || []);
@@ -310,6 +360,141 @@ export const TransactionsPage: React.FC = () => {
       await fetchTransactions();
     } catch (err: any) {
       alert(err?.message || "Failed to record supplier payment.");
+    }
+  };
+
+  const handleConvertQuotation = async (quotation: any) => {
+    if (
+      !window.confirm(
+        `Convert ${quotation.invoice_number} into a credit invoice for ${quotation.customer_name}? The customer ledger will be debited.`
+      )
+    ) {
+      return;
+    }
+    try {
+      const res = await api.post<{ invoice?: { invoice_number?: string } }>(
+        `/admin/quotations/${quotation.id}/convert`
+      );
+      setActionFeedback({
+        kind: "success",
+        message: `Converted to invoice ${res.invoice?.invoice_number || ""}.`.trim(),
+      });
+      await fetchTransactions();
+    } catch (err: any) {
+      setActionFeedback({ kind: "error", message: err?.message || "Conversion failed." });
+    }
+  };
+
+  const handleDeleteQuotation = async (quotation: any) => {
+    if (!window.confirm(`Delete quotation ${quotation.invoice_number}? This cannot be undone.`)) return;
+    try {
+      await api.delete(`/admin/quotations/${quotation.id}`);
+      setActionFeedback({ kind: "success", message: "Quotation deleted." });
+      await fetchTransactions();
+    } catch (err: any) {
+      setActionFeedback({ kind: "error", message: err?.message || "Delete failed." });
+    }
+  };
+
+  const handleReceivePurchaseOrder = async (order: any) => {
+    const invoiceNo = window.prompt(
+      `Record goods receipt for ${order.invoice_number}?\n\nSupplier invoice / GRN reference (leave blank to auto-number):`,
+      ""
+    );
+    if (invoiceNo === null) return;
+    try {
+      const res = await api.post<{ purchase?: { invoice_number?: string } }>(
+        `/admin/purchase-orders/${order.id}/receive`,
+        { supplier_invoice_no: invoiceNo.trim() || undefined }
+      );
+      setActionFeedback({
+        kind: "success",
+        message: `Goods receipt ${res.purchase?.invoice_number || ""} recorded; order completed.`.trim(),
+      });
+      await fetchTransactions();
+    } catch (err: any) {
+      setActionFeedback({ kind: "error", message: err?.message || "Goods receipt failed." });
+    }
+  };
+
+  const handleDeletePurchaseOrder = async (order: any) => {
+    if (!window.confirm(`Delete purchase order ${order.invoice_number}? This cannot be undone.`)) return;
+    try {
+      await api.delete(`/admin/purchase-orders/${order.id}`);
+      setActionFeedback({ kind: "success", message: "Purchase order deleted." });
+      await fetchTransactions();
+    } catch (err: any) {
+      setActionFeedback({ kind: "error", message: err?.message || "Delete failed." });
+    }
+  };
+
+  const openExpenseModal = (expense?: any) => {    if (!activeStore) {
+      setExpenseFeedback({ kind: "error", message: "Select a specific store before recording an expense." });
+      return;
+    }
+    if (expense) {
+      setEditingExpense(expense);
+      setExpenseHead(expense.expense_head || "");
+      setExpenseAmount(String(expense.amount ?? ""));
+      setExpenseMode(expense.payment_mode || "Cash");
+      setExpenseRef(expense.reference_no || "");
+      setExpenseNotes(expense.notes || "");
+      setExpenseDate(toDateInputValue(expense.expense_date) || todayInputValue());
+    } else {
+      setEditingExpense(null);
+      setExpenseHead("");
+      setExpenseAmount("");
+      setExpenseMode("Cash");
+      setExpenseRef("");
+      setExpenseNotes("");
+      setExpenseDate(todayInputValue());
+    }
+    setExpenseFeedback(null);
+    setIsExpenseModalOpen(true);
+  };
+
+  const handleSaveExpense = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!activeStore) {
+      setExpenseFeedback({ kind: "error", message: "Select a specific store before recording an expense." });
+      return;
+    }
+    setIsSavingExpense(true);
+    try {
+      const payload = {
+        store_id: activeStore.id,
+        expense_head: expenseHead.trim(),
+        amount: Number(expenseAmount),
+        payment_mode: expenseMode,
+        reference_no: expenseRef.trim() || undefined,
+        notes: expenseNotes.trim() || undefined,
+        expense_date: expenseDate,
+      };
+      if (editingExpense) {
+        await api.put(`/admin/expenses/${editingExpense.id}`, payload);
+      } else {
+        await api.post("/admin/expenses", payload);
+      }
+      setIsExpenseModalOpen(false);
+      setExpenseFeedback({ kind: "success", message: editingExpense ? "Expense updated." : "Expense recorded." });
+      await fetchTransactions();
+    } catch (err: any) {
+      setExpenseFeedback({ kind: "error", message: err?.message || "Failed to save expense." });
+    } finally {
+      setIsSavingExpense(false);
+    }
+  };
+
+  const handleDeleteExpense = async () => {
+    if (!expenseDeleteTarget) return;
+    try {
+      await api.delete(`/admin/expenses/${expenseDeleteTarget.id}`);
+      setExpenseDeleteTarget(null);
+      setExpenseFeedback({ kind: "success", message: "Expense deleted." });
+      await fetchTransactions();
+    } catch (err: any) {
+      setExpenseDeleteTarget(null);
+      setExpenseFeedback({ kind: "error", message: err?.message || "Failed to delete expense." });
     }
   };
 
@@ -424,6 +609,18 @@ export const TransactionsPage: React.FC = () => {
           </p>
         </div>
 
+        {activeTab === "expenses" && hasPermission("transactions", "create") && (
+          <button
+            onClick={() => openExpenseModal()}
+            disabled={!activeStore}
+            title={activeStore ? "Record a new expense voucher" : "Switch to a specific store to record expenses"}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-brand-600 hover:bg-brand-500 disabled:opacity-60 disabled:cursor-not-allowed text-white text-xs font-bold rounded-xl shadow-sm transition"
+          >
+            <Plus className="w-4 h-4" />
+            <span>Record Expense</span>
+          </button>
+        )}
+
         {activeTab === "supplier_payments" && hasPermission("transactions", "create") && (
           <button
             onClick={() => {
@@ -436,7 +633,58 @@ export const TransactionsPage: React.FC = () => {
             <span>Record Supplier Payout</span>
           </button>
         )}
+
+        {activeTab === "quotations" && hasPermission("transactions", "create") && (
+          <button
+            onClick={() => setDocEditor({ kind: "quotation", doc: null })}
+            disabled={!activeStore}
+            title={activeStore ? "Create a quotation" : "Switch to a specific store first"}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-brand-600 hover:bg-brand-500 disabled:opacity-60 disabled:cursor-not-allowed text-white text-xs font-bold rounded-xl shadow-sm transition"
+          >
+            <Plus className="w-4 h-4" />
+            <span>New Quotation</span>
+          </button>
+        )}
+
+        {activeTab === "purchase_orders" && hasPermission("transactions", "create") && (
+          <button
+            onClick={() => setDocEditor({ kind: "purchase_order", doc: null })}
+            disabled={!activeStore}
+            title={activeStore ? "Create a purchase order" : "Switch to a specific store first"}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-brand-600 hover:bg-brand-500 disabled:opacity-60 disabled:cursor-not-allowed text-white text-xs font-bold rounded-xl shadow-sm transition"
+          >
+            <Plus className="w-4 h-4" />
+            <span>New Purchase Order</span>
+          </button>
+        )}
+
+        {activeTab === "payments" && hasPermission("transactions", "create") && (
+          <button
+            onClick={() => setIsReceiptModalOpen(true)}
+            disabled={!activeStore}
+            title={activeStore ? "Record a customer receipt" : "Switch to a specific store first"}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-brand-600 hover:bg-brand-500 disabled:opacity-60 disabled:cursor-not-allowed text-white text-xs font-bold rounded-xl shadow-sm transition"
+          >
+            <Plus className="w-4 h-4" />
+            <span>Record Customer Receipt</span>
+          </button>
+        )}
       </div>
+
+      {actionFeedback && (
+        <div
+          className={`flex items-center justify-between gap-2 px-4 py-2.5 rounded-xl border text-xs font-medium ${
+            actionFeedback.kind === "success"
+              ? "bg-emerald-50 dark:bg-emerald-900/30 border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-200"
+              : "bg-rose-50 dark:bg-rose-900/30 border-rose-200 dark:border-rose-800 text-rose-700 dark:text-rose-200"
+          }`}
+        >
+          <span>{actionFeedback.message}</span>
+          <button onClick={() => setActionFeedback(null)} className="opacity-60 hover:opacity-100">
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
 
       {/* Tabs Toolbar */}
       <div className="flex border-b border-slate-200 dark:border-slate-800 gap-1 sm:gap-2 text-xs font-semibold overflow-x-auto pb-px">
@@ -494,10 +742,20 @@ export const TransactionsPage: React.FC = () => {
               className="px-2.5 py-1.5 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/80 rounded-xl text-xs text-slate-700 dark:text-slate-300 focus:outline-hidden"
             >
               <option value="">All Statuses</option>
-              <option value="issued">Issued / Converted</option>
-              <option value="cancelled">Cancelled</option>
-              <option value="paid">Paid</option>
-              <option value="draft">Draft</option>
+              {activeTab === "quotations" ? (
+                <>
+                  <option value="issued">Open Quote</option>
+                  <option value="converted">Converted</option>
+                  <option value="cancelled">Cancelled</option>
+                </>
+              ) : (
+                <>
+                  <option value="issued">Issued</option>
+                  <option value="cancelled">Cancelled</option>
+                  <option value="paid">Paid</option>
+                  <option value="draft">Draft</option>
+                </>
+              )}
             </select>
           )}
 
@@ -708,12 +966,13 @@ export const TransactionsPage: React.FC = () => {
                 <th className="px-4 py-3 text-right">Tax Total</th>
                 <th className="px-4 py-3 text-right">Estimate Total</th>
                 <th className="px-4 py-3 text-center">Status</th>
+                <th className="px-4 py-3 text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
               {quotationsList.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-4 py-8 text-center text-slate-400">
+                  <td colSpan={7} className="px-4 py-8 text-center text-slate-400">
                     No pro-forma quotations or estimates recorded.
                   </td>
                 </tr>
@@ -731,9 +990,46 @@ export const TransactionsPage: React.FC = () => {
                       {formatINR(q.grand_total)}
                     </td>
                     <td className="px-4 py-3 text-center">
-                      <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-blue-100 text-blue-700 capitalize">
-                        {q.status || "draft"}
+                      <span
+                        className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold capitalize ${
+                          (q.status || "issued") === "converted"
+                            ? "bg-emerald-100 text-emerald-700"
+                            : q.status === "cancelled"
+                            ? "bg-red-100 text-red-700"
+                            : "bg-blue-100 text-blue-700"
+                        }`}
+                      >
+                        {(q.status || "issued") === "issued" ? "open quote" : q.status || "issued"}
                       </span>
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center justify-end gap-1">
+                        {hasPermission("transactions", "edit") && q.status !== "converted" && q.status !== "cancelled" && (
+                          <>
+                            <button
+                              onClick={() => setDocEditor({ kind: "quotation", doc: q })}
+                              title="Edit quotation"
+                              className="p-1.5 rounded-lg text-slate-400 hover:text-brand-600 hover:bg-brand-50 dark:hover:bg-brand-900/30"
+                            >
+                              <Pencil className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              onClick={() => handleConvertQuotation(q)}
+                              title="Convert to credit invoice"
+                              className="p-1.5 rounded-lg text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-900/30"
+                            >
+                              <CheckCircle2 className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              onClick={() => handleDeleteQuotation(q)}
+                              title="Delete quotation"
+                              className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/30"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))
@@ -833,14 +1129,17 @@ export const TransactionsPage: React.FC = () => {
               <tr>
                 <th className="px-4 py-3">PO Number & Date</th>
                 <th className="px-4 py-3">Supplier Name</th>
+                <th className="px-4 py-3 text-center">Lines</th>
+                <th className="px-4 py-3">Expected Delivery</th>
                 <th className="px-4 py-3 text-right">Estimated Amount</th>
                 <th className="px-4 py-3 text-center">Status</th>
+                <th className="px-4 py-3 text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
               {purchaseOrdersList.length === 0 ? (
                 <tr>
-                  <td colSpan={4} className="px-4 py-8 text-center text-slate-400">
+                  <td colSpan={7} className="px-4 py-8 text-center text-slate-400">
                     No purchase orders placed.
                   </td>
                 </tr>
@@ -852,10 +1151,60 @@ export const TransactionsPage: React.FC = () => {
                       <div className="text-[10px] text-slate-400">{formatDate(po.invoice_date)}</div>
                     </td>
                     <td className="px-4 py-3 font-semibold">{po.supplier_name}</td>
+                    <td className="px-4 py-3 text-center font-mono">
+                      {Array.isArray(po.items) ? po.items.length : 0}
+                    </td>
+                    <td className="px-4 py-3 text-slate-500">
+                      {po.expected_delivery_date ? formatDate(po.expected_delivery_date) : "—"}
+                    </td>
                     <td className="px-4 py-3 text-right font-mono font-bold text-slate-900 dark:text-white">
                       {formatINR(po.grand_total)}
                     </td>
-                    <td className="px-4 py-3 text-center capitalize text-blue-600 font-semibold">{po.status}</td>
+                    <td className="px-4 py-3 text-center">
+                      <span
+                        className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold capitalize ${
+                          po.status === "completed"
+                            ? "bg-emerald-100 text-emerald-700"
+                            : po.status === "cancelled"
+                            ? "bg-red-100 text-red-700"
+                            : po.status === "partially_received"
+                            ? "bg-amber-100 text-amber-700"
+                            : "bg-blue-100 text-blue-700"
+                        }`}
+                      >
+                        {String(po.status || "pending").replace("_", " ")}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center justify-end gap-1">
+                        {hasPermission("transactions", "edit") &&
+                          !["completed", "received", "cancelled"].includes(po.status) && (
+                            <>
+                              <button
+                                onClick={() => setDocEditor({ kind: "purchase_order", doc: po })}
+                                title="Edit purchase order"
+                                className="p-1.5 rounded-lg text-slate-400 hover:text-brand-600 hover:bg-brand-50 dark:hover:bg-brand-900/30"
+                              >
+                                <Pencil className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                onClick={() => handleReceivePurchaseOrder(po)}
+                                title="Record goods receipt"
+                                className="p-1.5 rounded-lg text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-900/30"
+                              >
+                                <Package className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                onClick={() => handleDeletePurchaseOrder(po)}
+                                title="Delete purchase order"
+                                className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/30"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </>
+                          )}
+                      </div>
+                    </td>
                   </tr>
                 ))
               )}
@@ -1011,42 +1360,120 @@ export const TransactionsPage: React.FC = () => {
 
       {/* Expenses View */}
       {activeTab === "expenses" && (
-        <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs overflow-hidden">
-          <table className="w-full text-xs text-left text-slate-600 dark:text-slate-300">
-            <thead className="bg-slate-50 dark:bg-slate-800/50 text-slate-500 uppercase text-[10px] font-semibold border-b border-slate-200 dark:border-slate-800">
-              <tr>
-                <th className="px-4 py-3">Voucher Ref & Date</th>
-                <th className="px-4 py-3">Expense Head</th>
-                <th className="px-4 py-3">Payment Mode</th>
-                <th className="px-4 py-3">Notes</th>
-                <th className="px-4 py-3 text-right">Amount</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-              {expenses.length === 0 ? (
-                <tr>
-                  <td colSpan={5} className="px-4 py-8 text-center text-slate-400">
-                    No expense vouchers recorded.
-                  </td>
-                </tr>
-              ) : (
-                expenses.map((e) => (
-                  <tr key={e.id}>
-                    <td className="px-4 py-3 font-mono font-bold text-slate-900 dark:text-white">
-                      {e.reference_no}
-                      <div className="text-[10px] text-slate-400">{formatDate(e.expense_date)}</div>
-                    </td>
-                    <td className="px-4 py-3 font-semibold text-slate-800 dark:text-slate-200">{e.expense_head}</td>
-                    <td className="px-4 py-3">{e.payment_mode}</td>
-                    <td className="px-4 py-3 text-slate-400">{e.notes || "—"}</td>
-                    <td className="px-4 py-3 text-right font-mono font-bold text-red-600 dark:text-red-400">
-                      {formatINR(e.amount)}
-                    </td>
+        <div className="space-y-3">
+          {expenseFeedback && (
+            <div
+              className={`px-4 py-2.5 rounded-xl text-xs font-semibold border ${
+                expenseFeedback.kind === "success"
+                  ? "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-400 dark:border-emerald-900"
+                  : "bg-red-50 text-red-700 border-red-200 dark:bg-red-950/40 dark:text-red-400 dark:border-red-900"
+              }`}
+            >
+              {expenseFeedback.message}
+            </div>
+          )}
+
+          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs text-left text-slate-600 dark:text-slate-300">
+                <thead className="bg-slate-50 dark:bg-slate-800/50 text-slate-500 uppercase text-[10px] font-semibold border-b border-slate-200 dark:border-slate-800">
+                  <tr>
+                    <th className="px-4 py-3">Voucher Ref & Date</th>
+                    <th className="px-4 py-3">Expense Head</th>
+                    <th className="px-4 py-3">Payment Mode</th>
+                    <th className="px-4 py-3">Notes</th>
+                    <th className="px-4 py-3 text-right">Amount</th>
+                    {activeStore && <th className="px-4 py-3 text-right">Actions</th>}
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                  {isLoading ? (
+                    <tr>
+                      <td colSpan={activeStore ? 6 : 5} className="px-4 py-8 text-center text-slate-400">
+                        Loading expense vouchers...
+                      </td>
+                    </tr>
+                  ) : expenses.length === 0 ? (
+                    <tr>
+                      <td colSpan={activeStore ? 6 : 5} className="px-4 py-8 text-center text-slate-400">
+                        No expense vouchers recorded.
+                      </td>
+                    </tr>
+                  ) : (
+                    expenses.map((e) => (
+                      <tr key={e.id}>
+                        <td className="px-4 py-3 font-mono font-bold text-slate-900 dark:text-white">
+                          {e.expense_number || e.reference_no || `#${e.id}`}
+                          <div className="text-[10px] text-slate-400">{formatDate(e.expense_date)}</div>
+                        </td>
+                        <td className="px-4 py-3 font-semibold text-slate-800 dark:text-slate-200">
+                          {e.expense_head}
+                          {e.reference_no && (
+                            <div className="text-[10px] text-slate-400 font-normal">Ref: {e.reference_no}</div>
+                          )}
+                        </td>
+                        <td className="px-4 py-3">{e.payment_mode}</td>
+                        <td className="px-4 py-3 text-slate-400">
+                          {e.notes || "—"}
+                          {e.creator?.name && <div className="text-[10px] text-slate-400">By {e.creator.name}</div>}
+                        </td>
+                        <td className="px-4 py-3 text-right font-mono font-bold text-red-600 dark:text-red-400">
+                          {formatINR(e.amount)}
+                        </td>
+                        {activeStore && (
+                          <td className="px-4 py-3 text-right">
+                            <div className="flex items-center justify-end gap-1">
+                              {hasPermission("transactions", "edit") && (
+                                <>
+                                  <button
+                                    onClick={() => openExpenseModal(e)}
+                                    className="p-1.5 text-slate-400 hover:text-brand-600 hover:bg-brand-50 dark:hover:bg-brand-950/40 rounded-lg transition"
+                                    title="Edit expense"
+                                  >
+                                    <Pencil className="w-3.5 h-3.5" />
+                                  </button>
+                                  <button
+                                    onClick={() => setExpenseDeleteTarget(e)}
+                                    className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/40 rounded-lg transition"
+                                    title="Delete expense"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                </>
+                              )}
+                            </div>
+                          </td>
+                        )}
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="px-4 py-3 border-t border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/60 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-500 dark:text-slate-400">
+              <div>
+                Showing page <strong className="text-slate-800 dark:text-slate-200 font-semibold">{page}</strong> of{" "}
+                <strong className="text-slate-800 dark:text-slate-200 font-semibold">{totalPages}</strong> ({totalCount.toLocaleString()} total)
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  disabled={page <= 1 || isLoading}
+                  className="px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 disabled:opacity-50 text-slate-700 dark:text-slate-200 font-semibold hover:bg-slate-50"
+                >
+                  Previous
+                </button>
+                <button
+                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                  disabled={page >= totalPages || isLoading}
+                  className="px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 disabled:opacity-50 text-slate-700 dark:text-slate-200 font-semibold hover:bg-slate-50"
+                >
+                  Next
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       )}
 
@@ -1139,6 +1566,144 @@ export const TransactionsPage: React.FC = () => {
       )}
 
       {/* Record Supplier Payment Modal */}
+      {/* Expense Voucher Modal */}
+      {isExpenseModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 max-w-md w-full p-6 space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
+              <h3 className="font-bold text-slate-900 dark:text-white text-sm flex items-center gap-2">
+                <DollarSign className="w-4 h-4 text-brand-600" />
+                <span>{editingExpense ? "Edit Expense Voucher" : "Record Expense Voucher"}</span>
+              </h3>
+              <button onClick={() => setIsExpenseModalOpen(false)} className="text-slate-400 hover:text-slate-600">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveExpense} className="space-y-3 text-xs">
+              <div>
+                <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">Expense Head *</label>
+                <input
+                  type="text"
+                  required
+                  list="expense-head-suggestions"
+                  value={expenseHead}
+                  onChange={(e) => setExpenseHead(e.target.value)}
+                  placeholder="e.g. Shop Rent, Electricity, Staff Salary"
+                  className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl font-medium"
+                />
+                <datalist id="expense-head-suggestions">
+                  <option value="Shop Rent" />
+                  <option value="Electricity & Power" />
+                  <option value="Staff Salary & Wages" />
+                  <option value="Freight & Courier Inward" />
+                  <option value="Refreshments & Tea" />
+                  <option value="Printing & Stationery" />
+                  <option value="Housekeeping & Cleaning" />
+                  <option value="Miscellaneous Expenses" />
+                </datalist>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">Amount (₹) *</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0.01"
+                    required
+                    value={expenseAmount}
+                    onChange={(e) => setExpenseAmount(e.target.value)}
+                    placeholder="0.00"
+                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl font-mono text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">Expense Date *</label>
+                  <input
+                    type="date"
+                    required
+                    value={expenseDate}
+                    onChange={(e) => setExpenseDate(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">Payment Mode</label>
+                <select
+                  value={expenseMode}
+                  onChange={(e) => setExpenseMode(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl"
+                >
+                  <option value="Cash">Cash</option>
+                  <option value="Bank Transfer">Bank Transfer (NEFT/RTGS)</option>
+                  <option value="UPI">UPI</option>
+                  <option value="Cheque">Cheque</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                  Voucher Ref / Bill No
+                </label>
+                <input
+                  type="text"
+                  value={expenseRef}
+                  onChange={(e) => setExpenseRef(e.target.value)}
+                  placeholder="e.g. Rent bill 2026-11 or UTR"
+                  className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl"
+                />
+              </div>
+
+              <div>
+                <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">Narration / Notes</label>
+                <textarea
+                  value={expenseNotes}
+                  onChange={(e) => setExpenseNotes(e.target.value)}
+                  rows={2}
+                  placeholder="What was this expense for?"
+                  className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl"
+                />
+              </div>
+
+              {expenseFeedback?.kind === "error" && (
+                <div className="text-[11px] font-medium text-red-600 dark:text-red-400">{expenseFeedback.message}</div>
+              )}
+
+              <div className="flex justify-end gap-2 pt-3">
+                <button
+                  type="button"
+                  onClick={() => setIsExpenseModalOpen(false)}
+                  className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-xl"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSavingExpense}
+                  className="px-4 py-2 bg-brand-600 hover:bg-brand-500 disabled:opacity-60 text-white font-bold rounded-xl"
+                >
+                  {isSavingExpense ? "Saving..." : editingExpense ? "Save Changes" : "Record Expense"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      <ConfirmModal
+        isOpen={Boolean(expenseDeleteTarget)}
+        onClose={() => setExpenseDeleteTarget(null)}
+        onConfirm={handleDeleteExpense}
+        title={`Delete Expense: ${expenseDeleteTarget?.expense_number || expenseDeleteTarget?.expense_head || ""}`}
+        message="Deleting this expense voucher removes it from expense reports and day-close summaries. An immutable audit log entry will be recorded. This action cannot be undone."
+        confirmText="Delete Expense"
+        danger={true}
+        requireReason={false}
+      />
+
       {isSupplierPayModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
           <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 max-w-md w-full p-6 space-y-4">
@@ -1515,6 +2080,32 @@ export const TransactionsPage: React.FC = () => {
         danger={true}
         requireReason={true}
       />
+
+      {docEditor && (
+        <DocumentEditorModal
+          kind={docEditor.kind}
+          storeId={activeStore?.id}
+          doc={docEditor.doc}
+          onClose={() => setDocEditor(null)}
+          onSaved={(message) => {
+            setDocEditor(null);
+            setActionFeedback({ kind: "success", message });
+            fetchTransactions();
+          }}
+        />
+      )}
+
+      {isReceiptModalOpen && (
+        <CustomerReceiptModal
+          storeId={activeStore?.id}
+          onClose={() => setIsReceiptModalOpen(false)}
+          onSaved={(message) => {
+            setIsReceiptModalOpen(false);
+            setActionFeedback({ kind: "success", message });
+            fetchTransactions();
+          }}
+        />
+      )}
     </div>
   );
 };

@@ -34,6 +34,7 @@ export interface InvoiceEditApproval {
 
 export interface InvoiceRecord {
   id: string;
+  server_id?: number;
   store_id?: string | number;
   store_code?: string;
   module_key: string;
@@ -61,7 +62,7 @@ export interface InvoiceRecord {
   payment_mode: string;
   payment_status?: "paid" | "partially_paid" | "unpaid";
   payments?: InvoicePaymentRecord[];
-  status: "issued" | "cancelled";
+  status: "issued" | "cancelled" | "converted";
   cancel_reason?: string;
   is_revised?: boolean | number;
   edit_history?: string | InvoiceAuditEntry[];
@@ -74,6 +75,23 @@ export interface InvoiceRecord {
   external_id?: string;
   bill_discount_percent?: number;
   bill_discount_amount?: number;
+  // Statutory compliance registry (recorded in the admin panel; pulled on demand)
+  irn?: string;
+  irn_ack_no?: string;
+  irn_ack_date?: string;
+  irn_qr?: string;
+  irn_status?: string;
+  irn_cancelled_at?: string;
+  irn_cancel_reason?: string;
+  irn_error?: string;
+  irn_status_effective?: string;
+  irn_applicable?: boolean;
+  ewb_number?: string;
+  ewb_date?: string;
+  ewb_valid_until?: string;
+  ewb_status?: string;
+  ewb_status_effective?: string;
+  ewb_applicable?: boolean;
   created_at: number;
   updated_at: number;
 }
@@ -131,6 +149,47 @@ export interface InvoiceDiffResult {
     oldAmount?: number;
     newAmount?: number;
   }>;
+}
+
+type ComplianceFields = Pick<
+  InvoiceRecord,
+  | "irn"
+  | "irn_ack_no"
+  | "irn_ack_date"
+  | "irn_qr"
+  | "irn_status"
+  | "irn_cancelled_at"
+  | "irn_cancel_reason"
+  | "irn_error"
+  | "irn_status_effective"
+  | "irn_applicable"
+  | "ewb_number"
+  | "ewb_date"
+  | "ewb_valid_until"
+  | "ewb_status"
+  | "ewb_status_effective"
+  | "ewb_applicable"
+>;
+
+function extractComplianceFields(raw: any): ComplianceFields {
+  return {
+    irn: raw?.irn ?? undefined,
+    irn_ack_no: raw?.irn_ack_no ?? undefined,
+    irn_ack_date: raw?.irn_ack_date ?? undefined,
+    irn_qr: raw?.irn_qr ?? undefined,
+    irn_status: raw?.irn_status ?? undefined,
+    irn_cancelled_at: raw?.irn_cancelled_at ?? undefined,
+    irn_cancel_reason: raw?.irn_cancel_reason ?? undefined,
+    irn_error: raw?.irn_error ?? undefined,
+    irn_status_effective: raw?.irn_status_effective ?? undefined,
+    irn_applicable: raw?.irn_applicable ?? undefined,
+    ewb_number: raw?.ewb_number ?? undefined,
+    ewb_date: raw?.ewb_date ?? undefined,
+    ewb_valid_until: raw?.ewb_valid_until ?? undefined,
+    ewb_status: raw?.ewb_status ?? undefined,
+    ewb_status_effective: raw?.ewb_status_effective ?? undefined,
+    ewb_applicable: raw?.ewb_applicable ?? undefined,
+  };
 }
 
 export class InvoiceManagementService {
@@ -383,6 +442,7 @@ export class InvoiceManagementService {
               edit_history: sinv.edit_history || undefined,
             };
 
+            Object.assign(serverInvoiceRecord, extractComplianceFields(sinv));
             await sqliteStorage.insertRecord("invoices", String(sinv.id), serverInvoiceRecord);
 
             const serverItems: InvoiceItemRecord[] = [];
@@ -473,6 +533,53 @@ export class InvoiceManagementService {
     }
 
     return { invoice, items, auditLog };
+  }
+
+  /**
+   * Pull the authoritative IRN / e-way bill registry for an invoice and merge it
+   * onto the cached local record. Returns null when offline or not applicable.
+   */
+  async refreshCompliance(invoiceIdOrNumber: string): Promise<ComplianceFields | null> {
+    try {
+      const baseUrl = onlineTransactionService.getEffectiveBaseUrl();
+      const activeStore = storeRegistryService.getActiveStore();
+      const storeId = activeStore?.id || "1";
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 4000);
+      const res = await fetch(`${baseUrl}/api/invoices/${encodeURIComponent(invoiceIdOrNumber)}`, {
+        headers: {
+          Accept: "application/json",
+          "X-Store-Id": String(storeId),
+          "Store-Id": String(storeId),
+        },
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
+      if (!res.ok) return null;
+
+      const sinv = await res.json();
+      const compliance = extractComplianceFields(sinv);
+      const hasCompliance = Object.values(compliance).some(
+        (v) => v !== undefined && v !== null && v !== ""
+      );
+      if (!hasCompliance) return null;
+
+      const rows = await sqliteStorage.findAll<InvoiceRecord>("invoices").catch(() => []);
+      const cached =
+        rows.find((r) => r.server_id != null && String(r.server_id) === String(sinv.id)) ||
+        rows.find((r) => r.invoice_number === (sinv.invoice_number || invoiceIdOrNumber)) ||
+        rows.find(
+          (r) =>
+            String(r.id) === String(invoiceIdOrNumber) ||
+            String((r as any).external_id) === String(invoiceIdOrNumber)
+        );
+      if (cached) {
+        await sqliteStorage.insertRecord("invoices", String(cached.id), { ...cached, ...compliance });
+      }
+      return compliance;
+    } catch {
+      return null;
+    }
   }
 
   /**

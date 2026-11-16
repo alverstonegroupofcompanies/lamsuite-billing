@@ -1,5 +1,52 @@
 # Changelog
 
+## 2.0.38 — 2026-11-17
+
+Centralized-billing completion release: payments and settlement, GST compliance,
+price lists, sales orders, loyalty, accounting exports, B2B portal, Malayalam
+i18n, central backup/restore, day close, shared catalog, GST working papers and
+password reset — plus critical route and authentication hardening.
+
+### Security and authentication
+
+1. **Device-authenticated sync** — every sync push endpoint requires the paired workstation token (`X-Device-Token`); revoked, locked and pending devices and suspended stores are rejected, and writes are pinned to the device's own store. Cross-store payloads fail with a tenant-isolation 403.
+2. **Offline staff cache** — requires device authentication, derives the store from the device instead of the request, excludes global super-admins, and is served `Cache-Control: no-store, private`.
+3. **Admin unlock** — scoped to the device's store, rate-limited to six attempts per minute, audited on failure, and free of account-enumeration differences.
+4. **Staff login throttling** — 30 attempts per minute with a dedicated limiter key.
+5. **Biometric no-op removed** — the desk login no longer offers a flag-only biometric session without a real credential.
+6. **Store switching** — clears the previous store's legacy device token so a push never carries another pharmacy's credential.
+
+### Payments and settlement
+
+7. **Provider-agnostic payment config** with UPI intent QR generation on the POS tender screen.
+8. **Settlement import and reconciliation** — batch import, line matching and admin review.
+9. **Gift cards and store credit** — ledger-backed issuance, redemption and balance enquiry at tender.
+
+### GST compliance
+
+10. **Compliance data model and service** — e-invoice/e-way bill metadata captured per document, surfaced in POS, print and admin.
+11. **Compliance API** — backfill, import/export and admin dashboard.
+12. **GST working papers** — GSTR-3B, 2B reconciliation and annual 9/9C summaries.
+
+### Sales
+
+13. **Price lists** — customer- and channel-scoped pricing resolved in the POS cart.
+14. **Sales orders and delivery challans** — draft-to-dispatch workflow with Rule 55 challans.
+15. **Loyalty points and coupons** — earn/burn ledger, coupon validation and POS redemption.
+
+### Exports and portal
+
+16. **Accounting exports** — Tally, Busy and CSV exports with admin download.
+17. **B2B customer portal** — token-scoped portal access with statement and invoice views.
+18. **Malayalam i18n groundwork** and staff password reset.
+
+### Operations
+
+19. **Central backup and restore** — scheduled and manual database backups with in-app restore.
+20. **Store day close** — cash reconciliation, variance reporting and admin day-close review.
+21. **Shared central catalog** — publish catalog snapshots from admin and pull them at the store.
+22. **Signed webhook outbox** — retried, signed webhook delivery with an admin log.
+
 ## 2.0.37 — 2026-11-16
 
 33-item billing correctness, security and keyboard release, followed by a

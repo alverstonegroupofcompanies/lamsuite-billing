@@ -625,7 +625,7 @@ export const DEFAULT_PAYMENT_SETTINGS: PaymentSettingsConfig = {
   upiPayeeName: "",
   enableDynamicUpiQr: true,
   enableQuickDenominations: true,
-  creditPolicy: "warn_on_exceed",
+  creditPolicy: "block_on_exceed",
   printShowReferences: false,
   upi: DEFAULT_UPI_SETTINGS,
 };

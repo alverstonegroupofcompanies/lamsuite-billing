@@ -3,7 +3,6 @@ import {
   User,
   KeyRound,
   Shield,
-  Fingerprint,
   Lock,
   AlertTriangle,
   Building2,
@@ -16,11 +15,13 @@ import {
   ArrowRight,
   Eye,
   EyeOff,
+  Languages,
 } from "lucide-react";
 import { staffAuthService, type StaffUser, type StaffSessionConflict } from "../lib/auth/staffAuthService";
 import { storeDeviceService, type StoreDeviceProfile } from "../lib/auth/storeDeviceService";
 import { useModalEscape } from "../lib/ui/modalEscapeManager";
 import { API_BASE_URL } from "../config/env";
+import { useI18n } from "../lib/i18n/I18nContext";
 
 interface StaffLoginPageProps {
   onLoginSuccess: () => void;
@@ -33,6 +34,7 @@ export const StaffLoginPage: React.FC<StaffLoginPageProps> = ({
   onBackToStores,
   activeStore,
 }) => {
+  const { t, locale, toggleLocale } = useI18n();
   const [deviceProfile, setDeviceProfile] = useState<StoreDeviceProfile | null>(null);
   const [staffList, setStaffList] = useState<StaffUser[]>([]);
   const [selectedUser, setSelectedUser] = useState<StaffUser | null>(null);
@@ -42,7 +44,6 @@ export const StaffLoginPage: React.FC<StaffLoginPageProps> = ({
   const [showPin, setShowPin] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [isPasswordMode, setIsPasswordMode] = useState(false);
-  const [hasBiometrics, setHasBiometrics] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
   const [sessionConflict, setSessionConflict] = useState<StaffSessionConflict | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -101,7 +102,6 @@ export const StaffLoginPage: React.FC<StaffLoginPageProps> = ({
 
   useEffect(() => {
     loadStaffAndProfile();
-    staffAuthService.isBiometricsAvailable().then(setHasBiometrics);
   }, [activeStore?.id]);
 
   const selectedUserId = selectedUser?.id;
@@ -149,7 +149,7 @@ export const StaffLoginPage: React.FC<StaffLoginPageProps> = ({
   const submitCredentials = async (forceOut = false) => {
     const targetUserIdOrUsername = selectedUser ? selectedUser.id : manualUsername.trim();
     if (!targetUserIdOrUsername) {
-      setErrorMsg("Please select an operator or enter your username.");
+      setErrorMsg(t("login.pin_required"));
       return;
     }
     setErrorMsg("");
@@ -161,7 +161,7 @@ export const StaffLoginPage: React.FC<StaffLoginPageProps> = ({
         : await staffAuthService.authenticateWithPin(targetUserIdOrUsername, pin, { forceOut });
 
       if (!res.success) {
-        setErrorMsg(res.error || "Authentication failed.");
+        setErrorMsg(res.error || t("login.auth_failed"));
         setSessionConflict(res.conflict || null);
         if (!res.conflict) {
           setPin("");
@@ -183,7 +183,7 @@ export const StaffLoginPage: React.FC<StaffLoginPageProps> = ({
         }
       }
     } catch (err: any) {
-      setErrorMsg(err?.message || "Authentication error.");
+      setErrorMsg(err?.message || t("login.auth_error"));
     } finally {
       setIsLoading(false);
     }
@@ -192,25 +192,6 @@ export const StaffLoginPage: React.FC<StaffLoginPageProps> = ({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     await submitCredentials(false);
-  };
-
-  const handleBiometricAuth = async () => {
-    if (!selectedUser) return;
-    setIsLoading(true);
-    setErrorMsg("");
-
-    try {
-      const res = await staffAuthService.authenticateWithBiometrics(selectedUser.id);
-      if (!res.success) {
-        setErrorMsg(res.error || "Biometric sign-in failed.");
-      } else {
-        onLoginSuccess();
-      }
-    } catch (err: any) {
-      setErrorMsg(err?.message || "Biometrics unavailable. Use PIN.");
-    } finally {
-      setIsLoading(false);
-    }
   };
 
   const handleAdminUnlockSubmit = async (e: React.FormEvent) => {
@@ -236,7 +217,7 @@ export const StaffLoginPage: React.FC<StaffLoginPageProps> = ({
       const cur = updated.find((u) => u.id === selectedUser?.id);
       if (cur) setSelectedUser(cur);
     } else {
-      setAdminUnlockMsg(res.error || "Failed to unlock account.");
+      setAdminUnlockMsg(res.error || t("login.unlock_failed"));
     }
   };
 
@@ -255,7 +236,7 @@ export const StaffLoginPage: React.FC<StaffLoginPageProps> = ({
       setMustChangePassword(false);
       onLoginSuccess();
     } else {
-      setErrorMsg(res.error || "Failed to update credentials.");
+      setErrorMsg(res.error || t("login.update_failed"));
     }
   };
 
@@ -279,12 +260,12 @@ export const StaffLoginPage: React.FC<StaffLoginPageProps> = ({
               {isOnline ? (
                 <span className="flex items-center gap-1.5 text-emerald-400 font-medium">
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                  <span>Online Active</span>
+                  <span>{t("login.online")}</span>
                 </span>
               ) : (
                 <span className="flex items-center gap-1.5 text-amber-400 font-medium">
                   <AlertTriangle className="w-3 h-3" />
-                  <span>Offline Mode</span>
+                  <span>{t("login.offline")}</span>
                 </span>
               )}
             </div>
@@ -297,12 +278,22 @@ export const StaffLoginPage: React.FC<StaffLoginPageProps> = ({
               type="button"
               onClick={onBackToStores}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-btn bg-surface hover:bg-canvas border border-border-main text-xs font-semibold text-text-main shadow-xs transition-colors cursor-pointer"
-              title="Return to Store / Company Gateway"
+              title={t("login.switch_store_title")}
             >
               <Building2 className="w-3.5 h-3.5 text-accent" />
-              <span>Switch Store (Ctrl+Alt+S)</span>
+              <span>{t("login.switch_store")}</span>
             </button>
           )}
+
+          <button
+            type="button"
+            onClick={toggleLocale}
+            title={t("layout.language")}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-btn bg-surface hover:bg-canvas border border-border-main text-xs font-semibold text-text-muted shadow-xs transition-colors cursor-pointer"
+          >
+            <Languages className="w-3.5 h-3.5 text-accent" />
+            <span>{locale === "en" ? "മലയാളം" : "English"}</span>
+          </button>
 
           <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-btn bg-surface border border-border-main text-xs font-semibold text-accent shadow-xs">
             <Monitor className="w-4 h-4 text-text-muted" />
@@ -317,9 +308,9 @@ export const StaffLoginPage: React.FC<StaffLoginPageProps> = ({
         <div className="md:col-span-5 space-y-3">
           <div className="flex justify-between items-center mb-1">
             <span className="text-[11px] font-semibold text-text-muted uppercase tracking-wider">
-              Select Operator
+              {t("login.select_operator")}
             </span>
-            <span className="text-[10px] text-text-muted font-mono">Press 1-9 to select</span>
+            <span className="text-[10px] text-text-muted font-mono">{t("login.press_select")}</span>
           </div>
 
           <div className="space-y-2 max-h-[340px] overflow-y-auto pr-1">
@@ -329,9 +320,9 @@ export const StaffLoginPage: React.FC<StaffLoginPageProps> = ({
                   <UserPlus className="w-5 h-5" />
                 </div>
                 <div>
-                  <h4 className="text-xs font-bold text-text-main">No Staff Operators Registered</h4>
+                  <h4 className="text-xs font-bold text-text-main">{t("login.no_staff_title")}</h4>
                   <p className="text-[11px] text-text-muted mt-1 leading-relaxed">
-                    No operator accounts exist for this store partition yet. Enter your Administrator / Store Owner credentials on the right to sign in and open this terminal.
+                    {t("login.no_staff_body")}
                   </p>
                 </div>
               </div>
@@ -372,15 +363,15 @@ export const StaffLoginPage: React.FC<StaffLoginPageProps> = ({
                           <span>{user.full_name}</span>
                           {isLocked ? (
                             <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-rose-500/20 text-rose-500 border border-rose-500/30 flex items-center gap-1">
-                              <Lock className="w-2.5 h-2.5" /> Locked
+                              <Lock className="w-2.5 h-2.5" /> {t("login.locked_badge")}
                             </span>
                           ) : !user.pin_hash ? (
                             <span className="px-1.5 py-0.5 rounded text-[9px] font-medium bg-slate-500/10 text-slate-400 border border-slate-500/20">
-                              Password Only
+                              {t("login.password_only_badge")}
                             </span>
                           ) : (
                             <span className="px-1.5 py-0.5 rounded text-[9px] font-medium bg-emerald-500/10 text-emerald-500 border border-emerald-500/20">
-                              Active
+                              {t("login.active_badge")}
                             </span>
                           )}
                         </div>
@@ -403,14 +394,16 @@ export const StaffLoginPage: React.FC<StaffLoginPageProps> = ({
         <div className="md:col-span-7 bg-surface border border-border-main rounded-card p-6 sm:p-8 shadow-xs flex flex-col justify-center">
           <div className="mb-4">
             <h3 className="text-lg font-bold text-text-main">
-              {selectedUser ? `Welcome, ${selectedUser.full_name}` : "Sign In to Terminal"}
+              {selectedUser ? t("login.welcome", { name: selectedUser.full_name }) : t("login.sign_in")}
             </h3>
             <p className="text-xs text-text-muted mt-0.5">
               {selectedUser
                 ? !selectedUser.pin_hash
-                  ? "No Quick PIN configured for this account. Enter your password to open the terminal."
-                  : `Enter your ${isPasswordMode ? "account password" : "quick 4-digit PIN"} to open the terminal.`
-                : "Enter your username and password to open the store workstation."}
+                  ? t("login.no_pin_hint")
+                  : isPasswordMode
+                    ? t("login.password_hint")
+                    : t("login.pin_hint")
+                : t("login.manual_hint")}
             </p>
           </div>
 
@@ -420,11 +413,11 @@ export const StaffLoginPage: React.FC<StaffLoginPageProps> = ({
               <div className="flex items-center gap-2.5">
                 <Lock className="w-4 h-4 shrink-0 text-rose-500" />
                 <div>
-                  <span className="font-bold block">Account Temporarily Locked</span>
+                  <span className="font-bold block">{t("login.account_locked")}</span>
                   <span className="text-[11px] text-rose-400">
                     {selectedUser?.locked_until
-                      ? `Locked until ${new Date(selectedUser.locked_until).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} due to failed attempts`
-                      : "Locked due to failed attempts"}
+                      ? t("login.locked_until", { time: new Date(selectedUser.locked_until).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) })
+                      : t("login.locked_reason")}
                   </span>
                 </div>
               </div>
@@ -437,7 +430,7 @@ export const StaffLoginPage: React.FC<StaffLoginPageProps> = ({
                 className="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs rounded-lg shadow-sm transition-all cursor-pointer flex items-center gap-1.5"
               >
                 <Shield className="w-3.5 h-3.5" />
-                <span>Unlock Now</span>
+                <span>{t("login.unlock_now")}</span>
               </button>
             </div>
           )}
@@ -455,7 +448,7 @@ export const StaffLoginPage: React.FC<StaffLoginPageProps> = ({
             <div className="mb-4 bg-amber-500/10 border border-amber-500/30 rounded-btn p-3 text-xs text-amber-500 space-y-2.5">
               <div className="flex items-start gap-2.5">
                 <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
-                <span>{errorMsg || "This account is already signed in on another workstation."}</span>
+                <span>{errorMsg || t("login.session_conflict")}</span>
               </div>
               <div className="flex flex-wrap gap-2">
                 {sessionConflict.canForceOut && (
@@ -465,7 +458,7 @@ export const StaffLoginPage: React.FC<StaffLoginPageProps> = ({
                     onClick={() => submitCredentials(true)}
                     className="px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold text-[11px] rounded-btn transition-colors cursor-pointer disabled:opacity-60"
                   >
-                    Force sign-out there &amp; continue here
+                    {t("login.force_out")}
                   </button>
                 )}
                 <button
@@ -476,7 +469,7 @@ export const StaffLoginPage: React.FC<StaffLoginPageProps> = ({
                   }}
                   className="px-3 py-1.5 bg-surface border border-border-main text-text-main text-[11px] font-semibold rounded-btn transition-colors cursor-pointer"
                 >
-                  Cancel
+                  {t("login.cancel")}
                 </button>
               </div>
             </div>
@@ -486,14 +479,14 @@ export const StaffLoginPage: React.FC<StaffLoginPageProps> = ({
             {!selectedUser && (
               <div>
                 <label className="block text-[11px] font-semibold text-text-muted uppercase tracking-wider mb-1.5">
-                  Operator Username or Email
+                  {t("login.username_label")}
                 </label>
                 <input
                   type="text"
                   required
                   value={manualUsername}
                   onChange={(e) => setManualUsername(e.target.value)}
-                  placeholder="e.g. admin or owner@lamstone.in"
+                  placeholder={t("login.username_placeholder")}
                   className="w-full text-xs py-2.5 px-3 bg-canvas border border-border-main rounded-btn text-text-main focus:border-accent focus:outline-none"
                 />
               </div>
@@ -504,7 +497,7 @@ export const StaffLoginPage: React.FC<StaffLoginPageProps> = ({
               <div>
                 <div className="flex items-center justify-between mb-1.5">
                   <label className="block text-[11px] font-semibold text-text-muted uppercase tracking-wider">
-                    Quick PIN (Numpad Friendly)
+                    {t("login.quick_pin")}
                   </label>
                   <button
                     type="button"
@@ -512,7 +505,7 @@ export const StaffLoginPage: React.FC<StaffLoginPageProps> = ({
                     className="text-[11px] text-accent hover:underline flex items-center gap-1 cursor-pointer font-medium"
                   >
                     {showPin ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-                    <span>{showPin ? "Hide PIN" : "See PIN"}</span>
+                    <span>{showPin ? t("login.hide_pin") : t("login.show_pin")}</span>
                   </button>
                 </div>
                 <div className="relative">
@@ -534,7 +527,7 @@ export const StaffLoginPage: React.FC<StaffLoginPageProps> = ({
               <div>
                 <div className="flex items-center justify-between mb-1.5">
                   <label className="block text-[11px] font-semibold text-text-muted uppercase tracking-wider">
-                    Account Password
+                    {t("login.account_password")}
                   </label>
                   <button
                     type="button"
@@ -542,7 +535,7 @@ export const StaffLoginPage: React.FC<StaffLoginPageProps> = ({
                     className="text-[11px] text-accent hover:underline flex items-center gap-1 cursor-pointer font-medium"
                   >
                     {showPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-                    <span>{showPassword ? "Hide" : "See Password"}</span>
+                    <span>{showPassword ? t("login.hide") : t("login.see_password")}</span>
                   </button>
                 </div>
                 <div className="relative">
@@ -577,7 +570,7 @@ export const StaffLoginPage: React.FC<StaffLoginPageProps> = ({
                   onClick={() => setPin("")}
                   className="py-2.5 rounded-btn bg-surface hover:bg-canvas border border-border-main text-xs font-semibold text-text-muted transition-colors"
                 >
-                  Clear
+                  {t("login.clear")}
                 </button>
                 <button
                   type="button"
@@ -608,26 +601,10 @@ export const StaffLoginPage: React.FC<StaffLoginPageProps> = ({
                 ) : (
                   <>
                     <KeyRound className="w-4 h-4" />
-                    <span>Authorize & Open Terminal</span>
+                    <span>{t("login.authorize")}</span>
                   </>
                 )}
               </button>
-
-              {/* Biometric Button (platform-native authenticator) */}
-              {hasBiometrics && selectedUser?.biometric_registered && (
-                <button
-                  type="button"
-                  onClick={handleBiometricAuth}
-                  className="w-full py-2 bg-accent-soft hover:bg-accent-soft/80 text-accent text-xs font-semibold rounded-btn border border-accent/20 flex items-center justify-center gap-2 cursor-pointer transition-colors"
-                >
-                  <Fingerprint className="w-4 h-4 text-accent" />
-                  <span>
-                    {/Macintosh|Mac OS X/.test(navigator.userAgent)
-                      ? "Sign in with Touch ID"
-                      : "Sign in with Windows Hello"}
-                  </span>
-                </button>
-              )}
 
               <div className="flex justify-between items-center text-[11px] pt-1">
                 <button
@@ -635,7 +612,7 @@ export const StaffLoginPage: React.FC<StaffLoginPageProps> = ({
                   onClick={() => setIsPasswordMode(!isPasswordMode)}
                   className="text-accent hover:underline cursor-pointer font-medium"
                 >
-                  {isPasswordMode ? "Switch to Quick PIN (Alt+P)" : "Switch to Password (Alt+P)"}
+                  {isPasswordMode ? t("login.switch_to_pin") : t("login.switch_to_password")}
                 </button>
 
                 <button
@@ -643,7 +620,7 @@ export const StaffLoginPage: React.FC<StaffLoginPageProps> = ({
                   onClick={() => setShowAdminUnlockModal(true)}
                   className="text-text-muted hover:text-text-main transition-colors"
                 >
-                  Forgot / Reset PIN?
+                  {t("login.forgot_pin")}
                 </button>
               </div>
             </div>
@@ -653,8 +630,8 @@ export const StaffLoginPage: React.FC<StaffLoginPageProps> = ({
 
       {/* Footer Info */}
       <footer className="text-center text-[11px] text-text-muted max-w-5xl mx-auto w-full flex justify-between items-center">
-        <span>LamSuite Billing v2.0 • Multi-Store Retail POS</span>
-        <span>Keyboard shortcuts active (1-9 Operator, Enter Submit, Alt+P Mode)</span>
+        <span>{t("login.footer_left")}</span>
+        <span>{t("login.footer_right")}</span>
       </footer>
 
       {/* Admin Unlock Modal */}
@@ -663,11 +640,10 @@ export const StaffLoginPage: React.FC<StaffLoginPageProps> = ({
           <div className="bg-surface border border-border-main rounded-card max-w-md w-full p-6 shadow-modal space-y-4">
             <h4 className="text-sm font-bold text-text-main flex items-center gap-2">
               <Shield className="w-4 h-4 text-accent" />
-              Administrator Authorization & Unlock
+              {t("login.admin_unlock_title")}
             </h4>
             <p className="text-xs text-text-muted">
-              Enter store administrator credentials to clear the lockout for{" "}
-              <strong className="text-text-main">@{selectedUser?.username}</strong>.
+              {t("login.admin_unlock_body", { username: selectedUser?.username || "" })}
             </p>
 
             {adminUnlockMsg && (
@@ -678,7 +654,7 @@ export const StaffLoginPage: React.FC<StaffLoginPageProps> = ({
 
             <form onSubmit={handleAdminUnlockSubmit} className="space-y-3">
               <div>
-                <label className="block text-[11px] font-semibold text-text-muted mb-1 uppercase tracking-wider">Admin Username</label>
+                <label className="block text-[11px] font-semibold text-text-muted mb-1 uppercase tracking-wider">{t("login.admin_username")}</label>
                 <input
                   type="text"
                   required
@@ -689,7 +665,7 @@ export const StaffLoginPage: React.FC<StaffLoginPageProps> = ({
               </div>
 
               <div>
-                <label className="block text-[11px] font-semibold text-text-muted mb-1 uppercase tracking-wider">Admin Password or PIN</label>
+                <label className="block text-[11px] font-semibold text-text-muted mb-1 uppercase tracking-wider">{t("login.admin_credential")}</label>
                 <input
                   type="password"
                   required
@@ -705,13 +681,13 @@ export const StaffLoginPage: React.FC<StaffLoginPageProps> = ({
                   onClick={() => setShowAdminUnlockModal(false)}
                   className="px-3 py-1.5 rounded-lg bg-slate-700 text-slate-300 text-xs"
                 >
-                  Cancel
+                  {t("login.cancel")}
                 </button>
                 <button
                   type="submit"
                   className="px-3 py-1.5 rounded-lg bg-blue-600 text-white font-bold text-xs"
                 >
-                  Clear Lockout
+                  {t("login.clear_lockout")}
                 </button>
               </div>
             </form>
@@ -725,15 +701,15 @@ export const StaffLoginPage: React.FC<StaffLoginPageProps> = ({
           <div className="bg-slate-800 border border-slate-700 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
             <h4 className="text-sm font-bold text-white flex items-center gap-2">
               <Lock className="w-4 h-4 text-amber-400" />
-              Mandatory Password & PIN Update
+              {t("login.mandatory_title")}
             </h4>
             <p className="text-xs text-slate-300">
-              Your administrator requires you to set a personal password and quick PIN before your first session.
+              {t("login.mandatory_body")}
             </p>
 
             <form onSubmit={handleForcePasswordChangeSubmit} className="space-y-3">
               <div>
-                <label className="block text-[11px] text-slate-400 mb-1">New Password (min 6 chars)</label>
+                <label className="block text-[11px] text-slate-400 mb-1">{t("login.new_password")}</label>
                 <input
                   type="password"
                   required
@@ -744,7 +720,7 @@ export const StaffLoginPage: React.FC<StaffLoginPageProps> = ({
               </div>
 
               <div>
-                <label className="block text-[11px] text-slate-400 mb-1">New Quick PIN (4-6 digits)</label>
+                <label className="block text-[11px] text-slate-400 mb-1">{t("login.new_pin")}</label>
                 <input
                   type="password"
                   required
@@ -759,7 +735,7 @@ export const StaffLoginPage: React.FC<StaffLoginPageProps> = ({
                 type="submit"
                 className="w-full mt-2 py-2 bg-blue-600 text-white font-bold text-xs rounded-xl shadow-md"
               >
-                Save Credentials & Open Terminal
+                {t("login.save_credentials")}
               </button>
             </form>
           </div>

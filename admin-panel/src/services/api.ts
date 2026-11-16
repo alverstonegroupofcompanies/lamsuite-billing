@@ -49,7 +49,9 @@ export async function apiRequest<T = any>(
   if (token) {
     headers["Authorization"] = `Bearer ${token}`;
   }
-  if (storeId) {
+  if (storeId === "all") {
+    headers["X-Store-Scope"] = "all";
+  } else if (storeId) {
     headers["X-Store-Id"] = storeId;
   }
   if (impersonatorId) {
@@ -90,6 +92,47 @@ export async function apiRequest<T = any>(
   }
 
   return data as T;
+}
+
+export async function downloadFile(endpoint: string, fallbackName: string): Promise<void> {
+  const token = localStorage.getItem("admin_token");
+  const storeId = localStorage.getItem("admin_store_id");
+
+  const headers: Record<string, string> = { Accept: "*/*" };
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+  if (storeId === "all") {
+    headers["X-Store-Scope"] = "all";
+  } else if (storeId) {
+    headers["X-Store-Id"] = storeId;
+  }
+
+  const url = endpoint.startsWith("http") ? endpoint : `${API_BASE}${endpoint}`;
+  const response = await fetch(url, { headers });
+
+  if (!response.ok) {
+    let message = `HTTP Error ${response.status}`;
+    try {
+      const data = await response.json();
+      message = data?.message || message;
+    } catch {
+      // non-JSON error body
+    }
+    throw new ApiError(message, response.status);
+  }
+
+  const disposition = response.headers.get("content-disposition") || "";
+  const match = /filename="?([^";]+)"?/.exec(disposition);
+  const filename = match?.[1] || fallbackName;
+
+  const blob = await response.blob();
+  const objectUrl = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = objectUrl;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(objectUrl);
 }
 
 export const api = {

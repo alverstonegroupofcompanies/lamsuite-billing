@@ -7,6 +7,7 @@ use App\Models\CompanySetting;
 use App\Models\FinancialYear;
 use App\Models\GstLockPeriod;
 use App\Models\Store;
+use App\Services\Webhook\WebhookOutboxService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -96,6 +97,18 @@ class AdminSettingController
         $security = $settings['security']->value ?? [];
         $inventory = $settings['inventory']->value ?? [];
         $wallet = $settings['wallet']->value ?? [];
+
+        $webhookConfig = $settings['webhook']->value ?? [
+            'enabled' => false,
+            'url' => '',
+            'secret' => '',
+            'events' => WebhookOutboxService::DEFAULT_EVENTS,
+            'timeout' => 10,
+        ];
+        $webhookHasSecret = !empty($webhookConfig['secret']);
+        $webhookConfig['secret'] = $webhookHasSecret ? '••••••••••••' : '';
+        $webhookConfig['events'] = $webhookConfig['events'] ?? WebhookOutboxService::DEFAULT_EVENTS;
+        $webhookConfig['has_secret'] = $webhookHasSecret;
 
         $taxMode = $billing['tax_mode'] ?? $store->tax_mode ?? 'inclusive';
         $purchaseTaxMode = $billing['purchase_tax_mode'] ?? 'exclusive';
@@ -274,6 +287,7 @@ class AdminSettingController
             'smtp' => $smtpConfig,
             'sms' => $smsConfig,
             'whatsapp' => $whatsappConfig,
+            'webhook' => $webhookConfig,
             'keyboard' => $keyboard,
             'payments' => $payments,
             'invoice_columns' => $invoiceColumns,
@@ -454,7 +468,7 @@ class AdminSettingController
         // 4. Save each specific sub-config key
         $sections = [
             'sequences', 'printing', 'workspace', 'security', 'inventory',
-            'wallet', 'smtp', 'sms', 'whatsapp', 'keyboard', 'payments',
+            'wallet', 'smtp', 'sms', 'whatsapp', 'webhook', 'keyboard', 'payments',
             'invoice_columns', 'header_fields', 'active_billing_preset', 'saved_billing_presets',
             'purchase_columns', 'purchase_header_fields', 'active_purchase_preset', 'saved_purchase_presets',
             'enable_pts', 'enable_ptss', 'freight_is_taxable', 'batch_required', 'enabled_menu_items',
@@ -483,10 +497,16 @@ class AdminSettingController
                         $val['api_key'] = $existing->value['api_key'];
                     }
                 }
+                if ($key === 'webhook' && is_array($val) && isset($val['secret']) && str_contains($val['secret'], '••')) {
+                    $existing = CompanySetting::where('store_id', $storeId)->where('key', 'webhook')->first();
+                    if ($existing && isset($existing->value['secret'])) {
+                        $val['secret'] = $existing->value['secret'];
+                    }
+                }
 
                 CompanySetting::updateOrCreate(
                     ['store_id' => $storeId, 'key' => $key],
-                    ['value' => $val, 'is_secret' => in_array($key, ['smtp', 'sms', 'whatsapp'])]
+                    ['value' => $val, 'is_secret' => in_array($key, ['smtp', 'sms', 'whatsapp', 'webhook'])]
                 );
             }
         }
@@ -531,6 +551,8 @@ class AdminSettingController
             $val['api_key'] = $validated['new_value'];
         } elseif ($validated['secret_type'] === 'whatsapp_api_key') {
             $val['api_key'] = $validated['new_value'];
+        } elseif ($validated['secret_type'] === 'webhook_secret') {
+            $val['secret'] = $validated['new_value'];
         }
 
         CompanySetting::updateOrCreate(
@@ -620,31 +642,4 @@ class AdminSettingController
         ]);
     }
 
-    /**
-     * Backup & Restore points.
-     */
-    public function backupRestorePoints(Request $request): JsonResponse
-    {
-        $storeId = $request->get('active_store_id');
-
-        return response()->json([
-            'restore_points' => [
-                [
-                    'id' => 'bak_' . date('Ymd_His'),
-                    'label' => 'Pre-GSTR-1 Monthly Snapshot',
-                    'timestamp' => now()->subHours(4)->toIso8601String(),
-                    'size_bytes' => 4521034,
-                    'created_by' => 'Automated Cron Scheduler',
-                ],
-                [
-                    'id' => 'bak_20260925_000000',
-                    'label' => 'Weekly Disaster Recovery Point',
-                    'timestamp' => now()->subDays(6)->toIso8601String(),
-                    'size_bytes' => 4194304,
-                    'created_by' => 'Store Owner',
-                ],
-            ],
-            'auto_backup_schedule' => 'Every midnight at 02:00 AM IST',
-        ]);
-    }
 }

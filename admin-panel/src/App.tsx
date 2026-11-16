@@ -2,6 +2,7 @@ import React from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { ThemeProvider } from "./context/ThemeContext";
 import { AuthProvider, useAuth } from "./context/AuthContext";
+import { I18nProvider } from "./i18n/I18nContext";
 import { Layout } from "./components/Layout";
 
 // Pages
@@ -13,12 +14,22 @@ import { FeaturesPage } from "./pages/FeaturesPage";
 import { UsersPage } from "./pages/UsersPage";
 import { MastersPage } from "./pages/MastersPage";
 import { TransactionsPage } from "./pages/TransactionsPage";
+import { GiftCardsPage } from "./pages/GiftCardsPage";
+import { SettlementsPage } from "./pages/SettlementsPage";
+import { CompliancePage } from "./pages/CompliancePage";
+import { PriceListsPage } from "./pages/PriceListsPage";
+import { SalesOrdersPage } from "./pages/SalesOrdersPage";
+import { LoyaltyPage } from "./pages/LoyaltyPage";
+import { AccountingExportsPage } from "./pages/AccountingExportsPage";
+import { PortalPage } from "./pages/PortalPage";
+import { PortalAccessPage } from "./pages/PortalAccessPage";
 import { InventoryPage } from "./pages/InventoryPage";
 import { ReportsPage } from "./pages/ReportsPage";
 import { SyncCenterPage } from "./pages/SyncCenterPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { AuditLogsPage } from "./pages/AuditLogsPage";
 import { MigrationCenterPage } from "./pages/MigrationCenterPage";
+import { DayClosePage } from "./pages/DayClosePage";
 import { Building2, RefreshCw } from "lucide-react";
 
 const ProtectedRoutes: React.FC = () => {
@@ -58,6 +69,15 @@ const ProtectedRoutes: React.FC = () => {
         <Route path="/users" element={<UsersPage />} />
         <Route path="/masters" element={<MastersPage />} />
         <Route path="/transactions" element={<TransactionsPage />} />
+        <Route path="/gift-cards" element={<GiftCardsPage />} />
+        <Route path="/settlements" element={<SettlementsPage />} />
+        <Route path="/day-close" element={<DayClosePage />} />
+        <Route path="/compliance" element={<CompliancePage />} />
+        <Route path="/price-lists" element={<PriceListsPage />} />
+        <Route path="/sales-orders" element={<SalesOrdersPage />} />
+        <Route path="/loyalty" element={<LoyaltyPage />} />
+        <Route path="/accounting-exports" element={<AccountingExportsPage />} />
+        <Route path="/portal-access" element={<PortalAccessPage />} />
         <Route path="/inventory" element={<InventoryPage />} />
         <Route path="/reports" element={<ReportsPage />} />
         <Route path="/sync" element={<SyncCenterPage />} />
@@ -81,6 +101,8 @@ const AppRoutes: React.FC = () => {
           !isLoading && token && user ? <Navigate to="/" replace /> : <LoginPage />
         }
       />
+      <Route path="/portal" element={<PortalPage />} />
+      <Route path="/reset-password" element={<LoginPage />} />
       <Route path="/*" element={<ProtectedRoutes />} />
     </Routes>
   );
@@ -90,9 +112,11 @@ export const App: React.FC = () => {
   return (
     <ThemeProvider>
       <AuthProvider>
-        <BrowserRouter>
-          <AppRoutes />
-        </BrowserRouter>
+        <I18nProvider>
+          <BrowserRouter>
+            <AppRoutes />
+          </BrowserRouter>
+        </I18nProvider>
       </AuthProvider>
     </ThemeProvider>
   );

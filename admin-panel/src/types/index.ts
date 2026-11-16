@@ -96,6 +96,8 @@ export interface ProductBatch {
 export interface Product {
   id: number;
   store_id: number;
+  product_family_id?: string | null;
+  source_product_id?: number | null;
   barcode?: string;
   name: string;
   print_name?: string;

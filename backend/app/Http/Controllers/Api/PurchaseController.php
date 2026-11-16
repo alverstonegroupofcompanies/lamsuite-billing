@@ -9,6 +9,7 @@ use App\Models\Product;
 use App\Models\ProductBatch;
 use App\Models\Store;
 use App\Services\Tax\TaxEngine;
+use App\Services\Webhook\WebhookOutboxService;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
@@ -205,6 +206,21 @@ class PurchaseController
 
             return $purchase;
         });
+
+        app(WebhookOutboxService::class)->enqueue(
+            'purchase.created',
+            [
+                'id' => $purchase->id,
+                'invoice_number' => $purchase->invoice_number,
+                'supplier_id' => $purchase->supplier_id,
+                'supplier_name' => $purchase->supplier_name,
+                'grand_total' => (float) $purchase->grand_total,
+                'invoice_date' => optional($purchase->invoice_date)->toDateString(),
+            ],
+            (int) $storeId,
+            'purchase',
+            (string) $purchase->id
+        );
 
         return response()->json([
             'success' => true,

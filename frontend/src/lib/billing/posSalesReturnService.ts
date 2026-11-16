@@ -22,9 +22,23 @@ export interface QuotationLineInput {
   product_id: string;
   product_name: string;
   batch_id: string;
+  batch_no?: string;
+  hsn_code?: string;
   qty: number;
+  loose_qty?: number;
+  units_per_pack?: number;
   unit_price: number;
+  discount_percent?: number;
+  discount_amount?: number;
   gst_percent: number;
+}
+
+export interface QuotationOptions {
+  customer_id?: string;
+  customer_phone?: string;
+  customer_gstin?: string;
+  place_of_supply?: string;
+  store_id?: string;
 }
 
 export class PosSalesReturnService {
@@ -172,8 +186,13 @@ export class PosSalesReturnService {
     quotationNumber?: string,
     customerName: string = "Walk-in Customer",
     lines: QuotationLineInput[] = [],
-    defaultTaxMode: CompanyTaxMode = "exclusive"
+    defaultTaxMode: CompanyTaxMode = "exclusive",
+    options: QuotationOptions = {}
   ): Promise<{ success: boolean; quotationId: string; quotationNumber: string }> {
+    if (lines.length === 0) {
+      throw new Error("Cannot save a quotation without line items.");
+    }
+
     const assignedQuotationNumber =
       quotationNumber || (await companySettingsService.generateNextDocumentNumber("quotation"));
     if (quotationNumber) {
@@ -187,7 +206,11 @@ export class PosSalesReturnService {
       product_id: line.product_id,
       product_name: line.product_name,
       qty: line.qty,
+      loose_qty: line.loose_qty || 0,
+      units_per_pack: line.units_per_pack || 1,
       unit_price: line.unit_price,
+      discount_percent: line.discount_percent || 0,
+      discount_amount: line.discount_amount || 0,
       gst_percent: line.gst_percent,
     }));
 
@@ -197,6 +220,8 @@ export class PosSalesReturnService {
 
     const taxResult = calculateDocumentTaxes({
       store_state: stState,
+      customer_gstin: options.customer_gstin,
+      place_of_supply: options.place_of_supply,
       default_tax_mode: defaultTaxMode,
       gst_type: storeSettings.gst_type,
       is_composition: isComp,
@@ -206,9 +231,14 @@ export class PosSalesReturnService {
     const quotationRow: InvoiceRecord = {
       id: quotationId,
       module_key: "quotation",
+      store_id: options.store_id,
       invoice_number: assignedQuotationNumber,
       invoice_date: storeToday(companySettingsService.getSettings()),
+      customer_id: options.customer_id,
       customer_name: customerName,
+      customer_phone: options.customer_phone,
+      customer_gstin: options.customer_gstin,
+      place_of_supply: options.place_of_supply,
       subtotal: taxResult.taxable_subtotal,
       taxable_subtotal: taxResult.taxable_subtotal,
       discount_total: Math.round((taxResult.line_discount_total + taxResult.bill_discount_total) * 100) / 100,
@@ -222,11 +252,13 @@ export class PosSalesReturnService {
       paid_amount: 0,
       payment_mode: "Quotation",
       status: "issued",
+      sync_state: "pending",
       created_at: now,
     };
 
     await sqliteStorage.insertRecord("invoices", quotationId, quotationRow);
 
+    const syncItems: Record<string, unknown>[] = [];
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
       const lineRes = taxResult.lines[i];
@@ -236,15 +268,33 @@ export class PosSalesReturnService {
         invoice_id: quotationId,
         product_id: line.product_id,
         product_name: line.product_name,
+        batch_no: line.batch_no,
+        hsn_code: line.hsn_code,
         qty: line.qty,
+        loose_qty: line.loose_qty || 0,
+        units_per_pack: line.units_per_pack || 1,
         unit_price: line.unit_price,
+        discount_percent: line.discount_percent || 0,
+        discount_amount: line.discount_amount || 0,
+        taxable_amount: lineRes.taxable_amount,
         gst_percent: line.gst_percent,
         cgst_amount: lineRes.cgst_amount,
         sgst_amount: lineRes.sgst_amount,
         igst_amount: lineRes.igst_amount,
+        cess_amount: lineRes.cess_amount,
         total_amount: lineRes.total_amount,
       };
       await sqliteStorage.insertRecord("invoice_items", itemId, mirrorItem);
+      syncItems.push({ ...mirrorItem });
+    }
+
+    try {
+      await syncQueueService.enqueue("invoice", quotationId, "create", {
+        ...quotationRow,
+        items: syncItems,
+      } as unknown as Record<string, unknown>);
+    } catch (err) {
+      console.warn("Quotation sync enqueue failed:", err);
     }
 
     return { success: true, quotationId, quotationNumber: assignedQuotationNumber };
@@ -255,7 +305,16 @@ export class PosSalesReturnService {
     if (!quotation) throw new Error("Quotation not found");
 
     quotation.status = "converted";
+    quotation.sync_state = "pending";
     await sqliteStorage.insertRecord("invoices", quotation.id, quotation);
+
+    try {
+      await syncQueueService.enqueue("invoice", quotation.id, "update", {
+        ...quotation,
+      } as unknown as Record<string, unknown>);
+    } catch (err) {
+      console.warn("Quotation conversion sync enqueue failed:", err);
+    }
 
     return { success: true, quotation };
   }

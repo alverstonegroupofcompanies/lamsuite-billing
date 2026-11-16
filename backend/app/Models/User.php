@@ -137,6 +137,48 @@ class User extends Authenticatable
     }
 
     /**
+     * Stores this user may read. Null means unrestricted (all current and future stores).
+     */
+    public function accessibleStoreIds(): ?array
+    {
+        if ($this->role === 'super_admin') {
+            return null;
+        }
+
+        if ($this->store_id === null && empty($this->allowed_store_ids)) {
+            return null;
+        }
+
+        $ids = [];
+        if ($this->store_id !== null) {
+            $ids[] = (int) $this->store_id;
+        }
+        foreach ((array) $this->allowed_store_ids as $id) {
+            $ids[] = (int) $id;
+        }
+
+        $ids = array_values(array_unique(array_filter($ids)));
+        sort($ids);
+
+        return $ids;
+    }
+
+    /**
+     * Consolidated "All Stores" scope is only safe for users who can already see every store.
+     */
+    public function canViewAllStores(): bool
+    {
+        $ids = $this->accessibleStoreIds();
+        if ($ids === null) {
+            return true;
+        }
+
+        $accessible = Store::whereIn('id', $ids)->count();
+
+        return $accessible > 0 && $accessible >= Store::count();
+    }
+
+    /**
      * Check permission: module (e.g., 'stores', 'invoices', 'reports') and action ('view', 'create', 'edit', 'delete', 'export')
      */
     public function hasPermission(string $module, string $action = 'view'): bool
@@ -152,7 +194,7 @@ class User extends Authenticatable
 
         if ($this->role === 'accountant') {
             // Accountant has reports & financial views only
-            if ($module === 'reports' || $module === 'gst' || $module === 'dashboard') {
+            if ($module === 'reports' || $module === 'gst' || $module === 'dashboard' || $module === 'compliance') {
                 return $action === 'view' || $action === 'export';
             }
             return false;

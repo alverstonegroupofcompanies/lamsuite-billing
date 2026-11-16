@@ -259,6 +259,67 @@ describe("Billing Tender & Held Bills (POS-005, POS-006, Split Payments)", () =>
       expect(res.valid).toBe(true);
       expect(res.warning).toContain("Credit limit exceeded");
     });
+
+    it("uses outstanding_balance when the locally synced customer has no current_balance", async () => {
+      const grandTotal = 750.00;
+      const payments: PaymentTenderLine[] = [
+        { mode: "Credit", amount: 750.00 },
+      ];
+
+      // Server-synced party records persist the ledger balance as outstanding_balance
+      const customer = {
+        id: "cust_456",
+        name: "Dr. Ananya Sharma",
+        credit_limit: 5000.00,
+        outstanding_balance: 6200.00,
+      };
+
+      const res = await billingTenderService.validatePaymentLines(grandTotal, payments, customer, mockSettings);
+      expect(res.valid).toBe(false);
+      expect(res.error).toContain("Credit limit exceeded");
+    });
+
+    it("aggregates split credit lines before checking the credit limit", async () => {
+      const grandTotal = 800.00;
+      const payments: PaymentTenderLine[] = [
+        { mode: "Credit", amount: 400.00 },
+        { mode: "Credit", amount: 400.00 },
+      ];
+
+      const customer = {
+        id: "cust_123",
+        name: "Rahul Sharma",
+        credit_limit: 1000.00,
+        outstanding_balance: 500.00, // 500 + 800 = 1300 > 1000
+      };
+
+      const res = await billingTenderService.validatePaymentLines(grandTotal, payments, customer, mockSettings);
+      expect(res.valid).toBe(false);
+      expect(res.error).toContain("Credit limit exceeded");
+      expect(res.focusIndex).toBe(0);
+    });
+
+    it("does not warn on limit breach when store policy is 'allow_with_limit'", async () => {      const grandTotal = 750.00;
+      const payments: PaymentTenderLine[] = [
+        { mode: "Credit", amount: 750.00 },
+      ];
+
+      const customer = {
+        id: "cust_123",
+        name: "Rahul Sharma",
+        credit_limit: 1000.00,
+        outstanding_balance: 500.00,
+      };
+
+      const allowSettings: PaymentSettingsConfig = {
+        ...mockSettings,
+        creditPolicy: "allow_with_limit",
+      };
+
+      const res = await billingTenderService.validatePaymentLines(grandTotal, payments, customer, allowSettings);
+      expect(res.valid).toBe(true);
+      expect(res.warning).toBeUndefined();
+    });
   });
 
   describe("Hold & Recall Bills", () => {

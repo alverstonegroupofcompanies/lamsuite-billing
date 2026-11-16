@@ -18,6 +18,7 @@ class Party extends Model
         'email',
         'gstin',
         'pan',
+        'price_list_id',
         'address',
         'state_code',
         'credit_limit',
@@ -40,6 +41,11 @@ class Party extends Model
     public function store(): BelongsTo
     {
         return $this->belongsTo(Store::class);
+    }
+
+    public function priceList(): BelongsTo
+    {
+        return $this->belongsTo(PriceList::class);
     }
 
     public function invoices(): HasMany

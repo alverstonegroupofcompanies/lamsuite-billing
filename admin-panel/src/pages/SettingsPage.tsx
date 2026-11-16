@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { api } from "../services/api";
+import { api, downloadFile } from "../services/api";
 import { formatDate } from "../utils/formatters";
 import { useAuth } from "../context/AuthContext";
 import {
@@ -21,17 +21,36 @@ import {
   CheckCircle2,
   AlertCircle,
   ExternalLink,
+  Webhook,
+  RefreshCw,
 } from "lucide-react";
 
 export const SettingsPage: React.FC = () => {
   const { activeStore, hasPermission } = useAuth();
-  const [activeTab, setActiveTab] = useState<"general" | "whatsapp" | "secrets" | "financial_years" | "gst_locks" | "backups">("general");
+  const [activeTab, setActiveTab] = useState<"general" | "whatsapp" | "secrets" | "webhooks" | "financial_years" | "gst_locks" | "backups">("general");
 
   const [settingsData, setSettingsData] = useState<any>(null);
   const [financialYears, setFinancialYears] = useState<any[]>([]);
   const [gstPeriods, setGstPeriods] = useState<any[]>([]);
   const [backups, setBackups] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
+
+  // Webhook outbox state
+  const [webhookDeliveries, setWebhookDeliveries] = useState<any[]>([]);
+  const [webhookSummary, setWebhookSummary] = useState<{ pending: number; delivered: number; failed: number } | null>(null);
+  const [webhookEndpointLive, setWebhookEndpointLive] = useState(false);
+  const [webhookStatusFilter, setWebhookStatusFilter] = useState("");
+  const [isSavingWebhook, setIsSavingWebhook] = useState(false);
+  const [isTestingWebhook, setIsTestingWebhook] = useState(false);
+  const [webhookTestFeedback, setWebhookTestFeedback] = useState<{ success: boolean; message: string } | null>(null);
+  const [retryingDeliveryId, setRetryingDeliveryId] = useState<number | null>(null);
+
+  const WEBHOOK_EVENTS = [
+    { id: "invoice.created", label: "Invoice Created" },
+    { id: "invoice.cancelled", label: "Invoice Cancelled" },
+    { id: "payment.received", label: "Customer Payment Received" },
+    { id: "purchase.created", label: "Purchase Created" },
+  ];
 
   // WhatsApp OpenWA Integration state
   const [availableSessions, setAvailableSessions] = useState<{ id: string; name: string; status: string }[]>([]);
@@ -44,12 +63,85 @@ export const SettingsPage: React.FC = () => {
   const [rotateSecretType, setRotateSecretType] = useState<string | null>(null);
   const [newSecretValue, setNewSecretValue] = useState("");
 
+  // Database backups
+  const [backupBusy, setBackupBusy] = useState<string | null>(null);
+  const [backupNotice, setBackupNotice] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
+  const [restoreTarget, setRestoreTarget] = useState<any>(null);
+  const [restoreConfirm, setRestoreConfirm] = useState("");
+
+  const handleCreateBackup = async () => {
+    setBackupBusy("create");
+    setBackupNotice(null);
+    try {
+      await api.post("/admin/settings/backups", {});
+      await fetchSettings();
+      setBackupNotice({ kind: "ok", text: "Snapshot created and checksummed." });
+    } catch (err: any) {
+      setBackupNotice({ kind: "error", text: err?.message || "Failed to create snapshot." });
+    } finally {
+      setBackupBusy(null);
+    }
+  };
+
+  const handleDownloadBackup = async (bp: any) => {
+    setBackupBusy(`download-${bp.id}`);
+    try {
+      await downloadFile(`/admin/settings/backups/${bp.id}/download`, bp.filename);
+    } catch (err: any) {
+      setBackupNotice({ kind: "error", text: err?.message || "Download failed." });
+    } finally {
+      setBackupBusy(null);
+    }
+  };
+
+  const handleRestoreBackup = async () => {
+    if (!restoreTarget) return;
+    setBackupBusy("restore");
+    setBackupNotice(null);
+    try {
+      const res = await api.post(`/admin/settings/backups/${restoreTarget.id}/restore`, {
+        confirmation: restoreConfirm,
+      });
+      setRestoreTarget(null);
+      setRestoreConfirm("");
+      await fetchSettings();
+      setBackupNotice({ kind: "ok", text: res?.message || "Database restored." });
+    } catch (err: any) {
+      setBackupNotice({ kind: "error", text: err?.message || "Restore failed." });
+    } finally {
+      setBackupBusy(null);
+    }
+  };
+
+  const handleDeleteBackup = async (bp: any) => {
+    if (!window.confirm(`Delete backup ${bp.filename}? This cannot be undone.`)) return;
+    setBackupBusy(`delete-${bp.id}`);
+    setBackupNotice(null);
+    try {
+      await api.delete(`/admin/settings/backups/${bp.id}`);
+      await fetchSettings();
+    } catch (err: any) {
+      setBackupNotice({ kind: "error", text: err?.message || "Delete failed." });
+    } finally {
+      setBackupBusy(null);
+    }
+  };
+
   const fetchSettings = async () => {
     setIsLoading(true);
     try {
       if (activeTab === "general" || activeTab === "secrets" || activeTab === "whatsapp") {
         const res = await api.get("/admin/settings");
         setSettingsData(res);
+      } else if (activeTab === "webhooks") {
+        const [settingsRes, deliveriesRes] = await Promise.all([
+          api.get("/admin/settings"),
+          api.get(`/admin/webhooks${webhookStatusFilter ? `?status=${webhookStatusFilter}` : ""}`),
+        ]);
+        setSettingsData(settingsRes);
+        setWebhookDeliveries(deliveriesRes?.deliveries || []);
+        setWebhookSummary(deliveriesRes?.summary || null);
+        setWebhookEndpointLive(Boolean(deliveriesRes?.enabled));
       } else if (activeTab === "financial_years") {
         const res = await api.get("/admin/settings/financial-years");
         setFinancialYears(res || []);
@@ -57,8 +149,16 @@ export const SettingsPage: React.FC = () => {
         const res = await api.get("/admin/settings/gst-periods");
         setGstPeriods(res || []);
       } else if (activeTab === "backups") {
-        const res = await api.get("/admin/settings/backup-restore");
-        setBackups(res);
+        try {
+          const res = await api.get("/admin/settings/backups");
+          setBackups(res);
+        } catch (err: any) {
+          if (err?.status === 403) {
+            setBackups({ restricted: true, backups: [] });
+          } else {
+            throw err;
+          }
+        }
       }
     } catch (err) {
       console.error("Failed to load settings:", err);
@@ -69,7 +169,7 @@ export const SettingsPage: React.FC = () => {
 
   useEffect(() => {
     fetchSettings();
-  }, [activeTab, activeStore]);
+  }, [activeTab, activeStore, webhookStatusFilter]);
 
   const handleFetchSessions = async () => {
     setIsFetchingSessions(true);
@@ -143,8 +243,68 @@ export const SettingsPage: React.FC = () => {
     }
   };
 
-  const handleSaveGeneral = async (e: React.FormEvent) => {
+  const handleSaveWebhook = async (e: React.FormEvent) => {
     e.preventDefault();
+    setIsSavingWebhook(true);
+    try {
+      await api.post("/admin/settings", { webhook: settingsData?.webhook });
+      alert("Webhook configuration saved.");
+      await fetchSettings();
+    } catch (err: any) {
+      alert(err?.message || "Failed to save webhook configuration.");
+    } finally {
+      setIsSavingWebhook(false);
+    }
+  };
+
+  const handleTestWebhook = async () => {
+    setIsTestingWebhook(true);
+    setWebhookTestFeedback(null);
+    try {
+      const res = await api.post("/admin/webhooks/test", {});
+      setWebhookTestFeedback({
+        success: Boolean(res.success),
+        message: res.success
+          ? `Test event delivered (HTTP ${res.response_status ?? 200}).`
+          : res.error || res.message || "Delivery failed. Check the endpoint URL and secret.",
+      });
+      await fetchSettings();
+    } catch (err: any) {
+      setWebhookTestFeedback({
+        success: false,
+        message: err?.message || "Network error while sending test event.",
+      });
+    } finally {
+      setIsTestingWebhook(false);
+    }
+  };
+
+  const handleRetryDelivery = async (id: number) => {
+    setRetryingDeliveryId(id);
+    try {
+      await api.post(`/admin/webhooks/${id}/retry`, {});
+      await fetchSettings();
+    } catch (err: any) {
+      alert(err?.message || "Failed to retry webhook delivery.");
+    } finally {
+      setRetryingDeliveryId(null);
+    }
+  };
+
+  const toggleWebhookEvent = (eventId: string) => {
+    setSettingsData((prev: any) => {
+      const current: string[] = prev?.webhook?.events || [];
+      const next = current.includes(eventId)
+        ? current.filter((e) => e !== eventId)
+        : [...current, eventId];
+      return {
+        ...prev,
+        webhook: { ...(prev?.webhook || {}), events: next },
+      };
+    });
+  };
+
+  const handleSaveGeneral = async (e: React.FormEvent) => {    e.preventDefault();
     try {
       await api.post("/admin/settings", {
         billing: settingsData.billing,
@@ -222,6 +382,7 @@ export const SettingsPage: React.FC = () => {
           { id: "general", label: "Billing & Document Sequences", icon: Settings },
           { id: "whatsapp", label: "WhatsApp Gateway (OpenWA)", icon: MessageSquare },
           { id: "secrets", label: "Masked Secrets & SMTP", icon: Shield },
+          { id: "webhooks", label: "Webhooks & Event Outbox", icon: Webhook },
           { id: "financial_years", label: "Financial Years Closing", icon: Calendar },
           { id: "gst_locks", label: "GST Period Lock Engine", icon: Lock },
           { id: "backups", label: "Disaster Recovery Snapshots", icon: Download },
@@ -885,6 +1046,272 @@ export const SettingsPage: React.FC = () => {
                 <span>Rotate / Set API Key</span>
               </button>
             </div>
+
+            {/* Webhook Signing Secret */}
+            <div className="p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/40 flex items-center justify-between">
+              <div>
+                <div className="font-bold text-slate-900 dark:text-white text-xs flex items-center gap-2">
+                  <Webhook className="w-4 h-4 text-amber-600" />
+                  <span>Webhook Signing Secret</span>
+                </div>
+                <div className="text-[11px] text-slate-500 mt-1">
+                  Endpoint: <code className="font-mono text-slate-700 dark:text-slate-300">{settingsData.webhook?.url || "Not configured"}</code> |
+                  Secret: <code className="font-mono text-slate-400">{settingsData.webhook?.has_secret ? settingsData.webhook?.secret : "Not configured"}</code>
+                </div>
+              </div>
+              <button
+                onClick={() => setRotateSecretType("webhook_secret")}
+                className="px-3 py-1.5 bg-slate-900 text-white dark:bg-white dark:text-slate-900 rounded-lg text-xs font-bold hover:opacity-90 flex items-center gap-1 shadow-2xs"
+              >
+                <KeyRound className="w-3.5 h-3.5" />
+                <span>Rotate Secret</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Webhooks & Event Outbox */}
+      {activeTab === "webhooks" && settingsData && (
+        <div className="space-y-6">
+          <form onSubmit={handleSaveWebhook} className="bg-white dark:bg-slate-900 p-6 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs space-y-5">
+            <div className="flex items-start justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
+              <div>
+                <h3 className="font-bold text-slate-900 dark:text-white text-sm flex items-center gap-2">
+                  <Webhook className="w-4 h-4 text-brand-600" />
+                  <span>Signed Webhook Endpoint</span>
+                </h3>
+                <p className="text-[11px] text-slate-400 mt-1">
+                  Events are persisted to a durable outbox and retried with backoff. Every delivery carries an
+                  HMAC-SHA256 signature over <code className="font-mono">timestamp.body</code>.
+                </p>
+              </div>
+              <span
+                className={`px-2 py-1 rounded-full text-[10px] font-bold ${
+                  webhookEndpointLive
+                    ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300"
+                    : "bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400"
+                }`}
+              >
+                {webhookEndpointLive ? "Endpoint Active" : "Not Configured"}
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 text-xs">
+              <div>
+                <label className="block font-medium text-slate-700 dark:text-slate-300 mb-1">Endpoint URL</label>
+                <input
+                  type="url"
+                  placeholder="https://your-system.example/webhooks/lamsuite"
+                  value={settingsData.webhook?.url || ""}
+                  onChange={(e) =>
+                    setSettingsData((prev: any) => ({
+                      ...prev,
+                      webhook: { ...(prev?.webhook || {}), url: e.target.value },
+                    }))
+                  }
+                  className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 font-mono"
+                />
+              </div>
+              <div>
+                <label className="block font-medium text-slate-700 dark:text-slate-300 mb-1">Signing Secret</label>
+                <input
+                  type="text"
+                  value={settingsData.webhook?.secret || ""}
+                  onChange={(e) =>
+                    setSettingsData((prev: any) => ({
+                      ...prev,
+                      webhook: { ...(prev?.webhook || {}), secret: e.target.value },
+                    }))
+                  }
+                  placeholder="Enter a new secret to replace the stored one"
+                  className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 font-mono"
+                />
+                <p className="text-[10px] text-slate-400 mt-1">
+                  Leave the masked value untouched to keep the current secret.
+                </p>
+              </div>
+              <div>
+                <label className="block font-medium text-slate-700 dark:text-slate-300 mb-1">Request Timeout (seconds)</label>
+                <input
+                  type="number"
+                  min={2}
+                  max={30}
+                  value={settingsData.webhook?.timeout ?? 10}
+                  onChange={(e) =>
+                    setSettingsData((prev: any) => ({
+                      ...prev,
+                      webhook: { ...(prev?.webhook || {}), timeout: Number(e.target.value) },
+                    }))
+                  }
+                  className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2"
+                />
+              </div>
+              <div className="flex items-end">
+                <label className="flex items-center gap-2 font-medium text-slate-700 dark:text-slate-300">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(settingsData.webhook?.enabled)}
+                    onChange={(e) =>
+                      setSettingsData((prev: any) => ({
+                        ...prev,
+                        webhook: { ...(prev?.webhook || {}), enabled: e.target.checked },
+                      }))
+                    }
+                    className="rounded border-slate-300"
+                  />
+                  <span>Enable webhook delivery</span>
+                </label>
+              </div>
+            </div>
+
+            <div>
+              <label className="block font-medium text-slate-700 dark:text-slate-300 mb-2 text-xs">Subscribed Events</label>
+              <div className="flex flex-wrap gap-2">
+                {WEBHOOK_EVENTS.map((evt) => {
+                  const active = (settingsData.webhook?.events || []).includes(evt.id);
+                  return (
+                    <button
+                      type="button"
+                      key={evt.id}
+                      onClick={() => toggleWebhookEvent(evt.id)}
+                      className={`px-3 py-1.5 rounded-lg text-[11px] font-semibold border transition-colors ${
+                        active
+                          ? "bg-brand-50 border-brand-300 text-brand-700 dark:bg-brand-900/30 dark:border-brand-700 dark:text-brand-300"
+                          : "bg-white border-slate-200 text-slate-500 dark:bg-slate-950 dark:border-slate-700 dark:text-slate-400"
+                      }`}
+                    >
+                      {evt.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3 pt-2 border-t border-slate-100 dark:border-slate-800">
+              <button
+                type="submit"
+                disabled={isSavingWebhook}
+                className="px-4 py-2 bg-brand-600 text-white rounded-lg text-xs font-bold hover:bg-brand-700 disabled:opacity-50 flex items-center gap-1.5"
+              >
+                <Save className="w-3.5 h-3.5" />
+                <span>{isSavingWebhook ? "Saving..." : "Save Webhook Config"}</span>
+              </button>
+              <button
+                type="button"
+                onClick={handleTestWebhook}
+                disabled={isTestingWebhook || !webhookEndpointLive}
+                className="px-4 py-2 bg-slate-900 text-white dark:bg-white dark:text-slate-900 rounded-lg text-xs font-bold hover:opacity-90 disabled:opacity-50 flex items-center gap-1.5"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${isTestingWebhook ? "animate-spin" : ""}`} />
+                <span>{isTestingWebhook ? "Sending..." : "Send Test Event"}</span>
+              </button>
+              {webhookTestFeedback && (
+                <span
+                  className={`text-[11px] font-semibold flex items-center gap-1 ${
+                    webhookTestFeedback.success ? "text-emerald-600" : "text-red-600"
+                  }`}
+                >
+                  {webhookTestFeedback.success ? <CheckCircle2 className="w-3.5 h-3.5" /> : <AlertCircle className="w-3.5 h-3.5" />}
+                  {webhookTestFeedback.message}
+                </span>
+              )}
+            </div>
+          </form>
+
+          {/* Delivery Log */}
+          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs overflow-hidden">
+            <div className="p-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between gap-3 flex-wrap">
+              <div>
+                <h3 className="font-bold text-slate-900 dark:text-white text-sm">Delivery Log</h3>
+                <div className="flex items-center gap-2 mt-1 text-[10px] font-semibold">
+                  <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300">
+                    Pending {webhookSummary?.pending ?? 0}
+                  </span>
+                  <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">
+                    Delivered {webhookSummary?.delivered ?? 0}
+                  </span>
+                  <span className="px-2 py-0.5 rounded-full bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300">
+                    Failed {webhookSummary?.failed ?? 0}
+                  </span>
+                </div>
+              </div>
+              <select
+                value={webhookStatusFilter}
+                onChange={(e) => setWebhookStatusFilter(e.target.value)}
+                className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-1.5 text-xs"
+              >
+                <option value="">All statuses</option>
+                <option value="pending">Pending</option>
+                <option value="delivered">Delivered</option>
+                <option value="failed">Failed</option>
+              </select>
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead className="bg-slate-50 dark:bg-slate-800/60 text-slate-500 dark:text-slate-400">
+                  <tr>
+                    <th className="text-left px-4 py-2 font-semibold">Event</th>
+                    <th className="text-left px-4 py-2 font-semibold">Object</th>
+                    <th className="text-left px-4 py-2 font-semibold">Status</th>
+                    <th className="text-left px-4 py-2 font-semibold">Attempts</th>
+                    <th className="text-left px-4 py-2 font-semibold">Last Error</th>
+                    <th className="text-left px-4 py-2 font-semibold">Created</th>
+                    <th className="text-right px-4 py-2 font-semibold">Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                  {webhookDeliveries.length === 0 && (
+                    <tr>
+                      <td colSpan={7} className="px-4 py-8 text-center text-slate-400">
+                        No webhook deliveries recorded for this store yet.
+                      </td>
+                    </tr>
+                  )}
+                  {webhookDeliveries.map((row) => (
+                    <tr key={row.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
+                      <td className="px-4 py-2 font-mono font-semibold text-slate-800 dark:text-slate-200">{row.event}</td>
+                      <td className="px-4 py-2 text-slate-500">
+                        {row.object_type ? `${row.object_type} #${row.object_id ?? "-"}` : "—"}
+                      </td>
+                      <td className="px-4 py-2">
+                        <span
+                          className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                            row.status === "delivered"
+                              ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300"
+                              : row.status === "failed"
+                              ? "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300"
+                              : "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300"
+                          }`}
+                        >
+                          {row.status}
+                        </span>
+                      </td>
+                      <td className="px-4 py-2 text-slate-500">
+                        {row.attempts}
+                        {row.response_status ? ` · HTTP ${row.response_status}` : ""}
+                      </td>
+                      <td className="px-4 py-2 text-slate-500 max-w-[220px] truncate" title={row.last_error || ""}>
+                        {row.last_error || "—"}
+                      </td>
+                      <td className="px-4 py-2 text-slate-500">{formatDate(row.created_at)}</td>
+                      <td className="px-4 py-2 text-right">
+                        {hasPermission("settings", "edit") && row.status !== "delivered" && (
+                          <button
+                            onClick={() => handleRetryDelivery(row.id)}
+                            disabled={retryingDeliveryId === row.id}
+                            className="px-2.5 py-1 rounded-md bg-slate-900 text-white dark:bg-white dark:text-slate-900 text-[10px] font-bold hover:opacity-90 disabled:opacity-50"
+                          >
+                            {retryingDeliveryId === row.id ? "Retrying..." : "Retry"}
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
       )}
@@ -999,34 +1426,154 @@ export const SettingsPage: React.FC = () => {
       {/* Disaster Recovery Snapshots */}
       {activeTab === "backups" && backups && (
         <div className="bg-white dark:bg-slate-900 p-6 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs space-y-4">
-          <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
+          <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-100 dark:border-slate-800">
             <div>
-              <h3 className="font-bold text-slate-900 dark:text-white text-sm">Disaster Recovery Points</h3>
-              <p className="text-[11px] text-slate-400">Automated schedule: {backups.auto_backup_schedule}</p>
+              <h3 className="font-bold text-slate-900 dark:text-white text-sm">Database Snapshots</h3>
+              <p className="text-[11px] text-slate-400">
+                {backups.restricted
+                  ? "Central snapshots are restricted to the super administrator."
+                  : `${backups.schedule?.text || "Not scheduled"} • ${backups.retention_days}-day retention • ${backups.driver?.toUpperCase()}`}
+              </p>
             </div>
+            {!backups.restricted && (
+              <button
+                onClick={handleCreateBackup}
+                disabled={backupBusy === "create" || !backups.can_create}
+                className="px-3 py-1.5 bg-brand-600 hover:bg-brand-500 disabled:opacity-50 text-white rounded-lg font-bold text-xs flex items-center gap-1.5 shadow-2xs"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${backupBusy === "create" ? "animate-spin" : ""}`} />
+                <span>Create Snapshot</span>
+              </button>
+            )}
           </div>
 
-          <div className="space-y-3">
-            {backups.restore_points?.map((bp: any) => (
-              <div
-                key={bp.id}
-                className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/40 flex items-center justify-between text-xs"
-              >
-                <div>
-                  <div className="font-bold text-slate-900 dark:text-white">{bp.label}</div>
-                  <div className="text-[11px] text-slate-500">
-                    Created: {bp.timestamp} • Size: {(bp.size_bytes / 1024 / 1024).toFixed(2)} MB
+          {backupNotice && (
+            <div
+              className={`flex items-center gap-2 text-xs px-3 py-2 rounded-lg ${
+                backupNotice.kind === "ok"
+                  ? "bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-400"
+                  : "bg-red-50 dark:bg-red-950/30 text-red-700 dark:text-red-400"
+              }`}
+            >
+              {backupNotice.kind === "ok" ? <CheckCircle2 className="w-3.5 h-3.5" /> : <AlertCircle className="w-3.5 h-3.5" />}
+              <span>{backupNotice.text}</span>
+            </div>
+          )}
+
+          {backups.restricted ? (
+            <p className="text-xs text-slate-500">
+              Ask a super administrator to create, download or restore central database snapshots.
+            </p>
+          ) : !backups.can_create ? (
+            <p className="text-xs text-slate-500">
+              Automated snapshots are only configured for SQLite. Use the native database dump tooling for this driver.
+            </p>
+          ) : backups.backups?.length === 0 ? (
+            <p className="text-xs text-slate-500">No snapshots yet. Create one before your next risky change.</p>
+          ) : (
+            <div className="space-y-3">
+              {backups.backups?.map((bp: any) => (
+                <div
+                  key={bp.id}
+                  className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/40 flex flex-wrap items-center justify-between gap-3 text-xs"
+                >
+                  <div className="min-w-0">
+                    <div className="font-bold text-slate-900 dark:text-white font-mono truncate">{bp.filename}</div>
+                    <div className="text-[11px] text-slate-500">
+                      {formatDate(bp.created_at || bp.finished_at)}
+                      {" • "}
+                      {(bp.size_bytes / 1024 / 1024).toFixed(2)} MB
+                      {" • "}
+                      <span className="uppercase tracking-wide">{bp.kind.replace("_", " ")}</span>
+                      {bp.creator_name ? ` • ${bp.creator_name}` : ""}
+                    </div>
+                    <div className="text-[10px] text-slate-400 font-mono truncate">
+                      sha256 {bp.sha256 ? `${bp.sha256.slice(0, 16)}…` : "n/a"}
+                      {!bp.exists && <span className="text-red-500"> • file missing</span>}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => handleDownloadBackup(bp)}
+                      disabled={!bp.exists || backupBusy === `download-${bp.id}`}
+                      className="px-2.5 py-1.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg font-bold flex items-center gap-1.5 disabled:opacity-40"
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                      <span>Download</span>
+                    </button>
+                    <button
+                      onClick={() => {
+                        setRestoreTarget(bp);
+                        setRestoreConfirm("");
+                        setBackupNotice(null);
+                      }}
+                      disabled={!backups.can_restore || !bp.exists}
+                      className="px-2.5 py-1.5 bg-amber-600 hover:bg-amber-500 text-white rounded-lg font-bold flex items-center gap-1.5 disabled:opacity-40"
+                    >
+                      <RefreshCw className="w-3.5 h-3.5" />
+                      <span>Restore</span>
+                    </button>
+                    <button
+                      onClick={() => handleDeleteBackup(bp)}
+                      disabled={backupBusy === `delete-${bp.id}`}
+                      className="px-2.5 py-1.5 text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30 rounded-lg font-bold disabled:opacity-40"
+                    >
+                      Delete
+                    </button>
                   </div>
                 </div>
-                <button
-                  onClick={() => alert(`Downloading disaster snapshot ${bp.id}.tar.gz`)}
-                  className="px-3 py-1.5 bg-brand-600 hover:bg-brand-500 text-white rounded-lg font-bold flex items-center gap-1.5 shadow-2xs"
-                >
-                  <Download className="w-3.5 h-3.5" />
-                  <span>Download Backup</span>
-                </button>
-              </div>
-            ))}
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Restore confirmation modal */}
+      {restoreTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 max-w-md w-full p-6 space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
+              <h3 className="font-bold text-slate-900 dark:text-white text-sm flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 text-amber-500" />
+                <span>Restore Database Snapshot</span>
+              </h3>
+              <button
+                onClick={() => setRestoreTarget(null)}
+                className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <p className="text-xs text-slate-600 dark:text-slate-300">
+              This replaces the live database with <span className="font-mono font-bold">{restoreTarget.filename}</span>.
+              A pre-restore snapshot is taken automatically first, but any changes made after this snapshot will be lost.
+            </p>
+            <div>
+              <label className="block text-[11px] font-bold text-slate-500 mb-1">
+                Type the filename to confirm
+              </label>
+              <input
+                value={restoreConfirm}
+                onChange={(e) => setRestoreConfirm(e.target.value)}
+                placeholder={restoreTarget.filename}
+                className="w-full rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-xs font-mono text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-amber-500"
+              />
+            </div>
+            <div className="flex justify-end gap-2 pt-1">
+              <button
+                onClick={() => setRestoreTarget(null)}
+                className="px-3 py-1.5 text-xs font-bold text-slate-500 hover:text-slate-700 dark:hover:text-slate-200"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleRestoreBackup}
+                disabled={restoreConfirm.trim() !== restoreTarget.filename || backupBusy === "restore"}
+                className="px-3 py-1.5 bg-amber-600 hover:bg-amber-500 disabled:opacity-40 text-white rounded-lg text-xs font-bold"
+              >
+                {backupBusy === "restore" ? "Restoring…" : "Restore Snapshot"}
+              </button>
+            </div>
           </div>
         </div>
       )}

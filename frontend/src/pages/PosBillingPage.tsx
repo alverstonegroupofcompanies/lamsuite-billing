@@ -31,8 +31,15 @@ import {
   QrCode,
   RefreshCw,
   Receipt,
+  BadgeIndianRupee,
+  ClipboardList,
+  Gift,
 } from "lucide-react";
 import { posCartService, type PosCartLine } from "../lib/billing/posCartService";
+import { priceListService } from "../lib/billing/priceListService";
+import { salesOrderService } from "../lib/sales/salesOrderService";
+import { loyaltyService, type LoyaltyProgramInfo } from "../lib/loyalty/loyaltyService";
+import { combineBillDiscount, computePointsDiscount, netBaseAmount } from "../lib/loyalty/promotionMath";
 import {
   productsStore,
   isBatchExpired,
@@ -81,6 +88,7 @@ import { RoundOffModal } from "../components/RoundOffModal";
 import { calculateDerivedLooseRate, formatQuantityDisplay, formatExpiryDisplay } from "../lib/billing/unitConversion";
 import { partiesStore, type Customer, normalizeIndianPhone, isValidGstin } from "../lib/masters/partiesStore";
 import { syncQueueService } from "../lib/sync/syncQueueService";
+import { posSalesReturnService } from "../lib/billing/posSalesReturnService";
 import { unitsStore } from "../lib/masters/unitsStore";
 import { useModalEscape } from "../lib/ui/modalEscapeManager";
 
@@ -100,10 +108,21 @@ export function parseQuantityPrefix(input: string): { qty: number; query: string
   return { qty: 1, query: trimmed };
 }
 
+const GIFT_CARD_TENDER_MODES = new Set([
+  "GIFT VOUCHER",
+  "GIFT VOUCHER CARD",
+  "GIFT VOUCHERS",
+  "GIFT CARD",
+  "GIFTCARD",
+  "GIFT_CARD",
+  "GIFT_CARD_VOUCHER",
+]);
+
 export const PosBillingPage: React.FC = () => {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const editInvoiceParam = searchParams.get("edit");
+  const convertQuotationParam = searchParams.get("convertQuotation");
 
   // Cart & Invoice State
   const [lines, setLines] = useState<PosCartLine[]>([]);
@@ -112,6 +131,7 @@ export const PosBillingPage: React.FC = () => {
   const [customerPhone, setCustomerPhone] = useState("");
   const [customerGstin, setCustomerGstin] = useState("");
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
+  const [activePriceList, setActivePriceList] = useState<string | null>(null);
   const [doctorName, setDoctorName] = useState("");
   const [patientName, setPatientName] = useState("");
   const [billNotes, setBillNotes] = useState("");
@@ -142,6 +162,11 @@ export const PosBillingPage: React.FC = () => {
   const [isDiffModalOpen, setIsDiffModalOpen] = useState(false);
   const [editDiff, setEditDiff] = useState<InvoiceDiffResult | null>(null);
   const [editReason, setEditReason] = useState("");
+
+  // Quotation state (created from cart or loaded for conversion)
+  const [sourceQuotation, setSourceQuotation] = useState<InvoiceRecord | null>(null);
+  const [isSavingQuotation, setIsSavingQuotation] = useState(false);
+  const [isSavingOrder, setIsSavingOrder] = useState(false);
 
   // Search & Auto-complete
   const [searchQuery, setSearchQuery] = useState("");
@@ -291,6 +316,23 @@ export const PosBillingPage: React.FC = () => {
   ]);
   const [activeTenderIndex, setActiveTenderIndex] = useState<number>(0);
   const [expandedTenderExtras, setExpandedTenderExtras] = useState<Record<number, boolean>>({});
+
+  // Coupons & loyalty redemption (applied as bill discount before settlement)
+  const [manualBillDiscount, setManualBillDiscount] = useState<{ type: "percent" | "amount"; value: number }>({
+    type: "amount",
+    value: 0,
+  });
+  const [appliedCoupon, setAppliedCoupon] = useState<{
+    code: string;
+    description?: string | null;
+    discount_amount: number;
+  } | null>(null);
+  const [couponCodeInput, setCouponCodeInput] = useState("");
+  const [couponBusy, setCouponBusy] = useState(false);
+  const [loyaltyBalance, setLoyaltyBalance] = useState<number>(0);
+  const [loyaltyProgram, setLoyaltyProgram] = useState<LoyaltyProgramInfo | null>(null);
+  const [pointsToRedeem, setPointsToRedeem] = useState("");
+  const [pointsRedemption, setPointsRedemption] = useState<{ points: number; discount_amount: number } | null>(null);
   const [printFormat, setPrintFormatState] = useState<PosPrintFormat>(() => {
     try {
       const activeStore = storeRegistryService.getActiveStore();
@@ -370,6 +412,8 @@ export const PosBillingPage: React.FC = () => {
       const next = [...prev];
       const current = next[index] || { mode: "Cash", amount: 0 };
       const updatedRef = updates.reference !== undefined ? updates.reference : updates.reference_no !== undefined ? updates.reference_no : current.reference_no;
+      const resolvedMode = updates.mode !== undefined ? updates.mode : current.mode;
+      const isGiftCard = GIFT_CARD_TENDER_MODES.has((resolvedMode || "").trim().toUpperCase());
       next[index] = {
         ...current,
         ...updates,
@@ -383,6 +427,7 @@ export const PosBillingPage: React.FC = () => {
           cheque_date: updates.cheque_date !== undefined ? updates.cheque_date : current.cheque_date,
           payer_vpa: updates.payer_vpa !== undefined ? updates.payer_vpa : current.payer_vpa,
           notes: updates.notes !== undefined ? updates.notes : current.notes,
+          gift_card_code: isGiftCard ? (updatedRef || "").trim().toUpperCase() || undefined : undefined,
           ...updates.extra_fields,
         },
       };
@@ -411,6 +456,97 @@ export const PosBillingPage: React.FC = () => {
   const lastKeyTimeRef = useRef<number>(0);
   const scanBufferRef = useRef<string>("");
 
+  /**
+   * Load an existing document's customer, discounts and line items into the POS cart.
+   * Shared by invoice editing and quotation-to-bill conversion.
+   */
+  const hydrateCartFromDocument = async (
+    invoice: InvoiceRecord,
+    items: InvoiceItemRecord[],
+    matchedCust: Customer | null
+  ) => {
+    const resolvedPhone = invoice.customer_phone || matchedCust?.phone || "";
+
+    setCustomerName(invoice.customer_name || "Walk-in Customer");
+    setCustomerPhone(resolvedPhone);
+    setCustomerGstin(invoice.customer_gstin || matchedCust?.gstin || "");
+    setSelectedCustomer(matchedCust);
+
+    posCartService.setCustomer(
+      matchedCust?.id || invoice.customer_id || "",
+      invoice.customer_name || "Walk-in Customer",
+      invoice.customer_gstin || matchedCust?.gstin || "",
+      invoice.place_of_supply || matchedCust?.place_of_supply || "32-Kerala",
+      resolvedPhone
+    );
+
+    posCartService.clearCart();
+
+    if (invoice.bill_discount_percent && Number(invoice.bill_discount_percent) > 0) {
+      posCartService.setBillDiscount("percent", Number(invoice.bill_discount_percent));
+    } else if (invoice.bill_discount_amount && Number(invoice.bill_discount_amount) > 0) {
+      posCartService.setBillDiscount("amount", Number(invoice.bill_discount_amount));
+    } else if (Number(invoice.discount_total) > 0 && !items.some((i) => Number(i.discount_amount) > 0)) {
+      posCartService.setBillDiscount("amount", Number(invoice.discount_total));
+    }
+
+    for (const it of items) {
+      const prodId = String(it.product_id);
+      const existingProd = await productsStore.getProductById(prodId);
+      const batches: ProductBatch[] = await productsStore.getBatchesForProduct(prodId, false);
+      const matchedBatch = batches.find((b: ProductBatch) => b.batch_no === it.batch_no);
+      const batch: ProductBatch = matchedBatch || {
+        id: `batch_${prodId}_${it.batch_no || "NO_BATCH"}`,
+        product_id: prodId,
+        batch_no: it.batch_no || "NO_BATCH",
+        expiry_date: it.expiry_date || "2099-12-31",
+        stock_qty: 100,
+        mrp: Number(it.mrp) || Number(it.unit_price) || 0,
+        selling_rate: Number(it.unit_price) || 0,
+      };
+
+      const prodItem: ProductItem = existingProd
+        ? {
+            ...existingProd,
+            mrp: Number(it.mrp) || existingProd.mrp || Number(it.unit_price) || 0,
+            sel_rate: Number(it.unit_price) || existingProd.sel_rate || 0,
+          }
+        : {
+            id: prodId,
+            name: it.product_name,
+            barcode: "",
+            mrp: Number(it.mrp) || Number(it.unit_price) || 0,
+            sel_rate: Number(it.unit_price) || 0,
+            gst_percent: Number(it.gst_percent) || 0,
+            hsn_sac_code: (it as any).hsn_sac_code || it.hsn_code || "",
+            units_per_pack: Number(it.units_per_pack) || 1,
+            is_active: true,
+          };
+
+      const { line } = posCartService.addProductToCart(
+        prodItem,
+        batch,
+        Number(it.qty) || 0,
+        Number(it.loose_qty) || 0
+      );
+
+      if (line) {
+        if (it.unit_price !== undefined) {
+          posCartService.updateLinePrice(line.id, Number(it.unit_price));
+        }
+        if (Number(it.discount_percent) > 0 || Number(it.discount_amount) > 0) {
+          posCartService.updateLineDiscount(
+            line.id,
+            Number(it.discount_percent) || 0,
+            Number(it.discount_amount) || 0
+          );
+        }
+      }
+    }
+
+    refreshCartState();
+  };
+
   // Load invoice if 'edit' query param is provided
   useEffect(() => {
     if (!editInvoiceParam) {
@@ -435,8 +571,7 @@ export const PosBillingPage: React.FC = () => {
       setEditingInvoice(details.invoice);
       setOriginalInvoiceItems(details.items);
       setInvoiceNumber(details.invoice.invoice_number);
-      setCustomerName(details.invoice.customer_name || "Walk-in Customer");
-      let resolvedPhone = details.invoice.customer_phone || "";
+
       let matchedCust: Customer | null = null;
       if (details.invoice.customer_id) {
         matchedCust = await partiesStore.getCustomerById(details.invoice.customer_id);
@@ -449,92 +584,161 @@ export const PosBillingPage: React.FC = () => {
         matchedCust = matches.find((m) => m.name.toLowerCase() === details.invoice.customer_name?.toLowerCase()) || matches[0] || null;
       }
 
-      if (!resolvedPhone && matchedCust?.phone) {
-        resolvedPhone = matchedCust.phone;
-      }
-      setSelectedCustomer(matchedCust);
-      setCustomerPhone(resolvedPhone);
-      setCustomerGstin(details.invoice.customer_gstin || matchedCust?.gstin || "");
-
-      posCartService.setCustomer(
-        matchedCust?.id || details.invoice.customer_id || "",
-        details.invoice.customer_name || "Walk-in Customer",
-        details.invoice.customer_gstin || matchedCust?.gstin || "",
-        details.invoice.place_of_supply || matchedCust?.place_of_supply || "32-Kerala",
-        resolvedPhone
-      );
-
-      // Populate cart lines with previous invoice items
-      posCartService.clearCart();
-
-      // Restore Bill Discount if original invoice had one
-      if (details.invoice.bill_discount_percent && Number(details.invoice.bill_discount_percent) > 0) {
-        posCartService.setBillDiscount("percent", Number(details.invoice.bill_discount_percent));
-      } else if (details.invoice.bill_discount_amount && Number(details.invoice.bill_discount_amount) > 0) {
-        posCartService.setBillDiscount("amount", Number(details.invoice.bill_discount_amount));
-      } else if (Number(details.invoice.discount_total) > 0 && !details.items.some((i) => Number(i.discount_amount) > 0)) {
-        posCartService.setBillDiscount("amount", Number(details.invoice.discount_total));
-      }
-
-      for (const it of details.items) {
-        const prodId = String(it.product_id);
-        const existingProd = await productsStore.getProductById(prodId);
-        const batches: ProductBatch[] = await productsStore.getBatchesForProduct(prodId, false);
-        const matchedBatch = batches.find((b: ProductBatch) => b.batch_no === it.batch_no);
-        const batch: ProductBatch = matchedBatch || {
-          id: `batch_${prodId}_${it.batch_no || "NO_BATCH"}`,
-          product_id: prodId,
-          batch_no: it.batch_no || "NO_BATCH",
-          expiry_date: it.expiry_date || "2099-12-31",
-          stock_qty: 100,
-          mrp: Number(it.mrp) || Number(it.unit_price) || 0,
-          selling_rate: Number(it.unit_price) || 0,
-        };
-
-        const prodItem: ProductItem = existingProd
-          ? {
-              ...existingProd,
-              mrp: Number(it.mrp) || existingProd.mrp || Number(it.unit_price) || 0,
-              sel_rate: Number(it.unit_price) || existingProd.sel_rate || 0,
-            }
-          : {
-              id: prodId,
-              name: it.product_name,
-              barcode: "",
-              mrp: Number(it.mrp) || Number(it.unit_price) || 0,
-              sel_rate: Number(it.unit_price) || 0,
-              gst_percent: Number(it.gst_percent) || 0,
-              hsn_sac_code: (it as any).hsn_sac_code || it.hsn_code || "",
-              units_per_pack: Number(it.units_per_pack) || 1,
-              is_active: true,
-            };
-
-        const { line } = posCartService.addProductToCart(
-          prodItem,
-          batch,
-          Number(it.qty) || 0,
-          Number(it.loose_qty) || 0
-        );
-
-        if (line) {
-          if (it.unit_price !== undefined) {
-            posCartService.updateLinePrice(line.id, Number(it.unit_price));
-          }
-          if (Number(it.discount_percent) > 0 || Number(it.discount_amount) > 0) {
-            posCartService.updateLineDiscount(
-              line.id,
-              Number(it.discount_percent) || 0,
-              Number(it.discount_amount) || 0
-            );
-          }
-        }
-      }
-      refreshCartState();
+      await hydrateCartFromDocument(details.invoice, details.items, matchedCust);
       showNotification(`Editing ${details.invoice.invoice_number}`);
     };
 
     loadForEdit();
   }, [editInvoiceParam]);
+
+  // Load a quotation into the cart for conversion into a bill
+  useEffect(() => {
+    if (!convertQuotationParam) {
+      return;
+    }
+
+    const loadForConversion = async () => {
+      const details = await invoiceManagementService.getInvoiceWithDetails(convertQuotationParam);
+      if (!details || details.invoice.module_key !== "quotation") {
+        showNotification("Quotation not found", "error");
+        setSearchParams({});
+        return;
+      }
+
+      if (details.invoice.status === "converted") {
+        showNotification(`Quotation ${details.invoice.invoice_number} has already been converted.`, "error");
+        setSearchParams({});
+        return;
+      }
+
+      let matchedCust: Customer | null = null;
+      if (details.invoice.customer_id) {
+        matchedCust = await partiesStore.getCustomerById(details.invoice.customer_id);
+      } else if (
+        details.invoice.customer_name &&
+        details.invoice.customer_name.toLowerCase() !== "walk-in" &&
+        details.invoice.customer_name.toLowerCase() !== "walk-in customer"
+      ) {
+        const matches = await partiesStore.searchCustomers(details.invoice.customer_name, 5);
+        matchedCust = matches.find((m) => m.name.toLowerCase() === details.invoice.customer_name?.toLowerCase()) || matches[0] || null;
+      }
+
+      await hydrateCartFromDocument(details.invoice, details.items, matchedCust);
+      setSourceQuotation(details.invoice);
+      setSearchParams({});
+      showNotification(`Quotation ${details.invoice.invoice_number} loaded. Review prices and save as a bill.`);
+    };
+
+    loadForConversion();
+  }, [convertQuotationParam]);
+
+  const handleSaveQuotation = async () => {
+    if (editingInvoice) {
+      showNotification("Finish or cancel the invoice edit before saving a quotation.", "error");
+      return;
+    }
+    const currentLines = posCartService.getLines();
+    if (currentLines.length === 0) {
+      showNotification("Cannot save quotation: Cart is empty.", "error");
+      return;
+    }
+    if (isSavingQuotation) return;
+
+    const activeStore = storeRegistryService.getActiveStore();
+    if (activeStore && (activeStore as any).is_active === false) {
+      showNotification("Cannot save quotation: Store has been disabled by Admin.", "error");
+      return;
+    }
+
+    setIsSavingQuotation(true);
+    try {
+      const taxMode = posCartService.getActiveTaxMode().taxMode;
+      const res = await posSalesReturnService.createQuotation(
+        undefined,
+        customerName || "Walk-in Customer",
+        currentLines.map((l) => ({
+          product_id: l.product.id,
+          product_name: l.product.name,
+          batch_id: l.selectedBatch.id,
+          batch_no: l.selectedBatch.batch_no,
+          hsn_code: l.product.hsn_sac_code,
+          qty: l.qty,
+          loose_qty: l.loose_qty,
+          units_per_pack: l.product.units_per_pack || 1,
+          unit_price: l.unit_price,
+          discount_percent: l.discount_percent,
+          discount_amount: l.discount_amount,
+          gst_percent: l.product.gst_percent,
+        })),
+        taxMode,
+        {
+          customer_id: selectedCustomer?.id,
+          customer_phone: customerPhone,
+          customer_gstin: customerGstin,
+          place_of_supply: selectedCustomer?.place_of_supply || appSettingsState.state_code,
+          store_id: activeStore?.id,
+        }
+      );
+
+      posCartService.clearCart();
+      refreshCartState();
+      setInvoiceNumber(companySettingsService.previewNextInvoiceNumber());
+      showNotification(`Quotation ${res.quotationNumber} saved (no stock deducted).`, "success");
+    } catch (err: any) {
+      showNotification(err?.message || "Failed to save quotation.", "error");
+    } finally {
+      setIsSavingQuotation(false);
+    }
+  };
+
+  const handleSaveSalesOrder = async () => {
+    if (editingInvoice) {
+      showNotification("Finish or cancel the invoice edit before saving a sales order.", "error");
+      return;
+    }
+    const currentLines = posCartService.getLines();
+    if (currentLines.length === 0) {
+      showNotification("Cannot save order: Cart is empty.", "error");
+      return;
+    }
+    if (isSavingOrder) return;
+
+    setIsSavingOrder(true);
+    try {
+      const res = await salesOrderService.createOrder({
+        customer_id: selectedCustomer?.id || null,
+        customer_name: customerName || "Walk-in Customer",
+        customer_phone: customerPhone,
+        customer_gstin: customerGstin,
+        place_of_supply: selectedCustomer?.place_of_supply || appSettingsState.state_code,
+        notes: billNotes || undefined,
+        items: currentLines.map((l) => ({
+          product_id: l.product.id,
+          product_name: l.product.name,
+          hsn_code: l.product.hsn_sac_code,
+          qty: l.qty,
+          loose_qty: l.loose_qty,
+          units_per_pack: l.product.units_per_pack || 1,
+          unit_price: l.unit_price,
+          discount_percent: l.discount_percent,
+          discount_amount: l.discount_amount,
+          gst_percent: l.product.gst_percent,
+        })),
+      });
+
+      posCartService.clearCart();
+      refreshCartState();
+      setInvoiceNumber(companySettingsService.previewNextInvoiceNumber());
+      showNotification(
+        `Sales order ${res.order?.order_number || ""} saved as draft (no stock deducted). Confirm & dispatch it in Admin.`,
+        "success"
+      );
+    } catch (err: any) {
+      showNotification(err?.message || "Failed to save sales order.", "error");
+    } finally {
+      setIsSavingOrder(false);
+    }
+  };
 
   const cancelEditingMode = () => {
     if (editingInvoice) {
@@ -818,7 +1022,15 @@ export const PosBillingPage: React.FC = () => {
   };
 
   const handleApplyBillDiscount = (type: "percent" | "amount", value: number) => {
-    posCartService.setBillDiscount(type, value);
+    setManualBillDiscount({ type, value });
+    const hasPromos = Boolean(appliedCoupon) || Boolean(pointsRedemption);
+    if (!hasPromos) {
+      posCartService.setBillDiscount(type, value);
+    } else {
+      const netBase = netBaseAmount(posCartService.getTotals());
+      const promoAmounts = [appliedCoupon?.discount_amount || 0, pointsRedemption?.discount_amount || 0];
+      posCartService.setBillDiscount("amount", combineBillDiscount(netBase, { type, value }, promoAmounts));
+    }
     refreshCartState();
     if (value > 0) {
       showNotification(`Bill discount applied: ${type === "percent" ? `${value}%` : `₹${value}`}`, "success");
@@ -826,6 +1038,125 @@ export const PosBillingPage: React.FC = () => {
       showNotification("Bill discount cleared", "info");
     }
   };
+
+  const promotionBaseAmount = () => netBaseAmount(posCartService.getTotals());
+
+  const recomputeCartBillDiscount = (couponAmount: number, pointsAmount: number) => {
+    const netBase = netBaseAmount(posCartService.getTotals());
+    const current = posCartService.getBillDiscount();
+    let manual = { ...manualBillDiscount };
+    // Adopt any pre-existing discount (e.g. from a held bill) as the manual component
+    if (manual.value <= 0 && current.value > 0) {
+      const prevPromo = (appliedCoupon?.discount_amount || 0) + (pointsRedemption?.discount_amount || 0);
+      const unexplained = current.type === "amount" ? Math.max(0, current.value - prevPromo) : 0;
+      if (unexplained > 0) {
+        manual = { type: "amount", value: unexplained };
+      }
+    }
+    const combined = combineBillDiscount(netBase, manual, [couponAmount, pointsAmount]);
+    posCartService.setBillDiscount("amount", combined);
+    refreshCartState();
+  };
+
+  const handleApplyCoupon = async () => {
+    const code = couponCodeInput.trim();
+    if (!code) return;
+    if (posCartService.getLines().length === 0) {
+      showNotification("Add items before applying a coupon.", "error");
+      return;
+    }
+    setCouponBusy(true);
+    try {
+      const base = promotionBaseAmount();
+      const res = await loyaltyService.validateCoupon(code, base, selectedCustomer?.id ?? null);
+      setAppliedCoupon({
+        code: res.coupon.code,
+        description: res.coupon.description,
+        discount_amount: res.discount_amount,
+      });
+      setCouponCodeInput("");
+      recomputeCartBillDiscount(res.discount_amount, pointsRedemption?.discount_amount || 0);
+      showNotification(`Coupon ${res.coupon.code} applied: -₹${res.discount_amount.toFixed(2)}`, "success");
+    } catch (err) {
+      showNotification(err instanceof Error ? err.message : "Coupon could not be applied", "error");
+    } finally {
+      setCouponBusy(false);
+    }
+  };
+
+  const handleRemoveCoupon = () => {
+    setAppliedCoupon(null);
+    recomputeCartBillDiscount(0, pointsRedemption?.discount_amount || 0);
+    showNotification("Coupon removed", "info");
+  };
+
+  const handleApplyPoints = () => {
+    if (!loyaltyProgram?.is_active) {
+      showNotification("Loyalty program is not active for this store.", "error");
+      return;
+    }
+    if (!selectedCustomer?.id) {
+      showNotification("Select a customer to redeem loyalty points.", "error");
+      return;
+    }
+    const points = Math.floor(Number(pointsToRedeem) || 0);
+    if (points <= 0) {
+      showNotification("Enter the number of points to redeem.", "error");
+      return;
+    }
+    if (points < loyaltyProgram.min_redeem_points) {
+      showNotification(`Minimum redeemable points is ${loyaltyProgram.min_redeem_points}.`, "error");
+      return;
+    }
+    if (points > loyaltyBalance) {
+      showNotification(`Insufficient points (available: ${loyaltyBalance}).`, "error");
+      return;
+    }
+    const base = Math.max(0, promotionBaseAmount() - (appliedCoupon?.discount_amount || 0));
+    const discount = computePointsDiscount(points, loyaltyProgram.redeem_value_per_point, base);
+    if (discount <= 0) {
+      showNotification("These points have no redeemable value on this bill.", "error");
+      return;
+    }
+    setPointsRedemption({ points, discount_amount: discount });
+    recomputeCartBillDiscount(appliedCoupon?.discount_amount || 0, discount);
+    showNotification(`${points} points redeemed: -₹${discount.toFixed(2)}`, "success");
+  };
+
+  const handleRemovePoints = () => {
+    setPointsRedemption(null);
+    setPointsToRedeem("");
+    recomputeCartBillDiscount(appliedCoupon?.discount_amount || 0, 0);
+    showNotification("Loyalty point redemption removed", "info");
+  };
+
+  useEffect(() => {
+    if (!selectedCustomer?.id) {
+      setLoyaltyBalance(0);
+      setLoyaltyProgram(null);
+      return;
+    }
+    loyaltyService
+      .getBalance(selectedCustomer.id)
+      .then((res) => {
+        setLoyaltyBalance(res.balance || 0);
+        setLoyaltyProgram(res.program || null);
+      })
+      .catch(() => {
+        setLoyaltyBalance(0);
+        setLoyaltyProgram(null);
+      });
+  }, [selectedCustomer?.id]);
+
+  useEffect(() => {
+    if (lines.length === 0) {
+      setAppliedCoupon(null);
+      setPointsRedemption(null);
+      setPointsToRedeem("");
+      setManualBillDiscount({ type: "amount", value: 0 });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lines.length]);
 
   const handleApplyManualRoundOff = (manualAmount: number | null) => {
     posCartService.setManualRoundOff(manualAmount);
@@ -1187,6 +1518,7 @@ export const PosBillingPage: React.FC = () => {
           if (ok) {
             posCartService.clearCart();
             refreshCartState();
+            setSourceQuotation(null);
             showNotification("Bill cleared", "info");
             handleFocusSearch();
           }
@@ -1577,6 +1909,7 @@ export const PosBillingPage: React.FC = () => {
       if (window.confirm("Are you sure you want to clear all items in this bill?")) {
         posCartService.clearCart();
         refreshCartState();
+        setSourceQuotation(null);
         showNotification("Bill cleared", "info");
         handleFocusSearch();
       }
@@ -1788,6 +2121,28 @@ export const PosBillingPage: React.FC = () => {
       document.removeEventListener("mousedown", handleClickOutside);
     };
   }, [searchResults.length]);
+
+  // Resolve customer-specific negotiated pricing whenever the billed customer changes
+  useEffect(() => {
+    const customerId = String(selectedCustomer?.id || "");
+    if (!customerId) {
+      setActivePriceList(null);
+      return;
+    }
+    let cancelled = false;
+    priceListService
+      .resolveForCustomer(customerId)
+      .then((resolved) => {
+        if (cancelled) return;
+        posCartService.setPriceListPricing(resolved?.list?.name || null, resolved?.items || []);
+        setActivePriceList(resolved?.list?.name || null);
+        refreshCartState();
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedCustomer?.id]);
 
   // Auto-scroll selected search result item into view
   useEffect(() => {
@@ -2335,6 +2690,7 @@ export const PosBillingPage: React.FC = () => {
         customerPhone,
         customerGstin,
         selectedCustomer,
+        sourceQuotation,
       },
       currentLines.length,
       totals.grand_total,
@@ -2354,6 +2710,7 @@ export const PosBillingPage: React.FC = () => {
     }
 
     posCartService.clearCart();
+    setSourceQuotation((recalled.cart_payload?.sourceQuotation as InvoiceRecord) || null);
     const payloadLines = (recalled.cart_payload.lines as PosCartLine[]) || [];
     for (const line of payloadLines) {
       posCartService.addProductToCart(line.product, line.selectedBatch, line.qty, line.loose_qty);
@@ -2798,6 +3155,7 @@ export const PosBillingPage: React.FC = () => {
               name: selectedCustomer.name,
               credit_limit: selectedCustomer.credit_limit,
               current_balance: selectedCustomer.current_balance,
+              outstanding_balance: selectedCustomer.outstanding_balance,
             }
           : customerName
           ? { name: customerName }
@@ -2820,6 +3178,12 @@ export const PosBillingPage: React.FC = () => {
       const tenderCalcSnapshot = billingTenderService.calculateTenderBalance(totalsSnapshot.grand_total, effectiveTenders);
       const printData = preparePrintData(cartSnapshot, totalsSnapshot);
 
+      // Snapshot promotions before the cart is cleared
+      const couponSnapshot = appliedCoupon;
+      const pointsSnapshot = pointsRedemption;
+      const loyaltyCustomerId = activeCust?.id || selectedCustomer?.id || null;
+      const netPaidSnapshot = totalsSnapshot.net_before_round;
+
       // 4. Save invoice with payment lines
       const res = await posCartService.finalizeInvoice(invoiceNumber, effectiveTenders, {
         autoClear: false,
@@ -2831,6 +3195,48 @@ export const PosBillingPage: React.FC = () => {
 
       if (res.success) {
         let savedPdfPath: string | undefined;
+
+        // Record coupon redemption, point redemption and point accrual against the saved invoice
+        if (couponSnapshot || pointsSnapshot || loyaltyCustomerId) {
+          (async () => {
+            try {
+              if (couponSnapshot) {
+                await loyaltyService.redeemCoupon({
+                  code: couponSnapshot.code,
+                  invoiceId: res.invoiceId,
+                  billAmount:
+                    netPaidSnapshot +
+                    couponSnapshot.discount_amount +
+                    (pointsSnapshot?.discount_amount || 0),
+                  customerId: loyaltyCustomerId,
+                });
+              }
+              if (pointsSnapshot && loyaltyCustomerId) {
+                await loyaltyService.redeemPoints({
+                  customerId: loyaltyCustomerId,
+                  points: pointsSnapshot.points,
+                  invoiceId: res.invoiceId,
+                  billAmount: netPaidSnapshot + pointsSnapshot.discount_amount,
+                });
+              }
+              if (loyaltyCustomerId) {
+                const earnRes = await loyaltyService.earnPoints({
+                  invoiceId: res.invoiceId,
+                  customerId: loyaltyCustomerId,
+                  billAmount: netPaidSnapshot,
+                });
+                if (earnRes.points_earned > 0) {
+                  showNotification(
+                    `Customer earned ${earnRes.points_earned} loyalty points (balance ${earnRes.balance}).`,
+                    "success"
+                  );
+                }
+              }
+            } catch (loyaltyErr) {
+              console.warn("Loyalty post-checkout sync failed:", loyaltyErr);
+            }
+          })();
+        }
 
         // 5. Check if printing was requested
         if (shouldPrint && printFormat !== "none") {
@@ -2875,6 +3281,18 @@ export const PosBillingPage: React.FC = () => {
         refreshCartState();
         setIsTenderModalOpen(false);
 
+        // Mark the source quotation (if any) as converted
+        let convertedQuotationNo: string | null = null;
+        if (sourceQuotation) {
+          try {
+            await posSalesReturnService.convertQuotationToInvoice(sourceQuotation.id);
+            convertedQuotationNo = sourceQuotation.invoice_number;
+          } catch (convErr) {
+            console.warn("Quotation conversion marking failed:", convErr);
+          }
+          setSourceQuotation(null);
+        }
+
         // Auto-send via WhatsApp if enabled
         if (appSettings.whatsapp?.enabled && appSettings.whatsapp?.autoSendOnBillSave && customerPhone && customerPhone.trim().length >= 10) {
           whatsappService.dispatchInvoice(customerPhone, printData).then((waRes) => {
@@ -2887,9 +3305,11 @@ export const PosBillingPage: React.FC = () => {
         }
 
         showNotification(
-          savedPdfPath
-            ? `Saved to: ${savedPdfPath}`
-            : `Invoice ${invoiceNumber} billed successfully!`,
+          `${
+            savedPdfPath
+              ? `Saved to: ${savedPdfPath}`
+              : `Invoice ${invoiceNumber} billed successfully!`
+          }${convertedQuotationNo ? ` Quotation ${convertedQuotationNo} converted.` : ""}`,
           "success",
           savedPdfPath
             ? [
@@ -3059,6 +3479,15 @@ export const PosBillingPage: React.FC = () => {
                     showNotification(`Added new customer: ${cust.name}`);
                   }}
                 />
+                {activePriceList && (
+                  <span
+                    className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700"
+                    title="Customer-specific negotiated rates applied"
+                  >
+                    <BadgeIndianRupee className="h-3 w-3" />
+                    {activePriceList}
+                  </span>
+                )}
               </div>
             </>
           )}
@@ -3163,6 +3592,28 @@ export const PosBillingPage: React.FC = () => {
           </button>
 
           <button
+            type="button"
+            onClick={handleSaveQuotation}
+            disabled={isSavingQuotation || Boolean(editingInvoice)}
+            title="Save the current cart as a quotation (no stock deducted, no payment required)"
+            className="flex items-center gap-1.5 rounded-[10px] bg-[var(--color-surface-subtle)] border border-[var(--color-border)] px-3 py-1.5 text-xs font-semibold text-[var(--color-text)] hover:bg-[var(--color-surface-hover)] disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+          >
+            <FileText className="h-3.5 w-3.5 text-[var(--color-accent)]" />
+            <span>{isSavingQuotation ? "Saving Quote..." : "Save Quote"}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={handleSaveSalesOrder}
+            disabled={isSavingOrder || Boolean(editingInvoice)}
+            title="Save the current cart as a draft sales order for later confirmation & dispatch (no stock deducted)"
+            className="flex items-center gap-1.5 rounded-[10px] bg-[var(--color-surface-subtle)] border border-[var(--color-border)] px-3 py-1.5 text-xs font-semibold text-[var(--color-text)] hover:bg-[var(--color-surface-hover)] disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+          >
+            <ClipboardList className="h-3.5 w-3.5 text-[var(--color-accent)]" />
+            <span>{isSavingOrder ? "Saving Order..." : "Save Order"}</span>
+          </button>
+
+          <button
             onClick={() => setIsRecallModalOpen(true)}
             className="relative flex items-center gap-1.5 rounded-[10px] bg-[var(--color-accent-soft)] border border-[var(--color-accent-soft)] px-3 py-1.5 text-xs font-semibold text-[var(--color-accent)] hover:opacity-90 cursor-pointer"
           >
@@ -3207,6 +3658,32 @@ export const PosBillingPage: React.FC = () => {
               Cancel Editing ({shortcutLabel("cancelEdit", "edit")})
             </button>
           </div>
+        </div>
+      )}
+
+      {/* Quotation Conversion Banner */}
+      {sourceQuotation && !editingInvoice && (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-blue-300 bg-blue-50 px-4 py-2.5 shadow-sm text-xs text-blue-900">
+          <div className="flex items-center gap-2">
+            <FileText className="h-4 w-4 text-blue-600" />
+            <span className="font-bold text-blue-950">
+              Converting Quotation: {sourceQuotation.invoice_number}
+            </span>
+            <span className="text-blue-800">
+              Review quantities and save as a bill. The quotation will be marked converted.
+            </span>
+          </div>
+          <button
+            onClick={() => {
+              setSourceQuotation(null);
+              posCartService.clearCart();
+              refreshCartState();
+              showNotification("Quotation conversion cancelled. Started a new bill.");
+            }}
+            className="rounded bg-blue-200 px-3 py-1 text-xs font-bold text-blue-950 hover:bg-blue-300 transition-colors shadow-xs"
+          >
+            Cancel Conversion
+          </button>
         </div>
       )}
 
@@ -3955,6 +4432,109 @@ export const PosBillingPage: React.FC = () => {
                   </div>
                 )}
 
+                {/* Coupons & Loyalty Redemption */}
+                <div className="rounded-lg border border-slate-200 bg-white p-3 space-y-2">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="text-xs font-semibold text-slate-700 flex items-center gap-1.5">
+                      <Gift className="h-3.5 w-3.5 text-indigo-600" />
+                      Coupons &amp; Loyalty
+                    </span>
+                    <div className="flex items-center gap-1.5">
+                      {appliedCoupon && (
+                        <span className="inline-flex items-center gap-1 rounded bg-emerald-50 border border-emerald-200 px-2 py-0.5 text-[11px] font-semibold text-emerald-800">
+                          {appliedCoupon.code} · -₹{appliedCoupon.discount_amount.toFixed(2)}
+                          <button
+                            type="button"
+                            onClick={handleRemoveCoupon}
+                            className="text-emerald-700 hover:text-emerald-900 cursor-pointer"
+                            title="Remove coupon"
+                          >
+                            <X className="h-3 w-3" />
+                          </button>
+                        </span>
+                      )}
+                      {pointsRedemption && (
+                        <span className="inline-flex items-center gap-1 rounded bg-indigo-50 border border-indigo-200 px-2 py-0.5 text-[11px] font-semibold text-indigo-800">
+                          {pointsRedemption.points} pts · -₹{pointsRedemption.discount_amount.toFixed(2)}
+                          <button
+                            type="button"
+                            onClick={handleRemovePoints}
+                            className="text-indigo-700 hover:text-indigo-900 cursor-pointer"
+                            title="Remove point redemption"
+                          >
+                            <X className="h-3 w-3" />
+                          </button>
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <div className="flex items-center gap-1.5">
+                      <input
+                        value={couponCodeInput}
+                        onChange={(e) => setCouponCodeInput(e.target.value.toUpperCase())}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            e.preventDefault();
+                            if (!couponBusy) void handleApplyCoupon();
+                          }
+                        }}
+                        placeholder="Coupon code"
+                        disabled={Boolean(appliedCoupon) || couponBusy}
+                        className="flex-1 min-w-0 px-2.5 py-1.5 text-xs font-mono rounded-lg border border-slate-300 bg-slate-50 text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-60"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => void handleApplyCoupon()}
+                        disabled={Boolean(appliedCoupon) || couponBusy || !couponCodeInput.trim()}
+                        className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white disabled:opacity-50 cursor-pointer"
+                      >
+                        {couponBusy ? "Checking…" : "Apply"}
+                      </button>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <input
+                        type="number"
+                        min={0}
+                        value={pointsToRedeem}
+                        onChange={(e) => setPointsToRedeem(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            e.preventDefault();
+                            handleApplyPoints();
+                          }
+                        }}
+                        placeholder={
+                          selectedCustomer?.id && loyaltyProgram?.is_active
+                            ? `Points (avail ${loyaltyBalance})`
+                            : "Select loyalty customer"
+                        }
+                        disabled={Boolean(pointsRedemption) || !selectedCustomer?.id || !loyaltyProgram?.is_active}
+                        className="flex-1 min-w-0 px-2.5 py-1.5 text-xs rounded-lg border border-slate-300 bg-slate-50 text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-60"
+                      />
+                      <button
+                        type="button"
+                        onClick={handleApplyPoints}
+                        disabled={
+                          Boolean(pointsRedemption) ||
+                          !selectedCustomer?.id ||
+                          !loyaltyProgram?.is_active ||
+                          !pointsToRedeem
+                        }
+                        className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-slate-800 hover:bg-slate-900 text-white disabled:opacity-50 cursor-pointer"
+                      >
+                        Use
+                      </button>
+                    </div>
+                  </div>
+                  {selectedCustomer?.id && loyaltyProgram?.is_active && (
+                    <p className="text-[10px] text-slate-500">
+                      Balance {loyaltyBalance} pts · minimum {loyaltyProgram.min_redeem_points} pts · ₹
+                      {loyaltyProgram.redeem_value_per_point}/point
+                    </p>
+                  )}
+                </div>
+
                 {/* 2. Quick Mode & Helper Actions */}
                 <div>
                   <div className="flex items-center justify-between mb-1.5">
@@ -4073,6 +4653,7 @@ export const PosBillingPage: React.FC = () => {
                       };
                       const isRefRequired = modeCfg.referenceRequirement === "required";
                       const showRefField = modeCfg.referenceRequirement !== "off";
+                      const isGiftCardMode = GIFT_CARD_TENDER_MODES.has((line.mode || "").trim().toUpperCase());
                       const isExtrasOpen = Boolean(expandedTenderExtras[idx]);
                       const hasExtraFields =
                         Boolean(modeCfg.extraFields?.cardLastFour) ||
@@ -4172,8 +4753,10 @@ export const PosBillingPage: React.FC = () => {
                                   disabled={isFinalizing}
                                   value={line.reference || ""}
                                   placeholder={
-                                    modeCfg.referencePlaceholder ||
-                                    `${modeCfg.referenceLabel || "Ref ID"}${isRefRequired ? " *" : " (optional)"}`
+                                    isGiftCardMode
+                                      ? "Gift card code (e.g. GCXXXXXXXXXXXX) *"
+                                      : modeCfg.referencePlaceholder ||
+                                        `${modeCfg.referenceLabel || "Ref ID"}${isRefRequired ? " *" : " (optional)"}`
                                   }
                                   onChange={(e) => handleUpdatePaymentLine(idx, { reference: e.target.value })}
                                   className={`w-full rounded border px-2.5 py-1.5 text-xs text-slate-800 placeholder-slate-400 focus:outline-none ${
@@ -4223,6 +4806,13 @@ export const PosBillingPage: React.FC = () => {
                           {/* Expandable Extras Tray */}
                           {isExtrasOpen && (
                             <div className="mt-2.5 pt-2.5 border-t border-slate-200/80 grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px] animate-in fade-in duration-100">
+                              {isGiftCardMode && (
+                                <div className="col-span-2 sm:col-span-4 p-1.5 rounded bg-violet-50/70 border border-violet-200 text-violet-900">
+                                  Enter the gift card / voucher code in the Voucher Code field. The card balance is
+                                  verified and redeemed on the server when this bill syncs; unregistered or exhausted
+                                  cards will be rejected there.
+                                </div>
+                              )}
                               {(line.mode === "Cheque" || line.mode === "Bank Transfer") && (
                                 <div className="col-span-2 sm:col-span-4 flex items-center gap-2 p-1.5 rounded bg-amber-50/60 border border-amber-200 text-amber-900">
                                   <input
@@ -4415,7 +5005,7 @@ export const PosBillingPage: React.FC = () => {
                         <div>
                           <span className="text-slate-500 block">Current Balance</span>
                           <span className="font-bold text-slate-800">
-                            ₹ {(selectedCustomer?.current_balance || 0).toFixed(2)}
+                            ₹ {(selectedCustomer?.current_balance ?? selectedCustomer?.outstanding_balance ?? 0).toFixed(2)}
                           </span>
                         </div>
                         <div>
@@ -4427,7 +5017,7 @@ export const PosBillingPage: React.FC = () => {
                         <div>
                           <span className="text-slate-500 block">New Balance After Sale</span>
                           <span className="font-bold text-amber-950">
-                            ₹ {((selectedCustomer?.current_balance || 0) + creditLine.amount).toFixed(2)}
+                            ₹ {((selectedCustomer?.current_balance ?? selectedCustomer?.outstanding_balance ?? 0) + creditLine.amount).toFixed(2)}
                           </span>
                         </div>
                       </div>
@@ -4857,7 +5447,9 @@ export const PosBillingPage: React.FC = () => {
       {/* Overall Bill Discount (Ctrl+F2) Modal */}
       <BillDiscountModal
         isOpen={isBillDiscountModalOpen}
-        currentDiscount={posCartService.getBillDiscount()}
+        currentDiscount={
+          appliedCoupon || pointsRedemption ? manualBillDiscount : posCartService.getBillDiscount()
+        }
         taxableSubtotal={totals.taxable_subtotal}
         totalTax={totals.total_tax}
         onClose={() => setIsBillDiscountModalOpen(false)}

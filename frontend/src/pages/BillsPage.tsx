@@ -95,6 +95,31 @@ const normalizeServerPayments = (raw: unknown): InvoiceRecord["payments"] => {
   })) as InvoiceRecord["payments"];
 };
 
+const formatComplianceDate = (value?: string): string => {
+  if (!value) return "—";
+  const d = new Date(value);
+  if (isNaN(d.getTime())) return value;
+  return d.toLocaleDateString("en-GB").replace(/\//g, "-");
+};
+
+const hasComplianceData = (inv: InvoiceRecord): boolean =>
+  Boolean(
+    inv.irn ||
+      inv.ewb_number ||
+      inv.irn_status ||
+      inv.ewb_status ||
+      inv.irn_applicable ||
+      inv.ewb_applicable
+  );
+
+const complianceStatusClass = (status?: string): string => {
+  const s = (status || "").toLowerCase();
+  if (s.includes("cancelled") || s.includes("failed")) return "bg-rose-100 text-rose-800";
+  if (s.includes("generated") || s.includes("active")) return "bg-emerald-100 text-emerald-800";
+  if (s.includes("expired") || s.includes("pending")) return "bg-amber-100 text-amber-800";
+  return "bg-slate-100 text-slate-700";
+};
+
 const sumCollectedTenders = (inv: InvoiceRecord): number => {
   const active = (inv.payments || []).filter((p) => p.status !== "refunded");
   const amount =
@@ -330,7 +355,7 @@ export const BillsPage: React.FC = () => {
                 const rec: InvoiceRecord = {
                   id: String(sinv.id),
                   store_id: String(sinv.store_id || activeStoreId),
-                  module_key: "invoice",
+                  module_key: sinv.module_key || "invoice",
                   invoice_number: sinv.invoice_number,
                   invoice_date: toStoreDateString(sinv.invoice_date, storeTimeZone),
                   customer_id: sinv.customer_id ? String(sinv.customer_id) : undefined,
@@ -406,7 +431,7 @@ export const BillsPage: React.FC = () => {
             loadedInvoices = serverList.map((sinv: any) => ({
               id: String(sinv.id),
               store_id: String(sinv.store_id || activeStoreId),
-              module_key: "invoice",
+              module_key: sinv.module_key || "invoice",
               invoice_number: sinv.invoice_number,
               invoice_date: toStoreDateString(sinv.invoice_date, storeTimeZone),
               customer_id: sinv.customer_id ? String(sinv.customer_id) : undefined,
@@ -524,7 +549,7 @@ export const BillsPage: React.FC = () => {
         for (const sinv of serverInvoices) {
           await sqliteStorage.insertRecord("invoices", String(sinv.id), {
             id: String(sinv.id),
-            module_key: "invoice",
+            module_key: sinv.module_key || "invoice",
             invoice_number: sinv.invoice_number,
             invoice_date: toStoreDateString(sinv.invoice_date),
             customer_id: sinv.customer_id ? String(sinv.customer_id) : undefined,
@@ -814,6 +839,24 @@ export const BillsPage: React.FC = () => {
     setSelectedInvoiceItems(details.items);
     setSelectedInvoiceAudit(details.auditLog);
     setIsDetailModalOpen(true);
+
+    // Compliance references are recorded in the admin panel after the bill is
+    // synced, so pull the authoritative registry entry whenever the server is reachable.
+    if (details.invoice.module_key !== "quotation") {
+      invoiceManagementService
+        .refreshCompliance(
+          details.invoice.server_id
+            ? String(details.invoice.server_id)
+            : details.invoice.invoice_number || details.invoice.id
+        )
+        .then((compliance) => {
+          if (!compliance) return;
+          setSelectedInvoice((prev) =>
+            prev && String(prev.id) === String(details.invoice.id) ? { ...prev, ...compliance } : prev
+          );
+        })
+        .catch(() => undefined);
+    }
   };
 
   const buildPrintData = (invoice: InvoiceRecord, items: InvoiceItemRecord[]): InvoicePrintData => {
@@ -821,6 +864,7 @@ export const BillsPage: React.FC = () => {
     return {
       invoice_number: invoice.invoice_number + (invoice.is_revised ? " (Revised)" : ""),
       invoice_date: invoice.invoice_date,
+      document_title: invoice.module_key === "quotation" ? "QUOTATION" : "TAX INVOICE",
       store_name: header.store_name,
       store_address: header.store_address,
       store_phone: header.store_phone,
@@ -860,6 +904,11 @@ export const BillsPage: React.FC = () => {
       upi_vpa: header.upi_vpa,
       terms_and_conditions: header.terms_and_conditions,
       jurisdiction_note: header.jurisdiction_note,
+      irn: invoice.irn || undefined,
+      irn_ack_no: invoice.irn_ack_no || undefined,
+      irn_ack_date: invoice.irn_ack_date ? formatComplianceDate(invoice.irn_ack_date) : undefined,
+      ewb_number: invoice.ewb_number || undefined,
+      ewb_valid_until: invoice.ewb_valid_until ? formatComplianceDate(invoice.ewb_valid_until) : undefined,
     };
   };
 
@@ -1443,6 +1492,11 @@ export const BillsPage: React.FC = () => {
                           <span className={isCancelled ? "line-through text-red-500" : "text-blue-700"}>
                             {inv.invoice_number}
                           </span>
+                          {inv.module_key === "quotation" ? (
+                            <span className="rounded bg-amber-100 px-1.5 py-0.2 text-[9px] font-bold text-amber-800 uppercase border border-amber-200">
+                              Quote
+                            </span>
+                          ) : null}
                           {inv.is_revised ? (
                             <span className="rounded bg-purple-100 px-1.5 py-0.2 text-[9px] font-bold text-purple-700 uppercase">
                               Revised
@@ -1475,7 +1529,21 @@ export const BillsPage: React.FC = () => {
                         </span>
                       </td>
                       <td className="px-4 py-2.5 text-center">
-                        {isCancelled ? (
+                        {inv.module_key === "quotation" ? (
+                          inv.status === "converted" ? (
+                            <span className="rounded-full bg-[var(--color-accent-soft)] px-2 py-0.5 text-[10px] font-bold text-[var(--color-accent)] border border-[var(--color-accent-soft)]">
+                              Converted
+                            </span>
+                          ) : inv.status === "cancelled" ? (
+                            <span className="rounded-full bg-[var(--color-danger-bg)] px-2 py-0.5 text-[10px] font-bold text-[var(--color-danger-text)] border border-[var(--color-danger-border)]">
+                              Cancelled
+                            </span>
+                          ) : (
+                            <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-800 border border-amber-200">
+                              Open Quote
+                            </span>
+                          )
+                        ) : isCancelled ? (
                           <span className="rounded-full bg-[var(--color-danger-bg)] px-2 py-0.5 text-[10px] font-bold text-[var(--color-danger-text)] border border-[var(--color-danger-border)]">
                             Cancelled
                           </span>
@@ -1499,15 +1567,29 @@ export const BillsPage: React.FC = () => {
                         )}
                       </td>
                       <td className="px-4 py-2.5 text-center">
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            openDetailModal(inv);
-                          }}
-                          className="rounded-[8px] bg-[var(--color-surface-subtle)] border border-[var(--color-border)] px-2.5 py-1 text-[11px] font-semibold text-[var(--color-text)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-accent)] transition-colors cursor-pointer"
-                        >
-                          View / Actions
-                        </button>
+                        <div className="flex items-center justify-center gap-1.5">
+                          {inv.module_key === "quotation" && inv.status !== "converted" && inv.status !== "cancelled" ? (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                navigate(`/pos?convertQuotation=${inv.id}`);
+                              }}
+                              className="rounded-[8px] bg-[var(--color-accent)] border border-[var(--color-accent)] px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-[var(--color-accent-hover)] transition-colors cursor-pointer"
+                              title="Load this quotation into POS and convert to a bill"
+                            >
+                              Convert
+                            </button>
+                          ) : null}
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openDetailModal(inv);
+                            }}
+                            className="rounded-[8px] bg-[var(--color-surface-subtle)] border border-[var(--color-border)] px-2.5 py-1 text-[11px] font-semibold text-[var(--color-text)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-accent)] transition-colors cursor-pointer"
+                          >
+                            View / Actions
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   );
@@ -1586,11 +1668,23 @@ export const BillsPage: React.FC = () => {
                 <Receipt className="h-5 w-5 text-[var(--color-accent)]" />
                 <div>
                   <h3 className="text-sm font-bold text-[var(--color-text)] flex items-center gap-2">
-                    <span className="font-mono">Tax Invoice: {selectedInvoice.invoice_number}</span>
+                    <span className="font-mono">
+                      {selectedInvoice.module_key === "quotation" ? "Quotation" : "Tax Invoice"}: {selectedInvoice.invoice_number}
+                    </span>
                     {selectedInvoice.status === "cancelled" ? (
                       <span className="rounded-full bg-[var(--color-danger-bg)] border border-[var(--color-danger-border)] px-2 py-0.5 text-[10px] font-bold text-[var(--color-danger-text)]">
                         Cancelled
                       </span>
+                    ) : selectedInvoice.module_key === "quotation" ? (
+                      selectedInvoice.status === "converted" ? (
+                        <span className="rounded-full bg-[var(--color-accent-soft)] border border-[var(--color-accent-soft)] px-2 py-0.5 text-[10px] font-bold text-[var(--color-accent)]">
+                          Converted to Bill
+                        </span>
+                      ) : (
+                        <span className="rounded-full bg-amber-100 border border-amber-200 px-2 py-0.5 text-[10px] font-bold text-amber-800">
+                          Open Quote
+                        </span>
+                      )
                     ) : (
                       <span className="rounded-full bg-[var(--color-accent-soft)] border border-[var(--color-accent-soft)] px-2 py-0.5 text-[10px] font-bold text-[var(--color-accent)]">
                         Issued
@@ -1720,7 +1814,7 @@ export const BillsPage: React.FC = () => {
                   {(() => {
                     const totalPaid = sumCollectedTenders(selectedInvoice);
                     const balDue = Math.max(0, Math.round((selectedInvoice.grand_total - totalPaid + Number.EPSILON) * 100) / 100);
-                    if (selectedInvoice.status !== "cancelled" && balDue > 0) {
+                    if (selectedInvoice.module_key !== "quotation" && selectedInvoice.status !== "cancelled" && balDue > 0) {
                       return (
                         <button
                           type="button"
@@ -1822,6 +1916,88 @@ export const BillsPage: React.FC = () => {
                 </div>
               </div>
 
+              {/* Statutory compliance references (IRN / e-way bill) */}
+              {hasComplianceData(selectedInvoice) && (
+                <div className="rounded-[10px] border border-[var(--color-border)] bg-[var(--color-surface)] p-3">
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-1.5 font-bold text-[var(--color-text)] text-xs uppercase tracking-wider">
+                      <CheckCircle className="h-4 w-4 text-[var(--color-accent)]" />
+                      <span>Statutory References</span>
+                    </div>
+                    <span className="text-[10px] text-[var(--color-text-muted)]">
+                      Central compliance registry
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-[11px]">
+                    <div className="rounded border border-[var(--color-border)] bg-[var(--color-canvas)] p-2.5 space-y-1">
+                      <div className="flex items-center justify-between">
+                        <span className="font-bold text-[var(--color-text)] uppercase tracking-wider text-[10px]">
+                          E-Invoice (IRN)
+                        </span>
+                        <span
+                          className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${complianceStatusClass(
+                            selectedInvoice.irn_status_effective || selectedInvoice.irn_status || (selectedInvoice.irn_applicable ? "pending" : "not_applicable")
+                          )}`}
+                        >
+                          {(selectedInvoice.irn_status_effective || selectedInvoice.irn_status || (selectedInvoice.irn_applicable ? "pending" : "not_applicable")).replace(/_/g, " ")}
+                        </span>
+                      </div>
+                      {selectedInvoice.irn ? (
+                        <>
+                          <p className="font-mono break-all text-[var(--color-text)]">{selectedInvoice.irn}</p>
+                          <p className="text-[var(--color-text-muted)]">
+                            Ack No: <span className="font-mono">{selectedInvoice.irn_ack_no || "—"}</span>
+                            {" · "}Ack Date:{" "}
+                            <span className="font-mono">{formatComplianceDate(selectedInvoice.irn_ack_date)}</span>
+                          </p>
+                          {selectedInvoice.irn_cancel_reason && (
+                            <p className="text-[var(--color-danger-text)]">
+                              Cancelled: {selectedInvoice.irn_cancel_reason}
+                            </p>
+                          )}
+                        </>
+                      ) : (
+                        <p className="text-[var(--color-text-muted)]">
+                          {selectedInvoice.irn_applicable
+                            ? "IRN not recorded yet — generate it on the government portal and record it in the admin panel."
+                            : "Not applicable for this invoice."}
+                        </p>
+                      )}
+                    </div>
+                    <div className="rounded border border-[var(--color-border)] bg-[var(--color-canvas)] p-2.5 space-y-1">
+                      <div className="flex items-center justify-between">
+                        <span className="font-bold text-[var(--color-text)] uppercase tracking-wider text-[10px]">
+                          E-Way Bill
+                        </span>
+                        <span
+                          className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${complianceStatusClass(
+                            selectedInvoice.ewb_status_effective || selectedInvoice.ewb_status || (selectedInvoice.ewb_applicable ? "pending" : "not_applicable")
+                          )}`}
+                        >
+                          {(selectedInvoice.ewb_status_effective || selectedInvoice.ewb_status || (selectedInvoice.ewb_applicable ? "pending" : "not_applicable")).replace(/_/g, " ")}
+                        </span>
+                      </div>
+                      {selectedInvoice.ewb_number ? (
+                        <>
+                          <p className="font-mono font-bold text-[var(--color-text)]">{selectedInvoice.ewb_number}</p>
+                          <p className="text-[var(--color-text-muted)]">
+                            Generated: <span className="font-mono">{formatComplianceDate(selectedInvoice.ewb_date)}</span>
+                            {" · "}Valid Until:{" "}
+                            <span className="font-mono">{formatComplianceDate(selectedInvoice.ewb_valid_until)}</span>
+                          </p>
+                        </>
+                      ) : (
+                        <p className="text-[var(--color-text-muted)]">
+                          {selectedInvoice.ewb_applicable
+                            ? "E-way bill not recorded yet."
+                            : "Not applicable for this invoice."}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {/* Audit History Log */}
               {selectedInvoiceAudit.length > 0 && (
                 <div className="rounded-[10px] border border-[var(--color-border)] bg-[var(--color-surface)] p-3">
@@ -1885,7 +2061,21 @@ export const BillsPage: React.FC = () => {
                   <span>Duplicate as New</span>
                 </button>
 
-                {selectedInvoice.status !== "cancelled" && (
+                {selectedInvoice.module_key === "quotation" ? (
+                  selectedInvoice.status !== "converted" && selectedInvoice.status !== "cancelled" ? (
+                    <button
+                      onClick={() => {
+                        setIsDetailModalOpen(false);
+                        navigate(`/pos?convertQuotation=${selectedInvoice.id}`);
+                      }}
+                      className="flex items-center gap-1 rounded-[10px] bg-[var(--color-accent)] border border-[var(--color-accent)] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[var(--color-accent-hover)] cursor-pointer transition-colors"
+                      title="Load into POS cart and convert this quotation into a tax invoice"
+                    >
+                      <FileText className="h-3.5 w-3.5" />
+                      <span>Convert to Bill</span>
+                    </button>
+                  ) : null
+                ) : selectedInvoice.status !== "cancelled" ? (
                   <>
                     <button
                       onClick={() => {
@@ -1913,7 +2103,7 @@ export const BillsPage: React.FC = () => {
                       <span>Cancel Bill</span>
                     </button>
                   </>
-                )}
+                ) : null}
               </div>
             </div>
           </div>

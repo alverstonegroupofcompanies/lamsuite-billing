@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Models\AuditLog;
 use App\Models\Counter;
+use App\Models\Device;
 use App\Models\Store;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -17,6 +18,8 @@ class IamAndDeviceRegistrationTest extends TestCase
     private Store $store;
     private User $ownerUser;
     private User $staffUser;
+    private Device $device;
+    private string $deviceToken = 'lsd_test_device_token';
 
     protected function setUp(): void
     {
@@ -51,6 +54,26 @@ class IamAndDeviceRegistrationTest extends TestCase
             'enabled_menus' => ['pos', 'bills'],
             'max_failed_logins' => 5,
         ]);
+
+        $this->device = Device::create([
+            'store_id' => $this->store->id,
+            'device_name' => 'Counter 01',
+            'device_uuid' => 'uuid-test-counter-01',
+            'device_token' => $this->deviceToken,
+            'device_token_hash' => hash('sha256', $this->deviceToken),
+            'registered_via' => 'test',
+            'status' => 'active',
+            'approved_at' => now(),
+        ]);
+    }
+
+    private function deviceHeaders(?int $storeId = null): array
+    {
+        return [
+            'X-Device-Token' => $this->deviceToken,
+            'X-Device-UUID' => $this->device->device_uuid,
+            'X-Store-Id' => (string) ($storeId ?? $this->store->id),
+        ];
     }
 
     public function test_remote_device_enrollment_generates_pairing_code_and_awaits_approval(): void
@@ -123,7 +146,7 @@ class IamAndDeviceRegistrationTest extends TestCase
     public function test_staff_login_with_pin_and_lockout_cooldown(): void
     {
         // 1. Successful PIN login
-        $res = $this->postJson('/api/staff/login', [
+        $res = $this->withHeaders($this->deviceHeaders())->postJson('/api/staff/login', [
             'store_id' => $this->store->id,
             'username' => 'alice',
             'pin' => '4321',
@@ -167,7 +190,7 @@ class IamAndDeviceRegistrationTest extends TestCase
         $blockedRes->assertStatus(423);
 
         // 3. Admin unlocks staff member
-        $unlockRes = $this->postJson('/api/staff/admin-unlock', [
+        $unlockRes = $this->withHeaders($this->deviceHeaders())->postJson('/api/staff/admin-unlock', [
             'user_id' => $this->staffUser->id,
             'admin_username' => 'owner',
             'admin_password' => 'owner123',
@@ -186,7 +209,7 @@ class IamAndDeviceRegistrationTest extends TestCase
 
     public function test_staff_offline_cache_provides_salted_hashes(): void
     {
-        $res = $this->getJson("/api/staff/offline-cache?store_id={$this->store->id}");
+        $res = $this->withHeaders($this->deviceHeaders())->getJson("/api/staff/offline-cache?store_id={$this->store->id}");
         $res->assertStatus(200)
             ->assertJson(['success' => true]);
 

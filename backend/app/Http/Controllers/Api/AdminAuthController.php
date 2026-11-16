@@ -212,6 +212,7 @@ class AdminAuthController
                 'idle_timeout_minutes' => $user->idle_timeout_minutes,
             ],
             'store' => $user->store ?: Store::first(),
+            'can_view_all_stores' => $user->canViewAllStores(),
             'is_impersonated' => $isImpersonated,
             'impersonated_by' => $impersonator ? $impersonator->name : null,
             'stores' => ($user->isSuperAdmin() || $user->role === 'support')

@@ -7,7 +7,9 @@ interface AuthContextType {
   role: UserRole | null;
   stores: Store[];
   activeStore: Store | null;
-  setActiveStore: (store: Store) => void;
+  isAllStores: boolean;
+  canViewAllStores: boolean;
+  setActiveStore: (store: Store | null) => void;
   token: string | null;
   isLoading: boolean;
   isImpersonating: boolean;
@@ -26,6 +28,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [user, setUser] = useState<User | null>(null);
   const [stores, setStores] = useState<Store[]>([]);
   const [activeStore, setActiveStoreState] = useState<Store | null>(null);
+  const [isAllStores, setIsAllStores] = useState<boolean>(false);
+  const [canViewAllStores, setCanViewAllStores] = useState<boolean>(false);
   const [token, setToken] = useState<string | null>(() => localStorage.getItem("admin_token"));
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isImpersonating, setIsImpersonating] = useState<boolean>(false);
@@ -42,20 +46,30 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         user: User;
         store: Store | null;
         stores: Store[];
+        can_view_all_stores: boolean;
         is_impersonated: boolean;
         impersonated_by: string | null;
       }>("/admin/me");
 
       setUser(res.user);
       setStores(res.stores || []);
+      setCanViewAllStores(res.can_view_all_stores || false);
       setIsImpersonating(res.is_impersonated || false);
       setImpersonatedBy(res.impersonated_by || null);
 
-      // Select active store
+      // Restore consolidated scope when it was explicitly selected and is still permitted
       const savedStoreId = localStorage.getItem("admin_store_id");
+      if (savedStoreId === "all" && res.can_view_all_stores) {
+        setActiveStoreState(null);
+        setIsAllStores(true);
+        return;
+      }
+
+      // Select active store
       const found = res.stores?.find((s) => String(s.id) === savedStoreId) || res.store || res.stores?.[0] || null;
       if (found) {
         setActiveStoreState(found);
+        setIsAllStores(false);
         localStorage.setItem("admin_store_id", String(found.id));
       }
     } catch (err) {
@@ -82,9 +96,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return () => window.removeEventListener("session_expired", handleSessionExpired);
   }, []);
 
-  const setActiveStore = (store: Store) => {
-    setActiveStoreState(store);
-    localStorage.setItem("admin_store_id", String(store.id));
+  const setActiveStore = (store: Store | null) => {
+    if (store) {
+      setActiveStoreState(store);
+      setIsAllStores(false);
+      localStorage.setItem("admin_store_id", String(store.id));
+    } else {
+      setActiveStoreState(null);
+      setIsAllStores(true);
+      localStorage.setItem("admin_store_id", "all");
+    }
     window.location.reload(); // Refresh views with new scoped store
   };
 
@@ -107,6 +128,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setUser(res.user || null);
       if (res.store) {
         setActiveStoreState(res.store);
+        setIsAllStores(false);
         localStorage.setItem("admin_store_id", String(res.store.id));
       }
       if (res.all_stores) {
@@ -127,6 +149,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     localStorage.removeItem("impersonator_id");
     setToken(null);
     setUser(null);
+    setIsAllStores(false);
+    setCanViewAllStores(false);
     setIsImpersonating(false);
     setImpersonatedBy(null);
   };
@@ -144,9 +168,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     localStorage.setItem("impersonator_id", String(res.impersonator_id));
     if (res.store) {
       localStorage.setItem("admin_store_id", String(res.store.id));
+    } else {
+      localStorage.removeItem("admin_store_id");
     }
     setToken(res.token);
     setUser(res.user);
+    setIsAllStores(false);
     setIsImpersonating(true);
     setImpersonatedBy(res.impersonated_by);
     window.location.reload();
@@ -199,6 +226,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         role: user?.role || null,
         stores,
         activeStore,
+        isAllStores,
+        canViewAllStores,
         setActiveStore,
         token,
         isLoading,

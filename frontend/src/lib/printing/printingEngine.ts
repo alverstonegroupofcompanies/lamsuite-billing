@@ -20,6 +20,7 @@ export interface InvoicePrintData {
   invoice_number: string;
   invoice_date: string;
   invoice_time?: string;
+  document_title?: string; // Defaults to "TAX INVOICE"; quotations use "QUOTATION"
   store_name: string;
   store_address?: string;
   store_phone?: string;
@@ -78,6 +79,11 @@ export interface InvoicePrintData {
   grand_total: number;
   amount_in_words?: string;
   upi_vpa?: string;
+  irn?: string;
+  irn_ack_no?: string;
+  irn_ack_date?: string;
+  ewb_number?: string;
+  ewb_valid_until?: string;
   terms_and_conditions?: string;
   jurisdiction_note?: string;
   footer_note?: string;
@@ -1027,7 +1033,7 @@ export class PrintingEngine {
                   <div>2. Refrigerated medicines are strictly non-returnable.</div>
                   <div>3. ${data.jurisdiction_note || "Subject to local jurisdiction."}</div>
                 </div>
-                <div class="terms-brand">${data.footer_note || "Computer Generated Tax Invoice • LamSuite POS"}</div>
+                <div class="terms-brand">${data.footer_note || (data.document_title ? `Computer Generated ${data.document_title} • LamSuite POS` : "Computer Generated Tax Invoice • LamSuite POS")}</div>
               </div>
             </div>
 
@@ -1041,6 +1047,17 @@ export class PrintingEngine {
             </div>
           </div>
         </div>
+
+        ${
+          data.irn || data.ewb_number
+            ? `
+        <div style="margin-top: 8px; border: 1px solid #cbd5e1; border-radius: 4px; padding: 5px 8px; font-size: 8.5px; color: #334155; line-height: 1.45;">
+          <span style="font-weight: 700; text-transform: uppercase; color: #475569;">Statutory References</span>
+          ${data.irn ? `<div>IRN: <span style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace;">${data.irn}</span>${data.irn_ack_no ? ` &middot; Ack No: ${data.irn_ack_no}` : ""}${data.irn_ack_date ? ` &middot; Ack Date: ${data.irn_ack_date}` : ""}</div>` : ""}
+          ${data.ewb_number ? `<div>E-Way Bill: <strong>${data.ewb_number}</strong>${data.ewb_valid_until ? ` &middot; Valid Until: ${data.ewb_valid_until}` : ""}</div>` : ""}
+        </div>`
+            : ""
+        }
     `;
 
     const pagesHtml = chunks
@@ -1087,7 +1104,7 @@ export class PrintingEngine {
           </div>`
               : ""
           }
-          <div class="tax-badge">TAX INVOICE</div>
+          <div class="tax-badge">${data.document_title || "TAX INVOICE"}</div>
           ${copyMarker ? `<div class="copy-marker">[ ${copyMarker} ]</div>` : ""}
           ${isDuplicate ? `<div class="duplicate-watermark">DUPLICATE</div>` : ""}
         </div>
@@ -1111,7 +1128,7 @@ export class PrintingEngine {
         <div class="running-header">
           <div>
             <span class="running-store">${data.store_name}</span>
-            <span class="running-inv">Tax Invoice #${data.invoice_number}</span>
+            <span class="running-inv">${data.document_title || "Tax Invoice"} #${data.invoice_number}</span>
             <span class="running-date">Date: ${data.invoice_date}</span>
           </div>
           <div class="running-page">Page ${pageNum} of ${totalPages}</div>
@@ -1151,7 +1168,7 @@ export class PrintingEngine {
 
         <div class="spacer-fill"></div>
         <div class="page-footer">
-          <div>Computer Generated Tax Invoice • ${data.store_name}</div>
+          <div>${data.document_title ? `Computer Generated ${data.document_title}` : "Computer Generated Tax Invoice"} • ${data.store_name}</div>
           <div class="page-num">Page ${pageNum} of ${totalPages}</div>
         </div>
       </div>`;
@@ -1164,7 +1181,7 @@ export class PrintingEngine {
         <div class="running-header">
           <div>
             <span class="running-store">${data.store_name}</span>
-            <span class="running-inv">Tax Invoice #${data.invoice_number}</span>
+            <span class="running-inv">${data.document_title || "Tax Invoice"} #${data.invoice_number}</span>
             <span class="running-date">Date: ${data.invoice_date}</span>
           </div>
           <div class="running-page">Page ${totalPages} of ${totalPages}</div>
@@ -1174,7 +1191,7 @@ export class PrintingEngine {
 
         <div class="spacer-fill"></div>
         <div class="page-footer">
-          <div>Computer Generated Tax Invoice • ${data.store_name}</div>
+          <div>${data.document_title ? `Computer Generated ${data.document_title}` : "Computer Generated Tax Invoice"} • ${data.store_name}</div>
           <div class="page-num">Page ${totalPages} of ${totalPages}</div>
         </div>
       </div>`
@@ -1184,7 +1201,7 @@ export class PrintingEngine {
 <html>
 <head>
   <meta charset="utf-8" />
-  <title>Tax Invoice - ${data.invoice_number}</title>
+  <title>${data.document_title || "Tax Invoice"} - ${data.invoice_number}</title>
   <style>
     @page {
       size: A4 portrait;
@@ -1452,7 +1469,7 @@ export class PrintingEngine {
     ${showLicenses && data.drug_license_numbers?.length ? `<div class="center" style="font-size: 8px;">DL: ${data.drug_license_numbers.join(", ")}</div>` : ""}
 
     <div class="divider"></div>
-    <div class="center bold" style="font-size: ${is58 ? "10px" : "11px"}; letter-spacing: 0.5px;">*** TAX INVOICE ***</div>
+    <div class="center bold" style="font-size: ${is58 ? "10px" : "11px"}; letter-spacing: 0.5px;">*** ${data.document_title || "TAX INVOICE"} ***</div>
     ${copyMarker ? `<div class="center bold" style="font-size: 8.5px; color: #475569;">[ ${copyMarker} ]</div>` : ""}
     <div class="divider"></div>
 
@@ -1520,6 +1537,15 @@ export class PrintingEngine {
     <div class="divider"></div>
     ` : ""}
 
+    ${data.irn || data.ewb_number ? `
+    <div style="font-size: ${is58 ? "7.5px" : "8px"}; color: #334155; margin: 4px 0; word-break: break-all;">
+      ${data.irn ? `<div>IRN: ${data.irn}</div>` : ""}
+      ${data.irn_ack_no ? `<div>Ack No: ${data.irn_ack_no}${data.irn_ack_date ? ` (${data.irn_ack_date})` : ""}</div>` : ""}
+      ${data.ewb_number ? `<div>E-Way Bill: ${data.ewb_number}${data.ewb_valid_until ? ` | Valid till ${data.ewb_valid_until}` : ""}</div>` : ""}
+    </div>
+    <div class="divider"></div>
+    ` : ""}
+
     ${showTerms ? `
     <div class="center" style="font-size: 8px; color: #475569; margin-top: 6px;">
       <div>${data.terms_and_conditions || "Medicines strictly non-returnable without cash memo."}</div>
@@ -1577,7 +1603,7 @@ export class PrintingEngine {
 <html>
 <head>
   <meta charset="utf-8" />
-  <title>Tax Invoice (Half A4) - ${data.invoice_number}</title>
+  <title>${data.document_title || "Tax Invoice"} (Half A4) - ${data.invoice_number}</title>
   <style>
     @media print {
       @page { size: A5 landscape; margin: 5mm; }
@@ -1609,7 +1635,7 @@ export class PrintingEngine {
       ${showLicenses && data.store_gstin ? `<div style="font-size: 8px; font-weight: 700;">GSTIN: ${data.store_gstin}</div>` : ""}
     </div>
     <div style="text-align: right;">
-      <div style="font-size: 11px; font-weight: 800; color: #1d4ed8;">TAX INVOICE</div>
+      <div style="font-size: 11px; font-weight: 800; color: #1d4ed8;">${data.document_title || "TAX INVOICE"}</div>
       ${copyMarker ? `<div style="font-size: 8px; color: #64748b;">[ ${copyMarker} ]</div>` : ""}
       <div style="font-weight: 700;">#${data.invoice_number}</div>
       <div style="font-size: 8px;">Date: ${data.invoice_date}</div>
@@ -1657,6 +1683,12 @@ export class PrintingEngine {
       </div>
     </div>
   </div>
+
+  ${data.irn || data.ewb_number ? `
+  <div style="margin-top: 4px; border-top: 1px solid #cbd5e1; padding-top: 3px; font-size: 7.5px; color: #334155; word-break: break-all;">
+    ${data.irn ? `<div>IRN: ${data.irn}${data.irn_ack_no ? ` | Ack: ${data.irn_ack_no}` : ""}${data.irn_ack_date ? ` (${data.irn_ack_date})` : ""}</div>` : ""}
+    ${data.ewb_number ? `<div>E-Way Bill: ${data.ewb_number}${data.ewb_valid_until ? ` | Valid till ${data.ewb_valid_until}` : ""}</div>` : ""}
+  </div>` : ""}
 </body>
 </html>`;
   }
@@ -1721,7 +1753,7 @@ export class PrintingEngine {
     doc.setFont("Roboto", "bold");
     doc.setFontSize(10);
     doc.setTextColor(30, 41, 59);
-    doc.text("TAX INVOICE", centerX, 29, { align: "center" });
+    doc.text(data.document_title || "TAX INVOICE", centerX, 29, { align: "center" });
 
     // Metadata Grid (Customer / Patient / Doctor / Invoice Info)
     const metaBoxY = 31.5;
@@ -2107,7 +2139,7 @@ export class PrintingEngine {
 
     doc.setFontSize(6);
     doc.setTextColor(148, 163, 184);
-    doc.text(data.footer_note || "Computer Generated Tax Invoice • LamSuite POS", colLeftX + 3, row2Y + 21);
+    doc.text(data.footer_note || (data.document_title ? `Computer Generated ${data.document_title} • LamSuite POS` : "Computer Generated Tax Invoice • LamSuite POS"), colLeftX + 3, row2Y + 21);
 
     // Bottom-Right: Authorised Signatory Box (X: colRightX = 123mm, Width: colRightWidth = 75mm)
     doc.setFillColor(248, 250, 252);
@@ -2136,7 +2168,7 @@ export class PrintingEngine {
       doc.setFontSize(7);
       doc.setTextColor(148, 163, 184);
       doc.text(
-        `Page ${p} of ${totalPages}  •  Computer Generated Statutory Tax Invoice  •  LamSuite POS`,
+        `Page ${p} of ${totalPages}  •  ${data.document_title ? `Computer Generated ${data.document_title}` : "Computer Generated Statutory Tax Invoice"}  •  LamSuite POS`,
         centerX,
         292,
         { align: "center" }
@@ -3843,7 +3875,7 @@ export class PrintingEngine {
 
     const divider = "-".repeat(maxCols);
     pushStr(`${divider}\n`);
-    pushStr(`*** TAX INVOICE ***\n`);
+    pushStr(`*** ${data.document_title || "TAX INVOICE"} ***\n`);
     pushStr(`${divider}\n`);
 
     // Left Align: ESC a 0

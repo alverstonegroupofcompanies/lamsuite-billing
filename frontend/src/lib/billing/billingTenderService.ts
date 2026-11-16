@@ -21,6 +21,7 @@ export interface PaymentTenderLine {
     cheque_date?: string;
     payer_vpa?: string;
     notes?: string;
+    gift_card_code?: string;
   };
 }
 
@@ -241,7 +242,13 @@ export class BillingTenderService {
   async validatePaymentLines(
     grandTotal: number,
     payments: PaymentTenderLine[],
-    customer: { id?: string; name?: string; credit_limit?: number; current_balance?: number } | null,
+    customer: {
+      id?: string;
+      name?: string;
+      credit_limit?: number;
+      current_balance?: number;
+      outstanding_balance?: number;
+    } | null,
     settings?: PaymentSettingsConfig
   ): Promise<{
     valid: boolean;
@@ -272,6 +279,41 @@ export class BillingTenderService {
       };
     }
 
+    // Credit rules apply to the aggregate credit portion so that splitting
+    // the udhari across several tender lines cannot bypass the limit check.
+    if (calc.creditAmount > 0) {
+      const firstCreditIdx = payments.findIndex(
+        (p) => ["CREDIT", "UDHARI"].includes((p.mode || "").trim().toUpperCase())
+      );
+      const isWalkIn = !customer?.id || !customer?.name || customer.name.toLowerCase().includes("walk-in");
+      if (isWalkIn) {
+        return {
+          valid: false,
+          error: "Credit (Udhari) sale is not allowed for Walk-in Customers. Please select a registered customer.",
+          focusIndex: firstCreditIdx >= 0 ? firstCreditIdx : undefined,
+        };
+      }
+
+      const creditLimit = Number(customer?.credit_limit) || 0;
+      if (creditLimit > 0) {
+        // Local party records store the ledger balance in outstanding_balance
+        // (server current_balance is mapped into it on sync), so fall back to it.
+        const currentBal = Number(customer?.current_balance ?? customer?.outstanding_balance) || 0;
+        const newBal = currentBal + calc.creditAmount;
+        if (newBal > creditLimit) {
+          const msg = `Credit limit exceeded! Customer's limit is ₹${creditLimit.toFixed(2)}, new balance would be ₹${newBal.toFixed(2)}.`;
+          const policy = settings?.creditPolicy;
+          if (policy === "allow_with_limit") {
+            // cashier override: proceed silently
+          } else if (policy === "block_on_exceed" || (policy as string) === "block") {
+            return { valid: false, error: msg, focusIndex: firstCreditIdx >= 0 ? firstCreditIdx : undefined };
+          } else {
+            warning = msg;
+          }
+        }
+      }
+    }
+
     // Verify each line's amount and references
     for (let i = 0; i < payments.length; i++) {
       const line = payments[i];
@@ -283,34 +325,6 @@ export class BillingTenderService {
           focusIndex: i,
           focusField: "amount",
         };
-      }
-
-      const upperMode = (line.mode || "").trim().toUpperCase();
-
-      // Credit Rules
-      if (upperMode === "CREDIT" || upperMode === "UDHARI") {
-        const isWalkIn = !customer?.id || !customer?.name || customer.name.toLowerCase().includes("walk-in");
-        if (isWalkIn) {
-          return {
-            valid: false,
-            error: "Credit (Udhari) sale is not allowed for Walk-in Customers. Please select a registered customer.",
-            focusIndex: i,
-          };
-        }
-
-        const creditLimit = Number(customer?.credit_limit) || 0;
-        if (creditLimit > 0) {
-          const currentBal = Number(customer?.current_balance) || 0;
-          const newBal = currentBal + amt;
-          if (newBal > creditLimit) {
-            const msg = `Credit limit exceeded! Customer's limit is ₹${creditLimit.toFixed(2)}, new balance would be ₹${newBal.toFixed(2)}.`;
-            if (settings?.creditPolicy === "block_on_exceed" || (settings?.creditPolicy as string) === "block") {
-              return { valid: false, error: msg, focusIndex: i };
-            } else {
-              warning = msg;
-            }
-          }
-        }
       }
 
       // Mode configuration & Reference rules

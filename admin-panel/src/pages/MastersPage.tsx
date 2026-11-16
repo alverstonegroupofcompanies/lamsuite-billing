@@ -5,6 +5,7 @@ import { formatINR, formatIndianNumber, formatDate } from "../utils/formatters";
 import { useAuth } from "../context/AuthContext";
 import { ConflictModal } from "../components/ConflictModal";
 import { ConfirmModal } from "../components/ConfirmModal";
+import { CatalogPublishModal } from "../components/masters/CatalogPublishModal";
 import {
   Package,
   Layers,
@@ -30,6 +31,7 @@ import {
   CheckCircle,
   FileSpreadsheet,
   SlidersHorizontal,
+  Share2,
 } from "lucide-react";
 
 export type MasterTab =
@@ -67,6 +69,7 @@ export const MastersPage: React.FC = () => {
   const [productPerPage, setProductPerPage] = useState(50);
   const [selectedProductIds, setSelectedProductIds] = useState<number[]>([]);
   const [isProductModalOpen, setIsProductModalOpen] = useState(false);
+  const [publishingProduct, setPublishingProduct] = useState<Product | null>(null);
   const [editingProduct, setEditingProduct] = useState<Partial<Product> | null>(null);
   const [initialBatchData, setInitialBatchData] = useState<{ batch_no: string; expiry_date: string; stock_qty: number }>({
     batch_no: "B1",
@@ -990,6 +993,15 @@ export const MastersPage: React.FC = () => {
                           >
                             <Edit2 className="w-3.5 h-3.5" />
                           </button>
+                          {hasPermission("masters", "create") && (
+                            <button
+                              onClick={() => setPublishingProduct(p)}
+                              className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-950/40 rounded-lg"
+                              title="Publish to stores"
+                            >
+                              <Share2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
                           {hasPermission("masters", "delete") && (
                             <button
                               onClick={() => confirmDeleteProduct(p)}
@@ -2622,6 +2634,13 @@ export const MastersPage: React.FC = () => {
             </div>
           </div>
         </div>
+      )}
+
+      {/* ---------------------------------------------------------------------------------- */}
+      {/* CATALOG PUBLISH MODAL                                                              */}
+      {/* ---------------------------------------------------------------------------------- */}
+      {publishingProduct && (
+        <CatalogPublishModal product={publishingProduct} onClose={() => setPublishingProduct(null)} />
       )}
 
       {/* ---------------------------------------------------------------------------------- */}

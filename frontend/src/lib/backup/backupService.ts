@@ -30,6 +30,10 @@ export class BackupService {
     "sync_queue",
   ];
 
+  getSupportedTables(): string[] {
+    return [...this.backupTables];
+  }
+
   async createBackupSnapshot(appVersion = "2.0.0"): Promise<BackupPackage> {
     const data: Record<string, Record<string, unknown>[]> = {};
     const manifest: BackupManifest[] = [];
@@ -62,6 +66,7 @@ export class BackupService {
     success: boolean;
     restoredTables: string[];
     totalRecordsRestored: number;
+    skippedTables: string[];
   }> {
     if (!snapshot || !snapshot.data || !Array.isArray(snapshot.manifest)) {
       throw new Error("Invalid backup format: missing manifest or data payload");
@@ -75,24 +80,39 @@ export class BackupService {
     }
 
     const restoredTables: string[] = [];
+    const skippedTables: string[] = [];
     let totalRecordsRestored = 0;
 
     for (const [table, records] of Object.entries(snapshot.data)) {
       if (!Array.isArray(records)) continue;
-
-      for (const rec of records) {
-        const id = (rec.id as string) || (rec.code as string) || `rec_${Date.now()}`;
-        await sqliteStorage.insertRecord(table, id, rec);
-        totalRecordsRestored += 1;
+      if (!this.backupTables.includes(table)) {
+        skippedTables.push(table);
+        continue;
       }
 
+      const items: Array<{ id: string; record: Record<string, unknown> }> = [];
+      for (const rec of records) {
+        if (!rec || typeof rec !== "object" || Array.isArray(rec)) {
+          throw new Error(`Invalid backup record in table "${table}"`);
+        }
+        const id = (rec.id as string) || (rec.code as string) || `rec_${Date.now()}`;
+        items.push({ id: String(id), record: rec });
+      }
+
+      await sqliteStorage.insertBatch(table, items);
+      totalRecordsRestored += items.length;
       restoredTables.push(table);
+    }
+
+    if (restoredTables.length === 0) {
+      throw new Error("Backup contains no restorable tables");
     }
 
     return {
       success: true,
       restoredTables,
       totalRecordsRestored,
+      skippedTables,
     };
   }
 

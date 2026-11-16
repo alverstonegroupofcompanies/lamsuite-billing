@@ -3,18 +3,34 @@
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\AdminAuthController;
+use App\Http\Controllers\Api\PasswordResetController;
 use App\Http\Controllers\Api\AdminDashboardController;
 use App\Http\Controllers\Api\AdminStoreController;
 use App\Http\Controllers\Api\AdminDeviceController;
 use App\Http\Controllers\Api\AdminFeatureController;
 use App\Http\Controllers\Api\AdminUserController;
 use App\Http\Controllers\Api\AdminMasterController;
+use App\Http\Controllers\Api\AdminCatalogController;
 use App\Http\Controllers\Api\AdminTransactionController;
+use App\Http\Controllers\Api\AdminDayCloseController;
 use App\Http\Controllers\Api\InvoiceApprovalController;
 use App\Http\Controllers\Api\AdminInventoryController;
 use App\Http\Controllers\Api\AdminReportController;
 use App\Http\Controllers\Api\AdminSyncController;
 use App\Http\Controllers\Api\AdminSettingController;
+use App\Http\Controllers\Api\AdminBackupController;
+use App\Http\Controllers\Api\AdminWebhookController;
+use App\Http\Controllers\Api\AdminGiftCardController;
+use App\Http\Controllers\Api\AdminSettlementController;
+use App\Http\Controllers\Api\AdminComplianceController;
+use App\Http\Controllers\Api\AdminPriceListController;
+use App\Http\Controllers\Api\AdminSalesOrderController;
+use App\Http\Controllers\Api\AdminLoyaltyController;
+use App\Http\Controllers\Api\AdminAccountingExportController;
+use App\Http\Controllers\Api\AdminGstWorkingPaperController;
+use App\Http\Controllers\Api\AdminPortalController;
+use App\Http\Controllers\Api\PortalController;
+use App\Http\Controllers\Api\PaymentIntentController;
 use App\Http\Controllers\Api\AdminAuditController;
 use App\Http\Controllers\Api\AdminNotificationController;
 use App\Http\Controllers\Api\StoreController;
@@ -43,6 +59,8 @@ use App\Http\Controllers\Api\UserPreferenceController;
 */
 Route::post('/login', [AdminAuthController::class, 'login']);
 Route::post('/auth/login', [AdminAuthController::class, 'login']);
+Route::post('/auth/forgot-password', [PasswordResetController::class, 'forgot'])->middleware('throttle:6,1');
+Route::post('/auth/reset-password', [PasswordResetController::class, 'reset'])->middleware('throttle:6,1');
 Route::post('/devices/register', [AuthController::class, 'registerDevice']);
 Route::post('/devices/register-owner', [AuthController::class, 'registerDeviceWithOwner']);
 Route::match(['get', 'post'], '/devices/validate', [AuthController::class, 'validateToken']);
@@ -55,20 +73,25 @@ Route::get('/branches', [AuthController::class, 'branches']);
 Route::get('/license/check', [AuthController::class, 'checkLicense']);
 
 // Staff Terminal Authentication & Offline Hash Cache
-Route::post('/staff/login', [StaffAuthController::class, 'login']);
-Route::get('/staff/offline-cache', [StaffAuthController::class, 'offlineCache']);
-Route::post('/staff/admin-unlock', [StaffAuthController::class, 'adminUnlock']);
-Route::post('/sync/push/batch', [SyncController::class, 'pushBatch']);
-Route::post('/sync/push/invoices', [SyncController::class, 'pushInvoices']);
-Route::post('/sync/push/stock-events', [SyncController::class, 'pushStockEvents']);
-Route::post('/sync/push/purchases', [SyncController::class, 'pushPurchases']);
-Route::post('/sync/push/parties', [SyncController::class, 'pushParties']);
-Route::post('/sync/push/products', [SyncController::class, 'pushProducts']);
-Route::post('/sync/push/adjustments', [SyncController::class, 'pushAdjustments']);
-Route::post('/sync/push/transfers', [SyncController::class, 'pushTransfers']);
-Route::post('/sync/push/staff', [SyncController::class, 'pushStaff']);
-Route::post('/sync/push/security-audit', [SyncController::class, 'pushSecurityAudit']);
+Route::post('/staff/login', [StaffAuthController::class, 'login'])->middleware('throttle:30,1,staff-login');
 Route::get('/sync/pull/deltas', [SyncController::class, 'pullDeltas']);
+
+// Workstation-scoped endpoints: the paired device token decides which store
+// the request may read credentials from or write tenant data to.
+Route::middleware('device.auth')->group(function () {
+    Route::get('/staff/offline-cache', [StaffAuthController::class, 'offlineCache']);
+    Route::post('/staff/admin-unlock', [StaffAuthController::class, 'adminUnlock'])->middleware('throttle:6,1,staff-admin-unlock');
+    Route::post('/sync/push/batch', [SyncController::class, 'pushBatch']);
+    Route::post('/sync/push/invoices', [SyncController::class, 'pushInvoices']);
+    Route::post('/sync/push/stock-events', [SyncController::class, 'pushStockEvents']);
+    Route::post('/sync/push/purchases', [SyncController::class, 'pushPurchases']);
+    Route::post('/sync/push/parties', [SyncController::class, 'pushParties']);
+    Route::post('/sync/push/products', [SyncController::class, 'pushProducts']);
+    Route::post('/sync/push/adjustments', [SyncController::class, 'pushAdjustments']);
+    Route::post('/sync/push/transfers', [SyncController::class, 'pushTransfers']);
+    Route::post('/sync/push/staff', [SyncController::class, 'pushStaff']);
+    Route::post('/sync/push/security-audit', [SyncController::class, 'pushSecurityAudit']);
+});
 
 // Central Store Configuration & Sync for all Terminals & Devices
 Route::get('/settings', [AdminSettingController::class, 'index']);
@@ -76,6 +99,18 @@ Route::post('/settings', [AdminSettingController::class, 'update']);
 Route::put('/settings', [AdminSettingController::class, 'update']);
 
 // Centralized Device Session Tracking & Logged-In Devices (Item 2)
+// Customer B2B Portal (bearer portal link issued by an admin)
+Route::middleware('portal.auth')->prefix('portal')->group(function () {
+    Route::get('/me', [PortalController::class, 'me']);
+    Route::get('/invoices', [PortalController::class, 'invoices']);
+    Route::get('/invoices/{id}', [PortalController::class, 'showInvoice'])->whereNumber('id');
+    Route::get('/statement', [PortalController::class, 'statement']);
+    Route::get('/catalog', [PortalController::class, 'catalog']);
+    Route::get('/sales-orders', [PortalController::class, 'orders']);
+    Route::post('/sales-orders', [PortalController::class, 'createOrder']);
+    Route::post('/logout', [PortalController::class, 'logout']);
+});
+
 Route::get('/public-ip', [DeviceSessionController::class, 'publicIp']);
 Route::get('/network/public-ip', [DeviceSessionController::class, 'publicIp']);
 Route::get('/device-sessions', [DeviceSessionController::class, 'index']);
@@ -107,6 +142,9 @@ Route::post('/invoices/{id}/approvals/verify', [InvoiceApprovalController::class
 Route::get('/customers', [CustomerController::class, 'index']);
 Route::post('/customers', [CustomerController::class, 'store']);
 Route::get('/customers/{id}', [CustomerController::class, 'show']);
+
+// Customer-specific price list resolution for POS terminals
+Route::get('/price-lists/resolve', [AdminPriceListController::class, 'resolve']);
 
 // Electronic Dispatch & WhatsApp Gateway (OpenWA)
 Route::post('/whatsapp/send-invoice', [WhatsAppController::class, 'sendInvoice']);
@@ -163,6 +201,18 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/purchases', [PurchaseController::class, 'store']);
     Route::get('/purchases/{id}', [PurchaseController::class, 'show']);
 
+    // Sales orders taken at the counter (phone orders / delivery later)
+    Route::get('/sales-orders', [AdminSalesOrderController::class, 'index']);
+    Route::post('/sales-orders', [AdminSalesOrderController::class, 'store']);
+    Route::get('/sales-orders/{id}', [AdminSalesOrderController::class, 'show'])->whereNumber('id');
+
+    // Loyalty points & coupons at the counter
+    Route::get('/loyalty/balance', [AdminLoyaltyController::class, 'balance']);
+    Route::post('/loyalty/earn', [AdminLoyaltyController::class, 'earnPoints']);
+    Route::post('/loyalty/redeem', [AdminLoyaltyController::class, 'redeemPoints']);
+    Route::post('/coupons/validate', [AdminLoyaltyController::class, 'validateCoupon']);
+    Route::post('/coupons/redeem', [AdminLoyaltyController::class, 'redeemCoupon']);
+
     Route::post('/stock/adjustments', [StockController::class, 'recordAdjustment']);
     Route::get('/stock/transfers', [StockController::class, 'listTransfers']);
     Route::post('/stock/transfers', [StockController::class, 'dispatchTransfer']);
@@ -196,6 +246,8 @@ Route::middleware('auth:sanctum')->group(function () {
     // Payments & Returns API (MCP client parity)
     Route::post('/payments/customer', [AdminTransactionController::class, 'storeCustomerPayment']);
     Route::post('/payments/supplier', [AdminTransactionController::class, 'storeSupplierPayment']);
+    Route::get('/payments/upi-intent', [PaymentIntentController::class, 'upiIntent']);
+    Route::get('/gift-cards/lookup', [AdminGiftCardController::class, 'lookup']);
     Route::post('/returns/sales', [AdminTransactionController::class, 'storeSalesReturn']);
     Route::post('/returns/purchase', [AdminTransactionController::class, 'purchaseReturns']);
 });
@@ -282,6 +334,11 @@ Route::middleware(['auth:sanctum', 'ip.allowlist', 'scope.store'])->prefix('admi
     Route::post('/products/{id}/batches', [AdminMasterController::class, 'addBatch'])->middleware('rbac:masters,create');
     Route::post('/products/bulk-edit', [AdminMasterController::class, 'bulkEditProducts'])->middleware('rbac:masters,edit');
 
+    // Shared central catalog publishing
+    Route::get('/catalog/publications', [AdminCatalogController::class, 'publications'])->middleware('rbac:masters,view');
+    Route::post('/catalog/publish', [AdminCatalogController::class, 'publish'])->middleware('rbac:masters,create');
+    Route::post('/catalog/unpublish', [AdminCatalogController::class, 'unpublish'])->middleware('rbac:masters,edit');
+
     Route::get('/batches', [AdminMasterController::class, 'batches'])->middleware('rbac:masters,view');
     Route::put('/batches/{id}', [AdminMasterController::class, 'updateBatch'])->middleware('rbac:masters,edit');
     Route::delete('/batches/{id}', [AdminMasterController::class, 'deleteBatch'])->middleware('rbac:masters,delete');
@@ -295,6 +352,10 @@ Route::middleware(['auth:sanctum', 'ip.allowlist', 'scope.store'])->prefix('admi
     Route::post('/parties', [AdminMasterController::class, 'storeParty'])->middleware('rbac:masters,create');
     Route::put('/parties/{id}', [AdminMasterController::class, 'updateParty'])->middleware('rbac:masters,edit');
     Route::delete('/parties/{id}', [AdminMasterController::class, 'deleteParty'])->middleware('rbac:masters,delete');
+
+    Route::get('/parties/{id}/portal-status', [AdminPortalController::class, 'status'])->middleware('rbac:masters,view')->whereNumber('id');
+    Route::post('/parties/{id}/portal-link', [AdminPortalController::class, 'issue'])->middleware('rbac:masters,edit')->whereNumber('id');
+    Route::delete('/parties/{id}/portal-link', [AdminPortalController::class, 'revoke'])->middleware('rbac:masters,edit')->whereNumber('id');
 
     Route::post('/masters/merge', [AdminMasterController::class, 'mergeDuplicates'])->middleware('rbac:masters,edit');
     Route::post('/masters/import', [AdminMasterController::class, 'import'])->middleware('rbac:masters,create');
@@ -310,26 +371,117 @@ Route::middleware(['auth:sanctum', 'ip.allowlist', 'scope.store'])->prefix('admi
 
     Route::get('/returns', [AdminTransactionController::class, 'returns'])->middleware('rbac:transactions,view');
     Route::get('/quotations', [AdminTransactionController::class, 'quotations'])->middleware('rbac:transactions,view');
+    Route::post('/quotations', [AdminTransactionController::class, 'storeQuotation'])->middleware('rbac:transactions,create');
+    Route::put('/quotations/{id}', [AdminTransactionController::class, 'updateQuotation'])->middleware('rbac:transactions,edit');
+    Route::delete('/quotations/{id}', [AdminTransactionController::class, 'destroyQuotation'])->middleware('rbac:transactions,edit');
+    Route::post('/quotations/{id}/convert', [AdminTransactionController::class, 'convertQuotation'])->middleware('rbac:transactions,edit');
 
     Route::get('/purchases', [AdminTransactionController::class, 'purchases'])->middleware('rbac:transactions,view');
     Route::get('/purchases/{id}', [AdminTransactionController::class, 'showPurchase'])->middleware('rbac:transactions,view');
     Route::get('/purchase-returns', [AdminTransactionController::class, 'purchaseReturns'])->middleware('rbac:transactions,view');
     Route::get('/purchase-orders', [AdminTransactionController::class, 'purchaseOrders'])->middleware('rbac:transactions,view');
+    Route::post('/purchase-orders', [AdminTransactionController::class, 'storePurchaseOrder'])->middleware('rbac:transactions,create');
+    Route::put('/purchase-orders/{id}', [AdminTransactionController::class, 'updatePurchaseOrder'])->middleware('rbac:transactions,edit');
+    Route::delete('/purchase-orders/{id}', [AdminTransactionController::class, 'destroyPurchaseOrder'])->middleware('rbac:transactions,edit');
+    Route::post('/purchase-orders/{id}/receive', [AdminTransactionController::class, 'receivePurchaseOrder'])->middleware('rbac:transactions,edit');
 
     Route::get('/held-bills', [AdminTransactionController::class, 'heldBills'])->middleware('rbac:transactions,view');
     Route::get('/held-bills/{id}', [AdminTransactionController::class, 'showHeldBill'])->middleware('rbac:transactions,view');
 
     Route::get('/shifts', [AdminTransactionController::class, 'shifts'])->middleware('rbac:transactions,view');
 
+    // Day close & cash reconciliation
+    Route::get('/day-close', [AdminDayCloseController::class, 'show'])->middleware('rbac:transactions,view');
+    Route::get('/day-close/history', [AdminDayCloseController::class, 'history'])->middleware('rbac:transactions,view');
+    Route::post('/day-close/close', [AdminDayCloseController::class, 'close'])->middleware('rbac:transactions,edit');
+    Route::post('/day-close/reconcile', [AdminDayCloseController::class, 'reconcile'])->middleware('rbac:transactions,edit');
+    Route::post('/day-close/reopen', [AdminDayCloseController::class, 'reopen'])->middleware('rbac:transactions,edit');
+
     Route::get('/stock/adjustments', [AdminTransactionController::class, 'stockAdjustments'])->middleware('rbac:transactions,view');
     Route::get('/stock/transfers', [AdminTransactionController::class, 'stockTransfers'])->middleware('rbac:transactions,view');
     Route::get('/expenses', [AdminTransactionController::class, 'expenses'])->middleware('rbac:transactions,view');
+    Route::post('/expenses', [AdminTransactionController::class, 'storeExpense'])->middleware('rbac:transactions,create');
+    Route::put('/expenses/{id}', [AdminTransactionController::class, 'updateExpense'])->middleware('rbac:transactions,edit');
+    Route::delete('/expenses/{id}', [AdminTransactionController::class, 'destroyExpense'])->middleware('rbac:transactions,edit');
     Route::get('/customer-payments', [AdminTransactionController::class, 'customerPayments'])->middleware('rbac:transactions,view');
+    Route::post('/payments/customer', [AdminTransactionController::class, 'storeCustomerPayment'])->middleware('rbac:transactions,create');
     Route::get('/supplier-payments', [AdminTransactionController::class, 'supplierPayments'])->middleware('rbac:transactions,view');
     Route::post('/supplier-payments', [AdminTransactionController::class, 'storeSupplierPayment'])->middleware('rbac:transactions,create');
 
     Route::get('/customers/{id}/ledger', [AdminTransactionController::class, 'customerLedger'])->middleware('rbac:transactions,view');
     Route::get('/suppliers/{id}/ledger', [AdminTransactionController::class, 'supplierLedger'])->middleware('rbac:transactions,view');
+
+    // Module 7b: Gift cards & store credit
+    Route::get('/gift-cards', [AdminGiftCardController::class, 'index'])->middleware('rbac:transactions,view');
+    Route::post('/gift-cards', [AdminGiftCardController::class, 'store'])->middleware('rbac:transactions,create');
+    Route::post('/gift-cards/lookup', [AdminGiftCardController::class, 'lookup'])->middleware('rbac:transactions,view');
+    Route::get('/gift-cards/{id}', [AdminGiftCardController::class, 'show'])->middleware('rbac:transactions,view');
+    Route::post('/gift-cards/{id}/status', [AdminGiftCardController::class, 'updateStatus'])->middleware('rbac:transactions,edit');
+    Route::post('/gift-cards/{id}/adjust', [AdminGiftCardController::class, 'adjust'])->middleware('rbac:transactions,edit');
+
+    // Module 7c: Settlement import & reconciliation
+    Route::get('/settlements', [AdminSettlementController::class, 'index'])->middleware('rbac:transactions,view');
+    Route::post('/settlements/preview', [AdminSettlementController::class, 'preview'])->middleware('rbac:transactions,create');
+    Route::post('/settlements', [AdminSettlementController::class, 'store'])->middleware('rbac:transactions,create');
+    Route::get('/settlements/{id}', [AdminSettlementController::class, 'show'])->middleware('rbac:transactions,view');
+    Route::post('/settlements/{id}/rematch', [AdminSettlementController::class, 'rematch'])->middleware('rbac:transactions,edit');
+    Route::post('/settlements/lines/{id}/resolve', [AdminSettlementController::class, 'resolveLine'])->middleware('rbac:transactions,edit');
+
+    // Provider-agnostic payment intents (UPI)
+    Route::get('/payments/upi-intent', [PaymentIntentController::class, 'upiIntent'])->middleware('rbac:transactions,view');
+
+    // Module 7d: Statutory compliance (provider-agnostic e-invoice / e-way bill registry)
+    Route::get('/compliance', [AdminComplianceController::class, 'index'])->middleware('rbac:compliance,view');
+    Route::get('/compliance/summary', [AdminComplianceController::class, 'summary'])->middleware('rbac:compliance,view');
+    Route::get('/compliance/settings', [AdminComplianceController::class, 'settings'])->middleware('rbac:compliance,view');
+    Route::post('/compliance/settings', [AdminComplianceController::class, 'updateSettings'])->middleware('rbac:compliance,edit');
+    Route::get('/compliance/export-pending', [AdminComplianceController::class, 'exportPending'])->middleware('rbac:compliance,export');
+    Route::get('/compliance/backfill/preview', [AdminComplianceController::class, 'backfillPreview'])->middleware('rbac:compliance,view');
+    Route::post('/compliance/import', [AdminComplianceController::class, 'import'])->middleware('rbac:compliance,edit');
+    Route::get('/compliance/{id}', [AdminComplianceController::class, 'show'])->middleware('rbac:compliance,view')->whereNumber('id');
+    Route::post('/compliance/{id}/irn', [AdminComplianceController::class, 'recordIrn'])->middleware('rbac:compliance,edit')->whereNumber('id');
+    Route::post('/compliance/{id}/irn/cancel', [AdminComplianceController::class, 'cancelIrn'])->middleware('rbac:compliance,edit')->whereNumber('id');
+    Route::post('/compliance/{id}/eway-bill', [AdminComplianceController::class, 'recordEwb'])->middleware('rbac:compliance,edit')->whereNumber('id');
+    Route::put('/compliance/{id}/eway-bill', [AdminComplianceController::class, 'updateEwb'])->middleware('rbac:compliance,edit')->whereNumber('id');
+    Route::post('/compliance/{id}/eway-bill/cancel', [AdminComplianceController::class, 'cancelEwb'])->middleware('rbac:compliance,edit')->whereNumber('id');
+
+    // Module 7e: Price lists & customer-specific pricing
+    Route::get('/price-lists', [AdminPriceListController::class, 'index'])->middleware('rbac:pricing,view');
+    Route::post('/price-lists', [AdminPriceListController::class, 'store'])->middleware('rbac:pricing,edit');
+    Route::get('/price-lists/customers', [AdminPriceListController::class, 'customers'])->middleware('rbac:pricing,view');
+    Route::get('/price-lists/products', [AdminPriceListController::class, 'products'])->middleware('rbac:pricing,view');
+    Route::get('/price-lists/{id}', [AdminPriceListController::class, 'show'])->middleware('rbac:pricing,view')->whereNumber('id');
+    Route::put('/price-lists/{id}', [AdminPriceListController::class, 'update'])->middleware('rbac:pricing,edit')->whereNumber('id');
+    Route::delete('/price-lists/{id}', [AdminPriceListController::class, 'destroy'])->middleware('rbac:pricing,edit')->whereNumber('id');
+    Route::put('/price-lists/{id}/items', [AdminPriceListController::class, 'saveItems'])->middleware('rbac:pricing,edit')->whereNumber('id');
+    Route::post('/price-lists/{id}/assign', [AdminPriceListController::class, 'assign'])->middleware('rbac:pricing,edit')->whereNumber('id');
+
+    // Module 7f: Sales orders & delivery challans
+    Route::get('/sales-orders', [AdminSalesOrderController::class, 'index'])->middleware('rbac:sales_orders,view');
+    Route::post('/sales-orders', [AdminSalesOrderController::class, 'store'])->middleware('rbac:sales_orders,edit');
+    Route::get('/sales-orders/{id}', [AdminSalesOrderController::class, 'show'])->middleware('rbac:sales_orders,view')->whereNumber('id');
+    Route::put('/sales-orders/{id}', [AdminSalesOrderController::class, 'update'])->middleware('rbac:sales_orders,edit')->whereNumber('id');
+    Route::delete('/sales-orders/{id}', [AdminSalesOrderController::class, 'destroy'])->middleware('rbac:sales_orders,edit')->whereNumber('id');
+    Route::post('/sales-orders/{id}/status', [AdminSalesOrderController::class, 'updateStatus'])->middleware('rbac:sales_orders,edit')->whereNumber('id');
+    Route::post('/sales-orders/{id}/challans', [AdminSalesOrderController::class, 'storeChallan'])->middleware('rbac:sales_orders,edit')->whereNumber('id');
+    Route::get('/delivery-challans', [AdminSalesOrderController::class, 'challans'])->middleware('rbac:sales_orders,view');
+    Route::get('/delivery-challans/{id}', [AdminSalesOrderController::class, 'showChallan'])->middleware('rbac:sales_orders,view')->whereNumber('id');
+    Route::post('/delivery-challans/{id}/status', [AdminSalesOrderController::class, 'updateChallanStatus'])->middleware('rbac:sales_orders,edit')->whereNumber('id');
+
+    // Module 7g: Loyalty points & coupons
+    Route::get('/loyalty/program', [AdminLoyaltyController::class, 'program'])->middleware('rbac:loyalty,view');
+    Route::put('/loyalty/program', [AdminLoyaltyController::class, 'updateProgram'])->middleware('rbac:loyalty,edit');
+    Route::get('/loyalty/coupons', [AdminLoyaltyController::class, 'coupons'])->middleware('rbac:loyalty,view');
+    Route::post('/loyalty/coupons', [AdminLoyaltyController::class, 'storeCoupon'])->middleware('rbac:loyalty,edit');
+    Route::put('/loyalty/coupons/{id}', [AdminLoyaltyController::class, 'updateCoupon'])->middleware('rbac:loyalty,edit')->whereNumber('id');
+    Route::delete('/loyalty/coupons/{id}', [AdminLoyaltyController::class, 'destroyCoupon'])->middleware('rbac:loyalty,edit')->whereNumber('id');
+    Route::get('/loyalty/ledger', [AdminLoyaltyController::class, 'ledger'])->middleware('rbac:loyalty,view');
+    Route::post('/loyalty/points/adjust', [AdminLoyaltyController::class, 'adjustPoints'])->middleware('rbac:loyalty,edit');
+
+    // Module 7h: Accounting Exports (Tally XML / Busy XML / CSV)
+    Route::get('/accounting/exports', [AdminAccountingExportController::class, 'catalog'])->middleware('rbac:reports,view');
+    Route::get('/accounting/export-parties', [AdminAccountingExportController::class, 'parties'])->middleware('rbac:reports,view');
+    Route::get('/accounting/exports/{type}/{format}', [AdminAccountingExportController::class, 'download'])->middleware('rbac:reports,export');
 
     // Module 8: Inventory
     Route::get('/inventory/batches', [AdminInventoryController::class, 'batchInventory'])->middleware('rbac:inventory,view');
@@ -350,9 +502,22 @@ Route::middleware(['auth:sanctum', 'ip.allowlist', 'scope.store'])->prefix('admi
     // Module 9: Reports (Accessible to Accountant & Managers)
     Route::get('/reports/sales', [AdminReportController::class, 'salesSummary'])->middleware('rbac:reports,view');
     Route::get('/reports/gstr1', [AdminReportController::class, 'gstr1'])->middleware('rbac:reports,view');
+    Route::get('/reports/gstr3b', [AdminGstWorkingPaperController::class, 'gstr3b'])->middleware('rbac:reports,view');
+    Route::get('/reports/gstr3b/export', [AdminGstWorkingPaperController::class, 'gstr3bExport'])->middleware('rbac:reports,export');
+    Route::get('/reports/gstr9', [AdminGstWorkingPaperController::class, 'gstr9'])->middleware('rbac:reports,view');
+    Route::get('/reports/gstr9/export', [AdminGstWorkingPaperController::class, 'gstr9Export'])->middleware('rbac:reports,export');
+    Route::get('/reports/gstr2b/imports', [AdminGstWorkingPaperController::class, 'gstr2bImports'])->middleware('rbac:reports,view');
+    Route::post('/reports/gstr2b/import', [AdminGstWorkingPaperController::class, 'importGstr2b'])->middleware('rbac:reports,edit');
+    Route::get('/reports/gstr2b/imports/{id}', [AdminGstWorkingPaperController::class, 'gstr2bReport'])->middleware('rbac:reports,view')->whereNumber('id');
+    Route::get('/reports/gstr2b/imports/{id}/export', [AdminGstWorkingPaperController::class, 'gstr2bExport'])->middleware('rbac:reports,export')->whereNumber('id');
+    Route::delete('/reports/gstr2b/imports/{id}', [AdminGstWorkingPaperController::class, 'destroyGstr2bImport'])->middleware('rbac:reports,edit')->whereNumber('id');
     Route::get('/reports/customer-aging', [AdminReportController::class, 'customerAging'])->middleware('rbac:reports,view');
     Route::get('/reports/pharmacy', [AdminReportController::class, 'pharmacyReport'])->middleware('rbac:reports,view');
     Route::get('/reports/scheduled', [AdminReportController::class, 'scheduledReports'])->middleware('rbac:reports,view');
+    Route::post('/reports/scheduled', [AdminReportController::class, 'storeScheduledReport'])->middleware('rbac:reports,edit');
+    Route::put('/reports/scheduled/{id}', [AdminReportController::class, 'updateScheduledReport'])->middleware('rbac:reports,edit');
+    Route::delete('/reports/scheduled/{id}', [AdminReportController::class, 'destroyScheduledReport'])->middleware('rbac:reports,edit');
+    Route::post('/reports/scheduled/{id}/run-now', [AdminReportController::class, 'runScheduledReport'])->middleware('rbac:reports,edit');
     Route::get('/reports/daily-collection', [ReportController::class, 'dailyCollection'])->middleware('rbac:reports,view');
     Route::get('/reports/top-selling', [ReportController::class, 'topSelling'])->middleware('rbac:reports,view');
     Route::get('/reports/cash-book', [ReportController::class, 'cashBook'])->middleware('rbac:reports,view');
@@ -375,7 +540,14 @@ Route::middleware(['auth:sanctum', 'ip.allowlist', 'scope.store'])->prefix('admi
     Route::post('/settings/financial-years/{id}/toggle-lock', [AdminSettingController::class, 'toggleFinancialYearLock'])->middleware('rbac:settings,edit');
     Route::get('/settings/gst-periods', [AdminSettingController::class, 'gstPeriods'])->middleware('rbac:settings,view');
     Route::post('/settings/gst-periods/toggle-lock', [AdminSettingController::class, 'toggleGstPeriodLock'])->middleware('rbac:settings,edit');
-    Route::get('/settings/backup-restore', [AdminSettingController::class, 'backupRestorePoints'])->middleware('rbac:settings,view');
+    Route::get('/settings/backups', [AdminBackupController::class, 'index'])->middleware('rbac:settings,view');
+    Route::post('/settings/backups', [AdminBackupController::class, 'store'])->middleware('rbac:settings,edit');
+    Route::get('/settings/backups/{id}/download', [AdminBackupController::class, 'download'])->middleware('rbac:settings,view');
+    Route::post('/settings/backups/{id}/restore', [AdminBackupController::class, 'restore'])->middleware('rbac:settings,edit');
+    Route::delete('/settings/backups/{id}', [AdminBackupController::class, 'destroy'])->middleware('rbac:settings,edit');
+    Route::get('/webhooks', [AdminWebhookController::class, 'index'])->middleware('rbac:settings,view');
+    Route::post('/webhooks/test', [AdminWebhookController::class, 'test'])->middleware('rbac:settings,edit');
+    Route::post('/webhooks/{id}/retry', [AdminWebhookController::class, 'retry'])->middleware('rbac:settings,edit');
     Route::get('/settings/whatsapp/sessions', [WhatsAppController::class, 'sessions'])->middleware('rbac:settings,view');
     Route::post('/settings/whatsapp/test', [WhatsAppController::class, 'testConnection'])->middleware('rbac:settings,view');
     Route::get('/settings/min-app-version', [DesktopUpdateController::class, 'getMinVersion'])->middleware('rbac:settings,view');

@@ -53,6 +53,20 @@ class Invoice extends Model
         'original_invoice_number',
         'locked_by_counter_id',
         'locked_until',
+        'irn',
+        'irn_ack_no',
+        'irn_ack_date',
+        'irn_qr',
+        'irn_status',
+        'irn_cancelled_at',
+        'irn_cancel_reason',
+        'irn_error',
+        'ewb_number',
+        'ewb_date',
+        'ewb_valid_until',
+        'ewb_status',
+        'ewb_part_a',
+        'ewb_part_b',
     ];
 
     protected $casts = [
@@ -72,6 +86,12 @@ class Invoice extends Model
         'cancelled_at' => 'datetime',
         'synced_at' => 'datetime',
         'locked_until' => 'datetime',
+        'irn_ack_date' => 'datetime',
+        'irn_cancelled_at' => 'datetime',
+        'ewb_date' => 'datetime',
+        'ewb_valid_until' => 'datetime',
+        'ewb_part_a' => 'array',
+        'ewb_part_b' => 'array',
         'version' => 'integer',
     ];
 
@@ -107,5 +127,18 @@ class Invoice extends Model
     public function payments(): HasMany
     {
         return $this->hasMany(InvoicePayment::class);
+    }
+
+    protected static function booted(): void
+    {
+        static::creating(function (Invoice $invoice) {
+            // Quotations carry no money movement, so a reconciled day must not block them.
+            if (! $invoice->store_id || ! $invoice->invoice_date || $invoice->module_key === 'quotation') {
+                return;
+            }
+
+            app(\App\Services\DayClose\StoreDayCloseService::class)
+                ->assertDayOpen((int) $invoice->store_id, (string) $invoice->invoice_date);
+        });
     }
 }

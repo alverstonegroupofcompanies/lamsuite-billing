@@ -24,7 +24,8 @@ class AdminDashboardController
 
         // Multi-tenant store scoping query builder
         $invoiceScope = Invoice::where('status', '!=', 'cancelled');
-        $purchaseScope = Purchase::where('status', '!=', 'cancelled');
+        $purchaseScope = Purchase::where('status', '!=', 'cancelled')
+            ->whereNotIn('module_key', ['purchase_order', 'order']);
         $partyScope = Party::query();
         $productScope = Product::where('is_active', true);
         $batchScope = ProductBatch::where('stock_qty', '>', 0);

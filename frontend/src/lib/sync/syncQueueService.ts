@@ -58,6 +58,33 @@ export class BackendHttpApiClient implements SyncApiClient {
     return this.baseUrl || getResolvedApiBaseUrl();
   }
 
+  /**
+   * Push endpoints are device-authenticated. Only attach the stored device
+   * token when it belongs to the store we are pushing as.
+   */
+  private async buildPushHeaders(activeStoreId: string): Promise<Record<string, string>> {
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      Accept: "application/json",
+      "X-Store-Id": activeStoreId,
+      "Store-Id": activeStoreId,
+    };
+
+    try {
+      const { storeDeviceService } = await import("../auth/storeDeviceService");
+      const deviceHeaders = await storeDeviceService.getDeviceAuthHeaders();
+      if (deviceHeaders["X-Store-Id"] === activeStoreId) {
+        if (deviceHeaders["X-Device-Token"]) headers["X-Device-Token"] = deviceHeaders["X-Device-Token"];
+        if (deviceHeaders["X-Device-UUID"]) headers["X-Device-UUID"] = deviceHeaders["X-Device-UUID"];
+      }
+    } catch (_) {
+      // Token unavailable (unpaired/legacy install): the server will reject the
+      // push rather than accept anonymous tenant writes.
+    }
+
+    return headers;
+  }
+
   async pushBatch(items: Array<{ id: string; entity_type: string; action: string; payload: Record<string, unknown> }>): Promise<{
     success: boolean;
     results: { total: number; processed: number; failed: number };
@@ -66,12 +93,7 @@ export class BackendHttpApiClient implements SyncApiClient {
     const url = `${this.getEffectiveBaseUrl()}/api/sync/push/batch`;
     const res = await fetch(url, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Accept: "application/json",
-        "X-Store-Id": activeStoreId,
-        "Store-Id": activeStoreId,
-      },
+      headers: await this.buildPushHeaders(activeStoreId),
       body: JSON.stringify({ items, store_id: activeStoreId }),
     });
 
@@ -87,12 +109,7 @@ export class BackendHttpApiClient implements SyncApiClient {
     const url = `${this.getEffectiveBaseUrl()}/api/sync/push/invoices`;
     const res = await fetch(url, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Accept: "application/json",
-        "X-Store-Id": activeStoreId,
-        "Store-Id": activeStoreId,
-      },
+      headers: await this.buildPushHeaders(activeStoreId),
       body: JSON.stringify({ invoices: items, store_id: activeStoreId }),
     });
 
@@ -108,12 +125,7 @@ export class BackendHttpApiClient implements SyncApiClient {
     const url = `${this.getEffectiveBaseUrl()}/api/sync/push/stock-events`;
     const res = await fetch(url, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Accept: "application/json",
-        "X-Store-Id": activeStoreId,
-        "Store-Id": activeStoreId,
-      },
+      headers: await this.buildPushHeaders(activeStoreId),
       body: JSON.stringify({ events: items, store_id: activeStoreId }),
     });
 
