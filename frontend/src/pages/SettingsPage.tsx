@@ -2162,7 +2162,7 @@ export const SettingsPage: React.FC = () => {
                   <div className="flex items-center justify-between">
                     <span className="text-xs font-bold text-slate-800">Sales Returns / Credit Notes</span>
                     <span className="rounded-full bg-accent-soft px-2 py-0.5 font-mono text-[11px] font-bold text-accent">
-                      {(settings.sequences?.returnPrefix || "RET")}-{settings.sequences?.nextReturnNumber || 101}
+                      {(settings.sequences?.returnPrefix || "SR")}-{settings.sequences?.nextReturnNumber || 1}
                     </span>
                   </div>
                   <div className="grid grid-cols-2 gap-2 mt-2">
@@ -2170,7 +2170,7 @@ export const SettingsPage: React.FC = () => {
                       <span className="text-[10px] text-slate-500">Prefix</span>
                       <input
                         type="text"
-                        value={settings.sequences?.returnPrefix || "RET"}
+                        value={settings.sequences?.returnPrefix || "SR"}
                         onChange={(e) =>
                           setSettings({
                             ...settings,
@@ -2184,7 +2184,7 @@ export const SettingsPage: React.FC = () => {
                       <span className="text-[10px] text-slate-500">Next Number</span>
                       <input
                         type="number"
-                        value={settings.sequences?.nextReturnNumber || 101}
+                        value={settings.sequences?.nextReturnNumber || 1}
                         onChange={(e) =>
                           setSettings({
                             ...settings,
@@ -2240,7 +2240,7 @@ export const SettingsPage: React.FC = () => {
                   <div className="flex items-center justify-between">
                     <span className="text-xs font-bold text-slate-800">Estimates & Quotations</span>
                     <span className="rounded bg-amber-100 px-2 py-0.5 font-mono text-[11px] font-bold text-amber-800">
-                      {(settings.sequences?.quotationPrefix || "QUO")}-{settings.sequences?.nextQuotationNumber || 301}
+                      {(settings.sequences?.quotationPrefix || "QUO")}-{settings.sequences?.nextQuotationNumber || 101}
                     </span>
                   </div>
                   <div className="grid grid-cols-2 gap-2 mt-2">
@@ -2262,7 +2262,7 @@ export const SettingsPage: React.FC = () => {
                       <span className="text-[10px] text-slate-500">Next Number</span>
                       <input
                         type="number"
-                        value={settings.sequences?.nextQuotationNumber || 301}
+                        value={settings.sequences?.nextQuotationNumber || 101}
                         onChange={(e) =>
                           setSettings({
                             ...settings,
@@ -3418,6 +3418,51 @@ export const SettingsPage: React.FC = () => {
                     }
                     className="mt-1 w-full rounded border border-slate-300 p-2 text-xs focus:border-blue-500 focus:outline-none"
                   />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-[11px] font-semibold uppercase text-slate-600">Offline Sign-in Grace (Hours)</label>
+                  <input
+                    type="number"
+                    min="0"
+                    value={settings.security.offlineGraceHours ?? 72}
+                    onChange={(e) =>
+                      setSettings({
+                        ...settings,
+                        security: { ...settings.security, offlineGraceHours: Number(e.target.value) },
+                      })
+                    }
+                    className="mt-1 w-full rounded border border-slate-300 p-2 text-xs focus:border-blue-500 focus:outline-none"
+                  />
+                  <p className="mt-1 text-[10px] text-slate-500">
+                    Cached staff credentials stop working offline after this window. Use 0 for no limit.
+                  </p>
+                </div>
+                <div>
+                  <label className="block text-[11px] font-semibold uppercase text-slate-600">Multi-Counter Login Roles</label>
+                  <input
+                    type="text"
+                    value={(settings.security.allowMultiCounterRoles || []).join(", ")}
+                    onChange={(e) =>
+                      setSettings({
+                        ...settings,
+                        security: {
+                          ...settings.security,
+                          allowMultiCounterRoles: e.target.value
+                            .split(",")
+                            .map((r) => r.trim().toLowerCase())
+                            .filter(Boolean),
+                        },
+                      })
+                    }
+                    placeholder="e.g. manager, store_owner"
+                    className="mt-1 w-full rounded border border-slate-300 p-2 text-xs focus:border-blue-500 focus:outline-none"
+                  />
+                  <p className="mt-1 text-[10px] text-slate-500">
+                    Default: one active counter per user. Listed roles may stay signed in on several counters.
+                  </p>
                 </div>
               </div>
 

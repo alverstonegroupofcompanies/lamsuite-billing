@@ -25,6 +25,7 @@ import {
   Layers,
   Activity,
   Filter,
+  X,
 } from "lucide-react";
 
 export interface DeviceSessionItem {
@@ -68,7 +69,6 @@ export interface CounterItem {
     allow_stock_adj?: boolean;
     require_manager_pin?: boolean;
   };
-  manager_pin?: string;
   printer_profile?: {
     type?: string;
     paper_size?: string;
@@ -105,6 +105,7 @@ export const DevicesPage: React.FC = () => {
 
   const [selectedCounter, setSelectedCounter] = useState<CounterItem | null>(null);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
+  const [isSavingSettings, setIsSavingSettings] = useState(false);
   const [settingsForm, setSettingsForm] = useState({
     location_name: "",
     is_digital_only: false,
@@ -112,7 +113,6 @@ export const DevicesPage: React.FC = () => {
     allow_price_change: false,
     allow_stock_adj: false,
     require_manager_pin: false,
-    manager_pin: "",
     printer_type: "thermal_80mm",
   });
 
@@ -131,7 +131,7 @@ export const DevicesPage: React.FC = () => {
         min_required_version?: string;
         latest_version?: string;
         out_of_date_count?: number;
-      }>("/device-sessions");
+      }>("/admin/device-sessions");
       setDeviceSessions(res.devices || []);
       if (res.min_required_version) {
         setMinRequiredVersion(res.min_required_version);
@@ -159,7 +159,7 @@ export const DevicesPage: React.FC = () => {
 
   const fetchCounters = async () => {
     try {
-      const res = await api.get<{ success: boolean; counters: CounterItem[] }>("/counters");
+      const res = await api.get<{ success: boolean; counters: CounterItem[] }>("/admin/counters");
       setCounters(res.counters || []);
     } catch (err) {
       console.error("Failed to load counters:", err);
@@ -168,7 +168,7 @@ export const DevicesPage: React.FC = () => {
 
   const fetchNegativeStock = async () => {
     try {
-      const res = await api.get<any>("/inventory/negative-stock-report");
+      const res = await api.get<any>("/admin/inventory/negative-stock");
       setNegativeReport(res);
     } catch (err) {
       console.error("Failed to load negative stock report:", err);
@@ -179,12 +179,18 @@ export const DevicesPage: React.FC = () => {
     fetchDeviceSessions();
     fetchCounters();
     fetchNegativeStock();
+    // Presence is live: poll while the page is open so a workstation that
+    // signs out or changes status is reflected without a manual refresh.
+    const interval = setInterval(() => {
+      if (document.visibilityState === "visible") fetchDeviceSessions();
+    }, 15000);
+    return () => clearInterval(interval);
   }, []);
 
   const handleForceLogoutSession = async (s: DeviceSessionItem) => {
     if (!window.confirm(`Force log out session for "${s.device_name || s.counter_name}"?`)) return;
     try {
-      await api.post(`/device-sessions/${s.id}/force-logout`);
+      await api.post(`/admin/device-sessions/${s.id}/force-logout`);
       await fetchDeviceSessions();
     } catch (err: any) {
       alert(err?.message || "Failed to force logout session.");
@@ -200,9 +206,9 @@ export const DevicesPage: React.FC = () => {
 
     try {
       if (isLocked) {
-        await api.post(`/device-sessions/${s.id}/unlock`);
+        await api.post(`/admin/device-sessions/${s.id}/unlock`);
       } else {
-        await api.post(`/device-sessions/${s.id}/lock`);
+        await api.post(`/admin/device-sessions/${s.id}/lock`);
       }
       await fetchDeviceSessions();
     } catch (err: any) {
@@ -215,7 +221,7 @@ export const DevicesPage: React.FC = () => {
     if (reason === null) return;
 
     try {
-      await api.post(`/device-sessions/${s.id}/revoke`, { reason });
+      await api.post(`/admin/device-sessions/${s.id}/revoke`, { reason });
       await fetchDeviceSessions();
     } catch (err: any) {
       alert(err?.message || "Failed to revoke device.");
@@ -225,7 +231,7 @@ export const DevicesPage: React.FC = () => {
   const handleSaveRename = async () => {
     if (!renameSession) return;
     try {
-      await api.post(`/device-sessions/${renameSession.id}/rename`, {
+      await api.post(`/admin/device-sessions/${renameSession.id}/rename`, {
         device_name: renameForm.device_name.trim() || undefined,
         counter_name: renameForm.counter_name.trim() || undefined,
       });
@@ -261,7 +267,6 @@ export const DevicesPage: React.FC = () => {
       allow_price_change: Boolean(c.role_profile?.allow_price_change),
       allow_stock_adj: Boolean(c.role_profile?.allow_stock_adj),
       require_manager_pin: Boolean(c.role_profile?.require_manager_pin),
-      manager_pin: c.manager_pin || "",
       printer_type: c.printer_profile?.type || "thermal_80mm",
     });
     setIsSettingsModalOpen(true);
@@ -269,6 +274,7 @@ export const DevicesPage: React.FC = () => {
 
   const saveSettings = async () => {
     if (!selectedCounter) return;
+    setIsSavingSettings(true);
     try {
       await api.post(`/admin/counters/${selectedCounter.id}/settings`, {
         location_name: settingsForm.location_name,
@@ -279,7 +285,6 @@ export const DevicesPage: React.FC = () => {
           allow_stock_adj: settingsForm.allow_stock_adj,
           require_manager_pin: settingsForm.require_manager_pin,
         },
-        manager_pin: settingsForm.manager_pin,
         printer_profile: {
           type: settingsForm.printer_type,
           auto_print: true,
@@ -290,6 +295,8 @@ export const DevicesPage: React.FC = () => {
       alert(`Settings saved for counter ${selectedCounter.counter_code}.`);
     } catch (err: any) {
       alert(err?.message || "Failed to update settings.");
+    } finally {
+      setIsSavingSettings(false);
     }
   };
 
@@ -575,6 +582,7 @@ export const DevicesPage: React.FC = () => {
                       {/* Actions */}
                       <td className="px-4 py-3 text-right">
                         <div className="flex items-center justify-end gap-1.5 flex-wrap">
+                          {hasPermission("devices", "edit") && (
                           <button
                             onClick={() => {
                               setRenameSession(s);
@@ -585,8 +593,9 @@ export const DevicesPage: React.FC = () => {
                           >
                             <Edit2 className="w-3.5 h-3.5" />
                           </button>
+                          )}
 
-                          {s.status !== "Revoked" && (
+                          {hasPermission("devices", "edit") && s.status !== "Revoked" && (
                             <button
                               onClick={() => handleToggleLockSession(s)}
                               title={s.status === "Locked" ? "Unlock Workstation" : "Lock Workstation"}
@@ -600,7 +609,7 @@ export const DevicesPage: React.FC = () => {
                             </button>
                           )}
 
-                          {s.status !== "Offline" && s.status !== "Revoked" && (
+                          {hasPermission("devices", "edit") && s.status !== "Offline" && s.status !== "Revoked" && (
                             <button
                               onClick={() => handleForceLogoutSession(s)}
                               title="Force Logout Session"
@@ -610,7 +619,7 @@ export const DevicesPage: React.FC = () => {
                             </button>
                           )}
 
-                          {s.status !== "Revoked" && (
+                          {hasPermission("devices", "edit") && s.status !== "Revoked" && (
                             <button
                               onClick={() => handleRevokeSession(s)}
                               title="Revoke Authorization"
@@ -725,7 +734,7 @@ export const DevicesPage: React.FC = () => {
                           <button
                             onClick={() => openSettings(c)}
                             title="Counter Settings & Permissions"
-                            className="p-1.5 text-slate-500 hover:text-brand-600 hover:bg-brand-50 dark:hover:bg-brand-950/40 rounded-lg"
+                            className="p-1.5 text-slate-500 hover:text-brand-600 hover:bg-brand-50 dark:hover:bg-brand-950/40 rounded-lg cursor-pointer"
                           >
                             <Sliders className="w-3.5 h-3.5" />
                           </button>
@@ -864,6 +873,172 @@ export const DevicesPage: React.FC = () => {
                 className="px-3.5 py-1.5 text-xs font-bold rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white shadow-xs"
               >
                 Save
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Settings Modal */}
+      {isSettingsModalOpen && selectedCounter && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-900 w-full max-w-lg rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+            <div className="p-4 sm:p-5 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
+              <div>
+                <h3 className="font-bold text-slate-900 dark:text-white text-sm flex items-center gap-2">
+                  <Sliders className="w-4 h-4 text-brand-600" />
+                  <span>Counter Settings: {selectedCounter.counter_name}</span>
+                  <span className="font-mono bg-brand-50 text-brand-700 dark:bg-brand-950/60 dark:text-brand-300 px-1.5 py-0.5 rounded text-[11px]">
+                    {selectedCounter.counter_code}
+                  </span>
+                </h3>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                  Configure location, cashier permissions, supervisor PIN, and receipt printer
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsSettingsModalOpen(false)}
+                className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
+                title="Close"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-4 text-xs max-h-[75vh] overflow-y-auto">
+              {/* Location */}
+              <div>
+                <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                  Location / Department Name
+                </label>
+                <div className="relative">
+                  <MapPin className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5 pointer-events-none" />
+                  <input
+                    type="text"
+                    value={settingsForm.location_name}
+                    onChange={(e) => setSettingsForm({ ...settingsForm, location_name: e.target.value })}
+                    placeholder="e.g. Workstation Desk, Front Floor, Warehouse"
+                    className="w-full pl-9 pr-3 py-1.5 border border-slate-200 dark:border-slate-700 rounded-xl bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-hidden focus:ring-2 focus:ring-brand-500"
+                  />
+                </div>
+              </div>
+
+              {/* Permissions */}
+              <div className="space-y-2.5 pt-2 border-t border-slate-100 dark:border-slate-800">
+                <label className="block font-semibold text-slate-700 dark:text-slate-300">
+                  Counter Permissions & Restrictions
+                </label>
+                <div className="space-y-2.5 bg-slate-50 dark:bg-slate-800/40 p-3.5 rounded-xl border border-slate-200/80 dark:border-slate-800">
+                  <label className="flex items-center gap-2.5 text-slate-700 dark:text-slate-300 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={settingsForm.allow_cancel}
+                      onChange={(e) => setSettingsForm({ ...settingsForm, allow_cancel: e.target.checked })}
+                      className="rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+                    />
+                    <span>Allow Bill Cancellation at this counter</span>
+                  </label>
+
+                  <label className="flex items-center gap-2.5 text-slate-700 dark:text-slate-300 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={settingsForm.allow_price_change}
+                      onChange={(e) => setSettingsForm({ ...settingsForm, allow_price_change: e.target.checked })}
+                      className="rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+                    />
+                    <span>Allow Price & Rate Changes at billing time</span>
+                  </label>
+
+                  <label className="flex items-center gap-2.5 text-slate-700 dark:text-slate-300 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={settingsForm.allow_stock_adj}
+                      onChange={(e) => setSettingsForm({ ...settingsForm, allow_stock_adj: e.target.checked })}
+                      className="rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+                    />
+                    <span>Allow Stock Adjustments & Write-Offs</span>
+                  </label>
+
+                  <label className="flex items-center gap-2.5 text-slate-700 dark:text-slate-300 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={settingsForm.require_manager_pin}
+                      onChange={(e) => setSettingsForm({ ...settingsForm, require_manager_pin: e.target.checked })}
+                      className="rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+                    />
+                    <span>Require Manager PIN for Privileged Actions</span>
+                  </label>
+
+                  <label className="flex items-center gap-2.5 text-slate-700 dark:text-slate-300 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={settingsForm.is_digital_only}
+                      onChange={(e) => setSettingsForm({ ...settingsForm, is_digital_only: e.target.checked })}
+                      className="rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+                    />
+                    <span>Mark Digital-Only (No cash drawer or physical cash float)</span>
+                  </label>
+                </div>
+              </div>
+
+              {/* Printer Profile */}
+              <div className="pt-2 border-t border-slate-100 dark:border-slate-800">
+                <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                  Hardware Printer Profile
+                </label>
+                <div className="relative">
+                  <Printer className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5 pointer-events-none" />
+                  <select
+                    value={settingsForm.printer_type}
+                    onChange={(e) => setSettingsForm({ ...settingsForm, printer_type: e.target.value })}
+                    className="w-full pl-9 pr-3 py-1.5 border border-slate-200 dark:border-slate-700 rounded-xl bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-hidden focus:ring-2 focus:ring-brand-500 cursor-pointer"
+                  >
+                    <option value="thermal_80mm">3-inch Thermal POS Printer (80mm)</option>
+                    <option value="thermal_58mm">2-inch Thermal POS Printer (58mm)</option>
+                    <option value="a4_laser">Laser / Inkjet A4 Receipt</option>
+                    <option value="pdf_whatsapp">Digital PDF Only (WhatsApp / Email)</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Sequence Info (Read-Only) */}
+              {selectedCounter.sequences && selectedCounter.sequences.length > 0 && (
+                <div className="pt-2 border-t border-slate-100 dark:border-slate-800">
+                  <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
+                    Assigned Document Number Series
+                  </label>
+                  <div className="flex flex-wrap gap-1.5">
+                    {selectedCounter.sequences.map((s) => (
+                      <span
+                        key={s.id}
+                        className="inline-flex items-center gap-1 font-mono text-[10px] bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 px-2 py-0.5 rounded-lg border border-slate-200 dark:border-slate-700"
+                      >
+                        <span className="font-semibold text-slate-500 capitalize">{s.doc_type}:</span>
+                        <span>{s.prefix}-{s.next_number}</span>
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="p-4 bg-slate-50 dark:bg-slate-800/50 border-t border-slate-200 dark:border-slate-800 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setIsSettingsModalOpen(false)}
+                className="px-3 py-1.5 text-xs font-semibold rounded-xl border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={saveSettings}
+                disabled={isSavingSettings}
+                className="px-3.5 py-1.5 text-xs font-bold text-white bg-brand-600 hover:bg-brand-500 rounded-xl shadow-xs disabled:opacity-50 flex items-center gap-1.5 cursor-pointer"
+              >
+                {isSavingSettings && <RefreshCw className="w-3 h-3 animate-spin" />}
+                <span>Save Changes</span>
               </button>
             </div>
           </div>

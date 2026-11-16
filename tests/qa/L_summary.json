@@ -1,0 +1,49 @@
+{
+ "mismatches": [
+  {
+   "from": "/purchases",
+   "key": "Alt+S",
+   "expect": "supplier-focus",
+   "actual": "LamSuite Billing\nv2.0.36\n\nRetail & Pharmacy POS\n\nQA City Pharmacy\nQA-A\nID:6\nCtrl"
+  },
+  {
+   "from": "/pos",
+   "key": "Alt+H",
+   "expect": "hold-bill",
+   "actual": "Scan barcode or type product name (e.g. 3*paracetamol)"
+  },
+  {
+   "from": "/pos",
+   "key": "Alt+L",
+   "expect": "recall-bill",
+   "actual": "LamSuite Billing\nv2.0.36\n\nRetail & Pharmacy POS\n\nQA City Pharmacy\nQA-A\nID:6\nCtrl"
+  },
+  {
+   "from": "/pos",
+   "key": "Alt+E",
+   "expect": "batch-edit",
+   "actual": "Scan barcode or type product name (e.g. 3*paracetamol)"
+  },
+  {
+   "from": "/pos",
+   "key": "Alt+I",
+   "expect": "line-discount",
+   "actual": "Scan barcode or type product name (e.g. 3*paracetamol)"
+  },
+  {
+   "from": "/pos",
+   "key": "Control+Alt+S",
+   "expect": "switch-store-global",
+   "actual": "Scan barcode or type product name (e.g. 3*paracetamol)"
+  }
+ ],
+ "defects": [
+  "SHORTCUT-purchases-AltS",
+  "SHORTCUT-pos-AltH",
+  "SHORTCUT-pos-AltL",
+  "SHORTCUT-pos-AltE",
+  "SHORTCUT-pos-AltI",
+  "SHORTCUT-pos-ControlAltS",
+  "CONSOLE-ERRORS"
+ ]
+}

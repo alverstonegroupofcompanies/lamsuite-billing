@@ -3,11 +3,13 @@
 namespace App\Http\Controllers\Api;
 
 use App\Models\AuditLog;
+use App\Models\CompanySetting;
 use App\Models\Counter;
 use App\Models\DeviceSession;
 use App\Models\Store;
 use App\Models\User;
 use App\Models\UserSession;
+use Laravel\Sanctum\PersonalAccessToken;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
@@ -51,15 +53,30 @@ class StaffAuthController
             ], 403);
         }
 
-        // 1. Strict User Resolution: prefer user_id, fallback to exact username/email
+        // 1. Strict User Resolution: prefer numeric user_id, fallback to store-scoped username/email
         $user = null;
-        if (!empty($validated['user_id'])) {
+        if (!empty($validated['user_id']) && is_numeric($validated['user_id'])) {
             $user = User::find($validated['user_id']);
-        } elseif (!empty($validated['username'])) {
+        }
+
+        if (!$user && !empty($validated['username'])) {
             $identifier = trim($validated['username']);
-            $user = User::where('username', $identifier)
-                ->orWhere('email', $identifier)
+            // Prioritize user assigned directly to this store
+            $user = User::where('store_id', $store->id)
+                ->where(function ($q) use ($identifier) {
+                    $q->where('username', $identifier)
+                      ->orWhere('email', $identifier)
+                      ->orWhere('email', 'like', $identifier . '@%');
+                })
                 ->first();
+
+            // Fallback to global users or users with allowed_store_ids access
+            if (!$user) {
+                $user = User::where(function ($q) use ($identifier) {
+                    $q->where('username', $identifier)
+                      ->orWhere('email', $identifier);
+                })->first();
+            }
         }
 
         if (!$user) {
@@ -109,6 +126,12 @@ class StaffAuthController
                       ->orWhere('counter_name', $counterIdentifier);
                     if (is_numeric($counterIdentifier)) {
                         $q->orWhere('id', (int)$counterIdentifier);
+                    }
+                    if (str_starts_with($counterIdentifier, 'cntr_')) {
+                        $subId = substr($counterIdentifier, 5);
+                        if (is_numeric($subId)) {
+                            $q->orWhere('id', (int)$subId);
+                        }
                     }
                 })->first();
 
@@ -258,6 +281,79 @@ class StaffAuthController
             'locked_until' => null,
         ]);
 
+        // 8. One active counter per user (unless the role is explicitly allowed
+        // to hold several). A privileged operator can replace the stale session.
+        DeviceSession::where('user_id', $user->id)
+            ->where('is_active', true)
+            ->where(function ($q) {
+                $q->whereNull('last_active_at')
+                  ->orWhere('last_active_at', '<', now()->subMinutes(30));
+            })
+            ->update([
+                'is_active' => false,
+                'status' => 'expired',
+            ]);
+
+        // Mirror the identity this login will register so a repeat sign-in from
+        // the same workstation (even without an explicit device_uuid) is not
+        // treated as a second counter.
+        $currentDeviceUuid = $request->header('X-Device-UUID')
+            ?: $request->input('device_uuid')
+            ?: ('dev_staff_' . $user->id . '_' . substr(md5(($request->userAgent() ?? '') . $request->ip()), 0, 12));
+        $activeElsewhere = DeviceSession::with('counter:id,counter_name,counter_code')
+            ->where('user_id', $user->id)
+            ->where('is_active', true)
+            ->where('last_active_at', '>=', now()->subMinutes(30))
+            ->when($currentDeviceUuid, fn ($q) => $q->where('device_uuid', '!=', $currentDeviceUuid))
+            ->orderByDesc('last_active_at')
+            ->first();
+
+        if ($activeElsewhere && !$this->allowsMultiCounterLogin($user, (int)$store->id)) {
+            $privilegedRoles = ['store_owner', 'owner', 'admin', 'super_admin', 'manager'];
+            $canForceOut = in_array(strtolower((string)$user->role), $privilegedRoles, true);
+            $forceOut = $request->boolean('force_out');
+
+            if (!$forceOut || !$canForceOut) {
+                AuditLog::log(
+                    'staff_login_conflict',
+                    'User',
+                    (string)$user->id,
+                    null,
+                    [
+                        'reason' => 'active_on_another_counter',
+                        'store_id' => $store->id,
+                        'active_session_id' => $activeElsewhere->session_id,
+                        'active_device_uuid' => $activeElsewhere->device_uuid,
+                        'active_counter' => $activeElsewhere->counter_name,
+                        'requested_counter' => $validated['counter_id'] ?? null,
+                    ],
+                    $store->id,
+                    $user->id
+                );
+
+                return response()->json([
+                    'success' => false,
+                    'error' => 'ACTIVE_SESSION_ELSEWHERE',
+                    'message' => "This account is already signed in on '"
+                        . ($activeElsewhere->counter_name ?: $activeElsewhere->device_name ?: 'another workstation')
+                        . "' since " . ($activeElsewhere->last_active_at?->toIso8601String() ?? 'just now')
+                        . ". Sign out there first or ask a manager to force it out.",
+                    'active_session' => [
+                        'id' => (string)$activeElsewhere->id,
+                        'device_uuid' => $activeElsewhere->device_uuid,
+                        'device_name' => $activeElsewhere->device_name,
+                        'counter_id' => $activeElsewhere->counter_id ? (string)$activeElsewhere->counter_id : null,
+                        'counter_name' => $activeElsewhere->counter_name,
+                        'last_active_at' => $activeElsewhere->last_active_at?->toIso8601String(),
+                    ],
+                    'can_force_out' => $canForceOut,
+                ], 409);
+            }
+
+            $this->endDeviceSession($activeElsewhere, 'Replaced by a new sign-in');
+            PersonalAccessToken::where('tokenable_id', $user->id)->delete();
+        }
+
         $token = $user->createToken('staff_session_token')->plainTextToken;
 
         UserSession::create([
@@ -268,9 +364,7 @@ class StaffAuthController
             'is_active' => true,
         ]);
 
-        $deviceUuid = $request->header('X-Device-UUID')
-            ?: $request->input('device_uuid')
-            ?: ('dev_staff_' . $user->id . '_' . substr(md5(($request->userAgent() ?? '') . $request->ip()), 0, 12));
+        $deviceUuid = $currentDeviceUuid;
 
         $deviceName = $request->input('device_name') ?: ($counter?->device_name ?: 'Staff Terminal');
         $publicIp = DeviceSession::resolvePublicIp($request, $request->input('public_ip'));
@@ -388,7 +482,7 @@ class StaffAuthController
 
         $validated = $request->validate([
             'current_password' => 'nullable|string',
-            'new_password' => 'nullable|string|min:6',
+            'new_password' => 'nullable|string|min:8',
             'new_pin' => 'nullable|string|min:4|max:6',
         ]);
 
@@ -403,6 +497,10 @@ class StaffAuthController
         }
 
         if (!empty($validated['new_pin'])) {
+            $pinError = User::validatePinPolicy($validated['new_pin']);
+            if ($pinError) {
+                return response()->json(['message' => $pinError], 422);
+            }
             $updates['pin_hash'] = Hash::make($validated['new_pin']);
         }
 
@@ -490,6 +588,56 @@ class StaffAuthController
                 'is_locked' => false,
                 'locked_until' => null,
             ],
+        ]);
+    }
+
+    /**
+     * Roles allowed to stay signed in on more than one counter at a time.
+     */
+    private function allowsMultiCounterLogin(User $user, int $storeId): bool
+    {
+        $scope = function ($q) use ($storeId) {
+            $q->where('store_id', $storeId)->orWhereNull('store_id');
+        };
+
+        $setting = CompanySetting::where('key', 'allow_multi_counter_roles')
+            ->where($scope)
+            ->latest('id')
+            ->first();
+
+        $value = $setting?->value;
+
+        // The admin settings screen saves this inside the `security` block, while
+        // older stores may have written the standalone key.
+        if (empty($value)) {
+            $security = CompanySetting::where('key', 'security')
+                ->where($scope)
+                ->latest('id')
+                ->first();
+            $value = $security?->value['allowMultiCounterRoles'] ?? null;
+        }
+
+        if (empty($value)) {
+            return false;
+        }
+
+        $roles = is_array($value) && isset($value['roles']) ? $value['roles'] : $value;
+        if (!is_array($roles)) {
+            $roles = [$roles];
+        }
+
+        $roles = array_map(fn ($role) => strtolower(trim((string)$role)), $roles);
+        return in_array('*', $roles, true) || in_array(strtolower((string)$user->role), $roles, true);
+    }
+
+    private function endDeviceSession(DeviceSession $session, string $reason): void
+    {
+        $session->update([
+            'is_active' => false,
+            'status' => 'expired',
+            'last_active_at' => now(),
+            'force_logged_out_at' => now(),
+            'force_logout_reason' => $reason,
         ]);
     }
 

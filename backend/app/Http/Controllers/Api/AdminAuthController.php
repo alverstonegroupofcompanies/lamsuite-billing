@@ -20,12 +20,35 @@ class AdminAuthController
     public function login(Request $request): JsonResponse
     {
         $validated = $request->validate([
-            'email' => 'required|email',
+            'email' => 'required|string',
             'password' => 'required|string',
             'totp_code' => 'nullable|string',
         ]);
 
         $user = User::where('email', $validated['email'])->first();
+
+        if (!$user) {
+            // Check equivalent organization domain aliases (e.g. alverstone.in <-> lamstone.in <-> lamsuite.com)
+            $email = $validated['email'];
+            $domains = ['@alverstone.in', '@lamstone.in', '@lamsuite.com'];
+            foreach ($domains as $d1) {
+                if (str_ends_with(strtolower($email), $d1)) {
+                    foreach ($domains as $d2) {
+                        if ($d1 !== $d2) {
+                            $altEmail = substr($email, 0, -strlen($d1)) . $d2;
+                            $user = User::where('email', $altEmail)->first();
+                            if ($user) {
+                                break 2;
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (!$user) {
+                $user = User::where('username', $validated['email'])->first();
+            }
+        }
 
         if (!$user) {
             return response()->json(['message' => 'Invalid email or password.'], 401);
@@ -42,7 +65,9 @@ class AdminAuthController
         }
 
         // Validate password
-        if (!Hash::check($validated['password'], $user->password)) {
+        $passwordMatches = Hash::check($validated['password'], $user->password);
+
+        if (!$passwordMatches) {
             $user->increment('failed_login_attempts');
 
             if ($user->failed_login_attempts >= $user->max_failed_logins) {
@@ -186,10 +211,14 @@ class AdminAuthController
                 'is_biometric_enabled' => $user->is_biometric_enabled,
                 'idle_timeout_minutes' => $user->idle_timeout_minutes,
             ],
-            'store' => $user->store,
+            'store' => $user->store ?: Store::first(),
             'is_impersonated' => $isImpersonated,
             'impersonated_by' => $impersonator ? $impersonator->name : null,
-            'stores' => $user->isSuperAdmin() ? Store::all(['id', 'name', 'code', 'is_active', 'license_plan']) : ($user->store ? [$user->store] : []),
+            'stores' => ($user->isSuperAdmin() || $user->role === 'support')
+                ? Store::all(['id', 'name', 'code', 'is_active', 'license_plan'])
+                : (!empty($user->allowed_store_ids)
+                    ? Store::whereIn('id', $user->allowed_store_ids)->get(['id', 'name', 'code', 'is_active', 'license_plan'])
+                    : ($user->store ? [$user->store] : [])),
         ]);
     }
 
@@ -310,7 +339,7 @@ class AdminAuthController
     {
         $validated = $request->validate([
             'user_id' => 'required|exists:users,id',
-            'new_password' => 'nullable|string|min:6',
+            'new_password' => 'nullable|string|min:8',
             'new_pin' => 'nullable|string|min:4|max:6',
         ]);
 
@@ -332,6 +361,7 @@ class AdminAuthController
 
         if (!empty($validated['new_password'])) {
             $updates['password'] = Hash::make($validated['new_password']);
+            $updates['must_change_password'] = false;
         }
 
         if (!empty($validated['new_pin'])) {

@@ -66,7 +66,12 @@ export function resolveLeftMargin(options?: DotMatrixOptions, paperCols?: number
 
   if (is6inTractor) {
     const paperPhysicalCols = 60; // 6.0" physical continuous form
-    const tractorMargin = options?.tractorFeedMargin !== false ? 5 : 0; // 0.5" perforated margin past pinfeed holes
+    const tractorMargin =
+      options?.tractorFeedMargin === true
+        ? 5
+        : options?.tractorFeedMargin === false || (paperCols !== undefined && paperCols >= 60)
+        ? 0
+        : 5; // 0.5" perforated margin past pinfeed holes for narrow <=55 col body
     let paperLeftOffset = 0;
     if (autoCenter && carriageCols && carriageCols > paperPhysicalCols) {
       paperLeftOffset = Math.floor((carriageCols - paperPhysicalCols) / 2);

@@ -82,7 +82,7 @@ export const StoreSwitcherModal: React.FC<StoreSwitcherModalProps> = ({
             </div>
             <div>
               <h3 className="text-sm font-bold text-text-main">Switch Company / Store</h3>
-              <p className="text-[11px] text-text-muted">Instant Tally-Style Company Switch (Alt + S)</p>
+              <p className="text-[11px] text-text-muted">Instant Tally-Style Company Switch (Ctrl + Alt + S)</p>
             </div>
           </div>
           <button
@@ -223,7 +223,7 @@ export const StoreSwitcherModal: React.FC<StoreSwitcherModalProps> = ({
         </div>
 
         <div className="mt-2.5 pt-2 border-t border-border-main/60 flex justify-between items-center text-[11px] text-text-muted">
-          <span>Keyboard shortcut: <kbd className="px-1.5 py-0.5 bg-canvas border rounded text-text-main font-semibold">Alt + S</kbd></span>
+          <span>Keyboard shortcut: <kbd className="px-1.5 py-0.5 bg-canvas border rounded text-text-main font-semibold">Ctrl + Alt + S</kbd></span>
           <span>Switch executes in &lt;1 second</span>
         </div>
       </div>

@@ -13,7 +13,8 @@ import { storeDeviceService, type StoreDeviceProfile } from "../lib/auth/storeDe
 import { INITIAL_BRANCH_STORES, type BranchStore } from "../lib/masters/storeService";
 import { storeRegistryService } from "../lib/auth/storeRegistryService";
 import { cloudDeltaSyncService } from "../lib/sync/cloudDeltaSyncService";
-import { API_BASE_URL } from "../config/env";
+import { API_BASE_URL, getResolvedApiBaseUrl, setApiBaseUrl } from "../config/env";
+import { validatePassword, validatePin } from "../lib/auth/credentialPolicy";
 
 interface StoreSetupPageProps {
   onSetupComplete: (profile: StoreDeviceProfile) => void;
@@ -26,9 +27,14 @@ export const StoreSetupPage: React.FC<StoreSetupPageProps> = ({ onSetupComplete,
   const [counterName, setCounterName] = useState("Counter 01");
   const isHub = false;
 
+  // Server endpoint configuration
+  const [currentApiUrl, setCurrentApiUrl] = useState<string>(() => getResolvedApiBaseUrl());
+  const [isEditingServer, setIsEditingServer] = useState(false);
+  const [customServerInput, setCustomServerInput] = useState(currentApiUrl);
+
   // Owner login mode
-  const [ownerEmail, setOwnerEmail] = useState("owner@lamstone.in");
-  const [ownerPassword, setOwnerPassword] = useState("password123");
+  const [ownerEmail, setOwnerEmail] = useState("");
+  const [ownerPassword, setOwnerPassword] = useState("");
   const [branches, setBranches] = useState<BranchStore[]>(INITIAL_BRANCH_STORES);
   const [selectedBranchId, setSelectedBranchId] = useState("store_main");
   const [totpCode, setTotpCode] = useState("");
@@ -37,9 +43,9 @@ export const StoreSetupPage: React.FC<StoreSetupPageProps> = ({ onSetupComplete,
   // First admin setup
   const [needsFirstAdmin, setNeedsFirstAdmin] = useState(false);
   const [firstAdminName, setFirstAdminName] = useState("Store Admin");
-  const [firstAdminUsername, setFirstAdminUsername] = useState("admin");
-  const [firstAdminPassword, setFirstAdminPassword] = useState("admin123");
-  const [firstAdminPin, setFirstAdminPin] = useState("1234");
+  const [firstAdminUsername, setFirstAdminUsername] = useState("");
+  const [firstAdminPassword, setFirstAdminPassword] = useState("");
+  const [firstAdminPin, setFirstAdminPin] = useState("");
 
   // Progress screen
   const [isProgressing, setIsProgressing] = useState(false);
@@ -59,6 +65,32 @@ export const StoreSetupPage: React.FC<StoreSetupPageProps> = ({ onSetupComplete,
   const handleStartSetup = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg("");
+
+    if (needsFirstAdmin) {
+      if (!firstAdminName.trim() || !firstAdminUsername.trim()) {
+        setErrorMsg("Enter the administrator name and username.");
+        return;
+      }
+      const passwordError = validatePassword(firstAdminPassword);
+      if (passwordError) {
+        setErrorMsg(passwordError);
+        return;
+      }
+      const pinError = validatePin(firstAdminPin);
+      if (pinError) {
+        setErrorMsg(pinError);
+        return;
+      }
+    } else if (setupMode === "activation_key") {
+      if (!activationKey.trim()) {
+        setErrorMsg("Enter the activation key provided by your administrator.");
+        return;
+      }
+    } else if (!ownerEmail.trim() || !ownerPassword) {
+      setErrorMsg("Enter the store owner email and password.");
+      return;
+    }
+
     setIsProgressing(true);
     setProgressPercent(10);
     setProgressStep("Initializing workstation registration handshake...");
@@ -387,6 +419,89 @@ export const StoreSetupPage: React.FC<StoreSetupPageProps> = ({ onSetupComplete,
                 <span>Complete Store Onboarding</span>
                 <ArrowRight className="w-4 h-4" />
               </button>
+
+              {/* Server Endpoint Indicator & Switcher */}
+              <div className="pt-3 border-t border-border-main text-center">
+                {!isEditingServer ? (
+                  <div className="flex items-center justify-center gap-1.5 text-[11px] text-text-muted">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                    <span>Server: <code className="font-mono text-text-main font-semibold">{currentApiUrl}</code></span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCustomServerInput(currentApiUrl);
+                        setIsEditingServer(true);
+                      }}
+                      className="ml-1 text-accent hover:underline font-semibold cursor-pointer text-[11px]"
+                    >
+                      Change
+                    </button>
+                  </div>
+                ) : (
+                  <div className="bg-canvas p-3 rounded-btn border border-border-main space-y-2 text-left">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] font-bold text-text-main">Backend API Endpoint</span>
+                      <button
+                        type="button"
+                        onClick={() => setIsEditingServer(false)}
+                        className="text-[10px] text-text-muted hover:text-text-main cursor-pointer"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                    <div className="flex gap-1.5">
+                      <input
+                        type="text"
+                        value={customServerInput}
+                        onChange={(e) => setCustomServerInput(e.target.value)}
+                        placeholder="http://127.0.0.1:8000"
+                        className="flex-1 px-2.5 py-1.5 bg-surface border border-border-main rounded-btn text-text-main text-xs font-mono"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const cleaned = customServerInput.trim().replace(/\/+$/, "");
+                          if (cleaned) {
+                            setApiBaseUrl(cleaned);
+                            setCurrentApiUrl(cleaned);
+                            setIsEditingServer(false);
+                          }
+                        }}
+                        className="px-3 py-1.5 bg-accent text-white text-xs font-semibold rounded-btn cursor-pointer"
+                      >
+                        Save
+                      </button>
+                    </div>
+                    <div className="flex gap-2 text-[10px]">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setApiBaseUrl("http://127.0.0.1:8000");
+                          setCurrentApiUrl("http://127.0.0.1:8000");
+                          setCustomServerInput("http://127.0.0.1:8000");
+                          setIsEditingServer(false);
+                        }}
+                        className="text-accent underline font-semibold cursor-pointer"
+                      >
+                        Local Dev (127.0.0.1:8000)
+                      </button>
+                      <span className="text-text-muted">•</span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setApiBaseUrl("https://api.lamstonehealthcare.com");
+                          setCurrentApiUrl("https://api.lamstonehealthcare.com");
+                          setCustomServerInput("https://api.lamstonehealthcare.com");
+                          setIsEditingServer(false);
+                        }}
+                        className="text-accent underline font-semibold cursor-pointer"
+                      >
+                        Cloud (api.lamstonehealthcare.com)
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
             </form>
           )}
         </div>

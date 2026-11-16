@@ -5,9 +5,11 @@ namespace App\Http\Controllers\Api;
 use App\Models\AuditLog;
 use App\Models\Product;
 use App\Models\ProductBatch;
-use App\Models\StockAdjustment;
+use App\Models\StockAdjustmentDocument;
 use App\Models\StockTransfer;
 use App\Models\StockTransferItem;
+use App\Services\StockAdjustmentPolicy;
+use App\Services\StockAdjustmentService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
@@ -15,6 +17,12 @@ use Illuminate\Support\Facades\DB;
 
 class AdminInventoryController
 {
+    public function __construct(
+        private StockAdjustmentService $adjustmentService,
+        private StockAdjustmentPolicy $adjustmentPolicy
+    ) {
+    }
+
     /**
      * Stock by store and batch.
      */
@@ -240,6 +248,80 @@ class AdminInventoryController
     }
 
     /**
+     * Multi-line stock adjustment documents (posted + pending approval).
+     */
+    public function listAdjustments(Request $request): JsonResponse
+    {
+        $storeId = $request->get('active_store_id');
+        $query = StockAdjustmentDocument::with(['creator:id,name', 'approver:id,name', 'lines'])
+            ->when($storeId, fn($q) => $q->where('store_id', $storeId))
+            ->when($request->query('status'), fn($q) => $q->where('status', $request->query('status')))
+            ->orderByDesc('id');
+
+        return response()->json($query->paginate((int) $request->query('per_page', 20)));
+    }
+
+    public function showAdjustment(Request $request, string $id): JsonResponse
+    {
+        $storeId = $request->get('active_store_id');
+        $document = StockAdjustmentDocument::with(['creator:id,name', 'approver:id,name', 'lines.product:id,name,barcode', 'lines.batch:id,batch_no,expiry_date'])
+            ->when($storeId, fn($q) => $q->where('store_id', $storeId))
+            ->findOrFail($id);
+
+        return response()->json($document);
+    }
+
+    public function approveAdjustment(Request $request, string $id): JsonResponse
+    {
+        $storeId = $request->get('active_store_id');
+        $document = StockAdjustmentDocument::when($storeId, fn($q) => $q->where('store_id', $storeId))->findOrFail($id);
+
+        $document = $this->adjustmentService->approve($document, $request->user());
+
+        return response()->json([
+            'success' => true,
+            'document' => $document,
+            'message' => 'Stock adjustment approved and posted to the ledger.',
+        ]);
+    }
+
+    public function rejectAdjustment(Request $request, string $id): JsonResponse
+    {
+        $validated = $request->validate(['reason' => 'nullable|string|max:500']);
+        $storeId = $request->get('active_store_id');
+        $document = StockAdjustmentDocument::when($storeId, fn($q) => $q->where('store_id', $storeId))->findOrFail($id);
+
+        $document = $this->adjustmentService->reject($document, $request->user(), $validated['reason'] ?? null);
+
+        return response()->json([
+            'success' => true,
+            'document' => $document,
+            'message' => 'Stock adjustment rejected.',
+        ]);
+    }
+
+    public function getAdjustmentPolicy(Request $request): JsonResponse
+    {
+        $storeId = (int) $request->get('active_store_id');
+        return response()->json([
+            'success' => true,
+            'store_id' => $storeId,
+            'policy' => $this->adjustmentPolicy->forStore($storeId),
+            'defaults' => StockAdjustmentPolicy::DEFAULTS,
+        ]);
+    }
+
+    public function updateAdjustmentPolicy(Request $request): JsonResponse
+    {
+        $storeId = (int) $request->get('active_store_id');
+        $policy = $this->adjustmentPolicy->save($storeId, $request->input('policy', $request->all()));
+
+        AuditLog::log('update_stock_adjustment_policy', 'Store', (string) $storeId, null, $policy, $storeId);
+
+        return response()->json(['success' => true, 'store_id' => $storeId, 'policy' => $policy]);
+    }
+
+    /**
      * Stock Reconciliation adjustment.
      */
     public function reconcileStock(Request $request): JsonResponse
@@ -255,32 +337,56 @@ class AdminInventoryController
         $batch = ProductBatch::where('store_id', $validated['store_id'])
             ->where('product_id', $validated['product_id'])
             ->where('batch_no', $validated['batch_no'])
-            ->firstOrFail();
+            ->first();
+        $previousQty = $batch ? (float) $batch->stock_qty : null;
 
-        $diff = $validated['physical_qty'] - $batch->stock_qty;
-        $adjType = $diff >= 0 ? 'increase' : 'decrease';
-
-        StockAdjustment::create([
-            'store_id' => $validated['store_id'],
-            'product_id' => $validated['product_id'],
-            'batch_no' => $validated['batch_no'],
-            'adjustment_type' => $adjType,
-            'qty' => abs($diff),
-            'reason' => $validated['reason'] . " (Reconciled from {$batch->stock_qty} to {$validated['physical_qty']})",
-            'user_id' => $request->user() ? $request->user()->id : null,
+        // Route admin reconciliation through the same policy engine as the
+        // desktop and sync paths so role, threshold and period limits cannot
+        // be bypassed from the admin panel.
+        $result = $this->adjustmentService->post((int) $validated['store_id'], $request->user(), [
+            'document_id' => 'adm_rec_' . $validated['store_id'] . '_' . $validated['product_id'] . '_' . $validated['batch_no'] . '_' . now()->format('YmdHis'),
+            'mode' => 'physical_count',
+            'reason' => $validated['reason'],
+            'notes' => $validated['reason'],
+            'document_date' => now()->toDateString(),
+            'lines' => [[
+                'product_id' => (int) $validated['product_id'],
+                'batch_no' => $validated['batch_no'],
+                'counted_qty' => (float) $validated['physical_qty'],
+                'reason' => $validated['reason'],
+                'notes' => $validated['reason'],
+            ]],
         ]);
 
-        $batch->update(['stock_qty' => $validated['physical_qty']]);
-        $totalStock = ProductBatch::where('product_id', $validated['product_id'])->sum('stock_qty');
-        Product::where('id', $validated['product_id'])->update(['current_stock' => $totalStock]);
-
-        AuditLog::log('reconcile_stock', 'ProductBatch', (string)$batch->id, ['old_qty' => $batch->stock_qty], ['new_qty' => $validated['physical_qty'], 'diff' => $diff], $validated['store_id']);
+        // Preserve the admin reconcile audit trail expected by existing reports.
+        if (
+            $batch
+            && $previousQty !== null
+            && !($result['duplicate'] ?? false)
+            && $result['document']->status === 'posted'
+        ) {
+            AuditLog::log(
+                'reconcile_stock',
+                'ProductBatch',
+                (string) $batch->id,
+                ['old_qty' => $previousQty],
+                [
+                    'new_qty' => (float) $validated['physical_qty'],
+                    'diff' => (float) $validated['physical_qty'] - $previousQty,
+                ],
+                $validated['store_id']
+            );
+        }
 
         return response()->json([
             'success' => true,
-            'difference' => $diff,
-            'current_stock' => $totalStock,
-            'message' => 'Stock reconciled successfully.',
+            'duplicate' => $result['duplicate'] ?? false,
+            'document_id' => $result['document']->document_id,
+            'status' => $result['document']->status,
+            'requires_approval' => (bool) $result['document']->requires_approval,
+            'message' => $result['document']->status === 'pending_approval'
+                ? 'Stock reconciliation submitted for approval.'
+                : 'Stock reconciled successfully.',
         ]);
     }
 }

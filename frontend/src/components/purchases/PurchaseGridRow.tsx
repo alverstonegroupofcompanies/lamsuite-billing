@@ -2,8 +2,10 @@ import React, { useState, useRef, useEffect } from "react";
 import { Trash2, AlertTriangle, AlertCircle, ArrowUpRight, Search, Barcode, Check } from "lucide-react";
 import type { ColumnSetting } from "../../lib/settings/companySettingsService";
 import type { PurchaseLineItemInput } from "../../lib/purchases/purchaseService";
-import { parseExpiryInput, calculateLineMargin } from "../../lib/purchases/purchaseEntryUtils";
+import { parseExpiryInput, calculateLineMargin, isValidHsn, suggestGstForHsn } from "../../lib/purchases/purchaseEntryUtils";
 import { purchaseService } from "../../lib/purchases/purchaseService";
+import { BatchCombobox } from "../BatchCombobox";
+import type { ProductBatch } from "../../lib/masters/productsStore";
 
 export interface PurchaseGridRowProps {
   idx: number;
@@ -15,6 +17,7 @@ export interface PurchaseGridRowProps {
   isEditingCell?: boolean;
   visibleCols: ColumnSetting[];
   isInterstate?: boolean;
+  batchRequired?: boolean;
   lastPurchaseDetails?: { rate: number; purchase_number?: string } | null;
 
   // Draft product search input
@@ -50,6 +53,7 @@ export const PurchaseGridRow: React.FC<PurchaseGridRowProps> = ({
   isEditingCell = false,
   visibleCols,
   isInterstate = false,
+  batchRequired = true,
   lastPurchaseDetails,
   searchQuery = "",
   onSearchChange,
@@ -71,15 +75,18 @@ export const PurchaseGridRow: React.FC<PurchaseGridRowProps> = ({
   onEditBatch,
 }) => {
   // Input refs for keyboard loop across the entry row
-  const batchInputRef = useRef<HTMLInputElement>(null);
   const expiryInputRef = useRef<HTMLInputElement>(null);
+  const mfgInputRef = useRef<HTMLInputElement>(null);
   const qtyInputRef = useRef<HTMLInputElement>(null);
   const freeQtyInputRef = useRef<HTMLInputElement>(null);
   const mrpInputRef = useRef<HTMLInputElement>(null);
   const rateInputRef = useRef<HTMLInputElement>(null);
   const discInputRef = useRef<HTMLInputElement>(null);
   const gstInputRef = useRef<HTMLInputElement>(null);
+  const hsnInputRef = useRef<HTMLInputElement>(null);
   const sellRateInputRef = useRef<HTMLInputElement>(null);
+
+  const hasColumn = (id: string) => visibleCols.some((c) => c.id === id);
 
   // Compute live calculations
   const calc = line ? purchaseService.calculateLineTotals(line, isInterstate) : null;
@@ -100,15 +107,27 @@ export const PurchaseGridRow: React.FC<PurchaseGridRowProps> = ({
   // Expiry validation status
   const expiryStatus = line?.expiry_date ? parseExpiryInput(line.expiry_date) : null;
 
-  // Auto focus into Batch input right after product is chosen in entry row
+  // Track the picked master batch so the combobox can show its identity.
+  const [selectedBatchId, setSelectedBatchId] = useState("");
+
   useEffect(() => {
-    if (isDraft && line && line.product_name && !line.batch_no) {
-      setTimeout(() => {
-        batchInputRef.current?.focus();
-        batchInputRef.current?.select();
-      }, 50);
+    setSelectedBatchId("");
+  }, [line?.product_id]);
+
+  const applyBatchSelection = (batchId: string, batch?: ProductBatch) => {
+    if (!batch) return;
+    setSelectedBatchId(batch.id || batchId);
+    onFieldChange?.("batch_no", batch.batch_no || "");
+    if (batch.expiry_date) {
+      onFieldChange?.("expiry_date", String(batch.expiry_date).slice(0, 10));
     }
-  }, [isDraft, line?.product_id]);
+    if (batch.mfg_date) {
+      onFieldChange?.("mfg_date", String(batch.mfg_date).slice(0, 10));
+    }
+    if (batch.mrp) onFieldChange?.("mrp", batch.mrp);
+    if (batch.purchase_rate) onFieldChange?.("purchase_rate", batch.purchase_rate);
+    if (batch.selling_rate) onFieldChange?.("selling_rate", batch.selling_rate);
+  };
 
   // Row styling
   let rowClass = "transition-all text-[var(--color-text)] ";
@@ -262,30 +281,38 @@ export const PurchaseGridRow: React.FC<PurchaseGridRowProps> = ({
             }}
           >
             {isDraft && line ? (
-              <input
-                ref={batchInputRef}
-                type="text"
-                value={line.batch_no}
-                onChange={(e) => onFieldChange?.("batch_no", e.target.value.toUpperCase())}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    e.preventDefault();
-                    expiryInputRef.current?.focus();
-                    expiryInputRef.current?.select();
-                  }
+              <BatchCombobox
+                id={`purchase-batch-${idx}`}
+                value={selectedBatchId}
+                productId={line.product_id}
+                allowCustomValue
+                customValue={line.batch_no || ""}
+                onCustomValueChange={(text) => onFieldChange?.("batch_no", text.toUpperCase())}
+                onChange={applyBatchSelection}
+                onEnter={() => {
+                  const target = hasColumn("mfg_date") ? mfgInputRef.current : expiryInputRef.current;
+                  target?.focus();
+                  target?.select();
                 }}
-                placeholder="BATCH"
-                className="w-full uppercase font-mono text-xs rounded-[6px] border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1 text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none"
+                autoFocus={!line.batch_no}
+                required={batchRequired}
+                placeholder={batchRequired ? "Batch..." : "Batch (optional)"}
+                className="min-w-[130px]"
               />
             ) : isCellEditing && line ? (
-              <input
-                type="text"
+              <BatchCombobox
+                id={`purchase-batch-edit-${idx}`}
+                value={selectedBatchId}
+                productId={line.product_id}
+                allowCustomValue
+                customValue={line.batch_no || ""}
+                onCustomValueChange={(text) => onFieldChange?.("batch_no", text.toUpperCase())}
+                onChange={applyBatchSelection}
+                onEnter={onCellEditSave}
                 autoFocus
-                ref={(el) => el?.select()}
-                value={line.batch_no || ""}
-                onChange={(e) => onFieldChange?.("batch_no", e.target.value.toUpperCase())}
-                onKeyDown={handleCellKeyDown}
-                className="w-full uppercase font-mono text-xs rounded border border-[var(--color-accent)] bg-[var(--color-surface)] px-1.5 py-0.5 text-[var(--color-text)] focus:outline-none shadow-2xs"
+                required={batchRequired}
+                placeholder={batchRequired ? "Batch..." : "Batch (optional)"}
+                className="min-w-[130px]"
               />
             ) : line ? (
               <span className="font-mono text-xs font-semibold text-[var(--color-text)]">
@@ -293,6 +320,55 @@ export const PurchaseGridRow: React.FC<PurchaseGridRowProps> = ({
               </span>
             ) : (
               <span className="text-[var(--color-text-muted)] opacity-50">—</span>
+            )}
+          </td>
+        );
+
+      case "mfg_date":
+        return (
+          <td
+            key="mfg_date"
+            className={getCellHighlight("mfg_date", "px-2 py-1")}
+            onClick={() => {
+              onSelectRow?.();
+              onCellClick?.("mfg_date");
+            }}
+            onDoubleClick={() => {
+              onSelectRow?.();
+              onCellDoubleClick?.("mfg_date");
+            }}
+          >
+            {isDraft && line ? (
+              <input
+                ref={mfgInputRef}
+                type="date"
+                value={line.mfg_date || ""}
+                onChange={(e) => onFieldChange?.("mfg_date", e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    expiryInputRef.current?.focus();
+                    expiryInputRef.current?.select();
+                  }
+                }}
+                max={line.expiry_date || undefined}
+                className="w-full font-mono text-xs rounded-[6px] border border-[var(--color-border)] bg-[var(--color-surface)] px-1 py-1 text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none"
+                title="Manufacturing date (must be before expiry)"
+              />
+            ) : isCellEditing && line ? (
+              <input
+                type="date"
+                autoFocus
+                value={line.mfg_date || ""}
+                onChange={(e) => onFieldChange?.("mfg_date", e.target.value)}
+                onKeyDown={handleCellKeyDown}
+                max={line.expiry_date || undefined}
+                className="w-full font-mono text-xs rounded border border-[var(--color-accent)] bg-[var(--color-surface)] px-1 py-0.5 text-[var(--color-text)] focus:outline-none shadow-2xs"
+              />
+            ) : (
+              <span className="font-mono text-xs text-[var(--color-text-muted)]">
+                {line?.mfg_date || "—"}
+              </span>
             )}
           </td>
         );
@@ -479,33 +555,75 @@ export const PurchaseGridRow: React.FC<PurchaseGridRowProps> = ({
             }}
           >
             {isDraft && line ? (
-              <input
-                ref={freeQtyInputRef}
-                type="number"
-                value={line.free_qty || 0}
-                onChange={(e) => onFieldChange?.("free_qty", Math.max(0, parseFloat(e.target.value) || 0))}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    e.preventDefault();
-                    mrpInputRef.current?.focus();
-                    mrpInputRef.current?.select();
-                  }
-                }}
-                className="w-12 text-center font-mono text-xs rounded-[6px] border border-[var(--color-border)] bg-[var(--color-surface)] px-1 py-1 text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none"
-              />
+              <div className="flex items-center gap-1 justify-center">
+                <input
+                  ref={freeQtyInputRef}
+                  type="number"
+                  min="0"
+                  value={line.free_qty || ""}
+                  onChange={(e) => onFieldChange?.("free_qty", Math.max(0, parseFloat(e.target.value) || 0))}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      mrpInputRef.current?.focus();
+                      mrpInputRef.current?.select();
+                    }
+                  }}
+                  placeholder="Pk"
+                  title="Free packs"
+                  className="w-11 text-center font-mono text-xs rounded-[6px] border border-[var(--color-border)] bg-[var(--color-surface)] px-1 py-1 text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none"
+                />
+                {(line.units_per_pack || 1) > 1 && (
+                  <input
+                    type="number"
+                    min="0"
+                    value={line.free_loose_qty || ""}
+                    onChange={(e) => onFieldChange?.("free_loose_qty", Math.max(0, parseInt(e.target.value, 10) || 0))}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        mrpInputRef.current?.focus();
+                        mrpInputRef.current?.select();
+                      }
+                    }}
+                    placeholder="Loose"
+                    title="Free loose units"
+                    className="w-11 text-center font-mono text-xs rounded-[6px] border border-[var(--color-border)] bg-[var(--color-surface)] px-1 py-1 text-[var(--color-text-muted)] focus:border-[var(--color-accent)] focus:outline-none"
+                  />
+                )}
+              </div>
             ) : isCellEditing && line ? (
-              <input
-                type="number"
-                autoFocus
-                ref={(el) => el?.select()}
-                value={line.free_qty || 0}
-                onChange={(e) => onFieldChange?.("free_qty", Math.max(0, parseFloat(e.target.value) || 0))}
-                onKeyDown={handleCellKeyDown}
-                className="w-14 font-mono text-xs rounded border border-[var(--color-accent)] bg-[var(--color-surface)] px-1.5 py-0.5 text-[var(--color-text)] text-center focus:outline-none shadow-2xs"
-              />
+              <div className="flex items-center gap-1 justify-center">
+                <input
+                  type="number"
+                  autoFocus
+                  min="0"
+                  ref={(el) => el?.select()}
+                  value={line.free_qty || ""}
+                  onChange={(e) => onFieldChange?.("free_qty", Math.max(0, parseFloat(e.target.value) || 0))}
+                  onKeyDown={handleCellKeyDown}
+                  placeholder="Pk"
+                  title="Free packs"
+                  className="w-12 font-mono text-xs rounded border border-[var(--color-accent)] bg-[var(--color-surface)] px-1.5 py-0.5 text-[var(--color-text)] text-center focus:outline-none shadow-2xs"
+                />
+                {(line.units_per_pack || 1) > 1 && (
+                  <input
+                    type="number"
+                    min="0"
+                    value={line.free_loose_qty || ""}
+                    onChange={(e) => onFieldChange?.("free_loose_qty", Math.max(0, parseInt(e.target.value, 10) || 0))}
+                    onKeyDown={handleCellKeyDown}
+                    placeholder="Loose"
+                    title="Free loose units"
+                    className="w-12 font-mono text-xs rounded border border-[var(--color-accent)] bg-[var(--color-surface)] px-1.5 py-0.5 text-[var(--color-text-muted)] text-center focus:outline-none shadow-2xs"
+                  />
+                )}
+              </div>
             ) : line ? (
               <span className="font-mono text-xs text-[var(--color-text-muted)]">
-                {line.free_qty ? `+${line.free_qty}` : "0"}
+                {line.free_qty || line.free_loose_qty
+                  ? `+${line.free_qty || 0}p${line.free_loose_qty ? ` +${line.free_loose_qty}u` : ""}`
+                  : "0"}
               </span>
             ) : (
               <span className="text-[var(--color-text-muted)] opacity-50">—</span>
@@ -569,43 +687,114 @@ export const PurchaseGridRow: React.FC<PurchaseGridRowProps> = ({
         return (
           <td
             key="ptr"
-            className={getCellHighlight("ptr", "px-2 py-1 text-right font-mono text-xs text-[var(--color-text-muted)]")}
+            className={getCellHighlight("ptr", "px-2 py-1 text-right")}
             onClick={() => {
               onSelectRow?.();
               onCellClick?.("ptr");
             }}
+            onDoubleClick={() => {
+              onSelectRow?.();
+              onCellDoubleClick?.("ptr");
+            }}
           >
-            ₹ {Number(line?.purchase_rate || 0).toFixed(2)}
+            {isDraft && line ? (
+              <input
+                type="number"
+                step="0.01"
+                value={line.purchase_rate || ""}
+                onChange={(e) => onFieldChange?.("purchase_rate", parseFloat(e.target.value) || 0)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    rateInputRef.current?.focus();
+                    rateInputRef.current?.select();
+                  }
+                }}
+                placeholder="PTR"
+                className="w-18 text-right font-mono text-xs rounded-[6px] border border-[var(--color-border)] bg-[var(--color-surface)] px-1 py-1 text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none"
+                title="PTR / purchase rate per pack"
+              />
+            ) : isCellEditing && line ? (
+              <input
+                type="number"
+                step="0.01"
+                autoFocus
+                ref={(el) => el?.select()}
+                value={line.purchase_rate || ""}
+                onChange={(e) => onFieldChange?.("purchase_rate", parseFloat(e.target.value) || 0)}
+                onKeyDown={handleCellKeyDown}
+                className="w-20 font-mono text-xs rounded border border-[var(--color-accent)] bg-[var(--color-surface)] px-1.5 py-0.5 text-[var(--color-text)] text-right focus:outline-none shadow-2xs"
+                title="PTR / purchase rate per pack"
+              />
+            ) : (
+              <span className="font-mono text-xs text-[var(--color-text-muted)]">
+                ₹ {Number(line?.ptr ?? line?.purchase_rate ?? 0).toFixed(2)}
+              </span>
+            )}
           </td>
         );
 
       case "pts":
+      case "ptss": {
+        const isPtss = colId === "ptss";
+        const stored = isPtss ? line?.ptss : line?.pts;
+        const derived = Number(line?.purchase_rate || 0) * (isPtss ? 1.08 : 1.05);
+        const label = isPtss ? "PTSS" : "PTS";
+        const field = isPtss ? "ptss" : "pts";
         return (
           <td
-            key="pts"
-            className={getCellHighlight("pts", "px-2 py-1 text-right font-mono text-xs text-[var(--color-text-muted)]")}
+            key={colId}
+            className={getCellHighlight(colId, "px-2 py-1 text-right")}
             onClick={() => {
               onSelectRow?.();
-              onCellClick?.("pts");
+              onCellClick?.(colId);
             }}
-          >
-            ₹ {Number((line?.purchase_rate || 0) * 1.05).toFixed(2)}
-          </td>
-        );
-
-      case "ptss":
-        return (
-          <td
-            key="ptss"
-            className={getCellHighlight("ptss", "px-2 py-1 text-right font-mono text-xs text-[var(--color-text-muted)]")}
-            onClick={() => {
+            onDoubleClick={() => {
               onSelectRow?.();
-              onCellClick?.("ptss");
+              onCellDoubleClick?.(colId);
             }}
           >
-            ₹ {Number((line?.purchase_rate || 0) * 1.08).toFixed(2)}
+            {isDraft && line ? (
+              <input
+                type="number"
+                step="0.01"
+                value={stored ?? ""}
+                placeholder={derived.toFixed(2)}
+                onChange={(e) =>
+                  onFieldChange?.(field, e.target.value === "" ? undefined : parseFloat(e.target.value) || 0)
+                }
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    rateInputRef.current?.focus();
+                    rateInputRef.current?.select();
+                  }
+                }}
+                className="w-18 text-right font-mono text-xs rounded-[6px] border border-[var(--color-border)] bg-[var(--color-surface)] px-1 py-1 text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none"
+                title={`${label} (editable)`}
+              />
+            ) : isCellEditing && line ? (
+              <input
+                type="number"
+                step="0.01"
+                autoFocus
+                ref={(el) => el?.select()}
+                value={stored ?? ""}
+                placeholder={derived.toFixed(2)}
+                onChange={(e) =>
+                  onFieldChange?.(field, e.target.value === "" ? undefined : parseFloat(e.target.value) || 0)
+                }
+                onKeyDown={handleCellKeyDown}
+                className="w-20 font-mono text-xs rounded border border-[var(--color-accent)] bg-[var(--color-surface)] px-1.5 py-0.5 text-[var(--color-text)] text-right focus:outline-none shadow-2xs"
+              />
+            ) : (
+              <span className="font-mono text-xs text-[var(--color-text-muted)]">
+                ₹ {Number(stored ?? derived).toFixed(2)}
+              </span>
+            )}
           </td>
         );
+      }
 
       case "purchase_rate":
         return (
@@ -674,35 +863,79 @@ export const PurchaseGridRow: React.FC<PurchaseGridRowProps> = ({
             }}
           >
             {isDraft && line ? (
-              <input
-                ref={discInputRef}
-                type="number"
-                step="0.1"
-                value={line.discount_percent || 0}
-                onChange={(e) => onFieldChange?.("discount_percent", parseFloat(e.target.value) || 0)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    e.preventDefault();
-                    gstInputRef.current?.focus();
-                    gstInputRef.current?.select();
+              <div
+                className="flex items-center justify-center gap-0.5"
+                title="Alt+Y toggles percentage / flat amount"
+              >
+                <input
+                  ref={discInputRef}
+                  type="number"
+                  step="0.1"
+                  min="0"
+                  value={
+                    line.discount_type === "amount"
+                      ? line.discount_amount || 0
+                      : line.discount_percent || 0
                   }
-                }}
-                className="w-12 text-center font-mono text-xs rounded-[6px] border border-[var(--color-border)] bg-[var(--color-surface)] px-1 py-1 text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none"
-              />
+                  onChange={(e) => {
+                    const value = Math.max(0, parseFloat(e.target.value) || 0);
+                    if (line.discount_type === "amount") {
+                      onFieldChange?.("discount_amount", value);
+                    } else {
+                      onFieldChange?.("discount_percent", value);
+                    }
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      gstInputRef.current?.focus();
+                      gstInputRef.current?.select();
+                    }
+                  }}
+                  className="w-12 text-center font-mono text-xs rounded-[6px] border border-[var(--color-border)] bg-[var(--color-surface)] px-1 py-1 text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none"
+                  aria-label={line.discount_type === "amount" ? "Line discount amount" : "Line discount percent"}
+                />
+                <span className="text-[9px] font-bold text-[var(--color-text-muted)]">
+                  {line.discount_type === "amount" ? "₹" : "%"}
+                </span>
+              </div>
             ) : isCellEditing && line ? (
-              <input
-                type="number"
-                step="0.1"
-                autoFocus
-                ref={(el) => el?.select()}
-                value={line.discount_percent || 0}
-                onChange={(e) => onFieldChange?.("discount_percent", parseFloat(e.target.value) || 0)}
-                onKeyDown={handleCellKeyDown}
-                className="w-14 font-mono text-xs rounded border border-[var(--color-accent)] bg-[var(--color-surface)] px-1.5 py-0.5 text-[var(--color-text)] text-center focus:outline-none shadow-2xs"
-              />
+              <div className="flex items-center justify-center gap-0.5">
+                <input
+                  type="number"
+                  step="0.1"
+                  min="0"
+                  autoFocus
+                  ref={(el) => el?.select()}
+                  value={
+                    line.discount_type === "amount"
+                      ? line.discount_amount || 0
+                      : line.discount_percent || 0
+                  }
+                  onChange={(e) => {
+                    const value = Math.max(0, parseFloat(e.target.value) || 0);
+                    if (line.discount_type === "amount") {
+                      onFieldChange?.("discount_amount", value);
+                    } else {
+                      onFieldChange?.("discount_percent", value);
+                    }
+                  }}
+                  onKeyDown={handleCellKeyDown}
+                  className="w-14 font-mono text-xs rounded border border-[var(--color-accent)] bg-[var(--color-surface)] px-1.5 py-0.5 text-[var(--color-text)] text-center focus:outline-none shadow-2xs"
+                />
+                <span className="text-[9px] font-bold text-[var(--color-text-muted)]">
+                  {line.discount_type === "amount" ? "₹" : "%"}
+                </span>
+              </div>
             ) : line ? (
               <span className="font-mono text-xs text-[var(--color-text-muted)]">
-                {line.discount_percent ? `${line.discount_percent}%` : "—"}
+                {line.discount_type === "amount"
+                  ? line.discount_amount
+                    ? `₹${line.discount_amount}`
+                    : "—"
+                  : line.discount_percent
+                  ? `${line.discount_percent}%`
+                  : "—"}
               </span>
             ) : (
               <span className="text-[var(--color-text-muted)] opacity-50">—</span>
@@ -747,8 +980,13 @@ export const PurchaseGridRow: React.FC<PurchaseGridRowProps> = ({
                 onKeyDown={(e) => {
                   if (e.key === "Enter") {
                     e.preventDefault();
-                    sellRateInputRef.current?.focus();
-                    sellRateInputRef.current?.select();
+                    if (hasColumn("hsn")) {
+                      hsnInputRef.current?.focus();
+                      hsnInputRef.current?.select();
+                    } else {
+                      sellRateInputRef.current?.focus();
+                      sellRateInputRef.current?.select();
+                    }
                   }
                 }}
                 className="w-12 text-center font-mono text-xs rounded-[6px] border border-[var(--color-border)] bg-[var(--color-surface)] px-1 py-1 text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none"
@@ -776,8 +1014,75 @@ export const PurchaseGridRow: React.FC<PurchaseGridRowProps> = ({
 
       case "hsn":
         return (
-          <td key="hsn" className={getCellHighlight("hsn", "px-2 py-1 text-center font-mono text-xs text-[var(--color-text-muted)]")}>
-            {line?.hsn_code || "—"}
+          <td
+            key="hsn"
+            className={getCellHighlight("hsn", "px-2 py-1 text-center")}
+            onClick={() => {
+              onSelectRow?.();
+              onCellClick?.("hsn");
+            }}
+            onDoubleClick={() => {
+              onSelectRow?.();
+              onCellDoubleClick?.("hsn");
+            }}
+          >
+            {isDraft && line ? (
+              <input
+                ref={hsnInputRef}
+                type="text"
+                inputMode="numeric"
+                value={line.hsn_code || ""}
+                onChange={(e) =>
+                  onFieldChange?.("hsn_code", e.target.value.replace(/\D/g, "").slice(0, 8))
+                }
+                onBlur={() => {
+                  const code = (line.hsn_code || "").trim();
+                  if (code && isValidHsn(code) && !line.gst_percent) {
+                    const suggested = suggestGstForHsn(code);
+                    if (suggested !== null) onFieldChange?.("gst_percent", suggested);
+                  }
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    sellRateInputRef.current?.focus();
+                    sellRateInputRef.current?.select();
+                  }
+                }}
+                placeholder="HSN 4/6/8"
+                aria-invalid={Boolean(line.hsn_code && !isValidHsn(line.hsn_code))}
+                className={`w-20 text-center font-mono text-xs rounded-[6px] border bg-[var(--color-surface)] px-1 py-1 text-[var(--color-text)] focus:outline-none ${
+                  line.hsn_code && !isValidHsn(line.hsn_code)
+                    ? "border-[var(--color-danger-border)] ring-1 ring-[var(--color-danger-border)]"
+                    : "border-[var(--color-border)] focus:border-[var(--color-accent)]"
+                }`}
+                title="HSN/SAC must be 4, 6 or 8 digits"
+              />
+            ) : isCellEditing && line ? (
+              <input
+                type="text"
+                inputMode="numeric"
+                autoFocus
+                ref={(el) => el?.select()}
+                value={line.hsn_code || ""}
+                onChange={(e) =>
+                  onFieldChange?.("hsn_code", e.target.value.replace(/\D/g, "").slice(0, 8))
+                }
+                onBlur={() => {
+                  const code = (line.hsn_code || "").trim();
+                  if (code && isValidHsn(code) && !line.gst_percent) {
+                    const suggested = suggestGstForHsn(code);
+                    if (suggested !== null) onFieldChange?.("gst_percent", suggested);
+                  }
+                }}
+                onKeyDown={handleCellKeyDown}
+                className="w-20 font-mono text-xs rounded border border-[var(--color-accent)] bg-[var(--color-surface)] px-1.5 py-0.5 text-[var(--color-text)] text-center focus:outline-none shadow-2xs"
+              />
+            ) : (
+              <span className="font-mono text-xs text-[var(--color-text-muted)]">
+                {line?.hsn_code || "—"}
+              </span>
+            )}
           </td>
         );
 

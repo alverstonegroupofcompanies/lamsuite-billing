@@ -38,6 +38,7 @@ export interface Store {
   email?: string;
   address?: string;
   state_code: string;
+  timezone?: string;
   gstin?: string;
   drug_license_numbers?: string[];
   fssai_no?: string;

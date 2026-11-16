@@ -159,4 +159,38 @@ export const STORE_PROMPTS: PromptDefinition[] = [
       };
     },
   },
+  {
+    name: "staff_session_policy",
+    description:
+      "Explain the one-active-counter staff login contract (endpoints, the 409 ACTIVE_SESSION_ELSEWHERE response, force_out rules and how to release a stuck workstation).",
+    arguments: [
+      {
+        name: "store_code",
+        description: "Store code used at the terminal (optional, informational only)",
+        required: false,
+      },
+    ],
+    template: (args) => {
+      const store = args.store_code ? ` for store \`${args.store_code}\`` : "";
+      return {
+        description: "One-active-counter staff login contract",
+        messages: [
+          {
+            role: "user",
+            content: {
+              type: "text",
+              text:
+                `Document the LamSuite staff session contract${store}. Do not ask for or invent PINs, passwords or tokens.\n\n` +
+                `1. Staff sign in at a terminal with \`POST /staff/login\` sending \`store_id\` (id or code), \`username\` or \`user_id\`, \`pin\` or \`password\`, and an optional \`counter_id\`.\n` +
+                `2. LamSuite enforces one active counter per staff account. If the account is already active on another device within the last 30 minutes, the call returns HTTP 409 with \`error: "ACTIVE_SESSION_ELSEWHERE"\`, an \`active_session\` payload (session id, device, counter, last_active_at) and \`can_force_out\`.\n` +
+                `3. \`force_out: true\` is only honoured for privileged roles (store_owner, owner, admin, super_admin, manager); it ends the other device session and clears its tokens. Multi-counter login is allowed only for roles listed in the \`allow_multi_counter_roles\` company setting.\n` +
+                `4. Managers holding a privileged token can release a stuck terminal with \`POST /device-sessions/{id}/force-logout\` (or \`lock\` / \`unlock\` / \`revoke\`), or via the MCP tool \`lamsuite_device_session_action\`.\n` +
+                `5. Terminals heartbeat with \`POST /device-sessions/heartbeat\` and sign out with \`POST /staff/logout\` or \`POST /device-sessions/logout\`.\n` +
+                `6. Use \`lamsuite_list_device_sessions\` to show the current sessions before suggesting any remote action.`,
+            },
+          },
+        ],
+      };
+    },
+  },
 ];

@@ -211,6 +211,31 @@ export class BillingTenderService {
   }
 
   /**
+   * Synchronize in-progress typed tender inputs into tender lines.
+   * Ensures rapid finalize (Ctrl+S / Save click) commits unblurred input values.
+   */
+  syncInProgressTenderInput(
+    tenders: PaymentTenderLine[],
+    activeIndex: number,
+    inProgressValue: string | number | null | undefined
+  ): PaymentTenderLine[] {
+    if (inProgressValue === null || inProgressValue === undefined || inProgressValue === "") {
+      return tenders;
+    }
+    const parsedAmount = typeof inProgressValue === "number" ? inProgressValue : parseFloat(inProgressValue);
+    if (isNaN(parsedAmount) || parsedAmount < 0) {
+      return tenders;
+    }
+
+    if (activeIndex >= 0 && activeIndex < tenders.length) {
+      return tenders.map((t, idx) => (idx === activeIndex ? { ...t, amount: parsedAmount } : t));
+    } else if (tenders.length === 0) {
+      return [{ id: `pay_${Date.now()}_0`, mode: "Cash", amount: parsedAmount, status: "received" }];
+    }
+    return tenders;
+  }
+
+  /**
    * Validate payment lines before final checkout.
    */
   async validatePaymentLines(

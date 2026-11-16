@@ -75,6 +75,7 @@ class LoggedInDevicesTest extends TestCase
             'counter_id' => 'C01',
             'device_uuid' => 'uuid_pos_alpha',
             'device_name' => 'POS Terminal Alpha',
+            'app_version' => '2.0.36',
         ]);
         $loginRes->assertStatus(200);
 
@@ -96,7 +97,7 @@ class LoggedInDevicesTest extends TestCase
         $this->assertTrue($device['is_this_device']);
         $this->assertNotNull($device['sign_in_time']);
         $this->assertNotNull($device['last_seen']);
-        $this->assertEquals('2.0.21', $device['app_version']);
+        $this->assertEquals('2.0.36', $device['app_version']);
         $this->assertEquals(0, $device['unsynced_items_count']);
     }
 
@@ -295,6 +296,17 @@ class LoggedInDevicesTest extends TestCase
      */
     public function test_public_ip_resolution_and_heartbeat(): void
     {
+        // A registered counter provides the identity a bare heartbeat needs;
+        // presence is never fabricated with a null counter.
+        Counter::create([
+            'store_id' => $this->store->id,
+            'counter_code' => 'C02',
+            'counter_name' => 'Counter 02',
+            'device_name' => 'Tablet Desk',
+            'device_uuid' => 'uuid_pub_test',
+            'status' => 'active',
+        ]);
+
         $loginRes = $this->postJson('/api/device-sessions/heartbeat', [
             'device_uuid' => 'uuid_pub_test',
             'device_name' => 'Tablet Desk',
@@ -379,5 +391,223 @@ class LoggedInDevicesTest extends TestCase
         $res2 = $this->getJson('/api/device-sessions?store_id=' . $this->store->id);
         $dev2 = collect($res2->json('devices'))->firstWhere('device_uuid', 'uuid_ipv4_test');
         $this->assertEquals('192.168.0.145', $dev2['device_ipv4']);
+    }
+
+    /**
+     * 11. Heartbeat refreshes the full identity (names, role, counter, user)
+     * rather than keeping whatever was captured at sign-in.
+     */
+    public function test_heartbeat_refreshes_full_device_identity(): void
+    {
+        $counter = Counter::create([
+            'store_id' => $this->store->id,
+            'counter_code' => 'C09',
+            'counter_name' => 'Old Counter Name',
+            'device_name' => 'Old Workstation',
+            'device_uuid' => 'uuid_identity_refresh',
+            'status' => 'active',
+        ]);
+
+        $cashier = User::create([
+            'store_id' => $this->store->id,
+            'name' => 'Cashier Two',
+            'username' => 'cashier2',
+            'email' => 'cashier2@lamsuite.internal',
+            'password' => bcrypt('secret123'),
+            'role' => 'cashier',
+            'is_active' => true,
+        ]);
+
+        $session = DeviceSession::recordLogin(
+            $this->store->id,
+            'uuid_identity_refresh',
+            'Old Workstation',
+            $counter->id,
+            'Old Counter Name',
+            'C09',
+            $cashier->id
+        );
+
+        $counter->update(['counter_name' => 'Renamed Counter']);
+
+        $res = $this->postJson('/api/device-sessions/heartbeat', [
+            'device_uuid' => 'uuid_identity_refresh',
+            'device_name' => 'Renamed Workstation',
+            'counter_name' => 'Renamed Counter',
+            'counter_id' => $counter->id,
+            'user_id' => $cashier->id,
+            'user_role' => 'Senior Cashier',
+            'store_id' => (string)$this->store->id,
+        ]);
+        $res->assertStatus(200);
+
+        $fresh = $session->fresh();
+        $this->assertEquals('Renamed Workstation', $fresh->device_name);
+        $this->assertEquals('Renamed Counter', $fresh->counter_name);
+        $this->assertEquals('C09', $fresh->counter_code);
+        $this->assertEquals($counter->id, $fresh->counter_id);
+        $this->assertEquals($cashier->id, $fresh->user_id);
+        $this->assertEquals('Senior Cashier', $fresh->user_role);
+        $this->assertEquals((string)$this->store->id, (string)$fresh->store_id);
+    }
+
+    /**
+     * 12. A heartbeat from a force-logged-out workstation is rejected with 409
+     * and never creates a replacement session.
+     */
+    public function test_heartbeat_does_not_resurrect_a_force_logged_out_session(): void
+    {
+        $session = DeviceSession::recordLogin(
+            $this->store->id,
+            'uuid_force_logout',
+            'Counter 09',
+            null,
+            'Counter 09',
+            'C09'
+        );
+
+        $this->postJson("/api/device-sessions/{$session->id}/force-logout", [
+            'reason' => 'Signed in at another till',
+        ])->assertStatus(200);
+
+        $res = $this->postJson('/api/device-sessions/heartbeat', [
+            'device_uuid' => 'uuid_force_logout',
+            'store_id' => $this->store->id,
+        ]);
+
+        $res->assertStatus(409);
+        $res->assertJson([
+            'success' => false,
+            'force_logged_out' => true,
+            'action' => 'sign_in_required',
+        ]);
+        $this->assertStringContainsString('Signed in at another till', $res->json('message'));
+
+        $this->assertEquals(1, DeviceSession::where('device_uuid', 'uuid_force_logout')->count());
+        $this->assertFalse((bool)DeviceSession::where('device_uuid', 'uuid_force_logout')->first()->is_active);
+    }
+
+    /**
+     * 13. A revoked workstation heartbeat returns 403 so the client locks, and
+     * no new session is fabricated.
+     */
+    public function test_heartbeat_returns_revoked_for_revoked_workstation(): void
+    {
+        $session = DeviceSession::recordLogin(
+            $this->store->id,
+            'uuid_revoked_beat',
+            'Counter 10',
+            null,
+            'Counter 10',
+            'C10'
+        );
+
+        $this->postJson("/api/device-sessions/{$session->id}/revoke", [
+            'reason' => 'Lost device',
+        ])->assertStatus(200);
+
+        $res = $this->postJson('/api/device-sessions/heartbeat', [
+            'device_uuid' => 'uuid_revoked_beat',
+            'store_id' => $this->store->id,
+        ]);
+
+        $res->assertStatus(403);
+        $res->assertJson([
+            'success' => false,
+            'valid' => false,
+            'status' => 'revoked',
+            'action' => 'lock_and_reset',
+        ]);
+
+        $this->assertEquals(1, DeviceSession::where('device_uuid', 'uuid_revoked_beat')->count());
+    }
+
+    /**
+     * 14. A signed-out workstation heartbeat stays offline instead of becoming
+     * active again without a sign-in.
+     */
+    public function test_heartbeat_does_not_revive_a_logged_out_session(): void
+    {
+        DeviceSession::recordLogin(
+            $this->store->id,
+            'uuid_logged_out',
+            'Counter 11',
+            null,
+            'Counter 11',
+            'C11'
+        );
+
+        $this->postJson('/api/device-sessions/logout', [
+            'device_uuid' => 'uuid_logged_out',
+        ])->assertStatus(200);
+
+        $res = $this->postJson('/api/device-sessions/heartbeat', [
+            'device_uuid' => 'uuid_logged_out',
+            'store_id' => $this->store->id,
+        ]);
+
+        $res->assertStatus(409);
+        $res->assertJson([
+            'success' => false,
+            'error' => 'SESSION_NOT_ESTABLISHED',
+        ]);
+
+        $this->assertEquals(
+            0,
+            DeviceSession::where('device_uuid', 'uuid_logged_out')->where('is_active', true)->count()
+        );
+    }
+
+    /**
+     * 15. Store scoping is strict: an unknown store never falls back to another
+     * branch, and a missing store context is rejected.
+     */
+    public function test_device_sessions_store_scoping_is_strict(): void
+    {
+        $store2 = Store::create([
+            'name' => 'Other Branch',
+            'code' => 'BRANCH-02',
+            'is_active' => true,
+        ]);
+
+        DeviceSession::recordLogin($store2->id, 'uuid_other_branch', 'Counter X', null, 'CX', 'CX');
+
+        $notFound = $this->getJson('/api/device-sessions?store_id=999999');
+        $notFound->assertStatus(404);
+        $notFound->assertJson(['error' => 'STORE_NOT_FOUND']);
+        $this->assertEmpty($notFound->json('devices'));
+
+        $missing = $this->getJson('/api/device-sessions');
+        $missing->assertStatus(422);
+        $missing->assertJson(['error' => 'STORE_REQUIRED']);
+
+        $scoped = $this->getJson('/api/device-sessions?store_id=' . $this->store->id);
+        $scoped->assertStatus(200);
+        $this->assertNull(
+            collect($scoped->json('devices'))->firstWhere('device_uuid', 'uuid_other_branch')
+        );
+    }
+
+    /**
+     * 16. Stale sessions are expired so presence does not stay "active" forever.
+     */
+    public function test_stale_sessions_are_expired(): void
+    {
+        $session = DeviceSession::recordLogin(
+            $this->store->id,
+            'uuid_stale',
+            'Counter 12',
+            null,
+            'Counter 12',
+            'C12'
+        );
+
+        $session->update(['last_active_at' => now()->subHours(30)]);
+
+        DeviceSession::expireStale($this->store->id);
+
+        $fresh = $session->fresh();
+        $this->assertFalse((bool)$fresh->is_active);
+        $this->assertEquals('expired', $fresh->status);
     }
 }

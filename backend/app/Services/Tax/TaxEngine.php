@@ -106,9 +106,10 @@ class TaxEngine
             $packs = max(0, (float) ($line['qty'] ?? $line['pack_qty'] ?? 0));
             $loose = max(0, (float) ($line['loose_qty'] ?? 0));
             $free = max(0, (float) ($line['free_qty'] ?? $line['free_pack_qty'] ?? 0));
+            $freeLoose = max(0, (float) ($line['free_loose_qty'] ?? 0));
             $upp = max(1, (int) round((float) ($line['units_per_pack'] ?? 1)));
             $billedUnits = ($packs * $upp) + $loose;
-            $freeUnits = $free * $upp;
+            $freeUnits = ($free * $upp) + $freeLoose;
             $totalUnits = $billedUnits + $freeUnits;
 
             $unitPricePaise = self::toPaise($line['unit_price'] ?? 0);

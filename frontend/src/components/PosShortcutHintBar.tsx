@@ -1,5 +1,6 @@
 import React from "react";
 import { Keyboard, HelpCircle } from "lucide-react";
+import { shortcutLabel } from "../lib/keyboard/centralKeyMap";
 
 export type PosFocusContext = "search" | "grid" | "cell_edit" | "modal";
 
@@ -44,11 +45,11 @@ export const PosShortcutHintBar: React.FC<PosShortcutHintBarProps> = ({
         { key: "Esc in Qty", label: "Remove Line" },
         { key: "↑", label: "Cart Lines" },
         { key: "Alt+C", label: "Customer" },
-        { key: "Ctrl+F2", label: "Bill Disc" },
+        { key: shortcutLabel("billDiscount", "pos"), label: "Bill Disc" },
         { key: "Alt+R", label: "Round-off" },
         { key: "F12", label: "Checkout", highlight: true, onClick: onCheckout },
-        { key: "F8", label: "Hold Bill", onClick: onHold },
-        { key: "F9", label: "Recall", onClick: onRecall },
+        { key: shortcutLabel("holdBill", "pos"), label: "Hold Bill", onClick: onHold },
+        { key: shortcutLabel("recallBill", "pos"), label: "Recall", onClick: onRecall },
         { key: "Ctrl+N", label: "New Bill", onClick: onNewBill },
         { key: "Ctrl+Shift+C", label: "Columns", onClick: onColumnsConfig },
       ];
@@ -60,13 +61,13 @@ export const PosShortcutHintBar: React.FC<PosShortcutHintBarProps> = ({
         { key: "↓ (last)", label: "Entry Row" },
         { key: "Enter", label: "Edit Qty" },
         { key: "Esc", label: "Remove Line" },
-        { key: "F2", label: "Item Disc" },
-        { key: "Ctrl+F2", label: "Bill Disc" },
+        { key: shortcutLabel("lineDiscount", "pos"), label: "Item Disc" },
+        { key: shortcutLabel("billDiscount", "pos"), label: "Bill Disc" },
         { key: "Alt+R", label: "Round-off" },
         { key: "Del / Ctrl+D", label: "Delete Line" },
         { key: "Ctrl+Z", label: "Undo Delete" },
-        { key: "F4", label: "Batch / Expiry" },
-        { key: "Ctrl+E", label: "Packaging" },
+        { key: shortcutLabel("batchEdit", "pos"), label: "Edit Product" },
+        { key: shortcutLabel("packaging", "pos"), label: "Packaging" },
         { key: "F1", label: "Entry Row", onClick: onFocusSearch },
         { key: "F12", label: "Checkout", highlight: true, onClick: onCheckout },
       ];

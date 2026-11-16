@@ -181,6 +181,7 @@ class AdminSettingController
             'autoUpdateCheck' => true,
             'wifiStrengthSimulator' => 95,
             'defaultLandingPage' => 'dashboard',
+            'billsDefaultPeriod' => 'today',
         ], $workspace);
 
         $securityFull = array_merge([
@@ -188,6 +189,8 @@ class AdminSettingController
             'maxFailedLogins' => 5,
             'allowBiometricSignIn' => true,
             'defaultRole' => 'cashier',
+            'offlineGraceHours' => 72,
+            'allowMultiCounterRoles' => [],
         ], $security);
 
         $inventoryFull = array_merge([
@@ -218,6 +221,8 @@ class AdminSettingController
         $enablePts = $settings['enable_pts']->value ?? false;
         $enablePtss = $settings['enable_ptss']->value ?? false;
         $freightIsTaxable = $settings['freight_is_taxable']->value ?? false;
+        $batchRequired = $settings['batch_required']->value
+            ?? (($store->store_type ?? 'pharmacy') === 'pharmacy');
 
         $enabledMenuItems = $store->enabled_menu_items ?? ($settings['enabled_menu_items']->value ?? [
             'dashboard', 'pos', 'bills', 'sales_returns', 'customer_debit_notes',
@@ -236,6 +241,7 @@ class AdminSettingController
             'gstin' => $store->gstin ?? '',
             'drug_license_numbers' => $store->drug_license_numbers ?? [],
             'fssai_no' => $store->fssai_no ?? '',
+            'timezone' => $store->timezone ?? config('app.timezone'),
             'currency_symbol' => $general['currency_symbol'] ?? '₹',
 
             // Store & Tax Configuration
@@ -261,6 +267,7 @@ class AdminSettingController
             // Sub-configs
             'printing' => $printingFull,
             'workspace' => $workspaceFull,
+            'bills_default_period' => $workspaceFull['billsDefaultPeriod'] ?? 'today',
             'security' => $securityFull,
             'inventory' => $inventoryFull,
             'wallet' => $walletFull,
@@ -280,6 +287,7 @@ class AdminSettingController
             'enable_pts' => (bool)$enablePts,
             'enable_ptss' => (bool)$enablePtss,
             'freight_is_taxable' => (bool)$freightIsTaxable,
+            'batch_required' => (bool)$batchRequired,
             'enabled_menu_items' => $enabledMenuItems,
             'is_active' => (bool)$store->is_active,
 
@@ -341,6 +349,19 @@ class AdminSettingController
         }
         if (isset($input['fssai_no'])) {
             $storeUpdates['fssai_no'] = $input['fssai_no'];
+        }
+        if (isset($input['timezone'])) {
+            $timezone = trim((string)$input['timezone']);
+            try {
+                new \DateTimeZone($timezone);
+            } catch (\Throwable $e) {
+                return response()->json([
+                    'success' => false,
+                    'error' => 'INVALID_TIMEZONE',
+                    'message' => 'Use a valid IANA timezone such as Asia/Kolkata.',
+                ], 422);
+            }
+            $storeUpdates['timezone'] = $timezone;
         }
         if (isset($input['tax_mode'])) {
             $storeUpdates['tax_mode'] = $input['tax_mode'];
@@ -415,13 +436,28 @@ class AdminSettingController
             );
         }
 
+        // 3b. Workspace root shortcuts (e.g. bills_default_period) fold into workspace.
+        $workspace = is_array($input['workspace'] ?? null) ? $input['workspace'] : [];
+        if (isset($input['bills_default_period'])) {
+            $allowedPeriods = ['today', 'yesterday', 'last7days', 'month', 'all'];
+            if (in_array($input['bills_default_period'], $allowedPeriods, true)) {
+                $workspace['billsDefaultPeriod'] = $input['bills_default_period'];
+            }
+        }
+        if (!empty($workspace)) {
+            CompanySetting::updateOrCreate(
+                ['store_id' => $storeId, 'key' => 'workspace'],
+                ['value' => $workspace, 'is_secret' => false]
+            );
+        }
+
         // 4. Save each specific sub-config key
         $sections = [
             'sequences', 'printing', 'workspace', 'security', 'inventory',
             'wallet', 'smtp', 'sms', 'whatsapp', 'keyboard', 'payments',
             'invoice_columns', 'header_fields', 'active_billing_preset', 'saved_billing_presets',
             'purchase_columns', 'purchase_header_fields', 'active_purchase_preset', 'saved_purchase_presets',
-            'enable_pts', 'enable_ptss', 'freight_is_taxable', 'enabled_menu_items',
+            'enable_pts', 'enable_ptss', 'freight_is_taxable', 'batch_required', 'enabled_menu_items',
         ];
 
         foreach ($sections as $key) {

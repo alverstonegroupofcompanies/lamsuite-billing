@@ -632,6 +632,29 @@ export const MIGRATIONS: Migration[] = [
       );
     `,
   },
+  {
+    version: 8,
+    name: "stock_adjustment_documents",
+    sql: `
+      CREATE TABLE IF NOT EXISTS stock_adjustment_documents (
+        id TEXT PRIMARY KEY,
+        document_id TEXT NOT NULL UNIQUE,
+        mode TEXT NOT NULL DEFAULT 'adjustment',
+        reason TEXT,
+        notes TEXT,
+        document_date TEXT,
+        status TEXT NOT NULL DEFAULT 'posted',
+        requires_approval INTEGER DEFAULT 0,
+        total_qty REAL DEFAULT 0,
+        total_value REAL DEFAULT 0,
+        lines_json TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_stock_adj_doc_date ON stock_adjustment_documents(document_date);
+      CREATE INDEX IF NOT EXISTS idx_stock_adj_doc_status ON stock_adjustment_documents(status);
+    `,
+  },
 ];
 
 let mockDb: MockSqliteDatabase | null = null;
@@ -645,6 +668,7 @@ export function getMockDatabase(): MockSqliteDatabase {
 
 export class SqliteStorageService {
   private initialized = false;
+  private currentStoreId = "default";
 
   constructor() {
     this.registerMockIpcHandlers();
@@ -713,6 +737,7 @@ export class SqliteStorageService {
 
   async switchStore(storeId: string, relativeDbPath?: string): Promise<{ success: boolean; store_id: string }> {
     const bridge = getIpcBridge();
+    this.currentStoreId = storeId;
     const result = await bridge.invoke<{ success: boolean; store_id: string }>("db:switchStore", {
       store_id: storeId,
       relative_db_path: relativeDbPath,
@@ -739,6 +764,23 @@ export class SqliteStorageService {
 
   async ensureCatalogReady(storeId?: string): Promise<{ populated: boolean; count: number; source: string }> {
     try {
+      const storedActiveId = typeof window !== "undefined" && window.localStorage
+        ? window.localStorage.getItem("lamsuite_active_store_id") || ""
+        : "";
+      const activeId =
+        storeId ||
+        (this.currentStoreId && this.currentStoreId !== "default" ? this.currentStoreId : "") ||
+        storedActiveId;
+      if (!activeId) {
+        // No store context: never pull (the server would fall back to another store).
+        return { populated: false, count: 0, source: "no_active_store" };
+      }
+      if (typeof window !== "undefined" && window.localStorage) {
+        if (window.localStorage.getItem(`catalog_wiped_${activeId}`) === "true") {
+          return { populated: false, count: 0, source: "deliberately_empty" };
+        }
+      }
+
       const existing = await this.findAll("products");
       if (Array.isArray(existing) && existing.length > 0) {
         return { populated: false, count: existing.length, source: "already_populated" };
@@ -748,10 +790,10 @@ export class SqliteStorageService {
       try {
         const { cloudDeltaSyncService } = await import("../sync/cloudDeltaSyncService");
         const { API_BASE_URL } = await import("../../config/env");
-        const targetStore = storeId || "1";
         const syncRes = await cloudDeltaSyncService.pullMasterDelta({
           fetchMasterDeltas: async (wm) => {
-            const res = await fetch(`${API_BASE_URL}/api/sync/pull/deltas?store_id=${targetStore}&since_watermark=${wm}`, {
+            const res = await fetch(`${API_BASE_URL}/api/sync/pull/deltas?store_id=${encodeURIComponent(activeId)}&since_watermark=${wm}`, {
+              headers: { "X-Store-Id": activeId, "Store-Id": activeId },
               signal: AbortSignal.timeout(1500),
             });
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -760,6 +802,16 @@ export class SqliteStorageService {
         });
         if (syncRes.appliedProducts > 0) {
           return { populated: true, count: syncRes.appliedProducts, source: "cloud_sync" };
+        }
+        if (syncRes.resetProducts) {
+          // The server says this store's catalog was deliberately reset.
+          // Do not seed demo products; re-arm the local marker too.
+          try {
+            if (typeof window !== "undefined" && window.localStorage) {
+              window.localStorage.setItem(`catalog_wiped_${activeId}`, "true");
+            }
+          } catch {}
+          return { populated: false, count: 0, source: "deliberately_empty" };
         }
       } catch {
         // Offline or backend unavailable

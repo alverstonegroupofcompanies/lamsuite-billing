@@ -34,6 +34,7 @@ import { API_BASE_URL } from "./config/env";
 import { cloudDeltaSyncService } from "./lib/sync/cloudDeltaSyncService";
 import { deviceSessionService } from "./lib/devices/deviceSessionService";
 import { productsStore } from "./lib/masters/productsStore";
+import { ModalStackProvider } from "./lib/modal/CentralModalManager";
 
 const LandingRedirect: React.FC = () => {
   const [target, setTarget] = useState<string>("/dashboard");
@@ -76,6 +77,27 @@ export const App: React.FC = () => {
 
   useEffect(() => {
     initWorkspaceSettings();
+
+    // Apply store security policy to the local staff auth service and push any
+    // security audit events queued while the workstation was offline.
+    companySettingsService
+      .loadSettings()
+      .then((cfg) => {
+        if (cfg?.security) {
+          if (Number.isFinite(cfg.security.maxFailedLogins)) {
+            staffAuthService.setMaxFailedAttempts(cfg.security.maxFailedLogins);
+          }
+          if (cfg.security.offlineGraceHours !== undefined) {
+            staffAuthService.setOfflineGraceHours(cfg.security.offlineGraceHours);
+          }
+        }
+      })
+      .catch(() => {});
+    staffAuthService.flushOfflineAudit().catch(() => {});
+    const flushAuditOnReconnect = () => {
+      staffAuthService.flushOfflineAudit().catch(() => {});
+    };
+    window.addEventListener("online", flushAuditOnReconnect);
 
     // Check Windows 7 / 8.1 runtime prerequisites
     const { isLegacy } = windows7PrereqService.detectLegacyWindows();
@@ -140,6 +162,35 @@ export const App: React.FC = () => {
 
           const activeStoreId = String(currentActive?.id || "1");
           productsStore.ensureCatalogPopulated(activeStoreId).catch(() => {});
+
+          // Fast online verification of store status and remote reset events.
+          // Check every registered store so a reset clears the local DB of
+          // inactive stores too, not only the currently open one.
+          registry.stores.forEach((registeredStore) => {
+            const storeId = String(registeredStore.id);
+            fetch(`${API_BASE_URL}/api/license/check?store_id=${encodeURIComponent(storeId)}`)
+              .then((r) => (r.ok ? r.json() : null))
+              .then(async (lic) => {
+                if (!lic) return;
+                if (
+                  storeId === activeStoreId &&
+                  lic.is_active !== undefined &&
+                  currentActive.is_active !== Boolean(lic.is_active)
+                ) {
+                  await storeRegistryService.setStoreActiveStatus(currentActive.id, Boolean(lic.is_active));
+                  const { companySettingsService } = await import("./lib/settings/companySettingsService");
+                  await companySettingsService.updateLocalFromRemote({ is_active: Boolean(lic.is_active) });
+                }
+                if (lic.last_reset_at) {
+                  await storeRegistryService.applyRemoteResetOnce(
+                    storeId,
+                    lic.last_reset_at,
+                    lic.last_reset_options || undefined
+                  );
+                }
+              })
+              .catch(() => {});
+          });
         }
       }
       setIsInitializing(false);
@@ -174,6 +225,7 @@ export const App: React.FC = () => {
       stopDeviceHeartbeat();
       unsubStaff();
       unsubReg();
+      window.removeEventListener("online", flushAuditOnReconnect);
     };
   }, []);
 
@@ -232,17 +284,15 @@ export const App: React.FC = () => {
               const currentProducts = await productsStore.getAllProducts();
               const activeProfile = await storeDeviceService.getDeviceProfile();
 
-              if (currentProducts.length <= 1) {
-                // Online cloud sync: check backend server for catalog data
-                const storeId = activeStore?.id || activeProfile?.store_id || "1";
-                await cloudDeltaSyncService.pullMasterDelta({
-                  fetchMasterDeltas: async (wm) => {
-                    const res = await fetch(`${API_BASE_URL}/api/sync/pull/deltas?store_id=${storeId}&since_watermark=${wm}`);
-                    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-                    return res.json();
-                  },
-                }).catch(() => {});
-              }
+              // Online cloud sync: check backend server for catalog updates and remote reset/status events
+              const storeId = activeStore?.id || activeProfile?.store_id || "1";
+              await cloudDeltaSyncService.pullMasterDelta({
+                fetchMasterDeltas: async (wm) => {
+                  const res = await fetch(`${API_BASE_URL}/api/sync/pull/deltas?store_id=${storeId}&since_watermark=${wm}`);
+                  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                  return res.json();
+                },
+              }).catch(() => {});
             } catch (e) {
               console.warn("Post-login data pull check deferred:", e);
             }
@@ -269,7 +319,8 @@ export const App: React.FC = () => {
   }
 
   return (
-    <BrowserRouter>
+    <ModalStackProvider>
+      <BrowserRouter>
       <Layout
         onOpenGateway={() => setShowGateway(true)}
         onAddNewStore={() => setIsAddingStore(true)}
@@ -314,7 +365,8 @@ export const App: React.FC = () => {
           }}
         />
       )}
-    </BrowserRouter>
+      </BrowserRouter>
+    </ModalStackProvider>
   );
 };
 

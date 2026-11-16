@@ -14,7 +14,7 @@ describe("Products Availability in Masters & All Invoice Forms", () => {
     const initial = await sqliteStorage.findAll("products");
     expect(initial.length).toBe(0);
 
-    const result = await productsStore.ensureCatalogPopulated();
+    const result = await productsStore.ensureCatalogPopulated("1");
     expect(result.populated).toBe(true);
     expect(result.count).toBeGreaterThan(0);
 

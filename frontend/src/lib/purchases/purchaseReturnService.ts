@@ -88,30 +88,38 @@ export interface PurchaseReturnFilter {
 
 export class PurchaseReturnService {
   /**
-   * Generates sequential return number with financial year reset (e.g. PR-26-27-0001)
+   * Generates sequential return number following settings sequence (e.g. PR-1)
    */
   async generateNextReturnNumber(): Promise<string> {
     const settings = await companySettingsService.loadSettings();
     let prefix = settings.sequences?.purchaseReturnPrefix || "PR";
     prefix = prefix.replace(/-+$/, "");
-    const fy = getIndianFinancialYear();
+    let nextNum = settings.sequences?.nextPurchaseReturnNumber || 1;
 
     const allReturns = await sqliteStorage.findAll<PurchaseReturnRecord>("purchase_returns");
-    const searchPrefix = `${prefix}-${fy}-`;
+    const searchPrefix = `${prefix}-`;
     const matching = allReturns.filter((r) => r.return_number.startsWith(searchPrefix));
 
-    let maxNum = settings.sequences?.nextPurchaseReturnNumber ? settings.sequences.nextPurchaseReturnNumber - 1 : 0;
     for (const ret of matching) {
       const parts = ret.return_number.split("-");
       const lastPart = parts[parts.length - 1];
       const parsed = parseInt(lastPart, 10);
-      if (!isNaN(parsed) && parsed > maxNum) {
-        maxNum = parsed;
+      if (!isNaN(parsed) && parsed >= nextNum) {
+        nextNum = parsed + 1;
       }
     }
 
-    const nextSeq = maxNum + 1;
-    return `${prefix}-${fy}-${String(nextSeq).padStart(4, "0")}`;
+    const docNumber = `${prefix}-${nextNum}`;
+
+    await companySettingsService.updateSettings({
+      sequences: {
+        ...settings.sequences,
+        purchaseReturnPrefix: prefix,
+        nextPurchaseReturnNumber: nextNum + 1,
+      },
+    });
+
+    return docNumber;
   }
 
   /**

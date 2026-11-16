@@ -33,3 +33,8 @@ updater_keys*
 .lamsuite_secure_vault.dat
 backend/storage/framework/sessions/*
 stores_registry.json
+
+# Generated QA artifacts (may embed live bearer tokens)
+test-reports/
+tests/qa/admin_token.txt
+tests/qa/manifest.json

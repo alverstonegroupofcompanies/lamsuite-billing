@@ -72,6 +72,12 @@ class CounterController
                   ->orWhere('counter_code', $validated['counter_code']);
             })->first();
 
+        // Counter names are unique per store among active/locked/pending counters.
+        $nameConflict = Counter::nameConflict($store->id, $validated['counter_name'], $existing?->id);
+        if ($nameConflict) {
+            return $this->counterNameConflictResponse($nameConflict);
+        }
+
         if ($existing) {
             // Update device details
             $existing->update([
@@ -230,7 +236,6 @@ class CounterController
             'printer_profile' => 'nullable|array',
             'receipt_customization' => 'nullable|array',
             'role_profile' => 'nullable|array',
-            'manager_pin' => 'nullable|string',
             'allowed_user_ids' => 'nullable|array',
             'visible_menus' => 'nullable|array',
             'is_digital_only' => 'nullable|boolean',
@@ -622,6 +627,28 @@ class CounterController
             'license_status' => $licenseStatus,
             'timestamp' => now()->toIso8601String(),
         ]);
+    }
+
+    /**
+     * Explain which workstation already owns a counter name so the operator can
+     * release it instead of guessing why enrollment failed.
+     */
+    private function counterNameConflictResponse(Counter $conflict): \Illuminate\Http\JsonResponse
+    {
+        return response()->json([
+            'success' => false,
+            'error' => 'COUNTER_NAME_TAKEN',
+            'message' => "Counter name '{$conflict->counter_name}' is already used by workstation "
+                . "'{$conflict->device_name}' ({$conflict->device_uuid}). Release or rename that counter first.",
+            'conflict' => [
+                'id' => (string)$conflict->id,
+                'counter_name' => $conflict->counter_name,
+                'counter_code' => $conflict->counter_code,
+                'device_uuid' => $conflict->device_uuid,
+                'device_name' => $conflict->device_name,
+                'status' => $conflict->status,
+            ],
+        ], 422);
     }
 
     private function calculateFinancialYear(): string

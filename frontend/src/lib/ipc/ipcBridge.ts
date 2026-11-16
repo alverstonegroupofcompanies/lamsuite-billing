@@ -8,13 +8,31 @@ const inMemorySecureVault = new Map<string, string>();
 function initDefaultMockHandlers() {
   mockHandlers.set("secure_store_set", (args: any) => {
     inMemorySecureVault.set(args.key, args.value);
+    if (typeof localStorage !== "undefined") {
+      try { localStorage.setItem(`lamsuite_vault_${args.key}`, args.value); } catch (_) {}
+    }
     return { success: true };
   });
   mockHandlers.set("secure_store_get", (args: any) => {
-    return inMemorySecureVault.get(args.key) || null;
+    if (inMemorySecureVault.has(args.key)) {
+      return inMemorySecureVault.get(args.key) || null;
+    }
+    if (typeof localStorage !== "undefined") {
+      try {
+        const stored = localStorage.getItem(`lamsuite_vault_${args.key}`);
+        if (stored !== null) {
+          inMemorySecureVault.set(args.key, stored);
+          return stored;
+        }
+      } catch (_) {}
+    }
+    return null;
   });
   mockHandlers.set("secure_store_delete", (args: any) => {
     inMemorySecureVault.delete(args.key);
+    if (typeof localStorage !== "undefined") {
+      try { localStorage.removeItem(`lamsuite_vault_${args.key}`); } catch (_) {}
+    }
     return { success: true };
   });
   mockHandlers.set("get_device_ipv4", () => {

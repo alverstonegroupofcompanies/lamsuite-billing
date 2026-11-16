@@ -1,6 +1,8 @@
 import { sqliteStorage } from "../../db/sqliteStorage";
 import { partiesStore } from "../../masters/partiesStore";
 import { syncQueueService } from "../../sync/syncQueueService";
+import { storeToday } from "../../dateTimeUtils";
+import { companySettingsService } from "../../settings/companySettingsService";
 
 export interface CustomerPaymentRecord {
   id: string;
@@ -49,7 +51,7 @@ export class CustomerCreditService {
       payment_mode: input.payment_mode || "Cash",
       reference_no: input.reference_no?.trim() || undefined,
       notes: input.notes?.trim() || undefined,
-      payment_date: input.payment_date || new Date().toISOString().slice(0, 10),
+      payment_date: input.payment_date || storeToday(companySettingsService.getSettings()),
       created_at: now,
     };
 

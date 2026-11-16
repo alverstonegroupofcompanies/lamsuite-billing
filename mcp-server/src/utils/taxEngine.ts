@@ -14,6 +14,7 @@ export interface TaxEngineLineInput {
   qty: number;
   loose_qty?: number;
   free_qty?: number;
+  free_loose_qty?: number;
   units_per_pack?: number;
   unit_price: number;
   mrp?: number;
@@ -46,6 +47,7 @@ export interface TaxEngineCalculatedLine {
   qty: number;
   loose_qty: number;
   free_qty: number;
+  free_loose_qty?: number;
   units_per_pack: number;
   billed_units: number;
   free_units: number;
@@ -158,6 +160,7 @@ export function calculateDocumentTaxes(input: TaxEngineDocumentInput): TaxEngine
     packs: number;
     loose: number;
     free: number;
+    freeLoose: number;
     upp: number;
     billedUnits: number;
     freeUnits: number;
@@ -179,9 +182,10 @@ export function calculateDocumentTaxes(input: TaxEngineDocumentInput): TaxEngine
     const packs = Math.max(0, Number(line.qty) || 0);
     const loose = Math.max(0, Number(line.loose_qty) || 0);
     const free = Math.max(0, Number(line.free_qty) || 0);
+    const freeLoose = Math.max(0, Number(line.free_loose_qty) || 0);
     const upp = Math.max(1, Math.round(Number(line.units_per_pack) || 1));
     const billedUnits = packs * upp + loose;
-    const freeUnits = free * upp;
+    const freeUnits = free * upp + freeLoose;
     const totalUnits = billedUnits + freeUnits;
 
     const unitPricePaise = toPaise(line.unit_price);
@@ -216,6 +220,7 @@ export function calculateDocumentTaxes(input: TaxEngineDocumentInput): TaxEngine
       packs,
       loose,
       free,
+      freeLoose,
       upp,
       billedUnits,
       freeUnits,
@@ -369,6 +374,7 @@ export function calculateDocumentTaxes(input: TaxEngineDocumentInput): TaxEngine
       qty: pl.packs,
       loose_qty: pl.loose,
       free_qty: pl.free,
+      free_loose_qty: pl.freeLoose,
       units_per_pack: pl.upp,
       billed_units: pl.billedUnits,
       free_units: pl.freeUnits,

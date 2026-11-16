@@ -1,0 +1,780 @@
+{
+  "name": "LamSuite Billing keyboard shortcuts",
+  "version": "2.0.36",
+  "updated": "2026-11-14",
+  "rule": "A screen scope always wins over the global scope. Two bindings in the same scope are a conflict and fail CI.",
+  "scopePriority": [
+    "modal",
+    "preview",
+    "edit",
+    "pos",
+    "bills",
+    "purchase",
+    "stock",
+    "login",
+    "global"
+  ],
+  "counts": {
+    "total": 71,
+    "advertised": 70,
+    "conflicts": 0
+  },
+  "shortcuts": [
+    {
+      "action": "switchStore",
+      "label": "Switch Store",
+      "scope": "global",
+      "group": "Global",
+      "keys": [
+        "Ctrl+Alt+S"
+      ],
+      "hidden": false
+    },
+    {
+      "action": "lockTerminal",
+      "label": "Lock Terminal",
+      "scope": "global",
+      "group": "Global",
+      "keys": [
+        "Ctrl+L"
+      ],
+      "hidden": false
+    },
+    {
+      "action": "commandPalette",
+      "label": "Command Palette",
+      "scope": "global",
+      "group": "Global",
+      "keys": [
+        "Ctrl+K"
+      ],
+      "hidden": false
+    },
+    {
+      "action": "accountSwitcher",
+      "label": "Switch Account",
+      "scope": "global",
+      "group": "Global",
+      "keys": [
+        "F12"
+      ],
+      "hidden": false
+    },
+    {
+      "action": "navPos",
+      "label": "POS Billing",
+      "scope": "global",
+      "group": "Navigation",
+      "keys": [
+        "F1"
+      ],
+      "hidden": false
+    },
+    {
+      "action": "navPurchases",
+      "label": "Purchases",
+      "scope": "global",
+      "group": "Navigation",
+      "keys": [
+        "F2"
+      ],
+      "hidden": false
+    },
+    {
+      "action": "navPurchaseReturns",
+      "label": "Purchase Returns",
+      "scope": "global",
+      "group": "Navigation",
+      "keys": [
+        "Shift+F2"
+      ],
+      "hidden": false
+    },
+    {
+      "action": "navStock",
+      "label": "Stock Ledger",
+      "scope": "global",
+      "group": "Navigation",
+      "keys": [
+        "F3"
+      ],
+      "hidden": false
+    },
+    {
+      "action": "navTransfers",
+      "label": "Inter-Store Transfers",
+      "scope": "global",
+      "group": "Navigation",
+      "keys": [
+        "Shift+F3"
+      ],
+      "hidden": false
+    },
+    {
+      "action": "navReports",
+      "label": "Reports & GST",
+      "scope": "global",
+      "group": "Navigation",
+      "keys": [
+        "F4"
+      ],
+      "hidden": false
+    },
+    {
+      "action": "navMasters",
+      "label": "Masters",
+      "scope": "global",
+      "group": "Navigation",
+      "keys": [
+        "F5"
+      ],
+      "hidden": false
+    },
+    {
+      "action": "navBills",
+      "label": "Past Bills",
+      "scope": "global",
+      "group": "Navigation",
+      "keys": [
+        "F6"
+      ],
+      "hidden": false
+    },
+    {
+      "action": "navSalesReturns",
+      "label": "Sales Returns",
+      "scope": "global",
+      "group": "Navigation",
+      "keys": [
+        "F7"
+      ],
+      "hidden": false
+    },
+    {
+      "action": "navDebitNotes",
+      "label": "Customer Debit Notes",
+      "scope": "global",
+      "group": "Navigation",
+      "keys": [
+        "Shift+F7"
+      ],
+      "hidden": false
+    },
+    {
+      "action": "navCounters",
+      "label": "Store Counters",
+      "scope": "global",
+      "group": "Navigation",
+      "keys": [
+        "F8"
+      ],
+      "hidden": false
+    },
+    {
+      "action": "navImportExport",
+      "label": "Import / Export",
+      "scope": "global",
+      "group": "Navigation",
+      "keys": [
+        "F9"
+      ],
+      "hidden": false
+    },
+    {
+      "action": "navSettings",
+      "label": "Settings",
+      "scope": "global",
+      "group": "Navigation",
+      "keys": [
+        "F10"
+      ],
+      "hidden": false
+    },
+    {
+      "action": "toggleFullscreen",
+      "label": "Toggle Fullscreen",
+      "scope": "global",
+      "group": "Navigation",
+      "keys": [
+        "F11"
+      ],
+      "hidden": false
+    },
+    {
+      "action": "navDashboard",
+      "label": "Dashboard",
+      "scope": "global",
+      "group": "Navigation",
+      "keys": [
+        "Home"
+      ],
+      "hidden": false
+    },
+    {
+      "action": "openHelp",
+      "label": "Keyboard Shortcuts",
+      "scope": "global",
+      "group": "Navigation",
+      "keys": [
+        "Shift+/"
+      ],
+      "hidden": false
+    },
+    {
+      "action": "holdBill",
+      "label": "Hold Bill",
+      "scope": "pos",
+      "group": "Billing",
+      "keys": [
+        "Alt+H"
+      ],
+      "hidden": false
+    },
+    {
+      "action": "recallBill",
+      "label": "Recall Held Bill",
+      "scope": "pos",
+      "group": "Billing",
+      "keys": [
+        "Alt+L"
+      ],
+      "hidden": false
+    },
+    {
+      "action": "newBill",
+      "label": "New Bill",
+      "scope": "pos",
+      "group": "Billing",
+      "keys": [
+        "Ctrl+N"
+      ],
+      "hidden": false
+    },
+    {
+      "action": "checkout",
+      "label": "Checkout / Settle",
+      "scope": "pos",
+      "group": "Billing",
+      "keys": [
+        "F12"
+      ],
+      "hidden": false
+    },
+    {
+      "action": "columns",
+      "label": "Columns & Layout",
+      "scope": "pos",
+      "group": "Billing",
+      "keys": [
+        "Ctrl+Shift+C"
+      ],
+      "hidden": false
+    },
+    {
+      "action": "focusEntry",
+      "label": "Product Entry Row",
+      "scope": "pos",
+      "group": "Billing",
+      "keys": [
+        "F1"
+      ],
+      "hidden": false
+    },
+    {
+      "action": "focusCustomer",
+      "label": "Customer",
+      "scope": "pos",
+      "group": "Billing",
+      "keys": [
+        "Alt+C"
+      ],
+      "hidden": false
+    },
+    {
+      "action": "focusMobile",
+      "label": "Customer Mobile",
+      "scope": "pos",
+      "group": "Billing",
+      "keys": [
+        "Alt+M"
+      ],
+      "hidden": false
+    },
+    {
+      "action": "focusDoctor",
+      "label": "Doctor (pharmacy)",
+      "scope": "pos",
+      "group": "Billing",
+      "keys": [
+        "Alt+D"
+      ],
+      "hidden": false
+    },
+    {
+      "action": "focusPatient",
+      "label": "Patient (pharmacy)",
+      "scope": "pos",
+      "group": "Billing",
+      "keys": [
+        "Alt+P"
+      ],
+      "hidden": false
+    },
+    {
+      "action": "billDiscount",
+      "label": "Bill Discount",
+      "scope": "pos",
+      "group": "Billing",
+      "keys": [
+        "Alt+F2"
+      ],
+      "hidden": false
+    },
+    {
+      "action": "lineDiscount",
+      "label": "Line Discount",
+      "scope": "pos",
+      "group": "Billing",
+      "keys": [
+        "Alt+I"
+      ],
+      "hidden": false
+    },
+    {
+      "action": "roundOff",
+      "label": "Round-Off",
+      "scope": "pos",
+      "group": "Billing",
+      "keys": [
+        "Alt+R"
+      ],
+      "hidden": false
+    },
+    {
+      "action": "batchEdit",
+      "label": "Batch / Expiry",
+      "scope": "pos",
+      "group": "Billing",
+      "keys": [
+        "Alt+E"
+      ],
+      "hidden": false
+    },
+    {
+      "action": "rateEdit",
+      "label": "Selling Price",
+      "scope": "pos",
+      "group": "Billing",
+      "keys": [
+        "F3"
+      ],
+      "hidden": false
+    },
+    {
+      "action": "clearCart",
+      "label": "Clear Cart",
+      "scope": "pos",
+      "group": "Billing",
+      "keys": [
+        "Ctrl+Bksp"
+      ],
+      "hidden": false
+    },
+    {
+      "action": "deleteLine",
+      "label": "Delete Line",
+      "scope": "pos",
+      "group": "Grid",
+      "keys": [
+        "Delete",
+        "Ctrl+D"
+      ],
+      "hidden": false
+    },
+    {
+      "action": "undo",
+      "label": "Undo Delete",
+      "scope": "pos",
+      "group": "Grid",
+      "keys": [
+        "Ctrl+Z"
+      ],
+      "hidden": false
+    },
+    {
+      "action": "moveLineUp",
+      "label": "Move Line Up",
+      "scope": "pos",
+      "group": "Grid",
+      "keys": [
+        "Alt+Up"
+      ],
+      "hidden": false
+    },
+    {
+      "action": "moveLineDown",
+      "label": "Move Line Down",
+      "scope": "pos",
+      "group": "Grid",
+      "keys": [
+        "Alt+Down"
+      ],
+      "hidden": false
+    },
+    {
+      "action": "batchPicker",
+      "label": "Pick Batch",
+      "scope": "pos",
+      "group": "Grid",
+      "keys": [
+        "Ctrl+B"
+      ],
+      "hidden": false
+    },
+    {
+      "action": "toggleUnitRate",
+      "label": "Toggle Unit Rate",
+      "scope": "pos",
+      "group": "Grid",
+      "keys": [
+        "Ctrl+U"
+      ],
+      "hidden": false
+    },
+    {
+      "action": "packaging",
+      "label": "Packaging / Unit Conversion",
+      "scope": "pos",
+      "group": "Grid",
+      "keys": [
+        "Ctrl+E"
+      ],
+      "hidden": false
+    },
+    {
+      "action": "periodNext",
+      "label": "Next Period",
+      "scope": "bills",
+      "group": "Bills",
+      "keys": [
+        "Alt+Right"
+      ],
+      "hidden": false
+    },
+    {
+      "action": "periodPrev",
+      "label": "Previous Period",
+      "scope": "bills",
+      "group": "Bills",
+      "keys": [
+        "Alt+Left"
+      ],
+      "hidden": false
+    },
+    {
+      "action": "filterPayment",
+      "label": "Cycle Payment Filter",
+      "scope": "bills",
+      "group": "Bills",
+      "keys": [
+        "Alt+Shift+P"
+      ],
+      "hidden": false
+    },
+    {
+      "action": "filterStatus",
+      "label": "Cycle Status Filter",
+      "scope": "bills",
+      "group": "Bills",
+      "keys": [
+        "Alt+S"
+      ],
+      "hidden": false
+    },
+    {
+      "action": "cancelEdit",
+      "label": "Cancel Invoice Edit",
+      "scope": "edit",
+      "group": "Edit",
+      "keys": [
+        "Ctrl+Q"
+      ],
+      "hidden": false
+    },
+    {
+      "action": "focusSupplier",
+      "label": "Supplier",
+      "scope": "purchase",
+      "group": "Purchase",
+      "keys": [
+        "Alt+S"
+      ],
+      "hidden": false
+    },
+    {
+      "action": "focusBillNo",
+      "label": "Bill No",
+      "scope": "purchase",
+      "group": "Purchase",
+      "keys": [
+        "Alt+B"
+      ],
+      "hidden": false
+    },
+    {
+      "action": "focusBillDate",
+      "label": "Bill Date",
+      "scope": "purchase",
+      "group": "Purchase",
+      "keys": [
+        "Alt+D"
+      ],
+      "hidden": false
+    },
+    {
+      "action": "focusPurchaseType",
+      "label": "Purchase Type",
+      "scope": "purchase",
+      "group": "Purchase",
+      "keys": [
+        "Alt+T"
+      ],
+      "hidden": false
+    },
+    {
+      "action": "focusFreight",
+      "label": "Freight",
+      "scope": "purchase",
+      "group": "Purchase",
+      "keys": [
+        "Alt+F"
+      ],
+      "hidden": false
+    },
+    {
+      "action": "focusBillTotal",
+      "label": "Supplier Bill Total",
+      "scope": "purchase",
+      "group": "Purchase",
+      "keys": [
+        "Alt+I"
+      ],
+      "hidden": false
+    },
+    {
+      "action": "purchaseRoundOff",
+      "label": "Round-Off",
+      "scope": "purchase",
+      "group": "Purchase",
+      "keys": [
+        "Alt+R"
+      ],
+      "hidden": false
+    },
+    {
+      "action": "toggleDiscountType",
+      "label": "Toggle Discount % / Amount",
+      "scope": "purchase",
+      "group": "Purchase",
+      "keys": [
+        "Alt+Y"
+      ],
+      "hidden": false
+    },
+    {
+      "action": "quickAddProduct",
+      "label": "Quick Add Product",
+      "scope": "purchase",
+      "group": "Purchase",
+      "keys": [
+        "Ctrl+N"
+      ],
+      "hidden": false
+    },
+    {
+      "action": "newPurchase",
+      "label": "New Purchase Bill",
+      "scope": "purchase",
+      "group": "Purchase",
+      "keys": [
+        "Ctrl+Shift+N"
+      ],
+      "hidden": false
+    },
+    {
+      "action": "findPurchase",
+      "label": "Find Purchase Bill",
+      "scope": "purchase",
+      "group": "Purchase",
+      "keys": [
+        "F6"
+      ],
+      "hidden": false
+    },
+    {
+      "action": "saveDraft",
+      "label": "Save Draft",
+      "scope": "purchase",
+      "group": "Purchase",
+      "keys": [
+        "F8"
+      ],
+      "hidden": false
+    },
+    {
+      "action": "recallDraft",
+      "label": "Recall Draft",
+      "scope": "purchase",
+      "group": "Purchase",
+      "keys": [
+        "F9"
+      ],
+      "hidden": false
+    },
+    {
+      "action": "postPurchase",
+      "label": "Post Purchase",
+      "scope": "purchase",
+      "group": "Purchase",
+      "keys": [
+        "F12"
+      ],
+      "hidden": false
+    },
+    {
+      "action": "postPurchasePrint",
+      "label": "Post & Print Labels",
+      "scope": "purchase",
+      "group": "Purchase",
+      "keys": [
+        "Shift+F12"
+      ],
+      "hidden": false
+    },
+    {
+      "action": "newStockAdjustment",
+      "label": "New Stock Adjustment",
+      "scope": "stock",
+      "group": "Stock",
+      "keys": [
+        "Alt+A"
+      ],
+      "hidden": false
+    },
+    {
+      "action": "addAdjustmentLine",
+      "label": "Add Adjustment Line",
+      "scope": "stock",
+      "group": "Stock",
+      "keys": [
+        "Insert"
+      ],
+      "hidden": false
+    },
+    {
+      "action": "removeAdjustmentLine",
+      "label": "Remove Adjustment Line",
+      "scope": "stock",
+      "group": "Stock",
+      "keys": [
+        "Delete"
+      ],
+      "hidden": false
+    },
+    {
+      "action": "undoAdjustmentDelete",
+      "label": "Undo Line Delete",
+      "scope": "stock",
+      "group": "Stock",
+      "keys": [
+        "Ctrl+Z"
+      ],
+      "hidden": false
+    },
+    {
+      "action": "toggleAdjustmentMode",
+      "label": "Toggle Adjustment / Physical Count",
+      "scope": "stock",
+      "group": "Stock",
+      "keys": [
+        "Ctrl+M"
+      ],
+      "hidden": false
+    },
+    {
+      "action": "importAdjustmentCsv",
+      "label": "Import Adjustment CSV",
+      "scope": "stock",
+      "group": "Stock",
+      "keys": [
+        "Ctrl+I"
+      ],
+      "hidden": false
+    },
+    {
+      "action": "postStockAdjustment",
+      "label": "Post Stock Adjustment",
+      "scope": "stock",
+      "group": "Stock",
+      "keys": [
+        "Ctrl+Enter"
+      ],
+      "hidden": false
+    },
+    {
+      "action": "modalClose",
+      "label": "Close Modal",
+      "scope": "modal",
+      "group": "Modal",
+      "keys": [
+        "Esc"
+      ],
+      "hidden": true
+    }
+  ],
+  "conflicts": [],
+  "overrides": [
+    {
+      "chord": "F12",
+      "global": "accountSwitcher",
+      "screen": "checkout",
+      "screenScope": "pos"
+    },
+    {
+      "chord": "F1",
+      "global": "navPos",
+      "screen": "focusEntry",
+      "screenScope": "pos"
+    },
+    {
+      "chord": "F3",
+      "global": "navStock",
+      "screen": "rateEdit",
+      "screenScope": "pos"
+    },
+    {
+      "chord": "F6",
+      "global": "navBills",
+      "screen": "findPurchase",
+      "screenScope": "purchase"
+    },
+    {
+      "chord": "F8",
+      "global": "navCounters",
+      "screen": "saveDraft",
+      "screenScope": "purchase"
+    },
+    {
+      "chord": "F9",
+      "global": "navImportExport",
+      "screen": "recallDraft",
+      "screenScope": "purchase"
+    },
+    {
+      "chord": "F12",
+      "global": "accountSwitcher",
+      "screen": "postPurchase",
+      "screenScope": "purchase"
+    }
+  ]
+}

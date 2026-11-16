@@ -120,6 +120,83 @@ describe("Workstation Activation Security (SEC-004)", () => {
     expect(profileAfter).toBeNull();
   });
 
+  async function seedRegisteredDevice(): Promise<void> {
+    await invokeCommand("secure_store_set", { key: "device_token", value: "lsd_registered_token" });
+    await invokeCommand("secure_store_set", {
+      key: "store_device_profile",
+      value: JSON.stringify({
+        device_id: "dev_1",
+        device_uuid: "dev_uuid_1",
+        store_id: "1",
+        is_active: true,
+      }),
+    });
+  }
+
+  it("4a. Pending approval never locks the workstation or clears the active store", async () => {
+    await seedRegisteredDevice();
+    vi.spyOn(global, "fetch").mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        valid: false,
+        status: "pending_approval",
+        action: "wait_for_approval",
+        message: "Workstation is pending approval from store owner.",
+      }),
+    } as any);
+
+    const check = await storeDeviceService.validateDeviceSession();
+    expect(check.locked).toBe(false);
+    expect(check.valid).toBe(false);
+    expect(await invokeCommand("secure_store_get", { key: "device_token" })).toBe("lsd_registered_token");
+    expect(await invokeCommand("secure_store_get", { key: "store_device_profile" })).toContain("dev_uuid_1");
+  });
+
+  it("4b. A transient 401 from an edge/proxy does not revoke the workstation", async () => {
+    await seedRegisteredDevice();
+    vi.spyOn(global, "fetch").mockResolvedValueOnce({
+      ok: false,
+      status: 401,
+      json: async () => ({ message: "Unauthorized" }),
+    } as any);
+
+    const check = await storeDeviceService.validateDeviceSession();
+    expect(check.locked).toBe(false);
+    expect(await invokeCommand("secure_store_get", { key: "device_token" })).toBe("lsd_registered_token");
+  });
+
+  it("4c. Server outage keeps the workstation usable", async () => {
+    await seedRegisteredDevice();
+    vi.spyOn(global, "fetch").mockResolvedValueOnce({
+      ok: false,
+      status: 503,
+      json: async () => ({ message: "Service Unavailable" }),
+    } as any);
+
+    const check = await storeDeviceService.validateDeviceSession();
+    expect(check.valid).toBe(true);
+    expect(check.locked).toBe(false);
+  });
+
+  it("4d. A disabled store is reported without clearing local credentials", async () => {
+    await seedRegisteredDevice();
+    vi.spyOn(global, "fetch").mockResolvedValueOnce({
+      ok: false,
+      status: 403,
+      json: async () => ({
+        valid: false,
+        status: "store_inactive",
+        action: "lock_and_reset",
+        message: "Store license is suspended or deactivated.",
+      }),
+    } as any);
+
+    const check = await storeDeviceService.validateDeviceSession();
+    expect(check.locked).toBe(false);
+    expect(await invokeCommand("secure_store_get", { key: "device_token" })).toBe("lsd_registered_token");
+  });
+
   it("5. Release code verification: No demo bypass key or auto-activation exists in App.tsx or storeDeviceService", async () => {
     // Verify that attempting to activate with any dummy string without server contact fails
     vi.spyOn(global, "fetch").mockRejectedValueOnce(new Error("Network down"));
@@ -127,5 +204,48 @@ describe("Workstation Activation Security (SEC-004)", () => {
     await expect(
       storeDeviceService.registerWithActivationKey("LAM-DEMO-2026-KEY", "Counter 01")
     ).rejects.toThrow();
+  });
+
+  it("6. Falls back to local dev server if cloud endpoint rejects local activation key", async () => {
+    const { setApiBaseUrl } = await import("../../config/env");
+    setApiBaseUrl("https://api.lamstonehealthcare.com");
+
+    // 1st call (cloud): rejects with 422
+    // 2nd call (local): accepts with 200
+    vi.spyOn(global, "fetch")
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 422,
+        json: async () => ({ message: "Invalid, expired, or revoked activation key." }),
+      } as any)
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          success: true,
+          device_id: "dev_local_123",
+          counter_id: "cntr_local_01",
+          counter_name: "Counter 01",
+          counter_code: "C01",
+          store_id: "4",
+          store_name: "Test Store",
+          store_code: "TESTSTORE",
+          device_token: "lsd_local_token_abc123",
+          refresh_token: "ref_local_token_xyz789",
+          license_plan: "Professional",
+          status: "active",
+        }),
+      } as any);
+
+    const profile = await storeDeviceService.registerWithActivationKey("LAM-TESTSTOR-5B97D9A407A62056-1A4370E8", "Counter 01");
+    expect(profile.store_id).toBe("4");
+    expect(profile.store_name).toBe("Test Store");
+
+    // Verify fallback updated the API_BASE_URL to local server
+    const { API_BASE_URL } = await import("../../config/env");
+    expect(API_BASE_URL).toBe("http://127.0.0.1:8000");
+
+    // Reset back to local default
+    setApiBaseUrl("http://127.0.0.1:8000");
   });
 });

@@ -115,12 +115,12 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose 
       category: "Multi-Store Workspace",
       title: "Switch Company / Store...",
       subtitle: "Open Tally-style company switcher to select another store or branch",
-      shortcut: "Alt+S",
+      shortcut: "Ctrl+Alt+S",
       icon: Building2,
       action: () => {
         onClose();
         // Trigger key event for Alt+S to open modal
-        window.dispatchEvent(new KeyboardEvent("keydown", { key: "s", altKey: true }));
+        window.dispatchEvent(new KeyboardEvent("keydown", { key: "s", ctrlKey: true, altKey: true }));
       },
     },
     ...registeredStores.map((s) => ({
@@ -128,7 +128,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose 
       category: "Registered Stores",
       title: `Switch to: ${s.alias || s.name}`,
       subtitle: `${s.code} • ${s.counter_name}${s.id === activeStoreId ? " (Currently Active)" : ""}`,
-      shortcut: s.id === activeStoreId ? "Active" : "Alt+S",
+      shortcut: s.id === activeStoreId ? "Active" : "Ctrl+Alt+S",
       icon: Building2,
       action: async () => {
         onClose();

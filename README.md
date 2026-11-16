@@ -112,18 +112,18 @@ Open your browser at **`http://localhost:5174`** to access the Admin Panel.
 
 ---
 
-## Demo Credentials & Role Access
+## Seeded Role Access
 
-The database seeder pre-populates test credentials for all five administrative roles:
+The database seeder pre-populates the administrative roles below. Seeded accounts **never** receive a known password: the seeder generates a random secret and marks each account `must_change_password`. To set a known password for a throwaway local database, provide `SEED_USER_PASSWORD` before running `php artisan db:seed`.
 
-| Role | Email | Password | Default Scope | Key Capabilities |
-| :--- | :--- | :--- | :--- | :--- |
-| **Super Admin** | `admin@lamsuite.com` | `admin123` | Global (All Stores) | Killswitches, remote resets, user impersonation, system config |
-| **Store Owner** | `owner@lamsuite.com` | `owner123` | Palakkad Main (#1) | Store configuration, device approvals, master data, staff, reports |
-| **Manager** | `manager@lamsuite.com` | `manager123` | Palakkad Main (#1) | Day-to-day operations, stock adjustments, invoice cancels, sync retry |
-| **Accountant** | `accountant@lamsuite.com` | `accountant123` | Palakkad Main (#1) | Strictly reports, GSTR-1 tax registers, customer aging, no write rights |
-| **Support** | `support@lamsuite.com` | `support123` | Global (Read-only) | Diagnostics, device telemetry, immutable audit log view |
-| **Branch Manager** | `kochi_manager@lamsuite.com` | `manager123` | Kochi Express (#2) | Branch store operations; blocked from accessing Palakkad (#1) |
+| Role | Email | Default Scope | Key Capabilities |
+| :--- | :--- | :--- | :--- |
+| **Super Admin** | `admin@lamsuite.com` | Global (All Stores) | Killswitches, remote resets, user impersonation, system config |
+| **Store Owner** | `owner@lamsuite.com` | Palakkad Main (#1) | Store configuration, device approvals, master data, staff, reports |
+| **Manager** | `manager@lamsuite.com` | Palakkad Main (#1) | Day-to-day operations, stock adjustments, invoice cancels, sync retry |
+| **Accountant** | `accountant@lamsuite.com` | Palakkad Main (#1) | Strictly reports, GSTR-1 tax registers, customer aging, no write rights |
+| **Support** | `support@lamsuite.com` | Global (Read-only) | Diagnostics, device telemetry, immutable audit log view |
+| **Branch Manager** | `kochi_manager@lamsuite.com` | Kochi Express (#2) | Branch store operations; blocked from accessing Palakkad (#1) |
 
 ---
 

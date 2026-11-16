@@ -247,8 +247,8 @@ class AdminMasterCrudTest extends TestCase
         $this->assertTrue($pushRes->json('success'));
         $this->assertDatabaseHas('master_lookups', ['type' => 'unit', 'name' => 'Tablet', 'code' => 'TAB']);
 
-        // Pull deltas should return lookups
-        $deltaRes = $this->getJson('/api/sync/pull/deltas?since_watermark=0');
+        // Pull deltas should return lookups (scoped to the requesting store)
+        $deltaRes = $this->getJson("/api/sync/pull/deltas?since_watermark=0&store_id={$this->store->id}");
         $deltaRes->assertStatus(200);
         $this->assertArrayHasKey('lookups', $deltaRes->json());
         $this->assertTrue(collect($deltaRes->json('lookups'))->contains('name', 'Tablet'));

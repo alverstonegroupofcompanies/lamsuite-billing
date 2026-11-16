@@ -108,6 +108,7 @@ export const CustomerCombobox: React.FC<CustomerComboboxProps> = ({
   const [isSavingQuickAdd, setIsSavingQuickAdd] = useState(false);
 
   const listRef = useRef<HTMLDivElement | null>(null);
+  const isMouseDownInsideRef = useRef(false);
 
   // Synchronize internal input value when external value changes
   useEffect(() => {
@@ -237,6 +238,7 @@ export const CustomerCombobox: React.FC<CustomerComboboxProps> = ({
   }, [highlightedIndex, isOpen]);
 
   const selectWalkIn = () => {
+    isMouseDownInsideRef.current = false;
     setSearchTerm("Walk-in Customer");
     onChange({
       name: "Walk-in Customer",
@@ -249,6 +251,7 @@ export const CustomerCombobox: React.FC<CustomerComboboxProps> = ({
   };
 
   const selectCustomer = (cust: Customer) => {
+    isMouseDownInsideRef.current = false;
     setSearchTerm(cust.name);
     onChange({
       name: cust.name,
@@ -261,6 +264,7 @@ export const CustomerCombobox: React.FC<CustomerComboboxProps> = ({
   };
 
   const selectFreeTextWalkIn = (nameText: string) => {
+    isMouseDownInsideRef.current = false;
     const cleanName = nameText.trim() || "Walk-in Customer";
     setSearchTerm(cleanName);
     onChange({
@@ -274,6 +278,7 @@ export const CustomerCombobox: React.FC<CustomerComboboxProps> = ({
   };
 
   const openQuickAddModal = (initialName: string) => {
+    isMouseDownInsideRef.current = false;
     setQuickAddName(initialName.trim());
     setQuickAddPhone(phone || "");
     setQuickAddGstin(gstin || "");
@@ -438,6 +443,9 @@ export const CustomerCombobox: React.FC<CustomerComboboxProps> = ({
             updatePosition();
           }}
           onBlur={(e) => {
+            if (isMouseDownInsideRef.current) {
+              return;
+            }
             const related = e.relatedTarget as Node | null;
             if (listRef.current && related && listRef.current.contains(related)) {
               return;
@@ -469,6 +477,10 @@ export const CustomerCombobox: React.FC<CustomerComboboxProps> = ({
           <button
             type="button"
             tabIndex={-1}
+            onMouseDown={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+            }}
             onClick={handleClear}
             className="absolute right-1.5 rounded-full p-0.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-slate-700 dark:hover:text-slate-200"
             title="Reset to Walk-in Customer"
@@ -497,6 +509,16 @@ export const CustomerCombobox: React.FC<CustomerComboboxProps> = ({
             ref={listRef}
             id={listboxId}
             role="listbox"
+            tabIndex={-1}
+            onMouseDown={(e) => {
+              isMouseDownInsideRef.current = true;
+              e.preventDefault();
+            }}
+            onMouseUp={() => {
+              setTimeout(() => {
+                isMouseDownInsideRef.current = false;
+              }, 150);
+            }}
             style={{
               position: "fixed",
               top: `${dropdownCoords.top}px`,
@@ -520,6 +542,10 @@ export const CustomerCombobox: React.FC<CustomerComboboxProps> = ({
               role="option"
               aria-selected={highlightedIndex === 0}
               onMouseEnter={() => setHighlightedIndex(0)}
+              onMouseDown={(e) => {
+                e.preventDefault();
+                selectWalkIn();
+              }}
               onClick={selectWalkIn}
               className={`flex cursor-pointer items-center justify-between px-3 py-2 text-xs transition-colors ${
                 highlightedIndex === 0
@@ -559,6 +585,10 @@ export const CustomerCombobox: React.FC<CustomerComboboxProps> = ({
                   role="option"
                   aria-selected={isHighlighted}
                   onMouseEnter={() => setHighlightedIndex(itemIndex)}
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    selectCustomer(cust);
+                  }}
                   onClick={() => selectCustomer(cust)}
                   className={`flex cursor-pointer items-center justify-between border-t border-[var(--color-border-subtle)] px-3 py-2 text-xs transition-colors ${
                     isHighlighted
@@ -636,6 +666,10 @@ export const CustomerCombobox: React.FC<CustomerComboboxProps> = ({
                   role="option"
                   aria-selected={highlightedIndex === 1 + searchResults.length}
                   onMouseEnter={() => setHighlightedIndex(1 + searchResults.length)}
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    selectFreeTextWalkIn(searchTerm);
+                  }}
                   onClick={() => selectFreeTextWalkIn(searchTerm)}
                   className={`flex cursor-pointer items-center gap-2 px-3 py-2 text-xs transition-colors ${
                     highlightedIndex === 1 + searchResults.length
@@ -655,6 +689,10 @@ export const CustomerCombobox: React.FC<CustomerComboboxProps> = ({
                   role="option"
                   aria-selected={highlightedIndex === 1 + searchResults.length + 1}
                   onMouseEnter={() => setHighlightedIndex(1 + searchResults.length + 1)}
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    openQuickAddModal(searchTerm);
+                  }}
                   onClick={() => openQuickAddModal(searchTerm)}
                   className={`flex cursor-pointer items-center gap-2 px-3 py-2 text-xs font-semibold text-emerald-700 transition-colors dark:text-emerald-400 ${
                     highlightedIndex === 1 + searchResults.length + 1

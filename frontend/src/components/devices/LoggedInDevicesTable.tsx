@@ -70,7 +70,7 @@ export const LoggedInDevicesTable: React.FC<LoggedInDevicesTableProps> = ({
         const list = await deviceSessionService.getLoggedInDevices({
           search: searchQuery.trim() || undefined,
           status: statusFilter,
-          store_id: storeFilter === "all" ? "all" : (curStore?.id || "1"),
+          store_id: storeFilter === "all" ? "all" : (curStore?.id || undefined),
         });
         setDevices(list);
 
@@ -580,7 +580,7 @@ export const LoggedInDevicesTable: React.FC<LoggedInDevicesTableProps> = ({
                       <td className="py-3 px-4">
                         <div className="flex flex-col gap-0.5">
                           <span className="font-mono text-[11px] text-[var(--color-text)]">
-                            v{device.app_version || "2.0.36"}
+                            {device.app_version ? `v${device.app_version}` : "Version unknown"}
                           </span>
                           {device.unsynced_items_count > 0 ? (
                             <span className="inline-flex items-center gap-1 text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.2 rounded w-fit">

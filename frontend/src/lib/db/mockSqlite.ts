@@ -28,6 +28,13 @@ export class MockSqliteDatabase {
   }
 
   reset() {
+    if (this.isBrowser()) {
+      try {
+        window.localStorage.clear();
+      } catch {
+        // ignore
+      }
+    }
     this.storePartitions.clear();
     this.schemaVersions.clear();
     this.ensureTable("schema_version");

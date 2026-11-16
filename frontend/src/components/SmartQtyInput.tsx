@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useRef } from "react";
 import { Plus, Minus } from "lucide-react";
 import {
-  parseSmartQty,
   normalizePackLoose,
   type UnitConversionConfig,
 } from "../lib/billing/unitConversion";
+import { parseQuantityInput, sanitizeQuantityText } from "../lib/units/quantityInput";
 
 interface SmartQtyInputProps {
   packs: number;
@@ -47,6 +47,7 @@ export const SmartQtyInput: React.FC<SmartQtyInputProps> = ({
   const [looseText, setLooseText] = useState(loose.toString());
   const [isFocused, setIsFocused] = useState(false);
   const [showNormalizedHighlight, setShowNormalizedHighlight] = useState(false);
+  const [errorText, setErrorText] = useState("");
 
   const packInputRef = useRef<HTMLInputElement>(null);
   const looseInputRef = useRef<HTMLInputElement>(null);
@@ -79,26 +80,31 @@ export const SmartQtyInput: React.FC<SmartQtyInputProps> = ({
   // --- Handlers for Pack Input ---
   const handlePackChange = (newPacks: number) => {
     const p = Math.max(0, newPacks);
+    setErrorText("");
     setPackText(p.toString());
     onChange(p, loose);
   };
 
   const onPackInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const val = e.target.value;
-    setPackText(val);
+    const raw = e.target.value;
+    const sanitized = sanitizeQuantityText(raw, config);
+    setPackText(sanitized);
 
-    // Smart parsing for "2+5", "+5", "2.5", "10t"
-    if (val.includes("+")) {
-      const parts = val.split("+");
-      const p = parts[0].trim() ? parseFloat(parts[0]) || 0 : 0;
-      const l = parts[1].trim() ? parseFloat(parts[1]) || 0 : 0;
-      const norm = normalizePackLoose(p, l, upp);
+    if (raw.trim() !== sanitized.trim()) {
+      setErrorText("Use digits only (for example 2 or 2+5).");
+    }
 
-      setPackText(norm.packs.toString());
-      setLooseText(norm.loose.toString());
-      onChange(norm.packs, norm.loose);
+    if (sanitized.includes("+")) {
+      const parsed = parseQuantityInput(sanitized, config);
+      if (!parsed.ok) {
+        setErrorText(parsed.error ?? "");
+        return;
+      }
+      setErrorText("");
+      setPackText(parsed.packs.toString());
+      setLooseText(parsed.loose.toString());
+      onChange(parsed.packs, parsed.loose);
 
-      // Jump focus to loose input
       setTimeout(() => {
         looseInputRef.current?.focus();
         looseInputRef.current?.select();
@@ -106,22 +112,35 @@ export const SmartQtyInput: React.FC<SmartQtyInputProps> = ({
       return;
     }
 
-    if (val.includes(".")) {
-      const floatVal = parseFloat(val);
-      if (!isNaN(floatVal) && floatVal >= 0) {
-        const totalLoose = Math.round(floatVal * upp);
-        const norm = normalizePackLoose(0, totalLoose, upp);
-        setPackText(norm.packs.toString());
-        setLooseText(norm.loose.toString());
-        onChange(norm.packs, norm.loose);
-        return;
-      }
+    if (sanitized === "" || sanitized === ".") {
+      // Allow the empty intermediate state while the user is typing, but keep
+      // the error raised by rejected characters.
+      if (!raw.trim()) setErrorText("");
+      return;
     }
 
-    const num = val === "" ? 0 : parseFloat(val);
-    if (!isNaN(num) && num >= 0) {
-      onChange(Math.floor(num), loose);
+    if (!isLooseAllowed) {
+      const parsed = parseQuantityInput(sanitized, config);
+      if (!parsed.ok) {
+        setErrorText(parsed.error ?? "");
+        return;
+      }
+      setErrorText("");
+      onChange(parsed.packs + parsed.loose, 0);
+      return;
     }
+
+    const num = Number(sanitized);
+    if (!Number.isFinite(num)) {
+      setErrorText("Enter a valid number.");
+      return;
+    }
+    if (!Number.isInteger(num)) {
+      setErrorText("Packs must be a whole number. Use 2+5 for two packs and five loose units.");
+      return;
+    }
+    setErrorText("");
+    onChange(num, loose);
   };
 
   const onPackKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -164,9 +183,16 @@ export const SmartQtyInput: React.FC<SmartQtyInputProps> = ({
 
   const onPackBlur = () => {
     setIsFocused(false);
-    const num = parseFloat(packText) || 0;
-    setPackText(num.toString());
-    onChange(num, loose);
+    if (errorText) {
+      setPackText(packs.toString());
+      setLooseText(loose.toString());
+      return;
+    }
+    const num = packText === "" ? packs : Number(packText);
+    if (Number.isFinite(num)) {
+      setPackText(num.toString());
+      onChange(num, loose);
+    }
   };
 
   // --- Handlers for Loose Input ---
@@ -183,22 +209,29 @@ export const SmartQtyInput: React.FC<SmartQtyInputProps> = ({
   };
 
   const onLooseInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const val = e.target.value;
-    setLooseText(val);
+    const raw = e.target.value;
+    const digits = raw.replace(/[^\d]/g, "");
+    if (raw !== digits) {
+      setErrorText("Loose units must be a whole number.");
+    } else {
+      setErrorText("");
+    }
+    setLooseText(digits);
 
-    const num = val === "" ? 0 : parseFloat(val);
-    if (!isNaN(num) && num >= 0) {
-      if (num >= upp) {
-        // Auto-normalize if typed value exceeds pack size
-        const norm = normalizePackLoose(packs, num, upp);
-        setShowNormalizedHighlight(true);
-        setTimeout(() => setShowNormalizedHighlight(false), 1200);
-        setPackText(norm.packs.toString());
-        setLooseText(norm.loose.toString());
-        onChange(norm.packs, norm.loose);
-      } else {
-        onChange(packs, num);
-      }
+    if (digits === "") return;
+    const num = Number(digits);
+    if (!Number.isFinite(num)) return;
+
+    if (num >= upp) {
+      // Auto-normalize if typed value exceeds pack size
+      const norm = normalizePackLoose(packs, num, upp);
+      setShowNormalizedHighlight(true);
+      setTimeout(() => setShowNormalizedHighlight(false), 1200);
+      setPackText(norm.packs.toString());
+      setLooseText(norm.loose.toString());
+      onChange(norm.packs, norm.loose);
+    } else {
+      onChange(packs, num);
     }
   };
 
@@ -283,10 +316,26 @@ export const SmartQtyInput: React.FC<SmartQtyInputProps> = ({
               onPackBlur();
               if (onBlurInput) onBlurInput();
             }}
+            aria-invalid={Boolean(errorText)}
             onChange={(e) => {
-              setPackText(e.target.value);
-              const num = parseFloat(e.target.value) || 0;
-              onChange(Math.max(1, num), 0);
+              const raw = e.target.value;
+              const sanitized = sanitizeQuantityText(raw, config);
+              setPackText(sanitized);
+              if (raw.trim() !== sanitized.trim()) {
+                setErrorText("Use digits only.");
+                return;
+              }
+              if (sanitized === "" || sanitized === ".") {
+                if (!raw.trim()) setErrorText("");
+                return;
+              }
+              const parsed = parseQuantityInput(sanitized, config);
+              if (!parsed.ok) {
+                setErrorText(parsed.error ?? "");
+                return;
+              }
+              setErrorText("");
+              onChange(parsed.packs + parsed.loose, 0);
             }}
             onKeyDown={(e) => {
               if (e.key === "Enter") {
@@ -317,6 +366,11 @@ export const SmartQtyInput: React.FC<SmartQtyInputProps> = ({
         <span className="mt-0.5 text-[10px] text-slate-400 lowercase">
           {packName || "pcs"}
         </span>
+        {errorText && (
+          <span role="alert" className="mt-0.5 max-w-[140px] text-center text-[9px] font-semibold text-rose-600">
+            {errorText}
+          </span>
+        )}
       </div>
     );
   }
@@ -451,6 +505,11 @@ export const SmartQtyInput: React.FC<SmartQtyInputProps> = ({
           {loose > 0 ? ` + ${loose} ${loose === 1 ? looseName : `${looseName}s`}` : ""})
         </span>
       </div>
+      {errorText && (
+        <span role="alert" className="mt-0.5 max-w-[160px] text-center text-[9px] font-semibold text-rose-600">
+          {errorText}
+        </span>
+      )}
     </div>
   );
 };

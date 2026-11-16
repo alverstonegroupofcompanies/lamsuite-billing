@@ -43,9 +43,20 @@ class AdminDashboardController
             $storesScope->where('id', $storeId);
         }
 
-        $today = Carbon::today()->toDateString();
-        $startOfWeek = Carbon::now()->startOfWeek()->toDateString();
-        $startOfMonth = Carbon::now()->startOfMonth()->toDateString();
+        // Invoice dates are store-local calendar dates, so "today" must be
+        // evaluated in the store's timezone, not the server default.
+        $timezone = $storeId
+            ? (Store::whereKey($storeId)->value('timezone') ?: config('app.timezone'))
+            : config('app.timezone');
+        try {
+            $now = Carbon::now($timezone);
+        } catch (\Throwable $e) {
+            $timezone = config('app.timezone');
+            $now = Carbon::now($timezone);
+        }
+        $today = $now->toDateString();
+        $startOfWeek = $now->copy()->startOfWeek()->toDateString();
+        $startOfMonth = $now->copy()->startOfMonth()->toDateString();
 
         // 1. Sales metrics
         $todaySales = (clone $invoiceScope)->whereDate('invoice_date', $today)->sum('grand_total');
@@ -67,7 +78,7 @@ class AdminDashboardController
 
         // 4. Low stock & Near expiry
         $lowStockCount = (clone $productScope)->whereColumn('current_stock', '<=', 'reorder_level')->count();
-        $nearExpiryThreshold = Carbon::now()->addDays(60)->toDateString();
+        $nearExpiryThreshold = $now->copy()->addDays(60)->toDateString();
         $nearExpiryCount = (clone $batchScope)->whereDate('expiry_date', '<=', $nearExpiryThreshold)->count();
 
         // 5. Top 5 selling items
@@ -106,7 +117,7 @@ class AdminDashboardController
             });
 
         // 7. Sync health metrics
-        $storesOnline = Device::where('status', 'active')->where('last_seen_at', '>=', Carbon::now()->subMinutes(15))->distinct('store_id')->count('store_id');
+        $storesOnline = Device::where('status', 'active')->where('last_seen_at', '>=', $now->copy()->subMinutes(15))->distinct('store_id')->count('store_id');
         $totalStores = Store::where('is_active', true)->count();
         $lastSyncTime = Device::max('last_sync_at');
         $pendingQueueCount = (clone $syncScope)->where('status', 'pending')->count();
@@ -114,6 +125,7 @@ class AdminDashboardController
         $conflictsCount = (clone $syncScope)->where('status', 'conflict')->count();
 
         return response()->json([
+            'timezone' => $timezone,
             'sales' => [
                 'today' => ['amount' => round($todaySales, 2), 'count' => $todayInvoicesCount],
                 'week' => ['amount' => round($weekSales, 2), 'count' => $weekInvoicesCount],

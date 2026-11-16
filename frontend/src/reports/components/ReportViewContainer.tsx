@@ -172,7 +172,7 @@ export const ReportViewContainer: React.FC<ReportViewContainerProps> = ({ report
     const isDot = printLayout.startsWith("dot-matrix");
     const cols =
       printLayout === "dot-matrix-60"
-        ? 50
+        ? 60
         : printLayout === "dot-matrix-120"
         ? 120
         : printLayout === "dot-matrix-132"
@@ -190,7 +190,7 @@ export const ReportViewContainer: React.FC<ReportViewContainerProps> = ({ report
       paperSize: printLayout === "thermal"
         ? "thermal_80mm"
         : isDot
-        ? cols === 50
+        ? cols <= 60
           ? "dot_matrix_6in"
           : cols === 120
           ? "dot_matrix_12in"

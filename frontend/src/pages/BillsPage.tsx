@@ -17,7 +17,6 @@ import {
   ArrowLeft,
   AlertCircle,
   Eye,
-  Lock,
   UserCheck,
   RefreshCw,
   FolderOpen,
@@ -32,6 +31,7 @@ import {
   type InvoiceItemRecord,
   type InvoiceAuditEntry,
   type InvoiceFilterCriteria,
+  type InvoiceEditApproval,
 } from "../lib/billing/invoiceManagementService";
 import {
   printingEngine,
@@ -42,15 +42,80 @@ import {
 import { whatsappService } from "../lib/integrations/whatsappService";
 import { isTauri } from "../lib/ipc/ipcBridge";
 import { posCartService } from "../lib/billing/posCartService";
-import { productsStore, type ProductBatch, type ProductItem } from "../lib/masters/productsStore";
-import { companySettingsService } from "../lib/settings/companySettingsService";
+import { productsStore, formatExpiryDisplay, type ProductBatch, type ProductItem } from "../lib/masters/productsStore";
+import {
+  companySettingsService,
+} from "../lib/settings/companySettingsService";
 import { sqliteStorage } from "../lib/db/sqliteStorage";
 import { onlineTransactionService } from "../lib/sync/onlineTransactionService";
 import { storeRegistryService, type RegisteredStoreRecord } from "../lib/auth/storeRegistryService";
 import { storeDeviceService, type StoreDeviceProfile } from "../lib/auth/storeDeviceService";
+import { staffAuthService } from "../lib/auth/staffAuthService";
 import { partiesStore } from "../lib/masters/partiesStore";
 import { PrintPreviewModal } from "../components/PrintPreviewModal";
-import { useModalEscape } from "../lib/ui/modalEscapeManager";
+import { InvoiceApprovalDialog } from "../components/InvoiceApprovalDialog";
+import { ModalLayer } from "../lib/modal/CentralModalManager";
+import { shortcutDispatcher } from "../lib/keyboard/shortcutDispatcher";
+import { shortcutLabel } from "../lib/keyboard/centralKeyMap";
+import { userPreferencesService } from "../lib/settings/userPreferencesService";
+import { addDaysToDateString, getStoreTimezone, storeToday, toStoreDateString } from "../lib/dateTimeUtils";
+import {
+  BILLS_PAYMENT_MODES,
+  BILLS_PERIODS,
+  BILLS_PINNED_PERIOD_KEY,
+  BILLS_STATUSES,
+  cycleValue,
+  resolveBillsPeriod,
+  type BillsPeriod,
+} from "../lib/billing/billsFilterService";
+import type { InvoiceApprovalGrant } from "../lib/billing/invoiceApprovalService";
+
+const normalizeServerPayments = (raw: unknown): InvoiceRecord["payments"] => {
+  if (!Array.isArray(raw) || raw.length === 0) return undefined;
+  return raw.map((p: any, idx: number) => ({
+    id: String(p.id ?? idx),
+    invoice_id: String(p.invoice_id ?? ""),
+    store_id: p.store_id ? String(p.store_id) : undefined,
+    counter_id: p.counter_id ? String(p.counter_id) : undefined,
+    counter_code: p.counter_code ?? undefined,
+    payment_mode: p.payment_mode || p.mode || "Cash",
+    amount: Number(p.amount) || 0,
+    reference_no: p.reference_no ?? undefined,
+    status: p.status || "received",
+    extra_fields:
+      typeof p.extra_fields === "string"
+        ? p.extra_fields
+        : p.extra_fields
+          ? JSON.stringify(p.extra_fields)
+          : undefined,
+    notes: p.notes ?? undefined,
+    received_by: p.received_by ?? undefined,
+    created_at: p.created_at ? new Date(p.created_at).getTime() : Date.now(),
+    updated_at: p.updated_at ? new Date(p.updated_at).getTime() : Date.now(),
+  })) as InvoiceRecord["payments"];
+};
+
+const sumCollectedTenders = (inv: InvoiceRecord): number => {
+  const active = (inv.payments || []).filter((p) => p.status !== "refunded");
+  const amount =
+    active.length > 0
+      ? active.reduce((sum, p) => sum + (Number(p.amount) || 0), 0)
+      : Number(inv.paid_amount) || 0;
+  return Math.round(amount * 100) / 100;
+};
+
+const resolveInitialBillsPeriod = (): BillsPeriod => {
+  let pinned: unknown;
+  try {
+    const session = staffAuthService.getCurrentSession();
+    const preferences = session?.user?.id ? userPreferencesService.get(session.user.id) : {};
+    pinned = preferences[BILLS_PINNED_PERIOD_KEY];
+  } catch {
+    // Preferences are optional; fall through to the owner default.
+  }
+  const configured = companySettingsService.getSettings()?.workspace?.billsDefaultPeriod;
+  return resolveBillsPeriod(pinned, configured);
+};
 
 export const BillsPage: React.FC = () => {
   const navigate = useNavigate();
@@ -84,7 +149,7 @@ export const BillsPage: React.FC = () => {
 
   // Filters
   const [searchQuery, setSearchQuery] = useState("");
-  const [dateRange, setDateRange] = useState<"today" | "yesterday" | "last7days" | "month" | "all">("today");
+  const [dateRange, setDateRange] = useState<BillsPeriod>(() => resolveInitialBillsPeriod());
   const [paymentModeFilter, setPaymentModeFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
 
@@ -93,24 +158,13 @@ export const BillsPage: React.FC = () => {
   const [selectedInvoiceItems, setSelectedInvoiceItems] = useState<InvoiceItemRecord[]>([]);
   const [selectedInvoiceAudit, setSelectedInvoiceAudit] = useState<InvoiceAuditEntry[]>([]);
   const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
-  useModalEscape(isDetailModalOpen, () => setIsDetailModalOpen(false));
 
-  // Cancel & PIN Dialog
-  const [isCancelModalOpen, setIsCancelModalOpen] = useState(false);
-  useModalEscape(isCancelModalOpen, () => setIsCancelModalOpen(false));
-  const [cancelReason, setCancelReason] = useState("");
-  const [managerPin, setManagerPin] = useState("");
-  const [pinError, setPinError] = useState("");
-
-  // Edit PIN Dialog
-  const [isEditPinModalOpen, setIsEditPinModalOpen] = useState(false);
-  useModalEscape(isEditPinModalOpen, () => setIsEditPinModalOpen(false));
-  const [editPin, setEditPin] = useState("");
-  const [editPinError, setEditPinError] = useState("");
+  // Manager / admin approval gate for edit and cancellation
+  const [approvalAction, setApprovalAction] = useState<"edit" | "cancel">("edit");
+  const [isApprovalModalOpen, setIsApprovalModalOpen] = useState(false);
 
   // Receive Payment Dialog
   const [isReceivePaymentModalOpen, setIsReceivePaymentModalOpen] = useState(false);
-  useModalEscape(isReceivePaymentModalOpen, () => setIsReceivePaymentModalOpen(false));
   const [receiptMode, setReceiptMode] = useState("Cash");
   const [receiptAmount, setReceiptAmount] = useState(0);
   const [receiptReference, setReceiptReference] = useState("");
@@ -145,38 +199,56 @@ export const BillsPage: React.FC = () => {
 
   const [isRefreshingServer, setIsRefreshingServer] = useState(false);
 
-  // Subscribe to store registry changes
+  // Subscribe to store registry changes and load on mount
   useEffect(() => {
-    const unsub = storeRegistryService.onRegistryChange(() => {
-      setActiveStore(storeRegistryService.getActiveStore());
+    let mounted = true;
+    storeRegistryService.loadRegistry().then(() => {
+      if (!mounted) return;
+      const current = storeRegistryService.getActiveStore();
+      setActiveStore(current);
     });
-    return unsub;
+    const unsub = storeRegistryService.onRegistryChange(() => {
+      if (!mounted) return;
+      const current = storeRegistryService.getActiveStore();
+      setActiveStore(current);
+    });
+    return () => {
+      mounted = false;
+      unsub();
+    };
   }, []);
 
   const loadInvoices = async (page = currentPage, forceServer = false) => {
     setLoading(true);
     try {
-      const reg = storeRegistryService.getActiveStore();
-      setActiveStore(reg);
-      const activeStoreId = reg?.id || "1";
-
-      const now = new Date();
-      const formatYmdKolkata = (d: Date) => {
+      const reg = activeStore || storeRegistryService.getActiveStore();
+      const session = staffAuthService.getCurrentSession();
+      let activeStoreId = String(reg?.id || session?.user?.store_id || "");
+      if (!activeStoreId && typeof window !== "undefined" && window.localStorage) {
         try {
-          return d.toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
-        } catch {
-          return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+          activeStoreId = window.localStorage.getItem("lamsuite_active_store_id") || "";
+        } catch {}
+      }
+      if (!activeStoreId) {
+        activeStoreId = "4";
+      }
+
+      if (!activeStore) {
+        const found = storeRegistryService.getStores().find((s) => String(s.id) === activeStoreId) || reg;
+        if (found) {
+          setActiveStore(found);
         }
-      };
-      const todayStr = formatYmdKolkata(now);
-      const yesterdayDate = new Date(now);
-      yesterdayDate.setDate(yesterdayDate.getDate() - 1);
-      const yesterdayStr = formatYmdKolkata(yesterdayDate);
-      const sevenDaysAgoDate = new Date(now);
-      sevenDaysAgoDate.setDate(sevenDaysAgoDate.getDate() - 7);
-      const sevenDaysAgoStr = formatYmdKolkata(sevenDaysAgoDate);
+      }
+
+      const settings = companySettingsService.getSettings();
+      const storeTimeZone = getStoreTimezone(settings);
+      const todayStr = storeToday(settings);
+      const yesterdayStr = addDaysToDateString(todayStr, -1);
+      const sevenDaysAgoStr = addDaysToDateString(todayStr, -6);
       const monthStartStr = `${todayStr.slice(0, 7)}-01`;
-      const lastDayOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+      const lastDayOfMonth = new Date(
+        Date.UTC(Number(todayStr.slice(0, 4)), Number(todayStr.slice(5, 7)), 0)
+      ).getUTCDate();
       const monthEndStr = `${todayStr.slice(0, 7)}-${String(lastDayOfMonth).padStart(2, "0")}`;
 
       let startDate: string | undefined;
@@ -252,73 +324,112 @@ export const BillsPage: React.FC = () => {
             storeTotalCount = json.total_store_invoices !== undefined ? json.total_store_invoices : totalCount;
             pagesCount = json.last_page || 1;
 
-            // Ingest server bills into local SQLite cache
-            for (const sinv of serverList) {
-              const rec: InvoiceRecord = {
-                id: String(sinv.id),
-                module_key: "invoice",
-                invoice_number: sinv.invoice_number,
-                invoice_date: sinv.invoice_date,
-                customer_id: sinv.customer_id ? String(sinv.customer_id) : undefined,
-                customer_name: sinv.customer_name || "Walk-in Customer",
-                customer_phone: sinv.customer_phone || sinv.customer?.phone || (sinv as any).phone || "",
-                customer_gstin: sinv.customer_gstin || "",
-                subtotal: Number(sinv.subtotal) || 0,
-                discount_total: Number(sinv.discount_total) || 0,
-                tax_total: Number(sinv.tax_total) || 0,
-                round_off: Number(sinv.round_off) || 0,
-                grand_total: Number(sinv.grand_total) || 0,
-                paid_amount: Number(sinv.paid_amount) || Number(sinv.grand_total) || 0,
-                payment_mode: sinv.payment_mode || "Cash",
-                payment_status: sinv.payment_status || "paid",
-                status: sinv.status || "issued",
-                user_counter: sinv.counter_code ? `Counter ${sinv.counter_code}` : (sinv.user_counter || "Counter 01"),
-                sync_state: "synced",
-                created_at: sinv.created_at ? new Date(sinv.created_at).getTime() : Date.now(),
-                updated_at: sinv.updated_at ? new Date(sinv.updated_at).getTime() : Date.now(),
-              };
-              await sqliteStorage.insertRecord("invoices", String(sinv.id), rec);
-              if (Array.isArray(sinv.items)) {
-                for (const item of sinv.items) {
-                  await sqliteStorage.insertRecord("invoice_items", `item_${item.id || Math.random()}`, {
-                    id: String(item.id || `item_${Math.random()}`),
-                    invoice_id: String(sinv.id),
-                    product_id: String(item.product_id),
-                    product_name: item.product_name,
-                    batch_no: item.batch_no,
-                    expiry_date: item.expiry_date,
-                    qty: Number(item.qty || 0),
-                    loose_qty: Number(item.loose_qty || 0),
-                    units_per_pack: Number(item.units_per_pack || 1),
-                    unit_price: Number(item.unit_price || 0),
-                    mrp: Number(item.mrp || item.unit_price || 0),
-                    discount_percent: Number(item.discount_percent || 0),
-                    discount_amount: Number(item.discount_amount || 0),
-                    gst_percent: Number(item.gst_percent || 0),
-                    tax_amount: Number(item.tax_amount || 0),
-                    total_amount: Number(item.total_amount || 0),
-                  });
+            // Ingest server bills into local SQLite cache in background
+            try {
+              for (const sinv of serverList) {
+                const rec: InvoiceRecord = {
+                  id: String(sinv.id),
+                  store_id: String(sinv.store_id || activeStoreId),
+                  module_key: "invoice",
+                  invoice_number: sinv.invoice_number,
+                  invoice_date: toStoreDateString(sinv.invoice_date, storeTimeZone),
+                  customer_id: sinv.customer_id ? String(sinv.customer_id) : undefined,
+                  customer_name: sinv.customer_name || "Walk-in Customer",
+                  customer_phone: sinv.customer_phone || sinv.customer?.phone || (sinv as any).phone || "",
+                  customer_gstin: sinv.customer_gstin || "",
+                  subtotal: Number(sinv.subtotal) || 0,
+                  taxable_subtotal:
+                    sinv.taxable_subtotal != null ? Number(sinv.taxable_subtotal) || 0 : undefined,
+                  discount_total: Number(sinv.discount_total) || 0,
+                  tax_total: Number(sinv.tax_total) || 0,
+                  cgst_total: Number(sinv.cgst_total) || 0,
+                  sgst_total: Number(sinv.sgst_total) || 0,
+                  igst_total: Number(sinv.igst_total) || 0,
+                  round_off: Number(sinv.round_off) || 0,
+                  grand_total: Number(sinv.grand_total) || 0,
+                  paid_amount:
+                    sinv.paid_amount != null
+                      ? Number(sinv.paid_amount) || 0
+                      : Number(sinv.grand_total) || 0,
+                  payment_mode: sinv.payment_mode || "Cash",
+                  payment_status: sinv.payment_status || "paid",
+                  payments: normalizeServerPayments(sinv.payments),
+                  status: sinv.status || "issued",
+                  user_counter: sinv.counter_code ? `Counter ${sinv.counter_code}` : (sinv.user_counter || "Counter 01"),
+                  sync_state: "synced",
+                  created_at: sinv.created_at ? new Date(sinv.created_at).getTime() : Date.now(),
+                  updated_at: sinv.updated_at ? new Date(sinv.updated_at).getTime() : Date.now(),
+                };
+                await sqliteStorage.insertRecord("invoices", String(sinv.id), rec);
+                if (Array.isArray(sinv.items)) {
+                  for (const item of sinv.items) {
+                    await sqliteStorage.insertRecord("invoice_items", `item_${item.id || Math.random()}`, {
+                      id: String(item.id || `item_${Math.random()}`),
+                      invoice_id: String(sinv.id),
+                      product_id: String(item.product_id),
+                      product_name: item.product_name,
+                      hsn_code: item.hsn_code,
+                      batch_no: item.batch_no,
+                      expiry_date: item.expiry_date,
+                      qty: Number(item.qty || 0),
+                      loose_qty: Number(item.loose_qty || 0),
+                      units_per_pack: Number(item.units_per_pack || 1),
+                      unit_price: Number(item.unit_price || 0),
+                      mrp: Number(item.mrp || item.unit_price || 0),
+                      discount_percent: Number(item.discount_percent || 0),
+                      discount_amount: Number(item.discount_amount || 0),
+                      taxable_amount: item.taxable_amount != null ? Number(item.taxable_amount) : undefined,
+                      gst_percent: Number(item.gst_percent || 0),
+                      tax_amount: Number(item.tax_amount || 0),
+                      cgst_amount: Number(item.cgst_amount || 0),
+                      sgst_amount: Number(item.sgst_amount || 0),
+                      igst_amount: Number(item.igst_amount || 0),
+                      cess_amount: Number(item.cess_amount || 0),
+                      total_amount: Number(item.total_amount || 0),
+                    });
+                  }
+                }
+                const payments = normalizeServerPayments(sinv.payments);
+                if (payments) {
+                  for (const p of payments) {
+                    await sqliteStorage.insertRecord("invoice_payments", p.id, {
+                      ...p,
+                      store_id: String(sinv.store_id || activeStoreId),
+                    } as unknown as Record<string, unknown>);
+                  }
                 }
               }
+            } catch (cacheErr) {
+              console.warn("Local SQLite bill ingestion skipped:", cacheErr);
             }
 
             loadedInvoices = serverList.map((sinv: any) => ({
               id: String(sinv.id),
+              store_id: String(sinv.store_id || activeStoreId),
               module_key: "invoice",
               invoice_number: sinv.invoice_number,
-              invoice_date: sinv.invoice_date,
+              invoice_date: toStoreDateString(sinv.invoice_date, storeTimeZone),
               customer_id: sinv.customer_id ? String(sinv.customer_id) : undefined,
               customer_name: sinv.customer_name || "Walk-in Customer",
               customer_phone: sinv.customer_phone || sinv.customer?.phone || (sinv as any).phone || "",
               customer_gstin: sinv.customer_gstin || "",
               subtotal: Number(sinv.subtotal) || 0,
+              taxable_subtotal:
+                sinv.taxable_subtotal != null ? Number(sinv.taxable_subtotal) || 0 : undefined,
               discount_total: Number(sinv.discount_total) || 0,
               tax_total: Number(sinv.tax_total) || 0,
+              cgst_total: Number(sinv.cgst_total) || 0,
+              sgst_total: Number(sinv.sgst_total) || 0,
+              igst_total: Number(sinv.igst_total) || 0,
               round_off: Number(sinv.round_off) || 0,
               grand_total: Number(sinv.grand_total) || 0,
-              paid_amount: Number(sinv.paid_amount) || Number(sinv.grand_total) || 0,
+              paid_amount:
+                sinv.paid_amount != null
+                  ? Number(sinv.paid_amount) || 0
+                  : Number(sinv.grand_total) || 0,
               payment_mode: sinv.payment_mode || "Cash",
               payment_status: sinv.payment_status || "paid",
+              payments: normalizeServerPayments(sinv.payments),
               status: sinv.status || "issued",
               user_counter: sinv.counter_code ? `Counter ${sinv.counter_code}` : (sinv.user_counter || "Counter 01"),
               sync_state: "synced",
@@ -339,7 +450,7 @@ export const BillsPage: React.FC = () => {
 
             loadedFromLiveServer = true;
             setIsOfflineCache(false);
-            setLastSyncTime(new Date().toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata" }));
+            setLastSyncTime(new Date().toLocaleTimeString("en-IN", { timeZone: storeTimeZone }));
           }
         } catch (serverErr) {
           console.warn("Failed to load from server API, falling back to SQLite cache:", serverErr);
@@ -353,6 +464,7 @@ export const BillsPage: React.FC = () => {
           dateRange,
           paymentMode: paymentModeFilter,
           status: statusFilter,
+          storeId: activeStoreId,
         };
         const localList = await invoiceManagementService.listInvoices(criteria);
         loadedInvoices = localList;
@@ -369,6 +481,7 @@ export const BillsPage: React.FC = () => {
       setCurrentPage(page);
       setSelectedIndex(0);
     } catch (err) {
+      console.error("[loadInvoices error]", err);
       showNotification("Failed to load invoices", "error");
     } finally {
       setLoading(false);
@@ -413,19 +526,28 @@ export const BillsPage: React.FC = () => {
             id: String(sinv.id),
             module_key: "invoice",
             invoice_number: sinv.invoice_number,
-            invoice_date: sinv.invoice_date,
+            invoice_date: toStoreDateString(sinv.invoice_date),
             customer_id: sinv.customer_id ? String(sinv.customer_id) : undefined,
             customer_name: sinv.customer_name || "Walk-in Customer",
             customer_phone: sinv.customer_phone || sinv.customer?.phone || (sinv as any).phone || "",
             customer_gstin: sinv.customer_gstin || "",
             subtotal: Number(sinv.subtotal) || 0,
+            taxable_subtotal:
+              sinv.taxable_subtotal != null ? Number(sinv.taxable_subtotal) || 0 : undefined,
             discount_total: Number(sinv.discount_total) || 0,
             tax_total: Number(sinv.tax_total) || 0,
+            cgst_total: Number(sinv.cgst_total) || 0,
+            sgst_total: Number(sinv.sgst_total) || 0,
+            igst_total: Number(sinv.igst_total) || 0,
             round_off: Number(sinv.round_off) || 0,
             grand_total: Number(sinv.grand_total) || 0,
-            paid_amount: Number(sinv.paid_amount) || Number(sinv.grand_total) || 0,
+            paid_amount:
+              sinv.paid_amount != null
+                ? Number(sinv.paid_amount) || 0
+                : Number(sinv.grand_total) || 0,
             payment_mode: sinv.payment_mode || "Cash",
             payment_status: sinv.payment_status || "paid",
+            payments: normalizeServerPayments(sinv.payments),
             status: sinv.status || "issued",
             user_counter: sinv.counter_code ? `Counter ${sinv.counter_code}` : (sinv.user_counter || "Counter 01"),
             sync_state: "synced",
@@ -439,6 +561,7 @@ export const BillsPage: React.FC = () => {
                 invoice_id: String(sinv.id),
                 product_id: String(item.product_id),
                 product_name: item.product_name,
+                hsn_code: item.hsn_code,
                 batch_no: item.batch_no,
                 expiry_date: item.expiry_date,
                 qty: Number(item.qty || 0),
@@ -448,10 +571,24 @@ export const BillsPage: React.FC = () => {
                 mrp: Number(item.mrp || item.unit_price || 0),
                 discount_percent: Number(item.discount_percent || 0),
                 discount_amount: Number(item.discount_amount || 0),
+                taxable_amount: item.taxable_amount != null ? Number(item.taxable_amount) : undefined,
                 gst_percent: Number(item.gst_percent || 0),
                 tax_amount: Number(item.tax_amount || 0),
+                cgst_amount: Number(item.cgst_amount || 0),
+                sgst_amount: Number(item.sgst_amount || 0),
+                igst_amount: Number(item.igst_amount || 0),
+                cess_amount: Number(item.cess_amount || 0),
                 total_amount: Number(item.total_amount || 0),
               });
+            }
+          }
+          const payments = normalizeServerPayments(sinv.payments);
+          if (payments) {
+            for (const p of payments) {
+              await sqliteStorage.insertRecord("invoice_payments", p.id, {
+                ...p,
+                store_id: String(sinv.store_id || activeStoreId),
+              } as unknown as Record<string, unknown>);
             }
           }
           totalDownloaded++;
@@ -471,8 +608,9 @@ export const BillsPage: React.FC = () => {
   const handleSwitchStore = async (storeId: string) => {
     try {
       await storeRegistryService.switchActiveStore(storeId, true);
-      setActiveStore(storeRegistryService.getActiveStore());
-      showNotification(`Switched active store to STORE-01`, "success");
+      const switched = storeRegistryService.getActiveStore();
+      setActiveStore(switched);
+      showNotification(`Switched active store to ${switched?.name || storeId}`, "success");
       loadInvoices(1, true);
     } catch (err: any) {
       showNotification(`Failed to switch store: ${err.message}`, "error");
@@ -492,18 +630,23 @@ export const BillsPage: React.FC = () => {
   };
 
   const formatDisplayDate = (inv: InvoiceRecord) => {
-    const raw = inv.invoice_date || "";
-    if (raw) {
-      try {
-        const d = new Date(raw);
-        if (!isNaN(d.getTime())) {
-          return d.toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "2-digit", month: "short", year: "numeric" });
-        }
-      } catch {}
-      return raw.slice(0, 10);
+    const storeTimeZone = getStoreTimezone(companySettingsService.getSettings());
+    const dateOnly = toStoreDateString(inv.invoice_date || "", storeTimeZone);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(dateOnly)) {
+      return new Date(`${dateOnly}T00:00:00Z`).toLocaleDateString("en-IN", {
+        timeZone: "UTC",
+        day: "2-digit",
+        month: "short",
+        year: "numeric",
+      });
     }
     if (inv.created_at) {
-      return new Date(inv.created_at).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "2-digit", month: "short", year: "numeric" });
+      return new Date(inv.created_at).toLocaleDateString("en-IN", {
+        timeZone: storeTimeZone,
+        day: "2-digit",
+        month: "short",
+        year: "numeric",
+      });
     }
     return "-";
   };
@@ -514,7 +657,11 @@ export const BillsPage: React.FC = () => {
       try {
         const d = new Date(timestamp);
         if (!isNaN(d.getTime())) {
-          return d.toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit" });
+          return d.toLocaleTimeString("en-IN", {
+            timeZone: getStoreTimezone(companySettingsService.getSettings()),
+            hour: "2-digit",
+            minute: "2-digit",
+          });
         }
       } catch {}
     }
@@ -523,7 +670,7 @@ export const BillsPage: React.FC = () => {
 
   useEffect(() => {
     loadInvoices();
-  }, [dateRange, paymentModeFilter, statusFilter]);
+  }, [activeStore?.id, dateRange, paymentModeFilter, statusFilter]);
 
   // Debounced search
   useEffect(() => {
@@ -535,17 +682,11 @@ export const BillsPage: React.FC = () => {
 
   // Keyboard navigation
   useEffect(() => {
+    const isOverlayOpen =
+      isDetailModalOpen || isApprovalModalOpen || isReceivePaymentModalOpen || isSyncingHistory;
+
     const handleKeyDown = (e: KeyboardEvent) => {
-      // If modal is open, Escape closes modal
-      if (isDetailModalOpen || isCancelModalOpen || isEditPinModalOpen) {
-        if (e.key === "Escape") {
-          e.preventDefault();
-          if (isCancelModalOpen) setIsCancelModalOpen(false);
-          else if (isEditPinModalOpen) setIsEditPinModalOpen(false);
-          else if (isDetailModalOpen) setIsDetailModalOpen(false);
-        }
-        return;
-      }
+      if (isOverlayOpen) return;
 
       // Escape navigates back to POS billing
       if (e.key === "Escape") {
@@ -586,7 +727,59 @@ export const BillsPage: React.FC = () => {
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isDetailModalOpen, isCancelModalOpen, isEditPinModalOpen, invoices, selectedIndex, navigate]);
+  }, [
+    isDetailModalOpen,
+    isApprovalModalOpen,
+    isReceivePaymentModalOpen,
+    isSyncingHistory,
+    invoices,
+    selectedIndex,
+    navigate,
+  ]);
+
+  // Register the bills-scope filter chords with the central dispatcher.
+  useEffect(() => {
+    const isOverlayOpen =
+      isDetailModalOpen || isApprovalModalOpen || isReceivePaymentModalOpen || isSyncingHistory;
+
+    const applyPeriod = (next: BillsPeriod) => {
+      setDateRange(next);
+      const userId = staffAuthService.getCurrentSession()?.user?.id;
+      if (userId) {
+        void userPreferencesService.set(userId, BILLS_PINNED_PERIOD_KEY, next).catch(() => undefined);
+      }
+    };
+
+    return shortcutDispatcher.register({
+      id: "bills-filters",
+      scope: "bills",
+      isActive: () => !isOverlayOpen,
+      handlers: {
+        periodNext: () => {
+          applyPeriod(cycleValue(BILLS_PERIODS, dateRange, 1));
+          return true;
+        },
+        periodPrev: () => {
+          applyPeriod(cycleValue(BILLS_PERIODS, dateRange, -1));
+          return true;
+        },
+        filterPayment: () => {
+          setPaymentModeFilter((current) => cycleValue(BILLS_PAYMENT_MODES, current, 1));
+          return true;
+        },
+        filterStatus: () => {
+          setStatusFilter((current) => cycleValue(BILLS_STATUSES, current, 1));
+          return true;
+        },
+      },
+    });
+  }, [
+    dateRange,
+    isDetailModalOpen,
+    isApprovalModalOpen,
+    isReceivePaymentModalOpen,
+    isSyncingHistory,
+  ]);
 
   // Auto-scroll selected row into view
   useEffect(() => {
@@ -672,10 +865,7 @@ export const BillsPage: React.FC = () => {
 
   const handleOpenReceivePayment = () => {
     if (!selectedInvoice) return;
-    const paidSoFar = (selectedInvoice.payments || []).reduce(
-      (sum, p) => (p.status !== "refunded" ? sum + p.amount : sum),
-      0
-    );
+    const paidSoFar = sumCollectedTenders(selectedInvoice);
     const balanceRemaining = Math.max(
       0,
       Math.round((selectedInvoice.grand_total - paidSoFar + Number.EPSILON) * 100) / 100
@@ -831,63 +1021,44 @@ export const BillsPage: React.FC = () => {
     navigate("/pos");
   };
 
-  const handlePromptEdit = () => {
+  const openApprovalDialog = (action: "edit" | "cancel") => {
     if (!selectedInvoice) return;
-    const lock = invoiceManagementService.checkInvoiceLockStatus(selectedInvoice);
-    if (lock.isLocked) {
-      showNotification(lock.lockReason || "Invoice is locked from editing", "error");
+    if (selectedInvoice.status === "cancelled") {
+      showNotification("Cancelled invoices cannot be modified.", "error");
       return;
     }
-    setEditPin("");
-    setEditPinError("");
-    setIsEditPinModalOpen(true);
+    setApprovalAction(action);
+    setIsApprovalModalOpen(true);
   };
 
-  const handleConfirmEditPin = () => {
-    if (!invoiceManagementService.verifyManagerPin(editPin)) {
-      setEditPinError("Invalid Manager PIN. Default is 1234.");
-      return;
-    }
-    setIsEditPinModalOpen(false);
-    setIsDetailModalOpen(false);
-    navigate(`/pos?edit=${selectedInvoice?.id}`);
-  };
-
-  const handlePromptCancel = () => {
+  const handleApproved = async (grant: InvoiceApprovalGrant, reason: string) => {
     if (!selectedInvoice) return;
-    const lock = invoiceManagementService.checkInvoiceLockStatus(selectedInvoice);
-    if (lock.isLocked) {
-      showNotification(lock.lockReason || "Invoice cannot be cancelled", "error");
-      return;
-    }
-    setCancelReason("");
-    setManagerPin("");
-    setPinError("");
-    setIsCancelModalOpen(true);
-  };
+    setIsApprovalModalOpen(false);
 
-  const handleConfirmCancel = async () => {
-    if (!cancelReason.trim()) {
-      setPinError("Mandatory cancellation reason required");
-      return;
-    }
-    if (!invoiceManagementService.verifyManagerPin(managerPin)) {
-      setPinError("Invalid Manager PIN. Default is 1234.");
+    if (approvalAction === "edit") {
+      setIsDetailModalOpen(false);
+      navigate(`/pos?edit=${selectedInvoice.id}`);
       return;
     }
 
+    const approval: InvoiceEditApproval = {
+      id: grant.id,
+      token: grant.token,
+      mode: grant.mode,
+      approvedByName: grant.approvedByName,
+    };
     try {
       await invoiceManagementService.cancelInvoice(
-        selectedInvoice!.id,
-        cancelReason.trim(),
-        "Manager (Counter 01)"
+        selectedInvoice.id,
+        reason,
+        grant.approvedByName || "Manager",
+        approval
       );
-      showNotification(`Invoice ${selectedInvoice?.invoice_number} cancelled. Stock restored.`);
-      setIsCancelModalOpen(false);
+      showNotification(`Invoice ${selectedInvoice.invoice_number} cancelled. Stock restored.`);
       setIsDetailModalOpen(false);
       loadInvoices();
     } catch (err) {
-      setPinError(err instanceof Error ? err.message : "Error cancelling bill");
+      showNotification(err instanceof Error ? err.message : "Error cancelling bill", "error");
     }
   };
 
@@ -980,7 +1151,10 @@ export const BillsPage: React.FC = () => {
       {/* Filters Toolbar */}
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-2 shadow-2xs">
         {/* Date Range Chips */}
-        <div className="flex items-center gap-1.5">
+        <div
+          className="flex items-center gap-1.5"
+          title={`Previous period (${shortcutLabel("periodPrev", "bills")}) / Next period (${shortcutLabel("periodNext", "bills")})`}
+        >
           <span className="text-[11px] font-bold text-[var(--color-text-muted)] uppercase tracking-wider mr-1">Period:</span>
           {(
             [
@@ -993,7 +1167,16 @@ export const BillsPage: React.FC = () => {
           ).map((chip) => (
             <button
               key={chip.id}
-              onClick={() => setDateRange(chip.id)}
+              onClick={() => {
+                setDateRange(chip.id);
+                const userId = staffAuthService.getCurrentSession()?.user?.id;
+                if (userId) {
+                  void userPreferencesService
+                    .set(userId, BILLS_PINNED_PERIOD_KEY, chip.id)
+                    .catch(() => undefined);
+                }
+              }}
+              title={`Show ${chip.label} (remembered as your default period)`}
               className={`rounded-[8px] px-2.5 py-1 text-xs font-semibold transition-colors cursor-pointer ${
                 dateRange === chip.id
                   ? "bg-[var(--color-accent)] text-white shadow-2xs"
@@ -1007,31 +1190,39 @@ export const BillsPage: React.FC = () => {
 
         {/* Mode & Status Filters */}
         <div className="flex items-center gap-3">
-          <div className="flex items-center gap-1.5 text-xs text-[var(--color-text-muted)]">
+          <div
+            className="flex items-center gap-1.5 text-xs text-[var(--color-text-muted)]"
+            title={`Cycle payment filter (${shortcutLabel("filterPayment", "bills")})`}
+          >
             <span className="text-[11px] font-bold uppercase tracking-wider">Payment:</span>
             <select
               value={paymentModeFilter}
               onChange={(e) => setPaymentModeFilter(e.target.value)}
               className="rounded-[8px] border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1 text-xs font-medium text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none"
             >
-              <option value="all">All Modes</option>
-              <option value="Cash">Cash</option>
-              <option value="UPI">UPI</option>
-              <option value="Card">Card</option>
-              <option value="Credit">Credit</option>
+              {BILLS_PAYMENT_MODES.map((mode) => (
+                <option key={mode} value={mode}>
+                  {mode === "all" ? "All Modes" : mode}
+                </option>
+              ))}
             </select>
           </div>
 
-          <div className="flex items-center gap-1.5 text-xs text-[var(--color-text-muted)]">
+          <div
+            className="flex items-center gap-1.5 text-xs text-[var(--color-text-muted)]"
+            title={`Cycle status filter (${shortcutLabel("filterStatus", "bills")})`}
+          >
             <span className="text-[11px] font-bold uppercase tracking-wider">Status:</span>
             <select
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value)}
               className="rounded-[8px] border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1 text-xs font-medium text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none"
             >
-              <option value="all">All Status</option>
-              <option value="issued">Issued</option>
-              <option value="cancelled">Cancelled</option>
+              {BILLS_STATUSES.map((status) => (
+                <option key={status} value={status}>
+                  {status === "all" ? "All Status" : status === "issued" ? "Issued" : "Cancelled"}
+                </option>
+              ))}
             </select>
           </div>
 
@@ -1066,64 +1257,76 @@ export const BillsPage: React.FC = () => {
       )}
 
       {/* Diagnostics & Store Identification Bar */}
-      <div className="flex flex-wrap items-center justify-between gap-2 rounded-[10px] border border-[var(--color-border)] bg-[var(--color-surface-subtle)] px-3 py-1.5 text-[11px] text-[var(--color-text-muted)] shadow-2xs">
-        <div className="flex flex-wrap items-center gap-2.5">
-          <span className="font-semibold text-[var(--color-text)] flex items-center gap-1.5">
-            <span>🏪 Store:</span>
-            <strong className="font-mono">{activeStore?.alias || activeStore?.name || "Store 01"}</strong>
-            <span className="text-[10px] px-1.5 py-0.2 rounded bg-[var(--color-surface)] border border-[var(--color-border)] text-[var(--color-text)] font-mono font-bold">
-              {activeStore?.code || `STORE-${String(activeStore?.id || "01").padStart(2, "0")}`}
-            </span>
-            <span className="text-[10px] font-mono text-[var(--color-text-muted)]">
-              (Store ID: {activeStore?.id || "1"})
-            </span>
-          </span>
-          <span>•</span>
-          <span>Counter: <strong className="font-mono text-[var(--color-text)]">{activeStore?.counter_code || "C01"}</strong></span>
-          <span>•</span>
-          <span className="flex items-center gap-1">
-            <span className={`w-2 h-2 rounded-full ${isOnline && !isOfflineCache ? "bg-emerald-500" : "bg-amber-500"}`} />
-            <strong className={isOnline && !isOfflineCache ? "text-emerald-700 dark:text-emerald-400" : "text-amber-700 dark:text-amber-400"}>
-              {isOnline && !isOfflineCache ? "Live Cloud Mode" : "Offline Cache Mode"}
-            </strong>
-          </span>
-          {lastSyncTime && (
-            <>
-              <span>•</span>
-              <span>Last Sync: <span className="font-mono">{lastSyncTime}</span></span>
-            </>
-          )}
-        </div>
+      {(() => {
+        const currentSession = staffAuthService.getCurrentSession();
+        const currentStoredId = (typeof window !== "undefined" ? window.localStorage?.getItem("lamsuite_active_store_id") : null) || currentSession?.user?.store_id || "4";
+        const displayStore = activeStore || storeRegistryService.getActiveStore() || storeRegistryService.getStores().find(s => String(s.id) === String(currentStoredId)) || null;
+        const displayStoreName = displayStore?.alias || displayStore?.name || `Store ${currentStoredId}`;
+        const displayStoreCode = displayStore?.code || `STORE-${String(currentStoredId).padStart(2, "0")}`;
+        const displayStoreId = displayStore?.id || currentStoredId;
+        const displayCounter = displayStore?.counter_code || currentSession?.counterCode || "C01";
 
-        <div className="flex items-center gap-2">
-          {serverTotalCount !== null && (
-            <span className="font-mono text-[11px]">
-              Showing <strong>{invoices.length}</strong> of <strong>{serverTotalCount}</strong> matching bills ({serverTotalStoreInvoices ?? serverTotalCount} in store)
-            </span>
-          )}
-          {serverTotalCount !== null && serverTotalCount !== invoices.length && !loading && (
-            <span className="text-[10px] font-bold text-amber-600 bg-amber-50 dark:bg-amber-950/40 px-1.5 py-0.5 rounded border border-amber-200 dark:border-amber-800">
-              Filtered / Paged View
-            </span>
-          )}
-          <button
-            onClick={() => loadInvoices(currentPage, true)}
-            title="Reload live from server"
-            className="flex items-center gap-1 px-2.5 py-1 rounded bg-[var(--color-surface)] hover:bg-[var(--color-surface-hover)] border border-[var(--color-border)] text-[11px] font-semibold text-[var(--color-text)] cursor-pointer transition-colors"
-          >
-            <RefreshCw className="h-3 w-3" />
-            <span>Reload</span>
-          </button>
-          <button
-            onClick={() => downloadStoreInvoiceHistory(12)}
-            title="Download full 12-month store invoice history for offline cache"
-            className="flex items-center gap-1 px-2.5 py-1 rounded bg-[var(--color-surface)] hover:bg-[var(--color-surface-hover)] border border-[var(--color-border)] text-[11px] font-semibold text-[var(--color-accent)] cursor-pointer transition-colors"
-          >
-            <Download className="h-3 w-3" />
-            <span>Sync History</span>
-          </button>
-        </div>
-      </div>
+        return (
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-[10px] border border-[var(--color-border)] bg-[var(--color-surface-subtle)] px-3 py-1.5 text-[11px] text-[var(--color-text-muted)] shadow-2xs">
+            <div className="flex flex-wrap items-center gap-2.5">
+              <span className="font-semibold text-[var(--color-text)] flex items-center gap-1.5">
+                <span>🏪 Store:</span>
+                <strong className="font-mono">{displayStoreName}</strong>
+                <span className="text-[10px] px-1.5 py-0.2 rounded bg-[var(--color-surface)] border border-[var(--color-border)] text-[var(--color-text)] font-mono font-bold">
+                  {displayStoreCode}
+                </span>
+                <span className="text-[10px] font-mono text-[var(--color-text-muted)]">
+                  (Store ID: {displayStoreId})
+                </span>
+              </span>
+              <span>•</span>
+              <span>Counter: <strong className="font-mono text-[var(--color-text)]">{displayCounter}</strong></span>
+              <span>•</span>
+              <span className="flex items-center gap-1">
+                <span className={`w-2 h-2 rounded-full ${isOnline && !isOfflineCache ? "bg-emerald-500" : "bg-amber-500"}`} />
+                <strong className={isOnline && !isOfflineCache ? "text-emerald-700 dark:text-emerald-400" : "text-amber-700 dark:text-amber-400"}>
+                  {isOnline && !isOfflineCache ? "Live Cloud Mode" : "Offline Cache Mode"}
+                </strong>
+              </span>
+              {lastSyncTime && (
+                <>
+                  <span>•</span>
+                  <span>Last Sync: <span className="font-mono">{lastSyncTime}</span></span>
+                </>
+              )}
+            </div>
+
+            <div className="flex items-center gap-2">
+              {serverTotalCount !== null && (
+                <span className="font-mono text-[11px]">
+                  Showing <strong>{invoices.length}</strong> of <strong>{serverTotalCount}</strong> matching bills ({serverTotalStoreInvoices ?? serverTotalCount} in store)
+                </span>
+              )}
+              {serverTotalCount !== null && serverTotalCount !== invoices.length && !loading && (
+                <span className="text-[10px] font-bold text-amber-600 bg-amber-50 dark:bg-amber-950/40 px-1.5 py-0.5 rounded border border-amber-200 dark:border-amber-800">
+                  Filtered / Paged View
+                </span>
+              )}
+              <button
+                onClick={() => loadInvoices(currentPage, true)}
+                title="Reload live from server"
+                className="flex items-center gap-1 px-2.5 py-1 rounded bg-[var(--color-surface)] hover:bg-[var(--color-surface-hover)] border border-[var(--color-border)] text-[11px] font-semibold text-[var(--color-text)] cursor-pointer transition-colors"
+              >
+                <RefreshCw className="h-3 w-3" />
+                <span>Reload</span>
+              </button>
+              <button
+                onClick={() => downloadStoreInvoiceHistory(12)}
+                title="Download full 12-month store invoice history for offline cache"
+                className="flex items-center gap-1 px-2.5 py-1 rounded bg-[var(--color-surface)] hover:bg-[var(--color-surface-hover)] border border-[var(--color-border)] text-[11px] font-semibold text-[var(--color-accent)] cursor-pointer transition-colors"
+              >
+                <Download className="h-3 w-3" />
+                <span>Sync History</span>
+              </button>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Invoices List Table */}
       <div className="flex-1 rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-2xs overflow-hidden flex flex-col">
@@ -1369,8 +1572,13 @@ export const BillsPage: React.FC = () => {
       )}
 
       {/* Invoice Detail Modal */}
-      {isDetailModalOpen && selectedInvoice && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 font-sans">
+      <ModalLayer
+        isOpen={isDetailModalOpen && Boolean(selectedInvoice)}
+        onClose={() => setIsDetailModalOpen(false)}
+        ariaLabel="Invoice details"
+        className="fixed inset-0 flex items-center justify-center bg-black/40 p-4 font-sans"
+      >
+        {selectedInvoice && (
           <div className="flex max-h-[90vh] w-full max-w-4xl flex-col rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-modal overflow-hidden">
             {/* Modal Header */}
             <div className="flex items-center justify-between border-b border-[var(--color-border)] bg-[var(--color-surface)] px-5 py-3">
@@ -1395,7 +1603,7 @@ export const BillsPage: React.FC = () => {
                     ) : null}
                   </h3>
                   <p className="text-[11px] text-[var(--color-text-muted)] font-mono">
-                    Billed on {selectedInvoice.invoice_date} • Counter: {selectedInvoice.user_counter || "Counter 01"}
+                    Billed on {formatDisplayDate(selectedInvoice)} • {selectedInvoice.user_counter || "Counter 01"}
                   </p>
                 </div>
               </div>
@@ -1458,7 +1666,7 @@ export const BillsPage: React.FC = () => {
                       <tr key={item.id || idx} className="hover:bg-[var(--color-surface-hover)]">
                         <td className="px-3 py-2 font-bold text-[var(--color-text)]">{item.product_name}</td>
                         <td className="px-3 py-2 font-mono text-[var(--color-text-muted)]">{item.batch_no}</td>
-                        <td className="px-3 py-2 font-mono text-[var(--color-text-muted)]">{item.expiry_date}</td>
+                        <td className="px-3 py-2 font-mono text-[var(--color-text-muted)]">{formatExpiryDisplay(item.expiry_date)}</td>
                         <td className="px-3 py-2 text-right font-mono font-semibold tabular-nums">
                           {item.qty} {item.loose_qty ? `+ ${item.loose_qty}L` : ""}
                         </td>
@@ -1478,7 +1686,9 @@ export const BillsPage: React.FC = () => {
                 <div className="w-64 space-y-1 rounded-[10px] border border-[var(--color-border)] bg-[var(--color-canvas)] p-3 text-xs">
                   <div className="flex justify-between text-[var(--color-text-muted)]">
                     <span>Taxable Subtotal:</span>
-                    <span className="font-mono tabular-nums text-[var(--color-text)]">₹ {selectedInvoice.subtotal.toFixed(2)}</span>
+                    <span className="font-mono tabular-nums text-[var(--color-text)]">
+                      ₹ {Number(selectedInvoice.taxable_subtotal ?? selectedInvoice.subtotal ?? 0).toFixed(2)}
+                    </span>
                   </div>
                   <div className="flex justify-between text-[var(--color-text-muted)]">
                     <span>GST Tax Total:</span>
@@ -1505,13 +1715,10 @@ export const BillsPage: React.FC = () => {
                 <div className="flex items-center justify-between mb-2">
                   <div className="flex items-center gap-1.5 font-bold text-[var(--color-text)] text-xs uppercase tracking-wider">
                     <CreditCard className="h-4 w-4 text-[var(--color-accent)]" />
-                    <span>Payment Tenders & Receipts ({selectedInvoice.payments?.length || 1})</span>
+                    <span>Payment Tenders & Receipts ({selectedInvoice.payments?.length || 0})</span>
                   </div>
                   {(() => {
-                    const totalPaid = (selectedInvoice.payments || []).reduce(
-                      (sum, p) => (p.status !== "refunded" ? sum + p.amount : sum),
-                      0
-                    );
+                    const totalPaid = sumCollectedTenders(selectedInvoice);
                     const balDue = Math.max(0, Math.round((selectedInvoice.grand_total - totalPaid + Number.EPSILON) * 100) / 100);
                     if (selectedInvoice.status !== "cancelled" && balDue > 0) {
                       return (
@@ -1586,15 +1793,28 @@ export const BillsPage: React.FC = () => {
                         <tr>
                           <td className="px-3 py-1.5 font-bold text-[var(--color-text)]">{selectedInvoice.payment_mode || "Cash"}</td>
                           <td className="px-3 py-1.5 text-right font-mono font-bold tabular-nums text-[var(--color-text)]">
-                            ₹ {Number(selectedInvoice.grand_total || 0).toFixed(2)}
+                            ₹ {(Number(selectedInvoice.paid_amount) || 0).toFixed(2)}
                           </td>
                           <td className="px-3 py-1.5 font-mono text-[var(--color-text-muted)]">—</td>
                           <td className="px-3 py-1.5">
-                            <span className="inline-block px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-emerald-100 text-emerald-800">
-                              received
-                            </span>
+                            {(() => {
+                              const status = selectedInvoice.payment_status || "paid";
+                              const style =
+                                status === "unpaid"
+                                  ? "bg-rose-100 text-rose-800"
+                                  : status === "partially_paid"
+                                  ? "bg-amber-100 text-amber-800"
+                                  : "bg-emerald-100 text-emerald-800";
+                              const label =
+                                status === "unpaid" ? "unpaid" : status === "partially_paid" ? "partial" : "received";
+                              return (
+                                <span className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${style}`}>
+                                  {label}
+                                </span>
+                              );
+                            })()}
                           </td>
-                          <td className="px-3 py-1.5 text-[var(--color-text-muted)]">—</td>
+                          <td className="px-3 py-1.5 text-[var(--color-text-muted)]">No tender records synced</td>
                         </tr>
                       )}
                     </tbody>
@@ -1679,14 +1899,14 @@ export const BillsPage: React.FC = () => {
                       <span>Return / Credit Note</span>
                     </button>
                     <button
-                      onClick={handlePromptEdit}
+                      onClick={() => openApprovalDialog("edit")}
                       className="flex items-center gap-1 rounded-[10px] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1.5 text-xs font-semibold text-[var(--color-text)] hover:bg-[var(--color-surface-hover)] cursor-pointer transition-colors"
                     >
                       <Edit className="h-3.5 w-3.5" />
                       <span>Edit Bill</span>
                     </button>
                     <button
-                      onClick={handlePromptCancel}
+                      onClick={() => openApprovalDialog("cancel")}
                       className="flex items-center gap-1 rounded-[10px] bg-[var(--color-danger-bg)] border border-[var(--color-danger-border)] px-3 py-1.5 text-xs font-semibold text-[var(--color-danger-text)] hover:bg-red-700 hover:text-white cursor-pointer transition-colors"
                     >
                       <XCircle className="h-3.5 w-3.5" />
@@ -1697,105 +1917,26 @@ export const BillsPage: React.FC = () => {
               </div>
             </div>
           </div>
-        </div>
-      )}
+        )}
+      </ModalLayer>
 
-      {/* Edit PIN Prompt Modal */}
-      {isEditPinModalOpen && (
-        <div className="fixed inset-0 z-60 flex items-center justify-center bg-black/40 p-4 font-sans">
-          <div className="w-full max-w-sm rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] p-5 shadow-modal">
-            <div className="flex items-center gap-2 text-[var(--color-warning-text)] mb-3">
-              <Lock className="h-5 w-5" />
-              <h3 className="font-bold text-[var(--color-text)] text-sm">Manager Authorization Required</h3>
-            </div>
-            <p className="text-xs text-[var(--color-text-muted)] mb-3">
-              Editing a saved invoice requires manager verification. Please enter Manager PIN.
-            </p>
-            <input
-              type="password"
-              value={editPin}
-              onChange={(e) => setEditPin(e.target.value)}
-              placeholder="Enter PIN (Default: 1234)"
-              autoFocus
-              className="w-full rounded-[10px] border border-[var(--color-border)] px-3 py-2 text-center text-sm font-mono tracking-widest text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none bg-[var(--color-surface)]"
-            />
-            {editPinError && <p className="mt-1.5 text-[11px] font-bold text-[var(--color-danger-text)]">{editPinError}</p>}
-            <div className="mt-4 flex justify-end gap-2">
-              <button
-                onClick={() => setIsEditPinModalOpen(false)}
-                className="rounded-[10px] border border-[var(--color-border)] px-3 py-1.5 text-xs font-medium text-[var(--color-text)] hover:bg-[var(--color-surface-hover)] cursor-pointer"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleConfirmEditPin}
-                className="rounded-[10px] bg-[var(--color-accent)] px-4 py-1.5 text-xs font-bold text-white hover:bg-[var(--color-accent-hover)] cursor-pointer transition-colors"
-              >
-                Authorize & Edit
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Cancel Invoice Modal */}
-      {isCancelModalOpen && (
-        <div className="fixed inset-0 z-60 flex items-center justify-center bg-black/40 p-4 font-sans">
-          <div className="w-full max-w-md rounded-[14px] border border-[var(--color-danger-border)] bg-[var(--color-surface)] p-5 shadow-modal space-y-4">
-            <div className="flex items-center gap-2 text-[var(--color-danger-text)]">
-              <AlertCircle className="h-5 w-5" />
-              <h3 className="font-bold text-[var(--color-text)] text-sm">Cancel Invoice {selectedInvoice?.invoice_number}</h3>
-            </div>
-            <p className="text-xs text-[var(--color-text-muted)]">
-              Cancelling will restore all items to batch inventory, update reports, and retain this invoice number marked as <strong>Cancelled</strong>.
-            </p>
-
-            <div>
-              <label className="text-xs font-bold text-[var(--color-text)]">Mandatory Cancellation Reason:</label>
-              <input
-                type="text"
-                value={cancelReason}
-                onChange={(e) => setCancelReason(e.target.value)}
-                placeholder="e.g., Customer returned items, Billing mistake..."
-                className="w-full rounded-[10px] border border-[var(--color-border)] p-2 text-xs text-[var(--color-text)] focus:border-[var(--color-danger-text)] focus:outline-none mt-1 bg-[var(--color-surface)]"
-                autoFocus
-              />
-            </div>
-
-            <div>
-              <label className="text-xs font-bold text-[var(--color-text)]">Manager PIN:</label>
-              <input
-                type="password"
-                value={managerPin}
-                onChange={(e) => setManagerPin(e.target.value)}
-                placeholder="Default: 1234"
-                className="w-full rounded-[10px] border border-[var(--color-border)] p-2 text-xs font-mono tracking-widest text-[var(--color-text)] focus:border-[var(--color-danger-text)] focus:outline-none mt-1 bg-[var(--color-surface)]"
-              />
-            </div>
-
-            {pinError && <p className="text-xs font-bold text-[var(--color-danger-text)]">{pinError}</p>}
-
-            <div className="flex justify-end gap-2 pt-2">
-              <button
-                onClick={() => setIsCancelModalOpen(false)}
-                className="rounded-[10px] border border-[var(--color-border)] px-3 py-1.5 text-xs font-medium text-[var(--color-text)] hover:bg-[var(--color-surface-hover)] cursor-pointer"
-              >
-                Keep Invoice
-              </button>
-              <button
-                onClick={handleConfirmCancel}
-                className="rounded-[10px] bg-[var(--color-danger-bg)] border border-[var(--color-danger-border)] px-4 py-1.5 text-xs font-bold text-[var(--color-danger-text)] hover:bg-red-700 hover:text-white cursor-pointer transition-colors"
-              >
-                Confirm Cancellation
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* Manager / one-time PIN approval for edit and cancellation */}
+      <InvoiceApprovalDialog
+        isOpen={isApprovalModalOpen}
+        action={approvalAction}
+        invoice={selectedInvoice}
+        onClose={() => setIsApprovalModalOpen(false)}
+        onApproved={handleApproved}
+      />
 
       {/* Receive Payment Modal */}
-      {isReceivePaymentModalOpen && selectedInvoice && (
-        <div className="fixed inset-0 z-60 flex items-center justify-center bg-black/50 p-4 font-sans animate-in fade-in duration-100">
+      <ModalLayer
+        isOpen={isReceivePaymentModalOpen && Boolean(selectedInvoice)}
+        onClose={() => setIsReceivePaymentModalOpen(false)}
+        ariaLabel="Receive payment"
+        className="fixed inset-0 flex items-center justify-center bg-black/50 p-4 font-sans animate-in fade-in duration-100"
+      >
+        {selectedInvoice && (
           <div className="w-full max-w-md rounded-[14px] bg-[var(--color-surface)] shadow-modal overflow-hidden border border-[var(--color-border)]">
             <div className="flex items-center justify-between border-b border-[var(--color-border)] px-5 py-3.5 bg-[var(--color-canvas)]">
               <div>
@@ -1894,8 +2035,8 @@ export const BillsPage: React.FC = () => {
               </button>
             </div>
           </div>
-        </div>
-      )}
+        )}
+      </ModalLayer>
 
       {/* Print Preview Modal */}
       {previewModalState.isOpen && previewModalState.data && (

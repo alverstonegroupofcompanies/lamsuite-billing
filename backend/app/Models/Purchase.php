@@ -27,6 +27,9 @@ class Purchase extends Model
         'is_interstate',
         'is_rcm',
         'itc_eligibility',
+        'freight_charges',
+        'bill_discount_type',
+        'bill_discount',
         'round_off',
         'grand_total',
         'paid_amount',
@@ -36,7 +39,7 @@ class Purchase extends Model
     ];
 
     protected $casts = [
-        'invoice_date' => 'date',
+        'invoice_date' => 'date:Y-m-d',
         'subtotal' => 'decimal:2',
         'tax_total' => 'decimal:2',
         'cgst_total' => 'decimal:2',
@@ -45,6 +48,8 @@ class Purchase extends Model
         'cess_total' => 'decimal:2',
         'is_interstate' => 'boolean',
         'is_rcm' => 'boolean',
+        'freight_charges' => 'decimal:2',
+        'bill_discount' => 'decimal:2',
         'round_off' => 'decimal:2',
         'grand_total' => 'decimal:2',
         'paid_amount' => 'decimal:2',

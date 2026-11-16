@@ -19,8 +19,9 @@ import {
   Download,
   Scale,
   RefreshCw,
+  PowerOff,
 } from "lucide-react";
-import { productsStore, type ProductItem, type ProductBatch } from "../lib/masters/productsStore";
+import { productsStore, formatExpiryDisplay, isBatchExpired, type ProductItem, type ProductBatch } from "../lib/masters/productsStore";
 import { useModalEscape } from "../lib/ui/modalEscapeManager";
 import {
   partiesStore,
@@ -39,6 +40,16 @@ import { sqliteStorage } from "../lib/db/sqliteStorage";
 import { ImportWizardModal } from "../lib/data-exchange/ui/ImportWizardModal";
 import { ExportDialogModal } from "../lib/data-exchange/ui/ExportDialogModal";
 import { UnitAutocompleteInput } from "../components/UnitAutocompleteInput";
+
+const BATCH_EXPIRY_PATTERN = /^\d{4}-(0[1-9]|1[0-2])(-\d{2})?$/;
+
+const isBatchExpiringSoon = (expiryDate: string, months = 6): boolean => {
+  if (!expiryDate || isBatchExpired(expiryDate)) return false;
+  const boundary = new Date();
+  boundary.setMonth(boundary.getMonth() + months);
+  const cutoff = `${boundary.getFullYear()}-${String(boundary.getMonth() + 1).padStart(2, "0")}`;
+  return expiryDate.slice(0, 7).localeCompare(cutoff) <= 0;
+};
 
 export const MastersPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState<"products" | "batches" | "parties" | "discounts" | "units">("products");
@@ -224,7 +235,7 @@ export const MastersPage: React.FC = () => {
   // Save Product
   const handleSaveProduct = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!prodForm.name || !prodForm.barcode) {
+    if (!prodForm.name?.trim() || !prodForm.barcode?.trim()) {
       showNotification("Product name and Barcode are required", "error");
       return;
     }
@@ -310,8 +321,12 @@ export const MastersPage: React.FC = () => {
   // Save Batch
   const handleSaveBatch = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!batchForm.product_id || !batchForm.batch_no || !batchForm.expiry_date) {
+    if (!batchForm.product_id || !batchForm.batch_no?.trim() || !batchForm.expiry_date?.trim()) {
       showNotification("Product, Batch Number, and Expiry Date (YYYY-MM) are required", "error");
+      return;
+    }
+    if (!BATCH_EXPIRY_PATTERN.test(batchForm.expiry_date.trim())) {
+      showNotification("Expiry Date must be YYYY-MM or YYYY-MM-DD (e.g. 2027-12)", "error");
       return;
     }
 
@@ -319,7 +334,7 @@ export const MastersPage: React.FC = () => {
       id: editingBatch ? editingBatch.id : `batch_${Date.now()}_${Math.random().toString(16).slice(2, 6)}`,
       product_id: batchForm.product_id,
       batch_no: batchForm.batch_no.trim().toUpperCase(),
-      expiry_date: batchForm.expiry_date,
+      expiry_date: batchForm.expiry_date.trim(),
       stock_qty: Number(batchForm.stock_qty) || 0,
       mrp: Number(batchForm.mrp) || 0,
       purchase_rate: Number(batchForm.purchase_rate) || 0,
@@ -385,8 +400,9 @@ export const MastersPage: React.FC = () => {
       return;
     }
 
+    const isEditing = Boolean(discForm.rule_id);
     const rule: DiscountRule = {
-      rule_id: `disc_${Date.now()}`,
+      rule_id: discForm.rule_id || `disc_${Date.now()}`,
       name: discForm.name,
       rule_type: discForm.rule_type as "percentage" | "buy_x_get_y" | "customer_type",
       discount_percent: Number(discForm.discount_percent) || 0,
@@ -396,9 +412,27 @@ export const MastersPage: React.FC = () => {
     };
 
     await discountSchemaEngine.registerRule(rule);
-    showNotification(`Discount schema "${rule.name}" added`);
+    showNotification(`Discount schema "${rule.name}" ${isEditing ? "updated" : "added"}`);
     setIsDiscountModalOpen(false);
     loadData();
+  };
+
+  const handleToggleDiscountRule = async (rule: DiscountRule) => {
+    await discountSchemaEngine.registerRule({ ...rule, is_active: !rule.is_active });
+    showNotification(`Discount schema "${rule.name}" ${rule.is_active ? "disabled" : "enabled"}`);
+    loadData();
+  };
+
+  const handleDeleteDiscountRule = async (rule: DiscountRule) => {
+    if (confirm(`Are you sure you want to delete discount schema "${rule.name}"?`)) {
+      try {
+        await discountSchemaEngine.deleteRule(rule.rule_id);
+        showNotification(`Discount schema "${rule.name}" deleted successfully`);
+        await loadData();
+      } catch {
+        showNotification("Failed to delete discount schema", "error");
+      }
+    }
   };
 
   return (
@@ -406,7 +440,7 @@ export const MastersPage: React.FC = () => {
       {/* Toast Alert */}
       {notification && (
         <div
-          className={`fixed right-6 top-16 z-50 flex items-center gap-2 rounded-lg border px-4 py-2.5 shadow-lg text-sm transition-all ${
+          className={`fixed right-6 top-16 z-[100] flex items-center gap-2 rounded-lg border px-4 py-2.5 shadow-lg text-sm transition-all ${
             notification.type === "success"
               ? "border-emerald-200 bg-emerald-50 text-emerald-800"
               : "border-red-200 bg-red-50 text-red-800"
@@ -849,7 +883,9 @@ export const MastersPage: React.FC = () => {
               ) : (
                 filteredBatches.map((b) => {
                   const product = products.find((p) => p.id === b.product_id);
-                  const isExpiringSoon = b.expiry_date.localeCompare("2026-12") <= 0;
+                  const expired = isBatchExpired(b.expiry_date);
+                  const expiringSoon = !expired && isBatchExpiringSoon(b.expiry_date);
+                  const negativeStock = Number(b.stock_qty) < 0;
                   return (
                     <tr key={b.id} className="hover:bg-canvas/50 transition-colors">
                       <td className="px-4 py-2.5 font-medium text-text-main">
@@ -858,14 +894,27 @@ export const MastersPage: React.FC = () => {
                       <td className="px-4 py-2.5 font-mono font-bold text-text-main">{b.batch_no}</td>
                       <td className="px-4 py-2.5 font-mono tabular-nums">
                         <span
+                          title={b.expiry_date}
                           className={`inline-block rounded-full px-2 py-0.5 text-[10px] font-semibold ${
-                            isExpiringSoon ? "bg-amber-100 text-amber-800" : "bg-canvas text-text-muted"
+                            expired
+                              ? "bg-rose-100 text-rose-800"
+                              : expiringSoon
+                              ? "bg-amber-100 text-amber-800"
+                              : "bg-canvas text-text-muted"
                           }`}
                         >
-                          {b.expiry_date}
+                          {formatExpiryDisplay(b.expiry_date)}
+                          {expired ? " · expired" : ""}
                         </span>
                       </td>
-                      <td className="px-4 py-2.5 text-right font-mono tabular-nums font-bold text-text-main">{b.stock_qty}</td>
+                      <td
+                        className={`px-4 py-2.5 text-right font-mono tabular-nums font-bold ${
+                          negativeStock ? "text-rose-600" : "text-text-main"
+                        }`}
+                      >
+                        {b.stock_qty}
+                        {negativeStock ? " ↓" : ""}
+                      </td>
                       <td className="px-4 py-2.5 text-right font-mono tabular-nums text-text-muted">
                         {b.purchase_rate ? `₹${b.purchase_rate.toFixed(2)}` : "—"}
                       </td>
@@ -976,12 +1025,13 @@ export const MastersPage: React.FC = () => {
                 <th className="px-4 py-3 text-right">Min Qty</th>
                 <th className="px-4 py-3 text-right">Free Qty</th>
                 <th className="px-4 py-3 text-center">Status</th>
+                <th className="px-4 py-3 text-center">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border-main/50 font-sans">
               {discountRules.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="py-8 text-center text-text-muted">
+                  <td colSpan={7} className="py-8 text-center text-text-muted">
                     No discount schemas active. Click "Add Schema" to configure automated discounts.
                   </td>
                 </tr>
@@ -994,9 +1044,43 @@ export const MastersPage: React.FC = () => {
                     <td className="px-4 py-2.5 text-right font-mono tabular-nums text-text-muted">{rule.min_quantity || "1"}</td>
                     <td className="px-4 py-2.5 text-right font-mono tabular-nums text-text-muted">{rule.free_quantity || "—"}</td>
                     <td className="px-4 py-2.5 text-center">
-                      <span className="inline-flex rounded-full bg-accent-soft px-2 py-0.5 text-[10px] font-semibold text-accent">
+                      <span
+                        className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                          rule.is_active ? "bg-accent-soft text-accent" : "bg-canvas text-text-muted"
+                        }`}
+                      >
                         {rule.is_active ? "Active" : "Disabled"}
                       </span>
+                    </td>
+                    <td className="px-4 py-2.5 text-center">
+                      <div className="flex items-center justify-center gap-1.5">
+                        <button
+                          onClick={() => {
+                            setDiscForm({ ...rule });
+                            setIsDiscountModalOpen(true);
+                          }}
+                          className="rounded-btn p-1 text-text-muted hover:bg-canvas hover:text-accent cursor-pointer transition-colors"
+                          title="Edit Rule"
+                        >
+                          <Edit2 className="h-3.5 w-3.5" />
+                        </button>
+                        <button
+                          onClick={() => handleToggleDiscountRule(rule)}
+                          className={`rounded-btn p-1 text-text-muted hover:bg-canvas cursor-pointer transition-colors ${
+                            rule.is_active ? "hover:text-amber-600" : "hover:text-accent"
+                          }`}
+                          title={rule.is_active ? "Disable Rule" : "Enable Rule"}
+                        >
+                          <PowerOff className="h-3.5 w-3.5" />
+                        </button>
+                        <button
+                          onClick={() => handleDeleteDiscountRule(rule)}
+                          className="rounded-btn p-1 text-text-muted hover:bg-canvas hover:text-red-500 cursor-pointer transition-colors"
+                          title="Delete Rule"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))
@@ -1559,7 +1643,9 @@ export const MastersPage: React.FC = () => {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
           <div className="w-full max-w-md rounded-card bg-surface p-6 shadow-2xl border border-border-main">
             <div className="flex items-center justify-between border-b border-border-main pb-3">
-              <h2 className="text-base font-bold text-text-main">Add Discount Schema</h2>
+              <h2 className="text-base font-bold text-text-main">
+                {discForm.rule_id ? "Edit Discount Schema" : "Add Discount Schema"}
+              </h2>
               <button
                 onClick={() => setIsDiscountModalOpen(false)}
                 className="text-text-muted hover:text-text-main transition-colors"

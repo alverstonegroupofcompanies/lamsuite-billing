@@ -9,6 +9,7 @@ import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
 import { isClinicalSupported } from "../settings/storeTypePresets";
 import { companySettingsService } from "../settings/companySettingsService";
+import { formatExpiryDisplay } from "../masters/productsStore";
 import * as QRCodeModule from "qrcode";
 import { ROBOTO_REGULAR_BASE64, ROBOTO_BOLD_BASE64 } from "./embeddedFonts";
 import { dotMatrixRenderer, DotMatrixOptions } from "./dotMatrixRenderer";
@@ -351,7 +352,7 @@ export function formatColumnCellHtml(colId: string, item: any, itemNumber: numbe
       content = item.batch_no || "-";
       break;
     case "expiry":
-      content = item.expiry_date || "-";
+      content = formatExpiryDisplay(item.expiry_date);
       break;
     case "qty":
       content = `${item.qty}${item.loose_qty ? ` + ${item.loose_qty}L` : ""}`;
@@ -468,6 +469,197 @@ export function generateEmailShareUrl(email: string, data: InvoicePrintData): st
  * Single page invoices (<= maxSingle) fit compactly on 1 page.
  * Multi-page invoices are cleanly balanced across pages.
  */
+export interface DocumentPageChunk<T> {
+  pageNumber: number;
+  items: T[];
+  startIndex: number;
+  endIndex: number;
+}
+
+export interface DocumentPagePlan<T> {
+  chunks: DocumentPageChunk<T>[];
+  totalPages: number;
+  hasSeparateSummaryPage: boolean;
+}
+
+/**
+ * Calculates exact line item distribution across A4 pages by executing jsPDF autoTable layout simulation.
+ * This guarantees 100% exact parity between the preview modal, physical printouts, and downloaded vector PDFs.
+ */
+export function calculateInvoicePageChunks(
+  data: InvoicePrintData,
+  options?: PrintRenderOptions
+): DocumentPagePlan<InvoicePrintData["lines"][0]> {
+  const lines = data.lines || [];
+  if (lines.length === 0) {
+    return {
+      chunks: [{ pageNumber: 1, items: [], startIndex: 0, endIndex: 0 }],
+      totalPages: 1,
+      hasSeparateSummaryPage: false,
+    };
+  }
+
+  const activeStoreType = data.store_type || companySettingsService.getSettings()?.store_type;
+  const isPharmacy = isClinicalSupported(activeStoreType);
+  const activeColumns = resolvePrintColumns(options, isPharmacy);
+
+  try {
+    const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+    doc.addFileToVFS("Roboto-Regular.ttf", ROBOTO_REGULAR_BASE64);
+    doc.addFont("Roboto-Regular.ttf", "Roboto", "normal");
+    doc.addFileToVFS("Roboto-Bold.ttf", ROBOTO_BOLD_BASE64);
+    doc.addFont("Roboto-Bold.ttf", "Roboto", "bold");
+    doc.setFont("Roboto", "normal");
+    const marginX = 12;
+
+    const tableRows = lines.map((l, i) => {
+      return activeColumns.map((col) => {
+        switch (col.id) {
+          case "sl_no":
+            return String(i + 1);
+          case "description":
+            return l.description || (l as any).item_name || "";
+          case "hsn":
+            return l.hsn_code || (l as any).hsn || "-";
+          case "batch":
+            return l.batch_no || "-";
+          case "expiry":
+            return formatExpiryDisplay(l.expiry_date);
+          case "qty":
+            return `${l.qty}${l.loose_qty ? ` + ${l.loose_qty}L` : ""}`;
+          case "mrp":
+            return `₹ ${((l as any).mrp || 0).toFixed(2)}`;
+          case "rate":
+            return `₹ ${(l.rate || 0).toFixed(2)}`;
+          case "discount":
+            return (l as any).discount_percent ? `${(l as any).discount_percent}%` : "-";
+          case "gst":
+            return `${l.gst_percent || 0}%`;
+          case "amount":
+          case "total":
+            return `₹ ${(l.amount || 0).toFixed(2)}`;
+          default:
+            return String((l as any)[col.id] || "-");
+        }
+      });
+    });
+
+    const colAlignments: Record<number, "left" | "center" | "right"> = {};
+    activeColumns.forEach((c, idx) => {
+      colAlignments[idx] = c.id === "description" ? "left" : (["qty", "rate", "mrp", "discount", "gst", "amount", "total"].includes(c.id) ? "right" : "center");
+    });
+
+    const pageMap = new Map<number, number>();
+
+    autoTable(doc, {
+      startY: 53.5,
+      margin: { left: marginX, right: marginX, bottom: 22 },
+      head: [activeColumns.map((c) => c.label)],
+      body: tableRows,
+      theme: "grid",
+      showHead: "everyPage",
+      styles: {
+        font: "Roboto",
+        fontSize: 7.5,
+        textColor: [30, 41, 59],
+        cellPadding: 1.8,
+      },
+      headStyles: {
+        font: "Roboto",
+        fontStyle: "bold",
+        fillColor: [241, 245, 249],
+        textColor: [15, 23, 42],
+        fontSize: 7.5,
+      },
+      alternateRowStyles: {
+        fillColor: [255, 255, 255],
+      },
+      columnStyles: {
+        0: { cellWidth: 8 },
+        1: { cellWidth: 54, fontStyle: "bold" },
+        2: { cellWidth: 18 },
+        3: { cellWidth: 20 },
+        4: { cellWidth: 16 },
+        5: { cellWidth: 14 },
+        6: { cellWidth: 18 },
+        7: { cellWidth: 14 },
+        8: { cellWidth: 24, fontStyle: "bold" },
+      },
+      didDrawCell: (hookData) => {
+        if (hookData.section === "body" && hookData.column.index === 0 && hookData.row.raw) {
+          const page = (doc.internal as any).getCurrentPageInfo().pageNumber;
+          const rowIndex = hookData.row.index;
+          if (rowIndex >= 0 && !pageMap.has(rowIndex)) {
+            pageMap.set(rowIndex, page);
+          }
+        }
+      },
+      didParseCell: (hookData) => {
+        hookData.cell.styles.halign = colAlignments[hookData.column.index] || "left";
+      },
+    });
+
+    const pageIndices: Record<number, number[]> = {};
+    for (let i = 0; i < lines.length; i++) {
+      const page = pageMap.get(i) || 1;
+      if (!pageIndices[page]) pageIndices[page] = [];
+      pageIndices[page].push(i);
+    }
+
+    const chunks: DocumentPageChunk<InvoicePrintData["lines"][0]>[] = [];
+    const sortedPages = Object.keys(pageIndices).map(Number).sort((a, b) => a - b);
+    for (const pageNum of sortedPages) {
+      const indices = pageIndices[pageNum];
+      const items = indices.map((idx) => lines[idx]);
+      chunks.push({
+        pageNumber: pageNum,
+        items,
+        startIndex: indices[0],
+        endIndex: indices[indices.length - 1] + 1,
+      });
+    }
+
+    const lastTableY = (doc as any).lastAutoTable?.finalY ? (doc as any).lastAutoTable.finalY + 4 : 120;
+    const docTotalPages = doc.getNumberOfPages();
+    const lastChunkPage = chunks.length > 0 ? chunks[chunks.length - 1].pageNumber : 1;
+
+    let hasSeparateSummaryPage = false;
+    let totalPages = docTotalPages;
+
+    if (docTotalPages > lastChunkPage) {
+      hasSeparateSummaryPage = true;
+      totalPages = docTotalPages;
+    } else if (lastTableY + 65 > 280) {
+      hasSeparateSummaryPage = true;
+      totalPages = docTotalPages + 1;
+    } else {
+      hasSeparateSummaryPage = false;
+      totalPages = docTotalPages;
+    }
+
+    return { chunks, totalPages, hasSeparateSummaryPage };
+  } catch (err) {
+    console.warn("calculateInvoicePageChunks fallback to chunkInvoiceLines:", err);
+    const legacyChunks = chunkInvoiceLines(lines, 14, 16, 24, 14);
+    let start = 0;
+    const chunks: DocumentPageChunk<InvoicePrintData["lines"][0]>[] = legacyChunks.map((items, i) => {
+      const s = start;
+      start += items.length;
+      return {
+        pageNumber: i + 1,
+        items,
+        startIndex: s,
+        endIndex: start,
+      };
+    });
+    return {
+      chunks,
+      totalPages: chunks.length,
+      hasSeparateSummaryPage: false,
+    };
+  }
+}
+
 export function chunkInvoiceLines<T>(
   lines: T[],
   maxSingle: number = 14,
@@ -717,20 +909,150 @@ export class PrintingEngine {
       .join("");
 
     const activeColumns = resolvePrintColumns(options, isPharmacy);
-    const pageChunks = chunkInvoiceLines(data.lines, 14, 16, 24, 14);
-    const totalPages = pageChunks.length;
+    const pagePlan = calculateInvoicePageChunks(data, options);
+    const { chunks, totalPages, hasSeparateSummaryPage } = pagePlan;
 
-    let cumulativeIdx = 0;
-    const pagesHtml = pageChunks
+    const summarySectionHtml = `
+        ${
+          showHsn
+            ? `
+        <!-- HSN / GST Tax Summary -->
+        <div style="margin-top: 10px; margin-bottom: 10px;">
+          <div style="font-weight: 700; font-size: 9px; color: #475569; text-transform: uppercase; margin-bottom: 3px;">HSN / GST Tax Summary</div>
+          <table class="data-table" style="margin-bottom: 0;">
+            <thead>
+              <tr>
+                <th style="text-align: center; border-right: 1px solid #cbd5e1;">HSN/SAC</th>
+                <th style="text-align: right; border-right: 1px solid #cbd5e1;">Taxable Value (₹)</th>
+                ${isInterState ? `
+                <th style="text-align: right; border-right: 1px solid #cbd5e1;">IGST %</th>
+                <th style="text-align: right; border-right: 1px solid #cbd5e1;">IGST (₹)</th>
+                ` : `
+                <th style="text-align: right; border-right: 1px solid #cbd5e1;">CGST %</th>
+                <th style="text-align: right; border-right: 1px solid #cbd5e1;">CGST (₹)</th>
+                <th style="text-align: right; border-right: 1px solid #cbd5e1;">SGST %</th>
+                <th style="text-align: right; border-right: 1px solid #cbd5e1;">SGST (₹)</th>
+                `}
+                ${cessTotal > 0 ? `<th style="text-align: right; border-right: 1px solid #cbd5e1;">Cess (₹)</th>` : ""}
+                <th style="text-align: right;">Total Tax (₹)</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${hsnRowsHtml}
+              <tr style="background: #f1f5f9; font-weight: 700;">
+                <td style="padding: 4px 6px; text-align: center; border-top: 1px solid #94a3b8; border-right: 1px solid #cbd5e1;">Total</td>
+                <td style="padding: 4px 6px; text-align: right; border-top: 1px solid #94a3b8; border-right: 1px solid #cbd5e1; font-variant-numeric: tabular-nums;">₹ ${totalHsnTaxable.toFixed(2)}</td>
+                ${isInterState ? `
+                <td style="padding: 4px 6px; border-top: 1px solid #94a3b8; border-right: 1px solid #cbd5e1;"></td>
+                <td style="padding: 4px 6px; text-align: right; border-top: 1px solid #94a3b8; border-right: 1px solid #cbd5e1; font-variant-numeric: tabular-nums;">₹ ${totalHsnIgst.toFixed(2)}</td>
+                ` : `
+                <td style="padding: 4px 6px; border-top: 1px solid #94a3b8; border-right: 1px solid #cbd5e1;"></td>
+                <td style="padding: 4px 6px; text-align: right; border-top: 1px solid #94a3b8; border-right: 1px solid #cbd5e1; font-variant-numeric: tabular-nums;">₹ ${totalHsnCgst.toFixed(2)}</td>
+                <td style="padding: 4px 6px; border-top: 1px solid #94a3b8; border-right: 1px solid #cbd5e1;"></td>
+                <td style="padding: 4px 6px; text-align: right; border-top: 1px solid #94a3b8; border-right: 1px solid #cbd5e1; font-variant-numeric: tabular-nums;">₹ ${totalHsnSgst.toFixed(2)}</td>
+                `}
+                ${cessTotal > 0 ? `<td style="padding: 4px 6px; text-align: right; border-top: 1px solid #94a3b8; border-right: 1px solid #cbd5e1;">Cess (₹)</td>` : ""}
+                <td style="padding: 4px 6px; text-align: right; border-top: 1px solid #94a3b8; font-variant-numeric: tabular-nums;">₹ ${totalHsnTax.toFixed(2)}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>`
+            : ""
+        }
+
+        <div class="footer-container">
+          <div class="amount-words-bar">
+            <span style="color: #64748b; font-weight: 600;">Amount in Words:</span> ${amountWords}
+          </div>
+
+          <div class="footer-grid">
+            <!-- Top-Left: UPI QR -->
+            <div class="footer-cell">
+              <div class="qr-box">
+                ${showQr ? qrSvg : ""}
+                <div style="font-size: 9.5px; color: #334155;">
+                  <div style="font-weight: 800; color: #0f172a; margin-bottom: 2px;">Scan & Pay via UPI</div>
+                  <div style="margin-bottom: 1px;">UPI ID: <strong>${upiVpa}</strong></div>
+                  <div style="margin-bottom: 2px;">Amount: <strong>₹ ${data.grand_total.toFixed(2)}</strong></div>
+                  <div style="font-size: 8.5px; color: #64748b;">Supports GPay, PhonePe, Paytm & UPI Apps</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Top-Right: Totals -->
+            <div class="footer-cell">
+              <div class="totals-card">
+                <div class="total-line"><span>Taxable Subtotal:</span><span style="font-weight: 600;">₹ ${data.subtotal.toFixed(2)}</span></div>
+                ${isInterState ? `
+                <div class="total-line"><span>Integrated GST (IGST):</span><span style="font-weight: 600;">₹ ${igstTotal.toFixed(2)}</span></div>
+                ` : `
+                <div class="total-line"><span>Central GST (CGST):</span><span style="font-weight: 600;">₹ ${cgstTotal.toFixed(2)}</span></div>
+                <div class="total-line"><span>State GST (SGST):</span><span style="font-weight: 600;">₹ ${sgstTotal.toFixed(2)}</span></div>
+                `}
+                ${cessTotal > 0 ? `<div class="total-line"><span>Cess:</span><span style="font-weight: 600;">₹ ${cessTotal.toFixed(2)}</span></div>` : ""}
+                <div class="total-line"><span>Total Tax:</span><span style="font-weight: 600;">₹ ${data.tax_total.toFixed(2)}</span></div>
+                ${data.round_off ? `<div class="total-line"><span>Round Off:</span><span style="font-weight: 600;">${data.round_off > 0 ? "+" : ""}₹ ${data.round_off.toFixed(2)}</span></div>` : ""}
+                <div class="grand-total-line"><span>Grand Total:</span><span>₹ ${data.grand_total.toFixed(2)}</span></div>
+                ${data.payments && data.payments.length > 0 ? `
+                <div style="border-top: 1px dashed #cbd5e1; margin-top: 5px; padding-top: 4px; font-size: 8.5px;">
+                  ${data.payments.map((p) => `
+                    <div style="display: flex; justify-content: space-between; color: #475569; margin-bottom: 1.5px;">
+                      <span>Paid via ${p.mode}${p.reference_no ? ` [${p.reference_no}]` : ""}:</span>
+                      <span style="font-weight: 600;">₹ ${Number(p.amount).toFixed(2)}</span>
+                    </div>
+                  `).join("")}
+                  ${data.change_due && data.change_due > 0 ? `
+                    <div style="display: flex; justify-content: space-between; color: #047857; font-weight: 600;">
+                      <span>Change Returned:</span>
+                      <span>₹ ${Number(data.change_due).toFixed(2)}</span>
+                    </div>
+                  ` : ""}
+                  ${data.balance_due && data.balance_due > 0 ? `
+                    <div style="display: flex; justify-content: space-between; color: #b45309; font-weight: 700;">
+                      <span>Balance Due (Credit):</span>
+                      <span>₹ ${Number(data.balance_due).toFixed(2)}</span>
+                    </div>
+                  ` : ""}
+                </div>
+                ` : ""}
+              </div>
+            </div>
+
+            <!-- Bottom-Left: Terms -->
+            <div class="footer-cell">
+              <div class="terms-card">
+                <div>
+                  <div class="terms-title">Terms & Conditions:</div>
+                  <div>1. Goods once sold will not be returned without original cash memo.</div>
+                  <div>2. Refrigerated medicines are strictly non-returnable.</div>
+                  <div>3. ${data.jurisdiction_note || "Subject to local jurisdiction."}</div>
+                </div>
+                <div class="terms-brand">${data.footer_note || "Computer Generated Tax Invoice • LamSuite POS"}</div>
+              </div>
+            </div>
+
+            <!-- Bottom-Right: Signature -->
+            <div class="footer-cell">
+              <div class="sign-card">
+                <div class="sign-store">For ${data.store_name}</div>
+                <div class="sign-space"></div>
+                <div class="sign-line">Authorised Signatory / Pharmacist</div>
+              </div>
+            </div>
+          </div>
+        </div>
+    `;
+
+    const pagesHtml = chunks
       .map((chunk, pageIdx) => {
-        const pageNum = pageIdx + 1;
+        const pageNum = chunk.pageNumber;
         const isFirstPage = pageNum === 1;
-        const isLastPage = pageNum === totalPages;
-        const startIdx = cumulativeIdx;
-        cumulativeIdx += chunk.length;
-        const endIdx = cumulativeIdx;
+        const isLastTablePage = pageIdx === chunks.length - 1;
+        const isLastPage = isLastTablePage && !hasSeparateSummaryPage;
+        const startIdx = chunk.startIndex;
+        const endIdx = chunk.endIndex;
 
-        const itemsRowsHtml = chunk
+        const itemsRowsHtml = chunk.items
           .map((l, i) => {
             const itemNumber = startIdx + i + 1;
             return `
@@ -825,140 +1147,7 @@ export class PrintingEngine {
             : ""
         }
 
-        ${
-          isLastPage
-            ? `
-        ${
-          showHsn
-            ? `
-        <!-- HSN / GST Tax Summary -->
-        <div style="margin-top: 10px; margin-bottom: 10px;">
-          <div style="font-weight: 700; font-size: 9px; color: #475569; text-transform: uppercase; margin-bottom: 3px;">HSN / GST Tax Summary</div>
-          <table class="data-table" style="margin-bottom: 0;">
-            <thead>
-              <tr>
-                <th style="text-align: center; border-right: 1px solid #cbd5e1;">HSN/SAC</th>
-                <th style="text-align: right; border-right: 1px solid #cbd5e1;">Taxable Value (₹)</th>
-                ${isInterState ? `
-                <th style="text-align: right; border-right: 1px solid #cbd5e1;">IGST %</th>
-                <th style="text-align: right; border-right: 1px solid #cbd5e1;">IGST (₹)</th>
-                ` : `
-                <th style="text-align: right; border-right: 1px solid #cbd5e1;">CGST %</th>
-                <th style="text-align: right; border-right: 1px solid #cbd5e1;">CGST (₹)</th>
-                <th style="text-align: right; border-right: 1px solid #cbd5e1;">SGST %</th>
-                <th style="text-align: right; border-right: 1px solid #cbd5e1;">SGST (₹)</th>
-                `}
-                ${cessTotal > 0 ? `<th style="text-align: right; border-right: 1px solid #cbd5e1;">Cess (₹)</th>` : ""}
-                <th style="text-align: right;">Total Tax (₹)</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${hsnRowsHtml}
-              <tr style="background: #f1f5f9; font-weight: 700;">
-                <td style="padding: 4px 6px; text-align: center; border-top: 1px solid #94a3b8; border-right: 1px solid #cbd5e1;">Total</td>
-                <td style="padding: 4px 6px; text-align: right; border-top: 1px solid #94a3b8; border-right: 1px solid #cbd5e1; font-variant-numeric: tabular-nums;">₹ ${totalHsnTaxable.toFixed(2)}</td>
-                ${isInterState ? `
-                <td style="padding: 4px 6px; border-top: 1px solid #94a3b8; border-right: 1px solid #cbd5e1;"></td>
-                <td style="padding: 4px 6px; text-align: right; border-top: 1px solid #94a3b8; border-right: 1px solid #cbd5e1; font-variant-numeric: tabular-nums;">₹ ${totalHsnIgst.toFixed(2)}</td>
-                ` : `
-                <td style="padding: 4px 6px; border-top: 1px solid #94a3b8; border-right: 1px solid #cbd5e1;"></td>
-                <td style="padding: 4px 6px; text-align: right; border-top: 1px solid #94a3b8; border-right: 1px solid #cbd5e1; font-variant-numeric: tabular-nums;">₹ ${totalHsnCgst.toFixed(2)}</td>
-                <td style="padding: 4px 6px; border-top: 1px solid #94a3b8; border-right: 1px solid #cbd5e1;"></td>
-                <td style="padding: 4px 6px; text-align: right; border-top: 1px solid #94a3b8; border-right: 1px solid #cbd5e1; font-variant-numeric: tabular-nums;">₹ ${totalHsnSgst.toFixed(2)}</td>
-                `}
-                ${cessTotal > 0 ? `<td style="padding: 4px 6px; text-align: right; border-top: 1px solid #94a3b8; border-right: 1px solid #cbd5e1; font-variant-numeric: tabular-nums;">₹ ${totalHsnCess.toFixed(2)}</td>` : ""}
-                <td style="padding: 4px 6px; text-align: right; border-top: 1px solid #94a3b8; font-variant-numeric: tabular-nums;">₹ ${totalHsnTax.toFixed(2)}</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>`
-            : ""
-        }
-
-        <div class="footer-container">
-          <div class="amount-words-bar">
-            <span style="color: #64748b; font-weight: 600;">Amount in Words:</span> ${amountWords}
-          </div>
-
-          <div class="footer-grid">
-            <!-- Top-Left: UPI QR -->
-            <div class="footer-cell">
-              <div class="qr-box">
-                ${showQr ? qrSvg : ""}
-                <div style="font-size: 9.5px; color: #334155;">
-                  <div style="font-weight: 800; color: #0f172a; margin-bottom: 2px;">Scan & Pay via UPI</div>
-                  <div style="margin-bottom: 1px;">UPI ID: <strong>${upiVpa}</strong></div>
-                  <div style="margin-bottom: 2px;">Amount: <strong>₹ ${data.grand_total.toFixed(2)}</strong></div>
-                  <div style="font-size: 8.5px; color: #64748b;">Supports GPay, PhonePe, Paytm & UPI Apps</div>
-                </div>
-              </div>
-            </div>
-
-            <!-- Top-Right: Totals -->
-            <div class="footer-cell">
-              <div class="totals-card">
-                <div class="total-line"><span>Taxable Subtotal:</span><span style="font-weight: 600;">₹ ${data.subtotal.toFixed(2)}</span></div>
-                ${isInterState ? `
-                <div class="total-line"><span>Integrated GST (IGST):</span><span style="font-weight: 600;">₹ ${igstTotal.toFixed(2)}</span></div>
-                ` : `
-                <div class="total-line"><span>Central GST (CGST):</span><span style="font-weight: 600;">₹ ${cgstTotal.toFixed(2)}</span></div>
-                <div class="total-line"><span>State GST (SGST):</span><span style="font-weight: 600;">₹ ${sgstTotal.toFixed(2)}</span></div>
-                `}
-                ${cessTotal > 0 ? `<div class="total-line"><span>Cess:</span><span style="font-weight: 600;">₹ ${cessTotal.toFixed(2)}</span></div>` : ""}
-                <div class="total-line"><span>Total Tax:</span><span style="font-weight: 600;">₹ ${data.tax_total.toFixed(2)}</span></div>
-                ${data.round_off ? `<div class="total-line"><span>Round Off:</span><span style="font-weight: 600;">${data.round_off > 0 ? "+" : ""}₹ ${data.round_off.toFixed(2)}</span></div>` : ""}
-                <div class="grand-total-line"><span>Grand Total:</span><span>₹ ${data.grand_total.toFixed(2)}</span></div>
-                ${data.payments && data.payments.length > 0 ? `
-                <div style="border-top: 1px dashed #cbd5e1; margin-top: 5px; padding-top: 4px; font-size: 8.5px;">
-                  ${data.payments.map((p) => `
-                    <div style="display: flex; justify-content: space-between; color: #475569; margin-bottom: 1.5px;">
-                      <span>Paid via ${p.mode}${p.reference_no ? ` [${p.reference_no}]` : ""}:</span>
-                      <span style="font-weight: 600;">₹ ${Number(p.amount).toFixed(2)}</span>
-                    </div>
-                  `).join("")}
-                  ${data.change_due && data.change_due > 0 ? `
-                    <div style="display: flex; justify-content: space-between; color: #047857; font-weight: 600;">
-                      <span>Change Returned:</span>
-                      <span>₹ ${Number(data.change_due).toFixed(2)}</span>
-                    </div>
-                  ` : ""}
-                  ${data.balance_due && data.balance_due > 0 ? `
-                    <div style="display: flex; justify-content: space-between; color: #b45309; font-weight: 700;">
-                      <span>Balance Due (Credit):</span>
-                      <span>₹ ${Number(data.balance_due).toFixed(2)}</span>
-                    </div>
-                  ` : ""}
-                </div>
-                ` : ""}
-              </div>
-            </div>
-
-            <!-- Bottom-Left: Terms -->
-            <div class="footer-cell">
-              <div class="terms-card">
-                <div>
-                  <div class="terms-title">Terms & Conditions:</div>
-                  <div>1. Goods once sold will not be returned without original cash memo.</div>
-                  <div>2. Refrigerated medicines are strictly non-returnable.</div>
-                  <div>3. ${data.jurisdiction_note || "Subject to local jurisdiction."}</div>
-                </div>
-                <div class="terms-brand">${data.footer_note || "Computer Generated Tax Invoice • LamSuite POS"}</div>
-              </div>
-            </div>
-
-            <!-- Bottom-Right: Signature -->
-            <div class="footer-cell">
-              <div class="sign-card">
-                <div class="sign-store">For ${data.store_name}</div>
-                <div class="sign-space"></div>
-                <div class="sign-line">Authorised Signatory / Pharmacist</div>
-              </div>
-            </div>
-          </div>
-        </div>
-        `
-            : ""
-        }
+        ${isLastPage ? summarySectionHtml : ""}
 
         <div class="spacer-fill"></div>
         <div class="page-footer">
@@ -968,6 +1157,28 @@ export class PrintingEngine {
       </div>`;
       })
       .join("");
+
+    const summaryPageHtml = hasSeparateSummaryPage
+      ? `
+      <div class="a4-sheet">
+        <div class="running-header">
+          <div>
+            <span class="running-store">${data.store_name}</span>
+            <span class="running-inv">Tax Invoice #${data.invoice_number}</span>
+            <span class="running-date">Date: ${data.invoice_date}</span>
+          </div>
+          <div class="running-page">Page ${totalPages} of ${totalPages}</div>
+        </div>
+
+        ${summarySectionHtml}
+
+        <div class="spacer-fill"></div>
+        <div class="page-footer">
+          <div>Computer Generated Tax Invoice • ${data.store_name}</div>
+          <div class="page-num">Page ${totalPages} of ${totalPages}</div>
+        </div>
+      </div>`
+      : "";
 
     return `<!DOCTYPE html>
 <html>
@@ -1121,7 +1332,7 @@ export class PrintingEngine {
   </style>
 </head>
 <body>
-  ${pagesHtml}
+  ${pagesHtml}${summaryPageHtml}
   <script>
     window.addEventListener('keydown', function(e) {
       if (e.key === 'Escape') {
@@ -1172,7 +1383,7 @@ export class PrintingEngine {
               <span>${l.qty}${l.loose_qty ? `+${l.loose_qty}L` : ""} × ₹${l.rate.toFixed(2)} (${l.gst_percent}%)</span>
               <span style="font-weight: 700; color: #000;">₹${l.amount.toFixed(2)}</span>
             </div>
-            ${l.batch_no ? `<div style="font-size: 8px; color: #64748b;">B: ${l.batch_no} ${l.expiry_date ? `Exp: ${l.expiry_date}` : ""}</div>` : ""}
+            ${l.batch_no ? `<div style="font-size: 8px; color: #64748b;">B: ${l.batch_no} ${l.expiry_date ? `Exp: ${formatExpiryDisplay(l.expiry_date)}` : ""}</div>` : ""}
           </div>`;
         }
         return `
@@ -1182,7 +1393,7 @@ export class PrintingEngine {
             <span style="font-variant-numeric: tabular-nums;">₹${l.amount.toFixed(2)}</span>
           </div>
           <div style="display: flex; justify-content: space-between; font-size: 9.5px; color: #475569;">
-            <span>${l.batch_no ? `B: ${l.batch_no}` : ""}${l.expiry_date ? ` | Exp: ${l.expiry_date}` : ""}${l.hsn_code ? ` | HSN: ${l.hsn_code}` : ""}</span>
+            <span>${l.batch_no ? `B: ${l.batch_no}` : ""}${l.expiry_date ? ` | Exp: ${formatExpiryDisplay(l.expiry_date)}` : ""}${l.hsn_code ? ` | HSN: ${l.hsn_code}` : ""}</span>
             <span style="font-variant-numeric: tabular-nums;">${l.qty}${l.loose_qty ? `+${l.loose_qty}L` : ""} @ ₹${l.rate.toFixed(2)} (${l.gst_percent}% GST)</span>
           </div>
         </div>`;
@@ -1353,7 +1564,7 @@ export class PrintingEngine {
           <td style="padding: 3px 4px; text-align: center; border-bottom: 1px solid #cbd5e1;">${i + 1}</td>
           <td style="padding: 3px 4px; border-bottom: 1px solid #cbd5e1; font-weight: 700;">${l.description}</td>
           <td style="padding: 3px 4px; text-align: center; border-bottom: 1px solid #cbd5e1;">${l.batch_no || "-"}</td>
-          <td style="padding: 3px 4px; text-align: center; border-bottom: 1px solid #cbd5e1;">${l.expiry_date || "-"}</td>
+          <td style="padding: 3px 4px; text-align: center; border-bottom: 1px solid #cbd5e1;">${formatExpiryDisplay(l.expiry_date)}</td>
           <td style="padding: 3px 4px; text-align: right; border-bottom: 1px solid #cbd5e1;">${l.qty}${l.loose_qty ? `+${l.loose_qty}L` : ""}</td>
           <td style="padding: 3px 4px; text-align: right; border-bottom: 1px solid #cbd5e1;">₹${l.rate.toFixed(2)}</td>
           <td style="padding: 3px 4px; text-align: right; border-bottom: 1px solid #cbd5e1;">${l.gst_percent}%</td>
@@ -1570,7 +1781,7 @@ export class PrintingEngine {
           case "batch":
             return l.batch_no || "-";
           case "expiry":
-            return l.expiry_date || "-";
+            return formatExpiryDisplay(l.expiry_date);
           case "qty":
             return `${l.qty}${l.loose_qty ? ` + ${l.loose_qty}L` : ""}`;
           case "mrp":
@@ -1597,7 +1808,7 @@ export class PrintingEngine {
 
     autoTable(doc, {
       startY: 53.5,
-      margin: { left: marginX, right: marginX },
+      margin: { left: marginX, right: marginX, bottom: 22 },
       head: [activeColumns.map((c) => c.label)],
       body: tableRows,
       theme: "grid",
@@ -2190,7 +2401,7 @@ export class PrintingEngine {
             </td>
             <td style="padding: 4px 6px; text-align: center; border-bottom: 1px solid #e2e8f0; border-right: 1px solid #e2e8f0;">${it.hsn_code || "300490"}</td>
             <td style="padding: 4px 6px; text-align: center; border-bottom: 1px solid #e2e8f0; border-right: 1px solid #e2e8f0; font-family: monospace;">${it.batch_no || "-"}</td>
-            <td style="padding: 4px 6px; text-align: center; border-bottom: 1px solid #e2e8f0; border-right: 1px solid #e2e8f0;">${it.expiry_date || "-"}</td>
+            <td style="padding: 4px 6px; text-align: center; border-bottom: 1px solid #e2e8f0; border-right: 1px solid #e2e8f0;">${formatExpiryDisplay(it.expiry_date)}</td>
             <td style="padding: 4px 6px; text-align: right; border-bottom: 1px solid #e2e8f0; border-right: 1px solid #e2e8f0; font-weight: 700;">${it.qty}</td>
             <td style="padding: 4px 6px; text-align: right; border-bottom: 1px solid #e2e8f0; border-right: 1px solid #e2e8f0; font-variant-numeric: tabular-nums;">₹ ${it.rate.toFixed(2)}</td>
             <td style="padding: 4px 6px; text-align: right; border-bottom: 1px solid #e2e8f0; border-right: 1px solid #e2e8f0;">${it.gst_percent}%</td>
@@ -2739,7 +2950,7 @@ export class PrintingEngine {
       l.description,
       l.hsn_code || "300490",
       l.batch_no || "-",
-      l.expiry_date || "-",
+      formatExpiryDisplay(l.expiry_date),
       String(l.qty),
       `₹ ${l.rate.toFixed(2)}`,
       `${l.gst_percent}%`,
@@ -2861,7 +3072,7 @@ export class PrintingEngine {
             </td>
             <td style="padding: 4px 6px; text-align: center; border-bottom: 1px solid #e2e8f0; border-right: 1px solid #e2e8f0;">${it.hsn_code || "300490"}</td>
             <td style="padding: 4px 6px; text-align: center; border-bottom: 1px solid #e2e8f0; border-right: 1px solid #e2e8f0; font-family: monospace;">${it.batch_no || "-"}</td>
-            <td style="padding: 4px 6px; text-align: center; border-bottom: 1px solid #e2e8f0; border-right: 1px solid #e2e8f0;">${it.expiry_date || "-"}</td>
+            <td style="padding: 4px 6px; text-align: center; border-bottom: 1px solid #e2e8f0; border-right: 1px solid #e2e8f0;">${formatExpiryDisplay(it.expiry_date)}</td>
             <td style="padding: 4px 6px; text-align: right; border-bottom: 1px solid #e2e8f0; border-right: 1px solid #e2e8f0; font-weight: 700;">${it.qty}</td>
             <td style="padding: 4px 6px; text-align: right; border-bottom: 1px solid #e2e8f0; border-right: 1px solid #e2e8f0; font-variant-numeric: tabular-nums;">₹ ${it.rate.toFixed(2)}</td>
             <td style="padding: 4px 6px; text-align: right; border-bottom: 1px solid #e2e8f0; border-right: 1px solid #e2e8f0;">${it.gst_percent}%</td>
@@ -3110,7 +3321,7 @@ export class PrintingEngine {
       l.description,
       l.hsn_code || "300490",
       l.batch_no || "-",
-      l.expiry_date || "-",
+      formatExpiryDisplay(l.expiry_date),
       String(l.qty),
       `₹ ${l.rate.toFixed(2)}`,
       `${l.gst_percent}%`,
@@ -3224,7 +3435,7 @@ export class PrintingEngine {
               <div style="font-weight: 700;">${it.item_name || it.description || "Product"}</div>
             </td>
             <td style="padding: 4px 6px; text-align: center; border-bottom: 1px solid #e2e8f0; border-right: 1px solid #e2e8f0; font-family: monospace;">${it.batch_no || "-"}</td>
-            <td style="padding: 4px 6px; text-align: center; border-bottom: 1px solid #e2e8f0; border-right: 1px solid #e2e8f0;">${it.expiry_date || "-"}</td>
+            <td style="padding: 4px 6px; text-align: center; border-bottom: 1px solid #e2e8f0; border-right: 1px solid #e2e8f0;">${formatExpiryDisplay(it.expiry_date)}</td>
             <td style="padding: 4px 6px; text-align: right; border-bottom: 1px solid #e2e8f0; border-right: 1px solid #e2e8f0; font-weight: 700;">${it.qty || 0}</td>
             <td style="padding: 4px 6px; text-align: right; border-bottom: 1px solid #e2e8f0; border-right: 1px solid #e2e8f0;">₹ ${(it.ptr || it.rate || 0).toFixed(2)}</td>
             <td style="padding: 4px 6px; text-align: right; border-bottom: 1px solid #e2e8f0; border-right: 1px solid #e2e8f0;">${it.discount_percent || it.disc_percent || 0}%</td>

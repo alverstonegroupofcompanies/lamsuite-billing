@@ -15,6 +15,8 @@ import { storeRegistryService } from "../auth/storeRegistryService";
 import { storeDeviceService } from "../auth/storeDeviceService";
 import type { PaymentTenderLine } from "./billingTenderService";
 import { cashShiftService } from "./cashShiftService";
+import { companySettingsService } from "../settings/companySettingsService";
+import { storeToday, toStoreDateString, getStoreTimezone } from "../dateTimeUtils";
 
 export interface PosCartLine {
   id: string;
@@ -243,7 +245,7 @@ export class PosCartService {
         id: `batch_adhoc_${product.id}_${Date.now()}`,
         product_id: product.id,
         batch_no: "NO_BATCH",
-        expiry_date: new Date(Date.now() + 365 * 86400000).toISOString().slice(0, 10),
+        expiry_date: toStoreDateString(new Date(Date.now() + 365 * 86400000), getStoreTimezone(companySettingsService.getSettings())),
         stock_qty: 0,
         mrp: product.mrp,
         selling_rate: product.sel_rate,
@@ -271,9 +273,11 @@ export class PosCartService {
       const existing = this.lines[existingIndex];
       const updatedQty = existing.qty + qty;
       const updatedLoose = existing.loose_qty + looseQty;
+      const unitsPerPack = Math.max(1, Number(product.units_per_pack) || 1);
+      const requestedBaseUnits = updatedQty * unitsPerPack + updatedLoose;
 
-      const isNegative = updatedQty > availableStock || availableStock <= 0;
-      const shortage = Math.max(0, updatedQty - Math.max(0, availableStock));
+      const isNegative = requestedBaseUnits > availableStock || availableStock <= 0;
+      const shortage = Math.max(0, requestedBaseUnits - Math.max(0, availableStock));
 
       const updatedLine: PosCartLine = {
         ...existing,
@@ -292,8 +296,10 @@ export class PosCartService {
       return { success: true, line: updatedLine };
     }
 
-    const isNegative = qty > availableStock || availableStock <= 0;
-    const shortage = Math.max(0, qty - Math.max(0, availableStock));
+    const unitsPerPack = Math.max(1, Number(product.units_per_pack) || 1);
+    const requestedBaseUnits = qty * unitsPerPack + looseQty;
+    const isNegative = requestedBaseUnits > availableStock || availableStock <= 0;
+    const shortage = Math.max(0, requestedBaseUnits - Math.max(0, availableStock));
 
     const baseLine: Omit<PosCartLine, "calculated"> = {
       id: lineId,
@@ -335,7 +341,7 @@ export class PosCartService {
         id: `batch_adhoc_${product.id}_${Date.now()}`,
         product_id: product.id,
         batch_no: "NO_BATCH",
-        expiry_date: new Date(Date.now() + 365 * 86400000).toISOString().slice(0, 10),
+        expiry_date: toStoreDateString(new Date(Date.now() + 365 * 86400000), getStoreTimezone(companySettingsService.getSettings())),
         stock_qty: 0,
         mrp: product.mrp,
         selling_rate: product.sel_rate,
@@ -345,8 +351,14 @@ export class PosCartService {
       return { addedCount: 1 };
     }
 
-    let remaining = requestedQty;
+    const unitsPerPack = Math.max(1, Number(product.units_per_pack) || 1);
+    let remainingBaseUnits = requestedQty * unitsPerPack + Math.max(0, looseQty);
     let added = 0;
+
+    const toPacksAndLoose = (baseUnits: number) => ({
+      packs: Math.floor(baseUnits / unitsPerPack),
+      loose: baseUnits % unitsPerPack,
+    });
 
     for (let i = 0; i < batches.length; i++) {
       const b = batches[i];
@@ -354,18 +366,20 @@ export class PosCartService {
 
       if (i === batches.length - 1) {
         // Last batch absorbs all remaining quantity (even if negative)
-        this.addProductToCart(product, b, remaining, looseQty);
+        const { packs, loose } = toPacksAndLoose(remainingBaseUnits);
+        this.addProductToCart(product, b, packs, loose);
         added++;
         break;
       }
 
       if (available > 0) {
-        const alloc = Math.min(remaining, available);
-        this.addProductToCart(product, b, alloc, i === 0 ? looseQty : 0);
-        remaining -= alloc;
+        const allocBaseUnits = Math.min(remainingBaseUnits, available);
+        const { packs, loose } = toPacksAndLoose(allocBaseUnits);
+        this.addProductToCart(product, b, packs, loose);
+        remainingBaseUnits -= allocBaseUnits;
         added++;
 
-        if (remaining <= 0) break;
+        if (remainingBaseUnits <= 0) break;
       }
     }
 
@@ -378,9 +392,12 @@ export class PosCartService {
       const line = this.lines[index];
       const newQty = Math.max(0, qty);
       const newLoose = Math.max(0, looseQty);
+      // Batch stock is stored in base units; compare like with like.
+      const unitsPerPack = Math.max(1, Number(line.product.units_per_pack) || 1);
+      const requestedBaseUnits = newQty * unitsPerPack + newLoose;
       const available = line.selectedBatch.stock_qty !== undefined ? line.selectedBatch.stock_qty : 0;
-      const isNegative = newQty > available || available <= 0;
-      const shortage = Math.max(0, newQty - Math.max(0, available));
+      const isNegative = requestedBaseUnits > available || available <= 0;
+      const shortage = Math.max(0, requestedBaseUnits - Math.max(0, available));
 
       line.qty = newQty;
       line.loose_qty = newLoose;
@@ -583,7 +600,7 @@ export class PosCartService {
   }
 
   async finalizeInvoice(
-    invoiceNumber: string,
+    invoiceNumber?: string,
     paymentModeOrPayments: string | PaymentTenderLine[] = "Cash",
     options?: {
       autoClear?: boolean;
@@ -594,12 +611,18 @@ export class PosCartService {
       payments?: PaymentTenderLine[];
     }
   ): Promise<{ success: boolean; invoiceId: string; invoiceNumber?: string; isOfflineQueued?: boolean; isTempNumber?: boolean }> {
+    const resolvedInvoiceNumber = invoiceNumber || (await companySettingsService.generateNextInvoiceNumber());
     const linesToFinalize = options?.linesSnapshot && options.linesSnapshot.length > 0
       ? options.linesSnapshot
       : this.lines;
 
     if (linesToFinalize.length === 0) {
       throw new Error("Cannot finalize empty cart");
+    }
+
+    const activeStore = storeRegistryService.getActiveStore();
+    if (activeStore && activeStore.is_active === false) {
+      throw new Error("Cannot finalize invoice: Store is disabled by administration.");
     }
 
     const totals = options?.totalsSnapshot || this.getTotals();
@@ -617,7 +640,6 @@ export class PosCartService {
 
     const currentSession = staffAuthService.getCurrentSession();
     const activeCounterId = currentSession?.counterId || "Counter 01";
-    const activeStore = storeRegistryService.getActiveStore();
     const deviceProfile = await storeDeviceService.getDeviceProfile();
     const activeStoreId = String(activeStore?.id || currentSession?.user?.store_id || deviceProfile?.store_id || "1");
     const activeStoreCode = String(activeStore?.code || deviceProfile?.store_code || "STORE-01");
@@ -640,8 +662,8 @@ export class PosCartService {
       store_code: activeStoreCode,
       external_id: externalId,
       idempotency_key: externalId,
-      invoice_number: invoiceNumber,
-      invoice_date: new Date().toISOString().slice(0, 10),
+      invoice_number: resolvedInvoiceNumber,
+      invoice_date: storeToday(companySettingsService.getSettings()),
       customer_id: this.customerId,
       customer_name: this.customerName,
       customer_phone: this.customerPhone,
@@ -691,7 +713,10 @@ export class PosCartService {
 
     const finalizedInvoice = txRes.invoice;
     const finalId = finalizedInvoice.id || externalId;
-    const finalDocNumber = finalizedInvoice.invoice_number || invoiceNumber;
+    const finalDocNumber = finalizedInvoice.invoice_number || resolvedInvoiceNumber;
+
+    // Advance setting document sequence
+    await companySettingsService.syncNextInvoiceSequence(finalDocNumber).catch(() => {});
 
     // Record tender in active counter shift
     await cashShiftService.recordSaleTenders(activeCounterId, resolvedPayments, options?.cashChange || 0);

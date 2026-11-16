@@ -189,6 +189,86 @@ describe("Purchase Service & Inward Stock Receipts (PUR-001, PUR-002, PUR-003, S
       expect(stmt.summary.closingBalance).toBe(105);
     });
 
+    it("posts a batchless receipt into the shared NOBATCH bucket (item 23)", async () => {
+      const res = await purchaseService.recordInwardPurchaseBill({
+        purchase_number: "PB-NOBATCH-1",
+        supplier_id: "sup_retail",
+        supplier_name: "Retail Supplier",
+        supplier_invoice_no: "RT-001",
+        purchase_date: "2026-11-01",
+        lines: [
+          {
+            product_id: "prod_retail",
+            product_name: "Retail Widget",
+            batch_no: "",
+            pack_qty: 2,
+            units_per_pack: 1,
+            purchase_rate: 40,
+            gst_percent: 18,
+          },
+        ],
+      });
+
+      const batches = await productsStore.getBatchesForProduct("prod_retail", false);
+      expect(batches.length).toBe(1);
+      expect(batches[0].batch_no).toBe("");
+      expect(batches[0].stock_qty).toBe(2);
+
+      const items = await sqliteStorage.findAll<any>("purchase_items");
+      const item = items.find((i) => i.purchase_id === res.purchaseId);
+      expect(item?.batch_no).toBe("");
+      expect(item?.batch_id).toContain("NOBATCH");
+    });
+
+    it("persists extended purchase line fields (items 21, 24, 25, 26)", async () => {
+      const res = await purchaseService.recordInwardPurchaseBill({
+        purchase_number: "PB-EXT-1",
+        supplier_id: "sup_ext",
+        supplier_name: "Ext Supplier",
+        supplier_invoice_no: "EXT-001",
+        purchase_date: "2026-11-02",
+        lines: [
+          {
+            product_id: "prod_ext",
+            product_name: "Extended Item",
+            batch_no: "EXT-B1",
+            mfg_date: "2026-02-01",
+            expiry_date: "2028-02-28",
+            pack_qty: 1,
+            free_qty: 1,
+            free_loose_qty: 3,
+            units_per_pack: 10,
+            purchase_rate: 100,
+            mrp: 150,
+            hsn_code: "30049099",
+            ptr: 98,
+            pts: 95,
+            ptss: 93,
+            selling_rate: 14,
+            discount_type: "amount",
+            discount_percent: 0,
+            discount_amount: 5,
+            gst_percent: 12,
+          },
+        ],
+      });
+
+      const items = await sqliteStorage.findAll<any>("purchase_items");
+      const item = items.find((i) => i.purchase_id === res.purchaseId);
+      expect(item?.mfg_date).toBe("2026-02-01");
+      expect(item?.free_loose_qty).toBe(3);
+      expect(item?.hsn_code).toBe("30049099");
+      expect(item?.ptr).toBe(98);
+      expect(item?.pts).toBe(95);
+      expect(item?.ptss).toBe(93);
+      expect(item?.discount_type).toBe("amount");
+      expect(item?.discount_amount).toBe(5);
+      expect(item?.discount_percent).toBe(0);
+
+      const batches = await productsStore.getBatchesForProduct("prod_ext", false);
+      expect(batches[0].stock_qty).toBe(23); // 10 billed + 10 free packs + 3 free loose
+    });
+
     it("cancels purchase bill, reverts stock and posts debit ledger adjustment", async () => {
       const res = await purchaseService.recordInwardPurchaseBill({
         purchase_number: "PB-2026-003",
@@ -220,6 +300,101 @@ describe("Purchase Service & Inward Stock Receipts (PUR-001, PUR-002, PUR-003, S
       // Verify supplier ledger adjusted
       const stmt = await supplierLedgerService.getSupplierStatement("sup_cancel");
       expect(stmt.summary.closingBalance).toBe(0);
+    });
+  });
+
+  describe("Document Totals — Bill Discount, Freight and Round-off (items 21, 22)", () => {
+    it("pro-rates a percent bill discount before tax, adds freight after tax and rounds last", () => {
+      const totals = purchaseService.calculateDocumentTotals(
+        [
+          {
+            product_id: "p1",
+            product_name: "Line One",
+            batch_no: "B1",
+            expiry_date: "2028-01-01",
+            pack_qty: 1,
+            units_per_pack: 10,
+            purchase_rate: 100,
+            discount_percent: 10,
+            gst_percent: 12,
+          },
+        ],
+        false,
+        { bill_discount_type: "percent", bill_discount_value: 10, freight_charges: 5 }
+      );
+
+      expect(totals.subtotal).toBe(100); // gross before discounts
+      expect(totals.discountTotal).toBe(19); // 10 line + 9 bill
+      expect(totals.billDiscountAmount).toBe(9);
+      expect(totals.taxableSubtotal).toBe(81);
+      expect(totals.taxTotal).toBe(9.72);
+      expect(totals.roundOff).toBe(0.28);
+      expect(totals.grandTotal).toBe(96);
+    });
+
+    it("supports a flat bill discount amount", () => {
+      const totals = purchaseService.calculateDocumentTotals(
+        [
+          {
+            product_id: "p1",
+            product_name: "Line One",
+            batch_no: "B1",
+            expiry_date: "2028-01-01",
+            pack_qty: 1,
+            units_per_pack: 1,
+            purchase_rate: 100,
+            gst_percent: 12,
+          },
+        ],
+        false,
+        { bill_discount_type: "amount", bill_discount_value: 10 }
+      );
+
+      expect(totals.billDiscountAmount).toBe(10);
+      expect(totals.taxableSubtotal).toBe(90);
+      expect(totals.roundOff).toBe(0.2);
+      expect(totals.grandTotal).toBe(101);
+    });
+
+    it("honours a manual round-off instead of auto rounding", () => {
+      const totals = purchaseService.calculateDocumentTotals(
+        [
+          {
+            product_id: "p1",
+            product_name: "Line One",
+            batch_no: "B1",
+            expiry_date: "2028-01-01",
+            pack_qty: 1,
+            units_per_pack: 1,
+            purchase_rate: 100,
+            gst_percent: 12,
+          },
+        ],
+        false,
+        { round_off: 0.28 }
+      );
+
+      expect(totals.roundOff).toBe(0.28);
+      expect(totals.grandTotal).toBe(112.28);
+    });
+
+    it("ignores discount_percent when the line discount type is amount (item 22)", () => {
+      const calc = purchaseService.calculateLineTotals({
+        product_id: "p2",
+        product_name: "Amount Discount Item",
+        batch_no: "B2",
+        expiry_date: "2028-01-01",
+        pack_qty: 2,
+        units_per_pack: 1,
+        purchase_rate: 100,
+        discount_type: "amount",
+        discount_percent: 50,
+        discount_amount: 20,
+        gst_percent: 0,
+      });
+
+      expect(calc.discount_amount).toBe(20);
+      expect(calc.taxable_amount).toBe(180);
     });
   });
 });

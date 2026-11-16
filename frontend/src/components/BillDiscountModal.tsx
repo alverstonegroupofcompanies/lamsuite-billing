@@ -85,7 +85,7 @@ export const BillDiscountModal: React.FC<BillDiscountModalProps> = ({
             </div>
             <div>
               <h3 className="text-sm font-bold text-text-main">
-                Overall Bill Discount <span className="text-xs text-[var(--color-warning-text,#8A5200)] font-mono font-medium">(Ctrl+F2)</span>
+                Overall Bill Discount <span className="text-xs text-[var(--color-warning-text,#8A5200)] font-mono font-medium">(Alt+F2 / Ctrl+F2)</span>
               </h3>
               <p className="text-[11px] text-text-muted font-medium">
                 Apply special discount across entire invoice

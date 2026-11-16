@@ -3,10 +3,13 @@ import { productsStore, type ProductBatch, type ProductItem } from "../masters/p
 import { partiesStore } from "../masters/partiesStore";
 import { syncQueueService } from "../sync/syncQueueService";
 import { storeRegistryService } from "../auth/storeRegistryService";
+import { onlineTransactionService } from "../sync/onlineTransactionService";
 import type { PosCartLine } from "./posCartService";
 import { calculateInvoiceTotals, type BillingLineInput, type InvoiceTotals } from "./billingCalculations";
 import type { InvoicePaymentRecord, PaymentTenderLine } from "./billingTenderService";
 import { cashShiftService } from "./cashShiftService";
+import { companySettingsService } from "../settings/companySettingsService";
+import { addDaysToDateString, formatInStoreTZ, getStoreTimezone, storeToday } from "../dateTimeUtils";
 
 export interface InvoiceAuditEntry {
   timestamp: number;
@@ -16,6 +19,17 @@ export interface InvoiceAuditEntry {
   diffSummary?: string;
   oldTotal?: number;
   newTotal?: number;
+  approvedBy?: string;
+  approvalId?: string;
+  approvalMode?: string;
+}
+
+/** Short-lived grant returned by the server after manager / one-time PIN approval. */
+export interface InvoiceEditApproval {
+  id: string;
+  token: string;
+  mode: string;
+  approvedByName: string;
 }
 
 export interface InvoiceRecord {
@@ -58,6 +72,8 @@ export interface InvoiceRecord {
   doctor_reg_no?: string;
   notes?: string;
   external_id?: string;
+  bill_discount_percent?: number;
+  bill_discount_amount?: number;
   created_at: number;
   updated_at: number;
 }
@@ -79,6 +95,7 @@ export interface InvoiceItemRecord {
   discount_amount?: number;
   taxable_amount?: number;
   gst_percent: number;
+  tax_amount?: number;
   cgst_amount?: number;
   sgst_amount?: number;
   igst_amount?: number;
@@ -95,6 +112,7 @@ export interface InvoiceFilterCriteria {
   paymentMode?: string;
   status?: string;
   user?: string;
+  storeId?: string | number;
 }
 
 export interface InvoiceDiffResult {
@@ -157,27 +175,18 @@ export class InvoiceManagementService {
     }
 
     const now = new Date();
-    const formatYmdKolkata = (d: Date) => {
-      try {
-        return d.toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
-      } catch {
-        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-      }
-    };
+    const storeTimeZone = getStoreTimezone(companySettingsService.getSettings());
 
-    const todayStr = formatYmdKolkata(now);
-
-    const yesterdayDate = new Date(now);
-    yesterdayDate.setDate(yesterdayDate.getDate() - 1);
-    const yesterdayStr = formatYmdKolkata(yesterdayDate);
-
-    const sevenDaysAgoDate = new Date(now);
-    sevenDaysAgoDate.setDate(sevenDaysAgoDate.getDate() - 7);
-    const sevenDaysAgoStr = formatYmdKolkata(sevenDaysAgoDate);
+    const todayStr = storeToday(companySettingsService.getSettings(), now);
+    const yesterdayStr = addDaysToDateString(todayStr, -1);
+    const sevenDaysAgoStr = addDaysToDateString(todayStr, -6);
 
     const monthStartStr = `${todayStr.slice(0, 7)}-01`;
-    const lastDayOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+    const lastDayOfMonth = new Date(
+      Date.UTC(Number(todayStr.slice(0, 4)), Number(todayStr.slice(5, 7)), 0)
+    ).getUTCDate();
     const monthEndStr = `${todayStr.slice(0, 7)}-${String(lastDayOfMonth).padStart(2, "0")}`;
+    const formatStoreDate = (d: Date) => formatInStoreTZ(d, storeTimeZone);
 
     let startFilter = filters?.startDate;
     let endFilter = filters?.endDate;
@@ -204,28 +213,50 @@ export class InvoiceManagementService {
     }
 
     const query = filters?.searchQuery?.trim().toLowerCase();
+    const queryDate = (() => {
+      if (!query) return null;
+      if (/^\d{4}-\d{2}-\d{2}$/.test(query)) return query;
+      const dmy = query.match(/^(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})$/);
+      if (!dmy) return null;
+      return `${dmy[3]}-${dmy[2].padStart(2, "0")}-${dmy[1].padStart(2, "0")}`;
+    })();
 
     const parseInvoiceDate = (inv: InvoiceRecord): string => {
       const raw = (inv.invoice_date || "").trim();
       if (!raw && inv.created_at) {
-        return formatYmdKolkata(new Date(inv.created_at));
+        return formatStoreDate(new Date(inv.created_at));
       }
       if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
         return raw;
       }
+      if (raw.includes("Z") || raw.includes("+") || (raw.includes("T") && !raw.includes(" "))) {
+        try {
+          const d = new Date(raw);
+          if (!isNaN(d.getTime())) {
+            return formatStoreDate(d);
+          }
+        } catch {}
+      }
+      if (/^\d{4}-\d{2}-\d{2}/.test(raw)) {
+        return raw.slice(0, 10);
+      }
       try {
         const d = new Date(raw);
         if (!isNaN(d.getTime())) {
-          return formatYmdKolkata(d);
+          return formatStoreDate(d);
         }
-      } catch {
-        // fallback
-      }
+      } catch {}
       return raw.slice(0, 10);
     };
 
     const filtered = allInvoices.filter((inv) => {
-      // Date filter (compare date-only part in Asia/Kolkata store timezone)
+      // Store filter
+      if (filters?.storeId) {
+        const sId = String(filters.storeId);
+        if (inv.store_id && String(inv.store_id) !== sId) return false;
+      }
+
+      // Date filter (compare billing date in Asia/Kolkata store timezone)
       const invDateOnly = parseInvoiceDate(inv);
       if (startFilter && invDateOnly < startFilter) return false;
       if (endFilter && invDateOnly > endFilter) return false;
@@ -248,11 +279,13 @@ export class InvoiceManagementService {
         if (!u.toLowerCase().includes(filters.user.toLowerCase())) return false;
       }
 
-      // Query Search: matches invoice number, customer name, customer phone, or any product in items
+      // Query Search: matches invoice number, customer name, customer phone,
+      // billing date, or any product in items
       if (query) {
         const invNumMatch = inv.invoice_number?.toLowerCase().includes(query);
         const custNameMatch = inv.customer_name?.toLowerCase().includes(query);
         const custPhoneMatch = inv.customer_phone?.includes(query);
+        const dateMatch = queryDate ? invDateOnly === queryDate : false;
         const items = itemsByInvoice.get(inv.id) || [];
         const productMatch = items.some(
           (it) =>
@@ -260,7 +293,7 @@ export class InvoiceManagementService {
             it.batch_no?.toLowerCase().includes(query)
         );
 
-        if (!invNumMatch && !custNameMatch && !custPhoneMatch && !productMatch) {
+        if (!invNumMatch && !custNameMatch && !custPhoneMatch && !dateMatch && !productMatch) {
           return false;
         }
       }
@@ -279,37 +312,154 @@ export class InvoiceManagementService {
     invoiceIdOrNumber: string
   ): Promise<{ invoice: InvoiceRecord; items: InvoiceItemRecord[]; auditLog: InvoiceAuditEntry[] } | null> {
     const allInvoices = await sqliteStorage.findAll<InvoiceRecord>("invoices");
-    const invoice = allInvoices.find(
-      (inv) => inv.id === invoiceIdOrNumber || inv.invoice_number === invoiceIdOrNumber
+    let invoice = allInvoices.find(
+      (inv) =>
+        String(inv.id) === String(invoiceIdOrNumber) ||
+        inv.invoice_number === invoiceIdOrNumber ||
+        (inv as any).external_id === invoiceIdOrNumber
     );
 
-    if (!invoice) return null;
+    const allItems = await sqliteStorage.findAll<InvoiceItemRecord>("invoice_items");
+    let items = invoice
+      ? allItems.filter(
+          (it) =>
+            String(it.invoice_id) === String(invoice!.id) ||
+            String(it.invoice_id) === String(invoice!.invoice_number) ||
+            String(it.invoice_id) === String(invoiceIdOrNumber) ||
+            ((invoice as any).external_id && String(it.invoice_id) === String((invoice as any).external_id))
+        )
+      : [];
 
-    if (!invoice.customer_phone) {
-      if (invoice.customer_id) {
-        try {
-          const cust = await partiesStore.getCustomerById(String(invoice.customer_id));
-          if (cust?.phone) {
-            invoice.customer_phone = cust.phone;
+    // Fallback: If invoice not found in local cache OR items are empty, fetch from authoritative backend API
+    if (!invoice || items.length === 0) {
+      try {
+        const baseUrl = onlineTransactionService.getEffectiveBaseUrl();
+        const activeStore = storeRegistryService.getActiveStore();
+        const storeId = activeStore?.id || "1";
+        const res = await fetch(`${baseUrl}/api/invoices/${encodeURIComponent(invoiceIdOrNumber)}`, {
+          headers: {
+            Accept: "application/json",
+            "X-Store-Id": String(storeId),
+            "Store-Id": String(storeId),
+          },
+        });
+        if (res.ok) {
+          const sinv = await res.json();
+          if (sinv && (sinv.id || sinv.invoice_number)) {
+            const serverInvoiceRecord: InvoiceRecord = {
+              id: String(sinv.id),
+              store_id: sinv.store_id,
+              module_key: "invoice",
+              invoice_number: sinv.invoice_number,
+              invoice_date: sinv.invoice_date,
+              customer_id: sinv.customer_id ? String(sinv.customer_id) : undefined,
+              customer_name: sinv.customer_name || sinv.customer?.name || "Walk-in Customer",
+              customer_phone: sinv.customer_phone || sinv.customer?.phone || (sinv as any).phone || "",
+              customer_gstin: sinv.customer_gstin || sinv.customer?.gstin || "",
+              place_of_supply: sinv.place_of_supply || "",
+              subtotal: Number(sinv.subtotal) || 0,
+              taxable_subtotal:
+                sinv.taxable_subtotal != null ? Number(sinv.taxable_subtotal) || 0 : undefined,
+              discount_total: Number(sinv.discount_total) || 0,
+              tax_total: Number(sinv.tax_total) || 0,
+              cgst_total: Number(sinv.cgst_total) || 0,
+              sgst_total: Number(sinv.sgst_total) || 0,
+              igst_total: Number(sinv.igst_total) || 0,
+              round_off: Number(sinv.round_off) || 0,
+              grand_total: Number(sinv.grand_total) || 0,
+              paid_amount:
+                sinv.paid_amount != null
+                  ? Number(sinv.paid_amount) || 0
+                  : Number(sinv.grand_total) || 0,
+              payment_mode: sinv.payment_mode || "Cash",
+              payment_status: sinv.payment_status || "paid",
+              status: sinv.status || "issued",
+              user_counter: sinv.counter_code ? `Counter ${sinv.counter_code}` : (sinv.user_counter || "Counter 01"),
+              sync_state: "synced",
+              created_at: sinv.created_at ? new Date(sinv.created_at).getTime() : Date.now(),
+              updated_at: sinv.updated_at ? new Date(sinv.updated_at).getTime() : Date.now(),
+              bill_discount_percent: sinv.bill_discount_percent ? Number(sinv.bill_discount_percent) : undefined,
+              bill_discount_amount: sinv.bill_discount_amount ? Number(sinv.bill_discount_amount) : undefined,
+              edit_history: sinv.edit_history || undefined,
+            };
+
+            await sqliteStorage.insertRecord("invoices", String(sinv.id), serverInvoiceRecord);
+
+            const serverItems: InvoiceItemRecord[] = [];
+            if (Array.isArray(sinv.items)) {
+              for (let idx = 0; idx < sinv.items.length; idx++) {
+                const it = sinv.items[idx];
+                const itemRec: InvoiceItemRecord = {
+                  id: String(it.id || `item_${sinv.id}_${idx}`),
+                  invoice_id: String(sinv.id),
+                  product_id: String(it.product_id),
+                  product_name: it.product_name,
+                  batch_no: it.batch_no || "NO_BATCH",
+                  expiry_date: it.expiry_date || "",
+                  qty: Number(it.qty || 0),
+                  loose_qty: Number(it.loose_qty || 0),
+                  units_per_pack: Number(it.units_per_pack || 1),
+                  unit_price: Number(it.unit_price || 0),
+                  mrp: Number(it.mrp || it.unit_price || 0),
+                  discount_percent: Number(it.discount_percent || 0),
+                  discount_amount: Number(it.discount_amount || 0),
+                  taxable_amount: it.taxable_amount != null ? Number(it.taxable_amount) : undefined,
+                  gst_percent: Number(it.gst_percent || 0),
+                  tax_amount: Number(it.tax_amount || 0),
+                  cgst_amount: Number(it.cgst_amount || 0),
+                  sgst_amount: Number(it.sgst_amount || 0),
+                  igst_amount: Number(it.igst_amount || 0),
+                  cess_amount: Number(it.cess_amount || 0),
+                  total_amount: Number(it.total_amount || 0),
+                };
+                serverItems.push(itemRec);
+                await sqliteStorage.insertRecord("invoice_items", itemRec.id, itemRec);
+              }
+            }
+
+            if (Array.isArray(sinv.payments)) {
+              for (let idx = 0; idx < sinv.payments.length; idx++) {
+                const p = sinv.payments[idx];
+                const paymentRec: any = {
+                  id: String(p.id || `pay_${sinv.id}_${idx}`),
+                  store_id: p.store_id ? String(p.store_id) : String(sinv.store_id),
+                  invoice_id: String(sinv.id),
+                  counter_id: p.counter_id ? String(p.counter_id) : undefined,
+                  counter_code: p.counter_code ?? undefined,
+                  payment_mode: p.payment_mode || p.mode || "Cash",
+                  amount: Number(p.amount) || 0,
+                  reference_no: p.reference_no ?? undefined,
+                  status: p.status || "received",
+                  extra_fields:
+                    typeof p.extra_fields === "string"
+                      ? p.extra_fields
+                      : p.extra_fields
+                        ? JSON.stringify(p.extra_fields)
+                        : undefined,
+                  notes: p.notes ?? undefined,
+                  received_by: p.received_by ?? undefined,
+                  created_at: p.created_at ? new Date(p.created_at).getTime() : Date.now(),
+                  updated_at: p.updated_at ? new Date(p.updated_at).getTime() : Date.now(),
+                };
+                await sqliteStorage.insertRecord("invoice_payments", paymentRec.id, paymentRec);
+              }
+            }
+
+            invoice = serverInvoiceRecord;
+            items = serverItems;
           }
-        } catch {}
-      }
-      if (!invoice.customer_phone && invoice.customer_name && invoice.customer_name.toLowerCase() !== "walk-in customer") {
-        try {
-          const matches = await partiesStore.searchCustomers(invoice.customer_name, 1);
-          if (matches[0]?.phone) {
-            invoice.customer_phone = matches[0].phone;
-          }
-        } catch {}
+        }
+      } catch (err) {
+        console.warn("[getInvoiceWithDetails] Remote invoice lookup failed:", err);
       }
     }
 
-    const allItems = await sqliteStorage.findAll<InvoiceItemRecord>("invoice_items");
-    const items = allItems.filter((it) => it.invoice_id === invoice.id);
+    if (!invoice) return null;
 
     const allPayments = await sqliteStorage.findAll<InvoicePaymentRecord>("invoice_payments").catch(() => []);
     const payments = allPayments.filter((p) => p.invoice_id === invoice.id);
-    invoice.payments = payments;
+    // Cached invoices may carry their tender lines inline when the payments table is empty.
+    invoice.payments = payments.length > 0 ? payments : invoice.payments;
 
     let auditLog: InvoiceAuditEntry[] = [];
     if (typeof invoice.edit_history === "string") {
@@ -418,6 +568,7 @@ export class InvoiceManagementService {
       notes?: string;
       reason?: string;
       operatorUser?: string;
+      approval?: InvoiceEditApproval;
     }
   ): Promise<{ success: boolean; invoiceId: string }> {
     const existing = await this.getInvoiceWithDetails(originalInvoiceId);
@@ -427,8 +578,14 @@ export class InvoiceManagementService {
 
     const { invoice: originalInvoice, items: originalItems, auditLog } = existing;
 
+    if (originalInvoice.status === "cancelled") {
+      throw new Error("Cancelled invoices cannot be edited.");
+    }
+
     const lock = this.checkInvoiceLockStatus(originalInvoice);
-    if (lock.isLocked) {
+    // An administrator-issued or manager-approved grant is the only way past
+    // the age lock. Cancelled invoices stay uneditable regardless.
+    if (lock.isLocked && !payload.approval) {
       throw new Error(lock.lockReason || "Invoice is locked from editing");
     }
 
@@ -537,12 +694,15 @@ export class InvoiceManagementService {
     const diff = this.computeDiff(originalItems, payload.lines);
     const auditEntry: InvoiceAuditEntry = {
       timestamp: now,
-      user: payload.operatorUser || "Counter 01",
+      user: payload.approval?.approvedByName || payload.operatorUser || "Counter 01",
       action: "EDITED",
       reason: payload.reason || "Invoice revised from POS screen",
       diffSummary: `${diff.changes.length} change(s) made. Total changed from ₹${diff.oldTotal} to ₹${diff.newTotal}`,
       oldTotal: diff.oldTotal,
       newTotal: diff.newTotal,
+      approvedBy: payload.approval?.approvedByName,
+      approvalId: payload.approval?.id,
+      approvalMode: payload.approval?.mode,
     };
     const updatedAuditLog = [...auditLog, auditEntry];
 
@@ -603,7 +763,8 @@ export class InvoiceManagementService {
   async cancelInvoice(
     invoiceId: string,
     reason: string,
-    operatorUser = "Counter 01"
+    operatorUser = "Counter 01",
+    approval?: InvoiceEditApproval
   ): Promise<{ success: boolean }> {
     if (!reason || !reason.trim()) {
       throw new Error("A cancellation reason is mandatory");
@@ -621,7 +782,7 @@ export class InvoiceManagementService {
     }
 
     const lock = this.checkInvoiceLockStatus(invoice);
-    if (lock.isLocked) {
+    if (lock.isLocked && !approval) {
       throw new Error(lock.lockReason || "Invoice is locked from cancellation");
     }
 
@@ -659,12 +820,15 @@ export class InvoiceManagementService {
     // 2. UPDATE AUDIT LOG
     const auditEntry: InvoiceAuditEntry = {
       timestamp: now,
-      user: operatorUser,
+      user: approval?.approvedByName || operatorUser,
       action: "CANCELLED",
       reason: reason.trim(),
       oldTotal: invoice.grand_total,
       newTotal: 0,
       diffSummary: `Invoice marked cancelled. ₹${invoice.grand_total} reversed.`,
+      approvedBy: approval?.approvedByName,
+      approvalId: approval?.id,
+      approvalMode: approval?.mode,
     };
     const updatedAuditLog = [...auditLog, auditEntry];
 
@@ -718,6 +882,8 @@ export class InvoiceManagementService {
       status: "cancelled",
       cancel_reason: reason.trim(),
       updated_at: now,
+      approval_id: approval?.id,
+      approved_by: approval?.approvedByName,
     });
 
     return { success: true };
@@ -817,11 +983,27 @@ export class InvoiceManagementService {
   }
 
   /**
-   * Verify Manager PIN for privileged operations (edit/cancel)
+   * Release the edit lock a counter holds on an invoice. Safe to call when the
+   * terminal is offline: the lock also expires server-side after five minutes.
    */
-  verifyManagerPin(pin: string, configuredPin = "1234"): boolean {
-    return pin.trim() === configuredPin.trim();
+  async releaseInvoiceLock(invoiceId: string, counterCode = "C01"): Promise<boolean> {
+    try {
+      const baseUrl = onlineTransactionService.getEffectiveBaseUrl();
+      const res = await fetch(`${baseUrl}/api/invoices/${encodeURIComponent(invoiceId)}/unlock`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+          "X-Store-Id": String(storeRegistryService.getActiveStore()?.id || ""),
+        },
+        body: JSON.stringify({ counter_code: counterCode }),
+      });
+      return res.ok;
+    } catch {
+      return false;
+    }
   }
+
 }
 
 export const invoiceManagementService = new InvoiceManagementService();

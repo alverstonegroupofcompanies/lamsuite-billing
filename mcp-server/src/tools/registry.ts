@@ -25,6 +25,7 @@ import {
   searchPurchasesTool,
   getPurchaseTool,
   listReturnsTool,
+  listInvoiceApprovalsTool,
 } from "./read/invoices.js";
 import {
   salesSummaryTool,
@@ -53,6 +54,11 @@ import {
 } from "./write/returns.js";
 import { createStockAdjustmentTool } from "./write/stock.js";
 import { cancelInvoiceTool } from "./write/cancel.js";
+import {
+  issueInvoiceApprovalTool,
+  verifyInvoiceApprovalTool,
+  revokeInvoiceApprovalTool,
+} from "./write/approvals.js";
 import { createPurchaseTool } from "./write/purchase.js";
 import { getImportTemplateTool, exportDataTool } from "./read/dataExchange.js";
 import { importDataTool } from "./write/dataExchange.js";
@@ -64,7 +70,20 @@ import {
   migrationCutoverTool,
 } from "./write/migrationTools.js";
 import { listCountersTool, getNegativeStockReportTool } from "./read/counters.js";
+import {
+  listStockAdjustmentsTool,
+  getStockAdjustmentTool,
+  getStockAdjustmentPolicyTool,
+} from "./read/stockAdjustments.js";
 import { approveCounterTool, leaseCounterSequenceTool } from "./write/counters.js";
+import { getAdminDashboardTool, getDashboardMetricsTool } from "./read/dashboard.js";
+import { listDeviceSessionsTool } from "./read/deviceSessions.js";
+import { deviceSessionActionTool } from "./write/deviceSessions.js";
+import {
+  approveStockAdjustmentTool,
+  rejectStockAdjustmentTool,
+  updateStockAdjustmentPolicyTool,
+} from "./write/stockAdjustments.js";
 
 export const ALL_READ_TOOLS: ToolDefinition[] = [
   getImportTemplateTool,
@@ -83,6 +102,7 @@ export const ALL_READ_TOOLS: ToolDefinition[] = [
   searchPurchasesTool,
   getPurchaseTool,
   listReturnsTool,
+  listInvoiceApprovalsTool,
   salesSummaryTool,
   topSellingItemsTool,
   cashBookTool,
@@ -96,6 +116,12 @@ export const ALL_READ_TOOLS: ToolDefinition[] = [
   migrationReconcileTool,
   listCountersTool,
   getNegativeStockReportTool,
+  listStockAdjustmentsTool,
+  getStockAdjustmentTool,
+  getStockAdjustmentPolicyTool,
+  getAdminDashboardTool,
+  getDashboardMetricsTool,
+  listDeviceSessionsTool,
 ];
 
 export const ALL_WRITE_TOOLS: ToolDefinition[] = [
@@ -109,6 +135,9 @@ export const ALL_WRITE_TOOLS: ToolDefinition[] = [
   createPurchaseReturnTool,
   createStockAdjustmentTool,
   cancelInvoiceTool,
+  issueInvoiceApprovalTool,
+  verifyInvoiceApprovalTool,
+  revokeInvoiceApprovalTool,
   createPurchaseTool,
   importDataTool,
   migrationStartTool,
@@ -116,6 +145,10 @@ export const ALL_WRITE_TOOLS: ToolDefinition[] = [
   migrationCutoverTool,
   approveCounterTool,
   leaseCounterSequenceTool,
+  deviceSessionActionTool,
+  approveStockAdjustmentTool,
+  rejectStockAdjustmentTool,
+  updateStockAdjustmentPolicyTool,
 ];
 
 export class ToolRegistry {

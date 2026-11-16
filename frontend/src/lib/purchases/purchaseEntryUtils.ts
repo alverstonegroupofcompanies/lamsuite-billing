@@ -167,3 +167,28 @@ export function calculateLineMargin(
     effectiveUnitCost: Math.round(effectiveUnitCost * 100) / 100,
   };
 }
+
+/**
+ * Validates an HSN/SAC code. Statutory GST rules use 4, 6 or 8 digits.
+ */
+export function isValidHsn(hsn: string | null | undefined): boolean {
+  const code = String(hsn || "").replace(/\D/g, "");
+  return code.length === 4 || code.length === 6 || code.length === 8;
+}
+
+/**
+ * Best-effort GST slab suggestion for an HSN code. Returns null when the
+ * chapter is unknown so callers never overwrite a rate on a guess.
+ */
+export function suggestGstForHsn(hsn: string | null | undefined): number | null {
+  const code = String(hsn || "").replace(/\D/g, "");
+  if (code.length < 4) return null;
+  const chapter = code.slice(0, 2);
+  if (code.startsWith("3003") || code.startsWith("3004")) return 12;
+  if (["04", "10", "11", "12", "19", "20", "21", "22"].includes(chapter)) return 5;
+  if (Number(chapter) >= 50 && Number(chapter) <= 64) return 5;
+  if (["28", "29", "30", "38"].includes(chapter)) return 12;
+  if (["84", "85", "90"].includes(chapter)) return 18;
+  if (["24", "27", "71", "87", "88"].includes(chapter)) return 28;
+  return null;
+}

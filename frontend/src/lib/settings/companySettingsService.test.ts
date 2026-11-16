@@ -16,10 +16,10 @@ describe("Company Settings, Sequences & Menu Visibility (CFG-001, CFG-002)", () 
       });
 
       const inv1 = await companySettingsService.generateNextInvoiceNumber();
-      expect(inv1).toMatch(/^LS-\d{4}-00050$/);
+      expect(inv1).toBe("LS-50");
 
       const inv2 = await companySettingsService.generateNextInvoiceNumber();
-      expect(inv2).toMatch(/^LS-\d{4}-00051$/);
+      expect(inv2).toBe("LS-51");
 
       const settings = await companySettingsService.loadSettings();
       expect(settings.next_invoice_number).toBe(52);
@@ -60,6 +60,20 @@ describe("Company Settings, Sequences & Menu Visibility (CFG-001, CFG-002)", () 
 
       const loaded = await companySettingsService.loadSettings();
       expect(loaded.workspace.defaultLandingPage).toBe("pos");
+    });
+
+    it("persists the store-owner default bills period", async () => {
+      expect(DEFAULT_SETTINGS.workspace.billsDefaultPeriod).toBe("today");
+
+      await companySettingsService.updateSettings({
+        workspace: {
+          ...DEFAULT_SETTINGS.workspace,
+          billsDefaultPeriod: "last7days",
+        },
+      });
+
+      const loaded = await companySettingsService.loadSettings();
+      expect(loaded.workspace.billsDefaultPeriod).toBe("last7days");
     });
   });
 
@@ -105,6 +119,31 @@ describe("Company Settings, Sequences & Menu Visibility (CFG-001, CFG-002)", () 
       const deleted = await companySettingsService.deleteCustomBillingPreset(created.id);
       expect(deleted).toBe(true);
       expect(companySettingsService.getBillingPresets().some((p) => p.id === created.id)).toBe(false);
+    });
+  });
+
+  describe("Purchase columns (items 24, 26)", () => {
+    it("keeps newly added columns available when a saved layout predates them", async () => {
+      await companySettingsService.updateSettings({
+        purchase_columns: [
+          { id: "product_name", label: "Product", visible: true, width: 220, order: 0 },
+          { id: "qty", label: "Qty", visible: true, width: 70, order: 1 },
+        ],
+      });
+
+      const columns = companySettingsService.getPurchaseColumns();
+      expect(columns.find((c) => c.id === "mfg_date")).toBeDefined();
+      expect(columns.find((c) => c.id === "hsn")).toBeDefined();
+      expect(columns.find((c) => c.id === "ptr")).toBeDefined();
+      expect(columns.find((c) => c.id === "pts")).toBeDefined();
+      expect(columns.find((c) => c.id === "ptss")).toBeDefined();
+    });
+
+    it("exposes the discount column as percent or amount", () => {
+      const columns = companySettingsService.getPurchaseColumns();
+      const discount = columns.find((c) => c.id === "discount");
+      expect(discount?.label).toContain("%");
+      expect(discount?.visible).toBe(true);
     });
   });
 });

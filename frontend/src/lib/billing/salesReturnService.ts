@@ -3,6 +3,7 @@ import { productsStore, type ProductBatch } from "../masters/productsStore";
 import { partiesStore, type Customer } from "../masters/partiesStore";
 import { syncQueueService } from "../sync/syncQueueService";
 import { companySettingsService } from "../settings/companySettingsService";
+import { storeToday } from "../dateTimeUtils";
 import { round2 } from "./billingCalculations";
 import { calculateDocumentTaxes } from "../tax-engine/taxEngine";
 import type { InvoiceRecord, InvoiceItemRecord } from "../reports/reportEngine";
@@ -20,6 +21,8 @@ export interface SalesReturnLineInput {
   expiry_date?: string;
   sold_qty: number;
   return_qty: number;
+  loose_qty?: number;
+  units_per_pack?: number;
   unit_price: number;
   discount_percent?: number;
   gst_percent: number;
@@ -103,32 +106,123 @@ export function getIndianFinancialYear(date: Date = new Date()): string {
   return `${s}-${e}`;
 }
 
+/** One line's return quantity expressed in base units (packs × units_per_pack + loose). */
+export function toBaseUnits(
+  qty: number | undefined,
+  looseQty: number | undefined,
+  unitsPerPack: number | undefined
+): number {
+  const packs = Math.max(0, Number(qty) || 0);
+  const loose = Math.max(0, Number(looseQty) || 0);
+  const upp = Math.max(1, Math.round(Number(unitsPerPack) || 1));
+  return packs * upp + loose;
+}
+
+export const returnKey = (productId: string, batchNo: string | undefined): string =>
+  `${productId}_${batchNo || ""}`;
+
+/**
+ * Builds the per-line returnable quantity in base units: sold − already returned.
+ * `items` are the original invoice lines; `returnedBaseUnits` comes from the
+ * merged sales-return and credit-note history.
+ */
+export function buildReturnableQtyMap(
+  items: Array<{
+    product_id: string;
+    batch_no?: string;
+    qty?: number;
+    loose_qty?: number;
+    units_per_pack?: number;
+  }>,
+  returnedBaseUnits: Map<string, number>
+): Map<string, number> {
+  const map = new Map<string, number>();
+  for (const item of items) {
+    const key = returnKey(item.product_id, item.batch_no);
+    const sold = toBaseUnits(item.qty, item.loose_qty, item.units_per_pack);
+    const alreadyReturned = returnedBaseUnits.get(key) || 0;
+    map.set(key, Math.max(0, sold - alreadyReturned));
+  }
+  return map;
+}
+
 export class SalesReturnService {
   /**
-   * Generates a sequential, configurable return number with financial-year reset (e.g. SR-26-27-0001)
+   * Previews sequential return number following sequences in settings without advancing
+   */
+  async previewNextReturnNumber(): Promise<string> {
+    const settings = await companySettingsService.loadSettings();
+    let prefix = settings.sequences?.returnPrefix || "SR";
+    prefix = prefix.replace(/-+$/, "");
+    let nextNum = settings.sequences?.nextReturnNumber || 1;
+
+    const allReturns = await sqliteStorage.findAll<SalesReturnRecord>("sales_returns");
+    const searchPrefix = `${prefix}-`;
+    const matching = allReturns.filter((r) => r.return_number?.startsWith(searchPrefix));
+
+    for (const ret of matching) {
+      const parts = ret.return_number.split("-");
+      const lastPart = parts[parts.length - 1];
+      const parsed = parseInt(lastPart, 10);
+      if (!isNaN(parsed) && parsed >= nextNum) {
+        nextNum = parsed + 1;
+      }
+    }
+
+    return `${prefix}-${nextNum}`;
+  }
+
+  /**
+   * Generates a sequential, configurable return number following sequences in settings
    */
   async generateNextReturnNumber(): Promise<string> {
     const settings = await companySettingsService.loadSettings();
     let prefix = settings.sequences?.returnPrefix || "SR";
     prefix = prefix.replace(/-+$/, "");
-    const fy = getIndianFinancialYear();
+    let nextNum = settings.sequences?.nextReturnNumber || 1;
 
     const allReturns = await sqliteStorage.findAll<SalesReturnRecord>("sales_returns");
-    const searchPrefix = `${prefix}-${fy}-`;
-    const matching = allReturns.filter((r) => r.return_number.startsWith(searchPrefix));
+    const searchPrefix = `${prefix}-`;
+    const matching = allReturns.filter((r) => r.return_number?.startsWith(searchPrefix));
 
-    let maxNum = settings.sequences?.nextReturnNumber ? settings.sequences.nextReturnNumber - 1 : 0;
     for (const ret of matching) {
       const parts = ret.return_number.split("-");
       const lastPart = parts[parts.length - 1];
       const parsed = parseInt(lastPart, 10);
-      if (!isNaN(parsed) && parsed > maxNum) {
-        maxNum = parsed;
+      if (!isNaN(parsed) && parsed >= nextNum) {
+        nextNum = parsed + 1;
       }
     }
 
-    const nextSeq = maxNum + 1;
-    return `${prefix}-${fy}-${String(nextSeq).padStart(4, "0")}`;
+    const docNumber = `${prefix}-${nextNum}`;
+
+    await companySettingsService.updateSettings({
+      sequences: {
+        ...settings.sequences,
+        returnPrefix: prefix,
+        nextReturnNumber: nextNum + 1,
+      },
+    });
+
+    return docNumber;
+  }
+
+  async syncNextReturnSequence(returnNumber: string): Promise<void> {
+    if (!returnNumber) return;
+    const parts = returnNumber.split("-");
+    const lastNum = parseInt(parts[parts.length - 1], 10);
+    if (isNaN(lastNum)) return;
+    const settings = await companySettingsService.loadSettings();
+    const currNext = settings.sequences?.nextReturnNumber || 1;
+    if (lastNum >= currNext) {
+      await companySettingsService.updateSettings({
+        sequences: {
+          ...settings.sequences,
+          returnPrefix: settings.sequences?.returnPrefix || "SR",
+          nextReturnNumber: lastNum + 1,
+        },
+      });
+    }
   }
 
   /**
@@ -141,18 +235,54 @@ export class SalesReturnService {
   }
 
   /**
-   * Calculates already returned quantities per product & batch for a given invoice
+   * Calculates already returned quantities per product & batch for a given
+   * invoice, in base units. Both locally recorded sales returns and credit-note
+   * invoices that point at the original invoice are counted.
    */
   async getReturnedQtyMapForInvoice(invoiceNumber: string): Promise<Map<string, number>> {
-    const returns = await this.getReturnsForInvoice(invoiceNumber);
+    if (!invoiceNumber) return new Map();
     const map = new Map<string, number>();
+    const add = (productId: string, batchNo: string | undefined, baseUnits: number) => {
+      const key = returnKey(productId, batchNo);
+      map.set(key, (map.get(key) || 0) + baseUnits);
+    };
 
+    const returns = await this.getReturnsForInvoice(invoiceNumber);
+    const localReturnIds = new Set(returns.map((ret) => String(ret.id)));
     for (const ret of returns) {
       for (const item of ret.lines) {
-        const key = `${item.product_id}_${item.batch_no}`;
-        map.set(key, (map.get(key) || 0) + item.return_qty);
+        add(
+          item.product_id,
+          item.batch_no,
+          toBaseUnits(item.return_qty, item.loose_qty, item.units_per_pack)
+        );
       }
     }
+
+    const allInvoices = await sqliteStorage.findAll<InvoiceRecord>("invoices");
+    const creditNotes = allInvoices.filter(
+      (inv) =>
+        (inv.module_key === "credit_note" || inv.module_key === "sales_return") &&
+        (inv as any).original_invoice_number === invoiceNumber &&
+        inv.status !== "cancelled" &&
+        // Local returns also write a mirror credit-note row with the same id;
+        // counting both would double the returned quantity.
+        !localReturnIds.has(String(inv.id))
+    );
+    if (creditNotes.length > 0) {
+      const allItems = await sqliteStorage.findAll<InvoiceItemRecord>("invoice_items");
+      for (const cn of creditNotes) {
+        const cnItems = allItems.filter((it) => String(it.invoice_id) === String(cn.id));
+        for (const item of cnItems) {
+          add(
+            item.product_id,
+            item.batch_no,
+            toBaseUnits(item.qty, item.loose_qty, item.units_per_pack)
+          );
+        }
+      }
+    }
+
     return map;
   }
 
@@ -170,10 +300,13 @@ export class SalesReturnService {
     }
 
     const now = Date.now();
-    const today = new Date().toISOString().slice(0, 10);
+    const today = storeToday(companySettingsService.getSettings());
     const timeStr = new Date().toTimeString().slice(0, 8);
     const returnId = `sr_${now}_${Math.random().toString(16).slice(2, 6)}`;
-    const returnNumber = await this.generateNextReturnNumber();
+    const returnNumber = (input as any).return_number || (await this.generateNextReturnNumber());
+    if ((input as any).return_number) {
+      await this.syncNextReturnSequence(returnNumber);
+    }
 
     // Look up original invoice if available
     let originalInv: InvoiceRecord | null = null;
@@ -190,17 +323,22 @@ export class SalesReturnService {
       const returnedQtyMap = await this.getReturnedQtyMapForInvoice(input.original_invoice_number);
 
       for (const line of input.lines) {
-        if (line.return_qty <= 0) {
+        const requestedBaseUnits = toBaseUnits(
+          line.return_qty,
+          line.loose_qty,
+          line.units_per_pack
+        );
+        if (requestedBaseUnits <= 0) {
           throw new Error(`Return quantity for ${line.product_name} must be greater than 0`);
         }
 
-        const key = `${line.product_id}_${line.batch_no}`;
+        const key = returnKey(line.product_id, line.batch_no);
         const alreadyReturned = returnedQtyMap.get(key) || 0;
         const availableToReturn = line.sold_qty - alreadyReturned;
 
-        if (line.return_qty > availableToReturn) {
+        if (requestedBaseUnits > availableToReturn) {
           throw new Error(
-            `Cannot return ${line.return_qty} of ${line.product_name}. Maximum available to return is ${availableToReturn} (Sold: ${line.sold_qty}, Already Returned: ${alreadyReturned})`
+            `Cannot return ${requestedBaseUnits} of ${line.product_name}. Maximum available to return is ${availableToReturn} (Sold: ${line.sold_qty}, Already Returned: ${alreadyReturned})`
           );
         }
       }
@@ -214,8 +352,8 @@ export class SalesReturnService {
       hsn_code: line.hsn_code || "",
       qty: line.return_qty,
       pack_qty: line.return_qty,
-      loose_qty: 0,
-      units_per_pack: 1,
+      loose_qty: line.loose_qty || 0,
+      units_per_pack: line.units_per_pack || 1,
       unit_price: line.unit_price,
       discount_percent: line.discount_percent || 0,
       gst_percent: line.gst_percent || 0,
@@ -245,6 +383,7 @@ export class SalesReturnService {
       const line = input.lines[i];
       const lineRes = taxResult.lines[i];
       const itemId = `sri_${now}_${i}_${Math.random().toString(16).slice(2, 6)}`;
+      const returnedBaseUnits = toBaseUnits(line.return_qty, line.loose_qty, line.units_per_pack);
 
       returnLines.push({
         ...line,
@@ -269,7 +408,7 @@ export class SalesReturnService {
         }
 
         if (batch) {
-          batch.stock_qty += line.return_qty;
+          batch.stock_qty += returnedBaseUnits;
           await productsStore.upsertBatch(batch);
         }
 
@@ -280,7 +419,7 @@ export class SalesReturnService {
           product_id: line.product_id,
           batch_id: line.batch_id,
           event_type: "SALES_RETURN",
-          qty_delta: line.return_qty,
+          qty_delta: returnedBaseUnits,
           unit_cost: line.unit_price,
           reference_type: "SALES_RETURN",
           reference_id: returnNumber,
@@ -413,6 +552,8 @@ export class SalesReturnService {
         batch_no: item.batch_no,
         expiry_date: item.expiry_date,
         qty: item.return_qty,
+        loose_qty: item.loose_qty || 0,
+        units_per_pack: item.units_per_pack || 1,
         unit_price: item.unit_price,
         discount_percent: item.discount_percent,
         discount_amount: item.discount_amount,

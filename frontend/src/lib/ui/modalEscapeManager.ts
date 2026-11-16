@@ -1,6 +1,8 @@
 import { useEffect, useRef } from "react";
 
-type ModalCloseCallback = () => void;
+// A handler returns false when it consumed Escape without closing the modal
+// (for example, cancelling an in-cell edit), so the handler stays registered.
+type ModalCloseCallback = () => boolean | void;
 
 class ModalEscapeManager {
   private stack: ModalCloseCallback[] = [];
@@ -73,11 +75,13 @@ class ModalEscapeManager {
    */
   closeTopModal(): boolean {
     if (this.stack.length > 0) {
-      const onClose = this.stack.pop();
+      const onClose = this.stack[this.stack.length - 1];
       if (onClose) {
         try {
-          onClose();
+          const keepOpen = onClose() === false;
+          if (!keepOpen) this.stack.pop();
         } catch (err) {
+          this.stack.pop();
           console.error("Error closing modal on Escape:", err);
         }
         return true;
@@ -184,9 +188,7 @@ export function useModalEscape(isOpen: boolean, onClose: () => void) {
 
   useEffect(() => {
     if (!isOpen) return;
-    const handler = () => {
-      onCloseRef.current();
-    };
+    const handler = () => onCloseRef.current();
     return modalEscapeManager.register(handler);
   }, [isOpen]);
 }

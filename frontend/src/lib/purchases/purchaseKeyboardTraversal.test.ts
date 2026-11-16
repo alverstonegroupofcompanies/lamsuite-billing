@@ -14,7 +14,9 @@ class PurchaseKeyboardTraversalEngine {
   undoDeleteBuffer: { line: PurchaseLineItemInput; index: number } | null = null;
   entryInputFocused: boolean = true;
 
-  readonly visibleNavigableCols = [
+  visibleNavigableCols: string[];
+
+  constructor(cols = [
     "product_name",
     "batch_no",
     "expiry_date",
@@ -25,7 +27,9 @@ class PurchaseKeyboardTraversalEngine {
     "discount",
     "gst",
     "selling_rate",
-  ];
+  ]) {
+    this.visibleNavigableCols = cols;
+  }
 
   addLine(line: PurchaseLineItemInput) {
     this.lines.push(line);
@@ -326,5 +330,59 @@ describe("Purchase Inward Keyboard Traversal & Editing (Item 6)", () => {
     expect(engine.lines.length).toBe(3);
     expect(engine.lines[2].product_name).toBe("Azithromycin 500mg");
     expect(engine.selectedRowIndex).toBe(2);
+  });
+
+  it("8. Traverses the new mfg/PTR/PTS/PTSS/HSN columns when they are enabled (items 24, 26)", () => {
+    const full = new PurchaseKeyboardTraversalEngine([
+      "product_name",
+      "batch_no",
+      "mfg_date",
+      "expiry_date",
+      "qty",
+      "free_qty",
+      "mrp",
+      "ptr",
+      "pts",
+      "ptss",
+      "purchase_rate",
+      "discount",
+      "gst",
+      "hsn",
+      "selling_rate",
+    ]);
+    full.addLine({
+      product_id: "p1",
+      product_name: "Amoxicillin 500mg",
+      batch_no: "AMX-01",
+      expiry_date: "2027-12-31",
+      pack_qty: 10,
+      purchase_rate: 85,
+      mrp: 120,
+      gst_percent: 12,
+    });
+
+    full.handleKeyDown("ArrowUp"); // enter grid at qty
+    expect(full.selectedCellCol).toBe("qty");
+
+    const sequence: string[] = [];
+    for (let i = 0; i < 9; i++) {
+      full.handleKeyDown("ArrowRight");
+      sequence.push(full.selectedCellCol);
+    }
+
+    expect(sequence).toEqual([
+      "free_qty",
+      "mrp",
+      "ptr",
+      "pts",
+      "ptss",
+      "purchase_rate",
+      "discount",
+      "gst",
+      "hsn",
+    ]);
+
+    full.handleKeyDown("ArrowLeft");
+    expect(full.selectedCellCol).toBe("gst");
   });
 });

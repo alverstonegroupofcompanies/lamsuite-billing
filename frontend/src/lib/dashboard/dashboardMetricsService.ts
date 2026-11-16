@@ -1,6 +1,16 @@
 import { sqliteStorage } from "../db/sqliteStorage";
 import { companySettingsService } from "../settings/companySettingsService";
 import { billingTenderService } from "../billing/billingTenderService";
+import { dedupeDocuments } from "../billing/documentIdentity";
+import {
+  DEFAULT_STORE_TIMEZONE,
+  addDaysToDateString,
+  formatInStoreTZ,
+  getPeriodRange,
+  getStoreTimezone,
+  todayInStoreTZ,
+  toStoreDateString,
+} from "../dateTimeUtils";
 import { salesMetricsService } from "../data-layer/financials/salesMetrics";
 import type { InvoiceRecord, InvoiceItemRecord } from "../billing/invoiceManagementService";
 import type { ProductBatch } from "../masters/productsStore";
@@ -74,71 +84,27 @@ export interface DashboardMetricsResult {
 }
 
 export class DashboardMetricsService {
-  /**
-   * Helper to format a Date as YYYY-MM-DD in local time
-   */
-  formatLocalDate(d: Date): string {
-    const year = d.getFullYear();
-    const month = String(d.getMonth() + 1).padStart(2, "0");
-    const day = String(d.getDate()).padStart(2, "0");
-    return `${year}-${month}-${day}`;
+  /** Store timezone drives every calendar boundary; the device clock does not. */
+  storeTimezone(): string {
+    try {
+      return getStoreTimezone(companySettingsService.getSettings()) || DEFAULT_STORE_TIMEZONE;
+    } catch {
+      return DEFAULT_STORE_TIMEZONE;
+    }
   }
 
   /**
-   * Get start and end dates based on period type
+   * Helper to format a Date as YYYY-MM-DD in the store's timezone
+   */
+  formatLocalDate(d: Date): string {
+    return formatInStoreTZ(d, this.storeTimezone());
+  }
+
+  /**
+   * Get start and end dates based on period type, in store time
    */
   getDateRange(periodType: "today" | "yesterday" | "this_week" | "this_month" | "custom", customStart?: string, customEnd?: string) {
-    const now = new Date();
-    const todayStr = this.formatLocalDate(now);
-
-    if (periodType === "yesterday") {
-      const yesterday = new Date(now);
-      yesterday.setDate(yesterday.getDate() - 1);
-      const yesterdayStr = this.formatLocalDate(yesterday);
-      return {
-        startDate: yesterdayStr,
-        endDate: yesterdayStr,
-        prevStartDate: this.formatLocalDate(new Date(yesterday.getTime() - 86400000)),
-        prevEndDate: this.formatLocalDate(new Date(yesterday.getTime() - 86400000)),
-        label: "Yesterday",
-      };
-    }
-
-    if (periodType === "this_week") {
-      const dayOfWeek = now.getDay(); // 0 is Sunday, 1 is Monday
-      const distanceToMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
-      const startOfWeek = new Date(now);
-      startOfWeek.setDate(startOfWeek.getDate() - distanceToMonday);
-      const startOfWeekStr = this.formatLocalDate(startOfWeek);
-
-      const prevWeekEnd = new Date(startOfWeek);
-      prevWeekEnd.setDate(prevWeekEnd.getDate() - 1);
-      const prevWeekStart = new Date(prevWeekEnd);
-      prevWeekStart.setDate(prevWeekStart.getDate() - 6);
-
-      return {
-        startDate: startOfWeekStr,
-        endDate: todayStr,
-        prevStartDate: this.formatLocalDate(prevWeekStart),
-        prevEndDate: this.formatLocalDate(prevWeekEnd),
-        label: "This Week",
-      };
-    }
-
-    if (periodType === "this_month") {
-      const startOfMonthStr = `${todayStr.slice(0, 7)}-01`;
-      const prevMonthLastDay = new Date(now.getFullYear(), now.getMonth(), 0);
-      const prevMonthStart = `${this.formatLocalDate(prevMonthLastDay).slice(0, 7)}-01`;
-      const prevMonthEnd = this.formatLocalDate(prevMonthLastDay);
-
-      return {
-        startDate: startOfMonthStr,
-        endDate: todayStr,
-        prevStartDate: prevMonthStart,
-        prevEndDate: prevMonthEnd,
-        label: "This Month",
-      };
-    }
+    const tz = this.storeTimezone();
 
     if (periodType === "custom" && customStart && customEnd) {
       return {
@@ -150,17 +116,47 @@ export class DashboardMetricsService {
       };
     }
 
-    // Default "today"
-    const yesterday = new Date(now);
-    yesterday.setDate(yesterday.getDate() - 1);
-    const yesterdayStr = this.formatLocalDate(yesterday);
+    const key =
+      periodType === "yesterday"
+        ? "yesterday"
+        : periodType === "this_week"
+        ? "this_week"
+        : periodType === "this_month"
+        ? "this_month"
+        : "today";
+
+    const range = getPeriodRange(key, tz);
+    const startDate = range.startDate!;
+    const endDate = range.endDate!;
+
+    let prevStartDate: string;
+    let prevEndDate: string;
+    if (key === "today") {
+      prevStartDate = prevEndDate = addDaysToDateString(startDate, -1);
+    } else if (key === "yesterday") {
+      prevStartDate = prevEndDate = addDaysToDateString(startDate, -1);
+    } else if (key === "this_week") {
+      prevStartDate = addDaysToDateString(startDate, -7);
+      prevEndDate = addDaysToDateString(endDate, -7);
+    } else {
+      const monthStart = `${startDate.slice(0, 7)}-01`;
+      prevStartDate = addDaysToDateString(monthStart, -1).slice(0, 7) + "-01";
+      prevEndDate = addDaysToDateString(monthStart, -1);
+    }
+
+    const labels: Record<string, string> = {
+      today: "Today",
+      yesterday: "Yesterday",
+      this_week: "This Week",
+      this_month: "This Month",
+    };
 
     return {
-      startDate: todayStr,
-      endDate: todayStr,
-      prevStartDate: yesterdayStr,
-      prevEndDate: yesterdayStr,
-      label: "Today",
+      startDate,
+      endDate,
+      prevStartDate,
+      prevEndDate,
+      label: labels[key],
     };
   }
 
@@ -177,7 +173,11 @@ export class DashboardMetricsService {
     const nearExpiryThresholdDays = 60; // Standard FEFO alert window
 
     // 1. Fetch Invoices & Invoice Items from SQLite
-    const allInvoices = await sqliteStorage.findAll<InvoiceRecord>("invoices");
+    const tz = this.storeTimezone();
+    const allInvoices = dedupeDocuments(await sqliteStorage.findAll<InvoiceRecord>("invoices")).map((inv) => ({
+      ...inv,
+      invoice_date: toStoreDateString(inv.invoice_date, tz),
+    }));
     const allItems = await sqliteStorage.findAll<InvoiceItemRecord>("invoice_items");
 
     // Build items map by invoice ID
@@ -300,8 +300,13 @@ export class DashboardMetricsService {
       }
 
       let timeStr = "";
-      if (inv.created_at) {
-        timeStr = new Date(inv.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+      const createdAt = Number(inv.created_at) || new Date(inv.invoice_date).getTime();
+      if (createdAt) {
+        timeStr = new Intl.DateTimeFormat("en-IN", {
+          timeZone: this.storeTimezone(),
+          hour: "2-digit",
+          minute: "2-digit",
+        }).format(new Date(createdAt));
       }
 
       return {

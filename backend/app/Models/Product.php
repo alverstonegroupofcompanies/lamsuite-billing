@@ -27,6 +27,7 @@ class Product extends Model
         'pts',
         'gst_percent',
         'units_per_pack',
+        'allow_loose_sale',
         'rack_location',
         'shelf_location',
         'reorder_level',
@@ -45,6 +46,7 @@ class Product extends Model
         'reorder_level' => 'decimal:2',
         'current_stock' => 'decimal:2',
         'is_active' => 'boolean',
+        'allow_loose_sale' => 'boolean',
         'version' => 'integer',
         'units_per_pack' => 'integer',
     ];

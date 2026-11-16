@@ -27,10 +27,16 @@ import {
   Package,
   Layers,
   PauseCircle,
+  KeyRound,
+  Copy,
+  ShieldCheck,
 } from "lucide-react";
 
 export const TransactionsPage: React.FC = () => {
-  const { hasPermission, activeStore } = useAuth();
+  const { hasPermission, activeStore, role } = useAuth();
+  const canIssueEditPin =
+    hasPermission("transactions", "edit") &&
+    ["super_admin", "store_owner", "admin"].includes(role || "");
   const [activeTab, setActiveTab] = useState<
     | "invoices"
     | "returns"
@@ -72,6 +78,18 @@ export const TransactionsPage: React.FC = () => {
 
   // Cancellation Modal state
   const [cancelModalInvoice, setCancelModalInvoice] = useState<Invoice | null>(null);
+
+  // One-time edit/cancel approval state
+  const [approvalInvoice, setApprovalInvoice] = useState<Invoice | null>(null);
+  const [approvalAction, setApprovalAction] = useState<"edit" | "cancel">("edit");
+  const [approvalStaff, setApprovalStaff] = useState<Array<{ id: number | string; name: string; username?: string; role?: string }>>([]);
+  const [approvalUserId, setApprovalUserId] = useState("");
+  const [approvalMinutes, setApprovalMinutes] = useState(10);
+  const [approvalReason, setApprovalReason] = useState("");
+  const [issuedApprovalPin, setIssuedApprovalPin] = useState("");
+  const [isIssuingApproval, setIsIssuingApproval] = useState(false);
+  const [approvalRows, setApprovalRows] = useState<Array<{ id: string; action: string; mode: string; status: string; approved_by_name?: string; expires_at?: string; used_at?: string }>>([]);
+  const [isLoadingApprovals, setIsLoadingApprovals] = useState(false);
 
   // Conflict state
   const [conflictState, setConflictState] = useState<{
@@ -315,6 +333,84 @@ export const TransactionsPage: React.FC = () => {
     }
   };
 
+  const loadApprovalRows = async (invoiceId: number) => {
+    setIsLoadingApprovals(true);
+    try {
+      const res = await api.get<{ success: boolean; approvals: typeof approvalRows }>(
+        `/admin/invoices/${invoiceId}/edit-approvals`
+      );
+      setApprovalRows(res.approvals || []);
+    } catch {
+      setApprovalRows([]);
+    } finally {
+      setIsLoadingApprovals(false);
+    }
+  };
+
+  const openApprovalModal = async (invoice: Invoice) => {
+    setApprovalInvoice(invoice);
+    setApprovalAction("edit");
+    setApprovalUserId("");
+    setApprovalMinutes(10);
+    setApprovalReason("");
+    setIssuedApprovalPin("");
+    setApprovalRows([]);
+    void loadApprovalRows(invoice.id);
+    try {
+      const res = await api.get<{ data: Array<{ id: number; name: string; username?: string; role?: string }> }>(
+        "/admin/users",
+        { store_id: invoice.store_id }
+      );
+      setApprovalStaff(res.data || []);
+    } catch {
+      setApprovalStaff([]);
+    }
+  };
+
+  const handleIssueApproval = async () => {
+    if (!approvalInvoice) return;
+    if (!approvalUserId) {
+      alert("Select the staff member who will use the one-time PIN.");
+      return;
+    }
+    setIsIssuingApproval(true);
+    try {
+      const res = await api.post<{ success: boolean; pin: string; message?: string }>(
+        `/admin/invoices/${approvalInvoice.id}/edit-approvals`,
+        {
+          action: approvalAction,
+          user_id: approvalUserId,
+          minutes: approvalMinutes,
+          reason: approvalReason.trim() || undefined,
+        }
+      );
+      setIssuedApprovalPin(res.pin);
+      await loadApprovalRows(approvalInvoice.id);
+    } catch (err: any) {
+      alert(err?.message || "Failed to issue one-time PIN.");
+    } finally {
+      setIsIssuingApproval(false);
+    }
+  };
+
+  const handleRevokeApproval = async (approvalId: string) => {
+    if (!approvalInvoice) return;
+    try {
+      await api.post(`/admin/invoices/${approvalInvoice.id}/edit-approvals/${approvalId}/revoke`, {});
+      await loadApprovalRows(approvalInvoice.id);
+    } catch (err: any) {
+      alert(err?.message || "Failed to revoke approval.");
+    }
+  };
+
+  const copyIssuedPin = async () => {
+    try {
+      await navigator.clipboard.writeText(issuedApprovalPin);
+    } catch {
+      // Clipboard access can be denied; the PIN remains visible for manual copy.
+    }
+  };
+
   return (
     <div className="space-y-6">
       {/* Title & Navigation */}
@@ -500,14 +596,23 @@ export const TransactionsPage: React.FC = () => {
                             <Printer className="w-3.5 h-3.5" />
                           </button>
 
-                          {(inv.status === "issued" || inv.status === "paid") && hasPermission("transactions", "edit") && (
-                            <button
-                              onClick={() => setCancelModalInvoice(inv)}
-                              title="Cancel Invoice (Restores Stock & Adjusts Ledger)"
-                              className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/40 rounded-lg"
-                            >
-                              <Ban className="w-3.5 h-3.5" />
-                            </button>
+                          {(inv.status === "issued" || inv.status === "paid") && canIssueEditPin && (
+                            <>
+                              <button
+                                onClick={() => openApprovalModal(inv)}
+                                title="Issue One-Time Edit/Cancel PIN"
+                                className="p-1.5 text-slate-400 hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-950/40 rounded-lg"
+                              >
+                                <KeyRound className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                onClick={() => setCancelModalInvoice(inv)}
+                                title="Cancel Invoice (Restores Stock & Adjusts Ledger)"
+                                className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/40 rounded-lg"
+                              >
+                                <Ban className="w-3.5 h-3.5" />
+                              </button>
+                            </>
                           )}
                         </div>
                       </td>
@@ -1214,6 +1319,186 @@ export const TransactionsPage: React.FC = () => {
                 <Printer className="w-3.5 h-3.5" />
                 <span>Print Document</span>
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* One-Time Edit / Cancel Approval Modal */}
+      {approvalInvoice && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div
+            className="absolute inset-0 bg-slate-900/50 backdrop-blur-xs"
+            onClick={() => setApprovalInvoice(null)}
+          />
+          <div className="relative w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xl p-5 space-y-4">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h3 className="flex items-center gap-2 text-sm font-black text-slate-900 dark:text-white">
+                  <ShieldCheck className="w-4 h-4 text-amber-500" />
+                  Issue One-Time PIN
+                </h3>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                  {approvalInvoice.invoice_number} • valid for one invoice change by one staff member
+                </p>
+              </div>
+              <button
+                onClick={() => setApprovalInvoice(null)}
+                className="p-1.5 rounded-lg text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
+                title="Close"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {!issuedApprovalPin ? (
+              <div className="space-y-3">
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                    Authorized Action
+                  </label>
+                  <div className="grid grid-cols-2 gap-2">
+                    {(["edit", "cancel"] as const).map((action) => (
+                      <button
+                        key={action}
+                        type="button"
+                        onClick={() => setApprovalAction(action)}
+                        className={`px-3 py-2 rounded-xl text-xs font-bold border transition ${
+                          approvalAction === action
+                            ? "border-amber-400 bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300"
+                            : "border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300"
+                        }`}
+                      >
+                        {action === "edit" ? "Allow Edit" : "Allow Cancellation"}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                    Staff Member
+                  </label>
+                  <select
+                    value={approvalUserId}
+                    onChange={(e) => setApprovalUserId(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs text-slate-800 dark:text-white"
+                  >
+                    <option value="">Select staff member…</option>
+                    {approvalStaff.map((staff) => (
+                      <option key={staff.id} value={staff.id}>
+                        {staff.name} {staff.username ? `(${staff.username})` : ""} — {staff.role || "staff"}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                      Valid For
+                    </label>
+                    <select
+                      value={approvalMinutes}
+                      onChange={(e) => setApprovalMinutes(Number(e.target.value))}
+                      className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs text-slate-800 dark:text-white"
+                    >
+                      {[5, 10, 15, 30].map((minutes) => (
+                        <option key={minutes} value={minutes}>
+                          {minutes} minutes
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                      Reason
+                    </label>
+                    <input
+                      value={approvalReason}
+                      onChange={(e) => setApprovalReason(e.target.value)}
+                      placeholder="e.g. billing correction"
+                      className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs text-slate-800 dark:text-white"
+                    />
+                  </div>
+                </div>
+
+                <button
+                  onClick={handleIssueApproval}
+                  disabled={isIssuingApproval || !approvalUserId}
+                  className="w-full py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-white text-xs font-bold disabled:opacity-50"
+                >
+                  {isIssuingApproval ? "Issuing…" : "Generate One-Time PIN"}
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <div className="rounded-2xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/40 p-4 text-center">
+                  <p className="text-[11px] font-semibold text-amber-700 dark:text-amber-300">
+                    Share this PIN with the selected staff member now. It is stored only as a hash and cannot be shown again.
+                  </p>
+                  <div className="mt-3 flex items-center justify-center gap-2">
+                    <span className="font-mono text-3xl font-black tracking-[0.3em] text-amber-900 dark:text-amber-200">
+                      {issuedApprovalPin}
+                    </span>
+                    <button
+                      onClick={copyIssuedPin}
+                      className="p-2 rounded-lg bg-amber-200 dark:bg-amber-900 text-amber-900 dark:text-amber-200 hover:bg-amber-300"
+                      title="Copy PIN"
+                    >
+                      <Copy className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+                <button
+                  onClick={() => {
+                    setIssuedApprovalPin("");
+                    setApprovalUserId("");
+                  }}
+                  className="w-full py-2 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-bold text-slate-600 dark:text-slate-300"
+                >
+                  Issue Another PIN
+                </button>
+              </div>
+            )}
+
+            <div className="pt-3 border-t border-slate-100 dark:border-slate-800">
+              <h4 className="text-[11px] font-bold text-slate-600 dark:text-slate-300 mb-2">
+                Recent Approvals
+              </h4>
+              {isLoadingApprovals ? (
+                <p className="text-[11px] text-slate-400">Loading…</p>
+              ) : approvalRows.length === 0 ? (
+                <p className="text-[11px] text-slate-400">No approvals issued for this invoice.</p>
+              ) : (
+                <div className="space-y-1.5">
+                  {approvalRows.map((row) => (
+                    <div
+                      key={row.id}
+                      className="flex items-center justify-between gap-2 rounded-xl border border-slate-100 dark:border-slate-800 px-2.5 py-1.5 text-[11px]"
+                    >
+                      <div className="min-w-0">
+                        <div className="font-semibold text-slate-700 dark:text-slate-200 capitalize">
+                          {row.action} • {row.mode.replace("_", " ")} • {row.status}
+                        </div>
+                        <div className="text-slate-400">
+                          {row.approved_by_name || "System"}
+                          {row.expires_at ? ` • expires ${formatDateTime(row.expires_at)}` : ""}
+                          {row.used_at ? ` • used ${formatDateTime(row.used_at)}` : ""}
+                        </div>
+                      </div>
+                      {row.status === "pending" && (
+                        <button
+                          onClick={() => handleRevokeApproval(row.id)}
+                          className="shrink-0 px-2 py-1 rounded-lg text-red-600 bg-red-50 dark:bg-red-950/40 font-bold"
+                        >
+                          Revoke
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         </div>

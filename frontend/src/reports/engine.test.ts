@@ -459,7 +459,15 @@ describe("Report Engine Components (Export, Print & Runner)", () => {
     expect(thermalHtml).toContain("Alverstone Drug House Pvt Ltd.");
     expect(thermalHtml).toContain("₹11,200.00");
 
-    // 3. Dot Matrix 80C and 132C test
+    // 3. Dot Matrix 60C (6"), 80C and 132C test
+    const dot60Html = printFormatter.generatePrintHtml(purchaseDoc, "dot-matrix-60", false, {
+      printerColumns: 80, // Default printer carriage is 80, but preview must stay 60C (6C)
+    });
+    expect(dot60Html).toContain("min-width: 556px"); // 60 cols * 8.6 + 40
+    expect(dot60Html).toContain("ruler-container");
+    // Tens ruler in 60C (6C) must contain 6 columns, ending at 6, and not expanding to 8
+    expect(dot60Html).toMatch(/ruler-tens[^>]*>\s*1\s+2\s+3\s+4\s+5\s+6\s*<\/span>/);
+
     const dot80 = printFormatter.generateDotMatrixText(purchaseDoc, 80);
     const dot80Lines = dot80.split("\n");
     for (const line of dot80Lines) {

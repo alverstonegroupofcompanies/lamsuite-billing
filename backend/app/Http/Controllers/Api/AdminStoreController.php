@@ -5,9 +5,21 @@ namespace App\Http\Controllers\Api;
 use App\Models\AuditLog;
 use App\Models\Invoice;
 use App\Models\InvoiceItem;
+use App\Models\InvoicePayment;
 use App\Models\Purchase;
 use App\Models\PurchaseItem;
 use App\Models\StockAdjustment;
+use App\Models\StockTransfer;
+use App\Models\StockTransferItem;
+use App\Models\CustomerPayment;
+use App\Models\Expense;
+use App\Models\HeldBill;
+use App\Models\Party;
+use App\Models\Product;
+use App\Models\ProductBatch;
+use App\Models\StockLedgerEntry;
+use App\Models\SupplierPayment;
+use App\Models\SyncEvent;
 use App\Models\Store;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -75,6 +87,7 @@ class AdminStoreController
             'gstin' => 'nullable|string|max:20',
             'drug_license_numbers' => 'nullable|array',
             'fssai_no' => 'nullable|string|max:50',
+            'timezone' => 'nullable|string|max:64',
             'tax_mode' => 'nullable|in:inclusive,exclusive',
             'store_type' => 'nullable|string|in:pharmacy,cosmetics,kirana_general,clothing,electronics,stationery,wholesale,restaurant,other',
             'gst_type' => 'nullable|string|in:regular,composition,no_tax',
@@ -163,6 +176,7 @@ class AdminStoreController
             'gstin' => 'nullable|string|max:20',
             'drug_license_numbers' => 'nullable|array',
             'fssai_no' => 'nullable|string|max:50',
+            'timezone' => 'nullable|string|max:64',
             'tax_mode' => 'nullable|in:inclusive,exclusive',
             'store_type' => 'nullable|string|in:pharmacy,cosmetics,kirana_general,clothing,electronics,stationery,wholesale,restaurant,other',
             'gst_type' => 'nullable|string|in:regular,composition,no_tax',
@@ -206,6 +220,21 @@ class AdminStoreController
             $store->id
         );
 
+        // Record real-time SyncEvent for desktop terminals and counters
+        SyncEvent::create([
+            'store_id' => $store->id,
+            'entity_type' => 'store_status',
+            'entity_id' => (string)$store->id,
+            'action' => $newStatus ? 'enabled' : 'disabled',
+            'client_data' => [
+                'store_id' => $store->id,
+                'is_active' => $newStatus,
+                'store_version' => $store->version,
+                'reason' => $request->input('reason'),
+                'updated_at' => now()->toIso8601String(),
+            ],
+        ]);
+
         return response()->json([
             'success' => true,
             'store_id' => $store->id,
@@ -235,18 +264,95 @@ class AdminStoreController
             ], 422);
         }
 
+        $options = $request->input('options', [
+            'reset_invoices' => true,
+            'reset_stock' => true,
+            'reset_products' => false,
+            'reset_purchases' => true,
+            'reset_customers' => true,
+            'reset_expenses' => true,
+            'reset_held_bills' => true,
+        ]);
+
+        $resetInvoices = !empty($options['reset_invoices']);
+        $resetStock = !empty($options['reset_stock']);
+        $resetProducts = !empty($options['reset_products']);
+        $resetPurchases = !empty($options['reset_purchases']);
+        $resetCustomers = !empty($options['reset_customers']);
+        $resetExpenses = !empty($options['reset_expenses']);
+        $resetHeldBills = !empty($options['reset_held_bills']);
+
         DB::beginTransaction();
         try {
-            // Delete store transactional data while preserving master catalog
-            $invoiceIds = Invoice::where('store_id', $store->id)->pluck('id');
-            InvoiceItem::whereIn('invoice_id', $invoiceIds)->delete();
-            Invoice::where('store_id', $store->id)->delete();
+            $wipedCounts = [];
 
-            $purchaseIds = Purchase::where('store_id', $store->id)->pluck('id');
-            PurchaseItem::whereIn('purchase_id', $purchaseIds)->delete();
-            Purchase::where('store_id', $store->id)->delete();
+            // 1. Reset Invoices & Billing Data
+            if ($resetInvoices) {
+                $invoiceIds = Invoice::where('store_id', $store->id)->pluck('id');
+                InvoiceItem::whereIn('invoice_id', $invoiceIds)->delete();
+                InvoicePayment::where('store_id', $store->id)->delete();
+                Invoice::where('store_id', $store->id)->delete();
+                $wipedCounts['invoices_wiped'] = count($invoiceIds);
+            }
 
-            StockAdjustment::where('store_id', $store->id)->delete();
+            // 2. Reset Purchases & Supplier Invoices
+            if ($resetPurchases) {
+                $purchaseIds = Purchase::where('store_id', $store->id)->pluck('id');
+                PurchaseItem::whereIn('purchase_id', $purchaseIds)->delete();
+                Purchase::where('store_id', $store->id)->delete();
+                $wipedCounts['purchases_wiped'] = count($purchaseIds);
+            }
+
+            // 3. Reset Stock & Inventory Ledgers
+            if ($resetStock) {
+                $transferIds = StockTransfer::where('source_store_id', $store->id)->orWhere('destination_store_id', $store->id)->pluck('id');
+                StockTransferItem::whereIn('stock_transfer_id', $transferIds)->delete();
+                StockTransfer::whereIn('id', $transferIds)->delete();
+
+                $adjustmentsCount = StockAdjustment::where('store_id', $store->id)->delete();
+                $ledgerCount = StockLedgerEntry::where('store_id', $store->id)->delete();
+
+                // Reset batch quantities to zero for this store (wiping negative oversold deficits)
+                ProductBatch::where('store_id', $store->id)->update(['stock_qty' => 0]);
+                // If single-store or shared batches, also reset
+                if (Store::count() === 1) {
+                    ProductBatch::query()->update(['stock_qty' => 0]);
+                    Product::query()->update(['current_stock' => 0]);
+                } else {
+                    Product::where('store_id', $store->id)->update(['current_stock' => 0]);
+                }
+                $wipedCounts['stock_reset'] = true;
+                $wipedCounts['adjustments_wiped'] = $adjustmentsCount;
+            }
+
+            // 3b. Reset / Wipe Product & Batch Catalog
+            if ($resetProducts) {
+                $batchesCount = ProductBatch::where('store_id', $store->id)->delete();
+                $prodsCount = Product::where('store_id', $store->id)->delete();
+                $wipedCounts['products_wiped'] = $prodsCount;
+                $wipedCounts['batches_wiped'] = $batchesCount;
+            }
+
+            // 4. Reset Parties (customers, suppliers, doctors, patients), balances & payments
+            if ($resetCustomers) {
+                $paymentsCount = CustomerPayment::where('store_id', $store->id)->delete();
+                SupplierPayment::where('store_id', $store->id)->delete();
+                $partiesCount = Party::where('store_id', $store->id)->delete();
+                $wipedCounts['customer_payments_wiped'] = $paymentsCount;
+                $wipedCounts['parties_wiped'] = $partiesCount;
+            }
+
+            // 5. Reset Operational Expenses
+            if ($resetExpenses) {
+                $expensesCount = Expense::where('store_id', $store->id)->delete();
+                $wipedCounts['expenses_wiped'] = $expensesCount;
+            }
+
+            // 6. Reset Parked / Held Bills
+            if ($resetHeldBills) {
+                $heldCount = HeldBill::where('store_id', $store->id)->delete();
+                $wipedCounts['held_bills_wiped'] = $heldCount;
+            }
 
             // Increment store version
             $store->increment('version');
@@ -255,16 +361,42 @@ class AdminStoreController
                 'remote_store_reset',
                 'Store',
                 (string)$store->id,
-                ['invoices_wiped' => count($invoiceIds), 'purchases_wiped' => count($purchaseIds)],
-                ['reason' => $request->input('reason'), 'phrase' => $expectedPhrase],
+                $wipedCounts,
+                [
+                    'reason' => $request->input('reason'),
+                    'phrase' => $expectedPhrase,
+                    'options' => $options,
+                ],
                 $store->id
             );
+
+            // Record remote store reset SyncEvent so connected desktop apps clear local data
+            SyncEvent::create([
+                'store_id' => $store->id,
+                'entity_type' => 'store_reset',
+                'entity_id' => (string)$store->id,
+                'action' => 'remote_reset',
+                'client_data' => [
+                    'store_id' => $store->id,
+                    'store_version' => $store->version,
+                    'reason' => $request->input('reason'),
+                    'options' => $options,
+                    'reset_stock' => $resetStock,
+                    'reset_invoices' => $resetInvoices,
+                    'reset_purchases' => $resetPurchases,
+                    'reset_customers' => $resetCustomers,
+                    'reset_expenses' => $resetExpenses,
+                    'reset_held_bills' => $resetHeldBills,
+                    'reset_at' => now()->toIso8601String(),
+                ],
+            ]);
 
             DB::commit();
 
             return response()->json([
                 'success' => true,
-                'message' => "Store '{$store->name}' transactional data has been successfully reset.",
+                'message' => "Store '{$store->name}' selected data has been successfully reset.",
+                'wiped_modules' => $wipedCounts,
             ]);
         } catch (\Throwable $e) {
             DB::rollBack();

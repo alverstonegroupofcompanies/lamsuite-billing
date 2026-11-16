@@ -126,6 +126,8 @@ export interface PrintingConfig {
   dotMatrixAutoCenter?: boolean;
 }
 
+export type BillsDefaultPeriod = "today" | "yesterday" | "last7days" | "month" | "all";
+
 export interface WorkspaceSettings {
   theme: "light" | "dark" | "system";
   density: "compact" | "comfortable";
@@ -134,6 +136,8 @@ export interface WorkspaceSettings {
   autoUpdateCheck: boolean;
   wifiStrengthSimulator: number; // 0 - 100%
   defaultLandingPage?: "dashboard" | "pos" | "bills" | "stock" | "purchases";
+  /** Store-owner default period for the Past Bills register; users may pin their own. */
+  billsDefaultPeriod?: BillsDefaultPeriod;
 }
 
 export interface InventoryStockSettings {
@@ -143,11 +147,50 @@ export interface InventoryStockSettings {
   allowExpiredBatchSale: "warn_confirm" | "block";
 }
 
+/**
+ * Per-store stock adjustment restrictions. Mirrors the Laravel
+ * StockAdjustmentPolicy so the desktop can block locally and the server can
+ * still enforce the same rules.
+ */
+export interface StockAdjustmentPolicyConfig {
+  allow_negative_stock: boolean;
+  allowed_roles: string[];
+  allowed_reasons: string[];
+  max_qty_per_line: number | null;
+  max_value_per_document: number | null;
+  max_documents_per_day: number | null;
+  require_notes: boolean;
+  approval_threshold_value: number | null;
+  approval_threshold_qty: number | null;
+  approver_roles: string[];
+  locked_before_date: string | null;
+  allowed_time_window: { start: string; end: string } | null;
+}
+
+export const DEFAULT_STOCK_ADJUSTMENT_POLICY: StockAdjustmentPolicyConfig = {
+  allow_negative_stock: false,
+  allowed_roles: [],
+  allowed_reasons: [],
+  max_qty_per_line: null,
+  max_value_per_document: null,
+  max_documents_per_day: null,
+  require_notes: false,
+  approval_threshold_value: null,
+  approval_threshold_qty: null,
+  approver_roles: ["store_owner", "manager", "super_admin"],
+  locked_before_date: null,
+  allowed_time_window: null,
+};
+
 export interface SecurityConfig {
   idleTimeoutMinutes: number;
   maxFailedLogins: number;
   allowBiometricSignIn: boolean;
   defaultRole: "cashier" | "pharmacist" | "store_manager" | "admin";
+  /** Hours cached staff credentials stay usable while offline. 0 disables the limit. */
+  offlineGraceHours: number;
+  /** Roles allowed to stay signed in on more than one counter at a time. */
+  allowMultiCounterRoles: string[];
 }
 
 export interface WalletConfig {
@@ -289,6 +332,7 @@ export interface CompanySettings {
   workspace: WorkspaceSettings;
   security: SecurityConfig;
   inventory: InventoryStockSettings;
+  stock_adjustment_policy?: StockAdjustmentPolicyConfig;
   wallet: WalletConfig;
   smtp: EmailSmtpConfig;
   whatsapp: WhatsAppConfig;
@@ -303,6 +347,8 @@ export interface CompanySettings {
   enable_pts?: boolean;
   enable_ptss?: boolean;
   freight_is_taxable?: boolean;
+  /** Batch & expiry capture. Defaults to true for pharmacy stores, false otherwise. */
+  batch_required?: boolean;
   purchase_columns?: ColumnSetting[];
   purchase_header_fields?: HeaderFieldSetting[];
   active_purchase_preset?: string;
@@ -392,24 +438,25 @@ export const DEFAULT_PURCHASE_COLUMNS: ColumnSetting[] = [
   { id: "product_name", label: "Product", visible: true, width: 240, order: 2, required: true },
   { id: "batch_no", label: "Batch", visible: true, width: 105, order: 3, required: true },
   { id: "expiry_date", label: "Expiry (MM/YY)", visible: true, width: 95, order: 4, required: true },
-  { id: "qty", label: "Quantity", visible: true, width: 140, order: 5, required: true },
-  { id: "free_qty", label: "Free Qty", visible: true, width: 80, order: 6 },
-  { id: "mrp", label: "MRP (₹)", visible: true, width: 85, order: 7 },
-  { id: "ptr", label: "PTR (₹)", visible: false, width: 80, order: 8 },
-  { id: "pts", label: "PTS (₹)", visible: false, width: 80, order: 9 },
-  { id: "ptss", label: "PTSS (₹)", visible: false, width: 80, order: 10 },
-  { id: "purchase_rate", label: "Pur. Rate (₹)", visible: true, width: 95, order: 11, required: true },
-  { id: "discount", label: "Disc %", visible: true, width: 75, order: 12 },
-  { id: "discount_amount", label: "Disc (₹)", visible: false, width: 75, order: 13 },
-  { id: "scheme", label: "Scheme", visible: false, width: 75, order: 14 },
-  { id: "gst", label: "GST %", visible: true, width: 70, order: 15 },
-  { id: "hsn", label: "HSN", visible: false, width: 85, order: 16 },
-  { id: "selling_rate", label: "Selling Rate (₹)", visible: true, width: 95, order: 17 },
-  { id: "margin", label: "Margin %", visible: true, width: 80, order: 18 },
-  { id: "taxable_value", label: "Taxable (₹)", visible: true, width: 90, order: 19 },
-  { id: "tax", label: "Tax (₹)", visible: true, width: 85, order: 20 },
-  { id: "total", label: "Total (₹)", visible: true, width: 100, order: 21, required: true },
-  { id: "actions", label: "Action", visible: true, width: 60, order: 22, required: true },
+  { id: "mfg_date", label: "Mfg Date", visible: false, width: 95, order: 5 },
+  { id: "qty", label: "Quantity", visible: true, width: 140, order: 6, required: true },
+  { id: "free_qty", label: "Free Qty", visible: true, width: 80, order: 7 },
+  { id: "mrp", label: "MRP (₹)", visible: true, width: 85, order: 8 },
+  { id: "ptr", label: "PTR (₹)", visible: false, width: 80, order: 9 },
+  { id: "pts", label: "PTS (₹)", visible: false, width: 80, order: 10 },
+  { id: "ptss", label: "PTSS (₹)", visible: false, width: 80, order: 11 },
+  { id: "purchase_rate", label: "Pur. Rate (₹)", visible: true, width: 95, order: 12, required: true },
+  { id: "discount", label: "Disc %/₹", visible: true, width: 75, order: 13 },
+  { id: "discount_amount", label: "Disc (₹)", visible: false, width: 75, order: 14 },
+  { id: "scheme", label: "Scheme", visible: false, width: 75, order: 15 },
+  { id: "gst", label: "GST %", visible: true, width: 70, order: 16 },
+  { id: "hsn", label: "HSN", visible: false, width: 85, order: 17 },
+  { id: "selling_rate", label: "Selling Rate (₹)", visible: true, width: 95, order: 18 },
+  { id: "margin", label: "Margin %", visible: true, width: 80, order: 19 },
+  { id: "taxable_value", label: "Taxable (₹)", visible: true, width: 90, order: 20 },
+  { id: "tax", label: "Tax (₹)", visible: true, width: 85, order: 21 },
+  { id: "total", label: "Total (₹)", visible: true, width: 100, order: 22, required: true },
+  { id: "actions", label: "Action", visible: true, width: 60, order: 23, required: true },
 ];
 
 export const DEFAULT_PURCHASE_HEADER_FIELDS: HeaderFieldSetting[] = [
@@ -621,7 +668,7 @@ export const DEFAULT_SETTINGS: CompanySettings = {
     purchasePrefix: "PUR",
     nextPurchaseNumber: 201,
     quotationPrefix: "QUO",
-    nextQuotationNumber: 301,
+    nextQuotationNumber: 101,
     adjustmentPrefix: "ADJ",
     nextAdjustmentNumber: 401,
     transferPrefix: "TRF",
@@ -664,6 +711,7 @@ export const DEFAULT_SETTINGS: CompanySettings = {
     autoUpdateCheck: true,
     wifiStrengthSimulator: 95,
     defaultLandingPage: "dashboard",
+    billsDefaultPeriod: "today",
   },
 
   security: {
@@ -671,6 +719,8 @@ export const DEFAULT_SETTINGS: CompanySettings = {
     maxFailedLogins: 5,
     allowBiometricSignIn: true,
     defaultRole: "cashier",
+    offlineGraceHours: 72,
+    allowMultiCounterRoles: [],
   },
 
   inventory: {
@@ -679,6 +729,8 @@ export const DEFAULT_SETTINGS: CompanySettings = {
     requireManagerPinForNegativeStock: false,
     allowExpiredBatchSale: "warn_confirm",
   },
+
+  stock_adjustment_policy: { ...DEFAULT_STOCK_ADJUSTMENT_POLICY },
 
   wallet: {
     enabled: true,
@@ -750,6 +802,7 @@ export const DEFAULT_SETTINGS: CompanySettings = {
   enable_pts: false,
   enable_ptss: false,
   freight_is_taxable: false,
+  batch_required: true,
   purchase_columns: [...DEFAULT_PURCHASE_COLUMNS],
   purchase_header_fields: [...DEFAULT_PURCHASE_HEADER_FIELDS],
   active_purchase_preset: "pharmacy_inward",
@@ -786,6 +839,10 @@ export class CompanySettingsService {
         workspace: { ...DEFAULT_SETTINGS.workspace, ...(record.workspace || {}) },
         security: { ...DEFAULT_SETTINGS.security, ...(record.security || {}) },
         inventory: { ...DEFAULT_SETTINGS.inventory, ...(record.inventory || {}) },
+        stock_adjustment_policy: {
+          ...DEFAULT_STOCK_ADJUSTMENT_POLICY,
+          ...(record.stock_adjustment_policy || {}),
+        },
         wallet: { ...DEFAULT_SETTINGS.wallet, ...(record.wallet || {}) },
         smtp: { ...DEFAULT_SETTINGS.smtp, ...(record.smtp || {}) },
         whatsapp: { ...DEFAULT_SETTINGS.whatsapp, ...(record.whatsapp || {}) },
@@ -806,6 +863,7 @@ export class CompanySettingsService {
         enable_pts: record.enable_pts ?? DEFAULT_SETTINGS.enable_pts,
         enable_ptss: record.enable_ptss ?? DEFAULT_SETTINGS.enable_ptss,
         freight_is_taxable: record.freight_is_taxable ?? DEFAULT_SETTINGS.freight_is_taxable,
+        batch_required: record.batch_required ?? ((record.store_type || "pharmacy") === "pharmacy"),
         enabled_menu_items: record.enabled_menu_items?.length
           ? (record.enabled_menu_items.includes("import_export")
               ? record.enabled_menu_items
@@ -1050,15 +1108,20 @@ export class CompanySettingsService {
   }
 
   getPurchaseColumns(): ColumnSetting[] {
+    const mergeDefaults = (columns: ColumnSetting[]) => {
+      const known = new Set(columns.map((c) => c.id));
+      return [...columns, ...DEFAULT_PURCHASE_COLUMNS.filter((c) => !known.has(c.id))];
+    };
+
     const local = safeStorage.getItem("lamsuite_purchase_columns");
     if (local) {
       try {
         const parsed = JSON.parse(local);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        if (Array.isArray(parsed) && parsed.length > 0) return mergeDefaults(parsed);
       } catch (_) {}
     }
     return this.currentSettings.purchase_columns?.length
-      ? this.currentSettings.purchase_columns
+      ? mergeDefaults(this.currentSettings.purchase_columns)
       : [...DEFAULT_PURCHASE_COLUMNS];
   }
 
@@ -1239,6 +1302,8 @@ export class CompanySettingsService {
 
     try {
       const token = safeStorage.getItem("staff_token");
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 1000);
       const res = await fetch(`${baseUrl}/api/settings`, {
         method: "POST",
         headers: {
@@ -1252,7 +1317,9 @@ export class CompanySettingsService {
           ...settingsToSave,
           store_id: storeId,
         }),
+        signal: controller.signal,
       });
+      clearTimeout(timeoutId);
 
       if (res.ok) {
         return true;
@@ -1347,16 +1414,43 @@ export class CompanySettingsService {
       : (billing.round_off_enabled !== undefined ? Boolean(billing.round_off_enabled) : this.currentSettings.round_off_enabled);
     const defaultRateBasis = payload.default_rate_basis || billing.default_rate_basis || this.currentSettings.default_rate_basis;
 
-    // Sequences
+    // Sequences (monotonically non-decreasing to prevent duplicate document numbers)
     const sequences = payload.sequences || {};
     const invoicePrefix = sequences.invoicePrefix || sequences.invoice_prefix || payload.invoice_prefix || this.currentSettings.invoice_prefix;
-    const nextInvoiceNumber = sequences.nextInvoiceNumber || sequences.next_invoice_number || payload.next_invoice_number || this.currentSettings.next_invoice_number;
+    const remoteNextInv = Number(sequences.nextInvoiceNumber || sequences.next_invoice_number || payload.next_invoice_number || 0);
+    const localNextInv = Number(this.currentSettings.sequences?.nextInvoiceNumber || this.currentSettings.next_invoice_number || 1001);
+    const resolvedNextInvoiceNumber = Math.max(localNextInv, remoteNextInv);
 
     const mergedSequences = {
       ...this.currentSettings.sequences,
       ...sequences,
       invoicePrefix,
-      nextInvoiceNumber,
+      nextInvoiceNumber: resolvedNextInvoiceNumber,
+      returnPrefix: sequences.returnPrefix || sequences.return_prefix || this.currentSettings.sequences?.returnPrefix || "SR",
+      nextReturnNumber: Math.max(
+        Number(this.currentSettings.sequences?.nextReturnNumber || 1),
+        Number(sequences.nextReturnNumber || sequences.next_return_number || 0)
+      ),
+      purchasePrefix: sequences.purchasePrefix || sequences.purchase_prefix || this.currentSettings.sequences?.purchasePrefix || "PUR",
+      nextPurchaseNumber: Math.max(
+        Number(this.currentSettings.sequences?.nextPurchaseNumber || 201),
+        Number(sequences.nextPurchaseNumber || sequences.next_purchase_number || 0)
+      ),
+      quotationPrefix: sequences.quotationPrefix || sequences.quotation_prefix || this.currentSettings.sequences?.quotationPrefix || "QUO",
+      nextQuotationNumber: Math.max(
+        Number(this.currentSettings.sequences?.nextQuotationNumber || 101),
+        Number(sequences.nextQuotationNumber || sequences.next_quotation_number || 0)
+      ),
+      adjustmentPrefix: sequences.adjustmentPrefix || sequences.adjustment_prefix || this.currentSettings.sequences?.adjustmentPrefix || "ADJ",
+      nextAdjustmentNumber: Math.max(
+        Number(this.currentSettings.sequences?.nextAdjustmentNumber || 401),
+        Number(sequences.nextAdjustmentNumber || sequences.next_adjustment_number || 0)
+      ),
+      transferPrefix: sequences.transferPrefix || sequences.transfer_prefix || this.currentSettings.sequences?.transferPrefix || "TRF",
+      nextTransferNumber: Math.max(
+        Number(this.currentSettings.sequences?.nextTransferNumber || 501),
+        Number(sequences.nextTransferNumber || sequences.next_transfer_number || 0)
+      ),
     };
 
     this.currentSettings = {
@@ -1387,7 +1481,7 @@ export class CompanySettingsService {
 
       sequences: mergedSequences,
       invoice_prefix: invoicePrefix,
-      next_invoice_number: nextInvoiceNumber,
+      next_invoice_number: resolvedNextInvoiceNumber,
 
       printing: { ...this.currentSettings.printing, ...(payload.printing || {}) },
       workspace: { ...this.currentSettings.workspace, ...(payload.workspace || {}) },
@@ -1428,6 +1522,7 @@ export class CompanySettingsService {
       enable_pts: payload.enable_pts !== undefined ? Boolean(payload.enable_pts) : this.currentSettings.enable_pts,
       enable_ptss: payload.enable_ptss !== undefined ? Boolean(payload.enable_ptss) : this.currentSettings.enable_ptss,
       freight_is_taxable: payload.freight_is_taxable !== undefined ? Boolean(payload.freight_is_taxable) : this.currentSettings.freight_is_taxable,
+      batch_required: payload.batch_required !== undefined ? Boolean(payload.batch_required) : this.currentSettings.batch_required,
       enabled_menu_items: Array.isArray(payload.enabled_menu_items) && payload.enabled_menu_items.length > 0
         ? payload.enabled_menu_items
         : this.currentSettings.enabled_menu_items,
@@ -1443,36 +1538,73 @@ export class CompanySettingsService {
     return { ...this.currentSettings };
   }
 
+  previewNextInvoiceNumber(): string {
+    const seq = this.currentSettings.sequences;
+    const prefix = seq?.invoicePrefix || this.currentSettings.invoice_prefix || "INV";
+    const currentNum = seq?.nextInvoiceNumber ?? this.currentSettings.next_invoice_number ?? 1001;
+    return `${prefix}-${currentNum}`;
+  }
+
   async generateNextInvoiceNumber(): Promise<string> {
     await this.loadSettings();
-    const currentNum = this.currentSettings.next_invoice_number;
-    const prefix = this.currentSettings.invoice_prefix || "INV";
-    const year = new Date().getFullYear();
-    const formattedNum = String(currentNum).padStart(5, "0");
-    const invoiceNumber = `${prefix}-${year}-${formattedNum}`;
+    const seq = { ...this.currentSettings.sequences };
+    const prefix = seq.invoicePrefix || this.currentSettings.invoice_prefix || "INV";
+    const currentNum = seq.nextInvoiceNumber ?? this.currentSettings.next_invoice_number ?? 1001;
+    const invoiceNumber = `${prefix}-${currentNum}`;
 
     // Increment and persist next number
+    seq.invoicePrefix = prefix;
+    seq.nextInvoiceNumber = currentNum + 1;
     await this.updateSettings({
+      invoice_prefix: prefix,
       next_invoice_number: currentNum + 1,
-      sequences: {
-        ...this.currentSettings.sequences,
-        nextInvoiceNumber: currentNum + 1,
-      },
+      sequences: seq,
     });
     return invoiceNumber;
   }
 
+  async syncNextInvoiceSequence(assignedInvoiceNumber: string): Promise<void> {
+    if (!assignedInvoiceNumber) return;
+    await this.loadSettings();
+    const parts = assignedInvoiceNumber.split("-");
+    const lastPart = parseInt(parts[parts.length - 1], 10);
+    const seq = { ...this.currentSettings.sequences };
+    const currentNext = seq.nextInvoiceNumber ?? this.currentSettings.next_invoice_number ?? 1001;
+    if (!isNaN(lastPart) && lastPart >= currentNext) {
+      seq.nextInvoiceNumber = lastPart + 1;
+      await this.updateSettings({
+        next_invoice_number: lastPart + 1,
+        sequences: seq,
+      });
+    }
+  }
+
+  previewNextDocumentNumber(type: "return" | "purchase" | "quotation" | "adjustment" | "transfer"): string {
+    const seq = this.currentSettings.sequences;
+    if (type === "return") {
+      return `${seq?.returnPrefix || "SR"}-${seq?.nextReturnNumber || 1}`;
+    } else if (type === "purchase") {
+      return `${seq?.purchasePrefix || "PUR"}-${seq?.nextPurchaseNumber || 201}`;
+    } else if (type === "quotation") {
+      return `${seq?.quotationPrefix || "QUO"}-${seq?.nextQuotationNumber || 101}`;
+    } else if (type === "adjustment") {
+      return `${seq?.adjustmentPrefix || "ADJ"}-${seq?.nextAdjustmentNumber || 401}`;
+    } else if (type === "transfer") {
+      return `${seq?.transferPrefix || "TRF"}-${seq?.nextTransferNumber || 501}`;
+    }
+    return `DOC-1`;
+  }
+
   async generateNextDocumentNumber(type: "return" | "purchase" | "quotation" | "adjustment" | "transfer"): Promise<string> {
     await this.loadSettings();
-    const year = new Date().getFullYear();
     const seq = { ...this.currentSettings.sequences };
 
     let prefix = "DOC";
     let num = 1;
 
     if (type === "return") {
-      prefix = seq.returnPrefix || "RET";
-      num = seq.nextReturnNumber || 101;
+      prefix = seq.returnPrefix || "SR";
+      num = seq.nextReturnNumber || 1;
       seq.nextReturnNumber = num + 1;
     } else if (type === "purchase") {
       prefix = seq.purchasePrefix || "PUR";
@@ -1480,7 +1612,7 @@ export class CompanySettingsService {
       seq.nextPurchaseNumber = num + 1;
     } else if (type === "quotation") {
       prefix = seq.quotationPrefix || "QUO";
-      num = seq.nextQuotationNumber || 301;
+      num = seq.nextQuotationNumber || 101;
       seq.nextQuotationNumber = num + 1;
     } else if (type === "adjustment") {
       prefix = seq.adjustmentPrefix || "ADJ";
@@ -1493,7 +1625,36 @@ export class CompanySettingsService {
     }
 
     await this.updateSettings({ sequences: seq });
-    return `${prefix}-${year}-${String(num).padStart(5, "0")}`;
+    return `${prefix}-${num}`;
+  }
+
+  async syncNextDocumentSequence(
+    type: "return" | "purchase" | "quotation" | "adjustment" | "transfer",
+    assignedNumber: string
+  ): Promise<void> {
+    if (!assignedNumber) return;
+    await this.loadSettings();
+    const parts = assignedNumber.split("-");
+    const lastPart = parseInt(parts[parts.length - 1], 10);
+    if (isNaN(lastPart)) return;
+
+    const seq = { ...this.currentSettings.sequences };
+    if (type === "return" && lastPart >= (seq.nextReturnNumber || 1)) {
+      seq.nextReturnNumber = lastPart + 1;
+      await this.updateSettings({ sequences: seq });
+    } else if (type === "purchase" && lastPart >= (seq.nextPurchaseNumber || 201)) {
+      seq.nextPurchaseNumber = lastPart + 1;
+      await this.updateSettings({ sequences: seq });
+    } else if (type === "quotation" && lastPart >= (seq.nextQuotationNumber || 101)) {
+      seq.nextQuotationNumber = lastPart + 1;
+      await this.updateSettings({ sequences: seq });
+    } else if (type === "adjustment" && lastPart >= (seq.nextAdjustmentNumber || 401)) {
+      seq.nextAdjustmentNumber = lastPart + 1;
+      await this.updateSettings({ sequences: seq });
+    } else if (type === "transfer" && lastPart >= (seq.nextTransferNumber || 501)) {
+      seq.nextTransferNumber = lastPart + 1;
+      await this.updateSettings({ sequences: seq });
+    }
   }
 
   isMenuEnabled(menuKey: string): boolean {

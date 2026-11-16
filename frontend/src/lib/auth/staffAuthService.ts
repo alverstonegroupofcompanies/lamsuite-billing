@@ -5,6 +5,8 @@ import { deviceSessionService } from "../devices/deviceSessionService";
 import { API_BASE_URL } from "../../config/env";
 import { getOrCreateClientDeviceUuid, detectDeviceFriendlyName } from "./clientDeviceIdentifier";
 import { publicIpService } from "../network/publicIpService";
+import { validatePassword, validatePin } from "./credentialPolicy";
+import { decryptStaffSecret, encryptStaffSecret } from "./offlineStaffVault";
 
 export interface StaffUser {
   id: string;
@@ -34,13 +36,41 @@ export interface ActiveStaffSession {
   lastActivityAt: number;
 }
 
+export interface StaffSessionConflict {
+  activeSession?: {
+    id: string;
+    device_uuid?: string | null;
+    device_name?: string | null;
+    counter_id?: string | null;
+    counter_name?: string | null;
+    last_active_at?: string | null;
+  };
+  canForceOut: boolean;
+}
+
+export interface StaffAuthResult {
+  success: boolean;
+  error?: string;
+  mustChangePassword?: boolean;
+  user?: StaffUser;
+  conflict?: StaffSessionConflict;
+}
+
+export interface StaffAuthOptions {
+  forceOut?: boolean;
+}
+
 const isNumericId = (val: string) => /^\d+$/.test(val);
+
+const OFFLINE_SYNC_STORAGE_KEY = "lamsuite_staff_offline_sync_at";
+const DEFAULT_OFFLINE_GRACE_HOURS = 72;
 
 export class StaffAuthService {
   private currentSession: ActiveStaffSession | null = null;
   private maxFailedAttempts = 5;
   private lockoutDurationMs = 15 * 60 * 1000; // 15 mins
   private idleTimeoutMs = 5 * 60 * 1000; // 5 mins default
+  private offlineGraceHours = DEFAULT_OFFLINE_GRACE_HOURS;
   private sessionListeners: Array<(session: ActiveStaffSession | null) => void> = [];
 
   constructor() {
@@ -90,23 +120,39 @@ export class StaffAuthService {
       if (res.ok) {
         const body = await res.json();
         if (body.success && Array.isArray(body.staff)) {
-          // Replace local cache for this store with verified cloud users
-          const currentLocal = await sqliteStorage.findAll<any>("staff_users");
-          for (const u of currentLocal || []) {
-            if (String(u.store_id) === activeStore) {
-              await sqliteStorage.deleteRecord("staff_users", u.id);
-            }
+          const currentLocal = (await sqliteStorage.findAll<any>("staff_users")) || [];
+          const localById = new Map<string, any>();
+          const localByUsername = new Map<string, any>();
+          for (const u of currentLocal) {
+            localById.set(String(u.id), u);
+            localByUsername.set(String(u.username).toLowerCase(), u);
           }
 
+          const consumedLocalIds = new Set<string>();
+          const incomingIds = new Set<string>();
+          const incomingUsernames = new Set<string>();
+          const syncedStaff: StaffUser[] = [];
+
           for (const s of body.staff) {
+            const serverId = String(s.id);
+            const username = String(s.username || "");
+            const local = localById.get(serverId) || localByUsername.get(username.toLowerCase());
+            if (local) consumedLocalIds.add(String(local.id));
+
+            const cachedPassword = local?.password_hash ? await decryptStaffSecret(local.password_hash) : "";
+            const cachedPin = local?.pin_hash ? await decryptStaffSecret(local.pin_hash) : "";
+
+            const passwordHash = s.password_hash || cachedPassword;
+            const pinHash = s.pin_hash || (s.has_pin === false ? "" : cachedPin);
+
             const userRecord = {
-              id: String(s.id),
-              store_id: String(s.store_id),
-              username: s.username,
+              id: serverId,
+              store_id: String(s.store_id || activeStore),
+              username,
               full_name: s.full_name,
               role: s.role,
-              password_hash: s.password_hash,
-              pin_hash: s.pin_hash,
+              password_hash: await encryptStaffSecret(passwordHash),
+              pin_hash: await encryptStaffSecret(pinHash),
               is_active: s.is_active ? 1 : 0,
               must_change_password: s.must_change_password ? 1 : 0,
               biometric_registered: s.biometric_registered ? 1 : 0,
@@ -114,27 +160,42 @@ export class StaffAuthService {
               locked_until: s.locked_until,
               permissions_json: JSON.stringify(s.permissions || ["*"]),
               enabled_menus_json: JSON.stringify(s.enabled_menus || ["pos", "bills"]),
+              cache_synced_at: Date.now(),
               updated_at: Date.now(),
             };
             await sqliteStorage.insertRecord("staff_users", userRecord.id, userRecord);
+
+            incomingIds.add(serverId);
+            incomingUsernames.add(username.toLowerCase());
+            syncedStaff.push({
+              id: serverId,
+              store_id: userRecord.store_id,
+              username,
+              full_name: s.full_name,
+              role: s.role,
+              password_hash: passwordHash,
+              pin_hash: pinHash,
+              is_active: Boolean(s.is_active),
+              must_change_password: Boolean(s.must_change_password),
+              biometric_registered: Boolean(s.biometric_registered),
+              failed_attempts: s.failed_attempts || 0,
+              locked_until: s.locked_until,
+              permissions: s.permissions || ["*"],
+              enabled_menus: s.enabled_menus || ["pos", "bills"],
+            });
           }
 
-          return body.staff.map((u: any) => ({
-            id: String(u.id),
-            store_id: String(u.store_id),
-            username: u.username,
-            full_name: u.full_name,
-            role: u.role,
-            password_hash: u.password_hash,
-            pin_hash: u.pin_hash,
-            is_active: Boolean(u.is_active),
-            must_change_password: Boolean(u.must_change_password),
-            biometric_registered: Boolean(u.biometric_registered),
-            failed_attempts: u.failed_attempts || 0,
-            locked_until: u.locked_until,
-            permissions: u.permissions || ["*"],
-            enabled_menus: u.enabled_menus || ["pos", "bills"],
-          }));
+          // Users removed or revoked at the cloud are removed locally too.
+          for (const u of currentLocal) {
+            if (String(u.store_id) !== activeStore) continue;
+            if (consumedLocalIds.has(String(u.id))) continue;
+            if (incomingIds.has(String(u.id)) || incomingUsernames.has(String(u.username).toLowerCase())) continue;
+            await sqliteStorage.deleteRecord("staff_users", u.id).catch(() => {});
+          }
+
+          this.setOfflineCacheSyncedAt(activeStore);
+          this.flushOfflineAudit().catch(() => {});
+          return syncedStaff;
         }
       }
     } catch (_) {
@@ -143,115 +204,51 @@ export class StaffAuthService {
     return [];
   }
 
-  async initDemoStaffIfEmpty(
-    storeId?: string,
-    storeMeta?: { name?: string; code?: string; alias?: string }
-  ): Promise<void> {
-    try {
-      const activeStore = String(storeId || (await storeDeviceService.getDeviceProfile())?.store_id || "1");
-      const users = await sqliteStorage.findAll<any>("staff_users");
-      const existingInStore = (users || []).filter((u) => String(u.store_id) === activeStore);
-      if (existingInStore.length === 0) {
-        // Seed initial store staff specific to this store partition (for local mock/tests only)
-        const adminPw = await staffCryptoService.hashSecret("admin123");
-        const adminPin = await staffCryptoService.hashPin("1234");
-
-        const cashierPw = await staffCryptoService.hashSecret("cashier123");
-        const cashierPin = await staffCryptoService.hashPin("1111");
-
-        const managerPw = await staffCryptoService.hashSecret("manager123");
-        const managerPin = await staffCryptoService.hashPin("2222");
-
-        const lowerMeta = `${storeMeta?.name || ""} ${storeMeta?.code || ""} ${storeMeta?.alias || ""} ${activeStore}`.toLowerCase();
-        const isBranchTwo =
-          activeStore === "2" ||
-          lowerMeta.includes("kochi") ||
-          lowerMeta.includes("store-02") ||
-          lowerMeta.includes("02");
-        const isBranchThree =
-          activeStore === "3" ||
-          lowerMeta.includes("calicut") ||
-          lowerMeta.includes("store-03") ||
-          lowerMeta.includes("03");
-
-        const initialUsers: Array<Record<string, unknown>> = [
-          {
-            id: `usr_admin_${activeStore}`,
-            store_id: activeStore,
-            username: isBranchTwo ? "kochi_admin" : isBranchThree ? "calicut_admin" : "admin",
-            full_name: isBranchTwo
-              ? "Suresh Menon (Branch Lead - Kochi)"
-              : isBranchThree
-              ? "Faizal K (Hub Director - Calicut)"
-              : "Muhammad Anshad (Store Owner)",
-            role: "admin",
-            password_hash: adminPw,
-            pin_hash: adminPin,
-            is_active: 1,
-            must_change_password: 0,
-            biometric_registered: 1,
-            failed_attempts: 0,
-            locked_until: null,
-            permissions_json: JSON.stringify(["*"]),
-            enabled_menus_json: JSON.stringify([
-              "dashboard", "pos", "bills", "purchases", "stock", "stock_transfers", "reports", "masters", "settings"
-            ]),
-            updated_at: Date.now(),
-          },
-          {
-            id: `usr_manager_${activeStore}`,
-            store_id: activeStore,
-            username: isBranchTwo ? "kch_manager" : isBranchThree ? "clt_manager" : "manager",
-            full_name: isBranchTwo
-              ? "Naveen Raj (Kochi Operations Manager)"
-              : isBranchThree
-              ? "Deepak Nair (Logistics Manager)"
-              : "Rahul Verma (Floor Manager)",
-            role: "manager",
-            password_hash: managerPw,
-            pin_hash: managerPin,
-            is_active: 1,
-            must_change_password: 0,
-            biometric_registered: 1,
-            failed_attempts: 0,
-            locked_until: null,
-            permissions_json: JSON.stringify([
-              "pos.*", "bills.*", "stock.*", "purchases.*", "reports.*", "masters.view"
-            ]),
-            enabled_menus_json: JSON.stringify([
-              "dashboard", "pos", "bills", "purchases", "stock", "stock_transfers", "reports"
-            ]),
-            updated_at: Date.now(),
-          },
-          {
-            id: `usr_cashier_${activeStore}`,
-            store_id: activeStore,
-            username: isBranchTwo ? "kch_cashier1" : isBranchThree ? "clt_cashier1" : "cashier1",
-            full_name: isBranchTwo
-              ? "Reshma Pillai (Kochi Billing Desk)"
-              : isBranchThree
-              ? "Arun Kumar (Calicut Terminal)"
-              : "Ananya Nair (Counter Cashier)",
-            role: "cashier",
-            password_hash: cashierPw,
-            pin_hash: cashierPin,
-            is_active: 1,
-            must_change_password: 0,
-            biometric_registered: 0,
-            failed_attempts: 0,
-            locked_until: null,
-            permissions_json: JSON.stringify(["pos.bill", "bills.view"]),
-            enabled_menus_json: JSON.stringify(["pos", "bills"]),
-            updated_at: Date.now(),
-          },
-        ];
-
-        for (const u of initialUsers) {
-          await sqliteStorage.insertRecord("staff_users", u.id as string, u);
-        }
-      }
-    } catch (_) {}
+  setMaxFailedAttempts(maxFailedAttempts: number): void {
+    if (Number.isFinite(maxFailedAttempts) && maxFailedAttempts > 0) {
+      this.maxFailedAttempts = Math.trunc(maxFailedAttempts);
+    }
   }
+
+  setOfflineGraceHours(hours: number): void {
+    if (Number.isFinite(hours) && hours >= 0) {
+      this.offlineGraceHours = hours;
+    }
+  }
+
+  getOfflineGraceHours(): number {
+    return this.offlineGraceHours;
+  }
+
+  private setOfflineCacheSyncedAt(storeId: string): void {
+    try {
+      if (typeof localStorage === "undefined") return;
+      localStorage.setItem(`${OFFLINE_SYNC_STORAGE_KEY}_${storeId}`, String(Date.now()));
+    } catch {
+      // Storage unavailable
+    }
+  }
+
+  getOfflineCacheSyncedAt(storeId: string): number | null {
+    try {
+      if (typeof localStorage === "undefined") return null;
+      const raw = localStorage.getItem(`${OFFLINE_SYNC_STORAGE_KEY}_${storeId}`);
+      const parsed = raw ? Number(raw) : NaN;
+      return Number.isFinite(parsed) ? parsed : null;
+    } catch {
+      return null;
+    }
+  }
+
+  private offlineCacheExpired(storeId: string): boolean {
+    if (this.offlineGraceHours <= 0) return false;
+    const syncedAt = this.getOfflineCacheSyncedAt(storeId);
+    if (!syncedAt) return false;
+    return Date.now() - syncedAt > this.offlineGraceHours * 60 * 60 * 1000;
+  }
+
+  private static readonly OFFLINE_EXPIRED_MESSAGE =
+    "Offline sign-in has expired. Connect this workstation to the internet to refresh staff credentials, then try again.";
 
   onSessionChange(listener: (session: ActiveStaffSession | null) => void): () => void {
     this.sessionListeners.push(listener);
@@ -299,22 +296,24 @@ export class StaffAuthService {
       (u) => Boolean(u.is_active) && (String(u.store_id) === activeStore || (activeStore === "1" && u.store_id === "store_main"))
     );
 
-    return storeMatching.map((u) => ({
-      id: u.id,
-      store_id: u.store_id,
-      username: u.username,
-      full_name: u.full_name,
-      role: u.role,
-      password_hash: u.password_hash,
-      pin_hash: u.pin_hash,
-      is_active: Boolean(u.is_active),
-      must_change_password: Boolean(u.must_change_password),
-      biometric_registered: Boolean(u.biometric_registered),
-      failed_attempts: Number(u.failed_attempts || 0),
-      locked_until: u.locked_until ? Number(u.locked_until) : null,
-      permissions: u.permissions_json ? JSON.parse(u.permissions_json) : [],
-      enabled_menus: u.enabled_menus_json ? JSON.parse(u.enabled_menus_json) : [],
-    }));
+    return Promise.all(
+      storeMatching.map(async (u) => ({
+        id: u.id,
+        store_id: u.store_id,
+        username: u.username,
+        full_name: u.full_name,
+        role: u.role,
+        password_hash: u.password_hash ? await decryptStaffSecret(u.password_hash) : "",
+        pin_hash: u.pin_hash ? await decryptStaffSecret(u.pin_hash) : "",
+        is_active: Boolean(u.is_active),
+        must_change_password: Boolean(u.must_change_password),
+        biometric_registered: Boolean(u.biometric_registered),
+        failed_attempts: Number(u.failed_attempts || 0),
+        locked_until: u.locked_until ? Number(u.locked_until) : null,
+        permissions: u.permissions_json ? JSON.parse(u.permissions_json) : [],
+        enabled_menus: u.enabled_menus_json ? JSON.parse(u.enabled_menus_json) : [],
+      }))
+    );
   }
 
   async isBiometricsAvailable(): Promise<boolean> {
@@ -332,8 +331,9 @@ export class StaffAuthService {
 
   async authenticateWithPin(
     usernameOrId: string,
-    pin: string
-  ): Promise<{ success: boolean; error?: string; mustChangePassword?: boolean; user?: StaffUser }> {
+    pin: string,
+    options?: StaffAuthOptions
+  ): Promise<StaffAuthResult> {
     const profile = await storeDeviceService.getDeviceProfile();
     const activeStore = profile?.store_id || "1";
     const localUser = await this.findStaff(usernameOrId);
@@ -368,6 +368,7 @@ export class StaffAuthService {
             device_uuid: clientUuid,
             device_name: clientDevName,
             public_ip: publicIp || undefined,
+            force_out: options?.forceOut === true,
           }),
         });
 
@@ -400,6 +401,16 @@ export class StaffAuthService {
               } catch (_) {}
             }
           }
+        } else if (res.status === 409) {
+          const err = await res.json().catch(() => ({}));
+          return {
+            success: false,
+            error: err.message || "This account is already signed in on another workstation.",
+            conflict: {
+              activeSession: err.active_session,
+              canForceOut: Boolean(err.can_force_out),
+            },
+          };
         } else if (res.status === 401 || res.status === 403 || res.status === 422 || res.status === 423) {
           const err = await res.json().catch(() => ({}));
           return { success: false, error: err.message || "Invalid PIN." };
@@ -417,6 +428,10 @@ export class StaffAuthService {
     }
 
     // 2. OFFLINE FALLBACK
+    if (this.offlineCacheExpired(String(activeStore))) {
+      return { success: false, error: StaffAuthService.OFFLINE_EXPIRED_MESSAGE };
+    }
+
     const user = localUser || (await this.findStaff(usernameOrId));
     if (!user) return { success: false, error: "Staff member not found or inactive." };
 
@@ -440,8 +455,9 @@ export class StaffAuthService {
 
   async authenticateWithPassword(
     usernameOrId: string,
-    password: string
-  ): Promise<{ success: boolean; error?: string; mustChangePassword?: boolean; user?: StaffUser }> {
+    password: string,
+    options?: StaffAuthOptions
+  ): Promise<StaffAuthResult> {
     const profile = await storeDeviceService.getDeviceProfile();
     const activeStore = profile?.store_id || "1";
     const localUser = await this.findStaff(usernameOrId);
@@ -476,6 +492,7 @@ export class StaffAuthService {
             device_uuid: clientUuid,
             device_name: clientDevName,
             public_ip: publicIp || undefined,
+            force_out: options?.forceOut === true,
           }),
         });
 
@@ -508,6 +525,16 @@ export class StaffAuthService {
               } catch (_) {}
             }
           }
+        } else if (res.status === 409) {
+          const err = await res.json().catch(() => ({}));
+          return {
+            success: false,
+            error: err.message || "This account is already signed in on another workstation.",
+            conflict: {
+              activeSession: err.active_session,
+              canForceOut: Boolean(err.can_force_out),
+            },
+          };
         } else if (res.status === 401 || res.status === 403 || res.status === 422 || res.status === 423) {
           const err = await res.json().catch(() => ({}));
           return { success: false, error: err.message || "Invalid credentials." };
@@ -525,6 +552,10 @@ export class StaffAuthService {
     }
 
     // 2. OFFLINE FALLBACK
+    if (this.offlineCacheExpired(String(activeStore))) {
+      return { success: false, error: StaffAuthService.OFFLINE_EXPIRED_MESSAGE };
+    }
+
     const user = localUser || (await this.findStaff(usernameOrId));
     if (!user) return { success: false, error: "Staff member not found or inactive." };
 
@@ -642,12 +673,14 @@ export class StaffAuthService {
     if (!user) return { success: false, error: "User not found" };
 
     if (newPassword) {
-      if (newPassword.length < 6) return { success: false, error: "Password must be at least 6 characters" };
+      const passwordError = validatePassword(newPassword);
+      if (passwordError) return { success: false, error: passwordError };
       user.password_hash = await staffCryptoService.hashSecret(newPassword);
     }
 
     if (newPin) {
-      if (!/^\d{4,6}$/.test(newPin)) return { success: false, error: "PIN must be 4 to 6 numeric digits" };
+      const pinError = validatePin(newPin);
+      if (pinError) return { success: false, error: pinError };
       user.pin_hash = await staffCryptoService.hashPin(newPin);
     }
 
@@ -737,6 +770,9 @@ export class StaffAuthService {
           this.notifySessionChange();
           this.logAudit("SESSION_UNLOCKED", user, "Terminal unlocked");
           return { success: true };
+        } else if (res.status === 409) {
+          const err = await res.json().catch(() => ({}));
+          return { success: false, error: err.message || "This account is already signed in on another workstation." };
         } else if (res.status === 401 || res.status === 403 || res.status === 422 || res.status === 423) {
           const err = await res.json().catch(() => ({}));
           return { success: false, error: err.message || "Incorrect PIN" };
@@ -770,6 +806,23 @@ export class StaffAuthService {
       deviceSessionService.notifyLogout().catch(() => {});
       this.notifySessionChange();
     }
+  }
+
+  /**
+   * End the local staff session because the server ended it (force logout or
+   * revocation). Device registration and counter pairing stay intact.
+   */
+  handleDeviceSessionTerminated(reason: string): void {
+    const user = this.currentSession?.user;
+    this.currentSession = null;
+    try {
+      localStorage.removeItem("active_staff_session");
+      localStorage.removeItem("staff_token");
+    } catch (_) {}
+    if (user) {
+      this.logAudit("SESSION_FORCE_LOGGED_OUT", user, reason);
+    }
+    this.notifySessionChange();
   }
 
   recordActivity(): void {
@@ -821,6 +874,20 @@ export class StaffAuthService {
   private async establishSession(
     user: StaffUser
   ): Promise<{ success: boolean; mustChangePassword?: boolean; user: StaffUser }> {
+    // Online sign-in never returns credential hashes; reuse the cached slow
+    // hash so the session can still be unlocked and re-authenticated offline.
+    if (!user.password_hash || !user.pin_hash) {
+      const cached = await this.findCachedStaffRecord(user.id, user.username);
+      if (cached) {
+        if (!user.password_hash && cached.password_hash) {
+          user.password_hash = await decryptStaffSecret(cached.password_hash);
+        }
+        if (!user.pin_hash && cached.pin_hash) {
+          user.pin_hash = await decryptStaffSecret(cached.pin_hash);
+        }
+      }
+    }
+
     user.failed_attempts = 0;
     user.locked_until = null;
     await this.persistUserRecord(user).catch(() => {});
@@ -868,15 +935,33 @@ export class StaffAuthService {
     };
   }
 
+  private async findCachedStaffRecord(userId: string, username: string): Promise<any | null> {
+    const all = (await sqliteStorage.findAll<any>("staff_users").catch(() => [])) || [];
+    return (
+      all.find((u) => String(u.id) === String(userId)) ||
+      all.find((u) => String(u.username).toLowerCase() === String(username).toLowerCase()) ||
+      null
+    );
+  }
+
   private async persistUserRecord(user: StaffUser): Promise<void> {
     try {
       // Find if user already exists by username or id and delete to prevent UNIQUE constraint violation
       const all = await sqliteStorage.findAll<any>("staff_users").catch(() => []);
+      let existing: any = null;
       for (const u of all || []) {
         if (u.username === user.username || String(u.id) === String(user.id)) {
+          existing = existing || u;
           await sqliteStorage.deleteRecord("staff_users", u.id).catch(() => {});
         }
       }
+
+      // Never replace a cached slow hash with an empty value (online login does
+      // not return hashes, and that must not disable offline sign-in).
+      const passwordHash = user.password_hash
+        ? await encryptStaffSecret(user.password_hash)
+        : existing?.password_hash || "";
+      const pinHash = user.pin_hash ? await encryptStaffSecret(user.pin_hash) : existing?.pin_hash || "";
 
       await sqliteStorage.insertRecord("staff_users", user.id, {
         id: user.id,
@@ -884,8 +969,8 @@ export class StaffAuthService {
         username: user.username,
         full_name: user.full_name,
         role: user.role,
-        password_hash: user.password_hash || "",
-        pin_hash: user.pin_hash || "",
+        password_hash: passwordHash,
+        pin_hash: pinHash,
         is_active: user.is_active ? 1 : 0,
         must_change_password: user.must_change_password ? 1 : 0,
         biometric_registered: user.biometric_registered ? 1 : 0,
@@ -912,8 +997,68 @@ export class StaffAuthService {
         details,
         ip_address: "127.0.0.1",
         created_at: Date.now(),
+        synced: 0,
       });
     } catch (_) {}
+  }
+
+  /**
+   * Push locally recorded offline security events to the cloud when the link
+   * is available. Successfully uploaded rows are marked synced.
+   */
+  async flushOfflineAudit(): Promise<number> {
+    if (typeof fetch !== "function") return 0;
+    const logs = (await sqliteStorage.findAll<any>("security_audit_logs").catch(() => [])) || [];
+    const pending = logs.filter((entry) => !entry.synced);
+    if (pending.length === 0) return 0;
+
+    const batch = pending.slice(0, 100);
+    const profile = await storeDeviceService.getDeviceProfile().catch(() => null);
+    const token = (() => {
+      try {
+        return typeof localStorage !== "undefined" ? localStorage.getItem("staff_token") : null;
+      } catch {
+        return null;
+      }
+    })();
+
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/sync/push/security-audit`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({
+          store_id: profile?.store_id || "1",
+          device_uuid: profile?.device_uuid || getOrCreateClientDeviceUuid(),
+          events: batch.map((entry) => ({
+            id: entry.id,
+            event_type: entry.event_type,
+            user_id: entry.user_id,
+            user_name: entry.user_name,
+            counter_id: entry.counter_id,
+            details: entry.details,
+            ip_address: entry.ip_address,
+            created_at: entry.created_at,
+          })),
+        }),
+      });
+
+      if (!res.ok) return 0;
+
+      for (const entry of batch) {
+        await sqliteStorage.insertRecord("security_audit_logs", entry.id, {
+          ...entry,
+          synced: 1,
+          synced_at: Date.now(),
+        }).catch(() => {});
+      }
+      return batch.length;
+    } catch {
+      return 0;
+    }
   }
 }
 

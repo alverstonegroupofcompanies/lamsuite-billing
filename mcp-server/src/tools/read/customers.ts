@@ -126,10 +126,10 @@ export const searchSuppliersTool: ToolDefinition = {
     if (suppliers.length === 0) {
       summary += "No suppliers found.";
     } else {
-      summary += "| Supplier ID | Name | GSTIN | Credit Period | Outstanding Balance |\n";
+      summary += "| Supplier ID | Name | GSTIN | Credit Limit | Outstanding Balance |\n";
       summary += "| --- | --- | --- | --- | --- |\n";
       for (const s of suppliers) {
-        summary += `| \`${s.id}\` | ${s.name} | \`${s.gstin || "N/A"}\` | ${s.credit_period_days || 0} days | ${formatINR(s.outstanding_balance || 0)} |\n`;
+        summary += `| \`${s.id}\` | ${s.name} | \`${s.gstin || "N/A"}\` | ${formatINR((s as any).credit_limit || 0)} | ${formatINR(s.outstanding_balance || 0)} |\n`;
       }
     }
 
@@ -162,7 +162,7 @@ export const getSupplierTool: ToolDefinition = {
     summary += `- **GSTIN**: \`${s.gstin || "N/A"}\`\n`;
     if (s.phone) summary += `- **Contact**: ${s.phone}\n`;
     if (s.address) summary += `- **Address**: ${s.address}\n`;
-    summary += `- **Credit Period**: ${s.credit_period_days || 0} days\n`;
+    summary += `- **Credit Limit**: ${formatINR((s as any).credit_limit || 0)}\n`;
     summary += `- **Outstanding Payable**: **${formatINR(s.outstanding_balance || 0)}**\n`;
 
     return buildToolResponse(summary, {

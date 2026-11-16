@@ -59,7 +59,7 @@ export const AuditLogsPage: React.FC = () => {
         current_page: number;
         last_page: number;
         total: number;
-      }>("/audit-logs", params);
+      }>("/admin/audit-logs", params);
 
       setLogs(res.data || []);
       setPage(res.current_page || 1);
@@ -89,7 +89,7 @@ export const AuditLogsPage: React.FC = () => {
       if (endDate) params.end_date = endDate;
       if (activeStore) params.active_store_id = activeStore.id;
 
-      const res = await api.get<{ data: AuditLog[] }>("/audit-logs", params);
+      const res = await api.get<{ data: AuditLog[] }>("/admin/audit-logs", params);
       const rows = res.data || [];
 
       if (rows.length === 0) {
@@ -229,20 +229,33 @@ export const AuditLogsPage: React.FC = () => {
               className="w-full px-3 py-2 text-sm rounded-lg border border-slate-300 dark:border-slate-600 bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500"
             >
               <option value="">All Actions</option>
-              <option value="store.create">Store Created</option>
-              <option value="store.update">Store Updated</option>
-              <option value="store.disable">Store Disabled</option>
-              <option value="store.enable">Store Enabled</option>
-              <option value="store.reset">Remote Store Reset</option>
-              <option value="device.approve">Device Approved</option>
-              <option value="device.revoke">Device Revoked</option>
-              <option value="device.resync">Device Force Resync</option>
-              <option value="user.create">User Created</option>
-              <option value="user.impersonate">User Impersonation</option>
-              <option value="user.password_reset">Password Reset</option>
-              <option value="invoice.cancel">Invoice Cancelled</option>
-              <option value="sync.resolve_conflict">Sync Conflict Resolved</option>
-              <option value="settings.update">Settings Updated</option>
+              <option value="create_store">Store Created</option>
+              <option value="update_store">Store Updated</option>
+              <option value="regenerate_activation_key">Activation Key Regenerated</option>
+              <option value="create_user">User Created</option>
+              <option value="update_user">User Updated</option>
+              <option value="delete_user">User Deleted</option>
+              <option value="password_reset">Password Reset</option>
+              <option value="reset_user_pin">PIN Reset</option>
+              <option value="lock_user">User Locked</option>
+              <option value="unlock_user">User Unlocked</option>
+              <option value="account_locked">Account Lockout</option>
+              <option value="impersonate_stop">User Impersonation</option>
+              <option value="staff_login_conflict">Staff Login Conflict</option>
+              <option value="session_force_terminated">Session Force Terminated</option>
+              <option value="device_session_force_logout">Device Force Logout</option>
+              <option value="device_session_revoked">Device Revoked</option>
+              <option value="device_session_locked">Device Locked</option>
+              <option value="device_session_unlocked">Device Unlocked</option>
+              <option value="device_session_renamed">Device Renamed</option>
+              <option value="force_device_resync">Device Force Resync</option>
+              <option value="invoice_approval_issued">Edit PIN Issued</option>
+              <option value="invoice_approval_used">Edit PIN Used</option>
+              <option value="invoice_approval_revoked">Edit PIN Revoked</option>
+              <option value="invoice_approval_failed">Edit PIN Failed</option>
+              <option value="edit_invoice">Invoice Edited</option>
+              <option value="update_stock_adjustment_policy">Stock Adjustment Policy Changed</option>
+              <option value="update_settings">Settings Updated</option>
             </select>
           </div>
 
@@ -260,6 +273,8 @@ export const AuditLogsPage: React.FC = () => {
               <option value="Device">Device</option>
               <option value="User">User</option>
               <option value="Invoice">Invoice</option>
+              <option value="InvoiceApproval">Invoice Edit Approval</option>
+              <option value="DeviceSession">Device Session</option>
               <option value="Product">Product</option>
               <option value="SyncEvent">SyncEvent</option>
               <option value="CompanySetting">CompanySetting</option>

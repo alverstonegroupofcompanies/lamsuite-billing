@@ -1,5 +1,7 @@
 import { sqliteStorage } from "../db/sqliteStorage";
 import { inventoryService } from "../stock/inventoryService";
+import { dedupeDocuments } from "../billing/documentIdentity";
+import { toStoreDateString } from "../dateTimeUtils";
 import type { ProductBatch, ProductItem } from "../masters/productsStore";
 
 export interface InvoiceRecord {
@@ -203,6 +205,28 @@ export interface CancelledBillEntry {
 export class ReportEngine {
   private defaultStoreStateCode = "32"; // Default Kerala state code
 
+  /** Collapse duplicate local/server copies and normalise dates to store-timezone YYYY-MM-DD. */
+  private normalizeInvoices(records: InvoiceRecord[]): InvoiceRecord[] {
+    return dedupeDocuments(records).map((inv) => ({
+      ...inv,
+      invoice_date: toStoreDateString(inv.invoice_date),
+    }));
+  }
+
+  /** Taxable value excluding GST; item lines are authoritative when present. */
+  private invoiceTaxableTotal(inv: InvoiceRecord, items: InvoiceItemRecord[]): number {
+    if (items.length > 0) {
+      const taxable = items.reduce(
+        (sum, item) =>
+          sum + (item.total_amount || 0) - (item.cgst_amount || 0) - (item.sgst_amount || 0) - (item.igst_amount || 0),
+        0
+      );
+      return Math.round(taxable * 100) / 100;
+    }
+    if (typeof inv.taxable_subtotal === "number") return inv.taxable_subtotal;
+    return inv.subtotal;
+  }
+
   setDefaultStoreStateCode(code: string) {
     this.defaultStoreStateCode = code.padStart(2, "0");
   }
@@ -214,7 +238,7 @@ export class ReportEngine {
   // --- REP-001: Sales Register & Daily Collection Summary ---
 
   async getSalesRegister(startDate: string, endDate: string): Promise<SalesRegisterEntry[]> {
-    const allInvoices = await sqliteStorage.findAll<InvoiceRecord>("invoices");
+    const allInvoices = this.normalizeInvoices(await sqliteStorage.findAll<InvoiceRecord>("invoices"));
     const items = await sqliteStorage.findAll<InvoiceItemRecord>("invoice_items");
 
     // Group items by invoice_id to calculate taxes
@@ -243,7 +267,7 @@ export class ReportEngine {
         customer_name: inv.customer_name || "Walk-in Customer",
         customer_gstin: inv.customer_gstin || "",
         payment_mode: inv.payment_mode || "Cash",
-        taxable_subtotal: inv.subtotal,
+        taxable_subtotal: this.invoiceTaxableTotal(inv, lineItems),
         cgst_amount: cgst,
         sgst_amount: sgst,
         igst_amount: igst,
@@ -256,7 +280,7 @@ export class ReportEngine {
   }
 
   async getDailyCollectionSummary(startDate: string, endDate: string): Promise<DailyCollectionSummary> {
-    const allInvoices = await sqliteStorage.findAll<InvoiceRecord>("invoices");
+    const allInvoices = this.normalizeInvoices(await sqliteStorage.findAll<InvoiceRecord>("invoices"));
     const filtered = allInvoices.filter(
       (inv) => inv.invoice_date >= startDate && inv.invoice_date <= endDate && inv.status !== "cancelled"
     );
@@ -291,6 +315,7 @@ export class ReportEngine {
     for (const inv of filtered) {
       const isReturn = inv.module_key === "credit_note" || inv.module_key === "sales_return";
       const sign = isReturn ? -1 : 1;
+      const invItems = itemsMap.get(inv.id) || [];
 
       if (!isReturn) {
         summary.total_invoices_count += 1;
@@ -299,7 +324,8 @@ export class ReportEngine {
         summary.total_returns = Math.round((summary.total_returns + inv.grand_total) * 100) / 100;
       }
 
-      summary.total_taxable = Math.round((summary.total_taxable + sign * inv.subtotal) * 100) / 100;
+      summary.total_taxable =
+        Math.round((summary.total_taxable + sign * this.invoiceTaxableTotal(inv, invItems)) * 100) / 100;
       summary.total_round_off = Math.round((summary.total_round_off + sign * inv.round_off) * 100) / 100;
 
       // Tender breakdown
@@ -313,7 +339,6 @@ export class ReportEngine {
       else summary.by_tender.other = Math.round((summary.by_tender.other + amount) * 100) / 100;
 
       // Tax components
-      const invItems = itemsMap.get(inv.id) || [];
       for (const item of invItems) {
         summary.total_cgst = Math.round((summary.total_cgst + sign * (item.cgst_amount || 0)) * 100) / 100;
         summary.total_sgst = Math.round((summary.total_sgst + sign * (item.sgst_amount || 0)) * 100) / 100;
@@ -333,7 +358,7 @@ export class ReportEngine {
     customStoreStateCode?: string
   ): Promise<Gstr1SummaryReport> {
     const storeState = (customStoreStateCode || this.defaultStoreStateCode).padStart(2, "0");
-    const allInvoices = await sqliteStorage.findAll<InvoiceRecord>("invoices");
+    const allInvoices = this.normalizeInvoices(await sqliteStorage.findAll<InvoiceRecord>("invoices"));
     const allItems = await sqliteStorage.findAll<InvoiceItemRecord>("invoice_items");
 
     const itemsByInvoice = new Map<string, InvoiceItemRecord[]>();
@@ -387,6 +412,7 @@ export class ReportEngine {
       const cgstTotal = Math.round(invItems.reduce((s, i) => s + (i.cgst_amount || 0), 0) * 100) / 100;
       const sgstTotal = Math.round(invItems.reduce((s, i) => s + (i.sgst_amount || 0), 0) * 100) / 100;
       const igstTotal = Math.round(invItems.reduce((s, i) => s + (i.igst_amount || 0), 0) * 100) / 100;
+      const taxableTotal = this.invoiceTaxableTotal(inv, invItems);
 
       if (isReturn) {
         // Table 9: Credit/Debit Notes
@@ -398,7 +424,7 @@ export class ReportEngine {
           original_invoice_number: inv.original_invoice_number || "N/A",
           note_type: "C",
           note_value: inv.grand_total,
-          taxable_value: inv.subtotal,
+          taxable_value: taxableTotal,
           integrated_tax: igstTotal,
           central_tax: cgstTotal,
           state_tax: sgstTotal,
@@ -407,7 +433,7 @@ export class ReportEngine {
       }
 
       // Track positive sales totals
-      report.totals.total_taxable = Math.round((report.totals.total_taxable + inv.subtotal) * 100) / 100;
+      report.totals.total_taxable = Math.round((report.totals.total_taxable + taxableTotal) * 100) / 100;
       report.totals.total_cgst = Math.round((report.totals.total_cgst + cgstTotal) * 100) / 100;
       report.totals.total_sgst = Math.round((report.totals.total_sgst + sgstTotal) * 100) / 100;
       report.totals.total_igst = Math.round((report.totals.total_igst + igstTotal) * 100) / 100;
@@ -424,7 +450,7 @@ export class ReportEngine {
           invoice_value: inv.grand_total,
           place_of_supply: targetState,
           reverse_charge: "N",
-          taxable_value: inv.subtotal,
+          taxable_value: taxableTotal,
           integrated_tax: igstTotal,
           central_tax: cgstTotal,
           state_tax: sgstTotal,
@@ -482,7 +508,7 @@ export class ReportEngine {
   // --- REP-003: HSN / SAC Summary ---
 
   async getHsnSummary(startDate: string, endDate: string): Promise<HsnSummaryEntry[]> {
-    const allInvoices = await sqliteStorage.findAll<InvoiceRecord>("invoices");
+    const allInvoices = this.normalizeInvoices(await sqliteStorage.findAll<InvoiceRecord>("invoices"));
     const allItems = await sqliteStorage.findAll<InvoiceItemRecord>("invoice_items");
 
     const validInvoiceIds = new Set(
@@ -554,7 +580,7 @@ export class ReportEngine {
   // --- REP-005: Customer Outstanding & Aging Ledger ---
 
   async getCustomerOutstandingLedger(asOfDate = new Date()): Promise<CustomerOutstandingEntry[]> {
-    const allInvoices = await sqliteStorage.findAll<InvoiceRecord>("invoices");
+    const allInvoices = this.normalizeInvoices(await sqliteStorage.findAll<InvoiceRecord>("invoices"));
     const activeInvoices = allInvoices.filter(
       (inv) =>
         inv.module_key === "invoice" &&

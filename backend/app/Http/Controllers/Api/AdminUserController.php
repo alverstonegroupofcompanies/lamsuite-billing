@@ -14,23 +14,40 @@ class AdminUserController
     public function index(Request $request): JsonResponse
     {
         $currentUser = $request->user();
-        $storeId = $request->get('active_store_id');
+        $activeStoreId = $request->attributes->get('active_store_id');
+        $storeFilter = $request->query('store_id');
 
         $query = User::with('store:id,name,code');
 
-        if ($storeId) {
-            $query->where(function ($q) use ($storeId) {
-                $q->where('store_id', $storeId)
-                  ->orWhereNull('store_id')
-                  ->orWhereJsonContains('allowed_store_ids', (int)$storeId)
-                  ->orWhereJsonContains('allowed_store_ids', (string)$storeId);
-            });
-        } elseif (!$currentUser->isSuperAdmin()) {
-            $allowed = $currentUser->allowed_store_ids ?? [];
-            if ($currentUser->store_id) {
-                $allowed[] = $currentUser->store_id;
+        if ($currentUser->isSuperAdmin()) {
+            // Super Admin can view all staff users across all branches, or filter by a specific store
+            if ($storeFilter && $storeFilter !== 'all') {
+                $query->where(function ($q) use ($storeFilter) {
+                    $q->where('store_id', (int)$storeFilter)
+                      ->orWhereNull('store_id')
+                      ->orWhereJsonContains('allowed_store_ids', (int)$storeFilter)
+                      ->orWhereJsonContains('allowed_store_ids', (string)$storeFilter);
+                });
             }
-            $query->whereIn('store_id', array_unique($allowed));
+        } else {
+            $effectiveStoreId = ($storeFilter && $storeFilter !== 'all') ? (int)$storeFilter : $activeStoreId;
+            if ($effectiveStoreId) {
+                $query->where(function ($q) use ($effectiveStoreId) {
+                    $q->where('store_id', $effectiveStoreId)
+                      ->orWhereNull('store_id')
+                      ->orWhereJsonContains('allowed_store_ids', (int)$effectiveStoreId)
+                      ->orWhereJsonContains('allowed_store_ids', (string)$effectiveStoreId);
+                });
+            } else {
+                $allowed = $currentUser->allowed_store_ids ?? [];
+                if ($currentUser->store_id) {
+                    $allowed[] = $currentUser->store_id;
+                }
+                $query->where(function ($q) use ($allowed) {
+                    $q->whereIn('store_id', array_unique($allowed))
+                      ->orWhereNull('store_id');
+                });
+            }
         }
 
         if ($search = $request->query('search')) {
@@ -51,7 +68,10 @@ class AdminUserController
             return response()->json(['data' => $query->get()]);
         }
 
-        return response()->json($query->paginate(15));
+        $perPage = (int) ($request->query('per_page', 50));
+        $perPage = min(max($perPage, 10), 100);
+
+        return response()->json($query->paginate($perPage));
     }
 
     public function store(Request $request): JsonResponse
@@ -60,7 +80,7 @@ class AdminUserController
             'name' => 'required|string|max:255',
             'email' => 'required|email|unique:users,email',
             'username' => 'nullable|string|max:50|unique:users,username',
-            'password' => 'required|string|min:6',
+            'password' => 'required|string|min:8',
             'pin' => 'nullable|string',
             'role' => 'required|in:super_admin,store_owner,manager,cashier,operator,pharmacist,accountant,support,admin',
             'store_id' => 'nullable|exists:stores,id',
@@ -126,7 +146,7 @@ class AdminUserController
             'name' => 'sometimes|required|string|max:255',
             'email' => 'sometimes|required|email|unique:users,email,' . $user->id,
             'username' => 'nullable|string|max:50|unique:users,username,' . $user->id,
-            'password' => 'nullable|string|min:6',
+            'password' => 'nullable|string|min:8',
             'pin' => 'nullable|string',
             'role' => 'sometimes|required|in:super_admin,store_owner,manager,cashier,operator,pharmacist,accountant,support,admin',
             'store_id' => 'nullable',
@@ -162,6 +182,7 @@ class AdminUserController
 
         if (!empty($validated['password'])) {
             $validated['password'] = Hash::make($validated['password']);
+            $validated['must_change_password'] = false;
         } else {
             unset($validated['password']);
         }

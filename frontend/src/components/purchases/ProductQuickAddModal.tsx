@@ -1,6 +1,8 @@
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { Package, X, AlertCircle, Check } from "lucide-react";
 import { productsStore, type ProductItem } from "../../lib/masters/productsStore";
+import { companySettingsService } from "../../lib/settings/companySettingsService";
+import { useModalEscape } from "../../lib/ui/modalEscapeManager";
 
 interface ProductQuickAddModalProps {
   isOpen: boolean;
@@ -15,6 +17,11 @@ export const ProductQuickAddModal: React.FC<ProductQuickAddModalProps> = ({
   onProductCreated,
   initialName = "",
 }) => {
+  useModalEscape(isOpen, onClose);
+
+  const nameRef = useRef<HTMLInputElement | null>(null);
+  const purchaseRateRef = useRef<HTMLInputElement | null>(null);
+
   const [name, setName] = useState(initialName);
   const [genericName, setGenericName] = useState("");
   const [barcode, setBarcode] = useState("");
@@ -28,6 +35,31 @@ export const ProductQuickAddModal: React.FC<ProductQuickAddModalProps> = ({
   const [isScheduleH, setIsScheduleH] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Reset on every open so a cancelled attempt never leaks into the next product.
+  useEffect(() => {
+    if (!isOpen) return;
+    const settings = companySettingsService.getSettings();
+    const defaultHsn = settings.default_hsn_code || (settings.store_type === "pharmacy" ? "30049099" : "");
+
+    setName(initialName);
+    setGenericName("");
+    setBarcode("");
+    setHsnSacCode(defaultHsn);
+    setMrp("");
+    setPurchaseRate("");
+    setSelRate("");
+    setGstRate("12");
+    setUnit("STRIP");
+    setPackSize("10");
+    setIsScheduleH(false);
+    setIsSubmitting(false);
+    setError(null);
+
+    const focusTarget = initialName.trim() ? purchaseRateRef.current : nameRef.current;
+    const timer = setTimeout(() => focusTarget?.focus(), 30);
+    return () => clearTimeout(timer);
+  }, [isOpen, initialName]);
 
   if (!isOpen) return null;
 
@@ -44,6 +76,8 @@ export const ProductQuickAddModal: React.FC<ProductQuickAddModalProps> = ({
 
       const id = `prod_${Date.now()}_${Math.random().toString(16).slice(2, 6)}`;
       const cleanBarcode = barcode.trim() || `890${Math.floor(100000000 + Math.random() * 900000000)}`;
+      const settings = companySettingsService.getSettings();
+      const hsnFallback = settings.default_hsn_code || (settings.store_type === "pharmacy" ? "30049099" : "");
 
       const numMrp = Number(mrp) || 0;
       const numPurchaseRate = Number(purchaseRate) || 0;
@@ -55,7 +89,7 @@ export const ProductQuickAddModal: React.FC<ProductQuickAddModalProps> = ({
         print_name: name.trim(),
         generic_name: genericName.trim() || undefined,
         barcode: cleanBarcode,
-        hsn_sac_code: hsnSacCode.trim().replace(/\D/g, "") || "30049099",
+        hsn_sac_code: hsnSacCode.trim().replace(/\D/g, "") || hsnFallback,
         mrp: numMrp,
         ptr: numPurchaseRate,
         sel_rate: numSelRate,
@@ -99,11 +133,12 @@ export const ProductQuickAddModal: React.FC<ProductQuickAddModalProps> = ({
           )}
 
           <div>
-            <label className="font-semibold text-slate-700 block mb-1">Product / Brand Name *</label>
+            <label htmlFor="product-quick-add-name" className="font-semibold text-slate-700 block mb-1">Product / Brand Name *</label>
             <input
+              id="product-quick-add-name"
+              ref={nameRef}
               type="text"
               required
-              autoFocus
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="e.g. Augmentin 625 Duo Tablet"
@@ -174,8 +209,10 @@ export const ProductQuickAddModal: React.FC<ProductQuickAddModalProps> = ({
 
           <div className="grid grid-cols-3 gap-3">
             <div>
-              <label className="font-semibold text-slate-700 block mb-1">Purchase Rate (₹)</label>
+              <label htmlFor="product-quick-add-purchase-rate" className="font-semibold text-slate-700 block mb-1">Purchase Rate (₹)</label>
               <input
+                id="product-quick-add-purchase-rate"
+                ref={purchaseRateRef}
                 type="number"
                 step="0.01"
                 min="0"

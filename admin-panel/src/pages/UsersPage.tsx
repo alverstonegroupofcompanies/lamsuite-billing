@@ -31,6 +31,7 @@ export const UsersPage: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [roleFilter, setRoleFilter] = useState("");
+  const [storeFilter, setStoreFilter] = useState("all");
 
   // Create User Modal state
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
@@ -48,7 +49,7 @@ export const UsersPage: React.FC = () => {
     name: "",
     username: "",
     email: "",
-    password: "password123",
+    password: "",
     pin: "",
     role: "manager",
     store_id: "",
@@ -112,6 +113,7 @@ export const UsersPage: React.FC = () => {
       const res = await api.get<{ data: User[] }>("/admin/users", {
         search,
         role: roleFilter,
+        store_id: storeFilter,
       });
       setUsers(res.data || []);
     } catch (err) {
@@ -132,7 +134,7 @@ export const UsersPage: React.FC = () => {
 
   useEffect(() => {
     fetchUsers();
-  }, [search, roleFilter]);
+  }, [search, roleFilter, storeFilter]);
 
   useEffect(() => {
     fetchStores();
@@ -140,6 +142,10 @@ export const UsersPage: React.FC = () => {
 
   const handleCreateUser = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (newUser.password.trim().length < 8) {
+      alert("Password must be at least 8 characters.");
+      return;
+    }
     try {
       const payload: any = {
         name: newUser.name,
@@ -166,7 +172,7 @@ export const UsersPage: React.FC = () => {
         name: "",
         username: "",
         email: "",
-        password: "password123",
+        password: "",
         pin: "",
         role: "manager",
         store_id: "",
@@ -403,6 +409,21 @@ export const UsersPage: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-2 w-full sm:w-auto">
+          {/* Branch / Store Filter */}
+          <select
+            value={storeFilter}
+            onChange={(e) => setStoreFilter(e.target.value)}
+            className="text-xs px-3 py-1.5 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/80 rounded-xl text-slate-700 dark:text-slate-300 focus:outline-hidden"
+          >
+            <option value="all">All Branches</option>
+            {stores.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.name} ({s.code})
+              </option>
+            ))}
+          </select>
+
+          {/* Role Filter */}
           <select
             value={roleFilter}
             onChange={(e) => setRoleFilter(e.target.value)}

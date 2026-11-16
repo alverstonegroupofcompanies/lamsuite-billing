@@ -65,7 +65,20 @@ export async function apiRequest<T = any>(
 
   const contentType = response.headers.get("content-type");
   const isJson = contentType && contentType.includes("application/json");
-  const data = isJson ? await response.json() : await response.text();
+  let data: any;
+  if (isJson) {
+    try {
+      data = await response.json();
+    } catch {
+      try {
+        data = await response.text();
+      } catch {
+        data = null;
+      }
+    }
+  } else {
+    data = await response.text();
+  }
 
   if (!response.ok) {
     if (response.status === 401 && !endpoint.includes("/login")) {

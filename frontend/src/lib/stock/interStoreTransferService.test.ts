@@ -1,13 +1,17 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { interStoreTransferService, type InterStoreTransfer } from "./interStoreTransferService";
-import { storeService } from "../masters/storeService";
+import { storeService, INITIAL_BRANCH_STORES } from "../masters/storeService";
 import { getMockDatabase, sqliteStorage } from "../db/sqliteStorage";
 import { productsStore, type ProductBatch, type ProductItem } from "../masters/productsStore";
 
 describe("Inter-Store Multi-Product Transfer Engine (STK-TRF-001 - STK-TRF-010)", () => {
   beforeEach(async () => {
+    vi.spyOn(storeService, "fetchBranchesFromApi").mockResolvedValue([]);
     getMockDatabase().reset();
     await sqliteStorage.initDatabase();
+    for (const store of INITIAL_BRANCH_STORES) {
+      await sqliteStorage.insertRecord("stores", store.id, store as unknown as Record<string, unknown>);
+    }
     await storeService.ensureStoresSeeded();
   });
 

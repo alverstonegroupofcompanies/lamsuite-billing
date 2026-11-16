@@ -1,4 +1,6 @@
 import { sqliteStorage } from "../../db/sqliteStorage";
+import { dedupeDocuments } from "../../billing/documentIdentity";
+import { toStoreDateString } from "../../dateTimeUtils";
 import type { InvoiceRecord, InvoiceItemRecord } from "../../billing/invoiceManagementService";
 import type { InvoicePaymentRecord } from "../../billing/billingTenderService";
 
@@ -121,7 +123,10 @@ export class SalesMetricsService {
    * Guaranteed to tie out to the paisa between Dashboard and Reports.
    */
   async calculateFinancialMetrics(filter: DateRangeFilter): Promise<FinancialMetricsSummary> {
-    const allInvoices = await sqliteStorage.findAll<InvoiceRecord>("invoices");
+    const allInvoices = dedupeDocuments(await sqliteStorage.findAll<InvoiceRecord>("invoices")).map((inv) => ({
+      ...inv,
+      invoice_date: toStoreDateString(inv.invoice_date),
+    }));
     const allItems = await sqliteStorage.findAll<InvoiceItemRecord>("invoice_items");
     const allPayments = await sqliteStorage.findAll<InvoicePaymentRecord>("invoice_payments").catch(() => []);
 
@@ -246,7 +251,8 @@ export class SalesMetricsService {
           entry.igst += igst;
         }
       } else {
-        // Fallback to invoice header tax
+        // Fallback to invoice header tax. Itemless bills still need a slab row so
+        // the GST quick view is never empty when tax was actually collected.
         const signItem = isReturn ? -1 : 1;
         const sub = (Number(inv.taxable_subtotal ?? inv.subtotal) || (gTotal - (Number(inv.tax_total) || 0))) * signItem;
         const cgst = (Number(inv.cgst_total ?? (inv.tax_type === "inter_state" ? 0 : (Number(inv.tax_total) || 0) / 2))) * signItem;
@@ -256,6 +262,18 @@ export class SalesMetricsService {
         totalCgst += cgst;
         totalSgst += sgst;
         totalIgst += igst;
+
+        const headerTax = cgst + sgst + igst;
+        const effectiveBase = Math.abs(sub) > 0.001 ? Math.abs(sub) : Math.abs(gTotal);
+        const rate = effectiveBase > 0.001 ? Math.round((Math.abs(headerTax) / effectiveBase) * 100) : 0;
+        if (!slabMap.has(rate)) {
+          slabMap.set(rate, { taxable: 0, cgst: 0, sgst: 0, igst: 0 });
+        }
+        const entry = slabMap.get(rate)!;
+        entry.taxable += sub;
+        entry.cgst += cgst;
+        entry.sgst += sgst;
+        entry.igst += igst;
       }
     }
 
@@ -336,7 +354,10 @@ export class SalesMetricsService {
       count: number;
     };
   }> {
-    const allInvoices = await sqliteStorage.findAll<InvoiceRecord>("invoices");
+    const allInvoices = dedupeDocuments(await sqliteStorage.findAll<InvoiceRecord>("invoices")).map((inv) => ({
+      ...inv,
+      invoice_date: toStoreDateString(inv.invoice_date),
+    }));
     const allItems = await sqliteStorage.findAll<InvoiceItemRecord>("invoice_items");
 
     // Group items by invoice_id
@@ -490,7 +511,10 @@ export class SalesMetricsService {
     totalCount: number;
     summary: { totalAmount: number; count: number };
   }> {
-    const allInvoices = await sqliteStorage.findAll<InvoiceRecord>("invoices");
+    const allInvoices = dedupeDocuments(await sqliteStorage.findAll<InvoiceRecord>("invoices")).map((inv) => ({
+      ...inv,
+      invoice_date: toStoreDateString(inv.invoice_date),
+    }));
 
     let filtered = allInvoices.filter(
       (inv) =>
@@ -546,7 +570,10 @@ export class SalesMetricsService {
     startDate: string;
     endDate: string;
   }): Promise<HsnSummaryRow[]> {
-    const allInvoices = await sqliteStorage.findAll<InvoiceRecord>("invoices");
+    const allInvoices = dedupeDocuments(await sqliteStorage.findAll<InvoiceRecord>("invoices")).map((inv) => ({
+      ...inv,
+      invoice_date: toStoreDateString(inv.invoice_date),
+    }));
     const allItems = await sqliteStorage.findAll<InvoiceItemRecord>("invoice_items");
 
     const validInvoicesMap = new Map<string, InvoiceRecord>();

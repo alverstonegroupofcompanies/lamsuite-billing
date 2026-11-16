@@ -310,7 +310,7 @@ export const TopNav: React.FC<TopNavProps> = ({ enabledMenus, onOpenShortcutsHel
       aria-label="Main Navigation"
     >
       {/* Left: Navigation Items */}
-      <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-1">
+      <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto no-scrollbar py-1 xl:gap-1.5">
         {visibleNavItems.map((item) => {
           if (isNavGroup(item)) {
             const isChildActive = item.children.some((c) =>
@@ -332,7 +332,8 @@ export const TopNav: React.FC<TopNavProps> = ({ enabledMenus, onOpenShortcutsHel
                   aria-haspopup="true"
                   aria-expanded={isOpen}
                   role="menuitem"
-                  className={`flex h-8 items-center gap-1.5 whitespace-nowrap rounded-[8px] px-2.5 text-xs font-semibold tracking-tight transition-all duration-150 cursor-pointer ${
+                  title={item.name}
+                  className={`flex h-8 items-center gap-1.5 whitespace-nowrap rounded-[8px] px-2 text-xs font-semibold tracking-tight transition-all duration-150 cursor-pointer xl:px-2.5 ${
                     isChildActive
                       ? "bg-[var(--color-accent)] text-white shadow-xs font-bold"
                       : isOpen
@@ -364,7 +365,8 @@ export const TopNav: React.FC<TopNavProps> = ({ enabledMenus, onOpenShortcutsHel
               key={item.id}
               to={item.path}
               role="menuitem"
-              className={`flex h-8 items-center gap-1.5 whitespace-nowrap rounded-[8px] px-2.5 text-xs font-semibold tracking-tight transition-all duration-150 ${
+              title={item.key ? `${item.name} (${item.key})` : item.name}
+              className={`flex h-8 items-center gap-1.5 whitespace-nowrap rounded-[8px] px-2 text-xs font-semibold tracking-tight transition-all duration-150 xl:px-2.5 ${
                 isActive
                   ? "bg-[var(--color-accent)] text-white shadow-xs font-bold"
                   : "text-[var(--color-nav-text)] hover:bg-[var(--color-nav-hover)] hover:text-white"
@@ -373,7 +375,7 @@ export const TopNav: React.FC<TopNavProps> = ({ enabledMenus, onOpenShortcutsHel
               <Icon className="h-3.5 w-3.5 shrink-0 opacity-90" />
               <span>{item.name}</span>
               {item.key && (
-                <kbd className="ml-0.5 rounded-[5px] bg-black/40 px-1.5 py-0.5 font-mono text-[10px] font-medium text-[#C9D8D3] shadow-inner">
+                <kbd className="ml-0.5 hidden rounded-[5px] bg-black/40 px-1.5 py-0.5 font-mono text-[10px] font-medium text-[#C9D8D3] shadow-inner 2xl:inline-block">
                   {item.key}
                 </kbd>
               )}
@@ -383,21 +385,21 @@ export const TopNav: React.FC<TopNavProps> = ({ enabledMenus, onOpenShortcutsHel
       </div>
 
       {/* Right: Help, Shortcuts & App Version */}
-      <div className="flex items-center gap-2 pl-2">
+      <div className="flex shrink-0 items-center gap-2 pl-2">
         <Link
           to="/settings"
           title={`Installed Version: ${APP_FULL_VERSION} (Click to open Settings & Software Updates)`}
-          className="hidden md:inline-flex items-center rounded-[6px] bg-[var(--color-nav-hover)] px-2 py-0.5 font-mono text-[10px] font-semibold text-[#C9D8D3] border border-[var(--color-nav-border)] hover:text-white hover:border-[var(--color-accent)] transition-colors cursor-pointer"
+          className="hidden 2xl:inline-flex items-center rounded-[6px] bg-[var(--color-nav-hover)] px-2 py-0.5 font-mono text-[10px] font-semibold text-[#C9D8D3] border border-[var(--color-nav-border)] hover:text-white hover:border-[var(--color-accent)] transition-colors cursor-pointer"
         >
           {APP_FULL_VERSION}
         </Link>
         <button
           onClick={onOpenShortcutsHelp}
           title="View Keyboard Shortcuts & Cheatsheet"
-          className="flex h-7 items-center gap-1.5 rounded-[8px] bg-[var(--color-nav-hover)] px-2.5 text-[11px] font-medium text-[var(--color-nav-text)] hover:text-white transition-colors border border-[var(--color-nav-border)]"
+          className="flex h-7 items-center gap-1.5 rounded-[8px] bg-[var(--color-nav-hover)] px-2 text-[11px] font-medium text-[var(--color-nav-text)] hover:text-white transition-colors border border-[var(--color-nav-border)] 2xl:px-2.5"
         >
           <Keyboard className="h-3.5 w-3.5 text-[#C9D8D3]" />
-          <span className="hidden sm:inline">Shortcuts</span>
+          <span className="hidden 2xl:inline">Shortcuts</span>
         </button>
       </div>
 

@@ -3,6 +3,8 @@ import {
   parseExpiryInput,
   parseQuantityEntry,
   calculateLineMargin,
+  isValidHsn,
+  suggestGstForHsn,
 } from "./purchaseEntryUtils";
 
 describe("Purchase Entry Utils (Expiry, Quantity Shorthand & Margins)", () => {
@@ -91,6 +93,44 @@ describe("Purchase Entry Utils (Expiry, Quantity Shorthand & Margins)", () => {
       const res = calculateLineMargin(100, 80, 1);
       expect(res.isNegative).toBe(true);
       expect(res.marginPercent).toBe(-25);
+    });
+  });
+
+  describe("isValidHsn (item 26)", () => {
+    it("accepts 4, 6 and 8 digit codes and ignores separators", () => {
+      expect(isValidHsn("3004")).toBe(true);
+      expect(isValidHsn("300490")).toBe(true);
+      expect(isValidHsn("3004 90 99")).toBe(true);
+    });
+
+    it("rejects empty, short and long codes", () => {
+      expect(isValidHsn("")).toBe(false);
+      expect(isValidHsn("30")).toBe(false);
+      expect(isValidHsn("30045")).toBe(false);
+      expect(isValidHsn("300490999")).toBe(false);
+    });
+  });
+
+  describe("suggestGstForHsn (item 26)", () => {
+    it("suggests 12% for pharma chapters 3003/3004", () => {
+      expect(suggestGstForHsn("30049099")).toBe(12);
+      expect(suggestGstForHsn("3003")).toBe(12);
+    });
+
+    it("suggests 5% for food and textiles chapters", () => {
+      expect(suggestGstForHsn("0401")).toBe(5);
+      expect(suggestGstForHsn("1006")).toBe(5);
+      expect(suggestGstForHsn("5208")).toBe(5);
+    });
+
+    it("suggests 18% for machinery and 28% for automobiles", () => {
+      expect(suggestGstForHsn("8471")).toBe(18);
+      expect(suggestGstForHsn("8703")).toBe(28);
+    });
+
+    it("returns null when the code is too short or chapter is unknown", () => {
+      expect(suggestGstForHsn("30")).toBeNull();
+      expect(suggestGstForHsn("9999")).toBeNull();
     });
   });
 });

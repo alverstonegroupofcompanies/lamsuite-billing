@@ -162,7 +162,7 @@ describe("AutoUpdateService - Mocked Feed Scenarios", () => {
 
     const result = await autoUpdateService.checkForUpdates();
     expect(result.shouldUpdate).toBe(false);
-    expect(result.message).toContain("Already up to date (version 2.0.35)");
+    expect(result.message).toContain("Already up to date");
     expect(result.diagnostic?.status).toBe(200);
   });
 

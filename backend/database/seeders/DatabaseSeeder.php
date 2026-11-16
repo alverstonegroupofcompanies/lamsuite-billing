@@ -27,11 +27,19 @@ use App\Models\User;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Str;
 
 class DatabaseSeeder extends Seeder
 {
     public function run(): void
     {
+        // Seeded accounts must never ship with a predictable password. Operators
+        // may provide SEED_USER_PASSWORD for throwaway local databases; otherwise
+        // a random secret is generated and the account is forced to reset it.
+        $seedPassword = env('SEED_USER_PASSWORD');
+        $hashSeedPassword = fn () => Hash::make($seedPassword ?: Str::random(32));
+        $mustChangeSeededPassword = empty($seedPassword);
+
         // 1. Create Stores
         $store1 = Store::create([
             'name' => 'LamStone Healthcare Center',
@@ -107,7 +115,8 @@ class DatabaseSeeder extends Seeder
         $superAdmin = User::create([
             'name' => 'Rajesh Sharma',
             'email' => 'admin@lamstone.in',
-            'password' => Hash::make('password123'),
+            'password' => $hashSeedPassword(),
+            'must_change_password' => $mustChangeSeededPassword,
             'role' => 'super_admin',
             'store_id' => $store1->id,
             'allowed_store_ids' => [$store1->id, $store2->id, $store3->id],
@@ -119,7 +128,8 @@ class DatabaseSeeder extends Seeder
         $storeOwner = User::create([
             'name' => 'Dr. Anoop Menon',
             'email' => 'owner@lamstone.in',
-            'password' => Hash::make('password123'),
+            'password' => $hashSeedPassword(),
+            'must_change_password' => $mustChangeSeededPassword,
             'role' => 'store_owner',
             'store_id' => $store1->id,
             'allowed_store_ids' => [$store1->id],
@@ -131,7 +141,8 @@ class DatabaseSeeder extends Seeder
         $manager = User::create([
             'name' => 'Suresh Kumar',
             'email' => 'manager@lamstone.in',
-            'password' => Hash::make('password123'),
+            'password' => $hashSeedPassword(),
+            'must_change_password' => $mustChangeSeededPassword,
             'role' => 'manager',
             'store_id' => $store1->id,
             'allowed_store_ids' => [$store1->id],
@@ -143,7 +154,8 @@ class DatabaseSeeder extends Seeder
         $accountant = User::create([
             'name' => 'Priya Nair',
             'email' => 'accountant@lamstone.in',
-            'password' => Hash::make('password123'),
+            'password' => $hashSeedPassword(),
+            'must_change_password' => $mustChangeSeededPassword,
             'role' => 'accountant', // reports only
             'store_id' => $store1->id,
             'allowed_store_ids' => [$store1->id, $store2->id],
@@ -155,9 +167,10 @@ class DatabaseSeeder extends Seeder
         $support = User::create([
             'name' => 'Deepak Varma',
             'email' => 'support@lamstone.in',
-            'password' => Hash::make('password123'),
+            'password' => $hashSeedPassword(),
+            'must_change_password' => $mustChangeSeededPassword,
             'role' => 'support', // read only
-            'store_id' => null,
+            'store_id' => $store1->id,
             'allowed_store_ids' => [$store1->id, $store2->id, $store3->id],
             'totp_enabled' => false,
             'is_biometric_enabled' => false,
@@ -167,7 +180,8 @@ class DatabaseSeeder extends Seeder
         $kochiManager = User::create([
             'name' => 'Faisal Ali',
             'email' => 'kochi_manager@lamstone.in',
-            'password' => Hash::make('password123'),
+            'password' => $hashSeedPassword(),
+            'must_change_password' => $mustChangeSeededPassword,
             'role' => 'manager',
             'store_id' => $store2->id,
             'allowed_store_ids' => [$store2->id],

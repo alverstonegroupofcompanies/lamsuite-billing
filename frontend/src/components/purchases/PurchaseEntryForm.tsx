@@ -38,7 +38,7 @@ import { purchaseDraftService, type PurchaseDraftItem } from "../../lib/purchase
 import { productsStore, type ProductItem, type ProductBatch } from "../../lib/masters/productsStore";
 import { companySettingsService, type ColumnSetting, type HeaderFieldSetting } from "../../lib/settings/companySettingsService";
 import { parseQuantityPrefix } from "../../pages/PosBillingPage";
-import { parseQuantityEntry, parseExpiryInput, calculateLineMargin } from "../../lib/purchases/purchaseEntryUtils";
+import { parseQuantityEntry, parseExpiryInput, calculateLineMargin, isValidHsn } from "../../lib/purchases/purchaseEntryUtils";
 import { SupplierCombobox } from "./SupplierCombobox";
 import { PurchaseGridRow } from "./PurchaseGridRow";
 import { PurchaseShortcutHintBar, type PurchaseFocusContext } from "./PurchaseShortcutHintBar";
@@ -93,6 +93,10 @@ export const PurchaseEntryForm: React.FC<PurchaseEntryFormProps> = ({
 
   // Settings & Columns
   const [appSettings, setAppSettings] = useState(() => companySettingsService.getSettings());
+  const batchRequired = useMemo(
+    () => appSettings.batch_required ?? (appSettings.store_type || "pharmacy") === "pharmacy",
+    [appSettings.batch_required, appSettings.store_type]
+  );
   const [purchaseColumns, setPurchaseColumns] = useState<ColumnSetting[]>(() => companySettingsService.getPurchaseColumns());
   const [purchaseHeaders, setPurchaseHeaders] = useState<HeaderFieldSetting[]>(() => companySettingsService.getPurchaseHeaderFields());
   const [isColumnsModalOpen, setIsColumnsModalOpen] = useState(false);
@@ -127,13 +131,18 @@ export const PurchaseEntryForm: React.FC<PurchaseEntryFormProps> = ({
     () => [
       "product_name",
       "batch_no",
+      "mfg_date",
       "expiry_date",
       "qty",
       "free_qty",
       "mrp",
+      "ptr",
+      "pts",
+      "ptss",
       "purchase_rate",
       "discount",
       "gst",
+      "hsn",
       "selling_rate",
     ],
     []
@@ -144,8 +153,9 @@ export const PurchaseEntryForm: React.FC<PurchaseEntryFormProps> = ({
       .filter((c) => c.visible !== false)
       .sort((a, b) => (a.order || 0) - (b.order || 0))
       .map((c) => c.id)
-      .filter((id) => EDITABLE_PURCHASE_COLS.includes(id));
-  }, [purchaseColumns, EDITABLE_PURCHASE_COLS]);
+      .filter((id) => EDITABLE_PURCHASE_COLS.includes(id))
+      .filter((id) => (id === "pts" ? appSettings.enable_pts : id === "ptss" ? appSettings.enable_ptss : true));
+  }, [purchaseColumns, EDITABLE_PURCHASE_COLS, appSettings.enable_pts, appSettings.enable_ptss]);
 
   const startCellEdit = (rowIndex: number, colId: string) => {
     if (!lines[rowIndex]) return;
@@ -199,6 +209,7 @@ export const PurchaseEntryForm: React.FC<PurchaseEntryFormProps> = ({
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<ProductItem[]>([]);
   const [selectedSearchIndex, setSelectedSearchIndex] = useState(0);
+  const [isProductDropdownDismissed, setIsProductDropdownDismissed] = useState(false);
   const [dropdownPosition, setDropdownPosition] = useState<{ top: number; left: number; width: number } | null>(null);
   const dropdownRef = useRef<HTMLDivElement | null>(null);
   const entryProductInputRef = useRef<HTMLInputElement | null>(null);
@@ -213,7 +224,8 @@ export const PurchaseEntryForm: React.FC<PurchaseEntryFormProps> = ({
   const [supplierInvoiceTotal, setSupplierInvoiceTotal] = useState<number | "">("");
   const [freightCharges, setFreightCharges] = useState<number>(0);
   const [manualRoundOff, setManualRoundOff] = useState<number | null>(null);
-  const [billDiscountAmount, setBillDiscountAmount] = useState<number>(0);
+  const [billDiscountType, setBillDiscountType] = useState<"percent" | "amount">("amount");
+  const [billDiscountValue, setBillDiscountValue] = useState<number>(0);
 
   // Cache for last purchase rates to show hints and warnings
   const [lastPurchaseMap, setLastPurchaseMap] = useState<Record<string, any>>({});
@@ -261,6 +273,9 @@ export const PurchaseEntryForm: React.FC<PurchaseEntryFormProps> = ({
           setIsInterstate(Boolean(existing.document.is_interstate));
           setRemarks(existing.document.notes || "");
           setManualRoundOff(existing.document.round_off);
+          setFreightCharges(existing.document.freight_charges || 0);
+          setBillDiscountType(existing.document.bill_discount_type || "amount");
+          setBillDiscountValue(existing.document.bill_discount || 0);
 
           // Find supplier
           const sups = await supplierLedgerService.getAllSuppliers();
@@ -273,12 +288,18 @@ export const PurchaseEntryForm: React.FC<PurchaseEntryFormProps> = ({
             product_name: it.product_name,
             hsn_code: it.hsn_code,
             batch_no: it.batch_no,
+            mfg_date: it.mfg_date,
             expiry_date: it.expiry_date,
             pack_qty: it.pack_qty,
             loose_qty: it.loose_qty,
             free_qty: it.free_qty,
+            free_loose_qty: it.free_loose_qty,
             units_per_pack: it.units_per_pack,
             purchase_rate: it.purchase_rate,
+            ptr: it.ptr,
+            pts: it.pts,
+            ptss: it.ptss,
+            discount_type: it.discount_type || "percent",
             discount_percent: it.discount_percent,
             discount_amount: it.discount_amount,
             mrp: it.mrp,
@@ -303,8 +324,8 @@ export const PurchaseEntryForm: React.FC<PurchaseEntryFormProps> = ({
       // Warm up and ensure master catalog is loaded
       productsStore.getAllProducts().catch(() => {});
 
-      // Generate next purchase number
-      const nextNum = await purchaseService.generateNextPurchaseNumber();
+      // Preview next purchase number from settings
+      const nextNum = await purchaseService.previewNextPurchaseNumber();
       setEntryNumber(nextNum);
     } catch {
       setEntryNumber("PB-NEW");
@@ -407,8 +428,12 @@ export const PurchaseEntryForm: React.FC<PurchaseEntryFormProps> = ({
       pack_qty: 1,
       loose_qty: 0,
       free_qty: 0,
+      free_loose_qty: 0,
       units_per_pack: initialUnitsPerPack,
       purchase_rate: initialRate,
+      ptr: entryDraftProduct.ptr || initialRate,
+      pts: entryDraftProduct.pts,
+      discount_type: "percent",
       discount_percent: initialDiscount,
       discount_amount: 0,
       mrp: initialMrp,
@@ -442,59 +467,33 @@ export const PurchaseEntryForm: React.FC<PurchaseEntryFormProps> = ({
 
   // Compute Totals (including draftLine immediately)
   const computedTotals = useMemo(() => {
-    let subtotal = 0;
-    let discountTotal = billDiscountAmount;
-    let taxTotal = 0;
-    let cgstTotal = 0;
-    let sgstTotal = 0;
-    let igstTotal = 0;
-    let totalLinesAmount = 0;
-    let totalUnits = 0;
-
-    // All committed lines
-    for (const l of lines) {
-      const calc = purchaseService.calculateLineTotals(l, isInterstate);
-      subtotal += calc.gross_amount;
-      discountTotal += calc.discount_amount;
-      taxTotal += calc.total_tax;
-      cgstTotal += calc.cgst_amount;
-      sgstTotal += calc.sgst_amount;
-      igstTotal += calc.igst_amount;
-      totalLinesAmount += calc.total_amount;
-      totalUnits += calc.total_stock_units;
-    }
-
-    // Immediately include draftLine in totals if product is selected
+    const allLines = [...lines];
     if (draftLine && draftLine.product_name) {
-      const draftCalc = purchaseService.calculateLineTotals(draftLine, isInterstate);
-      subtotal += draftCalc.gross_amount;
-      discountTotal += draftCalc.discount_amount;
-      taxTotal += draftCalc.total_tax;
-      cgstTotal += draftCalc.cgst_amount;
-      sgstTotal += draftCalc.sgst_amount;
-      igstTotal += draftCalc.igst_amount;
-      totalLinesAmount += draftCalc.total_amount;
-      totalUnits += draftCalc.total_stock_units;
+      allLines.push(draftLine);
     }
 
-    const netBeforeRound = totalLinesAmount + freightCharges - billDiscountAmount;
-    const roundOff = manualRoundOff !== null ? manualRoundOff : Math.round(netBeforeRound) - netBeforeRound;
-    const grandTotal = Math.max(0, netBeforeRound + roundOff);
+    const totals = purchaseService.calculateDocumentTotals(allLines, isInterstate, {
+      bill_discount_type: billDiscountType,
+      bill_discount_value: billDiscountValue,
+      freight_charges: freightCharges,
+      round_off: manualRoundOff,
+    });
 
     return {
-      subtotal: Math.round(subtotal * 100) / 100,
-      discountTotal: Math.round(discountTotal * 100) / 100,
-      taxTotal: Math.round(taxTotal * 100) / 100,
-      cgstTotal: Math.round(cgstTotal * 100) / 100,
-      sgstTotal: Math.round(sgstTotal * 100) / 100,
-      igstTotal: Math.round(igstTotal * 100) / 100,
-      freightCharges: Math.round(freightCharges * 100) / 100,
-      roundOff: Math.round(roundOff * 100) / 100,
-      grandTotal: Math.round(grandTotal * 100) / 100,
+      subtotal: totals.subtotal,
+      discountTotal: totals.discountTotal,
+      taxTotal: totals.taxTotal,
+      cgstTotal: totals.cgstTotal,
+      sgstTotal: totals.sgstTotal,
+      igstTotal: totals.igstTotal,
+      freightCharges: totals.freightCharges,
+      billDiscountAmount: totals.billDiscountAmount,
+      roundOff: totals.roundOff,
+      grandTotal: totals.grandTotal,
       itemCount: lines.length + (draftLine && draftLine.product_name ? 1 : 0),
-      totalUnits,
+      totalUnits: totals.totalUnits,
     };
-  }, [lines, draftLine, isInterstate, freightCharges, manualRoundOff, billDiscountAmount]);
+  }, [lines, draftLine, isInterstate, freightCharges, manualRoundOff, billDiscountType, billDiscountValue]);
 
   // Live difference with physical Supplier Invoice Total
   const invoiceDiff = useMemo(() => {
@@ -519,17 +518,19 @@ export const PurchaseEntryForm: React.FC<PurchaseEntryFormProps> = ({
       return;
     }
 
-    if (!draftLine.batch_no.trim()) {
+    if (batchRequired && !draftLine.batch_no.trim()) {
       showNotification("Please specify batch number", "error");
       return;
     }
 
-    if (!draftLine.expiry_date.trim()) {
+    if (batchRequired && !draftLine.expiry_date.trim()) {
       showNotification("Please specify expiry date (MM/YY)", "error");
       return;
     }
 
-    const exp = parseExpiryInput(draftLine.expiry_date);
+    const exp = draftLine.expiry_date.trim()
+      ? parseExpiryInput(draftLine.expiry_date)
+      : { isoDate: "", isValid: true, isExpired: false, isNearExpiry: false, display: "" };
     if (!exp.isValid) {
       showNotification("Invalid expiry date format (use MM/YY)", "error");
       return;
@@ -537,6 +538,16 @@ export const PurchaseEntryForm: React.FC<PurchaseEntryFormProps> = ({
 
     if (exp.isExpired) {
       showNotification("Cannot inward expired batch!", "error");
+      return;
+    }
+
+    if (draftLine.mfg_date && exp.isoDate && draftLine.mfg_date >= exp.isoDate) {
+      showNotification("Manufacturing date must be before expiry date", "error");
+      return;
+    }
+
+    if (draftLine.hsn_code && !isValidHsn(draftLine.hsn_code)) {
+      showNotification("HSN/SAC must be 4, 6 or 8 digits", "error");
       return;
     }
 
@@ -595,11 +606,19 @@ export const PurchaseEntryForm: React.FC<PurchaseEntryFormProps> = ({
   };
 
   // Product Search & Barcode input handler
+  const showProductQuickAddOption = useMemo(() => {
+    const trimmed = searchQuery.trim().toLowerCase();
+    if (!trimmed) return false;
+    return !searchResults.some((p) => p.name.trim().toLowerCase() === trimmed);
+  }, [searchQuery, searchResults]);
+
+  const productOptionCount = searchResults.length + (showProductQuickAddOption ? 1 : 0);
+
   const handleProductSearchKeyDown = async (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "ArrowDown") {
       e.preventDefault();
-      if (searchResults.length > 0) {
-        setSelectedSearchIndex((prev) => (prev + 1 >= searchResults.length ? 0 : prev + 1));
+      if (productOptionCount > 0) {
+        setSelectedSearchIndex((prev) => (prev + 1 >= productOptionCount ? 0 : prev + 1));
       } else if (lines.length > 0) {
         setSelectedRowIndex(0);
         const navCols = getNavigableCols();
@@ -611,8 +630,8 @@ export const PurchaseEntryForm: React.FC<PurchaseEntryFormProps> = ({
 
     if (e.key === "ArrowUp") {
       e.preventDefault();
-      if (searchResults.length > 0) {
-        setSelectedSearchIndex((prev) => (prev - 1 < 0 ? searchResults.length - 1 : prev - 1));
+      if (productOptionCount > 0) {
+        setSelectedSearchIndex((prev) => (prev - 1 < 0 ? productOptionCount - 1 : prev - 1));
       } else if (lines.length > 0) {
         setSelectedRowIndex(lines.length - 1);
         const navCols = getNavigableCols();
@@ -637,6 +656,13 @@ export const PurchaseEntryForm: React.FC<PurchaseEntryFormProps> = ({
       }
 
       const { qty, query } = parseQuantityPrefix(trimmed);
+
+      // "+ Add new product" row sits after the real results and opens quick add.
+      // With zero results we still run barcode/exact lookup first so scanners win.
+      if (searchResults.length > 0 && showProductQuickAddOption && selectedSearchIndex >= searchResults.length) {
+        setIsProductQuickAddOpen(true);
+        return;
+      }
 
       // If dropdown has highlighted item
       if (searchResults.length > 0 && selectedSearchIndex < searchResults.length) {
@@ -792,8 +818,8 @@ export const PurchaseEntryForm: React.FC<PurchaseEntryFormProps> = ({
         }
       }
 
-      // Alt+S : Focus Supplier
-      if (e.altKey && key === "s") {
+      // Alt+S : Focus Supplier (Ctrl+Alt+S stays reserved for Switch Store)
+      if (e.altKey && !isCmdOrCtrl && key === "s") {
         e.preventDefault();
         supplierInputRef.current?.focus();
         setFocusContext("header");
@@ -845,6 +871,24 @@ export const PurchaseEntryForm: React.FC<PurchaseEntryFormProps> = ({
       if (e.altKey && key === "r") {
         e.preventDefault();
         setIsRoundOffModalOpen(true);
+        return;
+      }
+
+      // Alt+Y : Toggle discount type (% / amount) on the active line, else the bill
+      if (e.altKey && !isCmdOrCtrl && key === "y") {
+        e.preventDefault();
+        const nextType = (current?: "percent" | "amount") => (current === "amount" ? "percent" : "amount");
+        if (selectedRowIndex !== null && lines[selectedRowIndex]) {
+          updateCommittedLineField(
+            selectedRowIndex,
+            "discount_type",
+            nextType(lines[selectedRowIndex].discount_type)
+          );
+        } else if (draftLine) {
+          setDraftLine({ ...draftLine, discount_type: nextType(draftLine.discount_type) });
+        } else {
+          setBillDiscountType((prev) => (prev === "amount" ? "percent" : "amount"));
+        }
         return;
       }
 
@@ -952,7 +996,7 @@ export const PurchaseEntryForm: React.FC<PurchaseEntryFormProps> = ({
 
     const allLinesToPost = [...lines];
     if (draftLine && draftLine.product_name) {
-      if (draftLine.batch_no && draftLine.expiry_date) {
+      if (!batchRequired || (draftLine.batch_no.trim() && draftLine.expiry_date.trim())) {
         allLinesToPost.push(draftLine);
       }
     }
@@ -960,6 +1004,33 @@ export const PurchaseEntryForm: React.FC<PurchaseEntryFormProps> = ({
     if (allLinesToPost.length === 0) {
       showNotification("Cannot post empty purchase bill. Add at least one item [F1].", "error");
       entryProductInputRef.current?.focus();
+      return;
+    }
+
+    if (batchRequired) {
+      const missingBatch = allLinesToPost.find((l) => !l.batch_no?.trim());
+      if (missingBatch) {
+        showNotification(`Batch number missing for ${missingBatch.product_name}`, "error");
+        return;
+      }
+      const missingExpiry = allLinesToPost.find((l) => !l.expiry_date?.trim());
+      if (missingExpiry) {
+        showNotification(`Expiry date missing for ${missingExpiry.product_name}`, "error");
+        return;
+      }
+    }
+
+    const invalidHsnLine = allLinesToPost.find((l) => l.hsn_code && !isValidHsn(l.hsn_code));
+    if (invalidHsnLine) {
+      showNotification(`Invalid HSN/SAC for ${invalidHsnLine.product_name} (use 4, 6 or 8 digits)`, "error");
+      return;
+    }
+
+    const invalidMfgLine = allLinesToPost.find(
+      (l) => l.mfg_date && l.expiry_date && l.mfg_date >= l.expiry_date
+    );
+    if (invalidMfgLine) {
+      showNotification(`Manufacturing date must be before expiry for ${invalidMfgLine.product_name}`, "error");
       return;
     }
 
@@ -1023,12 +1094,16 @@ export const PurchaseEntryForm: React.FC<PurchaseEntryFormProps> = ({
       setIsPosting(true);
 
       const allLinesToPost = [...lines];
-      if (draftLine && draftLine.product_name && draftLine.batch_no && draftLine.expiry_date) {
+      if (
+        draftLine &&
+        draftLine.product_name &&
+        (!batchRequired || (draftLine.batch_no.trim() && draftLine.expiry_date.trim()))
+      ) {
         allLinesToPost.push(draftLine);
       }
 
       const docInput: PurchaseDocumentInput = {
-        purchase_number: entryNumber.startsWith("PB-") ? entryNumber : undefined,
+        purchase_number: entryNumber && entryNumber !== "Loading..." && entryNumber !== "PB-NEW" ? entryNumber : undefined,
         supplier_id: selectedSupplier.id,
         supplier_name: selectedSupplier.name,
         supplier_gstin: selectedSupplier.gstin,
@@ -1039,6 +1114,9 @@ export const PurchaseEntryForm: React.FC<PurchaseEntryFormProps> = ({
         is_interstate: isInterstate,
         lines: allLinesToPost,
         round_off: computedTotals.roundOff,
+        freight_charges: computedTotals.freightCharges,
+        bill_discount_type: billDiscountType,
+        bill_discount: billDiscountValue,
         notes: remarks.trim() || undefined,
         po_id: poGrnLink || undefined,
       };
@@ -1121,9 +1199,10 @@ export const PurchaseEntryForm: React.FC<PurchaseEntryFormProps> = ({
     setSupplierInvoiceTotal("");
     setFreightCharges(0);
     setManualRoundOff(null);
-    setBillDiscountAmount(0);
+    setBillDiscountType("amount");
+    setBillDiscountValue(0);
     setPostSuccessData(null);
-    purchaseService.generateNextPurchaseNumber().then((n) => setEntryNumber(n));
+    purchaseService.previewNextPurchaseNumber().then((n) => setEntryNumber(n));
     setTimeout(() => {
       supplierInputRef.current?.focus();
     }, 40);
@@ -1131,6 +1210,7 @@ export const PurchaseEntryForm: React.FC<PurchaseEntryFormProps> = ({
 
   const visibleColumns = purchaseColumns
     .filter((c) => c.visible !== false)
+    .filter((c) => (c.id === "pts" ? appSettings.enable_pts : c.id === "ptss" ? appSettings.enable_ptss : true))
     .sort((a, b) => (a.order || 0) - (b.order || 0));
 
   return (
@@ -1403,6 +1483,7 @@ export const PurchaseEntryForm: React.FC<PurchaseEntryFormProps> = ({
                     isEditingCell={isEditingCell && selectedRowIndex === idx}
                     visibleCols={visibleColumns}
                     isInterstate={isInterstate}
+                    batchRequired={batchRequired}
                     lastPurchaseDetails={lastPurchaseMap[line.product_id]}
                     onSelectRow={() => {
                       setSelectedRowIndex(idx);
@@ -1438,10 +1519,12 @@ export const PurchaseEntryForm: React.FC<PurchaseEntryFormProps> = ({
                 isSelected={selectedRowIndex === null && focusContext === "entry_row"}
                 visibleCols={visibleColumns}
                 isInterstate={isInterstate}
+                batchRequired={batchRequired}
                 lastPurchaseDetails={draftLine ? lastPurchaseMap[draftLine.product_id] : null}
                 searchQuery={searchQuery}
                 onSearchChange={(val) => {
                   setSearchQuery(val);
+                  setIsProductDropdownDismissed(false);
                   updateDropdownPosition();
                   if (val.trim()) {
                     const { query } = parseQuantityPrefix(val);
@@ -1457,6 +1540,7 @@ export const PurchaseEntryForm: React.FC<PurchaseEntryFormProps> = ({
                 onSearchFocus={() => {
                   setFocusContext("entry_row");
                   setSelectedRowIndex(null);
+                  setIsProductDropdownDismissed(false);
                   updateDropdownPosition();
                 }}
                 onSearchBlur={(e) => {
@@ -1464,11 +1548,14 @@ export const PurchaseEntryForm: React.FC<PurchaseEntryFormProps> = ({
                   if (dropdownRef.current && related && dropdownRef.current.contains(related)) {
                     return;
                   }
-                  setTimeout(() => setSearchResults([]), 180);
+                  setTimeout(() => {
+                    setSearchResults([]);
+                    setIsProductDropdownDismissed(true);
+                  }, 180);
                 }}
                 onSearchKeyDown={handleProductSearchKeyDown}
                 searchInputRef={entryProductInputRef}
-                isDropdownOpen={searchResults.length > 0}
+                isDropdownOpen={!isProductDropdownDismissed && (searchResults.length > 0 || showProductQuickAddOption)}
                 onFieldChange={(field, val) => {
                   if (draftLine) {
                     setDraftLine({ ...draftLine, [field]: val });
@@ -1488,7 +1575,8 @@ export const PurchaseEntryForm: React.FC<PurchaseEntryFormProps> = ({
         </div>
 
         {/* Product Autocomplete Dropdown in React Portal */}
-        {searchResults.length > 0 &&
+        {!isProductDropdownDismissed &&
+          (searchResults.length > 0 || showProductQuickAddOption) &&
           dropdownPosition &&
           createPortal(
             <div
@@ -1551,6 +1639,27 @@ export const PurchaseEntryForm: React.FC<PurchaseEntryFormProps> = ({
                   </div>
                 );
               })}
+
+              {showProductQuickAddOption && (
+                <div
+                  data-index={searchResults.length}
+                  role="option"
+                  aria-selected={selectedSearchIndex === searchResults.length}
+                  onMouseEnter={() => setSelectedSearchIndex(searchResults.length)}
+                  onClick={() => setIsProductQuickAddOpen(true)}
+                  className={`flex cursor-pointer items-center gap-2 px-4 py-2.5 text-xs font-bold text-[var(--color-accent)] border-t border-[var(--color-border)] ${
+                    selectedSearchIndex === searchResults.length
+                      ? "bg-[var(--color-accent-soft)]"
+                      : "hover:bg-[var(--color-surface-hover)]"
+                  }`}
+                >
+                  <Plus className="h-4 w-4" />
+                  <span className="truncate">Add new product &quot;{searchQuery.trim()}&quot;</span>
+                  <span className="ml-auto font-mono text-[10px] font-normal text-[var(--color-text-muted)]">
+                    Enter
+                  </span>
+                </div>
+              )}
             </div>,
             document.body
           )}
@@ -1756,10 +1865,10 @@ export const PurchaseEntryForm: React.FC<PurchaseEntryFormProps> = ({
         onClose={() => setIsBillDiscountModalOpen(false)}
         taxableSubtotal={computedTotals.subtotal}
         totalTax={computedTotals.taxTotal}
-        currentDiscount={{ type: "amount", value: billDiscountAmount }}
+        currentDiscount={{ type: billDiscountType, value: billDiscountValue }}
         onApplyDiscount={(type: "percent" | "amount", value: number) => {
-          const amt = type === "percent" ? (computedTotals.subtotal * value) / 100 : value;
-          setBillDiscountAmount(amt);
+          setBillDiscountType(type);
+          setBillDiscountValue(value);
           setIsBillDiscountModalOpen(false);
         }}
       />

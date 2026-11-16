@@ -218,10 +218,10 @@ export class ProductsStore {
 
   async getBatchesForProduct(productId: string, onlyInStock = true): Promise<ProductBatch[]> {
     const all = await sqliteStorage.findAll<ProductBatch>("product_batches");
-    const matched = all.filter((b) => b.product_id === productId && (!onlyInStock || b.stock_qty > 0));
+    const matched = all.filter((b) => String(b.product_id) === String(productId) && (!onlyInStock || (b.stock_qty || 0) > 0));
 
     // Sort FEFO (First-Expiry, First-Out)
-    return matched.sort((a, b) => a.expiry_date.localeCompare(b.expiry_date));
+    return matched.sort((a, b) => (a.expiry_date || "").localeCompare(b.expiry_date || ""));
   }
 
   async getEarliestExpiringBatch(productId: string): Promise<ProductBatch | null> {

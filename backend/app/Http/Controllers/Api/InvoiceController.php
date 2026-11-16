@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Exceptions\BusinessRuleException;
 use App\Models\AuditLog;
 use App\Models\CompanySetting;
 use App\Models\Counter;
@@ -151,6 +152,14 @@ class InvoiceController
     public function store(Request $request): JsonResponse
     {
         $storeId = $this->resolveStoreId($request, $request->all());
+        $store = Store::find($storeId);
+        if ($store && !$store->is_active) {
+            return response()->json([
+                'success' => false,
+                'error' => 'STORE_DISABLED',
+                'message' => 'Store is currently disabled by Admin. Billing and transactions are prohibited.',
+            ], 403);
+        }
 
         $validated = $request->validate([
             'store_id' => 'nullable',
@@ -191,7 +200,9 @@ class InvoiceController
             'items.*.batch_id' => 'nullable',
             'items.*.batch_no' => 'nullable|string',
             'items.*.expiry_date' => 'nullable|string',
-            'items.*.qty' => 'required|numeric|min:0.01',
+            // Loose-only sales legitimately carry qty = 0; the total base-unit
+            // check inside the transaction is the real invariant.
+            'items.*.qty' => 'required|numeric|min:0',
             'items.*.loose_qty' => 'nullable|numeric|min:0',
             'items.*.units_per_pack' => 'nullable|integer|min:1',
             'items.*.unit_price' => 'required|numeric|min:0',
@@ -415,7 +426,8 @@ class InvoiceController
                 $affectedBatchStockUpdates = [];
                 $hasNegativeStockDeduction = false;
 
-                foreach ($validated['items'] as $item) {
+                foreach ($validated['items'] as $lineIndex => $item) {
+                    $lineNumber = $lineIndex + 1;
                     $productId = $item['product_id'];
                     $product = is_numeric($productId)
                         ? Product::where('store_id', $storeId)->find($productId)
@@ -451,7 +463,39 @@ class InvoiceController
                     $qty = (float)$item['qty'];
                     $looseQty = (float)($item['loose_qty'] ?? 0);
                     $unitsPerPack = (int)($item['units_per_pack'] ?? $product->units_per_pack ?: 1);
+                    $unitsPerPack = max(1, $unitsPerPack);
                     $totalBaseUnits = ($qty * $unitsPerPack) + $looseQty;
+
+                    if ($totalBaseUnits <= 0) {
+                        throw new BusinessRuleException(
+                            'QUANTITY_REQUIRED',
+                            "Enter a quantity for '{$product->name}'.",
+                            'quantity_positive',
+                            $lineNumber,
+                            'qty',
+                            'Use packs and/or loose units, for example 2+5.'
+                        );
+                    }
+                    if ($unitsPerPack > 1 && $qty != floor($qty)) {
+                        throw new BusinessRuleException(
+                            'PACKS_MUST_BE_WHOLE',
+                            "Packs must be a whole number for '{$product->name}'.",
+                            'whole_packs',
+                            $lineNumber,
+                            'qty',
+                            'Enter 2+5 for two packs and five loose units.'
+                        );
+                    }
+                    if ($looseQty > 0 && !($product->allow_loose_sale ?? true)) {
+                        throw new BusinessRuleException(
+                            'LOOSE_NOT_ALLOWED',
+                            "Loose units are not enabled for '{$product->name}'.",
+                            'loose_permission',
+                            $lineNumber,
+                            'loose_qty',
+                            'Enter whole packs only.'
+                        );
+                    }
 
                     // Batch Resolution with Row-Level Lock
                     $batch = null;
@@ -499,7 +543,14 @@ class InvoiceController
                     // Check Stock Availability
                     $currentBatchStock = (float)$batch->stock_qty;
                     if ($currentBatchStock < $totalBaseUnits && !$allowNegativeStock) {
-                        throw new \DomainException("Insufficient stock for '{$product->name}' (Batch: {$batch->batch_no}). Available: {$currentBatchStock}, Requested: {$totalBaseUnits}");
+                        throw new BusinessRuleException(
+                            'INSUFFICIENT_STOCK',
+                            "Insufficient stock for '{$product->name}' (Batch: {$batch->batch_no}).",
+                            'stock_available',
+                            $lineNumber,
+                            'batch_id',
+                            "Available: {$currentBatchStock}, requested: {$totalBaseUnits}. Reduce the quantity or pick another batch."
+                        );
                     }
 
                     $newBatchStock = $currentBatchStock - $totalBaseUnits;
@@ -873,6 +924,8 @@ class InvoiceController
                 'temp_mapped_from' => $result['temp_mapped_from'],
                 'message' => 'Invoice created and confirmed authoritatively by server.',
             ], 201);
+        } catch (BusinessRuleException $e) {
+            return $e->render();
         } catch (\DomainException $e) {
             return response()->json([
                 'success' => false,
@@ -888,7 +941,10 @@ class InvoiceController
 
     public function show(string $id): JsonResponse
     {
-        $invoice = Invoice::with(['items', 'payments', 'customer'])->findOrFail($id);
+        $invoice = Invoice::with(['items', 'payments', 'customer'])
+            ->where('id', $id)
+            ->orWhere('invoice_number', $id)
+            ->firstOrFail();
         return response()->json($invoice);
     }
 

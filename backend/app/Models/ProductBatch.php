@@ -26,8 +26,8 @@ class ProductBatch extends Model
     ];
 
     protected $casts = [
-        'expiry_date' => 'date',
-        'mfg_date' => 'date',
+        'expiry_date' => 'date:Y-m-d',
+        'mfg_date' => 'date:Y-m-d',
         'stock_qty' => 'decimal:2',
         'mrp' => 'decimal:2',
         'purchase_rate' => 'decimal:2',

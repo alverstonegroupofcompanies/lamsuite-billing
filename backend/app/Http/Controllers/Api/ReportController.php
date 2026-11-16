@@ -13,6 +13,7 @@ use App\Models\Store;
 use App\Models\StoreDayClose;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use App\Services\StoreClock;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 
@@ -731,8 +732,14 @@ class ReportController
     public function dashboardMetrics(Request $request): JsonResponse
     {
         $storeId = $this->resolveStoreId($request);
-        $startDate = $request->query('start_date', date('Y-m-d'));
-        $endDate = $request->query('end_date', date('Y-m-d'));
+        $store = $storeId ? Store::find($storeId) : null;
+
+        // Defaults are calendar dates in the store's timezone, never the
+        // server timezone: a bill rung up at 00:30 IST belongs to that IST day
+        // even when the server clock is still on the previous UTC day.
+        $storeToday = StoreClock::today($store)->toDateString();
+        $startDate = $request->query('start_date', $storeToday);
+        $endDate = $request->query('end_date', $storeToday);
 
         $query = Invoice::whereDate('invoice_date', '>=', $startDate)
             ->whereDate('invoice_date', '<=', $endDate)
@@ -741,53 +748,52 @@ class ReportController
             $query->where('store_id', $storeId);
         }
 
-        $invoices = $query->with('payments')->get();
+        $invoices = $query->with(['payments', 'items'])->get();
 
-        $grossSales = (float)$invoices->where('module_key', 'invoice')->sum('grand_total');
-        $totalReturns = (float)$invoices->where('module_key', 'credit_note')->sum('grand_total');
+        $returnModuleKeys = ['credit_note', 'sales_return'];
+        $isReturnInvoice = fn ($inv) => in_array($inv->module_key, $returnModuleKeys, true);
+
+        $grossSales = (float)$invoices->filter(fn ($inv) => !$isReturnInvoice($inv))->sum('grand_total');
+        $totalReturns = (float)$invoices->filter($isReturnInvoice)->sum('grand_total');
         $netSales = $grossSales - $totalReturns;
 
-        $billsCount = $invoices->where('module_key', 'invoice')->count();
+        $billsCount = $invoices->filter(fn ($inv) => !$isReturnInvoice($inv))->count();
         $avgTicket = $billsCount > 0 ? round($grossSales / $billsCount, 2) : 0.0;
 
-        $cash = 0.0;
-        $upi = 0.0;
-        $card = 0.0;
-        $credit = 0.0;
+        $tenders = [
+            'cash' => 0.0,
+            'upi' => 0.0,
+            'card' => 0.0,
+            'bank_transfer' => 0.0,
+            'credit' => 0.0,
+            'other' => 0.0,
+        ];
 
         foreach ($invoices as $inv) {
-            $isReturn = $inv->module_key === 'credit_note';
-            $sign = $isReturn ? -1 : 1;
+            $sign = $isReturnInvoice($inv) ? -1 : 1;
 
             if ($inv->payments && $inv->payments->isNotEmpty()) {
                 foreach ($inv->payments as $p) {
-                    if ($p->status === 'refunded' || $p->status === 'bounced') continue;
-                    $m = strtolower(trim($p->payment_mode ?? ''));
-                    $amt = (float)$p->amount * $sign;
-                    if (str_contains($m, 'cash')) $cash += $amt;
-                    elseif (str_contains($m, 'upi')) $upi += $amt;
-                    elseif (str_contains($m, 'card')) $card += $amt;
-                    elseif (str_contains($m, 'credit') || str_contains($m, 'udhari')) $credit += $amt;
+                    if (in_array($p->status, ['refunded', 'bounced'], true)) {
+                        continue;
+                    }
+                    $category = $this->normalizeTenderMode($p->payment_mode);
+                    $tenders[$category] += (float)$p->amount * $sign;
                 }
             } else {
-                $m = strtolower(trim($inv->payment_mode ?: 'cash'));
-                $amt = (float)$inv->grand_total * $sign;
-                if (str_contains($m, 'cash')) $cash += $amt;
-                elseif (str_contains($m, 'upi')) $upi += $amt;
-                elseif (str_contains($m, 'card')) $card += $amt;
-                elseif (str_contains($m, 'credit') || str_contains($m, 'udhari')) $credit += $amt;
+                $category = $this->normalizeTenderMode($inv->payment_mode);
+                $tenders[$category] += (float)$inv->grand_total * $sign;
             }
         }
 
-        $digitalTotal = $upi + $card;
-        $totalCollected = $cash + $digitalTotal + $credit;
+        $digitalTotal = $tenders['upi'] + $tenders['card'] + $tenders['bank_transfer'];
+        $totalCollected = array_sum($tenders);
         $digitalPercent = $totalCollected > 0 ? round(($digitalTotal / $totalCollected) * 100, 1) : 0.0;
 
-        $slabs = [0, 5, 12, 18, 28];
         $slabMap = [];
-        foreach ($slabs as $s) {
-            $slabMap[$s] = [
-                'rate' => $s,
+        foreach ([0, 5, 12, 18, 28] as $rate) {
+            $slabMap[$rate] = [
+                'rate' => $rate,
                 'taxable_value' => 0.0,
                 'cgst_amount' => 0.0,
                 'sgst_amount' => 0.0,
@@ -795,47 +801,140 @@ class ReportController
                 'total_tax' => 0.0,
             ];
         }
-
-        $totalTaxAccrued = 0.0;
-        foreach ($invoices as $inv) {
-            $isReturn = $inv->module_key === 'credit_note';
-            $sign = $isReturn ? -1 : 1;
-
-            if ($inv->items) {
-                foreach ($inv->items as $it) {
-                    $r = (int)$it->gst_percent;
-                    if (isset($slabMap[$r])) {
-                        $slabMap[$r]['taxable_value'] += (float)($it->taxable_amount ?? 0) * $sign;
-                        $slabMap[$r]['cgst_amount'] += (float)($it->cgst_amount ?? 0) * $sign;
-                        $slabMap[$r]['sgst_amount'] += (float)($it->sgst_amount ?? 0) * $sign;
-                        $slabMap[$r]['igst_amount'] += (float)($it->igst_amount ?? 0) * $sign;
-                        $slabMap[$r]['total_tax'] += (float)($it->tax_amount ?? 0) * $sign;
-                    }
-                    $totalTaxAccrued += (float)($it->tax_amount ?? 0) * $sign;
-                }
+        $addSlab = function (int $rate, float $taxable, float $cgst, float $sgst, float $igst) use (&$slabMap) {
+            if (!isset($slabMap[$rate])) {
+                $slabMap[$rate] = [
+                    'rate' => $rate,
+                    'taxable_value' => 0.0,
+                    'cgst_amount' => 0.0,
+                    'sgst_amount' => 0.0,
+                    'igst_amount' => 0.0,
+                    'total_tax' => 0.0,
+                ];
             }
+            $slabMap[$rate]['taxable_value'] += $taxable;
+            $slabMap[$rate]['cgst_amount'] += $cgst;
+            $slabMap[$rate]['sgst_amount'] += $sgst;
+            $slabMap[$rate]['igst_amount'] += $igst;
+            $slabMap[$rate]['total_tax'] += $cgst + $sgst + $igst;
+        };
+
+        $totalTaxable = 0.0;
+        $totalCgst = 0.0;
+        $totalSgst = 0.0;
+        $totalIgst = 0.0;
+        $totalRoundOff = 0.0;
+
+        foreach ($invoices as $inv) {
+            $sign = $isReturnInvoice($inv) ? -1 : 1;
+            $totalRoundOff += (float)($inv->round_off ?? 0);
+
+            $items = $inv->items;
+            if ($items && $items->isNotEmpty()) {
+                foreach ($items as $it) {
+                    $cgst = (float)($it->cgst_amount ?? 0) * $sign;
+                    $sgst = (float)($it->sgst_amount ?? 0) * $sign;
+                    $igst = (float)($it->igst_amount ?? 0) * $sign;
+                    $lineTotal = (float)($it->total_amount ?? 0) * $sign;
+                    $taxable = $it->taxable_amount !== null
+                        ? (float)$it->taxable_amount * $sign
+                        : $lineTotal - $cgst - $sgst - $igst;
+
+                    $totalTaxable += $taxable;
+                    $totalCgst += $cgst;
+                    $totalSgst += $sgst;
+                    $totalIgst += $igst;
+
+                    $addSlab((int)round((float)($it->gst_percent ?? 0)), $taxable, $cgst, $sgst, $igst);
+                }
+                continue;
+            }
+
+            // Header-only invoices have no item rows. Derive the slab from the
+            // header so the GST quick view is never empty for them.
+            $headerTax = (float)($inv->tax_total ?? 0) * $sign;
+            $cgst = (float)($inv->cgst_total ?? 0) * $sign;
+            $sgst = (float)($inv->sgst_total ?? 0) * $sign;
+            $igst = (float)($inv->igst_total ?? 0) * $sign;
+            if (abs($cgst + $sgst + $igst) < 0.001 && abs($headerTax) > 0.001) {
+                // Older rows only kept tax_total; split it the way GST does.
+                $cgst = $headerTax / 2;
+                $sgst = $headerTax / 2;
+            }
+            $taxTotal = abs($cgst + $sgst + $igst) > 0.001 ? $cgst + $sgst + $igst : $headerTax;
+            $base = $inv->taxable_subtotal !== null
+                ? (float)$inv->taxable_subtotal * $sign
+                : ((float)($inv->grand_total ?? 0) - $headerTax) * $sign;
+            if (abs($base) < 0.001) {
+                $base = (float)($inv->grand_total ?? 0) * $sign;
+            }
+            $rate = abs($base) > 0.001 ? (int)round((abs($taxTotal) / abs($base)) * 100) : 0;
+
+            $totalTaxable += $base;
+            $totalCgst += $cgst;
+            $totalSgst += $sgst;
+            $totalIgst += $igst;
+            $addSlab($rate, $base, $cgst, $sgst, $igst);
         }
+
+        $totalTaxAccrued = $totalCgst + $totalSgst + $totalIgst;
+
+        ksort($slabMap);
 
         return response()->json([
             'date_range' => ['start_date' => $startDate, 'end_date' => $endDate],
+            'timezone' => StoreClock::timezone($store),
             'net_sales' => round($netSales, 2),
             'gross_sales' => round($grossSales, 2),
             'total_returns' => round($totalReturns, 2),
             'bills_count' => $billsCount,
             'average_ticket' => $avgTicket,
             'payments' => [
-                'cash' => round(max(0, $cash), 2),
-                'upi' => round(max(0, $upi), 2),
-                'card' => round(max(0, $card), 2),
-                'credit' => round(max(0, $credit), 2),
+                'cash' => round(max(0, $tenders['cash']), 2),
+                'upi' => round(max(0, $tenders['upi']), 2),
+                'card' => round(max(0, $tenders['card']), 2),
+                'bank_transfer' => round(max(0, $tenders['bank_transfer']), 2),
+                'credit' => round(max(0, $tenders['credit']), 2),
+                'other' => round(max(0, $tenders['other']), 2),
                 'digital_total' => round($digitalTotal, 2),
                 'digital_percent' => $digitalPercent,
+                'total_collected' => round($totalCollected, 2),
             ],
             'gst' => [
                 'slabs' => array_values($slabMap),
-                'total_tax_accrued' => round(max(0, $totalTaxAccrued), 2),
+                'total_taxable' => round($totalTaxable, 2),
+                'total_cgst' => round($totalCgst, 2),
+                'total_sgst' => round($totalSgst, 2),
+                'total_igst' => round($totalIgst, 2),
+                'total_round_off' => round($totalRoundOff, 2),
+                'total_tax_accrued' => round($totalTaxAccrued, 2),
             ],
         ]);
+    }
+
+    /** Map a stored payment mode onto the shared tender buckets. */
+    protected function normalizeTenderMode(?string $mode): string
+    {
+        $m = strtolower(trim((string)$mode));
+        if ($m === '') {
+            return 'other';
+        }
+        if (str_contains($m, 'cash')) {
+            return 'cash';
+        }
+        if (str_contains($m, 'upi') || str_contains($m, 'gpay') || str_contains($m, 'phonepe') || str_contains($m, 'paytm') || str_contains($m, 'qr')) {
+            return 'upi';
+        }
+        if (str_contains($m, 'card') || str_contains($m, 'visa') || str_contains($m, 'pos') || str_contains($m, 'debit')) {
+            return 'card';
+        }
+        if (str_contains($m, 'bank') || str_contains($m, 'neft') || str_contains($m, 'rtgs') || str_contains($m, 'imps') || str_contains($m, 'transfer')) {
+            return 'bank_transfer';
+        }
+        if (str_contains($m, 'credit') || str_contains($m, 'udhari') || str_contains($m, 'due') || str_contains($m, 'ledger')) {
+            return 'credit';
+        }
+        return 'other';
     }
 
     /**

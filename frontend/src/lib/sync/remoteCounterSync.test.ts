@@ -150,7 +150,6 @@ describe("Remote Counter Offline Sync, Concurrent Batch Billing & Security Simul
           allow_stock_adj: false,
           require_manager_pin: true,
         },
-        manager_pin: "4321",
         license_plan: "Retail Remote",
         license_status: "active",
         license_expires_at: "2027-12-31",
@@ -161,9 +160,6 @@ describe("Remote Counter Offline Sync, Concurrent Batch Billing & Security Simul
       expect(storeDeviceService.canPerformAction("cancel_bill")).toBe(false);
       expect(storeDeviceService.canPerformAction("change_price")).toBe(false);
       expect(storeDeviceService.canPerformAction("adjust_stock")).toBe(false);
-
-      expect(storeDeviceService.verifyManagerPin("0000")).toBe(false);
-      expect(storeDeviceService.verifyManagerPin("4321")).toBe(true);
     });
 
     it("locks device and blocks sync when revoked remotely by the store owner", async () => {

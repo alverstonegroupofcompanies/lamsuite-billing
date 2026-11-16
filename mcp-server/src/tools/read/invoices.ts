@@ -231,7 +231,11 @@ export const listReturnsTool: ToolDefinition = {
       summary += "| Doc No | Date | Party | Amount | Reason |\n";
       summary += "| --- | --- | --- | --- | --- |\n";
       for (const r of returns) {
-        summary += `| \`${r.number}\` | ${r.date} | ${r.party_name} | ${formatINR(r.amount)} | ${r.reason || "N/A"} |\n`;
+        const docNo = r.invoice_number ?? r.number ?? r.doc_number ?? "—";
+        const docDate = r.invoice_date ?? r.date ?? r.doc_date ?? "—";
+        const party = r.customer_name ?? r.supplier_name ?? r.party_name ?? "—";
+        const amount = r.grand_total ?? r.amount ?? 0;
+        summary += `| \`${docNo}\` | ${docDate} | ${party} | ${formatINR(amount)} | ${r.reason || r.cancellation_reason || "N/A"} |\n`;
       }
     }
 
@@ -240,5 +244,38 @@ export const listReturnsTool: ToolDefinition = {
       type: args.type,
       currency: "INR",
     });
+  },
+};
+
+export const listInvoiceApprovalsTool: ToolDefinition = {
+  name: "lamsuite_list_invoice_approvals",
+  description:
+    "List recent edit/cancel approvals for an invoice, including mode, status, approver and expiry.",
+  inputSchema: z.object({
+    invoice_id: z.string().describe("Invoice ID or invoice number"),
+  }),
+  annotations: {
+    readOnlyHint: true,
+    destructiveHint: false,
+    idempotentHint: true,
+  },
+  requiredPermission: "invoices:read",
+  isWriteTool: false,
+  handler: async (args, { client }) => {
+    const res = await client.listInvoiceApprovals(args.invoice_id);
+    const rows = res.approvals || [];
+
+    let summary = `### Approvals for Invoice ${args.invoice_id} (${rows.length}):\n\n`;
+    if (rows.length === 0) {
+      summary += "No approvals have been issued for this invoice.";
+    } else {
+      summary += "| Action | Mode | Status | Approver | Expires | Used |\n";
+      summary += "| --- | --- | --- | --- | --- | --- |\n";
+      for (const row of rows) {
+        summary += `| ${row.action} | ${row.mode} | ${row.status} | ${row.approved_by_name || "System"} | ${row.expires_at || "-"} | ${row.used_at || "-"} |\n`;
+      }
+    }
+
+    return buildToolResponse(summary, { approvals: rows });
   },
 };

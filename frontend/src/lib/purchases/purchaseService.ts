@@ -17,10 +17,15 @@ export interface PurchaseLineItemInput {
   expiry_date: string;
   pack_qty: number; // billed packs
   loose_qty?: number; // billed loose units
-  free_qty?: number; // bonus packs or units
+  free_qty?: number; // bonus packs
+  free_loose_qty?: number; // bonus loose units
   units_per_pack?: number;
   qty?: number; // legacy alias for pack_qty
   purchase_rate: number; // rate per pack (ex-tax)
+  ptr?: number; // trade price to retailer
+  pts?: number; // price to stockist
+  ptss?: number; // price to sub-stockist
+  discount_type?: "percent" | "amount";
   discount_percent?: number; // trade discount %
   discount_amount?: number; // scheme / cash discount amount
   mrp?: number;
@@ -62,6 +67,9 @@ export interface PurchaseDocumentInput {
   itc_eligibility?: "eligible" | "ineligible" | "blocked";
   lines: PurchaseLineItemInput[];
   round_off?: number;
+  freight_charges?: number;
+  bill_discount_type?: "percent" | "amount";
+  bill_discount?: number;
   notes?: string;
   po_id?: string;
 }
@@ -82,6 +90,9 @@ export interface PurchaseDocumentRecord {
   itc_eligibility: string;
   subtotal: number;
   discount_total: number;
+  bill_discount_type?: "percent" | "amount";
+  bill_discount?: number;
+  freight_charges?: number;
   tax_total: number;
   cgst_total: number;
   sgst_total: number;
@@ -115,9 +126,14 @@ export interface PurchaseItemRecord {
   pack_qty: number;
   loose_qty: number;
   free_qty: number;
+  free_loose_qty?: number;
   units_per_pack: number;
   total_units: number;
   purchase_rate: number;
+  ptr?: number;
+  pts?: number;
+  ptss?: number;
+  discount_type?: "percent" | "amount";
   discount_percent: number;
   discount_amount: number;
   effective_unit_cost: number;
@@ -135,27 +151,79 @@ export interface PurchaseItemRecord {
 
 export class PurchaseService {
   /**
-   * Generates sequential purchase bill number with FY reset (e.g. PB-26-27-0001)
+   * Previews sequential purchase bill number from settings without advancing sequence
    */
-  async generateNextPurchaseNumber(): Promise<string> {
+  async previewNextPurchaseNumber(): Promise<string> {
     const settings = await companySettingsService.loadSettings();
-    let prefix = settings.sequences?.purchasePrefix || "PB";
+    let prefix = settings.sequences?.purchasePrefix || "PUR";
     prefix = prefix.replace(/-+$/, "");
-    const fy = getIndianFinancialYear();
+    let nextNum = settings.sequences?.nextPurchaseNumber || 201;
 
     const allPurchases = await sqliteStorage.findAll<any>("purchase_documents");
-    const searchPrefix = `${prefix}-${fy}-`;
+    const searchPrefix = `${prefix}-`;
     const matching = allPurchases.filter((p) => p.purchase_number?.startsWith(searchPrefix));
 
-    let maxNum = 0;
     for (const p of matching) {
       const parts = p.purchase_number.split("-");
       const last = parseInt(parts[parts.length - 1], 10);
-      if (!isNaN(last) && last > maxNum) maxNum = last;
+      if (!isNaN(last) && last >= nextNum) {
+        nextNum = last + 1;
+      }
     }
 
-    const nextSeq = String(maxNum + 1).padStart(4, "0");
-    return `${prefix}-${fy}-${nextSeq}`;
+    return `${prefix}-${nextNum}`;
+  }
+
+  /**
+   * Generates sequential purchase bill number following sequences in settings
+   */
+  async generateNextPurchaseNumber(): Promise<string> {
+    const settings = await companySettingsService.loadSettings();
+    let prefix = settings.sequences?.purchasePrefix || "PUR";
+    prefix = prefix.replace(/-+$/, "");
+    let nextNum = settings.sequences?.nextPurchaseNumber || 201;
+
+    const allPurchases = await sqliteStorage.findAll<any>("purchase_documents");
+    const searchPrefix = `${prefix}-`;
+    const matching = allPurchases.filter((p) => p.purchase_number?.startsWith(searchPrefix));
+
+    for (const p of matching) {
+      const parts = p.purchase_number.split("-");
+      const last = parseInt(parts[parts.length - 1], 10);
+      if (!isNaN(last) && last >= nextNum) {
+        nextNum = last + 1;
+      }
+    }
+
+    const docNumber = `${prefix}-${nextNum}`;
+
+    await companySettingsService.updateSettings({
+      sequences: {
+        ...settings.sequences,
+        purchasePrefix: prefix,
+        nextPurchaseNumber: nextNum + 1,
+      },
+    });
+
+    return docNumber;
+  }
+
+  async syncNextPurchaseSequence(purchaseNumber: string): Promise<void> {
+    if (!purchaseNumber) return;
+    const parts = purchaseNumber.split("-");
+    const lastNum = parseInt(parts[parts.length - 1], 10);
+    if (isNaN(lastNum)) return;
+    const settings = await companySettingsService.loadSettings();
+    const currNext = settings.sequences?.nextPurchaseNumber || 201;
+    if (lastNum >= currNext) {
+      await companySettingsService.updateSettings({
+        sequences: {
+          ...settings.sequences,
+          purchasePrefix: settings.sequences?.purchasePrefix || "PUR",
+          nextPurchaseNumber: lastNum + 1,
+        },
+      });
+    }
   }
 
   /**
@@ -193,6 +261,9 @@ export class PurchaseService {
     const settings = companySettingsService.getSettings();
     const storeState = settings.state_code || "32";
     const defaultTaxMode = settings.purchase_tax_mode || "exclusive";
+    // Legacy callers without an explicit type may pass both a trade % and a
+    // flat scheme amount; the engine applies both. Typed lines are exclusive.
+    const discountType = line.discount_type;
 
     const doc = calculateDocumentTaxes({
       store_state: storeState,
@@ -203,12 +274,13 @@ export class PurchaseService {
           qty: packs,
           loose_qty: loose,
           free_qty: free,
+          free_loose_qty: Math.max(0, line.free_loose_qty || 0),
           units_per_pack: unitsPerPack,
           unit_price: line.purchase_rate,
           mrp: line.mrp,
           rate_basis: "ptr",
-          discount_percent: line.discount_percent,
-          discount_amount: line.discount_amount,
+          discount_percent: discountType === "amount" ? 0 : line.discount_percent,
+          discount_amount: discountType === "percent" ? 0 : line.discount_amount,
           gst_percent: line.gst_percent,
           cess_percent: line.cess_percent,
           is_tax_inclusive: defaultTaxMode === "inclusive",
@@ -243,6 +315,99 @@ export class PurchaseService {
   }
 
   /**
+   * Calculates document-level totals (line discounts, bill discount, freight,
+   * round-off) in one statutory pass so the purchase entry screen and the
+   * posting service always agree.
+   */
+  calculateDocumentTotals(
+    lines: PurchaseLineItemInput[],
+    isInterstate = false,
+    opts: {
+      bill_discount_type?: "percent" | "amount";
+      bill_discount_value?: number;
+      freight_charges?: number;
+      round_off?: number | null;
+    } = {}
+  ): {
+    subtotal: number;
+    discountTotal: number;
+    billDiscountAmount: number;
+    taxTotal: number;
+    cgstTotal: number;
+    sgstTotal: number;
+    igstTotal: number;
+    cessTotal: number;
+    freightCharges: number;
+    roundOff: number;
+    grandTotal: number;
+    totalUnits: number;
+    taxableSubtotal: number;
+  } {
+    const settings = companySettingsService.getSettings();
+    const storeState = settings.state_code || "32";
+    const defaultTaxMode = settings.purchase_tax_mode || "exclusive";
+
+    const engineLines = lines.map((line) => {
+      const discountType = line.discount_type;
+      return {
+        qty: Math.max(0, line.pack_qty ?? line.qty ?? 0),
+        loose_qty: Math.max(0, line.loose_qty || 0),
+        free_qty: Math.max(0, line.free_qty || 0),
+        free_loose_qty: Math.max(0, line.free_loose_qty || 0),
+        units_per_pack: Math.max(1, line.units_per_pack || 1),
+        unit_price: line.purchase_rate,
+        mrp: line.mrp,
+        hsn_code: line.hsn_code,
+        rate_basis: "ptr" as const,
+        discount_percent: discountType === "amount" ? 0 : line.discount_percent,
+        discount_amount: discountType === "percent" ? 0 : line.discount_amount,
+        gst_percent: line.gst_percent,
+        cess_percent: line.cess_percent,
+        is_tax_inclusive: defaultTaxMode === "inclusive",
+      };
+    });
+
+    const doc = calculateDocumentTaxes({
+      store_state: storeState,
+      place_of_supply: isInterstate ? (cleanStateCode(storeState) === "32" ? "29-Karnataka" : "32-Kerala") : storeState,
+      default_tax_mode: defaultTaxMode,
+      lines: engineLines,
+      bill_discount: {
+        type: opts.bill_discount_type || "amount",
+        value: Math.max(0, opts.bill_discount_value || 0),
+      },
+      auto_round_off: false,
+    });
+
+    const freight = round2(opts.freight_charges || 0);
+    const netBeforeRound = round2(doc.net_before_round + freight);
+    const roundOff = opts.round_off != null ? round2(opts.round_off) : round2(Math.round(netBeforeRound) - netBeforeRound);
+    const grandTotal = Math.max(0, round2(netBeforeRound + roundOff));
+    const totalUnits = lines.reduce((sum, line) => {
+      const upp = Math.max(1, line.units_per_pack || 1);
+      const billed = Math.max(0, line.pack_qty ?? line.qty ?? 0) * upp + Math.max(0, line.loose_qty || 0);
+      const free = Math.max(0, line.free_qty || 0) * upp + Math.max(0, line.free_loose_qty || 0);
+      return sum + billed + free;
+    }, 0);
+
+    return {
+      subtotal: doc.gross_subtotal,
+      discountTotal: round2(doc.line_discount_total + doc.bill_discount_total),
+      billDiscountAmount: doc.bill_discount_total,
+      taxTotal: doc.total_tax,
+      cgstTotal: doc.cgst_total,
+      sgstTotal: doc.sgst_total,
+      igstTotal: doc.igst_total,
+      cessTotal: doc.cess_total,
+      freightCharges: freight,
+      roundOff,
+      grandTotal,
+      totalUnits,
+      taxableSubtotal: doc.taxable_subtotal,
+    };
+  }
+
+  /**
    * Atomic record of inward purchase bill
    */
   async recordInwardPurchaseBill(doc: PurchaseDocumentInput): Promise<{
@@ -260,15 +425,9 @@ export class PurchaseService {
     const purchaseId = `pb_${Date.now()}_${Math.random().toString(16).slice(2, 6)}`;
     const now = Date.now();
     const purchaseNumber = doc.purchase_number || (await this.generateNextPurchaseNumber());
-
-    let subtotal = 0;
-    let discountTotal = 0;
-    let taxTotal = 0;
-    let cgstTotal = 0;
-    let sgstTotal = 0;
-    let igstTotal = 0;
-    let cessTotal = 0;
-    let totalLinesAmount = 0;
+    if (doc.purchase_number) {
+      await this.syncNextPurchaseSequence(purchaseNumber);
+    }
 
     const isInterstate = Boolean(doc.is_interstate);
     const itemRecords: PurchaseItemRecord[] = [];
@@ -276,20 +435,16 @@ export class PurchaseService {
 
     for (const line of doc.lines) {
       const calc = this.calculateLineTotals(line, isInterstate);
-      subtotal += calc.gross_amount;
-      discountTotal += calc.discount_amount;
-      taxTotal += calc.total_tax;
-      cgstTotal += calc.cgst_amount;
-      sgstTotal += calc.sgst_amount;
-      igstTotal += calc.igst_amount;
-      cessTotal += calc.cess_amount;
-      totalLinesAmount += calc.total_amount;
 
       // Track received quantity per product for PO fulfillment
       receivedMap[line.product_id] = (receivedMap[line.product_id] || 0) + (line.pack_qty || line.qty || 0);
 
-      // 1. Upsert or update batch stock
-      const batchId = `batch_${line.product_id}_${line.batch_no.replace(/\s+/g, "_")}`;
+      // 1. Upsert or update batch stock. Batch/expiry are optional for
+      //    non-pharmacy stores, so batchless receipts share one bucket.
+      const batchKey = line.batch_no?.trim()
+        ? line.batch_no.trim().replace(/\s+/g, "_")
+        : "NOBATCH";
+      const batchId = `batch_${line.product_id}_${batchKey}`;
       const existingBatch = await sqliteStorage.findById<ProductBatch>("product_batches", batchId);
 
       const updatedStock = (existingBatch?.stock_qty || 0) + calc.total_stock_units;
@@ -298,9 +453,9 @@ export class PurchaseService {
       await productsStore.upsertBatch({
         id: batchId,
         product_id: line.product_id,
-        batch_no: line.batch_no,
+        batch_no: line.batch_no?.trim() || "",
         mfg_date: line.mfg_date,
-        expiry_date: line.expiry_date,
+        expiry_date: line.expiry_date || "",
         stock_qty: updatedStock,
         mrp: line.mrp,
         purchase_rate: line.purchase_rate,
@@ -312,7 +467,8 @@ export class PurchaseService {
       let prod = await productsStore.getProductById(line.product_id);
       if (prod) {
         prod.current_stock = (prod.current_stock || 0) + calc.total_stock_units;
-        prod.ptr = line.purchase_rate;
+        prod.ptr = line.ptr ?? line.purchase_rate;
+        if (line.pts) prod.pts = line.pts;
         if (line.mrp) prod.mrp = line.mrp;
         if (line.selling_rate) prod.sel_rate = line.selling_rate;
         await productsStore.upsertProduct(prod);
@@ -344,7 +500,7 @@ export class PurchaseService {
         unit_cost: calc.effective_unit_cost,
         reference_type: "PURCHASE_BILL",
         reference_id: purchaseId,
-        notes: `Inward: Inv #${doc.supplier_invoice_no} (${line.batch_no})`,
+        notes: `Inward: Inv #${doc.supplier_invoice_no} (${line.batch_no || "no batch"})`,
         created_at: now,
       });
 
@@ -363,11 +519,16 @@ export class PurchaseService {
         pack_qty: line.pack_qty ?? line.qty ?? 1,
         loose_qty: line.loose_qty || 0,
         free_qty: line.free_qty || 0,
+        free_loose_qty: line.free_loose_qty || 0,
         units_per_pack: unitsPerPack,
         total_units: calc.total_stock_units,
         purchase_rate: line.purchase_rate,
-        discount_percent: line.discount_percent || 0,
-        discount_amount: calc.discount_amount,
+        ptr: line.ptr ?? line.purchase_rate,
+        pts: line.pts,
+        ptss: line.ptss,
+        discount_type: line.discount_type || "percent",
+        discount_percent: line.discount_type === "amount" ? 0 : line.discount_percent || 0,
+        discount_amount: line.discount_type === "percent" ? 0 : line.discount_amount ?? calc.discount_amount,
         effective_unit_cost: calc.effective_unit_cost,
         taxable_amount: calc.taxable_amount,
         mrp: line.mrp,
@@ -385,8 +546,12 @@ export class PurchaseService {
       itemRecords.push(itemRow);
     }
 
-    const roundOff = doc.round_off !== undefined ? doc.round_off : round2(Math.round(totalLinesAmount) - totalLinesAmount);
-    const grandTotal = round2(totalLinesAmount + roundOff);
+    const docTotals = this.calculateDocumentTotals(doc.lines, isInterstate, {
+      bill_discount_type: doc.bill_discount_type,
+      bill_discount_value: doc.bill_discount,
+      freight_charges: doc.freight_charges,
+      round_off: doc.round_off,
+    });
 
     const purchaseRow: PurchaseDocumentRecord = {
       id: purchaseId,
@@ -402,15 +567,18 @@ export class PurchaseService {
       is_interstate: isInterstate ? 1 : 0,
       is_rcm: doc.is_rcm ? 1 : 0,
       itc_eligibility: doc.itc_eligibility || "eligible",
-      subtotal: round2(subtotal),
-      discount_total: round2(discountTotal),
-      tax_total: round2(taxTotal),
-      cgst_total: round2(cgstTotal),
-      sgst_total: round2(sgstTotal),
-      igst_total: round2(igstTotal),
-      cess_total: round2(cessTotal),
-      round_off: round2(roundOff),
-      grand_total: round2(grandTotal),
+      subtotal: docTotals.subtotal,
+      discount_total: docTotals.discountTotal,
+      bill_discount_type: doc.bill_discount_type || "amount",
+      bill_discount: doc.bill_discount || 0,
+      freight_charges: docTotals.freightCharges,
+      tax_total: docTotals.taxTotal,
+      cgst_total: docTotals.cgstTotal,
+      sgst_total: docTotals.sgstTotal,
+      igst_total: docTotals.igstTotal,
+      cess_total: docTotals.cessTotal,
+      round_off: docTotals.roundOff,
+      grand_total: docTotals.grandTotal,
       paid_amount: 0,
       payment_status: "unpaid",
       status: "received",
@@ -431,7 +599,7 @@ export class PurchaseService {
       purchase_id: purchaseId,
       purchase_number: purchaseNumber,
       purchase_date: doc.purchase_date,
-      amount: grandTotal,
+      amount: docTotals.grandTotal,
       notes: `Inward Invoice: ${doc.supplier_invoice_no}`,
     });
 
@@ -736,33 +904,19 @@ export class PurchaseService {
     });
 
     // 3. APPLY UPDATED ITEMS
-    let subtotal = 0;
-    let discountTotal = 0;
-    let taxTotal = 0;
-    let cgstTotal = 0;
-    let sgstTotal = 0;
-    let igstTotal = 0;
-    let cessTotal = 0;
-    let totalLinesAmount = 0;
-
     const isInterstate = Boolean(doc.is_interstate);
     const newItemRecords: PurchaseItemRecord[] = [];
     const receivedMap: Record<string, number> = {};
 
     for (const line of doc.lines) {
       const calc = this.calculateLineTotals(line, isInterstate);
-      subtotal += calc.gross_amount;
-      discountTotal += calc.discount_amount;
-      taxTotal += calc.total_tax;
-      cgstTotal += calc.cgst_amount;
-      sgstTotal += calc.sgst_amount;
-      igstTotal += calc.igst_amount;
-      cessTotal += calc.cess_amount;
-      totalLinesAmount += calc.total_amount;
 
       receivedMap[line.product_id] = (receivedMap[line.product_id] || 0) + (line.pack_qty || line.qty || 0);
 
-      const batchId = `batch_${line.product_id}_${line.batch_no.replace(/\s+/g, "_")}`;
+      const batchKey = line.batch_no?.trim()
+        ? line.batch_no.trim().replace(/\s+/g, "_")
+        : "NOBATCH";
+      const batchId = `batch_${line.product_id}_${batchKey}`;
       const existingBatch = await sqliteStorage.findById<ProductBatch>("product_batches", batchId);
       const updatedStock = (existingBatch?.stock_qty || 0) + calc.total_stock_units;
       const unitsPerPack = Math.max(1, line.units_per_pack || 1);
@@ -770,9 +924,9 @@ export class PurchaseService {
       await productsStore.upsertBatch({
         id: batchId,
         product_id: line.product_id,
-        batch_no: line.batch_no,
+        batch_no: line.batch_no?.trim() || "",
         mfg_date: line.mfg_date,
-        expiry_date: line.expiry_date,
+        expiry_date: line.expiry_date || "",
         stock_qty: updatedStock,
         mrp: line.mrp,
         purchase_rate: line.purchase_rate,
@@ -783,7 +937,8 @@ export class PurchaseService {
       let prod = await productsStore.getProductById(line.product_id);
       if (prod) {
         prod.current_stock = (prod.current_stock || 0) + calc.total_stock_units;
-        prod.ptr = line.purchase_rate;
+        prod.ptr = line.ptr ?? line.purchase_rate;
+        if (line.pts) prod.pts = line.pts;
         if (line.mrp) prod.mrp = line.mrp;
         if (line.selling_rate) prod.sel_rate = line.selling_rate;
         await productsStore.upsertProduct(prod);
@@ -817,11 +972,16 @@ export class PurchaseService {
         pack_qty: line.pack_qty ?? line.qty ?? 1,
         loose_qty: line.loose_qty || 0,
         free_qty: line.free_qty || 0,
+        free_loose_qty: line.free_loose_qty || 0,
         units_per_pack: unitsPerPack,
         total_units: calc.total_stock_units,
         purchase_rate: line.purchase_rate,
-        discount_percent: line.discount_percent || 0,
-        discount_amount: calc.discount_amount,
+        ptr: line.ptr ?? line.purchase_rate,
+        pts: line.pts,
+        ptss: line.ptss,
+        discount_type: line.discount_type || "percent",
+        discount_percent: line.discount_type === "amount" ? 0 : line.discount_percent || 0,
+        discount_amount: line.discount_type === "percent" ? 0 : line.discount_amount ?? calc.discount_amount,
         effective_unit_cost: calc.effective_unit_cost,
         taxable_amount: calc.taxable_amount,
         mrp: line.mrp,
@@ -839,8 +999,12 @@ export class PurchaseService {
       newItemRecords.push(itemRow);
     }
 
-    const roundOff = doc.round_off !== undefined ? doc.round_off : round2(Math.round(totalLinesAmount) - totalLinesAmount);
-    const grandTotal = round2(totalLinesAmount + roundOff);
+    const docTotals = this.calculateDocumentTotals(doc.lines, isInterstate, {
+      bill_discount_type: doc.bill_discount_type,
+      bill_discount_value: doc.bill_discount,
+      freight_charges: doc.freight_charges,
+      round_off: doc.round_off,
+    });
 
     // 4. UPDATE PURCHASE DOCUMENT RECORD
     const updatedDocRow: PurchaseDocumentRecord = {
@@ -855,15 +1019,18 @@ export class PurchaseService {
       is_interstate: isInterstate ? 1 : 0,
       is_rcm: doc.is_rcm ? 1 : 0,
       itc_eligibility: doc.itc_eligibility || "eligible",
-      subtotal: round2(subtotal),
-      discount_total: round2(discountTotal),
-      tax_total: round2(taxTotal),
-      cgst_total: round2(cgstTotal),
-      sgst_total: round2(sgstTotal),
-      igst_total: round2(igstTotal),
-      cess_total: round2(cessTotal),
-      round_off: round2(roundOff),
-      grand_total: round2(grandTotal),
+      subtotal: docTotals.subtotal,
+      discount_total: docTotals.discountTotal,
+      bill_discount_type: doc.bill_discount_type || "amount",
+      bill_discount: doc.bill_discount || 0,
+      freight_charges: docTotals.freightCharges,
+      tax_total: docTotals.taxTotal,
+      cgst_total: docTotals.cgstTotal,
+      sgst_total: docTotals.sgstTotal,
+      igst_total: docTotals.igstTotal,
+      cess_total: docTotals.cessTotal,
+      round_off: docTotals.roundOff,
+      grand_total: docTotals.grandTotal,
       is_revised: 1,
       notes: doc.notes ? `${doc.notes} (Edited: ${reason})` : `Edited: ${reason}`,
       updated_at: now,
@@ -879,7 +1046,7 @@ export class PurchaseService {
       purchase_id: purchaseId,
       purchase_number: originalDoc.purchase_number,
       purchase_date: doc.purchase_date,
-      amount: grandTotal,
+      amount: docTotals.grandTotal,
       notes: `Inward Invoice (Revised): ${doc.supplier_invoice_no}`,
     });
 

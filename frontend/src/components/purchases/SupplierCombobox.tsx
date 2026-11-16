@@ -81,6 +81,7 @@ export const SupplierCombobox: React.FC<SupplierComboboxProps> = ({
 
   // Quick Add Modal State
   const [isQuickAddOpen, setIsQuickAddOpen] = useState(false);
+  const [quickAddName, setQuickAddName] = useState("");
   useModalEscape(isQuickAddOpen, () => setIsQuickAddOpen(false));
 
   const listRef = useRef<HTMLDivElement | null>(null);
@@ -204,6 +205,7 @@ export const SupplierCombobox: React.FC<SupplierComboboxProps> = ({
   };
 
   const openQuickAdd = () => {
+    setQuickAddName(searchTerm.trim());
     setIsQuickAddOpen(true);
     setIsOpen(false);
   };
@@ -429,6 +431,7 @@ export const SupplierCombobox: React.FC<SupplierComboboxProps> = ({
       {/* Supplier Quick Add Modal */}
       <SupplierQuickAddModal
         isOpen={isQuickAddOpen}
+        initialName={quickAddName}
         onClose={() => setIsQuickAddOpen(false)}
         onSupplierCreated={(newSup) => {
           loadSuppliers();

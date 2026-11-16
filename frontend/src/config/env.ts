@@ -17,6 +17,14 @@ declare global {
 }
 
 function resolveApiBaseUrl(): string {
+  // 0. Runtime stored URL from user configuration
+  if (typeof localStorage !== "undefined" && typeof localStorage.getItem === "function") {
+    try {
+      const custom = localStorage.getItem("lamsuite_custom_api_url");
+      if (custom?.trim()) return custom.trim().replace(/\/+$/, "");
+    } catch {}
+  }
+
   // 1. Runtime environment injected via Docker entrypoint / env.js
   if (typeof window !== "undefined" && window.__ENV__?.VITE_API_BASE_URL) {
     const raw = window.__ENV__.VITE_API_BASE_URL.trim();
@@ -75,7 +83,31 @@ function resolveApiBaseUrl(): string {
   return "http://127.0.0.1:8000";
 }
 
-export const API_BASE_URL: string = resolveApiBaseUrl();
+export let API_BASE_URL: string = resolveApiBaseUrl();
+
+export function setApiBaseUrl(url: string): void {
+  const cleaned = url.trim().replace(/\/+$/, "");
+  API_BASE_URL = cleaned;
+  if (typeof localStorage !== "undefined" && typeof localStorage.setItem === "function") {
+    try {
+      localStorage.setItem("lamsuite_custom_api_url", cleaned);
+    } catch {}
+  }
+}
+
+export function getCandidateApiUrls(): string[] {
+  const current = getResolvedApiBaseUrl();
+  const isCurrentLocal =
+    current.includes("127.0.0.1") || current.includes("localhost");
+
+  if (isCurrentLocal) {
+    // If already targeting a local server, only use the current URL
+    return [current];
+  }
+
+  // If targeting a remote cloud server, offer local backend as a fallback candidate
+  return [current, "http://127.0.0.1:8000"];
+}
 
 function resolvePanelPortalUrl(): string {
   if (typeof window !== "undefined") {
@@ -141,6 +173,10 @@ export const DEFAULT_LAN_PORT: number =
 
 export function getResolvedApiBaseUrl(): string {
   if (typeof localStorage !== "undefined" && typeof localStorage.getItem === "function") {
+    const custom = localStorage.getItem("lamsuite_custom_api_url");
+    if (custom?.trim()) {
+      return custom.trim().replace(/\/+$/, "");
+    }
     const hubIp = localStorage.getItem("lamsuite_hub_ip");
     const hubPort = localStorage.getItem("lamsuite_hub_port") || "8000";
     if (

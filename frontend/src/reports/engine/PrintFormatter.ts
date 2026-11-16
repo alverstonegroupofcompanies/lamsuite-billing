@@ -621,16 +621,16 @@ export class PrintFormatter {
       const is6in = layout === "dot-matrix-60";
       const cols =
         is6in
-          ? 50 // 5.0" usable body between 0.5" tractor margins
+          ? 60 // 60 columns (6-inch / 6C continuous form)
           : layout === "dot-matrix-120"
           ? 120
           : layout === "dot-matrix-132"
           ? 132
           : 80;
-      const carriageCols = options?.printerColumns || (is6in ? 60 : cols);
+      const carriageCols = is6in ? 60 : (options?.printerColumns || cols);
       const text = this.generateDotMatrixText(activeDoc, cols, {
         printerColumns: carriageCols,
-        autoCenter: options?.autoCenter !== false,
+        autoCenter: is6in ? false : options?.autoCenter !== false,
         leftMarginSpaces: options?.leftMarginSpaces,
       });
       const paperWidth: DotMatrixPaperWidth =
@@ -645,7 +645,7 @@ export class PrintFormatter {
         columns: cols,
         paperWidth,
         printerCarriageColumns: carriageCols,
-        autoCenterPaper: options?.autoCenter !== false,
+        autoCenterPaper: is6in ? false : options?.autoCenter !== false,
         showRuler: true,
         showLineNumbers: true,
         showPageBreaks: true,

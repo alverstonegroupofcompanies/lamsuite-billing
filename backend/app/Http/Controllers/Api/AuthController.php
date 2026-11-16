@@ -216,7 +216,7 @@ class AuthController
             $clientIp,
             $counter->location_name,
             $request->userAgent(),
-            $request->input('app_version', '2.0.35'),
+            $request->input('app_version'),
             'Cashier',
             $publicIp
         );
@@ -389,7 +389,7 @@ class AuthController
             $clientIp,
             $counter->location_name,
             $request->userAgent(),
-            $request->input('app_version', '2.0.35'),
+            $request->input('app_version'),
             $user->role ?: 'Store Owner',
             $publicIp
         );
@@ -568,6 +568,28 @@ class AuthController
      */
     public function checkLicense(Request $request): JsonResponse
     {
+        $storeCandidate = $request->header('X-Store-Id') ?: $request->header('Store-Id') ?: $request->query('store_id');
+        if (!empty($storeCandidate)) {
+            $store = is_numeric($storeCandidate) ? Store::find((int)$storeCandidate) : Store::where('code', $storeCandidate)->first();
+            if ($store) {
+                $lastReset = \App\Models\AuditLog::where('store_id', $store->id)
+                    ->where('action', 'remote_store_reset')
+                    ->latest('id')
+                    ->first();
+                return response()->json([
+                    'valid' => (bool)$store->is_active,
+                    'is_active' => (bool)$store->is_active,
+                    'status' => $store->is_active ? 'active' : 'disabled',
+                    'store_version' => (int)$store->version,
+                    'last_reset_at' => $lastReset ? $lastReset->created_at->toIso8601String() : null,
+                    'last_reset_options' => $lastReset ? ($lastReset->new_values['options'] ?? null) : null,
+                    'license_plan' => $store->license_plan ?? 'Enterprise Retail & Pharmacy Chain',
+                    'license_expires_at' => $store->license_expires_at ? $store->license_expires_at->toIso8601String() : '2027-12-31T23:59:59Z',
+                    'features' => ['pos', 'purchases', 'stock', 'reports', 'multi_counter', 'lan_sync'],
+                ]);
+            }
+        }
+
         $token = $request->header('X-Device-Token') ?: $request->input('device_token');
         if (!empty($token)) {
             $tokenHash = hash('sha256', trim($token));
@@ -615,10 +637,14 @@ class AuthController
             ->where('device_uuid', $deviceUuid)
             ->first();
 
-        // 2. If not found by device_uuid, match by (store_id, counter_code)
+        // 2. If not found by device_uuid, reuse a free counter with this code.
+        // Never hijack a counter that is actively bound to another workstation.
         if (!$counter) {
             $counter = Counter::where('store_id', $store->id)
                 ->where('counter_code', $counterCode)
+                ->where(function ($q) use ($deviceUuid) {
+                    $q->whereNull('device_uuid')->orWhere('device_uuid', $deviceUuid);
+                })
                 ->first();
         }
 
@@ -627,7 +653,10 @@ class AuthController
             ->when($counter, fn($q) => $q->where('id', '!=', $counter->id))
             ->update(['device_uuid' => null]);
 
-        // 4. If no existing counter found, allocate a unique counter code if requested is taken
+        // 4. Counter names are unique per store among live counters.
+        $uniqueCounterName = Counter::uniqueNameForStore($store->id, $deviceName, $counter?->id);
+
+        // 5. If no existing counter found, allocate a unique counter code if requested is taken
         if (!$counter) {
             $codeCandidate = $counterCode;
             $counterNum = 2;
@@ -639,7 +668,7 @@ class AuthController
             $counter = Counter::create([
                 'store_id' => $store->id,
                 'counter_code' => $counterCode,
-                'counter_name' => $deviceName,
+                'counter_name' => $uniqueCounterName,
                 'device_name' => $deviceName,
                 'location_name' => $locationName,
                 'is_hub' => $isHub,
@@ -654,7 +683,7 @@ class AuthController
             ]);
         } else {
             $counter->update([
-                'counter_name' => $deviceName,
+                'counter_name' => $uniqueCounterName,
                 'device_name' => $deviceName,
                 'location_name' => $locationName ?: $counter->location_name,
                 'is_hub' => $isHub,

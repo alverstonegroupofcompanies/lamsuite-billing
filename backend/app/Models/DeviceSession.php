@@ -31,6 +31,8 @@ class DeviceSession extends Model
         'unsynced_items_count',
         'is_active',
         'user_agent',
+        'force_logged_out_at',
+        'force_logout_reason',
     ];
 
     protected $casts = [
@@ -38,6 +40,7 @@ class DeviceSession extends Model
         'unsynced_items_count' => 'integer',
         'login_time' => 'datetime',
         'last_active_at' => 'datetime',
+        'force_logged_out_at' => 'datetime',
     ];
 
     public function store(): BelongsTo
@@ -190,6 +193,16 @@ class DeviceSession extends Model
                 'last_active_at' => now(),
             ]);
 
+        // Resolve the owning counter when the caller only knows the device.
+        if (empty($counterId)) {
+            $resolvedCounter = Counter::where('device_uuid', $deviceUuid)->first();
+            if ($resolvedCounter) {
+                $counterId = $resolvedCounter->id;
+                $counterName = $counterName ?: $resolvedCounter->counter_name;
+                $counterCode = $counterCode ?: $resolvedCounter->counter_code;
+            }
+        }
+
         if (empty($deviceName)) {
             $deviceModel = Device::where('device_uuid', $deviceUuid)->first();
             $counterModel = $counterId ? Counter::find($counterId) : Counter::where('device_uuid', $deviceUuid)->first();
@@ -228,7 +241,7 @@ class DeviceSession extends Model
             'login_time' => now(),
             'last_active_at' => now(),
             'status' => 'active',
-            'app_version' => $appVersion ?: '2.0.21',
+            'app_version' => $appVersion ?: null,
             'unsynced_items_count' => 0,
             'is_active' => true,
             'user_agent' => $userAgent ? substr($userAgent, 0, 255) : null,
@@ -249,10 +262,16 @@ class DeviceSession extends Model
         ?string $userRole = null,
         ?string $publicIp = null,
         int|string|null $storeId = null,
-        ?string $deviceIpv4 = null
+        ?string $deviceIpv4 = null,
+        int|string|null $userId = null,
+        int|string|null $counterId = null,
+        ?string $counterCode = null
     ): ?self {
+        // Never revive a released, revoked, or force-logged-out session. A new
+        // sign-in is what creates a session; presence only refreshes the live one.
         $session = self::where('device_uuid', $deviceUuid)
             ->where('is_active', true)
+            ->where('status', '!=', 'revoked')
             ->orderBy('id', 'desc')
             ->first();
 
@@ -260,8 +279,8 @@ class DeviceSession extends Model
             $updates = [
                 'last_active_at' => now(),
             ];
-            if ($storeId && (int)$session->store_id !== (int)$storeId) {
-                $updates['store_id'] = (int)$storeId;
+            if ($storeId !== null && $storeId !== '' && (string)$session->store_id !== (string)$storeId) {
+                $updates['store_id'] = $storeId;
             }
             $effectiveIp = self::normalizeIpv4($deviceIpv4 ?: $ipAddress);
             if ($effectiveIp) {
@@ -270,11 +289,22 @@ class DeviceSession extends Model
             if ($publicIp) {
                 $updates['public_ip'] = $publicIp;
             }
-            if ($deviceName && empty($session->device_name)) {
+            // Identity fields are refreshed on every beat so renames and role
+            // changes propagate without waiting for a fresh login.
+            if ($deviceName) {
                 $updates['device_name'] = $deviceName;
             }
-            if ($counterName && empty($session->counter_name)) {
+            if ($counterName) {
                 $updates['counter_name'] = $counterName;
+            }
+            if ($counterCode) {
+                $updates['counter_code'] = $counterCode;
+            }
+            if ($counterId !== null && $counterId !== '') {
+                $updates['counter_id'] = $counterId;
+            }
+            if ($userId !== null && $userId !== '') {
+                $updates['user_id'] = $userId;
             }
             if ($appVersion) {
                 $updates['app_version'] = $appVersion;
@@ -288,7 +318,7 @@ class DeviceSession extends Model
                     $updates['status'] = strtolower($status);
                 }
             }
-            if ($userRole && empty($session->user_role)) {
+            if ($userRole) {
                 $updates['user_role'] = $userRole;
             }
             $session->update($updates);
@@ -296,6 +326,23 @@ class DeviceSession extends Model
         }
 
         return null;
+    }
+
+    /**
+     * Mark sessions that stopped beating as expired so presence stays truthful.
+     */
+    public static function expireStale(int|string|null $storeId = null, int $staleHours = 24): int
+    {
+        return self::query()
+            ->when($storeId !== null && $storeId !== '', fn ($q) => $q->where('store_id', $storeId))
+            ->where('is_active', true)
+            ->where('status', '!=', 'revoked')
+            ->whereNotNull('last_active_at')
+            ->where('last_active_at', '<', now()->subHours($staleHours))
+            ->update([
+                'is_active' => false,
+                'status' => 'expired',
+            ]);
     }
 
     /**

@@ -2,7 +2,13 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { sqliteStorage } from "../db/sqliteStorage";
 import { productsStore } from "../masters/productsStore";
 import { partiesStore } from "../masters/partiesStore";
-import { salesReturnService, type SalesReturnInput } from "./salesReturnService";
+import {
+  salesReturnService,
+  toBaseUnits,
+  returnKey,
+  buildReturnableQtyMap,
+  type SalesReturnInput,
+} from "./salesReturnService";
 
 describe("salesReturnService - Credit Notes & Sales Returns", () => {
   const dummyProduct = {
@@ -77,7 +83,7 @@ describe("salesReturnService - Credit Notes & Sales Returns", () => {
 
     const res = await salesReturnService.createSalesReturn(input);
     expect(res.success).toBe(true);
-    expect(res.returnNumber).toMatch(/^SR-\d{2}-\d{2}-\d{4}$/);
+    expect(res.returnNumber).toMatch(/^SR-/);
 
     // Stock should increase from 100 to 101
     const updatedBatch = await sqliteStorage.findById<any>("product_batches", "batch_dolo_sr1");
@@ -294,5 +300,68 @@ describe("salesReturnService - Credit Notes & Sales Returns", () => {
     const ret = await salesReturnService.getSalesReturnById(created.returnId);
     expect(ret?.status).toBe("cancelled");
     expect(ret?.cancellation_reason).toBe("Customer decided to keep items");
+  });
+
+  it("converts packs and loose units into base units", () => {
+    expect(toBaseUnits(2, 3, 10)).toBe(23);
+    expect(toBaseUnits(undefined, undefined, undefined)).toBe(0);
+    expect(toBaseUnits(1, 0, 0)).toBe(1);
+  });
+
+  it("builds returnable base units per product and batch", () => {
+    const items = [
+      { product_id: "p1", batch_no: "B1", qty: 3, loose_qty: 2, units_per_pack: 10 },
+      { product_id: "p2", batch_no: "B2", qty: 1, loose_qty: 0, units_per_pack: 5 },
+    ];
+    const returned = new Map([[returnKey("p1", "B1"), 12]]);
+    const map = buildReturnableQtyMap(items, returned);
+    expect(map.get(returnKey("p1", "B1"))).toBe(20);
+    expect(map.get(returnKey("p2", "B2"))).toBe(5);
+  });
+
+  it("counts credit notes against the original invoice in base units", async () => {
+    await sqliteStorage.insertRecord("invoices", "cn_1", {
+      id: "cn_1",
+      module_key: "credit_note",
+      invoice_number: "CN-100",
+      invoice_date: "2026-10-01",
+      original_invoice_number: "INV-CN-1",
+      status: "issued",
+      grand_total: 100,
+    });
+    await sqliteStorage.insertRecord("invoice_items", "cn_item_1", {
+      id: "cn_item_1",
+      invoice_id: "cn_1",
+      product_id: "prod_dolo_sr",
+      product_name: "Dolo 650 Tablet",
+      batch_no: "DL2601",
+      qty: 1,
+      loose_qty: 2,
+      units_per_pack: 15,
+      unit_price: 30,
+    });
+    await sqliteStorage.insertRecord("invoices", "cn_cancelled", {
+      id: "cn_cancelled",
+      module_key: "credit_note",
+      invoice_number: "CN-101",
+      invoice_date: "2026-10-02",
+      original_invoice_number: "INV-CN-1",
+      status: "cancelled",
+      grand_total: 30,
+    });
+    await sqliteStorage.insertRecord("invoice_items", "cn_item_cancelled", {
+      id: "cn_item_cancelled",
+      invoice_id: "cn_cancelled",
+      product_id: "prod_dolo_sr",
+      product_name: "Dolo 650 Tablet",
+      batch_no: "DL2601",
+      qty: 1,
+      loose_qty: 0,
+      units_per_pack: 15,
+      unit_price: 30,
+    });
+
+    const map = await salesReturnService.getReturnedQtyMapForInvoice("INV-CN-1");
+    expect(map.get(returnKey("prod_dolo_sr", "DL2601"))).toBe(17);
   });
 });

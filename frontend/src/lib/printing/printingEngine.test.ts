@@ -759,5 +759,76 @@ describe("Printing Engine & Document Layouts (PRN-001, PRN-002, PRN-005)", () =>
       expect(html).toContain("Page 1 of 1");
       expect(html).not.toContain("Continued on Page");
     });
+
+    it("ensures preview HTML and downloaded PDF split pages with 100% exact parity on 58-item invoice", async () => {
+      const sampleDescriptions = [
+        "BIOTIQUE HIMALAYAN PLUM BODY CLEANSER 150GM",
+        "KAMA HIMALAYAN CEDAR DETANGLING CONDITIONER 200ML",
+        "Telma-H Tablet",
+        "Dolo 650mg Tablet",
+        "Dolo 650mg Tablet",
+        "REVOLUTION LIP OIL SHIMMER GRAPEFRUIT",
+        "HIMALAYA DIAPER RASH CREAM 20G",
+        "HIMALAYA EXTRA MOISTURIZING BABY SOAP 75G",
+        "SEBAMED FRESH SHOWER 200ML",
+        "SEBAMED LIP DEFENSE (STRAWBERRY) 4.8GM",
+        "SEBAMED ANTI HAIR LOSS SHAMPOO 200ML",
+        "SEBAMED MOISTURIZING BODY LOTION 200ML",
+        "SEBAMED BABY SUN LOTION SPF 50+ NO PERFUME 200ML",
+        "SEBAMED BABY BUBBLE BATH 200ML",
+        "SEBAMED BABY CREAM 50 ML",
+        "SEBAMED EVERYDAY SHAMPOO 200ML",
+        "WHISPER SOFT XL + 6S",
+      ];
+
+      const lines58 = Array.from({ length: 58 }, (_, i) => ({
+        description: sampleDescriptions[i % sampleDescriptions.length],
+        hsn_code: "300490",
+        batch_no: i % 2 === 0 ? "OPENING" : "B00" + (i % 5),
+        expiry_date: "2028-12-30T18:30:00.000000Z",
+        qty: (i % 3) + 1,
+        rate: 107.0 + i * 10,
+        gst_percent: 5,
+        amount: (107.0 + i * 10) * ((i % 3) + 1),
+      }));
+
+      const invoice58: InvoicePrintData = {
+        invoice_number: "INV-294974",
+        invoice_date: "2026-11-08T18:30:00.000000Z",
+        store_name: "Test Store",
+        customer_name: "Muhammad Anshad",
+        customer_phone: "9645440427",
+        lines: lines58,
+        subtotal: 20187.92,
+        tax_total: 2897.02,
+        round_off: 0.06,
+        grand_total: 23085.0,
+      };
+
+      // 1. Generate HTML (used in Preview Frame & Browser Print)
+      const html = printingEngine.generateInvoiceHtml(invoice58, { paperSize: "a4" });
+      const sheets = html.match(/class="a4-sheet"/g);
+      expect(sheets).not.toBeNull();
+      // Must produce exactly 3 sheets (pages 1-2 for filled items, page 3 for remaining items + summary)
+      expect(sheets!.length).toBe(3);
+
+      // Page 1 holds 26 items without leaving empty bottom space
+      expect(html).toContain("Showing items 1 to 26 of 58 Total Items");
+      expect(html).toContain("Continued on Page 2 &rarr;");
+
+      // Page 2 continuation notice
+      expect(html).toContain("Showing items 27 to 57 of 58 Total Items");
+      expect(html).toContain("Continued on Page 3 &rarr;");
+
+      // Page 3 must contain the final item, tax summary, totals, terms, and signature
+      expect(html).toContain("Page 3 of 3");
+      expect(html).toContain("HSN / GST Tax Summary");
+      expect(html).toContain("Amount in Words:");
+      expect(html).toContain("Authorised Signatory / Pharmacist");
+
+      // 2. Generate PDF (used in Download PDF & Native Print)
+      const pdfBytes = printingEngine.generateInvoicePdf(invoice58);
+      expect(pdfBytes.byteLength).toBeGreaterThan(10000);
+    });
   });
 });

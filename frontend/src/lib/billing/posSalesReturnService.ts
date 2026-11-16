@@ -3,6 +3,7 @@ import { productsStore, type ProductBatch } from "../masters/productsStore";
 import { syncQueueService } from "../sync/syncQueueService";
 import { calculateDocumentTaxes, type CompanyTaxMode } from "../tax-engine/taxEngine";
 import { companySettingsService } from "../settings/companySettingsService";
+import { storeToday } from "../dateTimeUtils";
 import type { InvoiceRecord, InvoiceItemRecord } from "../reports/reportEngine";
 
 export interface ReturnItemInput {
@@ -100,7 +101,7 @@ export class PosSalesReturnService {
       id: creditNoteId,
       module_key: "credit_note",
       invoice_number: returnNumber,
-      invoice_date: new Date().toISOString().slice(0, 10),
+      invoice_date: storeToday(companySettingsService.getSettings()),
       customer_id: customerId,
       customer_name: customerName,
       customer_gstin: originalInv?.customer_gstin,
@@ -168,11 +169,16 @@ export class PosSalesReturnService {
   }
 
   async createQuotation(
-    quotationNumber: string,
-    customerName: string,
-    lines: QuotationLineInput[],
+    quotationNumber?: string,
+    customerName: string = "Walk-in Customer",
+    lines: QuotationLineInput[] = [],
     defaultTaxMode: CompanyTaxMode = "exclusive"
-  ): Promise<{ success: boolean; quotationId: string }> {
+  ): Promise<{ success: boolean; quotationId: string; quotationNumber: string }> {
+    const assignedQuotationNumber =
+      quotationNumber || (await companySettingsService.generateNextDocumentNumber("quotation"));
+    if (quotationNumber) {
+      await companySettingsService.syncNextDocumentSequence("quotation", quotationNumber);
+    }
     const quotationId = `quot_${Date.now()}_${Math.random().toString(16).slice(2, 6)}`;
     const now = Date.now();
 
@@ -200,8 +206,8 @@ export class PosSalesReturnService {
     const quotationRow: InvoiceRecord = {
       id: quotationId,
       module_key: "quotation",
-      invoice_number: quotationNumber,
-      invoice_date: new Date().toISOString().slice(0, 10),
+      invoice_number: assignedQuotationNumber,
+      invoice_date: storeToday(companySettingsService.getSettings()),
       customer_name: customerName,
       subtotal: taxResult.taxable_subtotal,
       taxable_subtotal: taxResult.taxable_subtotal,
@@ -241,7 +247,7 @@ export class PosSalesReturnService {
       await sqliteStorage.insertRecord("invoice_items", itemId, mirrorItem);
     }
 
-    return { success: true, quotationId };
+    return { success: true, quotationId, quotationNumber: assignedQuotationNumber };
   }
 
   async convertQuotationToInvoice(quotationId: string): Promise<{ success: boolean; quotation: InvoiceRecord }> {

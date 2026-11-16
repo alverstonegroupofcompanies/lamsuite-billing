@@ -318,7 +318,7 @@ export const StoreGatewayPage: React.FC<StoreGatewayPageProps> = ({
           </label>
 
           <span className="text-[11px] font-mono text-text-muted">
-            Tip: Press <kbd className="px-1.5 py-0.5 bg-canvas border rounded text-text-main font-semibold">Alt + S</kbd> anytime inside billing to switch stores instantly
+            Tip: Press <kbd className="px-1.5 py-0.5 bg-canvas border rounded text-text-main font-semibold">Ctrl + Alt + S</kbd> anytime inside billing to switch stores instantly
           </span>
         </div>
       </main>

@@ -1,7 +1,24 @@
 /**
  * Robust, offline-capable password and PIN hashing using Web Crypto PBKDF2-SHA256
  * with salt and iteration hardening. Never stores plain-text secrets.
+ *
+ * Verification also understands the slow hashes the cloud backend issues
+ * (bcrypt and Argon2id) so staff can still sign in offline from the cached
+ * credential directory.
  */
+
+type BcryptVerifier = (options: { password: string; hash: string }) => Promise<boolean>;
+
+let bcryptVerifyPromise: Promise<BcryptVerifier | null> | null = null;
+
+async function loadBcryptVerifier(): Promise<BcryptVerifier | null> {
+  if (!bcryptVerifyPromise) {
+    bcryptVerifyPromise = import("hash-wasm")
+      .then((mod) => mod.bcryptVerify as BcryptVerifier)
+      .catch(() => null);
+  }
+  return bcryptVerifyPromise;
+}
 
 export class StaffCryptoService {
   private defaultPasswordIterations = 100_000;
@@ -78,12 +95,27 @@ export class StaffCryptoService {
   async verifySecret(secret: string, storedHash: string): Promise<boolean> {
     if (!storedHash || !secret) return false;
 
+    const hash = storedHash.trim();
+
+    if (hash.startsWith("$2a$") || hash.startsWith("$2b$") || hash.startsWith("$2y$")) {
+      return this.verifyBcrypt(secret, hash);
+    }
+
+    if (hash.startsWith("$argon2")) {
+      return this.verifyArgon2(secret, hash);
+    }
+
     // Parse $pbkdf2-sha256$i=100000$s=salt$hash or $fallback$...
-    const parts = storedHash.split("$").filter(Boolean);
+    const parts = hash.split("$").filter(Boolean);
     if (parts.length < 4) {
       // Handle legacy sha256 or direct comparison safely
       const legacyHashed = await this.hashSecret(secret, "legacy_salt", 1000);
-      return storedHash === legacyHashed;
+      return hash === legacyHashed;
+    }
+
+    const format = parts[0];
+    if (format !== "pbkdf2-sha256" && format !== "fallback") {
+      return false;
     }
 
     const iterPart = parts[1]; // "i=100000"
@@ -92,7 +124,42 @@ export class StaffCryptoService {
     const salt = saltPart.replace("s=", "");
 
     const calculated = await this.hashSecret(secret, salt, iterations);
-    return this.constantTimeCompare(calculated, storedHash);
+    return this.constantTimeCompare(calculated, hash);
+  }
+
+  /**
+   * True when a stored hash is either a cloud slow hash (bcrypt/Argon2id) or
+   * the PBKDF2 format this client writes. Used to detect weak legacy records.
+   */
+  isSlowHash(storedHash: string): boolean {
+    if (!storedHash) return false;
+    const hash = storedHash.trim();
+    return (
+      hash.startsWith("$2a$") ||
+      hash.startsWith("$2b$") ||
+      hash.startsWith("$2y$") ||
+      hash.startsWith("$argon2") ||
+      hash.startsWith("$pbkdf2-sha256$")
+    );
+  }
+
+  private async verifyBcrypt(secret: string, hash: string): Promise<boolean> {
+    try {
+      const verify = await loadBcryptVerifier();
+      if (!verify) return false;
+      return await verify({ password: secret, hash });
+    } catch {
+      return false;
+    }
+  }
+
+  private async verifyArgon2(secret: string, hash: string): Promise<boolean> {
+    try {
+      const { argon2Verify } = await import("hash-wasm");
+      return await argon2Verify({ password: secret, hash });
+    } catch {
+      return false;
+    }
   }
 
   async verifyPin(pin: string, storedHash: string): Promise<boolean> {

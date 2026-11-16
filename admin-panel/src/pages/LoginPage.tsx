@@ -4,8 +4,8 @@ import { Building2, Shield, KeyRound, ArrowRight, Lock, AlertCircle } from "luci
 
 export const LoginPage: React.FC = () => {
   const { login } = useAuth();
-  const [email, setEmail] = useState("admin@lamstone.in");
-  const [password, setPassword] = useState("password123");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [totpCode, setTotpCode] = useState("");
   const [requires2fa, setRequires2fa] = useState(false);
   const [error, setError] = useState<string>("");
@@ -26,13 +26,6 @@ export const LoginPage: React.FC = () => {
     } finally {
       setIsLoading(false);
     }
-  };
-
-  const setDemoCredentials = (roleEmail: string) => {
-    setEmail(roleEmail);
-    setPassword("password123");
-    setRequires2fa(false);
-    setError("");
   };
 
   return (
@@ -67,7 +60,7 @@ export const LoginPage: React.FC = () => {
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     className="w-full px-3.5 py-2.5 bg-slate-900 border border-slate-700 rounded-xl text-white text-xs placeholder-slate-500 focus:outline-hidden focus:ring-2 focus:ring-brand-500 transition-all"
-                    placeholder="admin@lamstone.in"
+                    placeholder="admin@alverstone.in"
                   />
                 </div>
 
@@ -92,7 +85,7 @@ export const LoginPage: React.FC = () => {
                   <span>Two-Factor Authentication (TOTP)</span>
                 </div>
                 <p className="text-xs text-slate-300">
-                  Enter the 6-digit verification code from your authenticator app (Google Authenticator / Authy) or demo code <code className="text-brand-300 font-mono">123456</code>.
+                  Enter the 6-digit verification code from your authenticator app (Google Authenticator / Authy).
                 </p>
                 <input
                   type="text"
@@ -116,43 +109,6 @@ export const LoginPage: React.FC = () => {
               <ArrowRight className="w-3.5 h-3.5" />
             </button>
           </form>
-
-          {/* Quick Demo Role Switcher */}
-          <div className="mt-6 pt-5 border-t border-slate-700/60">
-            <div className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-2 text-center">
-              Quick Switch Demo Roles
-            </div>
-            <div className="grid grid-cols-2 gap-1.5 text-xs">
-              <button
-                type="button"
-                onClick={() => setDemoCredentials("admin@lamstone.in")}
-                className="px-2 py-1.5 rounded-lg bg-slate-900/60 hover:bg-slate-700/60 text-slate-300 hover:text-white border border-slate-700/40 text-left truncate transition-colors"
-              >
-                👑 Super Admin
-              </button>
-              <button
-                type="button"
-                onClick={() => setDemoCredentials("owner@lamstone.in")}
-                className="px-2 py-1.5 rounded-lg bg-slate-900/60 hover:bg-slate-700/60 text-slate-300 hover:text-white border border-slate-700/40 text-left truncate transition-colors"
-              >
-                🏬 Store Owner
-              </button>
-              <button
-                type="button"
-                onClick={() => setDemoCredentials("accountant@lamstone.in")}
-                className="px-2 py-1.5 rounded-lg bg-slate-900/60 hover:bg-slate-700/60 text-slate-300 hover:text-white border border-slate-700/40 text-left truncate transition-colors"
-              >
-                📊 Accountant (Reports Only)
-              </button>
-              <button
-                type="button"
-                onClick={() => setDemoCredentials("support@lamstone.in")}
-                className="px-2 py-1.5 rounded-lg bg-slate-900/60 hover:bg-slate-700/60 text-slate-300 hover:text-white border border-slate-700/40 text-left truncate transition-colors"
-              >
-                🛡️ Support (Read-only)
-              </button>
-            </div>
-          </div>
         </div>
       </div>
     </div>

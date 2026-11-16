@@ -26,6 +26,13 @@ export interface BatchComboboxProps {
   onChange: (batchId: string, batch?: ProductBatch, product?: ProductItem) => void;
   batches?: ProductBatch[];
   products?: ProductItem[] | Record<string, ProductItem>;
+  /** Restrict options to one product (purchase inward rows). */
+  productId?: string;
+  /** Allow committing a batch number that does not exist yet. */
+  allowCustomValue?: boolean;
+  /** Current free-text batch number when the batch is not in the master. */
+  customValue?: string;
+  onCustomValueChange?: (text: string) => void;
   placeholder?: string;
   disabled?: boolean;
   required?: boolean;
@@ -33,6 +40,8 @@ export interface BatchComboboxProps {
   filterInStockOnly?: boolean;
   autoFocus?: boolean;
   id?: string;
+  /** Enter on the closed trigger, or after a selection, advances to the next field. */
+  onEnter?: () => void;
 }
 
 /** Helper component to highlight matching substrings */
@@ -68,6 +77,10 @@ export const BatchCombobox: React.FC<BatchComboboxProps> = ({
   onChange,
   batches: externalBatches,
   products: externalProducts,
+  productId,
+  allowCustomValue = false,
+  customValue = "",
+  onCustomValueChange,
   placeholder = "Search product name or batch...",
   disabled = false,
   required = false,
@@ -75,6 +88,7 @@ export const BatchCombobox: React.FC<BatchComboboxProps> = ({
   filterInStockOnly = false,
   autoFocus = false,
   id,
+  onEnter,
 }) => {
   const componentId = useId();
   const inputId = id || componentId;
@@ -148,6 +162,9 @@ export const BatchCombobox: React.FC<BatchComboboxProps> = ({
   // Build mapped options
   const allOptions = useMemo<BatchComboboxOption[]>(() => {
     let sourceBatches = batches;
+    if (productId) {
+      sourceBatches = sourceBatches.filter((b) => b.product_id === productId);
+    }
     if (filterInStockOnly) {
       sourceBatches = sourceBatches.filter((b) => (b.stock_qty || 0) > 0);
     }
@@ -171,7 +188,7 @@ export const BatchCombobox: React.FC<BatchComboboxProps> = ({
         searchString,
       };
     });
-  }, [batches, productMap, filterInStockOnly]);
+  }, [batches, productMap, filterInStockOnly, productId]);
 
   // Find currently selected option
   const selectedOption = useMemo(() => {
@@ -212,6 +229,13 @@ export const BatchCombobox: React.FC<BatchComboboxProps> = ({
       return a.productName.localeCompare(b.productName);
     });
   }, [allOptions, searchQuery]);
+
+  const customText = searchQuery.trim();
+  const showCustomOption =
+    allowCustomValue &&
+    customText.length > 0 &&
+    !filteredOptions.some((opt) => opt.batchNo.toLowerCase() === customText.toLowerCase());
+  const totalOptions = filteredOptions.length + (showCustomOption ? 1 : 0);
 
   // Portal positioning
   const [dropdownCoords, setDropdownCoords] = useState<{
@@ -265,6 +289,13 @@ export const BatchCombobox: React.FC<BatchComboboxProps> = ({
     setHighlightedIndex(0);
   }, [searchQuery]);
 
+  // Focus trigger on mount when requested (purchase entry row)
+  useEffect(() => {
+    if (!autoFocus) return;
+    const timer = setTimeout(() => triggerRef.current?.focus(), 40);
+    return () => clearTimeout(timer);
+  }, [autoFocus]);
+
   // Focus search input when dropdown opens
   useEffect(() => {
     if (isOpen) {
@@ -314,6 +345,17 @@ export const BatchCombobox: React.FC<BatchComboboxProps> = ({
     setIsOpen(false);
     setSearchQuery("");
     triggerRef.current?.focus();
+    onEnter?.();
+  };
+
+  const selectCustomValue = () => {
+    if (!customText) return;
+    onCustomValueChange?.(customText);
+    onChange("", undefined, undefined);
+    setIsOpen(false);
+    setSearchQuery("");
+    triggerRef.current?.focus();
+    onEnter?.();
   };
 
   const handleClear = (e: React.MouseEvent) => {
@@ -325,6 +367,14 @@ export const BatchCombobox: React.FC<BatchComboboxProps> = ({
   // Keyboard navigation on trigger button
   const handleTriggerKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
     if (disabled) return;
+
+    if (e.key === "Enter" && !isOpen) {
+      if (onEnter) {
+        e.preventDefault();
+        onEnter();
+        return;
+      }
+    }
 
     if (e.key === "ArrowDown" || e.key === "ArrowUp" || e.key === "Enter" || e.key === " ") {
       e.preventDefault();
@@ -344,18 +394,22 @@ export const BatchCombobox: React.FC<BatchComboboxProps> = ({
     switch (e.key) {
       case "ArrowDown":
         e.preventDefault();
-        setHighlightedIndex((prev) => (prev + 1 >= filteredOptions.length ? 0 : prev + 1));
+        setHighlightedIndex((prev) => (prev + 1 >= totalOptions ? 0 : prev + 1));
         break;
 
       case "ArrowUp":
         e.preventDefault();
-        setHighlightedIndex((prev) => (prev - 1 < 0 ? Math.max(0, filteredOptions.length - 1) : prev - 1));
+        setHighlightedIndex((prev) => (prev - 1 < 0 ? Math.max(0, totalOptions - 1) : prev - 1));
         break;
 
       case "Enter":
         e.preventDefault();
-        if (filteredOptions[highlightedIndex]) {
-          selectOption(filteredOptions[highlightedIndex]);
+        if (highlightedIndex < filteredOptions.length) {
+          if (filteredOptions[highlightedIndex]) {
+            selectOption(filteredOptions[highlightedIndex]);
+          }
+        } else if (showCustomOption) {
+          selectCustomValue();
         }
         break;
 
@@ -384,6 +438,7 @@ export const BatchCombobox: React.FC<BatchComboboxProps> = ({
         role="combobox"
         aria-expanded={isOpen}
         aria-haspopup="listbox"
+        aria-required={required}
         aria-controls={listboxId}
         onKeyDown={handleTriggerKeyDown}
         onClick={() => {
@@ -416,6 +471,14 @@ export const BatchCombobox: React.FC<BatchComboboxProps> = ({
               >
                 ({selectedOption.stockQty} on hand)
               </span>
+            </div>
+          ) : allowCustomValue && customValue ? (
+            <div className="flex items-center gap-2 min-w-0 flex-1">
+              <Package className="h-4 w-4 text-accent shrink-0" />
+              <span className="shrink-0 font-mono text-[10px] bg-canvas border border-border-main px-1.5 py-0.5 rounded text-text-main font-semibold uppercase">
+                Batch: {customValue}
+              </span>
+              <span className="truncate text-[10px] font-medium text-accent">New batch</span>
             </div>
           ) : (
             <div className="flex items-center gap-2 text-text-muted">
@@ -560,6 +623,25 @@ export const BatchCombobox: React.FC<BatchComboboxProps> = ({
                     </div>
                   );
                 })
+              )}
+
+              {showCustomOption && (
+                <div
+                  data-index={filteredOptions.length}
+                  role="option"
+                  aria-selected={highlightedIndex === filteredOptions.length}
+                  onMouseEnter={() => setHighlightedIndex(filteredOptions.length)}
+                  onClick={selectCustomValue}
+                  className={`flex items-center gap-2 px-3 py-2.5 cursor-pointer text-xs font-bold text-accent border-t border-border-main ${
+                    highlightedIndex === filteredOptions.length
+                      ? "bg-accent-soft"
+                      : "hover:bg-surface-hover"
+                  }`}
+                >
+                  <Package className="h-4 w-4" />
+                  <span className="truncate">Use new batch &quot;{customText}&quot;</span>
+                  <span className="ml-auto font-mono text-[10px] font-normal text-text-muted">Enter</span>
+                </div>
               )}
             </div>
 

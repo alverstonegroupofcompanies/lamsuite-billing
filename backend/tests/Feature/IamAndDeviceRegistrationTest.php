@@ -477,6 +477,35 @@ class IamAndDeviceRegistrationTest extends TestCase
         $this->assertEquals('wrong_store', $audit->new_values['reason']);
     }
 
+    public function test_staff_login_has_no_demo_pin_or_password_bypass(): void
+    {
+        $noPinUser = User::create([
+            'name' => 'No Pin Cashier',
+            'email' => 'no_pin@store1.local',
+            'username' => 'no_pin_cashier',
+            'password' => Hash::make('RealPass123'),
+            'role' => 'cashier',
+            'store_id' => $this->store->id,
+            'pin_hash' => null,
+        ]);
+
+        // A user without a configured PIN cannot use the old demo PINs.
+        $pinRes = $this->postJson('/api/staff/login', [
+            'store_id' => $this->store->id,
+            'user_id' => $noPinUser->id,
+            'pin' => '1234',
+        ]);
+        $pinRes->assertStatus(401);
+
+        // Demo passwords are not accepted either.
+        $passwordRes = $this->postJson('/api/staff/login', [
+            'store_id' => $this->store->id,
+            'user_id' => $noPinUser->id,
+            'password' => 'admin123',
+        ]);
+        $passwordRes->assertStatus(401);
+    }
+
     public function test_login_diagnostics_endpoint_returns_real_reasons_to_admin(): void
     {
         $admin = User::create([
@@ -574,5 +603,39 @@ class IamAndDeviceRegistrationTest extends TestCase
         ]);
         $res4->assertStatus(200)
             ->assertJson(['success' => true]);
+    }
+
+    public function test_admin_login_supports_domain_aliasing_but_rejects_demo_passwords(): void
+    {
+        $admin = User::create([
+            'name' => 'Muhammad Anshad',
+            'email' => 'admin@lamstone.in',
+            'username' => 'anshad_admin',
+            'password' => Hash::make('password123'),
+            'role' => 'super_admin',
+        ]);
+
+        // Login using equivalent alverstone.in alias
+        $res = $this->postJson('/api/auth/login', [
+            'email' => 'admin@alverstone.in',
+            'password' => 'password123',
+        ]);
+        $res->assertStatus(200)
+            ->assertJsonStructure(['token', 'user', 'store']);
+        $this->assertEquals('admin@lamstone.in', $res->json('user.email'));
+
+        // Login using username
+        $resUser = $this->postJson('/api/auth/login', [
+            'email' => 'anshad_admin',
+            'password' => 'password123',
+        ]);
+        $resUser->assertStatus(200);
+
+        // Demo passwords must never bypass credential verification.
+        $resDemoPass = $this->postJson('/api/auth/login', [
+            'email' => 'admin@alverstone.in',
+            'password' => 'admin123',
+        ]);
+        $resDemoPass->assertStatus(401);
     }
 }

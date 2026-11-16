@@ -10,6 +10,7 @@ use App\Http\Controllers\Api\AdminFeatureController;
 use App\Http\Controllers\Api\AdminUserController;
 use App\Http\Controllers\Api\AdminMasterController;
 use App\Http\Controllers\Api\AdminTransactionController;
+use App\Http\Controllers\Api\InvoiceApprovalController;
 use App\Http\Controllers\Api\AdminInventoryController;
 use App\Http\Controllers\Api\AdminReportController;
 use App\Http\Controllers\Api\AdminSyncController;
@@ -33,6 +34,7 @@ use App\Http\Controllers\Api\HeldBillController;
 use App\Http\Controllers\Api\StaffAuthController;
 use App\Http\Controllers\Api\DeviceSessionController;
 use App\Http\Controllers\Api\WhatsAppController;
+use App\Http\Controllers\Api\UserPreferenceController;
 
 /*
 |--------------------------------------------------------------------------
@@ -65,6 +67,7 @@ Route::post('/sync/push/products', [SyncController::class, 'pushProducts']);
 Route::post('/sync/push/adjustments', [SyncController::class, 'pushAdjustments']);
 Route::post('/sync/push/transfers', [SyncController::class, 'pushTransfers']);
 Route::post('/sync/push/staff', [SyncController::class, 'pushStaff']);
+Route::post('/sync/push/security-audit', [SyncController::class, 'pushSecurityAudit']);
 Route::get('/sync/pull/deltas', [SyncController::class, 'pullDeltas']);
 
 // Central Store Configuration & Sync for all Terminals & Devices
@@ -98,6 +101,7 @@ Route::get('/invoices', [InvoiceController::class, 'index']);
 Route::post('/invoices', [InvoiceController::class, 'store']);
 Route::get('/invoices/{id}', [InvoiceController::class, 'show']);
 Route::post('/invoices/{id}/cancel', [InvoiceController::class, 'cancel']);
+Route::post('/invoices/{id}/approvals/verify', [InvoiceApprovalController::class, 'verify']);
 
 // Terminal Customer Lookups & Registration
 Route::get('/customers', [CustomerController::class, 'index']);
@@ -139,6 +143,9 @@ Route::get('/app/update/{target}/{current_version}', [DesktopUpdateController::c
 Route::middleware('auth:sanctum')->group(function () {
     Route::get('/store', [StoreController::class, 'show']);
     Route::put('/store', [StoreController::class, 'update']);
+
+    Route::get('/me/preferences', [UserPreferenceController::class, 'show']);
+    Route::put('/me/preferences', [UserPreferenceController::class, 'update']);
 
     Route::get('/customers', [CustomerController::class, 'index']);
     Route::post('/customers', [CustomerController::class, 'store']);
@@ -187,9 +194,9 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/data-exchange/history', [DataExchangeController::class, 'history']);
 
     // Payments & Returns API (MCP client parity)
-    Route::post('/payments/customer', [AdminTransactionController::class, 'customerPayments']);
+    Route::post('/payments/customer', [AdminTransactionController::class, 'storeCustomerPayment']);
     Route::post('/payments/supplier', [AdminTransactionController::class, 'storeSupplierPayment']);
-    Route::post('/returns/sales', [AdminTransactionController::class, 'returns']);
+    Route::post('/returns/sales', [AdminTransactionController::class, 'storeSalesReturn']);
     Route::post('/returns/purchase', [AdminTransactionController::class, 'purchaseReturns']);
 });
 
@@ -199,13 +206,15 @@ Route::middleware('auth:sanctum')->group(function () {
 |--------------------------------------------------------------------------
 */
 // Alias for backwards compatibility / un-prefixed store operations
-Route::middleware(['auth:sanctum', 'session.timeout', 'ip.allowlist', 'scope.store'])
+Route::middleware(['auth:sanctum', 'ip.allowlist', 'scope.store'])
     ->post('/stores/{id}/regenerate-key', [AdminStoreController::class, 'regenerateKey'])
     ->middleware('rbac:stores,edit');
 
-Route::middleware(['auth:sanctum', 'session.timeout', 'ip.allowlist', 'scope.store'])->prefix('admin')->group(function () {
+Route::middleware(['auth:sanctum', 'ip.allowlist', 'scope.store'])->prefix('admin')->group(function () {
     // Auth, 2FA, Sessions & Impersonation
     Route::get('/me', [AdminAuthController::class, 'me']);
+    Route::get('/me/preferences', [UserPreferenceController::class, 'show']);
+    Route::put('/me/preferences', [UserPreferenceController::class, 'update']);
     Route::post('/logout', [AdminAuthController::class, 'logout']);
     Route::post('/2fa/setup', [AdminAuthController::class, 'setup2fa']);
     Route::post('/2fa/enable', [AdminAuthController::class, 'enable2fa']);
@@ -236,6 +245,13 @@ Route::middleware(['auth:sanctum', 'session.timeout', 'ip.allowlist', 'scope.sto
     Route::post('/devices/{id}/status', [AdminDeviceController::class, 'updateStatus'])->middleware('rbac:devices,edit');
     Route::post('/devices/{id}/force-resync', [AdminDeviceController::class, 'forceResync'])->middleware('rbac:devices,edit');
     Route::get('/counters', [CounterController::class, 'index'])->middleware('rbac:devices,view');
+    Route::get('/device-sessions', [DeviceSessionController::class, 'index'])->middleware('rbac:devices,view');
+    Route::post('/device-sessions/{id}/rename', [DeviceSessionController::class, 'rename'])->middleware('rbac:devices,edit');
+    Route::post('/device-sessions/{id}/lock', [DeviceSessionController::class, 'lock'])->middleware('rbac:devices,edit');
+    Route::post('/device-sessions/{id}/unlock', [DeviceSessionController::class, 'unlock'])->middleware('rbac:devices,edit');
+    Route::post('/device-sessions/{id}/revoke', [DeviceSessionController::class, 'revoke'])->middleware('rbac:devices,edit');
+    Route::post('/device-sessions/{id}/force-logout', [DeviceSessionController::class, 'forceLogout'])->middleware('rbac:devices,edit');
+    Route::get('/inventory/negative-stock', [SyncController::class, 'getNegativeStockReport'])->middleware('rbac:inventory,view');
     Route::post('/counters/approve-pairing', [CounterController::class, 'approvePairing'])->middleware('rbac:devices,edit');
     Route::post('/counters/{id}/status', [CounterController::class, 'updateStatus'])->middleware('rbac:devices,edit');
     Route::post('/counters/{id}/settings', [CounterController::class, 'updateSettings'])->middleware('rbac:devices,edit');
@@ -288,6 +304,9 @@ Route::middleware(['auth:sanctum', 'session.timeout', 'ip.allowlist', 'scope.sto
     Route::get('/invoices/{id}', [AdminTransactionController::class, 'showInvoice'])->middleware('rbac:transactions,view');
     Route::post('/invoices/{id}/cancel', [AdminTransactionController::class, 'cancelInvoice'])->middleware('rbac:transactions,edit');
     Route::put('/invoices/{id}', [AdminTransactionController::class, 'updateInvoice'])->middleware('rbac:transactions,edit');
+    Route::get('/invoices/{id}/edit-approvals', [InvoiceApprovalController::class, 'index'])->middleware('rbac:transactions,view');
+    Route::post('/invoices/{id}/edit-approvals', [InvoiceApprovalController::class, 'issue'])->middleware('rbac:transactions,edit');
+    Route::post('/invoices/{id}/edit-approvals/{approvalId}/revoke', [InvoiceApprovalController::class, 'revoke'])->middleware('rbac:transactions,edit');
 
     Route::get('/returns', [AdminTransactionController::class, 'returns'])->middleware('rbac:transactions,view');
     Route::get('/quotations', [AdminTransactionController::class, 'quotations'])->middleware('rbac:transactions,view');
@@ -319,6 +338,14 @@ Route::middleware(['auth:sanctum', 'session.timeout', 'ip.allowlist', 'scope.sto
     Route::post('/inventory/transfers/dispatch', [AdminInventoryController::class, 'dispatchTransfer'])->middleware('rbac:inventory,create');
     Route::post('/inventory/transfers/{id}/receive', [AdminInventoryController::class, 'receiveTransfer'])->middleware('rbac:inventory,edit');
     Route::post('/inventory/reconcile', [AdminInventoryController::class, 'reconcileStock'])->middleware('rbac:inventory,edit');
+
+    // Stock adjustment policy + multi-line documents (items 27 & 28)
+    Route::get('/stock-adjustments/policy', [AdminInventoryController::class, 'getAdjustmentPolicy'])->middleware('rbac:inventory,view');
+    Route::put('/stock-adjustments/policy', [AdminInventoryController::class, 'updateAdjustmentPolicy'])->middleware('rbac:inventory,edit');
+    Route::get('/stock-adjustments', [AdminInventoryController::class, 'listAdjustments'])->middleware('rbac:inventory,view');
+    Route::get('/stock-adjustments/{id}', [AdminInventoryController::class, 'showAdjustment'])->middleware('rbac:inventory,view');
+    Route::post('/stock-adjustments/{id}/approve', [AdminInventoryController::class, 'approveAdjustment'])->middleware('rbac:inventory,edit');
+    Route::post('/stock-adjustments/{id}/reject', [AdminInventoryController::class, 'rejectAdjustment'])->middleware('rbac:inventory,edit');
 
     // Module 9: Reports (Accessible to Accountant & Managers)
     Route::get('/reports/sales', [AdminReportController::class, 'salesSummary'])->middleware('rbac:reports,view');

@@ -190,7 +190,16 @@ export const ReportPrintPreviewModal: React.FC<ReportPrintPreviewModalProps> = (
 
   // Formatting options
   const formattingOptions: ReportPrintFormattingOptions = useMemo(() => {
-    const carriage = getPrinterCarriageColumns(selectedPrinterInfo);
+    const isDot60 = printLayout === "dot-matrix-60";
+    const carriage = isDot60
+      ? 60
+      : printLayout === "dot-matrix"
+      ? 80
+      : printLayout === "dot-matrix-120"
+      ? 120
+      : printLayout === "dot-matrix-132"
+      ? 132
+      : getPrinterCarriageColumns(selectedPrinterInfo);
     return {
       fontSize,
       margins,
@@ -200,9 +209,9 @@ export const ReportPrintPreviewModal: React.FC<ReportPrintPreviewModalProps> = (
       operatorName,
       zoomScale: typeof zoomMode === "number" ? zoomMode : zoomScale,
       printerColumns: carriage,
-      autoCenter: true,
+      autoCenter: !isDot60,
     };
-  }, [fontSize, margins, showHeader, showFooter, showFilterSummary, operatorName, zoomMode, zoomScale, selectedPrinterInfo]);
+  }, [fontSize, margins, showHeader, showFooter, showFilterSummary, operatorName, zoomMode, zoomScale, selectedPrinterInfo, printLayout]);
 
   // Generated preview HTML
   const previewHtml = useMemo(() => {
@@ -355,7 +364,7 @@ export const ReportPrintPreviewModal: React.FC<ReportPrintPreviewModalProps> = (
       const is6in = printLayout === "dot-matrix-60";
       const cols =
         is6in
-          ? 50
+          ? 60
           : printLayout === "dot-matrix-120"
           ? 120
           : printLayout === "dot-matrix-132"
@@ -444,7 +453,7 @@ export const ReportPrintPreviewModal: React.FC<ReportPrintPreviewModalProps> = (
         const is6in = printLayout === "dot-matrix-60";
         const cols =
           is6in
-            ? 50
+            ? 60
             : printLayout === "dot-matrix-120"
             ? 120
             : printLayout === "dot-matrix-132"

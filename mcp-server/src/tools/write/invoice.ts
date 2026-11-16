@@ -54,6 +54,12 @@ export const createInvoiceTool: ToolDefinition = {
       .optional()
       .describe("List of payment tender lines for split payment. If omitted, single payment_mode is used with grand_total."),
     counter_id: z.string().optional().describe("Counter identifier (e.g. C01, C02)"),
+    store_id: z
+      .number()
+      .int()
+      .positive()
+      .optional()
+      .describe("Target store ID. Sent as the X-Store-Id header; defaults to the configured store"),
     patient_name: z.string().optional().describe("Patient name (for prescription records)"),
     doctor_name: z.string().optional().describe("Prescribing doctor name"),
     doctor_reg_no: z.string().optional().describe("Doctor registration number"),
@@ -289,7 +295,7 @@ export const createInvoiceTool: ToolDefinition = {
       })),
     };
 
-    const created = await client.createInvoice(invoicePayload);
+    const created = await client.createInvoice(invoicePayload, args.store_id);
 
     // Save in idempotency cache
     idempotencyStore.set(idempotencyKey, created);

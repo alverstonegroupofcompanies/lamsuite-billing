@@ -74,7 +74,7 @@ describe("purchaseReturnService - Debit Notes & Purchase Returns", () => {
 
     const res = await purchaseReturnService.createPurchaseReturn(input);
     expect(res.success).toBe(true);
-    expect(res.returnNumber).toMatch(/^PR-\d{2}-\d{2}-\d{4}$/);
+    expect(res.returnNumber).toMatch(/^PR-\d+$/);
 
     // Stock was 50, returned 10 -> new stock should be 40
     const updatedBatch = await sqliteStorage.findById<any>("product_batches", "batch_amx_pr1");

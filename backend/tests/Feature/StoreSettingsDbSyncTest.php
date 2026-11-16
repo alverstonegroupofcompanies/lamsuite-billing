@@ -158,6 +158,11 @@ class StoreSettingsDbSyncTest extends TestCase
                     'paperSize' => 'thermal_58mm',
                     'footerNote' => 'Custom Store Receipt Note',
                 ],
+                // Same cashier signs in on two devices: allowed only because the
+                // store explicitly opts this role into multi-counter sessions.
+                'security' => [
+                    'allowMultiCounterRoles' => ['cashier'],
+                ],
             ]);
 
         // 2. Terminal 1 logs in

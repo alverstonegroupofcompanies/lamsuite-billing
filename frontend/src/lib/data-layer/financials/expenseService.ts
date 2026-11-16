@@ -1,5 +1,7 @@
 import { sqliteStorage } from "../../db/sqliteStorage";
 import { syncQueueService } from "../../sync/syncQueueService";
+import { storeToday } from "../../dateTimeUtils";
+import { companySettingsService } from "../../settings/companySettingsService";
 
 export interface ExpenseRecord {
   id: string;
@@ -91,7 +93,7 @@ export class ExpenseService {
       payment_mode: input.payment_mode || "Cash",
       reference_no: input.reference_no?.trim() || undefined,
       notes: input.notes?.trim() || undefined,
-      expense_date: input.expense_date || new Date().toISOString().slice(0, 10),
+      expense_date: input.expense_date || storeToday(companySettingsService.getSettings()),
       created_by: input.created_by,
       created_at: now,
     };

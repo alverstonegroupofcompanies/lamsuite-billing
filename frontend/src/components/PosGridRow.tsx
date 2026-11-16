@@ -187,7 +187,7 @@ export const PosGridRow: React.FC<PosGridRowProps> = ({
                         <span className="text-[9px] text-text-muted opacity-75">✏️</span>
                       </button>
 
-                      {/* F4 Edit button */}
+                      {/* Alt+E Edit button */}
                       <button
                         type="button"
                         onClick={(e) => {
@@ -195,9 +195,9 @@ export const PosGridRow: React.FC<PosGridRowProps> = ({
                           onEditProductBatch?.();
                         }}
                         className="inline-flex items-center gap-1 rounded-[6px] border border-border-main bg-canvas hover:bg-surface px-1.5 py-0.5 text-[10px] font-medium text-text-muted hover:text-accent transition-colors cursor-pointer"
-                        title="Click or press F4 to edit product, batch, expiry & rate"
+                        title="Click or press Alt+E to edit product, batch, expiry & rate"
                       >
-                        <span>Edit F4</span>
+                        <span>Edit Alt+E</span>
                         <span className="text-[9px] text-text-muted opacity-75">✏️</span>
                       </button>
 
@@ -283,7 +283,7 @@ export const PosGridRow: React.FC<PosGridRowProps> = ({
                   <button
                     type="button"
                     className="hover:underline hover:text-accent font-semibold flex items-center gap-1.5 cursor-pointer"
-                    title="Click or press F4 to edit product & batch details"
+                    title="Click or press Alt+E to edit product & batch details"
                   >
                     <span>{line.selectedBatch.batch_no}</span>
                     <span className="text-[9px] text-text-muted opacity-75">✏️</span>
@@ -310,7 +310,7 @@ export const PosGridRow: React.FC<PosGridRowProps> = ({
                   <button
                     type="button"
                     className="hover:underline hover:text-accent font-semibold flex items-center gap-1.5 cursor-pointer"
-                    title="Click or press F4 to edit product & batch details"
+                    title="Click or press Alt+E to edit product & batch details"
                   >
                     <span>{formatExpiryDisplay(line.selectedBatch.expiry_date)}</span>
                     <span className="text-[9px] text-text-muted opacity-75">✏️</span>
@@ -471,13 +471,19 @@ export const PosGridRow: React.FC<PosGridRowProps> = ({
                 {line ? (
                   <button
                     type="button"
-                    tabIndex={-1}
-                    className={`group inline-flex items-center gap-1 px-2 py-0.5 rounded-[6px] text-xs font-mono font-semibold cursor-pointer transition-colors ${
+                    id={`disc-input-${line.id}`}
+                    className={`group inline-flex items-center gap-1 px-2 py-0.5 rounded-[6px] text-xs font-mono font-semibold cursor-pointer transition-colors focus:outline-none focus:ring-2 focus:ring-amber-400 ${
                       line.discount_percent > 0 || line.discount_amount > 0
                         ? "bg-[var(--color-warning-bg)] text-[var(--color-warning-text)] hover:opacity-90 border border-[var(--color-warning-border)]"
                         : "text-text-muted hover:bg-canvas hover:text-text-main"
                     }`}
-                    title="Click or press F2 to edit item discount"
+                    title="Click or press Alt+I to edit item discount"
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        onDiscountClick?.();
+                      }
+                    }}
                   >
                     <span>
                       {line.discount_percent > 0

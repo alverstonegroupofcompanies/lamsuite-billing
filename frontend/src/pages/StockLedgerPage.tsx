@@ -14,7 +14,6 @@ import {
 } from "lucide-react";
 import {
   inventoryService,
-  type StockAdjustmentInput,
   type PhysicalReconciliationLine,
   type InterStoreTransferInput,
 } from "../lib/stock/inventoryService";
@@ -22,6 +21,10 @@ import { productsStore, formatExpiryDisplay, type ProductBatch, type ProductItem
 import { sqliteStorage } from "../lib/db/sqliteStorage";
 import { useModalEscape } from "../lib/ui/modalEscapeManager";
 import { BatchCombobox } from "../components/BatchCombobox";
+import { StockAdjustmentDocumentModal } from "../components/StockAdjustmentDocumentModal";
+import { shortcutDispatcher } from "../lib/keyboard/shortcutDispatcher";
+import { shortcutLabel } from "../lib/keyboard/centralKeyMap";
+import type { StockAdjustmentPostResult } from "../lib/stock/stockAdjustmentService";
 
 export const StockLedgerPage: React.FC = () => {
   const navigate = useNavigate();
@@ -36,15 +39,8 @@ export const StockLedgerPage: React.FC = () => {
 
   // Modals State
   const [isAdjustmentModalOpen, setIsAdjustmentModalOpen] = useState(false);
-  useModalEscape(isAdjustmentModalOpen, () => setIsAdjustmentModalOpen(false));
   const [isTransferModalOpen, setIsTransferModalOpen] = useState(false);
   useModalEscape(isTransferModalOpen, () => setIsTransferModalOpen(false));
-
-  // Adjustment Form State
-  const [adjBatchId, setAdjBatchId] = useState("");
-  const [adjQty, setAdjQty] = useState<number>(-1);
-  const [adjReason, setAdjReason] = useState<StockAdjustmentInput["reason"]>("Damaged");
-  const [adjNotes, setAdjNotes] = useState("");
 
   // Transfer Form State
   const [trDestStore, setTrDestStore] = useState("Branch Store 02");
@@ -52,15 +48,27 @@ export const StockLedgerPage: React.FC = () => {
   const [trQty, setTrQty] = useState<number>(1);
 
   // Selected Batch References
-  const selectedAdjBatch = allBatches.find((b) => b.id === adjBatchId);
-  const selectedAdjProduct = selectedAdjBatch ? productsMap[selectedAdjBatch.product_id] : null;
-
   const selectedTrBatch = allBatches.find((b) => b.id === trBatchId);
   const selectedTrProduct = selectedTrBatch ? productsMap[selectedTrBatch.product_id] : null;
 
   useEffect(() => {
     loadData();
   }, []);
+
+  // Stock-scope chord: Alt+A opens the multi-line adjustment document.
+  useEffect(() => {
+    return shortcutDispatcher.register({
+      id: "stock-ledger",
+      scope: "stock",
+      isActive: () => !isAdjustmentModalOpen && !isTransferModalOpen,
+      handlers: {
+        newStockAdjustment: () => {
+          setIsAdjustmentModalOpen(true);
+          return true;
+        },
+      },
+    });
+  }, [isAdjustmentModalOpen, isTransferModalOpen]);
 
   const loadData = async () => {
     const txs = await sqliteStorage.findAll<any>("stock_transactions");
@@ -91,35 +99,14 @@ export const StockLedgerPage: React.FC = () => {
     setTimeout(() => setNotification(null), 3000);
   };
 
-  const handleRecordAdjustment = async () => {
-    if (!adjBatchId) {
-      showNotification("Please select a batch to adjust", "error");
-      return;
-    }
-
-    const batch = allBatches.find((b) => b.id === adjBatchId);
-    if (!batch) return;
-
-    try {
-      const res = await inventoryService.recordStockAdjustment({
-        product_id: batch.product_id,
-        batch_id: adjBatchId,
-        adjustment_qty: adjQty,
-        reason: adjReason,
-        notes: adjNotes,
-      });
-
-      if (res.success) {
-        showNotification("Stock adjustment recorded in ledger!");
-        setIsAdjustmentModalOpen(false);
-        setAdjBatchId("");
-        setAdjQty(-1);
-        setAdjNotes("");
-        loadData();
-      }
-    } catch (err) {
-      showNotification(err instanceof Error ? err.message : "Error recording adjustment", "error");
-    }
+  const handleAdjustmentPosted = (result: StockAdjustmentPostResult) => {
+    showNotification(
+      result.status === "pending_approval"
+        ? "Adjustment submitted for manager approval."
+        : `Stock adjustment posted with ${result.lines_posted} ledger line${result.lines_posted === 1 ? "" : "s"}.`
+    );
+    setIsAdjustmentModalOpen(false);
+    loadData();
   };
 
   const handleDispatchTransfer = async () => {
@@ -181,10 +168,14 @@ export const StockLedgerPage: React.FC = () => {
         <div className="flex gap-2">
           <button
             onClick={() => setIsAdjustmentModalOpen(true)}
+            title={shortcutLabel("newStockAdjustment", "stock")}
             className="flex items-center gap-2 rounded-btn border border-border-main bg-surface px-3.5 py-2 text-xs font-medium text-text-main shadow-xs hover:bg-canvas transition-colors"
           >
             <RotateCcw className="h-4 w-4 text-status-warning" />
             <span>Stock Adjustment</span>
+            <kbd className="rounded border border-border-main bg-canvas px-1 text-[10px] font-bold text-text-muted">
+              {shortcutLabel("newStockAdjustment", "stock")}
+            </kbd>
           </button>
           <button
             onClick={() => navigate("/stock/transfers")}
@@ -445,123 +436,13 @@ export const StockLedgerPage: React.FC = () => {
         </div>
       )}
 
-      {/* Stock Adjustment Modal */}
-      {isAdjustmentModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="w-full max-w-md rounded-card bg-surface shadow-modal overflow-hidden border border-border-main">
-            <div className="flex items-center justify-between border-b border-border-main px-5 py-3.5 bg-canvas">
-              <h3 className="text-sm font-bold text-text-main">Record Stock Adjustment</h3>
-              <button onClick={() => setIsAdjustmentModalOpen(false)} className="text-text-muted hover:text-text-main">
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-
-            <div className="p-5 space-y-3">
-              <div>
-                <label className="text-xs font-medium text-text-main block mb-1">Select Batch *</label>
-                <BatchCombobox
-                  value={adjBatchId}
-                  onChange={(bId) => setAdjBatchId(bId)}
-                  batches={allBatches}
-                  products={productsMap}
-                  placeholder="Search product name or batch..."
-                />
-              </div>
-
-              {selectedAdjBatch && (
-                <div className="rounded-btn border border-border-main bg-canvas p-3 text-xs space-y-1.5 animate-in fade-in duration-150">
-                  <div className="flex items-center justify-between">
-                    <span className="text-text-muted">Product:</span>
-                    <span className="font-bold text-text-main truncate max-w-[220px]">
-                      {selectedAdjProduct?.name || "Unknown Product"}
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between text-[11px]">
-                    <span className="text-text-muted">Batch Number:</span>
-                    <span className="font-mono font-semibold text-text-main bg-surface px-1.5 py-0.5 rounded border border-border-main">
-                      {selectedAdjBatch.batch_no}
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between text-[11px]">
-                    <span className="text-text-muted">Expiry Date:</span>
-                    <span className="font-mono text-text-main">{formatExpiryDisplay(selectedAdjBatch.expiry_date)}</span>
-                  </div>
-                  <div className="flex items-center justify-between text-[11px]">
-                    <span className="text-text-muted">Current Stock on Hand:</span>
-                    <span
-                      className={`font-mono font-bold ${
-                        selectedAdjBatch.stock_qty <= 0 ? "text-status-danger" : "text-accent"
-                      }`}
-                    >
-                      {selectedAdjBatch.stock_qty} units
-                    </span>
-                  </div>
-                  {selectedAdjBatch.stock_qty + adjQty < 0 && (
-                    <div className="text-[11px] text-status-warning flex items-center gap-1.5 pt-1.5 border-t border-border-main">
-                      <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
-                      <span>Adjustment will lead to negative stock ({selectedAdjBatch.stock_qty + adjQty} units).</span>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              <div>
-                <label className="text-xs font-medium text-text-main block mb-1">
-                  Quantity Delta (Negative for write-off, Positive for found) *
-                </label>
-                <input
-                  type="number"
-                  value={adjQty}
-                  onChange={(e) => setAdjQty(Number(e.target.value) || 0)}
-                  className="w-full rounded-btn border border-border-main bg-surface px-2.5 py-2 text-xs text-text-main focus:border-accent focus:outline-none font-mono font-bold tabular-nums"
-                />
-              </div>
-
-              <div>
-                <label className="text-xs font-medium text-text-main block mb-1">Adjustment Reason *</label>
-                <select
-                  value={adjReason}
-                  onChange={(e) => setAdjReason(e.target.value as any)}
-                  className="w-full rounded-btn border border-border-main bg-surface px-2.5 py-2 text-xs text-text-main focus:border-accent focus:outline-none"
-                >
-                  <option value="Damaged">Damaged Goods</option>
-                  <option value="Expired">Expired</option>
-                  <option value="Breakage">Breakage</option>
-                  <option value="Theft">Theft / Pilferage</option>
-                  <option value="Found Stock">Found Stock (Surplus)</option>
-                  <option value="Other">Other</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="text-xs font-medium text-text-main block mb-1">Notes / Explanation</label>
-                <input
-                  type="text"
-                  value={adjNotes}
-                  onChange={(e) => setAdjNotes(e.target.value)}
-                  placeholder="e.g. Broken during shelf reorganization"
-                  className="w-full rounded-btn border border-border-main bg-surface px-2.5 py-2 text-xs text-text-main focus:border-accent focus:outline-none"
-                />
-              </div>
-            </div>
-
-            <div className="border-t border-border-main bg-canvas px-5 py-3.5 flex justify-end gap-2">
-              <button
-                onClick={() => setIsAdjustmentModalOpen(false)}
-                className="rounded-btn border border-border-main bg-surface px-3.5 py-2 text-xs font-medium text-text-main hover:bg-canvas transition-colors"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleRecordAdjustment}
-                className="rounded-btn bg-status-warning px-4 py-2 text-xs font-semibold text-white shadow-xs hover:opacity-90 transition-opacity"
-              >
-                Post Adjustment
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <StockAdjustmentDocumentModal
+        isOpen={isAdjustmentModalOpen}
+        batches={allBatches}
+        products={productsMap}
+        onClose={() => setIsAdjustmentModalOpen(false)}
+        onPosted={handleAdjustmentPosted}
+      />
 
       {/* Inter-Store Transfer Modal */}
       {isTransferModalOpen && (

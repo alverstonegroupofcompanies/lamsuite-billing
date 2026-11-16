@@ -133,6 +133,45 @@ describe("InvoiceManagementService", () => {
     expect(resMonth.length).toBe(2);
   });
 
+  it("matches invoices by ISO and day-first date searches beyond today", async () => {
+    const pastInv: InvoiceRecord = {
+      id: "inv_past_date",
+      module_key: "invoice",
+      invoice_number: "INV-PAST-1",
+      invoice_date: "2026-10-05",
+      customer_name: "Walk-in Customer",
+      subtotal: 100,
+      discount_total: 0,
+      tax_total: 0,
+      round_off: 0,
+      grand_total: 100,
+      paid_amount: 100,
+      payment_mode: "Cash",
+      status: "issued",
+      created_at: Date.now(),
+      updated_at: Date.now(),
+    };
+    await sqliteStorage.insertRecord("invoices", pastInv.id, pastInv as unknown as Record<string, unknown>);
+
+    const iso = await invoiceManagementService.listInvoices({
+      searchQuery: "2026-10-05",
+      dateRange: "all",
+    });
+    expect(iso.map((i) => i.id)).toEqual(["inv_past_date"]);
+
+    const dayFirst = await invoiceManagementService.listInvoices({
+      searchQuery: "05/10/2026",
+      dateRange: "all",
+    });
+    expect(dayFirst.map((i) => i.id)).toEqual(["inv_past_date"]);
+
+    const dotted = await invoiceManagementService.listInvoices({
+      searchQuery: "5.10.2026",
+      dateRange: "all",
+    });
+    expect(dotted.map((i) => i.id)).toEqual(["inv_past_date"]);
+  });
+
   it("computes structured diffs between original items and revised cart lines", () => {
     const origItems: InvoiceItemRecord[] = [
       {
@@ -401,9 +440,5 @@ describe("InvoiceManagementService", () => {
     const lockCheck2 = invoiceManagementService.checkInvoiceLockStatus(oldInv, 30);
     expect(lockCheck2.isLocked).toBe(true);
     expect(lockCheck2.lockReason).toContain("limit");
-
-    // PIN verification
-    expect(invoiceManagementService.verifyManagerPin("1234")).toBe(true);
-    expect(invoiceManagementService.verifyManagerPin("wrong")).toBe(false);
   });
 });

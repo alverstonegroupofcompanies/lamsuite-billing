@@ -17,7 +17,7 @@ import {
   Eye,
   EyeOff,
 } from "lucide-react";
-import { staffAuthService, type StaffUser } from "../lib/auth/staffAuthService";
+import { staffAuthService, type StaffUser, type StaffSessionConflict } from "../lib/auth/staffAuthService";
 import { storeDeviceService, type StoreDeviceProfile } from "../lib/auth/storeDeviceService";
 import { useModalEscape } from "../lib/ui/modalEscapeManager";
 import { API_BASE_URL } from "../config/env";
@@ -44,8 +44,8 @@ export const StaffLoginPage: React.FC<StaffLoginPageProps> = ({
   const [isPasswordMode, setIsPasswordMode] = useState(false);
   const [hasBiometrics, setHasBiometrics] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
+  const [sessionConflict, setSessionConflict] = useState<StaffSessionConflict | null>(null);
   const [isLoading, setIsLoading] = useState(false);
-  const [isSeeding, setIsSeeding] = useState(false);
   const [isOnline, setIsOnline] = useState<boolean>(navigator.onLine);
 
   useEffect(() => {
@@ -104,35 +104,21 @@ export const StaffLoginPage: React.FC<StaffLoginPageProps> = ({
     staffAuthService.isBiometricsAvailable().then(setHasBiometrics);
   }, [activeStore?.id]);
 
-  const handleSeedDefaultStaff = async () => {
-    setIsSeeding(true);
-    setErrorMsg("");
-    try {
-      const targetStoreId = activeStore?.id || (await storeDeviceService.getDeviceProfile())?.store_id || "1";
-      await staffAuthService.initDemoStaffIfEmpty(targetStoreId, activeStore || undefined);
-      const list = await staffAuthService.listActiveStaff(targetStoreId, activeStore || undefined);
-      setStaffList(list);
-      if (list.length > 0) {
-        setSelectedUser(list[0]);
-      }
-    } catch (e: any) {
-      setErrorMsg(e?.message || "Failed to initialize staff operators.");
-    } finally {
-      setIsSeeding(false);
-    }
-  };
-
+  const selectedUserId = selectedUser?.id;
   useEffect(() => {
     setPin("");
     setPassword("");
     setErrorMsg("");
-    if (selectedUser && !selectedUser.pin_hash) {
-      setIsPasswordMode(true);
-    }
     setTimeout(() => {
       pinInputRef.current?.focus();
     }, 50);
-  }, [selectedUser, isPasswordMode]);
+  }, [selectedUserId, isPasswordMode]);
+
+  useEffect(() => {
+    if (selectedUser && !selectedUser.pin_hash) {
+      setIsPasswordMode(true);
+    }
+  }, [selectedUser]);
 
   // Global keyboard shortcuts (1-9 to select operator, Enter to submit, Alt+P to toggle PIN/password)
   useEffect(() => {
@@ -160,8 +146,7 @@ export const StaffLoginPage: React.FC<StaffLoginPageProps> = ({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [staffList, mustChangePassword, showAdminUnlockModal]);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const submitCredentials = async (forceOut = false) => {
     const targetUserIdOrUsername = selectedUser ? selectedUser.id : manualUsername.trim();
     if (!targetUserIdOrUsername) {
       setErrorMsg("Please select an operator or enter your username.");
@@ -172,13 +157,16 @@ export const StaffLoginPage: React.FC<StaffLoginPageProps> = ({
 
     try {
       const res = isPasswordMode
-        ? await staffAuthService.authenticateWithPassword(targetUserIdOrUsername, password)
-        : await staffAuthService.authenticateWithPin(targetUserIdOrUsername, pin);
+        ? await staffAuthService.authenticateWithPassword(targetUserIdOrUsername, password, { forceOut })
+        : await staffAuthService.authenticateWithPin(targetUserIdOrUsername, pin, { forceOut });
 
       if (!res.success) {
         setErrorMsg(res.error || "Authentication failed.");
-        setPin("");
-        setPassword("");
+        setSessionConflict(res.conflict || null);
+        if (!res.conflict) {
+          setPin("");
+          setPassword("");
+        }
         // Refresh staff state to catch lockouts
         const updated = await staffAuthService.listActiveStaff();
         setStaffList(updated);
@@ -187,6 +175,7 @@ export const StaffLoginPage: React.FC<StaffLoginPageProps> = ({
           if (cur) setSelectedUser(cur);
         }
       } else {
+        setSessionConflict(null);
         if (res.mustChangePassword) {
           setMustChangePassword(true);
         } else {
@@ -198,6 +187,11 @@ export const StaffLoginPage: React.FC<StaffLoginPageProps> = ({
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    await submitCredentials(false);
   };
 
   const handleBiometricAuth = async () => {
@@ -306,7 +300,7 @@ export const StaffLoginPage: React.FC<StaffLoginPageProps> = ({
               title="Return to Store / Company Gateway"
             >
               <Building2 className="w-3.5 h-3.5 text-accent" />
-              <span>Switch Store (Alt+S)</span>
+              <span>Switch Store (Ctrl+Alt+S)</span>
             </button>
           )}
 
@@ -448,11 +442,42 @@ export const StaffLoginPage: React.FC<StaffLoginPageProps> = ({
             </div>
           )}
 
-          {errorMsg && !isUserLocked && (
+          {errorMsg && !isUserLocked && !sessionConflict && (
             <div className="mb-4 bg-status-danger/10 border border-status-danger/20 rounded-btn p-3 text-xs text-status-danger flex items-start gap-2.5">
               <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
               <div className="flex-1">
                 <span>{errorMsg}</span>
+              </div>
+            </div>
+          )}
+
+          {sessionConflict && (
+            <div className="mb-4 bg-amber-500/10 border border-amber-500/30 rounded-btn p-3 text-xs text-amber-500 space-y-2.5">
+              <div className="flex items-start gap-2.5">
+                <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+                <span>{errorMsg || "This account is already signed in on another workstation."}</span>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {sessionConflict.canForceOut && (
+                  <button
+                    type="button"
+                    disabled={isLoading}
+                    onClick={() => submitCredentials(true)}
+                    className="px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold text-[11px] rounded-btn transition-colors cursor-pointer disabled:opacity-60"
+                  >
+                    Force sign-out there &amp; continue here
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSessionConflict(null);
+                    setErrorMsg("");
+                  }}
+                  className="px-3 py-1.5 bg-surface border border-border-main text-text-main text-[11px] font-semibold rounded-btn transition-colors cursor-pointer"
+                >
+                  Cancel
+                </button>
               </div>
             </div>
           )}
@@ -588,7 +613,7 @@ export const StaffLoginPage: React.FC<StaffLoginPageProps> = ({
                 )}
               </button>
 
-              {/* Biometric Button (Windows Hello) */}
+              {/* Biometric Button (platform-native authenticator) */}
               {hasBiometrics && selectedUser?.biometric_registered && (
                 <button
                   type="button"
@@ -596,7 +621,11 @@ export const StaffLoginPage: React.FC<StaffLoginPageProps> = ({
                   className="w-full py-2 bg-accent-soft hover:bg-accent-soft/80 text-accent text-xs font-semibold rounded-btn border border-accent/20 flex items-center justify-center gap-2 cursor-pointer transition-colors"
                 >
                   <Fingerprint className="w-4 h-4 text-accent" />
-                  <span>Sign in with Windows Hello</span>
+                  <span>
+                    {/Macintosh|Mac OS X/.test(navigator.userAgent)
+                      ? "Sign in with Touch ID"
+                      : "Sign in with Windows Hello"}
+                  </span>
                 </button>
               )}
 

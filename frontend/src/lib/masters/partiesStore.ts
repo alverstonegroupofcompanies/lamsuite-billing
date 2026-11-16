@@ -304,74 +304,52 @@ export class PartiesStore {
   }
 
   /**
-   * Pulls real customers and parties from backend database into local SQLite cache.
-   * Purges hardcoded mock/sample customer records if real data is available.
+   * Pulls parties for the active store from the scoped sync endpoint into the
+   * local SQLite cache. Never relies on the unscoped /api/customers endpoint:
+   * without auth it has no store context and would return other tenants' data.
    */
   async ensurePartiesPopulated(force = false): Promise<{ count: number; source: string }> {
+    void force;
+    const storeId = typeof window !== "undefined" && window.localStorage
+      ? window.localStorage.getItem("lamsuite_active_store_id") || ""
+      : "";
+    if (!storeId) {
+      const local = await this.getAllParties();
+      return { count: local.length, source: "no_active_store" };
+    }
+
     try {
       const baseUrl = getResolvedApiBaseUrl();
-      const res = await fetch(`${baseUrl}/api/customers?limit=200`, {
-        headers: { Accept: "application/json" },
-      });
+      const res = await fetch(
+        `${baseUrl}/api/sync/pull/deltas?store_id=${encodeURIComponent(storeId)}&since_watermark=0`,
+        {
+          headers: {
+            Accept: "application/json",
+            "X-Store-Id": storeId,
+            "Store-Id": storeId,
+          },
+        }
+      );
       if (res.ok) {
-        const json = await res.json();
-        const rawList = Array.isArray(json.data) ? json.data : Array.isArray(json) ? json : [];
-        if (rawList.length > 0) {
-          // Remove legacy mock sample records
-          const existing = await sqliteStorage.findAll<Customer>("customers");
-          for (const old of existing) {
-            if (old.id === "cust_1" || old.id === "cust_2" || old.id === "cust_3" || old.id === "cust_4" || old.id === "cust_5" || old.id === "cust_seed_1") {
-              await sqliteStorage.deleteRecord("customers", old.id).catch(() => {});
-            }
-          }
-
-          let savedCount = 0;
-          for (const c of rawList) {
-            const cust: Customer = {
-              id: String(c.id),
-              customer_code: c.reg_no || c.customer_code || `CUST-${c.id}`,
-              name: c.name,
-              phone: c.phone || "",
-              gstin: c.gstin || undefined,
-              address: c.address || undefined,
-              place_of_supply: c.state_code ? `${c.state_code}-State` : undefined,
-              outstanding_balance: c.current_balance !== undefined ? Number(c.current_balance) : (c.outstanding_balance !== undefined ? Number(c.outstanding_balance) : 0),
-              credit_limit: c.credit_limit !== undefined ? Number(c.credit_limit) : 0,
-              is_active: Boolean(c.is_active !== false),
-              created_at: c.created_at ? new Date(c.created_at).getTime() : Date.now(),
-              updated_at: c.updated_at ? new Date(c.updated_at).getTime() : Date.now(),
-            };
-            await sqliteStorage.insertRecord("customers", cust.id, cust as unknown as Record<string, unknown>);
-            savedCount++;
-          }
-          return { count: savedCount, source: "backend_db" };
+        const delta = await res.json();
+        const rawParties = Array.isArray(delta.parties) ? delta.parties : [];
+        for (const party of rawParties) {
+          const normalizedParty: PartyMaster = {
+            ...party,
+            id: String(party.id),
+            is_active: Boolean(party.is_active !== false),
+            credit_limit: party.credit_limit !== undefined ? Number(party.credit_limit) : undefined,
+            outstanding_balance: party.current_balance !== undefined ? Number(party.current_balance) : (party.outstanding_balance !== undefined ? Number(party.outstanding_balance) : 0),
+          };
+          await this.upsertParty(normalizedParty, false);
+        }
+        if (rawParties.length > 0) {
+          return { count: rawParties.length, source: "sync_deltas" };
         }
       }
     } catch (_) {}
 
-    // Fallback: check sync delta pull
-    try {
-      const baseUrl = getResolvedApiBaseUrl();
-      const deltaRes = await fetch(`${baseUrl}/api/sync/pull/deltas?since_watermark=0`);
-      if (deltaRes.ok) {
-        const delta = await deltaRes.json();
-        if (Array.isArray(delta.parties) && delta.parties.length > 0) {
-          for (const party of delta.parties) {
-            const normalizedParty: PartyMaster = {
-              ...party,
-              id: String(party.id),
-              is_active: Boolean(party.is_active !== false),
-              credit_limit: party.credit_limit !== undefined ? Number(party.credit_limit) : undefined,
-              outstanding_balance: party.current_balance !== undefined ? Number(party.current_balance) : (party.outstanding_balance !== undefined ? Number(party.outstanding_balance) : 0),
-            };
-            await this.upsertParty(normalizedParty);
-          }
-          return { count: delta.parties.length, source: "sync_deltas" };
-        }
-      }
-    } catch (_) {}
-
-    const local = await sqliteStorage.findAll<Customer>("customers");
+    const local = await this.getAllParties();
     return { count: local.length, source: "sqlite_cache" };
   }
 
@@ -472,7 +450,7 @@ export class PartiesStore {
     return await sqliteStorage.findById<Patient>("patients", id);
   }
 
-  async upsertParty(party: PartyMaster): Promise<void> {
+  async upsertParty(party: PartyMaster, enqueueSync = true): Promise<void> {
     if (party.type === "supplier") {
       await this.upsertSupplier({
         id: party.id,
@@ -514,9 +492,11 @@ export class PartiesStore {
       });
     }
 
-    try {
-      await syncQueueService.enqueue("party", party.id, "update", party as unknown as Record<string, unknown>);
-    } catch (_) {}
+    if (enqueueSync) {
+      try {
+        await syncQueueService.enqueue("party", party.id, "update", party as unknown as Record<string, unknown>);
+      } catch (_) {}
+    }
   }
 
   async deleteParty(id: string, type: "customer" | "supplier" | "doctor" | "patient" = "customer"): Promise<boolean> {

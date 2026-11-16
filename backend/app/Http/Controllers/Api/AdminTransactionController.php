@@ -122,7 +122,10 @@ class AdminTransactionController
      */
     public function showInvoice(Request $request, string $id): JsonResponse
     {
-        $invoice = Invoice::with(['items', 'customer', 'store', 'payments', 'cancelledByUser'])->findOrFail($id);
+        $invoice = Invoice::with(['items', 'customer', 'store', 'payments', 'cancelledByUser'])
+            ->where('id', $id)
+            ->orWhere('invoice_number', $id)
+            ->firstOrFail();
         $store = $invoice->store ?: ($request->get('active_store_id') ? Store::find($request->get('active_store_id')) : null);
         $isPharmacy = !$store || $store->store_type === 'pharmacy';
 
@@ -135,6 +138,331 @@ class AdminTransactionController
 
     /**
      * Sales Returns & Credit Notes.
+     */
+    /**
+     * Create a sales return (credit note). The original invoice is required so
+     * the server can verify remaining returnable quantities in base units and
+     * restock the exact batch that was sold.
+     */
+    public function storeSalesReturn(Request $request): JsonResponse
+    {
+        $storeId = $request->get('active_store_id')
+            ?: $request->header('X-Store-Id')
+            ?: $request->user()?->store_id;
+        $store = $storeId ? Store::find($storeId) : null;
+        if (!$store) {
+            return response()->json([
+                'success' => false,
+                'error' => 'STORE_REQUIRED',
+                'message' => 'An active store is required to record a sales return.',
+            ], 422);
+        }
+
+        $validated = $request->validate([
+            'original_invoice_id' => 'nullable',
+            'original_invoice_number' => 'nullable|string|max:50',
+            'customer_phone' => 'nullable|string|max:20',
+            'refund_mode' => 'nullable|string|max:30',
+            'refund_amount' => 'nullable|numeric|min:0',
+            'notes' => 'nullable|string',
+            'items' => 'required|array|min:1',
+            'items.*.product_id' => 'required',
+            'items.*.product_name' => 'nullable|string|max:255',
+            'items.*.batch_no' => 'nullable|string|max:50',
+            'items.*.expiry_date' => 'nullable|string|max:30',
+            'items.*.qty' => 'required|numeric|min:0',
+            'items.*.loose_qty' => 'nullable|numeric|min:0',
+            'items.*.units_per_pack' => 'nullable|integer|min:1',
+            'items.*.rate' => 'nullable|numeric|min:0',
+            'items.*.unit_price' => 'nullable|numeric|min:0',
+            'items.*.gst_percent' => 'nullable|numeric|min:0',
+            'items.*.reason' => 'nullable|string|max:255',
+        ]);
+
+        if (empty($validated['original_invoice_id']) && empty($validated['original_invoice_number'])) {
+            return response()->json([
+                'success' => false,
+                'error' => 'ORIGINAL_INVOICE_REQUIRED',
+                'message' => 'Select the original invoice before recording a return.',
+            ], 422);
+        }
+
+        $original = null;
+        if (!empty($validated['original_invoice_id'])) {
+            $originalId = $validated['original_invoice_id'];
+            $original = Invoice::where('store_id', $store->id)
+                ->with('items')
+                ->where(function ($q) use ($originalId) {
+                    $q->where('id', $originalId)->orWhere('external_id', $originalId);
+                })
+                ->first();
+        }
+        if (!$original && !empty($validated['original_invoice_number'])) {
+            $original = Invoice::where('store_id', $store->id)
+                ->with('items')
+                ->where('invoice_number', $validated['original_invoice_number'])
+                ->first();
+        }
+
+        if (!$original) {
+            return response()->json([
+                'success' => false,
+                'error' => 'ORIGINAL_INVOICE_NOT_FOUND',
+                'message' => 'The original invoice could not be found in this store.',
+            ], 404);
+        }
+        if ($original->status === 'cancelled' || in_array($original->module_key, ['credit_note', 'sales_return', 'quotation'], true)) {
+            return response()->json([
+                'success' => false,
+                'error' => 'ORIGINAL_INVOICE_NOT_RETURNABLE',
+                'message' => 'Returns can only be created against an issued sales invoice.',
+            ], 422);
+        }
+
+        $alreadyReturned = $this->returnedBaseUnitsByLine($store->id, $original->invoice_number);
+        $resolved = [];
+        $taxLines = [];
+
+        foreach ($validated['items'] as $index => $item) {
+            $lineNumber = $index + 1;
+            $productId = $item['product_id'];
+            $product = Product::where('store_id', $store->id)
+                ->where(function ($q) use ($productId) {
+                    $q->where('id', $productId)->orWhere('external_id', $productId);
+                })
+                ->first();
+            if (!$product && !empty($item['product_name'])) {
+                $product = Product::where('store_id', $store->id)
+                    ->where('name', $item['product_name'])
+                    ->first();
+            }
+            if (!$product) {
+                return response()->json([
+                    'success' => false,
+                    'error' => 'PRODUCT_NOT_FOUND',
+                    'message' => "Line {$lineNumber}: product not found.",
+                    'line' => $lineNumber,
+                ], 422);
+            }
+
+            $qty = (float) $item['qty'];
+            $looseQty = (float) ($item['loose_qty'] ?? 0);
+            $unitsPerPack = max(1, (int) ($item['units_per_pack'] ?? 1));
+            $baseUnits = ($qty * $unitsPerPack) + $looseQty;
+            if ($baseUnits <= 0) {
+                return response()->json([
+                    'success' => false,
+                    'error' => 'RETURN_QTY_REQUIRED',
+                    'message' => "Line {$lineNumber}: enter a return quantity greater than zero.",
+                    'line' => $lineNumber,
+                ], 422);
+            }
+
+            $batchNo = $item['batch_no'] ?? null;
+            $productItems = $original->items->filter(
+                fn($oi) => (string) $oi->product_id === (string) $product->id
+            );
+            $originalItem = $productItems->first(
+                fn($oi) => !empty($batchNo) && $oi->batch_no === $batchNo
+            ) ?: $productItems->first();
+
+            if (!$originalItem) {
+                return response()->json([
+                    'success' => false,
+                    'error' => 'LINE_NOT_ON_INVOICE',
+                    'message' => "Line {$lineNumber}: '{$product->name}' was not sold on this invoice.",
+                    'line' => $lineNumber,
+                ], 422);
+            }
+
+            $batchNo = $batchNo ?: $originalItem->batch_no;
+            $lineKey = $product->id . '_' . ($batchNo ?? '');
+            $soldBase = $this->baseUnits(
+                $originalItem->qty,
+                $originalItem->loose_qty,
+                $originalItem->units_per_pack
+            );
+            $remaining = $soldBase - ($alreadyReturned[$lineKey] ?? 0);
+            if ($baseUnits > $remaining) {
+                return response()->json([
+                    'success' => false,
+                    'error' => 'RETURN_QTY_EXCEEDS',
+                    'message' => "Line {$lineNumber}: cannot return {$baseUnits} units of {$product->name}. Only {$remaining} remain returnable.",
+                    'line' => $lineNumber,
+                    'remaining' => $remaining,
+                ], 422);
+            }
+
+            $rate = (float) ($item['rate'] ?? $item['unit_price'] ?? $originalItem->unit_price ?? $product->sel_rate ?? 0);
+            $gstPercent = (float) ($item['gst_percent'] ?? $originalItem->gst_percent ?? $product->gst_percent ?? 0);
+
+            $resolved[] = [
+                'product' => $product,
+                'qty' => $qty,
+                'loose_qty' => $looseQty,
+                'units_per_pack' => $unitsPerPack,
+                'base_units' => $baseUnits,
+                'batch_no' => $batchNo,
+                'expiry_date' => $item['expiry_date'] ?? $originalItem->expiry_date,
+                'unit_price' => $rate,
+                'gst_percent' => $gstPercent,
+            ];
+
+            $taxLines[] = [
+                'line_id' => (string) $index,
+                'product_id' => (string) $product->id,
+                'product_name' => $product->name,
+                'hsn_code' => $originalItem->hsn_code ?? $product->hsn_sac_code ?? '',
+                'qty' => $qty,
+                'loose_qty' => $looseQty,
+                'units_per_pack' => $unitsPerPack,
+                'unit_price' => $rate,
+                'rate_basis' => 'sel_rate',
+                'discount_percent' => 0,
+                'discount_amount' => 0,
+                'gst_percent' => $gstPercent,
+                'cess_percent' => 0,
+            ];
+        }
+
+        $taxSetting = \App\Models\CompanySetting::where('store_id', $store->id)
+            ->where('key', 'tax_settings')
+            ->first();
+        $taxMode = $taxSetting ? ($taxSetting->value['tax_mode'] ?? 'inclusive') : 'inclusive';
+
+        $tax = \App\Services\Tax\TaxEngine::calculate([
+            'store_state' => $store->state_code ?: '32',
+            'customer_gstin' => $original->customer_gstin,
+            'place_of_supply' => $original->place_of_supply ?: '32-Kerala',
+            'default_tax_mode' => $taxMode,
+            'is_composition' => in_array($store->gst_type, ['composition', 'no_tax', 'unregistered'], true),
+            'lines' => $taxLines,
+            'auto_round_off' => true,
+        ]);
+
+        $result = DB::transaction(function () use ($store, $original, $validated, $resolved, $tax) {
+            $invoice = Invoice::create([
+                'store_id' => $store->id,
+                'counter_id' => $original->counter_id,
+                'user_id' => $original->user_id,
+                'module_key' => 'credit_note',
+                'invoice_number' => $this->nextCreditNoteNumber($store->id),
+                'invoice_date' => Carbon::now($store->timezone ?: 'Asia/Kolkata')->toDateString(),
+                'customer_id' => $original->customer_id,
+                'customer_name' => $original->customer_name,
+                'customer_phone' => $validated['customer_phone'] ?? $original->customer_phone,
+                'customer_gstin' => $original->customer_gstin,
+                'place_of_supply' => $original->place_of_supply,
+                'subtotal' => $tax['taxable_subtotal'],
+                'taxable_subtotal' => $tax['taxable_subtotal'],
+                'discount_total' => $tax['line_discount_total'] + $tax['bill_discount_total'],
+                'tax_total' => $tax['total_tax'],
+                'cgst_total' => $tax['cgst_total'],
+                'sgst_total' => $tax['sgst_total'],
+                'igst_total' => $tax['igst_total'],
+                'cess_total' => $tax['cess_total'],
+                'round_off' => $tax['round_off'],
+                'grand_total' => $tax['grand_total'],
+                'paid_amount' => $validated['refund_amount'] ?? $tax['grand_total'],
+                'payment_mode' => $validated['refund_mode'] ?? 'Cash',
+                'status' => 'issued',
+                'counter_code' => $original->counter_code,
+                'store_state_code' => $store->state_code ?: '32',
+                'original_invoice_id' => $original->id,
+                'original_invoice_number' => $original->invoice_number,
+            ]);
+
+            foreach ($resolved as $index => $line) {
+                $taxLine = $tax['lines'][$index];
+                InvoiceItem::create([
+                    'invoice_id' => $invoice->id,
+                    'product_id' => $line['product']->id,
+                    'product_name' => $line['product']->name,
+                    'batch_no' => $line['batch_no'],
+                    'expiry_date' => $line['expiry_date'],
+                    'qty' => $line['qty'],
+                    'loose_qty' => $line['loose_qty'],
+                    'units_per_pack' => $line['units_per_pack'],
+                    'unit_price' => $line['unit_price'],
+                    'mrp' => $line['product']->mrp ?? $line['unit_price'],
+                    'discount_percent' => 0,
+                    'discount_amount' => 0,
+                    'taxable_amount' => $taxLine['taxable_amount'],
+                    'gst_percent' => $line['gst_percent'],
+                    'cgst_amount' => $taxLine['cgst_amount'],
+                    'sgst_amount' => $taxLine['sgst_amount'],
+                    'igst_amount' => $taxLine['igst_amount'],
+                    'cess_rate' => $taxLine['cess_rate'],
+                    'cess_amount' => $taxLine['cess_amount'],
+                    'tax_amount' => $taxLine['total_tax'],
+                    'total_amount' => $taxLine['total_amount'],
+                ]);
+
+                $batch = ProductBatch::where('store_id', $store->id)
+                    ->where('product_id', $line['product']->id)
+                    ->where('batch_no', $line['batch_no'])
+                    ->lockForUpdate()
+                    ->first();
+                if ($batch) {
+                    $batch->increment('stock_qty', $line['base_units']);
+                }
+                $line['product']->increment('current_stock', $line['base_units']);
+            }
+
+            return $invoice->load('items');
+        });
+
+        return response()->json([
+            'success' => true,
+            'credit_note_number' => $result->invoice_number,
+            'return_id' => $result->id,
+            'refund_amount' => $result->grand_total,
+            'invoice' => $result,
+        ], 201);
+    }
+
+    private function baseUnits($qty, $looseQty, $unitsPerPack): float
+    {
+        $upp = max(1, (int) ($unitsPerPack ?: 1));
+        return max(0, (float) $qty) * $upp + max(0, (float) $looseQty);
+    }
+
+    /** Base units already returned per `productId_batchNo` for an invoice. */
+    private function returnedBaseUnitsByLine(int $storeId, string $invoiceNumber): array
+    {
+        $prior = Invoice::where('store_id', $storeId)
+            ->whereIn('module_key', ['credit_note', 'sales_return'])
+            ->where('original_invoice_number', $invoiceNumber)
+            ->where('status', '!=', 'cancelled')
+            ->with('items')
+            ->get();
+
+        $map = [];
+        foreach ($prior as $doc) {
+            foreach ($doc->items as $item) {
+                $key = $item->product_id . '_' . ($item->batch_no ?? '');
+                $map[$key] = ($map[$key] ?? 0)
+                    + $this->baseUnits($item->qty, $item->loose_qty, $item->units_per_pack);
+            }
+        }
+        return $map;
+    }
+
+    private function nextCreditNoteNumber(int $storeId): string
+    {
+        $last = Invoice::where('store_id', $storeId)
+            ->where('module_key', 'credit_note')
+            ->orderByDesc('id')
+            ->first();
+        $sequence = 1;
+        if ($last && preg_match('/(\d+)$/', (string) $last->invoice_number, $matches)) {
+            $sequence = (int) $matches[1] + 1;
+        }
+        return sprintf('CN-%d-%04d', $storeId, $sequence);
+    }
+
+    /**
+     * List sales returns & credit notes.
      */
     public function returns(Request $request): JsonResponse
     {
@@ -562,6 +890,50 @@ class AdminTransactionController
             ->orderBy('payment_date', 'desc');
 
         return response()->json($query->paginate(20));
+    }
+
+    public function storeCustomerPayment(Request $request): JsonResponse
+    {
+        $storeId = $request->input('store_id') ?: $request->get('active_store_id');
+        $validated = $request->validate([
+            'store_id' => 'required|exists:stores,id',
+            'customer_id' => 'required|exists:parties,id',
+            'amount' => 'required|numeric|min:0.01',
+            'payment_mode' => 'required|string|max:50',
+            'reference_no' => 'nullable|string|max:100',
+            'notes' => 'nullable|string|max:500',
+            'payment_date' => 'nullable|date',
+        ]);
+
+        $validated['payment_date'] = $validated['payment_date'] ?? now()->toDateString();
+        $validated['created_by'] = $request->user() ? $request->user()->id : null;
+
+        DB::beginTransaction();
+        try {
+            $payment = CustomerPayment::create($validated);
+            $customer = Party::findOrFail($validated['customer_id']);
+            $oldBalance = $customer->current_balance;
+            $customer->decrement('current_balance', $validated['amount']);
+
+            AuditLog::log(
+                'record_customer_payment',
+                'CustomerPayment',
+                (string)$payment->id,
+                ['current_balance' => $oldBalance],
+                ['amount' => $validated['amount'], 'new_balance' => $customer->current_balance],
+                $validated['store_id']
+            );
+
+            DB::commit();
+            return response()->json([
+                'success' => true,
+                'payment' => $payment->load(['customer:id,name,phone', 'creator:id,name']),
+                'new_balance' => $customer->current_balance,
+            ], 201);
+        } catch (\Throwable $e) {
+            DB::rollBack();
+            return response()->json(['message' => 'Failed to record customer payment: ' . $e->getMessage()], 500);
+        }
     }
 
     /**

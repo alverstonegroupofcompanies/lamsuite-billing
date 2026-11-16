@@ -47,6 +47,16 @@ class Store extends Model
         'version' => 'integer',
     ];
 
+    protected $appends = [
+        'allow_negative_stock',
+    ];
+
+    public function getAllowNegativeStockAttribute(): bool
+    {
+        // One canonical policy is shared by the desktop, admin panel and MCP.
+        return app(\App\Services\StockAdjustmentPolicy::class)->forStore((int) $this->id)['allow_negative_stock'];
+    }
+
     public function activationKeys(): HasMany
     {
         return $this->hasMany(ActivationKey::class);

@@ -20,18 +20,18 @@ export const approveCounterTool: ToolDefinition = {
   isWriteTool: true,
   handler: async (args, { client }) => {
     if (args.pairing_code) {
-      const res = await (client as any).post?.(`/api/counters/approve-pairing`, {
+      const res = await client.post(`/counters/approve-pairing`, {
         pairing_code: args.pairing_code,
-      }) ?? { success: true };
+      });
       return buildToolResponse(`Counter approved via pairing code ${args.pairing_code}`, res);
     }
     if (!args.counter_id) {
       throw new Error("Either counter_id or pairing_code must be provided.");
     }
-    const res = await (client as any).post?.(`/api/admin/counters/${args.counter_id}/status`, {
+    const res = await client.post(`/admin/counters/${encodeURIComponent(args.counter_id)}/status`, {
       status: args.status,
       revoke_reason: args.reason,
-    }) ?? { success: true };
+    });
     return buildToolResponse(`Counter status updated to ${args.status}`, res);
   },
 };
@@ -55,7 +55,10 @@ export const leaseCounterSequenceTool: ToolDefinition = {
   requiredPermission: "store:write",
   isWriteTool: true,
   handler: async (args, { client }) => {
-    const res = await (client as any).post?.(`/api/admin/counters/${args.counter_id}/lease-sequence`, args) ?? { success: true };
+    const res = await client.post(
+      `/admin/counters/${encodeURIComponent(args.counter_id)}/lease-sequence`,
+      args
+    );
     return buildToolResponse(`Document sequence range leased`, res);
   },
 };

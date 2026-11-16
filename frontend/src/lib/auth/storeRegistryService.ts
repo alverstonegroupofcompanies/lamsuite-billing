@@ -77,6 +77,11 @@ export class StoreRegistryService {
           active_store_id: res.active_store_id || null,
           auto_open_last: res.auto_open_last ?? true,
         };
+        if (this.registry.active_store_id && typeof window !== "undefined" && window.localStorage) {
+          try {
+            window.localStorage.setItem("lamsuite_active_store_id", String(this.registry.active_store_id));
+          } catch {}
+        }
         this.isLoaded = true;
         return this.registry;
       }
@@ -204,8 +209,14 @@ export class StoreRegistryService {
   }
 
   getActiveStore(): RegisteredStoreRecord | null {
-    if (!this.registry.active_store_id) return null;
-    return this.registry.stores.find((s) => s.id === this.registry.active_store_id) || null;
+    let activeId = this.registry.active_store_id;
+    if (!activeId && typeof window !== "undefined" && window.localStorage) {
+      try {
+        activeId = window.localStorage.getItem("lamsuite_active_store_id");
+      } catch {}
+    }
+    if (!activeId) return null;
+    return this.registry.stores.find((s) => String(s.id) === String(activeId)) || null;
   }
 
   getActiveStoreColor() {
@@ -321,6 +332,227 @@ export class StoreRegistryService {
     }
     this.registry.stores = nextList;
     await this.saveRegistry();
+  }
+
+  async setStoreActiveStatus(storeId: string, isActive: boolean, reason?: string): Promise<void> {
+    const store = this.registry.stores.find((s) => String(s.id) === String(storeId));
+    if (store) {
+      store.is_active = isActive;
+      store.sync_status = isActive ? "synced" : "disabled";
+      if (reason) store.disabled_reason = reason;
+      await this.saveRegistry();
+    }
+  }
+
+  /**
+   * Destructively wipes local data for a reset store according to the reset
+   * options chosen in the admin panel. Product catalog is kept unless
+   * reset_products is set; party masters are deleted with reset_customers.
+   */
+  /**
+   * Applies a remote store reset exactly once. Callers may identify the reset
+   * either by its timestamp, its sync-event id, or both. Markers are written
+   * even if the wipe throws part-way so a failing call cannot re-wipe on every
+   * poll/reconnect.
+   */
+  async applyRemoteResetOnce(
+    storeId: string,
+    resetAt?: string | null,
+    options?: {
+      reset_stock?: boolean;
+      reset_products?: boolean;
+      reset_invoices?: boolean;
+      reset_purchases?: boolean;
+      reset_customers?: boolean;
+      reset_expenses?: boolean;
+      reset_held_bills?: boolean;
+    },
+    eventId?: number | string | null
+  ): Promise<boolean> {
+    if (!storeId) return false;
+    const ls = typeof window !== "undefined" ? window.localStorage : null;
+    const tsKey = `lamsuite_last_applied_reset_${storeId}`;
+    const eventKey = `lamsuite_last_applied_reset_event_${storeId}`;
+    const numericEventId = Number(eventId || 0);
+
+    try {
+      if (resetAt && ls && ls.getItem(tsKey) === resetAt) {
+        return false;
+      }
+      if (numericEventId && ls && numericEventId <= Number(ls.getItem(eventKey) || 0)) {
+        return false;
+      }
+    } catch {
+      // localStorage unavailable: fall through and apply
+    }
+
+    try {
+      await this.wipeStoreTransactionalData(storeId, options);
+    } finally {
+      try {
+        if (ls) {
+          if (resetAt) ls.setItem(tsKey, resetAt);
+          if (numericEventId) ls.setItem(eventKey, String(numericEventId));
+        }
+      } catch {}
+    }
+    return true;
+  }
+
+  async wipeStoreTransactionalData(
+    storeId: string,
+    options?: {
+      reset_stock?: boolean;
+      reset_products?: boolean;
+      reset_invoices?: boolean;
+      reset_purchases?: boolean;
+      reset_customers?: boolean;
+      reset_expenses?: boolean;
+      reset_held_bills?: boolean;
+    }
+  ): Promise<void> {
+    const currentActiveId = this.registry.active_store_id;
+    const isCurrentActive = String(currentActiveId) === String(storeId);
+
+    const store = this.registry.stores.find((s) => String(s.id) === String(storeId));
+    if (!store) {
+      // Store is not registered on this workstation: never wipe whichever
+      // store database happens to be active.
+      return;
+    }
+    if (!isCurrentActive) {
+      await sqliteStorage.switchStore(store.id, store.db_path).catch(() => {});
+    }
+
+    const resetInvoices = options?.reset_invoices !== false;
+    const resetStock = options?.reset_stock !== false;
+    const resetProducts = options?.reset_products === true;
+    const resetPurchases = options?.reset_purchases !== false;
+    const resetCustomers = options?.reset_customers !== false;
+    const resetExpenses = options?.reset_expenses !== false;
+    const resetHeldBills = options?.reset_held_bills !== false;
+
+    const tablesToClear: string[] = [];
+
+    if (resetInvoices) {
+      tablesToClear.push("invoices", "invoice_items", "invoice_payments", "sales_returns", "sync_queue");
+    }
+    if (resetPurchases) {
+      tablesToClear.push("purchase_documents", "purchases", "purchase_items", "purchase_returns", "supplier_payments");
+    }
+    if (resetStock) {
+      tablesToClear.push("stock_transactions", "stock_adjustments", "counter_stock_deltas");
+    }
+    if (resetProducts) {
+      tablesToClear.push("products", "product_batches");
+      if (typeof window !== "undefined" && window.localStorage) {
+        try {
+          window.localStorage.setItem(`catalog_wiped_${storeId}`, "true");
+        } catch {}
+      }
+    }
+    if (resetCustomers) {
+      tablesToClear.push(
+        "customers",
+        "suppliers",
+        "doctors",
+        "patients",
+        "customer_payments",
+        "supplier_payments",
+        "party_ledger_entries"
+      );
+    }
+    if (resetExpenses) {
+      tablesToClear.push("expenses");
+    }
+    if (resetHeldBills) {
+      tablesToClear.push("distributed_held_bills");
+    }
+
+    for (const table of tablesToClear) {
+      await sqliteStorage.clearTable(table).catch(() => {});
+    }
+
+    // When resetting stock without wiping products, reset batch stock_qty and product current_stock to 0 (clearing oversold negative stock)
+    if (resetStock && !resetProducts) {
+      try {
+        const batches = await sqliteStorage.findAll<any>("product_batches").catch(() => []);
+        if (batches && batches.length > 0) {
+          const resetBatches = batches.map((b) => ({
+            id: String(b.id),
+            record: {
+              ...b,
+              stock_qty: 0,
+              updated_at: Date.now(),
+            },
+          }));
+          await sqliteStorage.insertBatch("product_batches", resetBatches).catch(() => {});
+        }
+      } catch (e) {
+        console.warn("Failed to reset batch stock:", e);
+      }
+
+      try {
+        const prods = await sqliteStorage.findAll<any>("products").catch(() => []);
+        if (prods && prods.length > 0) {
+          const resetProds = prods.map((p) => ({
+            id: String(p.id),
+            record: {
+              ...p,
+              current_stock: 0,
+              updated_at: Date.now(),
+            },
+          }));
+          await sqliteStorage.insertBatch("products", resetProds).catch(() => {});
+        }
+      } catch (e) {
+        console.warn("Failed to reset product current_stock:", e);
+      }
+    }
+
+    // Also clear localStorage keys if mock/web
+    if (typeof window !== "undefined" && window.localStorage) {
+      try {
+        const keysToRemove: string[] = [];
+        for (let i = 0; i < window.localStorage.length; i++) {
+          const k = window.localStorage.key(i);
+          if (k) {
+            for (const table of tablesToClear) {
+              if (
+                k === `lamsuite_tbl_${table}` ||
+                k === `lamsuite_tbl_${storeId}_${table}` ||
+                k.startsWith(`lamsuite_tbl_${storeId}_${table}`)
+              ) {
+                keysToRemove.push(k);
+              }
+            }
+          }
+        }
+        for (const k of keysToRemove) {
+          window.localStorage.removeItem(k);
+        }
+      } catch {}
+    }
+
+    if (isCurrentActive && resetInvoices) {
+      posCartService.clearCart();
+      await companySettingsService
+        .updateSettings({
+          next_invoice_number: 1001,
+          sequences: {
+            ...companySettingsService.getSettings()?.sequences,
+            nextInvoiceNumber: 1001,
+          },
+        })
+        .catch(() => {});
+    } else if (currentActiveId) {
+      const activeStore = this.registry.stores.find((s) => String(s.id) === String(currentActiveId));
+      if (activeStore) {
+        await sqliteStorage.switchStore(activeStore.id, activeStore.db_path).catch(() => {});
+      }
+    }
+
+    this.notify();
   }
 
   /**
@@ -452,11 +684,15 @@ export class StoreRegistryService {
     posCartService.resetCart();
     printerManagerService.clearCache();
     staffAuthService.logout();
-    await staffAuthService.initDemoStaffIfEmpty(idStr, target);
 
     // 4. Update last opened timestamp
     target.last_opened_at = Date.now();
     this.registry.active_store_id = idStr;
+    if (typeof window !== "undefined" && window.localStorage) {
+      try {
+        window.localStorage.setItem("lamsuite_active_store_id", idStr);
+      } catch {}
+    }
     await this.saveRegistry();
 
     // 5. Reload company settings for the new store from database or local fallback
@@ -467,7 +703,9 @@ export class StoreRegistryService {
     }
 
     // 6. Broadcast device presence heartbeat under new active store
-    deviceSessionService.sendHeartbeat({ store_id: idStr }).catch(() => {});
+    if (staffAuthService.getCurrentSession()) {
+      deviceSessionService.sendHeartbeat({ store_id: idStr }).catch(() => {});
+    }
 
     return target;
   }

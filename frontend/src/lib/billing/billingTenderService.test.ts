@@ -279,4 +279,51 @@ describe("Billing Tender & Held Bills (POS-005, POS-006, Split Payments)", () =>
       expect(billingTenderService.listHeldBills().length).toBe(1);
     });
   });
+
+  describe("In-Progress Tender Input Synchronization (Rapid Finalize without Blur)", () => {
+    it("synchronizes in-progress typed tender amount for rapid finalize without manual input blur", async () => {
+      const grandTotal = 1000.00;
+      // Stale state in React before input blur: Line 0 has 500 (UPI), Line 1 has old amount 200 (Cash)
+      const staleTenders: PaymentTenderLine[] = [
+        { mode: "UPI", amount: 500.00, reference_no: "UPI_REF_123" },
+        { mode: "Cash", amount: 200.00 },
+      ];
+
+      // Operator is typing '500' in Line 1, but hasn't blurred the field
+      const activeLineIndex = 1;
+      const inProgressInputValue = "500";
+
+      // Synchronize in-progress input into tender lines
+      const synchronizedTenders = billingTenderService.syncInProgressTenderInput(
+        staleTenders,
+        activeLineIndex,
+        inProgressInputValue
+      );
+
+      // Verify that the active line took the in-progress value
+      expect(synchronizedTenders[1].amount).toBe(500.00);
+
+      // Calculate tender balance with synchronized lines
+      const tenderBalance = billingTenderService.calculateTenderBalance(grandTotal, synchronizedTenders);
+      expect(tenderBalance.totalPaid).toBe(1000.00);
+      expect(tenderBalance.balanceDue).toBe(0);
+      expect(tenderBalance.isFullyPaid).toBe(true);
+
+      // Validate payment lines passes immediately without blur
+      const validation = await billingTenderService.validatePaymentLines(
+        grandTotal,
+        synchronizedTenders,
+        null
+      );
+      expect(validation.valid).toBe(true);
+    });
+
+    it("handles rapid single-line cash commit without blur when creating initial tender line", () => {
+      const emptyTenders: PaymentTenderLine[] = [];
+      const synchronized = billingTenderService.syncInProgressTenderInput(emptyTenders, 0, "750.50");
+      expect(synchronized.length).toBe(1);
+      expect(synchronized[0].amount).toBe(750.50);
+      expect(synchronized[0].mode).toBe("Cash");
+    });
+  });
 });

@@ -2,6 +2,7 @@ import React from "react";
 import { X, Keyboard, Command } from "lucide-react";
 import { APP_FULL_VERSION } from "../config/version";
 import { useModalEscape } from "../lib/ui/modalEscapeManager";
+import { formatChord, shortcutsForScope } from "../lib/keyboard/centralKeyMap";
 
 interface KeyboardShortcutsModalProps {
   isOpen: boolean;
@@ -18,68 +19,19 @@ export const KeyboardShortcutsModal: React.FC<KeyboardShortcutsModalProps> = ({ 
 
   if (!isOpen) return null;
 
+  const toShortcuts = (scope: Parameters<typeof shortcutsForScope>[0]) =>
+    shortcutsForScope(scope).map((s) => ({
+      key: s.keys.map(formatChord).join(" / "),
+      description: s.label,
+    }));
+
   const shortcutGroups: ShortcutGroup[] = [
-    {
-      category: "Purchase Inward & Goods Receipt",
-      shortcuts: [
-        { key: "Alt+S / B / D / T", description: "Jump to Supplier / Bill No / Date / Purchase Type" },
-        { key: "F1 or /", description: "Jump to Product Entry Row (permanent + row)" },
-        { key: "MMYY / MM/YY", description: "Expiry date mask with auto-validation" },
-        { key: "2+5 or 10+2", description: "Quantity shorthand (Pack + Loose or Pack + Free)" },
-        { key: "Ctrl+N", description: "Quick Add New Product inline in popover" },
-        { key: "Ctrl+Shift+N", description: "Start a New Purchase Bill" },
-        { key: "Alt+F / Alt+I / Alt+R", description: "Freight / Supplier Bill Total / Round-Off" },
-        { key: "F6 / F8 / F9", description: "Find Bill / Save Draft / Recall Draft" },
-        { key: "Ctrl+Shift+C", description: "Configure Inward Grid Columns & Presets" },
-        { key: "F12 / Shift+F12", description: "Post Purchase Bill / Post & Print Labels" },
-      ],
-    },
-    {
-      category: "POS Counter & Billing",
-      shortcuts: [
-        { key: "F1 or /", description: "Focus Product Entry Row / Barcode" },
-        { key: "3*<name/code>", description: "Quantity prefix multiplier (e.g. 3*Paracetamol)" },
-        { key: "F12 or Ctrl+Enter", description: "Open Settlement / Checkout" },
-        { key: "Ctrl+F2 or Shift+F2", description: "Overall Bill Discount (% or ₹)" },
-        { key: "Alt+R", description: "Edit Round-Off / Net Payable Amount" },
-        { key: "Alt+C / M / D / P", description: "Focus Customer / Mobile / Doctor / Patient" },
-        { key: "F6 / F8 / F9", description: "Past Bills / Hold Bill / Recall Bill" },
-        { key: "Ctrl+N / Ctrl+Bksp", description: "New Bill / Clear Current Cart" },
-        { key: "Ctrl+Shift+C", description: "Configure Visible Columns & Layout" },
-      ],
-    },
-    {
-      category: "Cart Grid & Line Actions",
-      shortcuts: [
-        { key: "↑ (from entry row)", description: "Jump to last cart line" },
-        { key: "↓ (from last line)", description: "Return to product entry row" },
-        { key: "↑ / ↓", description: "Navigate between items in grid" },
-        { key: "Tab or +", description: "Jump between Pack & Loose quantity" },
-        { key: "Enter (in Qty)", description: "Confirm line & focus entry row for next item" },
-        { key: "Esc (in Qty)", description: "Remove freshly added line & return to entry row" },
-        { key: "F2", description: "Quick Edit Item Discount (% or ₹)" },
-        { key: "F3", description: "Quick Edit Selling Price" },
-        { key: "F4 or Ctrl+M", description: "Quick Edit Product Name, Batch, Expiry & Tax" },
-        { key: "Ctrl+B / Ctrl+U", description: "Change Batch / Toggle Unit Rate" },
-        { key: "Ctrl+E", description: "Edit Packaging & Unit Conversion" },
-        { key: "Delete or Ctrl+D", description: "Delete selected line (Ctrl+Z to Undo)" },
-        { key: "Alt+↑ / Alt+↓", description: "Move line Up / Down" },
-      ],
-    },
-    {
-      category: "Navigation & Global",
-      shortcuts: [
-        { key: "Alt + S / Alt + F3", description: "Switch Company / Store (Instant Tally Switch)" },
-        { key: "Home or Ctrl+D", description: "Go to Dashboard" },
-        { key: "Ctrl + K", description: "Open Command Palette / Fast Search" },
-        { key: "F2 / Shift+F2", description: "Purchase Register / Purchase Returns" },
-        { key: "F3 / Shift+F3", description: "Stock Ledger / Inter-Store Transfers" },
-        { key: "F4 / F5", description: "Reports & GST Hub / Master Data" },
-        { key: "F8 / F9 / F10", description: "Store Counters / Import-Export Hub / Settings" },
-        { key: "?", description: "Open Keyboard Shortcuts Help" },
-        { key: "Esc", description: "Cancel / Close modal or dropdown" },
-      ],
-    },
+    { category: "POS Counter & Billing", shortcuts: toShortcuts("pos") },
+    { category: "Bills Register", shortcuts: toShortcuts("bills") },
+    { category: "Invoice Edit", shortcuts: toShortcuts("edit") },
+    { category: "Purchase Inward & Goods Receipt", shortcuts: toShortcuts("purchase") },
+    { category: "Stock Adjustment", shortcuts: toShortcuts("stock") },
+    { category: "Navigation & Global", shortcuts: toShortcuts("global") },
   ];
 
   return (

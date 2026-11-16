@@ -1,0 +1,42 @@
+[
+ {
+  "id": "B01",
+  "status": "FAIL"
+ },
+ {
+  "id": "B02",
+  "status": "PASS"
+ },
+ {
+  "id": "B03",
+  "status": "FAIL"
+ },
+ {
+  "id": "B04",
+  "status": "FAIL"
+ },
+ {
+  "id": "B05",
+  "status": "FAIL"
+ },
+ {
+  "id": "B06",
+  "status": "FAIL"
+ },
+ {
+  "id": "B07",
+  "status": "FAIL"
+ },
+ {
+  "id": "B08",
+  "status": "FAIL"
+ },
+ {
+  "id": "B09",
+  "status": "PASS"
+ },
+ {
+  "id": "B10",
+  "status": "PASS"
+ }
+]

@@ -16,6 +16,8 @@ import {
 } from "lucide-react";
 import {
   salesReturnService,
+  returnKey,
+  toBaseUnits,
   type SalesReturnRecord,
   type SalesReturnInput,
   type SalesReturnLineInput,
@@ -27,6 +29,7 @@ import { useModalEscape } from "../lib/ui/modalEscapeManager";
 import { invoiceManagementService, type InvoiceRecord, type InvoiceItemRecord } from "../lib/billing/invoiceManagementService";
 import { printingEngine, type CreditNotePrintData } from "../lib/printing/printingEngine";
 import { companySettingsService } from "../lib/settings/companySettingsService";
+import { partiesStore, type Customer } from "../lib/masters/partiesStore";
 import { PrintPreviewModal } from "../components/PrintPreviewModal";
 
 const RETURN_REASONS: { value: ReturnReason; label: string }[] = [
@@ -92,6 +95,12 @@ export const SalesReturnPage: React.FC = () => {
   const [returnLines, setReturnLines] = useState<ReturnLineState[]>([]);
   const [returnedQtyMap, setReturnedQtyMap] = useState<Map<string, number>>(new Map());
 
+  // Customer-first lookup: list every invoice for a known customer, any date.
+  const [customerSearchQuery, setCustomerSearchQuery] = useState("");
+  const [customerSearchResults, setCustomerSearchResults] = useState<Customer[]>([]);
+  const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
+  const [customerInvoicesLoading, setCustomerInvoicesLoading] = useState(false);
+
   // Step 3: Payment
   const [refundMode, setRefundMode] = useState<RefundPaymentMode>("Cash");
   const [notes, setNotes] = useState("");
@@ -135,6 +144,9 @@ export const SalesReturnPage: React.FC = () => {
     setFormStep("invoice_search");
     setInvoiceSearchQuery("");
     setInvoiceSearchResults([]);
+    setCustomerSearchQuery("");
+    setCustomerSearchResults([]);
+    setSelectedCustomer(null);
     setSelectedInvoice(null);
     setInvoiceItems([]);
     setReturnLines([]);
@@ -156,14 +168,55 @@ export const SalesReturnPage: React.FC = () => {
   };
 
   // ── Invoice search ────────────────────────────────────────────────────────────
+  // Returns must reach any historical bill, so the search spans all dates
+  // instead of inheriting the dashboard's "today" default.
   const handleInvoiceSearch = async (q: string) => {
     setInvoiceSearchQuery(q);
+    setSelectedCustomer(null);
     if (q.trim().length < 2) {
       setInvoiceSearchResults([]);
       return;
     }
-    const results = await invoiceManagementService.listInvoices({ searchQuery: q });
+    const results = await invoiceManagementService.listInvoices({
+      searchQuery: q,
+      dateRange: "all",
+    });
     setInvoiceSearchResults(results.filter((r) => r.status !== "cancelled").slice(0, 8));
+  };
+
+  const handleCustomerSearch = async (q: string) => {
+    setCustomerSearchQuery(q);
+    setSelectedCustomer(null);
+    if (q.trim().length < 2) {
+      setCustomerSearchResults([]);
+      return;
+    }
+    const matches = await partiesStore.searchCustomers(q, 8);
+    setCustomerSearchResults(matches);
+  };
+
+  const selectCustomer = async (customer: Customer) => {
+    setSelectedCustomer(customer);
+    setCustomerSearchResults([]);
+    setCustomerSearchQuery(customer.name);
+    setSelectedInvoice(null);
+    setCustomerInvoicesLoading(true);
+    try {
+      const all = await invoiceManagementService.listInvoices({ dateRange: "all", status: "issued" });
+      const phone = (customer.phone || "").replace(/\D/g, "").slice(-10);
+      const matches = all.filter((inv) => {
+        if (customer.id && inv.customer_id && String(inv.customer_id) === String(customer.id)) return true;
+        if (phone && (inv.customer_phone || "").replace(/\D/g, "").endsWith(phone)) return true;
+        return Boolean(
+          customer.name &&
+            inv.customer_name &&
+            inv.customer_name.trim().toLowerCase() === customer.name.trim().toLowerCase()
+        );
+      });
+      setInvoiceSearchResults(matches.slice(0, 20));
+    } finally {
+      setCustomerInvoicesLoading(false);
+    }
   };
 
   const selectInvoice = async (inv: InvoiceRecord) => {
@@ -176,16 +229,22 @@ export const SalesReturnPage: React.FC = () => {
     const items: InvoiceItemRecord[] = details?.items || [];
     setInvoiceItems(items);
 
-    // Get already returned qty
+    // Get already returned qty (sales returns + credit notes) in base units
     const qtyMap = await salesReturnService.getReturnedQtyMapForInvoice(inv.invoice_number);
     setReturnedQtyMap(qtyMap);
 
-    // Build return lines
+    // Build return lines. Sold and returnable quantities are tracked in base
+    // units so packs, loose units and prior partial returns reconcile.
     const lines: ReturnLineState[] = items.map((item) => {
-      const key = `${item.product_id}_${item.batch_no}`;
-      const alreadyReturned = Number(qtyMap.get(key) || 0);
-      const soldQty = Number(item.qty || 0);
+      const unitsPerPack = Math.max(1, Math.round(Number(item.units_per_pack || 1)));
+      const soldQty = toBaseUnits(item.qty, item.loose_qty, unitsPerPack);
+      const alreadyReturned = Number(qtyMap.get(returnKey(item.product_id, item.batch_no)) || 0);
       const maxReturnable = Math.max(0, soldQty - alreadyReturned);
+      const rateBasis = (item as any).rate_basis;
+      const baseRate =
+        rateBasis === "loose_rate"
+          ? Number(item.unit_price || 0)
+          : Number(item.unit_price || 0) / unitsPerPack;
       return {
         product_id: item.product_id || "",
         product_name: item.product_name,
@@ -196,7 +255,7 @@ export const SalesReturnPage: React.FC = () => {
         sold_qty: soldQty,
         max_returnable: maxReturnable,
         return_qty: 0,
-        unit_price: Number(item.unit_price || 0),
+        unit_price: Math.round(baseRate * 100) / 100,
         discount_percent: Number(item.discount_percent || 0),
         gst_percent: Number(item.gst_percent || 0),
         reason: "customer_return",
@@ -321,6 +380,8 @@ export const SalesReturnPage: React.FC = () => {
         expiry_date: l.expiry_date,
         sold_qty: l.sold_qty,
         return_qty: l.return_qty,
+        loose_qty: 0,
+        units_per_pack: 1,
         unit_price: l.unit_price,
         discount_percent: l.discount_percent,
         gst_percent: l.gst_percent,
@@ -638,17 +699,65 @@ export const SalesReturnPage: React.FC = () => {
                   </div>
 
                   <div className="relative">
-                    <label className="mb-1 block text-xs font-semibold text-slate-700">
-                      Search Original Invoice by Number, Customer Name, or Mobile
+                    <label
+                      htmlFor="sales-return-customer-search"
+                      className="mb-1 block text-xs font-semibold text-slate-700"
+                    >
+                      Find Customer First (all invoices, any date)
                     </label>
                     <div className="relative">
                       <Search className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
                       <input
+                        id="sales-return-customer-search"
+                        type="text"
+                        value={customerSearchQuery}
+                        onChange={(e) => handleCustomerSearch(e.target.value)}
+                        placeholder="Customer name or mobile number..."
+                        className="w-full rounded-lg border border-slate-200 bg-slate-50 pl-9 pr-3 py-2.5 text-xs text-slate-800 placeholder-slate-400 focus:border-rose-400 focus:bg-white focus:outline-none"
+                      />
+                    </div>
+                    {customerSearchResults.length > 0 && (
+                      <div className="absolute top-full left-0 right-0 z-10 mt-1 rounded-lg border border-slate-200 bg-white shadow-lg overflow-hidden">
+                        {customerSearchResults.map((customer) => (
+                          <button
+                            key={customer.id}
+                            type="button"
+                            onClick={() => selectCustomer(customer)}
+                            className="flex w-full items-center justify-between px-4 py-2.5 text-left text-xs hover:bg-rose-50"
+                          >
+                            <span className="font-medium text-slate-800">{customer.name}</span>
+                            <span className="font-mono text-slate-500">{customer.phone || "No phone"}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    {selectedCustomer && (
+                      <p className="mt-1 text-[11px] text-slate-600">
+                        {customerInvoicesLoading
+                          ? "Loading invoices…"
+                          : invoiceSearchResults.length > 0
+                          ? `Showing ${invoiceSearchResults.length} invoice(s) for ${selectedCustomer.name}. Pick one below.`
+                          : `No issued invoices found for ${selectedCustomer.name}.`}
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="relative">
+                    <label
+                      htmlFor="sales-return-invoice-search"
+                      className="mb-1 block text-xs font-semibold text-slate-700"
+                    >
+                      Or Search Any Bill: Invoice Number, Customer, Mobile, Date or Product
+                    </label>
+                    <div className="relative">
+                      <Search className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
+                      <input
+                        id="sales-return-invoice-search"
                         ref={invoiceSearchRef}
                         type="text"
                         value={invoiceSearchQuery}
                         onChange={(e) => handleInvoiceSearch(e.target.value)}
-                        placeholder="e.g. INV-001, Ravi Kumar, 9876543210..."
+                        placeholder="e.g. INV-001, Ravi Kumar, 9876543210, 2026-10-29..."
                         className="w-full rounded-lg border border-slate-200 bg-slate-50 pl-9 pr-3 py-2.5 text-xs text-slate-800 placeholder-slate-400 focus:border-rose-400 focus:bg-white focus:outline-none"
                       />
                     </div>
@@ -745,9 +854,9 @@ export const SalesReturnPage: React.FC = () => {
                           <th className="px-3 py-2 text-left w-6"></th>
                           <th className="px-3 py-2 text-left">Product</th>
                           <th className="px-3 py-2 text-center">Batch / Exp</th>
-                          <th className="px-3 py-2 text-center">Sold Qty</th>
-                          <th className="px-3 py-2 text-center">Max Return</th>
-                          <th className="px-3 py-2 text-center">Return Qty</th>
+                          <th className="px-3 py-2 text-center">Sold Units</th>
+                          <th className="px-3 py-2 text-center">Max Return (units)</th>
+                          <th className="px-3 py-2 text-center">Return Qty (units)</th>
                           <th className="px-3 py-2 text-left">Reason</th>
                           <th className="px-3 py-2 text-left">Condition</th>
                         </tr>
@@ -756,7 +865,29 @@ export const SalesReturnPage: React.FC = () => {
                         {returnLines.map((line, idx) => (
                           <tr
                             key={idx}
-                            className={`transition-colors ${
+                            data-return-line={idx}
+                            tabIndex={line.max_returnable === 0 ? -1 : 0}
+                            aria-selected={line.selected}
+                            onKeyDown={(event) => {
+                              const move = (delta: number) => {
+                                const next = document.querySelector<HTMLElement>(
+                                  `[data-return-line="${idx + delta}"]`
+                                );
+                                next?.focus();
+                              };
+                              if (event.key === "Enter" || event.key === " ") {
+                                if (line.max_returnable === 0) return;
+                                event.preventDefault();
+                                toggleLine(idx);
+                              } else if (event.key === "ArrowDown") {
+                                event.preventDefault();
+                                move(1);
+                              } else if (event.key === "ArrowUp") {
+                                event.preventDefault();
+                                move(-1);
+                              }
+                            }}
+                            className={`transition-colors outline-none focus-visible:ring-2 focus-visible:ring-rose-400 ${
                               line.max_returnable === 0
                                 ? "opacity-40 bg-slate-50"
                                 : line.selected

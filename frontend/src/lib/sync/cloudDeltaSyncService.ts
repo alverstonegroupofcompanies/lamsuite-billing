@@ -31,6 +31,9 @@ export class CloudDeltaSyncService {
     appliedBatches: number;
     appliedParties: number;
     newWatermark: number;
+    lastResetAt: string | null;
+    resetProducts: boolean;
+    resetCustomers: boolean;
   }> {
     const delta = await apiClient.fetchMasterDeltas(this.lastWatermark);
 
@@ -94,7 +97,7 @@ export class CloudDeltaSyncService {
           credit_limit: party.credit_limit !== undefined ? Number(party.credit_limit) : undefined,
           outstanding_balance: party.outstanding_balance !== undefined ? Number(party.outstanding_balance) : undefined,
         };
-        await partiesStore.upsertParty(normalizedParty);
+        await partiesStore.upsertParty(normalizedParty, false);
         appliedParties += 1;
       }
     }
@@ -107,7 +110,51 @@ export class CloudDeltaSyncService {
       } catch (_) {}
     }
 
-    // 5. Update watermark
+    // 5. Ingest Store Status & Reset Events
+    if ((delta as any).is_active !== undefined) {
+      try {
+        const { storeRegistryService } = await import("../auth/storeRegistryService");
+        const activeStore = storeRegistryService.getActiveStore();
+        if (activeStore && activeStore.is_active !== Boolean((delta as any).is_active)) {
+          await storeRegistryService.setStoreActiveStatus(activeStore.id, Boolean((delta as any).is_active));
+          const { companySettingsService } = await import("../settings/companySettingsService");
+          await companySettingsService.updateLocalFromRemote({ is_active: Boolean((delta as any).is_active) });
+        }
+      } catch (_) {}
+    }
+
+    if ((delta as any).last_reset_at) {
+      try {
+        const { storeRegistryService } = await import("../auth/storeRegistryService");
+        const activeStore = storeRegistryService.getActiveStore();
+        const storeId = String((delta as any).store_id || activeStore?.id || "");
+        await storeRegistryService.applyRemoteResetOnce(
+          storeId,
+          (delta as any).last_reset_at,
+          (delta as any).last_reset_options || undefined
+        );
+      } catch (_) {}
+    }
+
+    if (Array.isArray((delta as any).sync_events)) {
+      for (const ev of (delta as any).sync_events) {
+        if (ev.entity_type === "store_reset") {
+          try {
+            const storeId = String(ev.store_id || ev.entity_id || "");
+            const { storeRegistryService } = await import("../auth/storeRegistryService");
+            const payload = typeof ev.client_data === "string" ? JSON.parse(ev.client_data) : ev.client_data;
+            await storeRegistryService.applyRemoteResetOnce(
+              storeId,
+              null,
+              payload?.options,
+              ev.id
+            );
+          } catch (_) {}
+        }
+      }
+    }
+
+    // 6. Update watermark
     this.lastWatermark = delta.watermark;
 
     return {
@@ -116,6 +163,9 @@ export class CloudDeltaSyncService {
       appliedBatches,
       appliedParties,
       newWatermark: this.lastWatermark,
+      lastResetAt: (delta as any).last_reset_at || null,
+      resetProducts: Boolean((delta as any).last_reset_options?.reset_products),
+      resetCustomers: Boolean((delta as any).last_reset_options?.reset_customers),
     };
   }
 }

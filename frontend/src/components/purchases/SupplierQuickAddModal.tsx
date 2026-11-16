@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { X, Building2, Check, AlertCircle } from "lucide-react";
 import { supplierLedgerService, type SupplierMaster } from "../../lib/purchases/supplierLedgerService";
 import { isValidGstin, isValidIndianPhone } from "../../lib/masters/partiesStore";
@@ -6,26 +6,52 @@ import { useModalEscape } from "../../lib/ui/modalEscapeManager";
 
 interface SupplierQuickAddModalProps {
   isOpen: boolean;
+  /** Name typed into the combobox; pre-fills the form and moves focus past it. */
+  initialName?: string;
   onClose: () => void;
   onSupplierCreated: (supplier: SupplierMaster) => void;
 }
 
+const PLACE_OF_SUPPLY_DEFAULT = "Kerala (32)";
+
 export const SupplierQuickAddModal: React.FC<SupplierQuickAddModalProps> = ({
   isOpen,
+  initialName = "",
   onClose,
   onSupplierCreated,
 }) => {
   useModalEscape(isOpen, onClose);
 
+  const nameRef = useRef<HTMLInputElement | null>(null);
+  const gstinRef = useRef<HTMLInputElement | null>(null);
+
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [gstin, setGstin] = useState("");
   const [address, setAddress] = useState("");
-  const [placeOfSupply, setPlaceOfSupply] = useState("Kerala (32)");
+  const [placeOfSupply, setPlaceOfSupply] = useState(PLACE_OF_SUPPLY_DEFAULT);
   const [creditDays, setCreditDays] = useState(30);
   const [openingBalance, setOpeningBalance] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Reset every open so a cancelled attempt never leaks into the next supplier.
+  useEffect(() => {
+    if (!isOpen) return;
+    setName(initialName);
+    setPhone("");
+    setGstin("");
+    setAddress("");
+    setPlaceOfSupply(PLACE_OF_SUPPLY_DEFAULT);
+    setCreditDays(30);
+    setOpeningBalance(0);
+    setError(null);
+    setIsSubmitting(false);
+
+    const focusTarget = initialName.trim() ? gstinRef.current : nameRef.current;
+    const timer = setTimeout(() => focusTarget?.focus(), 30);
+    return () => clearTimeout(timer);
+  }, [isOpen, initialName]);
 
   if (!isOpen) return null;
 
@@ -99,11 +125,12 @@ export const SupplierQuickAddModal: React.FC<SupplierQuickAddModalProps> = ({
           )}
 
           <div>
-            <label className="font-semibold text-[var(--color-text)] block mb-1">Company / Supplier Name *</label>
+            <label htmlFor="supplier-quick-add-name" className="font-semibold text-[var(--color-text)] block mb-1">Company / Supplier Name *</label>
             <input
+              id="supplier-quick-add-name"
+              ref={nameRef}
               type="text"
               required
-              autoFocus
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="e.g. Apex Health Logistics Pvt Ltd"
@@ -113,8 +140,10 @@ export const SupplierQuickAddModal: React.FC<SupplierQuickAddModalProps> = ({
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="font-semibold text-[var(--color-text)] block mb-1">GSTIN (Optional)</label>
+              <label htmlFor="supplier-quick-add-gstin" className="font-semibold text-[var(--color-text)] block mb-1">GSTIN (Optional)</label>
               <input
+                id="supplier-quick-add-gstin"
+                ref={gstinRef}
                 type="text"
                 value={gstin}
                 onChange={(e) => setGstin(e.target.value.toUpperCase())}
@@ -124,8 +153,9 @@ export const SupplierQuickAddModal: React.FC<SupplierQuickAddModalProps> = ({
               />
             </div>
             <div>
-              <label className="font-semibold text-[var(--color-text)] block mb-1">Mobile / Phone</label>
+              <label htmlFor="supplier-quick-add-phone" className="font-semibold text-[var(--color-text)] block mb-1">Mobile / Phone</label>
               <input
+                id="supplier-quick-add-phone"
                 type="tel"
                 value={phone}
                 onChange={(e) => setPhone(e.target.value)}

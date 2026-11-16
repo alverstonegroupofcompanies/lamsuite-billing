@@ -1,10 +1,12 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { deviceSessionService } from "./deviceSessionService";
 import { storeDeviceService } from "../auth/storeDeviceService";
+import { staffAuthService } from "../auth/staffAuthService";
 
 describe("deviceSessionService - Centralized Logged-In Device Tracking (Item 2)", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    deviceSessionService.clearCache();
   });
 
   afterEach(() => {
@@ -187,6 +189,7 @@ describe("deviceSessionService - Centralized Logged-In Device Tracking (Item 2)"
 
   it("6. startHeartbeatTimer runs periodic heartbeat and returns clean cancellation", async () => {
     vi.useFakeTimers();
+    vi.spyOn(staffAuthService, "getCurrentSession").mockReturnValue({ user: { id: "1" } } as any);
 
     const heartbeatSpy = vi.spyOn(deviceSessionService, "sendHeartbeat").mockResolvedValue(true);
 
@@ -250,5 +253,106 @@ describe("deviceSessionService - Centralized Logged-In Device Tracking (Item 2)"
     const meta = deviceSessionService.getMetadata();
     expect(meta.caller_public_ip).toBe("117.236.91.145");
     expect(meta.other_stores_active_count).toBe(2);
+  });
+
+  it("8. getLoggedInDevices does not fabricate a local device row when the server is unreachable", async () => {
+    vi.spyOn(storeDeviceService, "getDeviceProfile").mockResolvedValue({
+      device_id: "dev_local",
+      device_uuid: "uuid_local",
+      device_name: "Local PC",
+      store_id: "4",
+      store_name: "Local Store",
+      counter_id: "cntr_1",
+      counter_name: "Counter 1",
+    } as any);
+    vi.spyOn(global, "fetch").mockRejectedValueOnce(new TypeError("Failed to fetch"));
+
+    const devices = await deviceSessionService.getLoggedInDevices();
+
+    expect(devices).toEqual([]);
+  });
+
+  it("9. sendHeartbeat reports the counter and signed-in user identity", async () => {
+    vi.spyOn(storeDeviceService, "getDeviceProfile").mockResolvedValueOnce({
+      device_uuid: "uuid-test-123",
+      device_name: "Counter 01",
+      counter_name: "Front Cashier",
+      counter_id: "cntr_07",
+      counter_code: "C07",
+      store_id: "4",
+    } as any);
+    vi.spyOn(staffAuthService, "getCurrentSession").mockReturnValueOnce({
+      sessionId: "s1",
+      counterId: "cntr_07",
+      counterName: "Front Cashier",
+      counterCode: "C07",
+      user: { id: "42", full_name: "Cashier", role: "cashier" },
+      authenticatedAt: Date.now(),
+      isLocked: false,
+      lastActivityAt: Date.now(),
+    } as any);
+
+    const fetchSpy = vi.spyOn(global, "fetch").mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ success: true }),
+    } as Response);
+
+    await deviceSessionService.sendHeartbeat();
+
+    const body = JSON.parse((fetchSpy.mock.calls[0][1] as RequestInit).body as string);
+    expect(body.counter_id).toBe("cntr_07");
+    expect(body.counter_code).toBe("C07");
+    expect(body.user_id).toBe("42");
+    expect(body.store_id).toBe("4");
+  });
+
+  it("10. heartbeat 409 force-logout ends the local staff session without wiping the device", async () => {
+    vi.spyOn(storeDeviceService, "getDeviceProfile").mockResolvedValueOnce({
+      device_uuid: "uuid-test-123",
+      store_id: "4",
+    } as any);
+    vi.spyOn(global, "fetch").mockResolvedValueOnce({
+      ok: false,
+      status: 409,
+      json: async () => ({
+        success: false,
+        force_logged_out: true,
+        action: "sign_in_required",
+        reason: "Signed in at another till",
+        message: "This session was ended: Signed in at another till. Sign in again.",
+      }),
+    } as Response);
+    const terminateSpy = vi.spyOn(staffAuthService, "handleDeviceSessionTerminated");
+    const lockSpy = vi.spyOn(storeDeviceService, "lockAndResetWorkstation");
+
+    const ok = await deviceSessionService.sendHeartbeat();
+
+    expect(ok).toBe(false);
+    expect(terminateSpy).toHaveBeenCalledWith("Signed in at another till");
+    expect(lockSpy).not.toHaveBeenCalled();
+  });
+
+  it("11. heartbeat 403 revocation locks and resets the workstation", async () => {
+    vi.spyOn(storeDeviceService, "getDeviceProfile").mockResolvedValueOnce({
+      device_uuid: "uuid-test-123",
+      store_id: "4",
+    } as any);
+    vi.spyOn(global, "fetch").mockResolvedValueOnce({
+      ok: false,
+      status: 403,
+      json: async () => ({
+        success: false,
+        status: "revoked",
+        action: "lock_and_reset",
+        wipe_on_revocation: true,
+      }),
+    } as Response);
+    const lockSpy = vi.spyOn(storeDeviceService, "lockAndResetWorkstation").mockResolvedValue(undefined);
+
+    const ok = await deviceSessionService.sendHeartbeat();
+
+    expect(ok).toBe(false);
+    expect(lockSpy).toHaveBeenCalledWith(true);
   });
 });

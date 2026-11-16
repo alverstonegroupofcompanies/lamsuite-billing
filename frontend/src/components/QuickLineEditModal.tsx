@@ -85,7 +85,7 @@ export const QuickLineEditModal: React.FC<QuickLineEditModalProps> = ({
             </div>
             <div>
               <h3 className="text-xs font-bold text-text-main">
-                {isDiscount ? "Quick Edit Discount (F2)" : "Quick Edit Rate (F3)"}
+                {isDiscount ? "Quick Edit Discount (Alt+F2)" : "Quick Edit Rate (F3)"}
               </h3>
               <p className="text-[11px] text-text-muted font-medium truncate max-w-[180px]">
                 {line.product.name}

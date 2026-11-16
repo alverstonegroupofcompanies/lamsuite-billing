@@ -21,7 +21,7 @@ export const migrationPrecheckTool: ToolDefinition = {
   requiredPermission: "items:read",
   isWriteTool: false,
   handler: async (args, { client }) => {
-    const res = await (client as any).post("/admin/migrations/precheck", args);
+    const res = await client.post("/admin/migrations/precheck", args);
     const data = res.data || res;
     const canProceed = data.can_proceed ? "✅ Ready to migrate" : "⚠️ Pre-check blockers found";
 
@@ -60,7 +60,7 @@ export const migrationStartTool: ToolDefinition = {
   requiredPermission: "store:write",
   isWriteTool: true,
   handler: async (args, { client }) => {
-    const res = await (client as any).post("/admin/migrations/start", args);
+    const res = await client.post("/admin/migrations/start", args);
     const data = res.data || res;
     const isDry = args.is_dry_run ? "[DRY-RUN]" : "[LIVE]";
     const stats = data.stats || {};
@@ -106,7 +106,7 @@ export const migrationReconcileTool: ToolDefinition = {
   requiredPermission: "reports:read",
   isWriteTool: false,
   handler: async (args, { client }) => {
-    const res = await (client as any).post(`/admin/migrations/${args.uuid}/reconcile`, {
+    const res = await client.post(`/admin/migrations/${encodeURIComponent(args.uuid)}/reconcile`, {
       source_type: args.source_type,
       config: args.config,
     });
@@ -151,7 +151,7 @@ export const migrationRollbackTool: ToolDefinition = {
   requiredPermission: "store:write",
   isWriteTool: true,
   handler: async (args, { client }) => {
-    const res = await (client as any).post(`/admin/migrations/${args.uuid}/rollback`, {});
+    const res = await client.post(`/admin/migrations/${encodeURIComponent(args.uuid)}/rollback`, {});
     const data = res.data || res;
 
     let text = `### ⏪ Migration Run Rolled Back Successfully\n\n`;
@@ -183,7 +183,7 @@ export const migrationCutoverTool: ToolDefinition = {
   requiredPermission: "store:write",
   isWriteTool: true,
   handler: async (args, { client }) => {
-    const res = await (client as any).post(`/admin/migrations/${args.uuid}/cutover`, {
+    const res = await client.post(`/admin/migrations/${encodeURIComponent(args.uuid)}/cutover`, {
       confirmation_phrase: args.confirmation_phrase,
     });
     const data = res.data || res;

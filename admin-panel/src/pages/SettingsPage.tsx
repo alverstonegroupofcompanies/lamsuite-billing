@@ -152,6 +152,11 @@ export const SettingsPage: React.FC = () => {
         printing: settingsData.printing,
         wallet: settingsData.wallet,
         whatsapp: settingsData.whatsapp,
+        workspace: settingsData.workspace,
+        security: settingsData.security,
+        inventory: settingsData.inventory,
+        batch_required: Boolean(settingsData.batch_required),
+        timezone: settingsData.timezone,
       });
       alert("Settings saved successfully.");
       await fetchSettings();
@@ -303,6 +308,35 @@ export const SettingsPage: React.FC = () => {
                     className="w-full px-3 py-2 rounded-xl font-mono border border-slate-200 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                   />
                 </div>
+
+                <div>
+                  <label className="block font-medium text-slate-700 dark:text-slate-300 mb-1">
+                    Past Bills Default Period
+                  </label>
+                  <select
+                    value={
+                      settingsData.workspace?.billsDefaultPeriod ||
+                      settingsData.bills_default_period ||
+                      "today"
+                    }
+                    onChange={(e) =>
+                      setSettingsData({
+                        ...settingsData,
+                        workspace: { ...settingsData.workspace, billsDefaultPeriod: e.target.value },
+                      })
+                    }
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                  >
+                    <option value="today">Today</option>
+                    <option value="yesterday">Yesterday</option>
+                    <option value="last7days">Last 7 Days</option>
+                    <option value="month">This Month</option>
+                    <option value="all">All Time</option>
+                  </select>
+                  <p className="mt-1 text-[10px] text-slate-400">
+                    Store default. Staff can pin their own period from the Past Bills screen.
+                  </p>
+                </div>
               </div>
             </div>
 
@@ -362,16 +396,110 @@ export const SettingsPage: React.FC = () => {
                 </div>
               </div>
             </div>
+
+            {/* Store Clock, Security & Inventory */}
+            <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs space-y-4 lg:col-span-2">
+              <h3 className="font-bold text-slate-900 dark:text-white text-sm">Store Clock, Security & Inventory</h3>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
+                <div>
+                  <label className="block font-medium text-slate-700 dark:text-slate-300 mb-1">
+                    Store Timezone
+                  </label>
+                  <input
+                    type="text"
+                    list="timezone-options"
+                    value={settingsData.timezone || settingsData.store_details?.timezone || "Asia/Kolkata"}
+                    onChange={(e) => setSettingsData({ ...settingsData, timezone: e.target.value })}
+                    className="w-full px-3 py-2 rounded-xl font-mono border border-slate-200 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                  />
+                  <datalist id="timezone-options">
+                    <option value="Asia/Kolkata" />
+                    <option value="Asia/Dubai" />
+                    <option value="Asia/Singapore" />
+                    <option value="UTC" />
+                  </datalist>
+                  <p className="mt-1 text-[10px] text-slate-400">Drives dashboard "today", GST periods and bills dates.</p>
+                </div>
+                <div>
+                  <label className="block font-medium text-slate-700 dark:text-slate-300 mb-1">
+                    Offline Sign-in Grace (Hours)
+                  </label>
+                  <input
+                    type="number"
+                    min={1}
+                    value={settingsData.security?.offlineGraceHours ?? 72}
+                    onChange={(e) =>
+                      setSettingsData({
+                        ...settingsData,
+                        security: { ...settingsData.security, offlineGraceHours: Number(e.target.value) },
+                      })
+                    }
+                    className="w-full px-3 py-2 rounded-xl font-mono border border-slate-200 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                  />
+                </div>
+                <div>
+                  <label className="block font-medium text-slate-700 dark:text-slate-300 mb-1">
+                    Max Failed Logins
+                  </label>
+                  <input
+                    type="number"
+                    min={3}
+                    value={settingsData.security?.maxFailedLogins ?? 5}
+                    onChange={(e) =>
+                      setSettingsData({
+                        ...settingsData,
+                        security: { ...settingsData.security, maxFailedLogins: Number(e.target.value) },
+                      })
+                    }
+                    className="w-full px-3 py-2 rounded-xl font-mono border border-slate-200 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                  />
+                </div>
+                <div className="md:col-span-2">
+                  <label className="block font-medium text-slate-700 dark:text-slate-300 mb-1">
+                    Multi-Counter Login Roles
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g. manager, store_owner (blank = one active counter for everyone)"
+                    value={(settingsData.security?.allowMultiCounterRoles || []).join(", ")}
+                    onChange={(e) =>
+                      setSettingsData({
+                        ...settingsData,
+                        security: {
+                          ...settingsData.security,
+                          allowMultiCounterRoles: e.target.value
+                            .split(",")
+                            .map((r) => r.trim().toLowerCase())
+                            .filter(Boolean),
+                        },
+                      })
+                    }
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                  />
+                </div>
+                <label className="flex items-center gap-2 self-end pb-2 font-medium text-slate-700 dark:text-slate-300">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(settingsData.batch_required)}
+                    onChange={(e) => setSettingsData({ ...settingsData, batch_required: e.target.checked })}
+                    className="rounded border-slate-300 text-brand-600"
+                  />
+                  <span>Require batch &amp; expiry (pharmacy)</span>
+                </label>
+              </div>
+            </div>
           </div>
 
           <div className="flex justify-end">
-            <button
-              type="submit"
-              className="px-5 py-2.5 bg-brand-600 hover:bg-brand-500 text-white font-bold text-xs rounded-xl shadow-sm flex items-center gap-1.5"
-            >
-              <Save className="w-4 h-4" />
-              <span>Save System Settings</span>
-            </button>
+            {hasPermission("settings", "edit") && (
+              <button
+                type="submit"
+                className="px-5 py-2.5 bg-brand-600 hover:bg-brand-500 text-white font-bold text-xs rounded-xl shadow-sm flex items-center gap-1.5"
+              >
+                <Save className="w-4 h-4" />
+                <span>Save System Settings</span>
+              </button>
+            )}
           </div>
         </form>
       )}

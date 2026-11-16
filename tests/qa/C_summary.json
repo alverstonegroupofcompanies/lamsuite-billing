@@ -1,0 +1,22 @@
+[
+ {
+  "id": "C01",
+  "status": "FAIL"
+ },
+ {
+  "id": "C02",
+  "status": "CHECK"
+ },
+ {
+  "id": "C03",
+  "status": "CHECK"
+ },
+ {
+  "id": "C04",
+  "status": "CHECK"
+ },
+ {
+  "id": "C05",
+  "status": "BLOCKED"
+ }
+]

@@ -45,9 +45,9 @@ describe("MCP Inspector & Official Protocol Handshake", () => {
     await mockBackend.stop();
   });
 
-  it("handshakes protocol and lists all 46 registered tools with schemas", async () => {
+  it("handshakes protocol and lists all 60 registered tools with schemas", async () => {
     const toolsResult = await client.listTools();
-    expect(toolsResult.tools.length).toBe(46);
+    expect(toolsResult.tools.length).toBe(60);
 
     const searchTool = toolsResult.tools.find((t) => t.name === "lamsuite_search_items");
     expect(searchTool).toBeDefined();
@@ -92,7 +92,7 @@ describe("MCP Inspector & Official Protocol Handshake", () => {
 
   it("lists and gets MCP prompts", async () => {
     const promptsList = await client.listPrompts();
-    expect(promptsList.prompts.length).toBe(4);
+    expect(promptsList.prompts.length).toBe(5);
 
     const dailyClosing = promptsList.prompts.find((p) => p.name === "daily_closing_report");
     expect(dailyClosing).toBeDefined();

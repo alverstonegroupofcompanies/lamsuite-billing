@@ -1,4 +1,5 @@
 import { API_BASE_URL } from "../../config/env";
+import { APP_VERSION } from "../../config/version";
 import { storeDeviceService } from "../auth/storeDeviceService";
 import { storeRegistryService } from "../auth/storeRegistryService";
 import { syncQueueService } from "../sync/syncQueueService";
@@ -39,7 +40,7 @@ export interface LoggedInDevice {
   login_time?: string | null;
   last_seen: string | null;
   last_active?: string | null;
-  app_version: string;
+  app_version: string | null;
   unsynced_items_count: number;
   is_this_device: boolean;
   is_active: boolean;
@@ -66,11 +67,19 @@ export interface DeviceSessionResponseMetadata {
 export class DeviceSessionService {
   private heartbeatInterval: ReturnType<typeof setInterval> | null = null;
   private cachedDevices: LoggedInDevice[] = [];
+  private cachedStoreId: string | null = null;
   private lastMetadata: DeviceSessionResponseMetadata = {};
   private listeners: Array<(devices: LoggedInDevice[]) => void> = [];
 
   getMetadata(): DeviceSessionResponseMetadata {
     return this.lastMetadata;
+  }
+
+  clearCache(): void {
+    this.cachedDevices = [];
+    this.cachedStoreId = null;
+    this.lastMetadata = {};
+    this.notify();
   }
 
   /**
@@ -79,7 +88,9 @@ export class DeviceSessionService {
   async getLoggedInDevices(options?: DeviceFilterOptions): Promise<LoggedInDevice[]> {
     const activeStore = storeRegistryService.getActiveStore();
     const profile = await storeDeviceService.getDeviceProfile().catch(() => null);
-    const storeId = options?.store_id !== undefined ? options.store_id : (activeStore?.id || profile?.store_id || "1");
+    const storeId = options?.store_id !== undefined
+      ? options.store_id
+      : (activeStore?.id || profile?.store_id || null);
 
     const params = new URLSearchParams();
     if (storeId) params.set("store_id", String(storeId));
@@ -137,47 +148,18 @@ export class DeviceSessionService {
             unsynced_items_count: Number(d.unsynced_items_count) || 0,
           };
         });
+        this.cachedStoreId = storeId ? String(storeId) : null;
         this.notify();
         return this.cachedDevices;
       }
       return [];
     } catch (err) {
-      if (this.cachedDevices.length > 0) {
+      if (this.cachedDevices.length > 0 && this.cachedStoreId === (storeId ? String(storeId) : null)) {
         return this.filterLocally(this.cachedDevices, options);
       }
 
-      const publicIp = await publicIpService.getPublicIp().catch(() => null);
-      const localIpv4 = await deviceIpService.getLocalIpv4().catch(() => "127.0.0.1");
-
-      if (profile) {
-        const fallback: LoggedInDevice = {
-          id: profile.device_id || "local_dev_1",
-          device_uuid: profile.device_uuid,
-          device_name: profile.device_name || "This Workstation",
-          counter_name: profile.counter_name || "Counter 1",
-          counter_code: profile.counter_code || "C01",
-          store_id: profile.store_id || "1",
-          store_name: profile.store_name || "Main Store",
-          store_code: profile.store_code || "STORE-01",
-          user_name: staffAuthService.getCurrentSession()?.user.full_name || "Cashier",
-          user_role: staffAuthService.getCurrentSession()?.user.role || "Admin",
-          ip_address: localIpv4,
-          device_ipv4: localIpv4,
-          public_ip: publicIp,
-          location: profile.location_name || null,
-          login_time: new Date(profile.registered_at || Date.now()).toISOString(),
-          sign_in_time: new Date(profile.registered_at || Date.now()).toISOString(),
-          last_active: new Date().toISOString(),
-          last_seen: new Date().toISOString(),
-          app_version: "2.0.35",
-          unsynced_items_count: 0,
-          is_this_device: true,
-          status: "Active",
-          is_active: true,
-        };
-        return [fallback];
-      }
-
+      // No fabricated "this device" row: presence is server-owned. With no
+      // reachable server and no cache the roster is simply unknown.
       return [];
     }
   }
@@ -222,8 +204,11 @@ export class DeviceSessionService {
         body: JSON.stringify({
           device_uuid: deviceUuid,
           device_name: profile?.device_name || detectDeviceFriendlyName(),
-          counter_name: profile?.counter_name || "Counter 01",
-          app_version: params?.app_version || "2.0.35",
+          counter_name: profile?.counter_name || undefined,
+          counter_id: profile?.counter_id || undefined,
+          counter_code: profile?.counter_code || undefined,
+          user_id: staff?.user.id || undefined,
+          app_version: params?.app_version || APP_VERSION,
           unsynced_items_count: unsynced,
           status: params?.status || "Active",
           user_role: userRole,
@@ -236,7 +221,44 @@ export class DeviceSessionService {
         }),
       });
 
-      return res.ok;
+      if (res.status === 403 || res.status === 409) {
+        const body = await res.json().catch(() => ({}));
+        if (body.action === "lock_and_reset" || body.status === "revoked") {
+          await storeDeviceService.lockAndResetWorkstation(Boolean(body.wipe_on_revocation));
+        } else if (body.force_logged_out || body.action === "sign_in_required" || body.error === "SESSION_NOT_ESTABLISHED") {
+          staffAuthService.handleDeviceSessionTerminated(
+            body.reason || body.message || "Session ended by the server"
+          );
+        } else if (!res.ok) {
+          return false;
+        }
+        return false;
+      }
+
+      if (res.ok) {
+        const body = await res.json().catch(() => ({}));
+        if (body && body.store_active !== undefined) {
+          const isActive = Boolean(body.store_active);
+          const currentStore = storeRegistryService.getActiveStore();
+          if (currentStore && currentStore.is_active !== isActive) {
+            await storeRegistryService.setStoreActiveStatus(currentStore.id, isActive);
+            const { companySettingsService } = await import("../settings/companySettingsService");
+            await companySettingsService.updateLocalFromRemote({ is_active: isActive });
+          }
+        }
+        if (body && body.last_reset_at) {
+          const currentStore = storeRegistryService.getActiveStore();
+          const storeId = String(body.store_id || currentStore?.id || "");
+          await storeRegistryService.applyRemoteResetOnce(
+            storeId,
+            body.last_reset_at,
+            body.last_reset_options || undefined
+          );
+        }
+        return true;
+      }
+
+      return false;
     } catch {
       return false;
     }
@@ -419,12 +441,17 @@ export class DeviceSessionService {
       clearInterval(this.heartbeatInterval);
     }
 
-    // Immediate first ping
-    this.sendHeartbeat().catch(() => {});
-
-    this.heartbeatInterval = setInterval(() => {
+    // Presence only exists for a signed-in operator: a bare workstation must not
+    // hammer the heartbeat endpoint with SESSION_NOT_ESTABLISHED 409s.
+    const beat = () => {
+      if (!staffAuthService.getCurrentSession()) return;
       this.sendHeartbeat().catch(() => {});
-    }, intervalMs);
+    };
+
+    // Immediate first ping
+    beat();
+
+    this.heartbeatInterval = setInterval(beat, intervalMs);
 
     return () => {
       if (this.heartbeatInterval) {

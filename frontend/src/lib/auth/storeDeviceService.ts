@@ -1,11 +1,18 @@
 import { invokeCommand } from "../ipc/ipcBridge";
+import { APP_VERSION } from "../../config/version";
 import { sqliteStorage } from "../db/sqliteStorage";
 import { companySettingsService } from "../settings/companySettingsService";
 import { staffCryptoService } from "./staffCryptoService";
+import { validatePassword, validatePin } from "./credentialPolicy";
 import { INITIAL_BRANCH_STORES, type BranchStore } from "../masters/storeService";
 import { productsStore } from "../masters/productsStore";
 import { partiesStore } from "../masters/partiesStore";
-import { API_BASE_URL, DEFAULT_LAN_PORT } from "../../config/env";
+import {
+  API_BASE_URL,
+  DEFAULT_LAN_PORT,
+  getCandidateApiUrls,
+  setApiBaseUrl,
+} from "../../config/env";
 
 export interface StoreDeviceProfile {
   device_id: string;
@@ -27,7 +34,6 @@ export interface StoreDeviceProfile {
     allow_stock_adj?: boolean;
     require_manager_pin?: boolean;
   };
-  manager_pin?: string;
   printer_profile?: Record<string, unknown>;
   receipt_customization?: Record<string, unknown>;
   license_plan: string;
@@ -112,27 +118,30 @@ export class StoreDeviceService {
     _email?: string,
     _password?: string
   ): Promise<BranchStore[]> {
-    try {
-      const res = await fetch(`${API_BASE_URL}/api/branches`, {
-        headers: { Accept: "application/json" },
-      });
-      if (res.ok) {
-        const body = await res.json();
-        if (body.data && Array.isArray(body.data) && body.data.length > 0) {
-          return body.data.map((b: any) => ({
-            id: String(b.id),
-            name: b.name,
-            code: b.code,
-            city: b.city || "Palakkad",
-            state_code: b.state_code || "32",
-            gstin: b.gstin || "",
-            is_main: Boolean(b.is_main),
-            is_active: Boolean(b.is_active),
-          }));
+    const candidateUrls = getCandidateApiUrls();
+    for (const targetUrl of candidateUrls) {
+      try {
+        const res = await fetch(`${targetUrl}/api/branches`, {
+          headers: { Accept: "application/json" },
+        });
+        if (res.ok) {
+          const body = await res.json();
+          if (body.data && Array.isArray(body.data) && body.data.length > 0) {
+            return body.data.map((b: any) => ({
+              id: String(b.id),
+              name: b.name,
+              code: b.code,
+              city: b.city || "Palakkad",
+              state_code: b.state_code || "32",
+              gstin: b.gstin || "",
+              is_main: Boolean(b.is_main),
+              is_active: Boolean(b.is_active),
+            }));
+          }
         }
+      } catch {
+        // try next candidate
       }
-    } catch {
-      // offline / unreachable
     }
     return [];
   }
@@ -154,28 +163,50 @@ export class StoreDeviceService {
       : "C01";
     const counterId = `cntr_${Date.now()}_${counterCode.toLowerCase()}`;
 
-    let response: Response;
-    try {
-      response = await fetch(`${API_BASE_URL}/api/devices/register`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Accept: "application/json" },
-        body: JSON.stringify({
-          activation_key: activationKey.trim(),
-          device_uuid: deviceUuid,
-          device_name: counterName,
-          is_hub: isHub,
-        }),
-      });
-    } catch (networkErr: any) {
-      console.error("[Activation] Network error during device registration:", networkErr, "Target URL:", `${API_BASE_URL}/api/devices/register`);
-      // NO OFFLINE ACTIVATION: If backend cannot be reached, abort immediately!
-      throw new Error("Cannot reach server. Online verification is required to activate this workstation.");
+    const candidateUrls = getCandidateApiUrls();
+    let response: Response | null = null;
+    let successfulUrl = candidateUrls[0];
+    let lastErrorMessage = "";
+
+    for (let i = 0; i < candidateUrls.length; i++) {
+      const targetUrl = candidateUrls[i];
+      try {
+        if (candidateUrls.length > 1 && i > 0) {
+          onProgress?.(`Validating against alternative server (${targetUrl})...`, 25);
+        }
+        const res = await fetch(`${targetUrl}/api/devices/register`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Accept: "application/json" },
+          body: JSON.stringify({
+            activation_key: activationKey.trim(),
+            device_uuid: deviceUuid,
+            device_name: counterName,
+            is_hub: isHub,
+          }),
+        });
+
+        if (res.ok) {
+          response = res;
+          successfulUrl = targetUrl;
+          break;
+        } else {
+          const errBody = await res.json().catch(() => ({}));
+          lastErrorMessage = errBody.message || `Activation rejected by server (HTTP ${res.status})`;
+        }
+      } catch (networkErr: any) {
+        lastErrorMessage = "Cannot reach server. Online verification is required to activate this workstation.";
+        if (i === 0 && candidateUrls.length > 1) {
+          throw new Error("Cannot reach server. Online verification is required to activate this workstation.");
+        }
+      }
     }
 
-    if (!response.ok) {
-      const errBody = await response.json().catch(() => ({}));
-      const message = errBody.message || `Activation rejected by server (HTTP ${response.status})`;
-      throw new Error(message);
+    if (!response || !response.ok) {
+      throw new Error(lastErrorMessage || "Invalid, expired, or revoked activation key.");
+    }
+
+    if (successfulUrl !== API_BASE_URL) {
+      setApiBaseUrl(successfulUrl);
     }
 
     const data = await response.json();
@@ -223,7 +254,7 @@ export class StoreDeviceService {
       is_hub: isHub ? 1 : 0,
       ip_address: "127.0.0.1",
       port: 8089,
-      app_version: "2.0.0",
+      app_version: APP_VERSION,
       status: storeProfile.is_active ? "active" : "pending_approval",
       pending_queue_count: 0,
       last_sync_at: Date.now(),
@@ -260,30 +291,50 @@ export class StoreDeviceService {
     onProgress?.("Authenticating store owner account with cloud backend...", 20);
     const deviceUuid = `dev_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`;
 
-    let response: Response;
-    try {
-      response = await fetch(`${API_BASE_URL}/api/devices/register-owner`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Accept: "application/json" },
-        body: JSON.stringify({
-          email: email.trim(),
-          password,
-          store_id: selectedStoreId,
-          device_uuid: deviceUuid,
-          device_name: counterName,
-          totp_code: totpCode,
-          is_hub: isHub,
-        }),
-      });
-    } catch (networkErr: any) {
-      console.error("[Activation] Network error during owner registration:", networkErr, "Target URL:", `${API_BASE_URL}/api/devices/register-owner`);
-      const detail = networkErr?.message ? ` (${networkErr.message})` : "";
-      throw new Error(`Cannot reach server at ${API_BASE_URL}${detail}. Online verification is required for Owner activation.`);
+    const candidateUrls = getCandidateApiUrls();
+    let response: Response | null = null;
+    let successfulUrl = candidateUrls[0];
+    let lastErrorMessage = "";
+
+    for (let i = 0; i < candidateUrls.length; i++) {
+      const targetUrl = candidateUrls[i];
+      try {
+        if (candidateUrls.length > 1 && i > 0) {
+          onProgress?.(`Authenticating against alternative server (${targetUrl})...`, 25);
+        }
+        const res = await fetch(`${targetUrl}/api/devices/register-owner`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Accept: "application/json" },
+          body: JSON.stringify({
+            email: email.trim(),
+            password,
+            store_id: selectedStoreId,
+            device_uuid: deviceUuid,
+            device_name: counterName,
+            totp_code: totpCode,
+            is_hub: isHub,
+          }),
+        });
+
+        if (res.ok) {
+          response = res;
+          successfulUrl = targetUrl;
+          break;
+        } else {
+          const err = await res.json().catch(() => ({}));
+          lastErrorMessage = err.message || `Owner registration rejected (${res.status})`;
+        }
+      } catch (networkErr: any) {
+        lastErrorMessage = networkErr?.message || "Cannot reach server.";
+      }
     }
 
-    if (!response.ok) {
-      const err = await response.json().catch(() => ({}));
-      throw new Error(err.message || `Owner registration rejected (${response.status})`);
+    if (!response || !response.ok) {
+      throw new Error(lastErrorMessage || "Cannot reach server. Online verification is required for Owner activation.");
+    }
+
+    if (successfulUrl !== API_BASE_URL) {
+      setApiBaseUrl(successfulUrl);
     }
 
     const data = await response.json();
@@ -336,7 +387,7 @@ export class StoreDeviceService {
       is_hub: isHub ? 1 : 0,
       ip_address: "127.0.0.1",
       port: 8089,
-      app_version: "2.0.0",
+      app_version: APP_VERSION,
       status: "active",
       pending_queue_count: 0,
       last_sync_at: Date.now(),
@@ -391,27 +442,46 @@ export class StoreDeviceService {
         }),
       });
 
+      const body = await res.json().catch(() => ({}));
+
+      // A server-side outage or proxy error is not a revocation. Never eject a
+      // working operator (and drop an open cart) because the cloud is unhealthy.
       if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        if (body.action === "lock_and_reset" || res.status === 401 || res.status === 403) {
+        if (res.status >= 500) {
+          return { valid: true, locked: false };
+        }
+
+        const genuinelyRevoked =
+          body?.status === "revoked" ||
+          body?.status === "unrecognized" ||
+          (body?.action === "lock_and_reset" && body?.status !== "store_inactive");
+
+        if (genuinelyRevoked) {
           await this.lockAndResetWorkstation(body.wipe_on_revocation || false);
           return { valid: false, locked: true, reason: body.message || "Device unrecognized or revoked by server." };
         }
+
+        // Pending approval, disabled store, transient auth/edge errors: report
+        // the problem but keep the registered store selected.
+        return {
+          valid: false,
+          locked: false,
+          reason: body?.message || `Device validation unavailable (HTTP ${res.status}).`,
+        };
       }
 
-      const body = await res.json().catch(() => ({}));
       if (body.valid === false) {
-        if (body.action === "lock_and_reset") {
+        if (body.action === "lock_and_reset" && body.status !== "store_inactive") {
           await this.lockAndResetWorkstation(body.wipe_on_revocation || false);
           return { valid: false, locked: true, reason: body.message || "Workstation revoked by server." };
         }
-        return { valid: false, locked: true, reason: body.message };
+        return { valid: false, locked: false, reason: body.message };
       }
 
       return { valid: true };
     } catch (networkErr) {
       // Offline fallback: already verified device can continue locally
-      return { valid: true };
+      return { valid: true, locked: false };
     }
   }
 
@@ -445,6 +515,10 @@ export class StoreDeviceService {
     if (!admin.username || !admin.password || !admin.pin) {
       throw new Error("Admin username, password and PIN are required");
     }
+    const passwordError = validatePassword(admin.password);
+    if (passwordError) throw new Error(passwordError);
+    const pinError = validatePin(admin.pin);
+    if (pinError) throw new Error(pinError);
 
     const passwordHash = await staffCryptoService.hashSecret(admin.password);
     const pinHash = await staffCryptoService.hashPin(admin.pin);
@@ -794,11 +868,6 @@ export class StoreDeviceService {
     if (action === "adjust_stock" && rp.allow_stock_adj === false) return false;
 
     return true;
-  }
-
-  verifyManagerPin(inputPin: string): boolean {
-    if (!this.activeProfile?.manager_pin) return true; // No PIN configured
-    return this.activeProfile.manager_pin === inputPin;
   }
 }
 

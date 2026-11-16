@@ -8,8 +8,10 @@ use App\Models\Counter;
 use App\Models\Device;
 use App\Models\DeviceSession;
 use App\Models\Store;
+use App\Models\UserSession;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Laravel\Sanctum\PersonalAccessToken;
 
 class DeviceSessionController
 {
@@ -18,8 +20,29 @@ class DeviceSessionController
      */
     public function index(Request $request): JsonResponse
     {
-        $isAllStores = strtolower(trim((string)$request->query('store_id'))) === 'all';
+        $requestedStore = $request->query('store_id') ?? $request->header('X-Store-Id');
+        $isAllStores = strtolower(trim((string)$requestedStore)) === 'all';
         $storeId = $isAllStores ? null : $this->resolveStoreId($request);
+
+        // A named store that does not exist must never fall back to another
+        // store; that would leak another branch's device roster.
+        if (!$isAllStores && $requestedStore !== null && trim((string)$requestedStore) !== '' && $storeId === null) {
+            return response()->json([
+                'success' => false,
+                'error' => 'STORE_NOT_FOUND',
+                'message' => "Unknown store '{$requestedStore}'.",
+            ], 404);
+        }
+
+        if (!$isAllStores && $storeId === null) {
+            return response()->json([
+                'success' => false,
+                'error' => 'STORE_REQUIRED',
+                'message' => 'store_id is required to list device sessions.',
+            ], 422);
+        }
+
+        DeviceSession::expireStale($isAllStores ? null : $storeId);
 
         // If no device session records exist for this store yet, bootstrap from registered counters/devices
         if ($storeId && DeviceSession::where('store_id', $storeId)->count() === 0) {
@@ -84,8 +107,8 @@ class DeviceSessionController
         $devices = $sessions->map(function (DeviceSession $s) use ($currentDeviceUuid, $minRequiredVersion, $latestVersion, $callerPublicIp) {
             $status = $s->computeStatus();
             $userRole = $s->user_role ?: ($s->user?->role ?: ($s->user?->is_admin ? 'Admin' : 'Cashier'));
-            $appVer = $s->app_version ?: '2.0.21';
-            $isOutOfDate = version_compare($appVer, $minRequiredVersion, '<');
+            $appVer = $s->app_version;
+            $isOutOfDate = $appVer ? version_compare($appVer, $minRequiredVersion, '<') : false;
 
             // Resolve public IP for this device
             $devicePublicIp = $s->public_ip;
@@ -203,6 +226,9 @@ class DeviceSessionController
             'device_uuid' => 'required|string',
             'device_name' => 'nullable|string|max:100',
             'counter_name' => 'nullable|string|max:100',
+            'counter_id' => 'nullable',
+            'counter_code' => 'nullable|string|max:30',
+            'user_id' => 'nullable',
             'app_version' => 'nullable|string|max:30',
             'unsynced_items_count' => 'nullable|integer',
             'status' => 'nullable|string|in:Active,active,Idle,idle,Locked,locked',
@@ -217,7 +243,22 @@ class DeviceSessionController
         $reportedIpv4 = $validated['device_ipv4'] ?? $validated['local_ip'] ?? null;
         $ip = $reportedIpv4 ?: $request->ip();
         $publicIp = DeviceSession::resolvePublicIp($request, $validated['public_ip'] ?? null);
-        $targetStoreId = !empty($validated['store_id']) ? (int)$validated['store_id'] : null;
+
+        $requestedStore = $validated['store_id'] ?? $request->header('X-Store-Id');
+        $targetStoreId = $requestedStore !== null && trim((string)$requestedStore) !== ''
+            ? $this->resolveStoreValue($requestedStore)
+            : $this->resolveStoreId($request);
+
+        if ($requestedStore !== null && trim((string)$requestedStore) !== '' && $targetStoreId === null) {
+            return response()->json([
+                'success' => false,
+                'valid' => false,
+                'error' => 'STORE_NOT_FOUND',
+                'message' => "Unknown store '{$requestedStore}'.",
+            ], 404);
+        }
+
+        $counter = $this->resolveHeartbeatCounter($deviceUuid, $validated, $targetStoreId);
 
         $session = DeviceSession::recordHeartbeat(
             $deviceUuid,
@@ -230,21 +271,66 @@ class DeviceSessionController
             $validated['user_role'] ?? null,
             $publicIp,
             $targetStoreId,
-            $reportedIpv4
+            $reportedIpv4,
+            $validated['user_id'] ?? null,
+            $counter?->id,
+            $counter?->counter_code
         );
 
         if (!$session) {
-            $storeId = $targetStoreId ?: $this->resolveStoreId($request);
+            $latest = DeviceSession::where('device_uuid', $deviceUuid)
+                ->orderByDesc('id')
+                ->first();
+
+            $counterStatus = $counter?->status;
+            $deviceStatus = Device::where('device_uuid', $deviceUuid)->value('status');
+            if ($latest?->status === 'revoked' || $counterStatus === 'revoked' || $deviceStatus === 'revoked') {
+                return response()->json([
+                    'success' => false,
+                    'valid' => false,
+                    'status' => 'revoked',
+                    'action' => 'lock_and_reset',
+                    'message' => 'This workstation has been revoked by the store owner.',
+                ], 403);
+            }
+
+            if ($latest?->force_logged_out_at) {
+                return response()->json([
+                    'success' => false,
+                    'valid' => false,
+                    'status' => 'expired',
+                    'action' => 'sign_in_required',
+                    'force_logged_out' => true,
+                    'reason' => $latest->force_logout_reason,
+                    'message' => $latest->force_logout_reason
+                        ? "This session was ended: {$latest->force_logout_reason}. Sign in again."
+                        : 'This session was ended by an administrator. Sign in again.',
+                ], 409);
+            }
+
+            // A signed-out workstation stays offline until someone signs in.
+            // Never fabricate an active row from a bare heartbeat.
+            if ($latest || !$counter || !$targetStoreId) {
+                return response()->json([
+                    'success' => false,
+                    'valid' => false,
+                    'status' => 'offline',
+                    'action' => 'sign_in_required',
+                    'error' => 'SESSION_NOT_ESTABLISHED',
+                    'message' => 'No active workstation session. Sign in on this device to restore presence.',
+                ], 409);
+            }
+
             $session = DeviceSession::recordLogin(
-                $storeId,
+                $targetStoreId,
                 $deviceUuid,
-                $validated['device_name'] ?? null,
-                null,
-                $validated['counter_name'] ?? null,
-                null,
-                $request->user()?->id,
+                $validated['device_name'] ?? $counter->device_name,
+                $counter->id,
+                $validated['counter_name'] ?? $counter->counter_name,
+                $counter->counter_code,
+                $validated['user_id'] ?? $request->user()?->id,
                 $ip,
-                $this->detectLocation($request),
+                $counter->location_name ?: $this->detectLocation($request),
                 $request->userAgent(),
                 $validated['app_version'] ?? null,
                 $validated['user_role'] ?? null,
@@ -253,14 +339,48 @@ class DeviceSessionController
             );
         }
 
+        $store = Store::find($session->store_id);
+        $lastReset = AuditLog::where('store_id', $session->store_id)
+            ->where('action', 'remote_store_reset')
+            ->latest('id')
+            ->first();
+
         return response()->json([
             'success' => true,
             'status' => $session->computeStatus(),
+            'store_id' => (string)$session->store_id,
+            'store_active' => $store ? (bool)$store->is_active : true,
+            'store_version' => $store ? (int)$store->version : 1,
+            'last_reset_at' => $lastReset ? $lastReset->created_at->toIso8601String() : null,
+            'last_reset_options' => $lastReset ? ($lastReset->new_values['options'] ?? null) : null,
             'public_ip' => $session->public_ip,
             'last_seen' => $session->last_active_at?->toIso8601String(),
             'last_active' => $session->last_active_at?->toIso8601String(),
             'timestamp' => now()->toIso8601String(),
         ]);
+    }
+
+    /**
+     * Resolve the counter identity a heartbeat belongs to.
+     */
+    protected function resolveHeartbeatCounter(string $deviceUuid, array $validated, ?int $storeId): ?Counter
+    {
+        $counter = null;
+
+        if (!empty($validated['counter_id'])) {
+            $reference = $validated['counter_id'];
+            $counter = is_numeric($reference)
+                ? Counter::find((int)$reference)
+                : Counter::where('counter_code', $reference)
+                    ->when($storeId, fn ($q) => $q->where('store_id', $storeId))
+                    ->first();
+        }
+
+        if (!$counter) {
+            $counter = Counter::where('device_uuid', $deviceUuid)->first();
+        }
+
+        return $counter;
     }
 
     /**
@@ -284,6 +404,30 @@ class DeviceSessionController
 
         if (empty($updates)) {
             return response()->json(['message' => 'No names provided to update.'], 422);
+        }
+
+        if (!empty($updates['counter_name'])) {
+            $conflict = Counter::nameConflict(
+                (int)$session->store_id,
+                $updates['counter_name'],
+                $session->counter_id ? (int)$session->counter_id : null
+            );
+            if ($conflict) {
+                return response()->json([
+                    'success' => false,
+                    'error' => 'COUNTER_NAME_TAKEN',
+                    'message' => "Counter name '{$conflict->counter_name}' is already used by workstation "
+                        . "'{$conflict->device_name}' ({$conflict->device_uuid}). Release or rename that counter first.",
+                    'conflict' => [
+                        'id' => (string)$conflict->id,
+                        'counter_name' => $conflict->counter_name,
+                        'counter_code' => $conflict->counter_code,
+                        'device_uuid' => $conflict->device_uuid,
+                        'device_name' => $conflict->device_name,
+                        'status' => $conflict->status,
+                    ],
+                ], 422);
+            }
         }
 
         $session->update($updates);
@@ -414,18 +558,36 @@ class DeviceSessionController
     public function forceLogout(Request $request, string $id): JsonResponse
     {
         $session = DeviceSession::findOrFail($id);
+        $reason = $request->input('reason', 'Force-logged out by administrator');
         $session->update([
             'is_active' => false,
             'status' => 'expired',
             'last_active_at' => now(),
+            'force_logged_out_at' => now(),
+            'force_logout_reason' => $reason,
         ]);
+
+        // Invalidate the credential used by that workstation. Because the
+        // one-active-counter policy is account-wide, all live tokens for the
+        // user are revoked; a fresh sign-in issues a new token.
+        if ($session->user_id) {
+            PersonalAccessToken::where('tokenable_id', $session->user_id)->delete();
+            UserSession::where('user_id', $session->user_id)
+                ->where('is_active', true)
+                ->update(['is_active' => false, 'last_activity' => now()]);
+        }
 
         AuditLog::log(
             'device_session_force_logout',
             'DeviceSession',
             (string)$session->id,
             null,
-            ['device_uuid' => $session->device_uuid, 'device_name' => $session->device_name],
+            [
+                'device_uuid' => $session->device_uuid,
+                'device_name' => $session->device_name,
+                'reason' => $reason,
+                'user_id' => $session->user_id,
+            ],
             $session->store_id,
             $request->user()?->id
         );
@@ -466,20 +628,18 @@ class DeviceSessionController
 
     /**
      * Resolve store ID from request header, query, or authenticated user.
+     *
+     * Returns null when the caller named a store that does not exist. Callers
+     * must treat that as an error instead of assuming another branch.
      */
-    protected function resolveStoreId(Request $request): int
+    protected function resolveStoreId(Request $request): ?int
     {
         $storeParam = $request->header('X-Store-Id')
             ?: $request->query('store_id')
             ?: $request->input('store_id');
 
-        if ($storeParam) {
-            $store = is_numeric($storeParam)
-                ? Store::find($storeParam)
-                : Store::where('code', $storeParam)->first();
-            if ($store) {
-                return (int)$store->id;
-            }
+        if ($storeParam !== null && $storeParam !== '') {
+            return $this->resolveStoreValue($storeParam);
         }
 
         if ($user = $request->user()) {
@@ -488,8 +648,25 @@ class DeviceSessionController
             }
         }
 
-        $defaultStore = Store::first();
-        return $defaultStore ? (int)$defaultStore->id : 1;
+        return null;
+    }
+
+    /**
+     * Strictly resolve a numeric store id or store code. Never guesses.
+     */
+    protected function resolveStoreValue(mixed $storeParam): ?int
+    {
+        $value = trim((string)$storeParam);
+        if ($value === '' || strtolower($value) === 'all') {
+            return null;
+        }
+
+        if (is_numeric($value)) {
+            return Store::whereKey((int)$value)->exists() ? (int)$value : null;
+        }
+
+        $store = Store::where('code', $value)->first();
+        return $store ? (int)$store->id : null;
     }
 
     /**
@@ -537,7 +714,7 @@ class DeviceSessionController
                 'login_time' => $c->last_seen_at ?: $c->created_at ?: now()->subMinutes(10),
                 'last_active_at' => $c->last_seen_at ?: now()->subMinutes(10),
                 'status' => $isRevoked ? 'revoked' : ($isActive ? 'active' : 'offline'),
-                'app_version' => '2.0.21',
+                'app_version' => null,
                 'unsynced_items_count' => 0,
                 'user_role' => 'Cashier',
                 'is_active' => !$isRevoked,

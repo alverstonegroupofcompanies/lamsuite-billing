@@ -3,6 +3,7 @@ import { productsStore, type ProductBatch } from "../masters/productsStore";
 import { partiesStore, type Customer } from "../masters/partiesStore";
 import { syncQueueService } from "../sync/syncQueueService";
 import { companySettingsService } from "../settings/companySettingsService";
+import { storeToday } from "../dateTimeUtils";
 import { round2 } from "./billingCalculations";
 import { calculateDocumentTaxes } from "../tax-engine/taxEngine";
 import type { InvoiceRecord, InvoiceItemRecord } from "../reports/reportEngine";
@@ -287,7 +288,7 @@ export function getIndianFinancialYear(date: Date = new Date()): string {
  * Checks if a given invoice date crosses the Section 34 GST time limit
  * Deadline: 30th November following the end of the FY of the invoice
  */
-export function checkSec34TimeLimit(invoiceDateStr: string, creditNoteDateStr: string = new Date().toISOString().slice(0, 10)): {
+export function checkSec34TimeLimit(invoiceDateStr: string, creditNoteDateStr: string = storeToday(companySettingsService.getSettings())): {
   isExpired: boolean;
   deadlineDate: string;
   warning?: string;
@@ -313,27 +314,37 @@ export function checkSec34TimeLimit(invoiceDateStr: string, creditNoteDateStr: s
 
 export class CustomerDebitNoteService {
   /**
-   * Generates next credit note sequence number, e.g. CN-26-27-0001
+   * Generates next credit note sequence number following settings sequence (e.g. SR-1)
    */
   async generateNextCreditNoteNumber(): Promise<string> {
-    const fy = getIndianFinancialYear();
     const settings = await companySettingsService.loadSettings();
-    const prefix = settings.sequences?.returnPrefix || "CN";
+    let prefix = settings.sequences?.returnPrefix || "SR";
+    prefix = prefix.replace(/-+$/, "");
+    let nextNum = settings.sequences?.nextReturnNumber || 1;
 
     const allCNs = await sqliteStorage.findAll<CreditNoteRecord>("credit_notes");
-    const fyPrefix = `${prefix}-${fy}-`;
-    const matching = allCNs.filter((cn) => cn.credit_note_number?.startsWith(fyPrefix));
+    const searchPrefix = `${prefix}-`;
+    const matching = allCNs.filter((cn) => cn.credit_note_number?.startsWith(searchPrefix));
 
-    let maxNum = 0;
     for (const cn of matching) {
       const parts = cn.credit_note_number.split("-");
       const lastPart = parseInt(parts[parts.length - 1], 10);
-      if (!isNaN(lastPart) && lastPart > maxNum) {
-        maxNum = lastPart;
+      if (!isNaN(lastPart) && lastPart >= nextNum) {
+        nextNum = lastPart + 1;
       }
     }
-    const nextNum = maxNum + 1;
-    return `${fyPrefix}${String(nextNum).padStart(4, "0")}`;
+
+    const docNumber = `${prefix}-${nextNum}`;
+
+    await companySettingsService.updateSettings({
+      sequences: {
+        ...settings.sequences,
+        returnPrefix: prefix,
+        nextReturnNumber: nextNum + 1,
+      },
+    });
+
+    return docNumber;
   }
 
   /**
@@ -683,7 +694,7 @@ export class CustomerDebitNoteService {
 
     const now = Date.now();
     const id = `cdn_${now}_${Math.random().toString(16).slice(2, 6)}`;
-    const receivedDate = input.received_date || new Date().toISOString().slice(0, 10);
+    const receivedDate = input.received_date || storeToday(companySettingsService.getSettings());
 
     const processedLines: DebitNoteLine[] = [];
     let ourCalculatedAmount = 0;
@@ -903,7 +914,7 @@ export class CustomerDebitNoteService {
 
     const opt = options?.creditNoteOption || dn.credit_note_option || "B";
     const now = Date.now();
-    const cnDate = options?.creditNoteDate || new Date().toISOString().slice(0, 10);
+    const cnDate = options?.creditNoteDate || storeToday(companySettingsService.getSettings());
     const cnTime = new Date().toTimeString().slice(0, 8);
 
     // Collect all approved allocations

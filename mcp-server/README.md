@@ -190,7 +190,7 @@ All tools use the prefix `lamsuite_`. Every list tool supports pagination (`limi
 | `lamsuite_create_purchase_return` | `supplier_id`, `items`, `dry_run?` | `idempotent` | Issue purchase return (Debit Note) to supplier. |
 | `lamsuite_create_stock_adjustment` | `product_id`, `adjustment_type`, `qty`, `reason`, **`confirm: true`**, `dry_run?` | **`destructive`** | Adjust physical stock count. Requires `confirm: true` and `reason`. |
 | `lamsuite_cancel_invoice` | `invoice_id`, `reason`, **`confirm: true`**, `dry_run?` | **`destructive`** | Void invoice and restore stock. Requires `confirm: true` and `reason`. |
-| `lamsuite_create_purchase` | `supplier_id`, `purchase_number`, `purchase_date`, `items`, `dry_run?` | `idempotent` | Record inward bill with batch numbers, expiry dates, and purchase rates. |
+| `lamsuite_create_purchase` | `supplier_id`, `purchase_number`, `purchase_date`, `items`, `bill_discount_type?`, `bill_discount?`, `freight_charges?`, `round_off?`, `dry_run?` | `idempotent` | Record inward bill with purchase rates, optional batch/expiry (required only when the store enforces batch tracking), per-line percent/flat discounts, free packs/loose units, HSN and PTR/PTS/PTSS. |
 
 ---
 

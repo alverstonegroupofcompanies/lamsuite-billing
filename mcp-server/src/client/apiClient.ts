@@ -19,6 +19,13 @@ import type {
   SupplierData,
 } from "./types.js";
 
+export interface ApiRequestOptions extends RequestInit {
+  /** Skip bearer-token resolution (used for the login call). */
+  skipAuth?: boolean;
+  /** Override the X-Store-Id header for this single request. */
+  storeId?: number;
+}
+
 export class LamSuiteApiClient {
   private config: ServerConfig;
   private token: string;
@@ -63,19 +70,21 @@ export class LamSuiteApiClient {
 
   public async request<T>(
     endpoint: string,
-    options: RequestInit & { skipAuth?: boolean } = {}
+    options: ApiRequestOptions = {}
   ): Promise<T> {
     const url = `${this.config.apiUrl.replace(/\/$/, "")}/${endpoint.replace(/^\//, "")}`;
+
+    const { skipAuth, storeId, ...fetchOptions } = options;
 
     const headers: Record<string, string> = {
       Accept: "application/json",
       "Content-Type": "application/json",
-      "X-Store-Id": String(this.config.storeId),
+      "X-Store-Id": String(storeId ?? this.config.storeId),
       "X-User-Role": this.config.role,
-      ...(options.headers as Record<string, string>),
+      ...(fetchOptions.headers as Record<string, string>),
     };
 
-    if (!options.skipAuth) {
+    if (!skipAuth) {
       const token = await this.getAuthToken();
       if (token) {
         headers["Authorization"] = `Bearer ${token}`;
@@ -87,7 +96,7 @@ export class LamSuiteApiClient {
 
     try {
       const response = await fetch(url, {
-        ...options,
+        ...fetchOptions,
         headers,
         signal: controller.signal,
       });
@@ -158,6 +167,35 @@ export class LamSuiteApiClient {
 
       throw new McpToolError(`Unexpected communication error: ${err.message}`);
     }
+  }
+
+  // --- Generic HTTP helpers (used by tools that mirror admin routes) ---
+  async get<T = any>(endpoint: string, options: ApiRequestOptions = {}): Promise<T> {
+    return this.request<T>(endpoint, { ...options, method: "GET" });
+  }
+
+  async post<T = any>(
+    endpoint: string,
+    body?: unknown,
+    options: ApiRequestOptions = {}
+  ): Promise<T> {
+    return this.request<T>(endpoint, {
+      ...options,
+      method: "POST",
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+  }
+
+  async put<T = any>(
+    endpoint: string,
+    body?: unknown,
+    options: ApiRequestOptions = {}
+  ): Promise<T> {
+    return this.request<T>(endpoint, {
+      ...options,
+      method: "PUT",
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
   }
 
   // --- Store Profile ---
@@ -252,18 +290,46 @@ export class LamSuiteApiClient {
     });
   }
 
-  // --- Suppliers ---
-  async getSuppliers(params?: { query?: string; page?: number; limit?: number }): Promise<PaginatedResponse<SupplierData>> {
+  // --- Suppliers (backed by the admin Party directory) ---
+  async getSuppliers(params?: {
+    query?: string;
+    page?: number;
+    limit?: number;
+    storeId?: number;
+  }): Promise<PaginatedResponse<SupplierData>> {
     const q = new URLSearchParams();
-    if (params?.query) q.set("query", params.query);
+    q.set("type", "supplier");
+    if (params?.query) q.set("search", params.query);
     if (params?.page) q.set("page", String(params.page));
-    if (params?.limit) q.set("limit", String(params.limit));
-    const qs = q.toString() ? `?${q.toString()}` : "";
-    return this.request<PaginatedResponse<SupplierData>>(`/suppliers${qs}`);
+    if (params?.limit) q.set("per_page", String(params.limit));
+    const res = await this.request<PaginatedResponse<any>>(
+      `/admin/parties?${q.toString()}`,
+      { storeId: params?.storeId }
+    );
+    return {
+      ...res,
+      data: (res.data || []).map((party) => this.mapPartyToSupplier(party)),
+    };
   }
 
-  async getSupplier(id: string): Promise<SupplierData> {
-    return this.request<SupplierData>(`/suppliers/${encodeURIComponent(id)}`);
+  async getSupplier(id: string, storeId?: number): Promise<SupplierData> {
+    // `/admin/parties` has no show route; the admin supplier ledger returns the
+    // party profile together with its running balance.
+    const res = await this.request<{ supplier: any; current_balance?: number }>(
+      `/admin/suppliers/${encodeURIComponent(id)}/ledger`,
+      { storeId }
+    );
+    return this.mapPartyToSupplier(res.supplier || { id }, res.current_balance);
+  }
+
+  private mapPartyToSupplier(party: any, currentBalance?: number): SupplierData {
+    return {
+      ...party,
+      id: String(party.id),
+      outstanding_balance: Number(
+        currentBalance ?? party.current_balance ?? party.outstanding_balance ?? 0
+      ),
+    };
   }
 
   // --- Invoices ---
@@ -295,17 +361,47 @@ export class LamSuiteApiClient {
     return this.request<InvoiceData>(`/invoices/${encodeURIComponent(idOrNumber)}`);
   }
 
-  async createInvoice(invoice: any): Promise<InvoiceData> {
-    return this.request<InvoiceData>("/invoices", {
-      method: "POST",
-      body: JSON.stringify(invoice),
-    });
+  async createInvoice(invoice: any, storeId?: number): Promise<InvoiceData> {
+    return this.post<InvoiceData>("/invoices", invoice, { storeId });
   }
 
   async cancelInvoice(id: string, reason: string): Promise<{ success: boolean; status: string }> {
     return this.request<{ success: boolean; status: string }>(`/invoices/${encodeURIComponent(id)}/cancel`, {
       method: "POST",
       body: JSON.stringify({ reason }),
+    });
+  }
+
+  async listInvoiceApprovals(invoiceId: string): Promise<{ success: boolean; approvals: any[] }> {
+    return this.request<{ success: boolean; approvals: any[] }>(
+      `/admin/invoices/${encodeURIComponent(invoiceId)}/edit-approvals`
+    );
+  }
+
+  async issueInvoiceApproval(
+    invoiceId: string,
+    payload: { action: "edit" | "cancel"; user_id: string; minutes?: number; reason?: string }
+  ): Promise<{ success: boolean; pin: string; approval: any; message?: string }> {
+    return this.request<{ success: boolean; pin: string; approval: any; message?: string }>(
+      `/admin/invoices/${encodeURIComponent(invoiceId)}/edit-approvals`,
+      { method: "POST", body: JSON.stringify(payload) }
+    );
+  }
+
+  async revokeInvoiceApproval(
+    invoiceId: string,
+    approvalId: string
+  ): Promise<{ success: boolean; approval: any }> {
+    return this.request<{ success: boolean; approval: any }>(
+      `/admin/invoices/${encodeURIComponent(invoiceId)}/edit-approvals/${encodeURIComponent(approvalId)}/revoke`,
+      { method: "POST", body: JSON.stringify({}) }
+    );
+  }
+
+  async verifyInvoiceApproval(invoiceId: string, payload: Record<string, unknown>): Promise<any> {
+    return this.request<any>(`/invoices/${encodeURIComponent(invoiceId)}/approvals/verify`, {
+      method: "POST",
+      body: JSON.stringify(payload),
     });
   }
 
@@ -333,21 +429,34 @@ export class LamSuiteApiClient {
     return this.request<PurchaseData>(`/purchases/${encodeURIComponent(id)}`);
   }
 
-  async createPurchase(purchase: any): Promise<PurchaseData> {
-    return this.request<PurchaseData>("/purchases", {
-      method: "POST",
-      body: JSON.stringify(purchase),
-    });
+  async createPurchase(purchase: any, storeId?: number): Promise<PurchaseData> {
+    return this.post<PurchaseData>("/purchases", purchase, { storeId });
   }
 
   // --- Returns & Adjustments ---
-  async getReturns(params?: { type?: string; start_date?: string; end_date?: string; page?: number; limit?: number }): Promise<any> {
+  async getReturns(params?: {
+    type?: string;
+    start_date?: string;
+    end_date?: string;
+    page?: number;
+    limit?: number;
+    storeId?: number;
+  }): Promise<any> {
     const q = new URLSearchParams();
-    if (params?.type) q.set("type", params.type);
     if (params?.start_date) q.set("start_date", params.start_date);
     if (params?.end_date) q.set("end_date", params.end_date);
+    if (params?.page) q.set("page", String(params.page));
+    if (params?.limit) q.set("per_page", String(params.limit));
     const qs = q.toString() ? `?${q.toString()}` : "";
-    return this.request(`/returns${qs}`);
+
+    // Sales returns/credit notes and purchase returns/debit notes live on
+    // separate admin list routes.
+    const path =
+      params?.type === "purchase_return"
+        ? `/admin/purchase-returns${qs}`
+        : `/admin/returns${qs}`;
+
+    return this.request(path, { storeId: params?.storeId });
   }
 
   async recordCustomerPayment(payment: any): Promise<any> {
@@ -372,6 +481,8 @@ export class LamSuiteApiClient {
   }
 
   async createPurchaseReturn(data: any): Promise<any> {
+    // The only purchase-return create route is POST /returns/purchase.
+    // `/admin/purchase-returns` is the GET list route.
     return this.request("/returns/purchase", {
       method: "POST",
       body: JSON.stringify(data),
@@ -442,22 +553,106 @@ export class LamSuiteApiClient {
     return this.request(`/reports/profit?${q.toString()}`);
   }
 
-  async getStockLedger(productId?: string, batchId?: string, startDate?: string, endDate?: string, limit: number = 20): Promise<any> {
+  async getStockLedger(productId?: string, batchId?: string, startDate?: string, endDate?: string, limit: number = 20): Promise<any[]> {
     const q = new URLSearchParams();
     if (productId) q.set("product_id", productId);
     if (batchId) q.set("batch_id", batchId);
     if (startDate) q.set("start_date", startDate);
     if (endDate) q.set("end_date", endDate);
     q.set("limit", String(limit));
-    return this.request(`/stock/ledger?${q.toString()}`);
+    const res = await this.request<any>(`/reports/stock-ledger?${q.toString()}`);
+    const entries: any[] = Array.isArray(res) ? res : res.entries || [];
+    return entries.map((e) => ({
+      id: e.id,
+      date: e.created_at ?? e.date ?? e.transaction_date ?? "",
+      product_name: e.product_name ?? e.product?.name ?? "Unknown Item",
+      batch_no: e.batch_no ?? e.batch?.batch_no,
+      type: e.event_type ?? e.voucher_type ?? e.type,
+      qty: Number(e.qty_delta ?? e.qty ?? 0),
+      balance: Number(e.balance_after ?? e.balance ?? 0),
+      reference: e.reference_number ?? e.reference_id ?? e.reference_type ?? e.reference,
+    }));
   }
 
-  async getStockBalance(query?: string, categoryId?: string, location?: string, limit: number = 20): Promise<any> {
+  async getStockBalance(query?: string, categoryId?: string, location?: string, limit: number = 20): Promise<any[]> {
+    // `/admin/inventory/ledger` is a movement ledger; current on-hand balances
+    // come from the batch inventory route.
     const q = new URLSearchParams();
-    if (query) q.set("query", query);
+    if (query) q.set("search", query);
     if (categoryId) q.set("category_id", categoryId);
     if (location) q.set("location", location);
-    q.set("limit", String(limit));
-    return this.request(`/stock/balance?${q.toString()}`);
+    q.set("only_positive", "true");
+    q.set("per_page", String(limit));
+    const res = await this.request<any>(`/admin/inventory/batches?${q.toString()}`);
+    const rows: any[] = Array.isArray(res) ? res : res.data || [];
+    return rows.map((b) => {
+      const stockQty = Number(b.stock_qty ?? 0);
+      const sellingRate = Number(b.selling_rate ?? b.product?.sel_rate ?? 0);
+      return {
+        product_id: b.product_id ?? b.product?.id,
+        name: b.product?.name ?? b.product_name ?? "Unknown Item",
+        batch_no: b.batch_no,
+        expiry_date: b.expiry_date,
+        current_stock: stockQty,
+        sel_rate: sellingRate,
+        mrp: Number(b.mrp ?? b.product?.mrp ?? 0),
+        stock_value_selling: Math.round(stockQty * sellingRate * 100) / 100,
+      };
+    });
+  }
+
+  // --- Dashboard ---
+  async getAdminDashboard(storeId?: number): Promise<any> {
+    return this.request("/admin/dashboard", { storeId });
+  }
+
+  async getDashboardMetrics(params?: {
+    start_date?: string;
+    end_date?: string;
+    storeId?: number;
+  }): Promise<any> {
+    const q = new URLSearchParams();
+    if (params?.start_date) q.set("start_date", params.start_date);
+    if (params?.end_date) q.set("end_date", params.end_date);
+    const qs = q.toString() ? `?${q.toString()}` : "";
+    return this.request(`/reports/dashboard/metrics${qs}`, { storeId: params?.storeId });
+  }
+
+  // --- Stock adjustment documents (approval workflow) ---
+  async getStockAdjustment(id: string, storeId?: number): Promise<any> {
+    return this.request(`/admin/stock-adjustments/${encodeURIComponent(id)}`, { storeId });
+  }
+
+  async approveStockAdjustment(id: string, storeId?: number): Promise<any> {
+    return this.post(`/admin/stock-adjustments/${encodeURIComponent(id)}/approve`, {}, { storeId });
+  }
+
+  async rejectStockAdjustment(id: string, reason?: string, storeId?: number): Promise<any> {
+    return this.post(
+      `/admin/stock-adjustments/${encodeURIComponent(id)}/reject`,
+      { reason },
+      { storeId }
+    );
+  }
+
+  async updateStockAdjustmentPolicy(policy: Record<string, unknown>, storeId?: number): Promise<any> {
+    return this.put(`/admin/stock-adjustments/policy`, { policy }, { storeId });
+  }
+
+  // --- Device sessions ---
+  async getDeviceSessions(storeId?: number): Promise<any> {
+    return this.request("/device-sessions", { storeId });
+  }
+
+  async deviceSessionAction(
+    id: string,
+    action: "force-logout" | "revoke" | "lock" | "unlock",
+    storeId?: number
+  ): Promise<any> {
+    return this.post(
+      `/device-sessions/${encodeURIComponent(id)}/${action}`,
+      {},
+      { storeId }
+    );
   }
 }

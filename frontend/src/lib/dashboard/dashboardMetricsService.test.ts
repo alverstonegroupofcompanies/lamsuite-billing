@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { dashboardMetricsService } from "./dashboardMetricsService";
 import { sqliteStorage } from "../db/sqliteStorage";
 import type { InvoiceRecord, InvoiceItemRecord } from "../billing/invoiceManagementService";
@@ -167,6 +167,119 @@ describe("DashboardMetricsService", () => {
     expect(res.billsIssuedCount).toBe(0);
     expect(res.payments.cash).toBe(0);
     expect(res.recentDocuments[0].paymentStatus).toBe("cancelled");
+  });
+
+  it("collapses the local + server copies of one bill into a single recent document", async () => {
+    const todayStr = dashboardMetricsService.formatLocalDate(new Date());
+
+    const base = {
+      module_key: "invoice" as const,
+      invoice_number: "INV-26-27-0042",
+      invoice_date: todayStr,
+      subtotal: 476.19,
+      discount_total: 0,
+      tax_total: 23.81,
+      round_off: 0,
+      grand_total: 500,
+      paid_amount: 500,
+      payment_mode: "Cash",
+      status: "issued" as const,
+    };
+
+    // Same bill cached under its local id (pending) and again under the
+    // server id after the push completed.
+    await sqliteStorage.insertRecord("invoices", "local_inv_42", {
+      ...base,
+      id: "local_inv_42",
+      external_id: "ext-42",
+      sync_state: "pending",
+      created_at: 1000,
+      updated_at: 1000,
+    } as InvoiceRecord);
+    await sqliteStorage.insertRecord("invoices", "901", {
+      ...base,
+      id: "901",
+      server_id: 901,
+      external_id: "ext-42",
+      sync_state: "synced",
+      created_at: 2000,
+      updated_at: 2000,
+    } as InvoiceRecord);
+
+    const res = await dashboardMetricsService.getDashboardMetrics("today");
+    expect(res.recentDocuments).toHaveLength(1);
+    expect(res.grossSales).toBe(500);
+    expect(res.billsIssuedCount).toBe(1);
+  });
+
+  it("keeps GST quick view populated for header-only bills with no item rows", async () => {
+    const todayStr = dashboardMetricsService.formatLocalDate(new Date());
+
+    const inv: InvoiceRecord = {
+      id: "inv_header_only",
+      module_key: "invoice",
+      invoice_number: "INV-26-27-0099",
+      invoice_date: todayStr,
+      subtotal: 1000,
+      taxable_subtotal: 1000,
+      discount_total: 0,
+      tax_total: 180,
+      cgst_total: 90,
+      sgst_total: 90,
+      igst_total: 0,
+      round_off: 0,
+      grand_total: 1180,
+      paid_amount: 1180,
+      payment_mode: "Card",
+      status: "issued",
+      created_at: Date.now(),
+      updated_at: Date.now(),
+    };
+
+    await sqliteStorage.insertRecord("invoices", inv.id, inv);
+
+    const res = await dashboardMetricsService.getDashboardMetrics("today");
+    expect(res.gst.slabs).toHaveLength(1);
+    expect(res.gst.slabs[0].rate).toBe(18);
+    expect(res.gst.slabs[0].taxableValue).toBe(1000);
+    expect(res.gst.totalTaxAccrued).toBe(180);
+    expect(res.gst.totalTaxable).toBe(1000);
+  });
+
+  it("dates late-night bills on the store calendar day, not the UTC day", async () => {
+    // 00:30 IST on 2026-11-15 is still 2026-11-14 in UTC.
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-11-14T19:00:00Z"));
+    try {
+      const range = dashboardMetricsService.getDateRange("today");
+      expect(range.startDate).toBe("2026-11-15");
+      expect(range.endDate).toBe("2026-11-15");
+
+      const inv: InvoiceRecord = {
+        id: "inv_late_night",
+        module_key: "invoice",
+        invoice_number: "INV-26-27-0100",
+        invoice_date: "2026-11-15",
+        subtotal: 100,
+        discount_total: 0,
+        tax_total: 0,
+        round_off: 0,
+        grand_total: 100,
+        paid_amount: 100,
+        payment_mode: "Cash",
+        status: "issued",
+        created_at: Date.now(),
+        updated_at: Date.now(),
+      };
+      await sqliteStorage.insertRecord("invoices", inv.id, inv);
+
+      const res = await dashboardMetricsService.getDashboardMetrics("today");
+      expect(res.period.startDate).toBe("2026-11-15");
+      expect(res.netSales).toBe(100);
+      expect(res.recentDocuments).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("filters near expiry batches within threshold (e.g. 60 days) and ignores far dates", async () => {

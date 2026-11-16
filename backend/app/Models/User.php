@@ -120,12 +120,17 @@ class User extends Authenticatable
             return false;
         }
 
+        // Global staff / unassigned to a single store (no restriction configured)
+        if ($this->store_id === null && empty($this->allowed_store_ids)) {
+            return true;
+        }
+
         if ($this->store_id === $storeId) {
             return true;
         }
 
-        if (is_array($this->allowed_store_ids) && in_array($storeId, $this->allowed_store_ids)) {
-            return true;
+        if (is_array($this->allowed_store_ids)) {
+            return in_array($storeId, $this->allowed_store_ids) || in_array((string)$storeId, $this->allowed_store_ids);
         }
 
         return false;

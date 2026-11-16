@@ -22,7 +22,6 @@ class Counter extends Model
         'mac_address',
         'ip_address',
         'role_profile',
-        'manager_pin',
         'allowed_user_ids',
         'printer_profile',
         'receipt_customization',
@@ -41,6 +40,7 @@ class Counter extends Model
 
     protected $hidden = [
         'device_token_hash',
+        'manager_pin',
     ];
 
     protected $casts = [
@@ -82,6 +82,45 @@ class Counter extends Model
     public function approver(): BelongsTo
     {
         return $this->belongsTo(User::class, 'approved_by');
+    }
+
+    /**
+     * Counters that hold a visible name in the store. Revoked counters release
+     * their name so it can be reused by a replacement workstation.
+     */
+    public static function nameConflict(int $storeId, string $name, ?int $ignoreId = null): ?self
+    {
+        $normalized = mb_strtolower(trim($name));
+        if ($normalized === '') {
+            return null;
+        }
+
+        return self::where('store_id', $storeId)
+            ->whereIn('status', ['active', 'locked', 'pending_approval'])
+            ->whereRaw('LOWER(TRIM(counter_name)) = ?', [$normalized])
+            ->when($ignoreId, fn ($q) => $q->where('id', '!=', $ignoreId))
+            ->orderBy('id')
+            ->first();
+    }
+
+    /**
+     * Return a store-unique counter name, suffixing the code when taken.
+     */
+    public static function uniqueNameForStore(int $storeId, string $desiredName, ?int $ignoreId = null): string
+    {
+        $base = trim($desiredName) ?: 'Counter';
+        if (!self::nameConflict($storeId, $base, $ignoreId)) {
+            return $base;
+        }
+
+        for ($suffix = 2; $suffix <= 99; $suffix++) {
+            $candidate = "{$base} ({$suffix})";
+            if (!self::nameConflict($storeId, $candidate, $ignoreId)) {
+                return $candidate;
+            }
+        }
+
+        return "{$base} (" . substr((string)microtime(true), -6) . ")";
     }
 
     public function isPendingApproval(): bool

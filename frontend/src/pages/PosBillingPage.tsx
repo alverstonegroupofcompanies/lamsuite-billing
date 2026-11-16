@@ -51,6 +51,9 @@ import {
 import { whatsappService } from "../lib/integrations/whatsappService";
 import { isTauri } from "../lib/ipc/ipcBridge";
 import { isClinicalSupported } from "../lib/settings/storeTypePresets";
+import { shortcutDispatcher, type ShortcutHandler } from "../lib/keyboard/shortcutDispatcher";
+import { shortcutLabel, type ShortcutAction } from "../lib/keyboard/centralKeyMap";
+import { ModalLayer } from "../lib/modal/CentralModalManager";
 import { staffAuthService } from "../lib/auth/staffAuthService";
 import { companySettingsService, DEFAULT_COLUMNS, DEFAULT_PAYMENT_MODES, type ColumnSetting, type HeaderFieldSetting, type PaymentModeConfig } from "../lib/settings/companySettingsService";
 import type { InvoiceTotals } from "../lib/billing/billingCalculations";
@@ -60,6 +63,7 @@ import {
   type InvoiceItemRecord,
   type InvoiceDiffResult,
 } from "../lib/billing/invoiceManagementService";
+import { invoiceApprovalService } from "../lib/billing/invoiceApprovalService";
 import { PrintPreviewModal } from "../components/PrintPreviewModal";
 import { TaxOverrideModal } from "../components/TaxOverrideModal";
 import { CustomerCombobox } from "../components/CustomerCombobox";
@@ -71,11 +75,11 @@ import { PosShortcutHintBar, type PosFocusContext } from "../components/PosShort
 import { QuickLineEditModal } from "../components/QuickLineEditModal";
 import { QuickProductBatchEditModal } from "../components/QuickProductBatchEditModal";
 import { KeyboardShortcutsModal } from "../components/KeyboardShortcutsModal";
-import { storeRegistryService } from "../lib/auth/storeRegistryService";
+import { storeRegistryService, type RegisteredStoreRecord } from "../lib/auth/storeRegistryService";
 import { BillDiscountModal } from "../components/BillDiscountModal";
 import { RoundOffModal } from "../components/RoundOffModal";
 import { calculateDerivedLooseRate, formatQuantityDisplay, formatExpiryDisplay } from "../lib/billing/unitConversion";
-import { partiesStore, type Customer, normalizeIndianPhone } from "../lib/masters/partiesStore";
+import { partiesStore, type Customer, normalizeIndianPhone, isValidGstin } from "../lib/masters/partiesStore";
 import { syncQueueService } from "../lib/sync/syncQueueService";
 import { unitsStore } from "../lib/masters/unitsStore";
 import { useModalEscape } from "../lib/ui/modalEscapeManager";
@@ -111,7 +115,7 @@ export const PosBillingPage: React.FC = () => {
   const [doctorName, setDoctorName] = useState("");
   const [patientName, setPatientName] = useState("");
   const [billNotes, setBillNotes] = useState("");
-  const [invoiceNumber, setInvoiceNumber] = useState(`INV-${Date.now().toString().slice(-6)}`);
+  const [invoiceNumber, setInvoiceNumber] = useState<string>(() => companySettingsService.previewNextInvoiceNumber());
 
   // Keyboard-first Grid & Focus State
   const [selectedRowIndex, setSelectedRowIndex] = useState<number | null>(null);
@@ -151,6 +155,15 @@ export const PosBillingPage: React.FC = () => {
 
   // Product Entry Style & Inline Entry Row State
   const [appSettingsState, setAppSettingsState] = useState(() => companySettingsService.getSettings());
+
+  useEffect(() => {
+    companySettingsService.loadSettings().then((fresh) => {
+      setAppSettingsState(fresh);
+      if (!editInvoiceParam) {
+        setInvoiceNumber(companySettingsService.previewNextInvoiceNumber());
+      }
+    });
+  }, [editInvoiceParam]);
 
   useEffect(() => {
     posCartService.setStoreTaxSettings({
@@ -248,6 +261,8 @@ export const PosBillingPage: React.FC = () => {
   // Modals & Popups
   const [isTenderModalOpen, setIsTenderModalOpen] = useState(false);
   const [isRecallModalOpen, setIsRecallModalOpen] = useState(false);
+  const [recallIndex, setRecallIndex] = useState(0);
+  const recallListRef = useRef<HTMLDivElement>(null);
   const [heldBillsCount, setHeldBillsCount] = useState(billingTenderService.listHeldBills().length);
   interface NotificationAction {
     label: string;
@@ -259,6 +274,15 @@ export const PosBillingPage: React.FC = () => {
     type: "success" | "error" | "info" | "warning";
     actions?: NotificationAction[];
   } | null>(null);
+
+  const [activeStore, setActiveStore] = useState<RegisteredStoreRecord | null>(() => storeRegistryService.getActiveStore());
+
+  useEffect(() => {
+    const unsub = storeRegistryService.onRegistryChange(() => {
+      setActiveStore(storeRegistryService.getActiveStore());
+    });
+    return unsub;
+  }, []);
 
   // Tender form state
   type PosPrintFormat = "thermal" | "a4" | "pdf" | "none" | "ask";
@@ -442,31 +466,68 @@ export const PosBillingPage: React.FC = () => {
 
       // Populate cart lines with previous invoice items
       posCartService.clearCart();
+
+      // Restore Bill Discount if original invoice had one
+      if (details.invoice.bill_discount_percent && Number(details.invoice.bill_discount_percent) > 0) {
+        posCartService.setBillDiscount("percent", Number(details.invoice.bill_discount_percent));
+      } else if (details.invoice.bill_discount_amount && Number(details.invoice.bill_discount_amount) > 0) {
+        posCartService.setBillDiscount("amount", Number(details.invoice.bill_discount_amount));
+      } else if (Number(details.invoice.discount_total) > 0 && !details.items.some((i) => Number(i.discount_amount) > 0)) {
+        posCartService.setBillDiscount("amount", Number(details.invoice.discount_total));
+      }
+
       for (const it of details.items) {
-        const batches: ProductBatch[] = await productsStore.getBatchesForProduct(it.product_id, false);
-        const batch: ProductBatch = batches.find((b: ProductBatch) => b.batch_no === it.batch_no) || {
-          id: `batch_${it.product_id}_${it.batch_no}`,
-          product_id: it.product_id,
-          batch_no: it.batch_no,
-          expiry_date: it.expiry_date,
+        const prodId = String(it.product_id);
+        const existingProd = await productsStore.getProductById(prodId);
+        const batches: ProductBatch[] = await productsStore.getBatchesForProduct(prodId, false);
+        const matchedBatch = batches.find((b: ProductBatch) => b.batch_no === it.batch_no);
+        const batch: ProductBatch = matchedBatch || {
+          id: `batch_${prodId}_${it.batch_no || "NO_BATCH"}`,
+          product_id: prodId,
+          batch_no: it.batch_no || "NO_BATCH",
+          expiry_date: it.expiry_date || "2099-12-31",
           stock_qty: 100,
-          mrp: it.mrp || it.unit_price,
-          selling_rate: it.unit_price,
+          mrp: Number(it.mrp) || Number(it.unit_price) || 0,
+          selling_rate: Number(it.unit_price) || 0,
         };
 
-        const prodItem: ProductItem = {
-          id: it.product_id,
-          name: it.product_name,
-          barcode: "",
-          mrp: it.mrp || it.unit_price,
-          sel_rate: it.unit_price,
-          gst_percent: it.gst_percent,
-          hsn_sac_code: it.hsn_code,
-          units_per_pack: it.units_per_pack || 1,
-          is_active: true,
-        };
+        const prodItem: ProductItem = existingProd
+          ? {
+              ...existingProd,
+              mrp: Number(it.mrp) || existingProd.mrp || Number(it.unit_price) || 0,
+              sel_rate: Number(it.unit_price) || existingProd.sel_rate || 0,
+            }
+          : {
+              id: prodId,
+              name: it.product_name,
+              barcode: "",
+              mrp: Number(it.mrp) || Number(it.unit_price) || 0,
+              sel_rate: Number(it.unit_price) || 0,
+              gst_percent: Number(it.gst_percent) || 0,
+              hsn_sac_code: (it as any).hsn_sac_code || it.hsn_code || "",
+              units_per_pack: Number(it.units_per_pack) || 1,
+              is_active: true,
+            };
 
-        posCartService.addProductToCart(prodItem, batch, it.qty, it.loose_qty);
+        const { line } = posCartService.addProductToCart(
+          prodItem,
+          batch,
+          Number(it.qty) || 0,
+          Number(it.loose_qty) || 0
+        );
+
+        if (line) {
+          if (it.unit_price !== undefined) {
+            posCartService.updateLinePrice(line.id, Number(it.unit_price));
+          }
+          if (Number(it.discount_percent) > 0 || Number(it.discount_amount) > 0) {
+            posCartService.updateLineDiscount(
+              line.id,
+              Number(it.discount_percent) || 0,
+              Number(it.discount_amount) || 0
+            );
+          }
+        }
       }
       refreshCartState();
       showNotification(`Editing ${details.invoice.invoice_number}`);
@@ -476,12 +537,20 @@ export const PosBillingPage: React.FC = () => {
   }, [editInvoiceParam]);
 
   const cancelEditingMode = () => {
+    if (editingInvoice) {
+      const counterCode =
+        storeRegistryService.getActiveStore()?.counter_code ||
+        staffAuthService.getCurrentSession()?.counterCode ||
+        "C01";
+      void invoiceManagementService.releaseInvoiceLock(editingInvoice.id, counterCode);
+      invoiceApprovalService.clearGrant(editingInvoice.id);
+    }
     setEditingInvoice(null);
     setOriginalInvoiceItems([]);
     setSearchParams({});
     posCartService.clearCart();
     refreshCartState();
-    setInvoiceNumber(`INV-${Date.now().toString().slice(-6)}`);
+    setInvoiceNumber(companySettingsService.previewNextInvoiceNumber());
     setCustomerName("Walk-in Customer");
     setCustomerPhone("");
     setCustomerGstin("");
@@ -554,9 +623,15 @@ export const PosBillingPage: React.FC = () => {
     }, 50);
   };
 
+  useEffect(() => {
+    if (!isRecallModalOpen) return;
+    setRecallIndex(0);
+    const timer = window.setTimeout(() => recallListRef.current?.focus(), 0);
+    return () => window.clearTimeout(timer);
+  }, [isRecallModalOpen]);
+
   useModalEscape(Boolean(selectedProductForBatch), closeBatchModal);
   useModalEscape(isTenderModalOpen, () => setIsTenderModalOpen(false));
-  useModalEscape(isRecallModalOpen, () => setIsRecallModalOpen(false));
   useModalEscape(isDiffModalOpen, () => setIsDiffModalOpen(false));
 
   const updateDropdownPosition = () => {
@@ -1026,38 +1101,26 @@ export const PosBillingPage: React.FC = () => {
         return;
       }
 
-      // Alt+D: Focus Doctor Details
-      if (e.altKey && !e.shiftKey && (keyLower === "d" || code === "KeyD")) {
-        e.preventDefault();
-        doctorInputRef.current?.focus();
-        return;
-      }
-
-      // Alt+P: Focus Patient Details
-      if (e.altKey && !e.shiftKey && (keyLower === "p" || code === "KeyP")) {
-        e.preventDefault();
-        patientInputRef.current?.focus();
-        return;
+      // Alt+D / Alt+P: pharmacy-only fields. Retail and nursing stores must not
+      // have these keys swallowed, so the legacy fallback is gated like the
+      // central POS registration.
+      if (clinicalShortcutsEnabled) {
+        if (e.altKey && !e.shiftKey && (keyLower === "d" || code === "KeyD")) {
+          e.preventDefault();
+          doctorInputRef.current?.focus();
+          return;
+        }
+        if (e.altKey && !e.shiftKey && (keyLower === "p" || code === "KeyP")) {
+          e.preventDefault();
+          patientInputRef.current?.focus();
+          return;
+        }
       }
 
       // F6: Find / Manage Past Bills
       if (e.key === "F6") {
         e.preventDefault();
         navigate("/bills");
-        return;
-      }
-
-      // F8 or Alt+H or Alt+8: Hold Current Bill
-      if (e.key === "F8" || (e.altKey && (keyLower === "h" || code === "KeyH" || e.key === "8" || code === "Digit8"))) {
-        e.preventDefault();
-        handleHoldBill();
-        return;
-      }
-
-      // F9 or Alt+J or Alt+9: Recall Held Bill
-      if (e.key === "F9" || (e.altKey && (keyLower === "j" || code === "KeyJ" || e.key === "9" || code === "Digit9"))) {
-        e.preventDefault();
-        setIsRecallModalOpen(true);
         return;
       }
 
@@ -1068,13 +1131,14 @@ export const PosBillingPage: React.FC = () => {
         return;
       }
 
-      // Ctrl+F2 / Cmd+F2 / Shift+F2 / Ctrl+Shift+D / Cmd+Shift+D / Alt+Shift+D / Alt+O: Open Overall Bill Discount Modal
+      // Alt+F2 / Ctrl+F2 / Cmd+F2 / Shift+F2 / Ctrl+Shift+D / Cmd+Shift+D / Alt+Shift+D / Alt+O: Open Overall Bill Discount Modal
       if (
         (isCmdOrCtrl && e.key === "F2") ||
         (e.shiftKey && e.key === "F2") ||
         (isCmdOrCtrl && e.shiftKey && (keyLower === "d" || code === "KeyD")) ||
         (e.altKey && e.shiftKey && (keyLower === "d" || code === "KeyD")) ||
-        (e.altKey && (keyLower === "o" || code === "KeyO"))
+        (e.altKey && (keyLower === "o" || code === "KeyO")) ||
+        (e.altKey && (e.key === "F2" || code === "F2") && (lines.length === 0 || selectedRowIndex === null))
       ) {
         e.preventDefault();
         setIsBillDiscountModalOpen(true);
@@ -1171,9 +1235,9 @@ export const PosBillingPage: React.FC = () => {
         }
       }
 
-      // Global Item-level shortcuts (F2 for item discount, F3 for item rate)
+      // Global Item-level shortcuts (Alt+F2 for item discount, F3 for item rate)
       const isItemDiscountKey =
-        (e.key === "F2" && !e.ctrlKey && !e.metaKey && !e.shiftKey) ||
+        (e.altKey && (e.key === "F2" || code === "F2")) ||
         (e.altKey && (e.key === "2" || code === "Digit2" || code === "Numpad2")) ||
         (isCmdOrCtrl && e.shiftKey && (keyLower === "i" || code === "KeyI"));
 
@@ -1199,20 +1263,6 @@ export const PosBillingPage: React.FC = () => {
           : 0;
         handleSelectRow(targetIdx);
         handleQuickRate(lines[targetIdx]);
-        return;
-      }
-
-      const isItemProductBatchEditKey =
-        (e.key === "F4" && !e.ctrlKey && !e.metaKey && !e.shiftKey) ||
-        (isCmdOrCtrl && (keyLower === "m" || code === "KeyM"));
-
-      if (isItemProductBatchEditKey && lines.length > 0) {
-        e.preventDefault();
-        const targetIdx = selectedRowIndex !== null && selectedRowIndex >= 0 && selectedRowIndex < lines.length
-          ? selectedRowIndex
-          : 0;
-        handleSelectRow(targetIdx);
-        setSelectedLineForProductBatchEdit(lines[targetIdx]);
         return;
       }
 
@@ -1397,6 +1447,226 @@ export const PosBillingPage: React.FC = () => {
     totals.grand_total,
   ]);
 
+  // Central shortcut registrations for the POS screen. Screen scope wins over
+  // the global shell, and the whole set is disabled while an overlay is open so
+  // modals/preview/login keep their own keys.
+  const shortcutBlockedRef = useRef(false);
+  shortcutBlockedRef.current =
+    isTenderModalOpen ||
+    isRecallModalOpen ||
+    isDiffModalOpen ||
+    isColumnsModalOpen ||
+    Boolean(selectedProductForBatch) ||
+    isShortcutsModalOpen ||
+    quickEditModal.isOpen ||
+    Boolean(selectedLineForConversion) ||
+    isBillDiscountModalOpen ||
+    isRoundOffModalOpen ||
+    Boolean(selectedLineForProductBatchEdit) ||
+    isTaxOverrideModalOpen ||
+    previewModalState.isOpen;
+
+  const clinicalShortcutsEnabled = isClinicalSupported(appSettingsState.store_type);
+
+  const shortcutHandlersRef = useRef<Partial<Record<ShortcutAction, ShortcutHandler>>>({});
+  shortcutHandlersRef.current = {
+    holdBill: () => {
+      handleHoldBill();
+      return true;
+    },
+    recallBill: () => {
+      setIsRecallModalOpen(true);
+      return true;
+    },
+    checkout: () => {
+      openTenderModal();
+      return true;
+    },
+    focusEntry: () => {
+      handleFocusSearch();
+      return true;
+    },
+    focusCustomer: () => {
+      customerInputRef.current?.focus();
+      return true;
+    },
+    focusMobile: () => {
+      customerPhoneInputRef.current?.focus();
+      return true;
+    },
+    focusDoctor: () => {
+      if (!clinicalShortcutsEnabled) return false;
+      doctorInputRef.current?.focus();
+      return true;
+    },
+    focusPatient: () => {
+      if (!clinicalShortcutsEnabled) return false;
+      patientInputRef.current?.focus();
+      return true;
+    },
+    billDiscount: () => {
+      const target = selectedRowIndex !== null ? lines[selectedRowIndex] : undefined;
+      if (target) {
+        handleQuickDiscount(target);
+      } else {
+        setIsBillDiscountModalOpen(true);
+      }
+      return true;
+    },
+    lineDiscount: () => {
+      if (lines.length === 0) return false;
+      const index = selectedRowIndex !== null && selectedRowIndex >= 0 && selectedRowIndex < lines.length
+        ? selectedRowIndex
+        : lines.length - 1;
+      handleSelectRow(index);
+      const cell = document.getElementById(`disc-input-${lines[index].id}`) as HTMLElement | null;
+      if (cell) {
+        cell.focus();
+        return true;
+      }
+      handleQuickDiscount(lines[index]);
+      return true;
+    },
+    roundOff: () => {
+      setIsRoundOffModalOpen(true);
+      return true;
+    },
+    batchEdit: () => {
+      // Entry row first: edit the product/batch the cashier is about to add.
+      if (entryDraftProduct) {
+        setSelectedProductForBatch(entryDraftProduct);
+        productsStore.getBatchesForProduct(entryDraftProduct.id, false).then((b) => {
+          setProductBatches(b);
+        });
+        return true;
+      }
+      if (selectedRowIndex === null || selectedRowIndex < 0 || selectedRowIndex >= lines.length) {
+        return false;
+      }
+      setSelectedLineForProductBatchEdit(lines[selectedRowIndex]);
+      return true;
+    },
+    rateEdit: () => {
+      if (lines.length === 0) return false;
+      const index = selectedRowIndex !== null && selectedRowIndex >= 0 && selectedRowIndex < lines.length
+        ? selectedRowIndex
+        : lines.length - 1;
+      handleSelectRow(index);
+      handleQuickRate(lines[index]);
+      return true;
+    },
+    columns: () => {
+      setIsColumnsModalOpen((prev) => !prev);
+      return true;
+    },
+    newBill: () => {
+      if (addLineMode === "after_enter" && draftLine) {
+        const ok = window.confirm(`Add "${entryDraftProduct?.name || "product"}" to the bill before starting a new bill?`);
+        if (ok) {
+          commitEntryRow();
+        } else {
+          setEntryDraftProduct(null);
+          setEntryDraftBatch(null);
+        }
+      }
+      cancelEditingMode();
+      return true;
+    },
+    clearCart: () => {
+      if (lines.length === 0) return false;
+      if (window.confirm("Are you sure you want to clear all items in this bill?")) {
+        posCartService.clearCart();
+        refreshCartState();
+        showNotification("Bill cleared", "info");
+        handleFocusSearch();
+      }
+      return true;
+    },
+    undo: () => {
+      if (!undoDeleteBuffer) return false;
+      handleUndoDelete();
+      return true;
+    },
+    deleteLine: () => {
+      if (selectedRowIndex === null) return false;
+      handleDeleteSelectedLine();
+      return true;
+    },
+    batchPicker: () => {
+      if (selectedRowIndex === null) return false;
+      handleOpenBatchForSelectedLine();
+      return true;
+    },
+    toggleUnitRate: () => {
+      if (selectedRowIndex === null) return false;
+      handleToggleUnitRateForSelectedLine();
+      return true;
+    },
+    packaging: () => {
+      if (selectedRowIndex === null) return false;
+      setSelectedLineForConversion(lines[selectedRowIndex]);
+      return true;
+    },
+    moveLineUp: () => {
+      if (selectedRowIndex === null) return false;
+      handleMoveLine("up");
+      return true;
+    },
+    moveLineDown: () => {
+      if (selectedRowIndex === null) return false;
+      handleMoveLine("down");
+      return true;
+    },
+  };
+
+  useEffect(() => {
+    const actions = Object.keys(shortcutHandlersRef.current) as ShortcutAction[];
+    const handlers: Partial<Record<ShortcutAction, ShortcutHandler>> = {};
+    for (const action of actions) {
+      handlers[action] = (event) => shortcutHandlersRef.current[action]?.(event) ?? false;
+    }
+    return shortcutDispatcher.register({
+      id: "pos-main",
+      scope: "pos",
+      isActive: () => !shortcutBlockedRef.current,
+      handlers,
+    });
+  }, []);
+
+  // Invoice edit is its own scope so Ctrl+Q cannot collide with POS keys.
+  useEffect(() => {
+    return shortcutDispatcher.register({
+      id: "pos-invoice-edit",
+      scope: "edit",
+      isActive: () => Boolean(editingInvoice) && !shortcutBlockedRef.current,
+      handlers: {
+        cancelEdit: () => {
+          if (lines.length > 0 && !window.confirm("Discard changes and release the edit lock?")) {
+            return true;
+          }
+          cancelEditingMode();
+          return true;
+        },
+      },
+    });
+  }, [editingInvoice, lines.length]);
+
+  const applyCustomerTaxJurisdiction = (gstin: string, placeOfSupply?: string) => {
+    const settings = companySettingsService.getSettings();
+    const homeState = (settings.state_code || "32").trim();
+    const clean = gstin.trim().toUpperCase();
+    const fromGstin = isValidGstin(clean) ? clean.slice(0, 2) : "";
+    const fromPos = (placeOfSupply || "").slice(0, 2);
+    const custState = fromGstin || (/^\d{2}$/.test(fromPos) ? fromPos : homeState);
+    posCartService.setIsInterState(custState !== homeState);
+  };
+
+  const handleCustomerGstinChange = (raw: string) => {
+    const value = raw.toUpperCase().replace(/\s+/g, "");
+    setCustomerGstin(value);
+    applyCustomerTaxJurisdiction(value, selectedCustomer?.place_of_supply);
+  };
+
   const handleCustomerPhoneChange = async (newPhone: string) => {
     setCustomerPhone(newPhone);
     const clean = normalizeIndianPhone(newPhone);
@@ -1407,6 +1677,7 @@ export const PosBillingPage: React.FC = () => {
         setCustomerName(match.name);
         setCustomerGstin(match.gstin || "");
         posCartService.setCustomer(match.id, match.name, match.gstin || "", match.place_of_supply || "", match.phone);
+        applyCustomerTaxJurisdiction(match.gstin || "", match.place_of_supply);
         showNotification(`Matched customer: ${match.name}`);
       }
     }
@@ -2113,6 +2384,12 @@ export const PosBillingPage: React.FC = () => {
   };
 
   const openTenderModal = () => {
+    const currentActiveStore = storeRegistryService.getActiveStore();
+    if (currentActiveStore && currentActiveStore.is_active === false) {
+      showNotification("Cannot open checkout: Store has been disabled by Admin. Billing is prohibited.", "error");
+      return;
+    }
+
     if (addLineMode === "after_enter" && draftLine) {
       commitEntryRow();
     }
@@ -2158,6 +2435,14 @@ export const PosBillingPage: React.FC = () => {
       }
 
       const primaryPaymentMode = tenders[0]?.mode || editingInvoice.payment_mode || "Cash";
+      const grant = invoiceApprovalService.getGrant(editingInvoice.id);
+      if (!grant) {
+        showNotification(
+          "Edit authorization expired. Return to Past Bills and request manager approval again.",
+          "error"
+        );
+        return;
+      }
       const res = await invoiceManagementService.saveInvoiceEdit(editingInvoice.id, {
         lines: cartSnapshot,
         customerName,
@@ -2166,6 +2451,12 @@ export const PosBillingPage: React.FC = () => {
         paymentMode: primaryPaymentMode,
         reason: editReason || "Invoice revised from POS screen",
         operatorUser: "Counter 01",
+        approval: {
+          id: grant.id,
+          token: grant.token,
+          mode: grant.mode,
+          approvedByName: grant.approvedByName,
+        },
       });
 
       if (res.success) {
@@ -2202,13 +2493,20 @@ export const PosBillingPage: React.FC = () => {
           });
         }
 
+        invoiceApprovalService.clearGrant(editingInvoice.id);
+        void invoiceManagementService.releaseInvoiceLock(
+          editingInvoice.id,
+          storeRegistryService.getActiveStore()?.counter_code ||
+            staffAuthService.getCurrentSession()?.counterCode ||
+            "C01"
+        );
         posCartService.clearCart();
         refreshCartState();
         setIsDiffModalOpen(false);
         setEditingInvoice(null);
         setOriginalInvoiceItems([]);
         setSearchParams({});
-        setInvoiceNumber(`INV-${Date.now().toString().slice(-6)}`);
+        setInvoiceNumber(companySettingsService.previewNextInvoiceNumber());
         setCustomerName("Walk-in Customer");
         setCustomerPhone("");
         setCustomerGstin("");
@@ -2278,7 +2576,7 @@ export const PosBillingPage: React.FC = () => {
       place_of_supply: settings.state_code ? `${settings.state_code}-Kerala` : "32-Kerala",
       customer_name: customerName || "Walk-in Customer",
       customer_phone: customerPhone || "",
-      customer_gstin: customerGstin || undefined,
+      customer_gstin: customerGstin?.trim().toUpperCase() || undefined,
       doctor_name: doctorName || undefined,
       patient_name: patientName || undefined,
       payment_mode: tenders.length > 1 ? "Split" : (tenders[0]?.mode || "Cash"),
@@ -2352,6 +2650,12 @@ export const PosBillingPage: React.FC = () => {
   };
 
   const handleFinalizeAndPrint = async (shouldPrint = true) => {
+    const currentActiveStore = storeRegistryService.getActiveStore();
+    if (currentActiveStore && currentActiveStore.is_active === false) {
+      showNotification("Cannot process invoice: This store has been disabled in Central Admin.", "error");
+      return;
+    }
+
     // 1. Idempotency guard: ignore repeat triggers while a save is in progress
     if (isFinalizingRef.current) {
       return;
@@ -2366,6 +2670,15 @@ export const PosBillingPage: React.FC = () => {
 
       if (cartSnapshot.length === 0) {
         showNotification("Cannot finalize: Cart is empty", "error");
+        return;
+      }
+
+      const trimmedGstin = customerGstin?.trim().toUpperCase() || "";
+      if (trimmedGstin && !isValidGstin(trimmedGstin)) {
+        showNotification(
+          "Invalid GSTIN: enter a valid 15-character GSTIN or clear the field for a B2C walk-in sale.",
+          "error"
+        );
         return;
       }
 
@@ -2427,10 +2740,58 @@ export const PosBillingPage: React.FC = () => {
 
       const appSettings = companySettingsService.getSettings();
 
+      // DEF-03 Fix: Auto-commit in-progress tender inputs from focused DOM fields prior to balance calculation & validation
+      let effectiveTenders = [...tenders];
+
+      // Identify focused tender input field
+      const activeEl = typeof document !== "undefined" ? (document.activeElement as HTMLInputElement | null) : null;
+      let targetIndex = activeTenderIndex;
+      if (activeEl) {
+        const matchedIdx = tenderAmountInputRefs.current.findIndex((el) => el === activeEl);
+        if (matchedIdx !== -1) {
+          targetIndex = matchedIdx;
+        }
+        activeEl.blur();
+      }
+
+      // Synchronize active in-progress typed value
+      const activeInputRef = tenderAmountInputRefs.current[targetIndex];
+      if (activeInputRef && activeInputRef.value !== "") {
+        effectiveTenders = billingTenderService.syncInProgressTenderInput(
+          effectiveTenders,
+          targetIndex,
+          activeInputRef.value
+        );
+      }
+
+      // Synchronize any other mounted tender inputs if their DOM values diverge from state
+      tenderAmountInputRefs.current.forEach((el, idx) => {
+        if (el && el.value !== "" && idx < effectiveTenders.length) {
+          const domVal = parseFloat(el.value);
+          if (!isNaN(domVal) && domVal !== effectiveTenders[idx].amount) {
+            effectiveTenders = billingTenderService.syncInProgressTenderInput(
+              effectiveTenders,
+              idx,
+              domVal
+            );
+          }
+        }
+      });
+
+      if (effectiveTenders.length === 0) {
+        effectiveTenders = [{ id: `pay_${Date.now()}_0`, mode: "Cash", amount: totalsSnapshot.grand_total, status: "received" }];
+      } else {
+        const tenderCheck = billingTenderService.calculateTenderBalance(totalsSnapshot.grand_total, effectiveTenders);
+        if (effectiveTenders.length === 1 && tenderCheck.balanceDue > 0 && effectiveTenders[0].mode === "Cash") {
+          effectiveTenders = [{ ...effectiveTenders[0], amount: totalsSnapshot.grand_total }];
+        }
+      }
+      setTenders(effectiveTenders);
+
       // Validate payment lines
       const validation = await billingTenderService.validatePaymentLines(
         totalsSnapshot.grand_total,
-        tenders,
+        effectiveTenders,
         selectedCustomer
           ? {
               id: selectedCustomer.id,
@@ -2456,11 +2817,11 @@ export const PosBillingPage: React.FC = () => {
         showNotification(validation.warning, "warning");
       }
 
-      const tenderCalcSnapshot = billingTenderService.calculateTenderBalance(totalsSnapshot.grand_total, tenders);
+      const tenderCalcSnapshot = billingTenderService.calculateTenderBalance(totalsSnapshot.grand_total, effectiveTenders);
       const printData = preparePrintData(cartSnapshot, totalsSnapshot);
 
       // 4. Save invoice with payment lines
-      const res = await posCartService.finalizeInvoice(invoiceNumber, tenders, {
+      const res = await posCartService.finalizeInvoice(invoiceNumber, effectiveTenders, {
         autoClear: false,
         linesSnapshot: cartSnapshot,
         totalsSnapshot,
@@ -2545,7 +2906,8 @@ export const PosBillingPage: React.FC = () => {
               ]
             : undefined
         );
-        setInvoiceNumber(`INV-${Date.now().toString().slice(-6)}`);
+        await companySettingsService.syncNextInvoiceSequence(invoiceNumber);
+        setInvoiceNumber(companySettingsService.previewNextInvoiceNumber());
         setCustomerName("Walk-in Customer");
         setCustomerPhone("");
         setCustomerGstin("");
@@ -2678,7 +3040,7 @@ export const PosBillingPage: React.FC = () => {
                     const companySettings = companySettingsService.getSettings();
                     const homeState = (companySettings.state_code || "32").trim();
                     const custGstin = sel.gstin || sel.customer?.gstin || "";
-                    const custStateFromGstin = custGstin.length >= 2 ? custGstin.slice(0, 2) : "";
+                    const custStateFromGstin = isValidGstin(custGstin) ? custGstin.trim().slice(0, 2) : "";
                     const custPlaceOfSupply = sel.customer?.place_of_supply || "";
                     const custStateCode = custStateFromGstin || (custPlaceOfSupply.slice(0, 2).match(/^\d{2}$/) ? custPlaceOfSupply.slice(0, 2) : homeState);
                     const isInterState = custStateCode !== "" && custStateCode !== homeState;
@@ -2715,14 +3077,26 @@ export const PosBillingPage: React.FC = () => {
             <input
               type="text"
               value={customerGstin}
-              onChange={(e) => setCustomerGstin(e.target.value)}
+              onChange={(e) => handleCustomerGstinChange(e.target.value)}
               placeholder="GSTIN"
-              className="w-32 rounded-[10px] border border-[var(--color-border)] bg-[var(--color-surface)] px-2.5 py-1 text-xs font-mono text-[var(--color-text)] placeholder-[var(--color-text-muted)] focus:border-[var(--color-accent)] focus:outline-none uppercase"
+              maxLength={15}
+              aria-invalid={Boolean(customerGstin.trim()) && !isValidGstin(customerGstin)}
+              title={
+                customerGstin.trim() && !isValidGstin(customerGstin)
+                  ? "Invalid GSTIN — must be 15 characters (e.g. 32AABCU9603R1ZM)"
+                  : "Customer GSTIN (optional, 15 characters)"
+              }
+              className={`w-32 rounded-[10px] border bg-[var(--color-surface)] px-2.5 py-1 text-xs font-mono text-[var(--color-text)] placeholder-[var(--color-text-muted)] focus:outline-none uppercase ${
+                customerGstin.trim() && !isValidGstin(customerGstin)
+                  ? "border-rose-500 focus:border-rose-500"
+                  : "border-[var(--color-border)] focus:border-[var(--color-accent)]"
+              }`}
             />
           )}
 
           {isClinicalSupported(appSettingsState.store_type) && posHeaders.find((h) => h.id === "doctor")?.visible && (
             <input
+              ref={doctorInputRef}
               type="text"
               value={doctorName}
               onChange={(e) => {
@@ -2736,6 +3110,7 @@ export const PosBillingPage: React.FC = () => {
 
           {isClinicalSupported(appSettingsState.store_type) && posHeaders.find((h) => h.id === "patient")?.visible && (
             <input
+              ref={patientInputRef}
               type="text"
               value={patientName}
               onChange={(e) => {
@@ -2773,10 +3148,10 @@ export const PosBillingPage: React.FC = () => {
           <button
             onClick={() => navigate("/bills")}
             className="flex items-center gap-1.5 rounded-[10px] bg-[var(--color-surface-subtle)] border border-[var(--color-border)] px-3 py-1.5 text-xs font-semibold text-[var(--color-text)] hover:bg-[var(--color-surface-hover)] cursor-pointer"
-            title="Recall / Find Past Bills (F6)"
+            title={`Recall / Find Past Bills (${shortcutLabel("navBills", "global")})`}
           >
             <FileText className="h-3.5 w-3.5 text-[var(--color-accent)]" />
-            <span className="hidden md:inline">Find Bill (F6)</span>
+            <span className="hidden md:inline">Find Bill ({shortcutLabel("navBills", "global")})</span>
           </button>
 
           <button
@@ -2784,7 +3159,7 @@ export const PosBillingPage: React.FC = () => {
             className="flex items-center gap-1.5 rounded-[10px] bg-[var(--color-warning-bg)] border border-[var(--color-warning-border)] px-3 py-1.5 text-xs font-semibold text-[var(--color-warning-text)] hover:opacity-90 cursor-pointer"
           >
             <PauseCircle className="h-3.5 w-3.5" />
-            <span>Hold (F8)</span>
+            <span>Hold ({shortcutLabel("holdBill", "pos")})</span>
           </button>
 
           <button
@@ -2792,7 +3167,7 @@ export const PosBillingPage: React.FC = () => {
             className="relative flex items-center gap-1.5 rounded-[10px] bg-[var(--color-accent-soft)] border border-[var(--color-accent-soft)] px-3 py-1.5 text-xs font-semibold text-[var(--color-accent)] hover:opacity-90 cursor-pointer"
           >
             <PlayCircle className="h-3.5 w-3.5" />
-            <span>Recall (F9)</span>
+            <span>Recall ({shortcutLabel("recallBill", "pos")})</span>
             {heldBillsCount > 0 && (
               <span className="ml-1 rounded-full bg-[var(--color-accent)] px-1.5 py-0.2 text-[10px] font-bold font-mono text-white">
                 {heldBillsCount}
@@ -2820,10 +3195,16 @@ export const PosBillingPage: React.FC = () => {
               Changes will reverse original stock and update ledger atomically on Save (F12)
             </span>
             <button
-              onClick={cancelEditingMode}
+              onClick={() => {
+                if (lines.length > 0 && !window.confirm("Discard changes and release the edit lock?")) {
+                  return;
+                }
+                cancelEditingMode();
+              }}
+              title={`Cancel editing and release the invoice lock (${shortcutLabel("cancelEdit", "edit")})`}
               className="rounded bg-amber-200 px-3 py-1 text-xs font-bold text-amber-950 hover:bg-amber-300 transition-colors shadow-xs"
             >
-              Cancel Editing
+              Cancel Editing ({shortcutLabel("cancelEdit", "edit")})
             </button>
           </div>
         </div>
@@ -3175,10 +3556,10 @@ export const PosBillingPage: React.FC = () => {
                   tabIndex={-1}
                   onClick={() => setIsBillDiscountModalOpen(true)}
                   className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-[8px] bg-[var(--color-warning-bg)] hover:opacity-90 text-[var(--color-warning-text)] font-bold border border-[var(--color-warning-border)] shadow-2xs transition-colors cursor-pointer"
-                  title="Edit Overall Bill Discount (Ctrl+F2)"
+                  title="Edit Overall Bill Discount (Alt+F2 / Ctrl+F2)"
                 >
                   <span className="font-mono">Bill Disc: -₹{displayTotals.bill_discount_amount.toFixed(2)}</span>
-                  <span className="text-[10px] text-[var(--color-warning-text)] font-mono opacity-80">Ctrl+F2</span>
+                  <span className="text-[10px] text-[var(--color-warning-text)] font-mono opacity-80">Alt+F2</span>
                 </button>
               ) : (
                 <button
@@ -3186,10 +3567,10 @@ export const PosBillingPage: React.FC = () => {
                   tabIndex={-1}
                   onClick={() => setIsBillDiscountModalOpen(true)}
                   className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-[8px] bg-[var(--color-surface-subtle)] hover:bg-[var(--color-surface-hover)] text-[var(--color-text-muted)] font-semibold text-[11px] border border-[var(--color-border)] transition-colors cursor-pointer"
-                  title="Add Overall Bill Discount (Ctrl+F2)"
+                  title="Add Overall Bill Discount (Alt+F2 / Ctrl+F2)"
                 >
                   <span>+ Bill Disc</span>
-                  <span className="text-[10px] font-mono text-[var(--color-text-muted)]">Ctrl+F2</span>
+                  <span className="text-[10px] font-mono text-[var(--color-text-muted)]">Alt+F2</span>
                 </button>
               )}
             </div>
@@ -3235,7 +3616,7 @@ export const PosBillingPage: React.FC = () => {
 
             <button
               onClick={openTenderModal}
-              disabled={lines.length === 0 && !draftLine}
+              disabled={(lines.length === 0 && !draftLine) || Boolean(activeStore && activeStore.is_active === false)}
               className="flex items-center gap-2 rounded-[10px] bg-[var(--color-accent)] px-6 py-3 text-sm font-bold text-white shadow-xs hover:bg-[var(--color-accent-hover)] disabled:opacity-40 transition-all cursor-pointer h-[48px]"
             >
               <CreditCard className="h-4 w-4" />
@@ -4164,45 +4545,89 @@ export const PosBillingPage: React.FC = () => {
         );
       })()}
 
-      {/* Recall Held Bills Modal (F9) */}
-      {isRecallModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 select-none font-sans animate-in fade-in duration-100">
-          <div className="w-full max-w-md rounded-card bg-surface shadow-modal overflow-hidden border border-border-main">
-            <div className="flex items-center justify-between border-b border-border-main px-4 py-3 bg-canvas">
-              <h3 className="text-xs font-bold text-text-main">Recall Held Bills</h3>
-              <button
-                onClick={() => setIsRecallModalOpen(false)}
-                className="text-text-muted hover:text-text-main p-1 rounded-btn hover:bg-surface transition-colors cursor-pointer"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-            <div className="max-h-72 overflow-y-auto divide-y divide-border-main">
-              {billingTenderService.listHeldBills().length === 0 ? (
-                <div className="py-8 text-center text-text-muted text-xs">No bills are currently on hold.</div>
-              ) : (
-                billingTenderService.listHeldBills().map((b) => (
-                  <div
-                    key={b.id}
-                    onClick={() => handleRecallBill(b.id)}
-                    className="flex cursor-pointer items-center justify-between px-4 py-3 hover:bg-surface-hover text-xs transition-colors"
-                  >
-                    <div>
-                      <p className="font-semibold text-text-main">{b.customer_name}</p>
-                      <p className="text-[11px] text-text-muted">
-                        {b.items_count} items | Held: {new Date(b.held_at).toLocaleTimeString()}
-                      </p>
-                    </div>
-                    <span className="rounded-btn bg-accent-soft px-2.5 py-1 text-[11px] font-bold text-accent">
-                      Recall →
-                    </span>
-                  </div>
-                ))
-              )}
-            </div>
+      {/* Recall Held Bills Modal. Esc/Tab/focus come from the shared modal layer. */}
+      <ModalLayer
+        isOpen={isRecallModalOpen}
+        onClose={() => setIsRecallModalOpen(false)}
+        ariaLabel="Recall Held Bills"
+        className="fixed inset-0 flex items-center justify-center bg-black/40 p-4 select-none z-[60]"
+      >
+        <div className="w-full max-w-md rounded-card bg-surface shadow-modal overflow-hidden border border-border-main">
+          <div className="flex items-center justify-between border-b border-border-main px-4 py-3 bg-canvas">
+            <h3 className="text-xs font-bold text-text-main">Recall Held Bills</h3>
+            <span className="text-[10px] text-text-muted mr-auto ml-3">
+              {shortcutLabel("recallBill", "pos")} · ↑↓ to choose · Enter to recall · Esc to close
+            </span>
+            <button
+              onClick={() => setIsRecallModalOpen(false)}
+              className="text-text-muted hover:text-text-main p-1 rounded-btn hover:bg-surface transition-colors cursor-pointer"
+              aria-label="Close recall dialog"
+            >
+              <X className="h-4 w-4" />
+            </button>
           </div>
+          {(() => {
+            const heldBills = billingTenderService.listHeldBills();
+            return (
+              <div
+                ref={recallListRef}
+                role="listbox"
+                aria-label="Held bills"
+                tabIndex={0}
+                className="max-h-72 overflow-y-auto divide-y divide-border-main focus:outline-none"
+                onKeyDown={(e) => {
+                  if (heldBills.length === 0) return;
+                  if (e.key === "ArrowDown") {
+                    e.preventDefault();
+                    setRecallIndex((i) => (i + 1) % heldBills.length);
+                  } else if (e.key === "ArrowUp") {
+                    e.preventDefault();
+                    setRecallIndex((i) => (i - 1 + heldBills.length) % heldBills.length);
+                  } else if (e.key === "Enter") {
+                    e.preventDefault();
+                    const bill = heldBills[recallIndex] || heldBills[0];
+                    if (bill) handleRecallBill(bill.id);
+                  } else if (/^[1-9]$/.test(e.key)) {
+                    const bill = heldBills[Number(e.key) - 1];
+                    if (bill) {
+                      e.preventDefault();
+                      handleRecallBill(bill.id);
+                    }
+                  }
+                }}
+              >
+                {heldBills.length === 0 ? (
+                  <div className="py-8 text-center text-text-muted text-xs">No bills are currently on hold.</div>
+                ) : (
+                  heldBills.map((b, index) => (
+                    <div
+                      key={b.id}
+                      role="option"
+                      aria-selected={index === recallIndex}
+                      tabIndex={index === recallIndex ? 0 : -1}
+                      onClick={() => handleRecallBill(b.id)}
+                      onFocus={() => setRecallIndex(index)}
+                      className={`flex cursor-pointer items-center justify-between px-4 py-3 hover:bg-surface-hover text-xs transition-colors ${
+                        index === recallIndex ? "bg-surface-hover outline-none ring-2 ring-inset ring-accent/40" : ""
+                      }`}
+                    >
+                      <div>
+                        <p className="font-semibold text-text-main">{b.customer_name}</p>
+                        <p className="text-[11px] text-text-muted">
+                          {b.items_count} items | Held: {new Date(b.held_at).toLocaleTimeString()}
+                        </p>
+                      </div>
+                      <span className="rounded-btn bg-accent-soft px-2.5 py-1 text-[11px] font-bold text-accent">
+                        {index + 1}. Recall →
+                      </span>
+                    </div>
+                  ))
+                )}
+              </div>
+            );
+          })()}
         </div>
-      )}
+      </ModalLayer>
 
       {/* Invoice Revision Diff Confirmation Modal */}
       {isDiffModalOpen && editingInvoice && editDiff && (
@@ -4400,7 +4825,7 @@ export const PosBillingPage: React.FC = () => {
         onSave={handleSaveLineConversion}
       />
 
-      {/* Quick Product & Batch Editor (F4) Modal */}
+      {/* Quick Product & Batch Editor (Alt+E) Modal */}
       <QuickProductBatchEditModal
         isOpen={Boolean(selectedLineForProductBatchEdit)}
         line={selectedLineForProductBatchEdit}
@@ -4408,7 +4833,7 @@ export const PosBillingPage: React.FC = () => {
         onSave={handleSaveProductBatchEdit}
       />
 
-      {/* Quick Line Edit (F2 / F3) Modal */}
+      {/* Quick Line Edit (Alt+F2 / F3) Modal */}
       <QuickLineEditModal
         isOpen={quickEditModal.isOpen}
         type={quickEditModal.type}

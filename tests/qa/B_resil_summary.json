@@ -1,0 +1,22 @@
+[
+ {
+  "id": "B11",
+  "status": "PASS"
+ },
+ {
+  "id": "B12a",
+  "status": "FAIL"
+ },
+ {
+  "id": "B12",
+  "status": "FAIL"
+ },
+ {
+  "id": "B13",
+  "status": "FAIL"
+ },
+ {
+  "id": "B14",
+  "status": "CHECK"
+ }
+]

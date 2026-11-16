@@ -12,6 +12,7 @@ export type Permission =
   | "invoices:read"
   | "invoices:create"
   | "invoices:cancel"
+  | "invoices:approve"
   | "purchases:read"
   | "purchases:create"
   | "returns:read"
@@ -36,6 +37,7 @@ export const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     "invoices:read",
     "invoices:create",
     "invoices:cancel",
+    "invoices:approve",
     "purchases:read",
     "purchases:create",
     "returns:read",
@@ -59,6 +61,7 @@ export const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     "invoices:read",
     "invoices:create",
     "invoices:cancel",
+    "invoices:approve",
     "purchases:read",
     "purchases:create",
     "returns:read",

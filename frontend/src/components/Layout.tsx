@@ -25,6 +25,7 @@ import { StoreSwitcherModal } from "./StoreSwitcherModal";
 import { storeRegistryService, type RegisteredStoreRecord, STORE_PRESET_COLORS } from "../lib/auth/storeRegistryService";
 import { Lock, Users, Building2 } from "lucide-react";
 import { APP_FULL_VERSION } from "../config/version";
+import { shortcutDispatcher } from "../lib/keyboard/shortcutDispatcher";
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -85,7 +86,13 @@ export const Layout: React.FC<LayoutProps> = ({ children, onOpenGateway, onAddNe
       });
     });
     const unsubReg = storeRegistryService.onRegistryChange((reg) => {
-      setActiveStore(storeRegistryService.getActiveStore());
+      const cur = storeRegistryService.getActiveStore();
+      setActiveStore(cur);
+      if (cur && cur.is_active === false) {
+        setIsStoreDisabled(true);
+      } else if (cur && cur.is_active) {
+        setIsStoreDisabled(false);
+      }
     });
     const unsubHealth = onlineTransactionService.subscribe(setNetworkHealth);
 
@@ -115,126 +122,70 @@ export const Layout: React.FC<LayoutProps> = ({ children, onOpenGateway, onAddNe
     window.addEventListener("online", handleOnline);
     window.addEventListener("offline", handleOffline);
 
-    // Global keyboard navigation shortcuts
-    const handleKeyDown = (e: KeyboardEvent) => {
-      // If event was already handled or prevented, ignore
-      if (e.defaultPrevented) return;
+    const isPosPage = () => location.pathname === "/pos" || location.pathname.startsWith("/pos");
+    const isTyping = (event: KeyboardEvent) =>
+      event.target instanceof HTMLInputElement ||
+      event.target instanceof HTMLTextAreaElement ||
+      event.target instanceof HTMLSelectElement;
 
-      const isPosPage = location.pathname === "/pos" || location.pathname.startsWith("/pos");
-
-      // Multi-Store Switcher (Alt+S or Alt+F3 - Tally Style)
-      if (
-        (e.altKey && (e.key.toLowerCase() === "s" || e.code === "KeyS")) ||
-        (e.altKey && (e.key === "F3" || e.code === "F3"))
-      ) {
-        e.preventDefault();
-        setIsStoreSwitcherOpen((prev) => !prev);
-        return;
-      }
-
-      // Manual Lock Terminal (Ctrl+L)
-      if ((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === "l" || e.code === "KeyL")) {
-        e.preventDefault();
-        staffAuthService.lockCurrentSession();
-        return;
-      }
-
-      // Quick Account Switcher (F12)
-      if (e.key === "F12" && !isPosPage) {
-        e.preventDefault();
-        setIsAccountSwitcherOpen(true);
-        return;
-      }
-
-      // Command Palette (Ctrl+K / Cmd+K)
-      if ((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === "k" || e.code === "KeyK")) {
-        e.preventDefault();
-        setIsCmdPaletteOpen((prev) => !prev);
-        return;
-      }
-
-      // Ignore text input fields for standard navigation letters
-      const isInput =
-        e.target instanceof HTMLInputElement ||
-        e.target instanceof HTMLTextAreaElement ||
-        e.target instanceof HTMLSelectElement;
-
-      if (e.key === "Home" && !isInput) {
-        e.preventDefault();
-        navigate("/dashboard");
-        return;
-      }
-
-      // On POS page, let POS Billing handle F1, F2, F3, F6, F9, Ctrl+D, Shift+F2, Alt+R, etc.
-      if (isPosPage) {
-        if (
-          e.key === "F1" ||
-          e.key === "F2" ||
-          e.key === "F3" ||
-          e.key === "F6" ||
-          e.key === "F9" ||
-          ((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === "d" || e.code === "KeyD"))
-        ) {
-          return;
-        }
-      }
-
-      // Function key navigation shortcuts for other pages
-      if (e.key === "F1") {
-        e.preventDefault();
-        navigate("/pos");
-      } else if (e.key === "F2") {
-        e.preventDefault();
-        if (e.shiftKey) {
-          navigate("/returns/purchases");
-        } else {
-          navigate("/purchases");
-        }
-      } else if (e.key === "F3") {
-        e.preventDefault();
-        if (e.shiftKey) {
-          navigate("/stock/transfers");
-        } else {
-          navigate("/stock");
-        }
-      } else if (e.key === "F4") {
-        e.preventDefault();
-        navigate("/reports");
-      } else if (e.key === "F5") {
-        e.preventDefault();
-        navigate("/masters");
-      } else if (e.key === "F6") {
-        e.preventDefault();
-        navigate("/bills");
-      } else if (e.key === "F7") {
-        e.preventDefault();
-        if (e.shiftKey) {
-          navigate("/returns/debit-notes");
-        } else {
-          navigate("/returns/sales");
-        }
-      } else if (e.key === "F8") {
-        e.preventDefault();
-        navigate("/counters");
-      } else if (e.key === "F9") {
-        e.preventDefault();
-        navigate("/import-export");
-      } else if (e.key === "F10") {
-        e.preventDefault();
-        navigate("/settings");
-      } else if (e.key === "F11") {
-        e.preventDefault();
-        toggleFullscreen();
-      }
+    const nav = (path: string) => () => {
+      navigate(path);
+      return true;
     };
 
-    window.addEventListener("keydown", handleKeyDown);
+    const uninstallDispatcher = shortcutDispatcher.install();
+    const unregisterGlobal = shortcutDispatcher.register({
+      id: "global-shell",
+      scope: "global",
+      handlers: {
+        switchStore: () => {
+          setIsStoreSwitcherOpen((prev) => !prev);
+          return true;
+        },
+        lockTerminal: () => {
+          staffAuthService.lockCurrentSession();
+          return true;
+        },
+        commandPalette: () => {
+          setIsCmdPaletteOpen((prev) => !prev);
+          return true;
+        },
+        accountSwitcher: () => {
+          if (isPosPage()) return false;
+          setIsAccountSwitcherOpen(true);
+          return true;
+        },
+        navPos: nav("/pos"),
+        navPurchases: nav("/purchases"),
+        navPurchaseReturns: nav("/returns/purchases"),
+        navStock: nav("/stock"),
+        navTransfers: nav("/stock/transfers"),
+        navReports: nav("/reports"),
+        navMasters: nav("/masters"),
+        navBills: nav("/bills"),
+        navSalesReturns: nav("/returns/sales"),
+        navDebitNotes: nav("/returns/debit-notes"),
+        navCounters: nav("/counters"),
+        navImportExport: nav("/import-export"),
+        navSettings: nav("/settings"),
+        toggleFullscreen: () => {
+          toggleFullscreen();
+          return true;
+        },
+        navDashboard: (event) => {
+          if (isTyping(event as KeyboardEvent)) return false;
+          navigate("/dashboard");
+          return true;
+        },
+      },
+    });
 
     return () => {
       clearInterval(timer);
+      unregisterGlobal();
+      uninstallDispatcher();
       window.removeEventListener("online", handleOnline);
       window.removeEventListener("offline", handleOffline);
-      window.removeEventListener("keydown", handleKeyDown);
     };
   }, [navigate, location.pathname]);
 
@@ -268,11 +219,12 @@ export const Layout: React.FC<LayoutProps> = ({ children, onOpenGateway, onAddNe
         if (cfg.enabled_menu_items) {
           setEnabledMenus(cfg.enabled_menu_items);
         }
-        if (cfg.is_active === false) {
-          setIsStoreDisabled(true);
-        } else {
-          setIsStoreDisabled(false);
-        }
+      }
+      const curStore = storeRegistryService.getActiveStore();
+      if ((curStore && curStore.is_active === false) || (cfg && cfg.is_active === false)) {
+        setIsStoreDisabled(true);
+      } else {
+        setIsStoreDisabled(false);
       }
     });
   }, [location.pathname]);
@@ -328,7 +280,7 @@ export const Layout: React.FC<LayoutProps> = ({ children, onOpenGateway, onAddNe
     }
   };
 
-  if (isStoreDisabled) {
+  if (isStoreDisabled || (activeStore && activeStore.is_active === false)) {
     return (
       <div className="flex h-screen flex-col items-center justify-center bg-slate-900 text-white p-6 font-sans">
         <div className="max-w-md w-full text-center space-y-4 bg-slate-800 p-8 rounded-2xl border border-red-500/30 shadow-2xl">
@@ -337,11 +289,19 @@ export const Layout: React.FC<LayoutProps> = ({ children, onOpenGateway, onAddNe
           </div>
           <h2 className="text-2xl font-bold tracking-tight text-red-400">Store disabled</h2>
           <p className="text-sm text-slate-300">
-            This store has been disabled in the central Admin Panel. Connected workstations and billing terminals cannot process transactions while the store is disabled.
+            {activeStore ? `Store "${activeStore.name}" (${activeStore.code})` : "This store"} has been disabled in the central Admin Panel. Connected workstations and billing terminals cannot process transactions while the store is disabled.
           </p>
           <div className="rounded-lg bg-slate-950/60 p-3 text-xs text-slate-400 font-mono">
             Status: Store disabled | Contact your system administrator.
           </div>
+          {onOpenGateway && (
+            <button
+              onClick={onOpenGateway}
+              className="mt-2 px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white text-xs font-semibold rounded-lg transition-colors cursor-pointer"
+            >
+              Switch Store (Ctrl+Alt+S)
+            </button>
+          )}
         </div>
       </div>
     );
@@ -382,7 +342,7 @@ export const Layout: React.FC<LayoutProps> = ({ children, onOpenGateway, onAddNe
           <button
             type="button"
             onClick={() => setIsStoreSwitcherOpen(true)}
-            title={`Active Store: ${activeStore?.name || "Main Store"} (Store ID: ${activeStore?.id || "1"}, Code: ${activeStore?.code || "STORE-01"}). Press Alt + S to switch.`}
+            title={`Active Store: ${activeStore?.name || "Main Store"} (Store ID: ${activeStore?.id || "1"}, Code: ${activeStore?.code || "STORE-01"}). Press Ctrl + Alt + S to switch.`}
             className="flex items-center gap-2 px-2.5 py-1 rounded-btn bg-[var(--color-surface-subtle)] hover:bg-[var(--color-surface-hover)] border border-[var(--color-border)] text-xs font-semibold cursor-pointer transition-colors shadow-2xs"
           >
             <span
@@ -399,7 +359,7 @@ export const Layout: React.FC<LayoutProps> = ({ children, onOpenGateway, onAddNe
               ID:{activeStore?.id || "1"}
             </span>
             <span className="text-[10px] text-[var(--color-text-muted)] font-mono px-1 rounded bg-[var(--color-canvas)] border border-[var(--color-border)]">
-              Alt+S
+              Ctrl+Alt+S
             </span>
           </button>
         </div>

@@ -1,5 +1,7 @@
 import { sqliteStorage } from "../db/sqliteStorage";
 import type { PaymentTenderLine } from "./billingTenderService";
+import { storeToday } from "../dateTimeUtils";
+import { companySettingsService } from "../settings/companySettingsService";
 
 export interface CashShift {
   id: string;
@@ -48,7 +50,7 @@ export class CashShiftService {
     notes?: string,
     customDate?: string
   ): Promise<CashShift> {
-    const shiftDate = customDate || new Date().toISOString().slice(0, 10);
+    const shiftDate = customDate || storeToday(companySettingsService.getSettings());
     const existing = await this.getActiveShift(counterId);
     if (existing) {
       return existing; // Shift already open

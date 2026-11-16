@@ -139,7 +139,7 @@ export const QuickProductBatchEditModal: React.FC<QuickProductBatchEditModalProp
               <h3 className="text-sm font-bold text-text-main flex items-center gap-2">
                 Quick Edit Product & Batch
                 <kbd className="px-1.5 py-0.5 rounded-btn bg-surface border border-border-main text-[10px] font-mono text-text-muted">
-                  F4
+                  Alt+F4
                 </kbd>
               </h3>
               <p className="text-[11px] text-text-muted">

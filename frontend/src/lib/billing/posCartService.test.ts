@@ -98,11 +98,11 @@ describe("POS Cart Service & Checkout Pipeline (POS-001, POS-002, POS-007, STK-0
     expect(stockTx[0].qty_delta).toBe(-10);
     expect(stockTx[0].event_type).toBe("SALE");
 
-    // Verify enqueued into sync queue
-    const queue = await sqliteStorage.findAll("sync_queue");
-    expect(queue.length).toBe(1);
-    expect(queue[0].entity_type).toBe("invoice");
-    expect(queue[0].entity_id).toBe(result.invoiceId);
+    // Verify enqueued into sync queue (settings sync may enqueue concurrently)
+    const queue = await sqliteStorage.findAll<any>("sync_queue");
+    const invoiceQueue = queue.filter((row) => row.entity_type === "invoice");
+    expect(invoiceQueue.length).toBe(1);
+    expect(invoiceQueue[0].entity_id).toBe(result.invoiceId);
 
     // Verify cart was cleared
     expect(posCartService.getLines().length).toBe(0);
@@ -177,7 +177,7 @@ describe("POS Cart Service & Checkout Pipeline (POS-001, POS-002, POS-007, STK-0
     expect(lines.length).toBe(1);
     expect(lines[0].isNegativeStock).toBe(true);
     expect(lines[0].availableStockSnapshot).toBe(0);
-    expect(lines[0].shortageQty).toBe(2);
+    expect(lines[0].shortageQty).toBe(20); // 2 packs x 10 base units
 
     // Finalize invoice and verify batch stock becomes -20 base units (2 packs of 10)
     const res = await posCartService.finalizeInvoice("INV-NEG-001", "Cash");
@@ -192,6 +192,24 @@ describe("POS Cart Service & Checkout Pipeline (POS-001, POS-002, POS-007, STK-0
     expect(saleTx?.qty_delta).toBe(-20);
   });
 
+  it("compares batch stock in base units, not packs", async () => {
+    const product = (await productsStore.getProductById("prod_paracetamol"))!;
+    const batch = { ...(await productsStore.getEarliestExpiringBatch("prod_paracetamol"))!, stock_qty: 15 };
+
+    // 2 packs = 20 base units against 15 in stock -> shortage of 5.
+    posCartService.addProductToCart(product, batch, 2, 0);
+    const line = posCartService.getLines()[0];
+    expect(line.shortageQty).toBe(5);
+    expect(line.isNegativeStock).toBe(true);
+
+    // Loose-only line of 3 base units is fully covered.
+    posCartService.clearCart();
+    posCartService.addProductToCart(product, batch, 0, 3);
+    const looseLine = posCartService.getLines()[0];
+    expect(looseLine.shortageQty).toBe(0);
+    expect(looseLine.isNegativeStock).toBe(false);
+  });
+
   it("splits requested quantity across FEFO batches and assigns shortfall to last batch", async () => {
     const product = (await productsStore.getProductById("prod_paracetamol"))!;
     
@@ -201,14 +219,14 @@ describe("POS Cart Service & Checkout Pipeline (POS-001, POS-002, POS-007, STK-0
       product_id: "prod_paracetamol",
       batch_no: "FEFO-1",
       expiry_date: "2026-11-01",
-      stock_qty: 1, // 1 pack
+      stock_qty: 10, // 1 pack in base units
     });
     await productsStore.upsertBatch({
       id: "batch_fefo_2",
       product_id: "prod_paracetamol",
       batch_no: "FEFO-2",
       expiry_date: "2026-12-01",
-      stock_qty: 2, // 2 packs
+      stock_qty: 20, // 2 packs in base units
     });
 
     const batches = await productsStore.getBatchesForProduct("prod_paracetamol");

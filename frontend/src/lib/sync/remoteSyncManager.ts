@@ -120,7 +120,11 @@ export class RemoteSyncManager {
       this.eventSource = null;
     }
 
-    const sseUrl = `${baseUrl}/api/sync/stream?counter_code=${encodeURIComponent(counterCode)}`;
+    const storeId = typeof window !== "undefined" && window.localStorage
+      ? window.localStorage.getItem("lamsuite_active_store_id") || ""
+      : "";
+    const storeQuery = storeId ? `&store_id=${encodeURIComponent(storeId)}` : "";
+    const sseUrl = `${baseUrl}/api/sync/stream?counter_code=${encodeURIComponent(counterCode)}${storeQuery}`;
 
     if (typeof EventSource !== "undefined") {
       try {
@@ -254,13 +258,38 @@ export class RemoteSyncManager {
         }
       }
     } else if (syncEvt.entity_type === "product" || syncEvt.entity_type === "party") {
-      // Pull fresh deltas
+      // Pull fresh deltas, scoped to the event's store so another tenant's
+      // catalog can never be pulled into (and reseed) this device.
+      const pullStoreId = String(
+        syncEvt.store_id ||
+        (typeof window !== "undefined" && window.localStorage
+          ? window.localStorage.getItem("lamsuite_active_store_id") || ""
+          : "")
+      );
       await cloudDeltaSyncService.pullMasterDelta({
         fetchMasterDeltas: async (wm) => {
-          const res = await fetch(`${API_BASE_URL}/api/sync/pull/deltas?since_watermark=${wm}`);
+          const storeQuery = pullStoreId ? `&store_id=${encodeURIComponent(pullStoreId)}` : "";
+          const res = await fetch(`${API_BASE_URL}/api/sync/pull/deltas?since_watermark=${wm}${storeQuery}`);
           return res.json();
         },
       });
+    } else if (syncEvt.entity_type === "store_reset") {
+      const storeId = String(syncEvt.store_id || syncEvt.entity_id || "");
+      if (storeId) {
+        const payload = typeof syncEvt.client_data === "string" ? JSON.parse(syncEvt.client_data) : syncEvt.client_data;
+        const { storeRegistryService } = await import("../auth/storeRegistryService");
+        await storeRegistryService.applyRemoteResetOnce(storeId, null, payload?.options, syncEvt.id);
+      }
+    } else if (syncEvt.entity_type === "store_status") {
+      const storeId = String(syncEvt.store_id || syncEvt.entity_id || "");
+      const payload = typeof syncEvt.client_data === "string" ? JSON.parse(syncEvt.client_data) : syncEvt.client_data;
+      const isActive = payload?.is_active !== undefined ? Boolean(payload.is_active) : syncEvt.action !== "disabled";
+      if (storeId) {
+        const { storeRegistryService } = await import("../auth/storeRegistryService");
+        await storeRegistryService.setStoreActiveStatus(storeId, isActive, payload?.reason);
+        const { companySettingsService } = await import("../settings/companySettingsService");
+        await companySettingsService.updateLocalFromRemote({ is_active: isActive });
+      }
     }
   }
 

@@ -6,7 +6,9 @@ import { storeRegistryService } from "../auth/storeRegistryService";
 import { staffAuthService } from "../auth/staffAuthService";
 import { syncQueueService } from "./syncQueueService";
 import { companySettingsService } from "../settings/companySettingsService";
+import { storeToday } from "../dateTimeUtils";
 import { calculateDocumentTaxes } from "../tax-engine/taxEngine";
+import { parseBusinessRuleError, type BusinessRuleErrorPayload } from "../errors/businessRuleError";
 import type { PaymentTenderLine } from "../billing/billingTenderService";
 
 export type ConnectionState = "online" | "slow" | "offline";
@@ -91,6 +93,8 @@ export interface AuthoritativeInvoiceResponse {
   }>;
   tempMappedFrom?: string;
   error?: string;
+  /** Structured business-rule payload from the server (code/rule/line/fix). */
+  businessRule?: BusinessRuleErrorPayload;
 }
 
 export class OnlineTransactionService {
@@ -149,9 +153,16 @@ export class OnlineTransactionService {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 2500);
 
-      const res = await fetch(`${baseUrl}/api/license/check`, {
+      const activeStore = storeRegistryService.getActiveStore();
+      const activeStoreId = String(activeStore?.id || "1");
+
+      const res = await fetch(`${baseUrl}/api/license/check?store_id=${encodeURIComponent(activeStoreId)}`, {
         method: "GET",
-        headers: { Accept: "application/json" },
+        headers: {
+          Accept: "application/json",
+          "X-Store-Id": activeStoreId,
+          "Store-Id": activeStoreId,
+        },
         cache: "no-store",
         signal: controller.signal,
       });
@@ -160,6 +171,22 @@ export class OnlineTransactionService {
       latency = Date.now() - start;
       if (res.ok) {
         isConnected = true;
+        const body = await res.json().catch(() => ({}));
+        if (body && body.is_active !== undefined) {
+          const isActive = Boolean(body.is_active);
+          if (activeStore && activeStore.is_active !== isActive) {
+            await storeRegistryService.setStoreActiveStatus(activeStore.id, isActive);
+            await companySettingsService.updateLocalFromRemote({ is_active: isActive });
+          }
+        }
+        if (body && body.last_reset_at) {
+          const storeId = String(body.store_id || activeStore?.id || "");
+          await storeRegistryService.applyRemoteResetOnce(
+            storeId,
+            body.last_reset_at,
+            body.last_reset_options || undefined
+          );
+        }
       }
     } catch {
       // Server unreachable
@@ -342,6 +369,10 @@ export class OnlineTransactionService {
       counter_code: counterCode,
     };
 
+    if (activeStore && activeStore.is_active === false) {
+      throw new Error("Store is currently disabled by Admin. Invoicing and transactions are prohibited.");
+    }
+
     // If currently online or slow, attempt live server transaction first
     if (this.connectionState !== "offline") {
       try {
@@ -363,6 +394,14 @@ export class OnlineTransactionService {
 
         const data = await res.json();
 
+        if (res.status === 403 && data.error === "STORE_DISABLED") {
+          if (activeStore) {
+            await storeRegistryService.setStoreActiveStatus(activeStore.id, false);
+            await companySettingsService.updateLocalFromRemote({ is_active: false });
+          }
+          throw new Error(data.message || "Store is disabled by administration. Invoicing prohibited.");
+        }
+
         if (res.ok && data.success) {
           // 1. Live server write succeeded!
           const authoritativeInvoice = data.invoice;
@@ -381,12 +420,15 @@ export class OnlineTransactionService {
             tempMappedFrom: data.temp_mapped_from,
           };
         } else if (res.status === 422) {
-          // Business rule violation (period lock, credit limit, out of stock)
+          // Business rule violation (period lock, credit limit, out of stock).
+          // Keep the structured payload so the till can point at the exact line.
+          const businessRule = parseBusinessRuleError(data);
           return {
             success: false,
             isOnline: true,
             invoice: null,
-            error: data.error || "Transaction rejected by business rules.",
+            error: businessRule?.message || data.error || "Transaction rejected by business rules.",
+            businessRule: businessRule ?? undefined,
           };
         }
       } catch (networkErr: any) {
@@ -452,7 +494,7 @@ export class OnlineTransactionService {
         line_id: `L${idx}`,
         product_id: item.product_id,
         product_name: item.product_name,
-        qty: Number(item.qty || 1),
+        qty: Number(item.qty ?? 0),
         loose_qty: Number(item.loose_qty || 0),
         units_per_pack: Number(item.units_per_pack || 1),
         unit_price: Number(item.unit_price || 0),
@@ -539,7 +581,7 @@ export class OnlineTransactionService {
       store_code: resolvedStoreCode,
       module_key: "invoice",
       invoice_number: assignedDocNumber,
-      invoice_date: payload.invoice_date || new Date().toISOString().slice(0, 10),
+      invoice_date: payload.invoice_date || storeToday(companySettingsService.getSettings()),
       customer_id: payload.customer_id || "",
       customer_name: payload.customer_name || "Walk-in Customer",
       customer_phone: payload.customer_phone || "",
