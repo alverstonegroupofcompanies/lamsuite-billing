@@ -24,6 +24,8 @@ export interface PosCartLine {
   selectedBatch: ProductBatch;
   qty: number;
   loose_qty: number;
+  free_qty?: number;
+  free_loose_qty?: number;
   unit_price: number;
   discount_percent: number;
   discount_amount: number;
@@ -194,6 +196,15 @@ export class PosCartService {
     return { name: this.priceListName, productCount: Object.keys(this.priceListItems).length };
   }
 
+  private stockBaseUnits(line: Pick<PosCartLine, "qty" | "loose_qty" | "free_qty" | "free_loose_qty" | "product">): number {
+    const unitsPerPack = Math.max(1, Number(line.product?.units_per_pack) || 1);
+    const billed = Math.max(0, Number(line.qty) || 0);
+    const loose = Math.max(0, Number(line.loose_qty) || 0);
+    const free = Math.max(0, Number(line.free_qty) || 0);
+    const freeLoose = Math.max(0, Number(line.free_loose_qty) || 0);
+    return (billed + free) * unitsPerPack + loose + freeLoose;
+  }
+
   private effectiveQty(line: Pick<PosCartLine, "qty" | "loose_qty" | "product">): number {
     const unitsPerPack = Math.max(1, Number(line.product?.units_per_pack) || 1);
     return Math.max(0, Number(line.qty) || 0) + Math.max(0, Number(line.loose_qty) || 0) / unitsPerPack;
@@ -338,8 +349,13 @@ export class PosCartService {
       const existing = this.lines[existingIndex];
       const updatedQty = existing.qty + qty;
       const updatedLoose = existing.loose_qty + looseQty;
-      const unitsPerPack = Math.max(1, Number(product.units_per_pack) || 1);
-      const requestedBaseUnits = updatedQty * unitsPerPack + updatedLoose;
+      const requestedBaseUnits = this.stockBaseUnits({
+        qty: updatedQty,
+        loose_qty: updatedLoose,
+        free_qty: existing.free_qty,
+        free_loose_qty: existing.free_loose_qty,
+        product,
+      });
 
       const isNegative = requestedBaseUnits > availableStock || availableStock <= 0;
       const shortage = Math.max(0, requestedBaseUnits - Math.max(0, availableStock));
@@ -372,6 +388,8 @@ export class PosCartService {
       selectedBatch: batch,
       qty,
       loose_qty: looseQty,
+      free_qty: 0,
+      free_loose_qty: 0,
       unit_price: unitPrice,
       discount_percent: 0,
       discount_amount: 0,
@@ -459,20 +477,31 @@ export class PosCartService {
       const line = this.lines[index];
       const newQty = Math.max(0, qty);
       const newLoose = Math.max(0, looseQty);
-      // Batch stock is stored in base units; compare like with like.
-      const unitsPerPack = Math.max(1, Number(line.product.units_per_pack) || 1);
-      const requestedBaseUnits = newQty * unitsPerPack + newLoose;
-      const available = line.selectedBatch.stock_qty !== undefined ? line.selectedBatch.stock_qty : 0;
-      const isNegative = requestedBaseUnits > available || available <= 0;
-      const shortage = Math.max(0, requestedBaseUnits - Math.max(0, available));
 
       line.qty = newQty;
       line.loose_qty = newLoose;
-      line.isNegativeStock = isNegative;
-      line.shortageQty = shortage;
+      this.refreshStockStatus(line);
       this.applyPriceListPricing(line);
       line.calculated = this.calculateLine(line);
     }
+  }
+
+  updateLineFreeQuantity(lineId: string, freeQty: number, freeLooseQty = 0) {
+    const index = this.lines.findIndex((l) => l.id === lineId);
+    if (index >= 0) {
+      const line = this.lines[index];
+      line.free_qty = Math.max(0, freeQty);
+      line.free_loose_qty = Math.max(0, freeLooseQty);
+      this.refreshStockStatus(line);
+    }
+  }
+
+  private refreshStockStatus(line: PosCartLine) {
+    // Batch stock is stored in base units; billed and free units both consume it.
+    const requestedBaseUnits = this.stockBaseUnits(line);
+    const available = line.selectedBatch.stock_qty !== undefined ? line.selectedBatch.stock_qty : 0;
+    line.isNegativeStock = requestedBaseUnits > available || available <= 0;
+    line.shortageQty = Math.max(0, requestedBaseUnits - Math.max(0, available));
   }
 
   updateLinePrice(
@@ -535,6 +564,16 @@ export class PosCartService {
         line.loose_qty = 0;
       }
 
+      const freeLoose = Math.max(0, Number(line.free_loose_qty) || 0);
+      if (upp > 1 && freeLoose >= upp) {
+        line.free_qty = Math.max(0, Number(line.free_qty) || 0) + Math.floor(freeLoose / upp);
+        line.free_loose_qty = freeLoose % upp;
+      } else if (upp <= 1) {
+        line.free_qty = Math.max(0, Number(line.free_qty) || 0) + freeLoose;
+        line.free_loose_qty = 0;
+      }
+
+      this.refreshStockStatus(line);
       line.calculated = this.calculateLine(line);
 
       if (persistToProductMaster) {
@@ -769,6 +808,8 @@ export class PosCartService {
         expiry_date: line.selectedBatch.expiry_date,
         qty: line.qty,
         loose_qty: line.loose_qty,
+        free_qty: Math.max(0, Number(line.free_qty) || 0),
+        free_loose_qty: Math.max(0, Number(line.free_loose_qty) || 0),
         units_per_pack: line.product.units_per_pack,
         unit_price: line.unit_price,
         mrp: line.product.mrp,

@@ -1868,7 +1868,7 @@ dependencies = [
 
 [[package]]
 name = "lamsuite-billing"
-version = "2.0.38"
+version = "2.0.39"
 dependencies = [
  "cc",
  "chrono",

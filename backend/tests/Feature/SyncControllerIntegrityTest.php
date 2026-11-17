@@ -242,4 +242,50 @@ class SyncControllerIntegrityTest extends TestCase
         $this->assertEquals('Credit', $invoice->payment_mode);
         $this->assertEquals(750.00, (float)$invoice->grand_total);
     }
+
+    public function test_offline_sync_persists_free_quantity_on_invoice_items(): void
+    {
+        $payload = [
+            'invoices' => [
+                [
+                    'external_id' => 'inv_test_free_qty_sync',
+                    'invoice_number' => 'INV-TEST-FREE-01',
+                    'store_id' => $this->inclusiveStore->id,
+                    'grand_total' => 100.00,
+                    'taxable_subtotal' => 89.29,
+                    'tax_total' => 10.71,
+                    'payment_mode' => 'Cash',
+                    'customer_name' => 'Walk-in Customer',
+                    'items' => [
+                        [
+                            'product_id' => null,
+                            'product_name' => 'Bonus Item',
+                            'batch_no' => 'B-FREE-01',
+                            'qty' => 1,
+                            'loose_qty' => 2,
+                            'free_qty' => 3,
+                            'free_loose_qty' => 4,
+                            'units_per_pack' => 10,
+                            'unit_price' => 100.00,
+                            'gst_percent' => 12,
+                            'total_amount' => 100.00,
+                        ],
+                    ],
+                ],
+            ],
+        ];
+
+        $this->postJson('/api/sync/push/invoices', $payload)
+            ->assertStatus(200)
+            ->assertJson(['success' => true, 'ingested_count' => 1]);
+
+        $invoice = Invoice::where('external_id', 'inv_test_free_qty_sync')->firstOrFail();
+        $this->assertDatabaseHas('invoice_items', [
+            'invoice_id' => $invoice->id,
+            'qty' => 1,
+            'loose_qty' => 2,
+            'free_qty' => 3,
+            'free_loose_qty' => 4,
+        ]);
+    }
 }

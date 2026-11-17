@@ -1,5 +1,28 @@
 # Changelog
 
+## 2.0.39 — 2026-11-17
+
+Roles, permissions and counter-workflow release: granular RBAC across backend,
+admin panel and POS, a per-user permission matrix, free quantity end to end,
+staff directory, batch label printing and sales-order recall.
+
+### Permissions and roles
+
+1. **Granular RBAC** — backend, admin panel and POS share one permission model. Per-user overrides take precedence over the role baseline, a present module key is a complete allow-list, wildcards and legacy list forms are accepted, and super admins bypass overrides.
+2. **Wildcard leak fixed** — staff login and the offline cache no longer default to `["*"]`; legacy wildcard sessions are migrated on load. Previously every role effectively held every permission.
+3. **POS enforcement** — menu visibility, command palette, route access and report listings all honor the session's permissions, so cashiers no longer see all reports or restricted screens.
+4. **Permission matrix** — tri-state per-module editor in Admin → Users for creating and editing custom access, with backend normalization and privilege guards that stop non-super-admins creating or modifying super-admin accounts.
+
+### Billing
+
+5. **Free quantity end to end** — editable free packs/loose on the POS grid and entry row, correct stock deduction, invoice persistence, cloud sync (including the admin API and a `free_qty` column on invoice items), printing and sales reports.
+6. **Batch label printing** — print barcode/label sheets for any batch from Masters.
+
+### Counter workflow
+
+7. **Staff directory** — read-only list of the store's staff and permission overrides in POS Settings → Security; accounts stay managed in Admin.
+8. **Sales-order recall** — recall open sales orders into the POS cart from the billing screen, with search, status labels and a replacement confirmation. The order itself stays open until fulfilled or cancelled in Admin.
+
 ## 2.0.38 — 2026-11-17
 
 Centralized-billing completion release: payments and settlement, GST compliance,

@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Models\AuditLog;
 use App\Models\User;
 use App\Models\UserSession;
+use App\Services\PermissionMap;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
@@ -76,6 +77,8 @@ class AdminUserController
 
     public function store(Request $request): JsonResponse
     {
+        $currentUser = $request->user();
+
         $validated = $request->validate([
             'name' => 'required|string|max:255',
             'email' => 'required|email|unique:users,email',
@@ -91,6 +94,16 @@ class AdminUserController
             'ip_allowlist' => 'nullable|string',
             'is_biometric_enabled' => 'nullable|boolean',
         ]);
+
+        if ($validated['role'] === 'super_admin' && !$currentUser->isSuperAdmin()) {
+            return response()->json(['message' => 'Only Super Admins can create Super Admin accounts.'], 403);
+        }
+
+        if (array_key_exists('permissions', $validated)) {
+            $validated['permissions'] = $validated['permissions'] === null
+                ? null
+                : PermissionMap::normalize($validated['permissions']);
+        }
 
         if (empty($validated['username'])) {
             $validated['username'] = explode('@', $validated['email'])[0];
@@ -140,7 +153,12 @@ class AdminUserController
 
     public function update(Request $request, string $id): JsonResponse
     {
+        $currentUser = $request->user();
         $user = User::findOrFail($id);
+
+        if ($user->role === 'super_admin' && !$currentUser->isSuperAdmin()) {
+            return response()->json(['message' => 'Only Super Admins can modify Super Admin accounts.'], 403);
+        }
 
         $validated = $request->validate([
             'name' => 'sometimes|required|string|max:255',
@@ -157,6 +175,16 @@ class AdminUserController
             'ip_allowlist' => 'nullable|string',
             'is_biometric_enabled' => 'nullable|boolean',
         ]);
+
+        if (($validated['role'] ?? null) === 'super_admin' && !$currentUser->isSuperAdmin()) {
+            return response()->json(['message' => 'Only Super Admins can assign the Super Admin role.'], 403);
+        }
+
+        if (array_key_exists('permissions', $validated)) {
+            $validated['permissions'] = $validated['permissions'] === null
+                ? null
+                : PermissionMap::normalize($validated['permissions']);
+        }
 
         if (array_key_exists('store_id', $validated)) {
             $validated['store_id'] = empty($validated['store_id']) ? null : (int)$validated['store_id'];

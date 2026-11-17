@@ -887,6 +887,8 @@ export const BillsPage: React.FC = () => {
         expiry_date: it.expiry_date,
         qty: it.qty,
         loose_qty: it.loose_qty,
+        free_qty: (it as any).free_qty || 0,
+        free_loose_qty: (it as any).free_loose_qty || 0,
         rate: it.unit_price,
         gst_percent: it.gst_percent,
         amount: it.total_amount,
@@ -1063,7 +1065,10 @@ export const BillsPage: React.FC = () => {
         is_active: true,
       };
 
-      posCartService.addProductToCart(productItem, batch, it.qty, it.loose_qty);
+      const added = posCartService.addProductToCart(productItem, batch, it.qty, it.loose_qty);
+      if (it.free_qty || it.free_loose_qty) {
+        posCartService.updateLineFreeQuantity(added.line.id, it.free_qty || 0, it.free_loose_qty || 0);
+      }
     }
 
     setIsDetailModalOpen(false);
@@ -1763,6 +1768,11 @@ export const BillsPage: React.FC = () => {
                         <td className="px-3 py-2 font-mono text-[var(--color-text-muted)]">{formatExpiryDisplay(item.expiry_date)}</td>
                         <td className="px-3 py-2 text-right font-mono font-semibold tabular-nums">
                           {item.qty} {item.loose_qty ? `+ ${item.loose_qty}L` : ""}
+                          {(item.free_qty || item.free_loose_qty) ? (
+                            <span className="ml-1 text-[10px] text-[var(--color-text-muted)]">
+                              (+{item.free_qty || 0}P{item.free_loose_qty ? `+${item.free_loose_qty}L` : ""} free)
+                            </span>
+                          ) : null}
                         </td>
                         <td className="px-3 py-2 text-right font-mono tabular-nums">₹ {item.unit_price.toFixed(2)}</td>
                         <td className="px-3 py-2 text-right font-mono">{item.gst_percent}%</td>

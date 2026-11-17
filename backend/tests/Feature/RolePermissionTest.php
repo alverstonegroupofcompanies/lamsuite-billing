@@ -114,4 +114,53 @@ class RolePermissionTest extends TestCase
 
         $resetRes->assertStatus(403);
     }
+
+    public function test_permission_matrix_payload_is_normalized_when_saving_a_user(): void
+    {
+        $res = $this->actingAs($this->superAdmin, 'sanctum')
+            ->postJson('/api/admin/users', [
+                'name' => 'Counter Cashier',
+                'email' => 'cashier@lamstone.in',
+                'username' => 'cashier1',
+                'password' => 'password123',
+                'role' => 'cashier',
+                'store_id' => $this->store->id,
+                'permissions' => [
+                    'sales' => true,
+                    'reports' => [],
+                    'purchases' => ['view', 'purchases.edit', 'bogus'],
+                    'not_a_module' => ['view'],
+                ],
+            ]);
+
+        $res->assertStatus(201);
+
+        $saved = User::where('email', 'cashier@lamstone.in')->firstOrFail();
+        $this->assertSame(['view', 'create', 'edit', 'delete', 'export'], $saved->permissions['sales']);
+        $this->assertSame([], $saved->permissions['reports']);
+        $this->assertSame(['view', 'edit'], $saved->permissions['purchases']);
+        $this->assertArrayNotHasKey('not_a_module', $saved->permissions);
+
+        $this->assertFalse($saved->hasPermission('reports', 'view'));
+        $this->assertTrue($saved->hasPermission('sales', 'edit'));
+    }
+
+    public function test_non_super_admin_cannot_create_or_modify_super_admin_accounts(): void
+    {
+        $createRes = $this->actingAs($this->managerUser, 'sanctum')
+            ->postJson('/api/admin/users', [
+                'name' => 'Rogue Admin',
+                'email' => 'rogue@lamstone.in',
+                'password' => 'password123',
+                'role' => 'super_admin',
+                'store_id' => $this->store->id,
+            ]);
+        $createRes->assertStatus(403);
+
+        $updateRes = $this->actingAs($this->managerUser, 'sanctum')
+            ->putJson("/api/admin/users/{$this->superAdmin->id}", [
+                'name' => 'Hijacked Admin',
+            ]);
+        $updateRes->assertStatus(403);
+    }
 }

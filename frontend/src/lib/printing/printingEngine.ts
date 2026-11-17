@@ -56,6 +56,8 @@ export interface InvoicePrintData {
     expiry_date?: string;
     qty: number;
     loose_qty?: number;
+    free_qty?: number;
+    free_loose_qty?: number;
     rate: number;
     ptr?: number;
     pts?: number;
@@ -340,6 +342,16 @@ export function resolvePrintColumns(options?: PrintRenderOptions, isPharmacy: bo
   }).sort((a, b) => a.order - b.order);
 }
 
+export function formatFreeQtySuffix(l: { free_qty?: number | string; free_loose_qty?: number | string }): string {
+  const freePacks = Number(l.free_qty) || 0;
+  const freeLoose = Number(l.free_loose_qty) || 0;
+  if (freePacks <= 0 && freeLoose <= 0) return "";
+  const parts: string[] = [];
+  if (freePacks > 0) parts.push(`${freePacks}P`);
+  if (freeLoose > 0) parts.push(`${freeLoose}L`);
+  return ` (+${parts.join("+")} Free)`;
+}
+
 export function formatColumnCellHtml(colId: string, item: any, itemNumber: number): { align: string; content: string; isBold?: boolean } {
   const align = colId === "description" ? "left" : (["qty", "rate", "mrp", "discount", "gst", "amount", "total"].includes(colId) ? "right" : "center");
   let content = "-";
@@ -361,7 +373,7 @@ export function formatColumnCellHtml(colId: string, item: any, itemNumber: numbe
       content = formatExpiryDisplay(item.expiry_date);
       break;
     case "qty":
-      content = `${item.qty}${item.loose_qty ? ` + ${item.loose_qty}L` : ""}`;
+      content = `${item.qty}${item.loose_qty ? ` + ${item.loose_qty}L` : ""}${formatFreeQtySuffix(item)}`;
       break;
     case "mrp":
       content = `₹ ${(item.mrp || 0).toFixed(2)}`;
@@ -532,7 +544,7 @@ export function calculateInvoicePageChunks(
           case "expiry":
             return formatExpiryDisplay(l.expiry_date);
           case "qty":
-            return `${l.qty}${l.loose_qty ? ` + ${l.loose_qty}L` : ""}`;
+            return `${l.qty}${l.loose_qty ? ` + ${l.loose_qty}L` : ""}${formatFreeQtySuffix(l)}`;
           case "mrp":
             return `₹ ${((l as any).mrp || 0).toFixed(2)}`;
           case "rate":
@@ -1397,7 +1409,7 @@ export class PrintingEngine {
           <div style="margin-bottom: 4px; border-bottom: 1px dotted #cbd5e1; padding-bottom: 3px;">
             <div style="font-weight: 700; word-break: break-word;">${i + 1}. ${l.description}</div>
             <div style="display: flex; justify-content: space-between; font-size: 9px; color: #334155;">
-              <span>${l.qty}${l.loose_qty ? `+${l.loose_qty}L` : ""} × ₹${l.rate.toFixed(2)} (${l.gst_percent}%)</span>
+              <span>${l.qty}${l.loose_qty ? `+${l.loose_qty}L` : ""}${formatFreeQtySuffix(l)} × ₹${l.rate.toFixed(2)} (${l.gst_percent}%)</span>
               <span style="font-weight: 700; color: #000;">₹${l.amount.toFixed(2)}</span>
             </div>
             ${l.batch_no ? `<div style="font-size: 8px; color: #64748b;">B: ${l.batch_no} ${l.expiry_date ? `Exp: ${formatExpiryDisplay(l.expiry_date)}` : ""}</div>` : ""}
@@ -1411,7 +1423,7 @@ export class PrintingEngine {
           </div>
           <div style="display: flex; justify-content: space-between; font-size: 9.5px; color: #475569;">
             <span>${l.batch_no ? `B: ${l.batch_no}` : ""}${l.expiry_date ? ` | Exp: ${formatExpiryDisplay(l.expiry_date)}` : ""}${l.hsn_code ? ` | HSN: ${l.hsn_code}` : ""}</span>
-            <span style="font-variant-numeric: tabular-nums;">${l.qty}${l.loose_qty ? `+${l.loose_qty}L` : ""} @ ₹${l.rate.toFixed(2)} (${l.gst_percent}% GST)</span>
+            <span style="font-variant-numeric: tabular-nums;">${l.qty}${l.loose_qty ? `+${l.loose_qty}L` : ""}${formatFreeQtySuffix(l)} @ ₹${l.rate.toFixed(2)} (${l.gst_percent}% GST)</span>
           </div>
         </div>`;
       })
@@ -1591,7 +1603,7 @@ export class PrintingEngine {
           <td style="padding: 3px 4px; border-bottom: 1px solid #cbd5e1; font-weight: 700;">${l.description}</td>
           <td style="padding: 3px 4px; text-align: center; border-bottom: 1px solid #cbd5e1;">${l.batch_no || "-"}</td>
           <td style="padding: 3px 4px; text-align: center; border-bottom: 1px solid #cbd5e1;">${formatExpiryDisplay(l.expiry_date)}</td>
-          <td style="padding: 3px 4px; text-align: right; border-bottom: 1px solid #cbd5e1;">${l.qty}${l.loose_qty ? `+${l.loose_qty}L` : ""}</td>
+          <td style="padding: 3px 4px; text-align: right; border-bottom: 1px solid #cbd5e1;">${l.qty}${l.loose_qty ? `+${l.loose_qty}L` : ""}${formatFreeQtySuffix(l)}</td>
           <td style="padding: 3px 4px; text-align: right; border-bottom: 1px solid #cbd5e1;">₹${l.rate.toFixed(2)}</td>
           <td style="padding: 3px 4px; text-align: right; border-bottom: 1px solid #cbd5e1;">${l.gst_percent}%</td>
           <td style="padding: 3px 4px; text-align: right; border-bottom: 1px solid #cbd5e1; font-weight: 700;">₹${l.amount.toFixed(2)}</td>
@@ -1815,7 +1827,7 @@ export class PrintingEngine {
           case "expiry":
             return formatExpiryDisplay(l.expiry_date);
           case "qty":
-            return `${l.qty}${l.loose_qty ? ` + ${l.loose_qty}L` : ""}`;
+            return `${l.qty}${l.loose_qty ? ` + ${l.loose_qty}L` : ""}${formatFreeQtySuffix(l)}`;
           case "mrp":
             return `₹ ${((l as any).mrp || 0).toFixed(2)}`;
           case "rate":
@@ -3896,7 +3908,7 @@ export class PrintingEngine {
 
     for (const l of data.lines) {
       const desc = l.description.substring(0, is58 ? 16 : 20).padEnd(is58 ? 16 : 20);
-      const qtyStr = `${l.qty}${l.loose_qty ? `+${l.loose_qty}L` : ""}`.padStart(5);
+      const qtyStr = `${l.qty}${l.loose_qty ? `+${l.loose_qty}L` : ""}${formatFreeQtySuffix(l)}`.padStart(5);
       const amtStr = `Rs.${l.amount.toFixed(2)}`.padStart(is58 ? 9 : 10);
       if (is58) {
         pushStr(`${desc} ${qtyStr} ${amtStr}\n`);

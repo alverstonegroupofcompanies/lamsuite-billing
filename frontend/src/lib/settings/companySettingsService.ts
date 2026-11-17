@@ -369,7 +369,7 @@ export const DEFAULT_COLUMNS: ColumnSetting[] = [
   { id: "discount", label: "Disc %", visible: true, width: 75, order: 8 },
   { id: "gst", label: "GST %", visible: true, width: 75, order: 9 },
   { id: "hsn", label: "HSN/SAC", visible: false, width: 90, order: 10 },
-  { id: "free_qty", label: "Free Qty", visible: false, width: 75, order: 11 },
+  { id: "free_qty", label: "Free Qty", visible: false, width: 130, order: 11 },
   { id: "rack_shelf", label: "Rack/Shelf", visible: false, width: 90, order: 12 },
   { id: "current_stock", label: "Stock", visible: false, width: 80, order: 13 },
   { id: "total", label: "Total (₹)", visible: true, width: 100, order: 14, required: true },
@@ -396,7 +396,7 @@ export const BUILTIN_BILLING_PRESETS: BillingScreenPreset[] = [
     isBuiltin: true,
     columns: DEFAULT_COLUMNS.map((c) => ({
       ...c,
-      visible: ["idx", "product_name", "batch_no", "expiry_date", "qty", "mrp", "rate", "discount", "gst", "total", "actions"].includes(c.id),
+      visible: ["idx", "product_name", "batch_no", "expiry_date", "qty", "free_qty", "mrp", "rate", "discount", "gst", "total", "actions"].includes(c.id),
     })),
     headerFields: DEFAULT_HEADER_FIELDS.map((h) => ({
       ...h,

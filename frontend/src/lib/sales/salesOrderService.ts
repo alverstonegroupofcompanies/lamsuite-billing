@@ -38,6 +38,39 @@ export interface SalesOrderSummary {
   items_count: number;
 }
 
+export interface SalesOrderItemRecord {
+  id: number;
+  product_id?: number | null;
+  product_name: string;
+  hsn_code?: string | null;
+  qty: number;
+  loose_qty?: number;
+  units_per_pack?: number;
+  unit_price: number;
+  discount_percent?: number;
+  discount_amount?: number;
+  gst_percent?: number;
+  total_amount?: number;
+  remaining_base_units?: number;
+}
+
+export interface SalesOrderDetail extends SalesOrderSummary {
+  customer_phone?: string | null;
+  customer_gstin?: string | null;
+  place_of_supply?: string | null;
+  discount_total: number;
+  tax_total: number;
+  notes?: string | null;
+  items: SalesOrderItemRecord[];
+}
+
+/** Orders still awaiting confirmation / dispatch can be recalled into the POS cart. */
+export const OPEN_SALES_ORDER_STATUSES = ["draft", "confirmed", "partially_fulfilled"] as const;
+
+export function isOpenSalesOrderStatus(status: string): boolean {
+  return (OPEN_SALES_ORDER_STATUSES as readonly string[]).includes(status);
+}
+
 function token(): string | null {
   try {
     return localStorage.getItem("staff_token");
@@ -84,10 +117,15 @@ class SalesOrderService {
 
   async listOpenOrders(customerId?: string | number | null): Promise<SalesOrderSummary[]> {
     const res = await request<{ orders: SalesOrderSummary[] }>("/sales-orders?per_page=100");
-    const orders = res.orders || [];
+    const orders = (res.orders || []).filter((o) => isOpenSalesOrderStatus(o.status));
     return customerId
       ? orders.filter((o) => String(o.customer_id || "") === String(customerId))
       : orders;
+  }
+
+  async getOrder(id: number | string): Promise<SalesOrderDetail | null> {
+    const res = await request<{ success?: boolean; order: SalesOrderDetail }>(`/sales-orders/${id}`);
+    return res.order || null;
   }
 }
 

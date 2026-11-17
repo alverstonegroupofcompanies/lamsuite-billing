@@ -31,6 +31,8 @@ export interface OnlineInvoiceLinePayload {
   expiry_date?: string;
   qty: number;
   loose_qty?: number;
+  free_qty?: number;
+  free_loose_qty?: number;
   units_per_pack?: number;
   unit_price: number;
   mrp?: number;
@@ -496,6 +498,8 @@ export class OnlineTransactionService {
         product_name: item.product_name,
         qty: Number(item.qty ?? 0),
         loose_qty: Number(item.loose_qty || 0),
+        free_qty: Number(item.free_qty || 0),
+        free_loose_qty: Number(item.free_loose_qty || 0),
         units_per_pack: Number(item.units_per_pack || 1),
         unit_price: Number(item.unit_price || 0),
         mrp: item.mrp ? Number(item.mrp) : undefined,
@@ -527,6 +531,8 @@ export class OnlineTransactionService {
         expiry_date: rawItem.expiry_date,
         qty: cLine.qty,
         loose_qty: cLine.loose_qty,
+        free_qty: Math.max(0, Number(rawItem.free_qty) || 0),
+        free_loose_qty: Math.max(0, Number(rawItem.free_loose_qty) || 0),
         units_per_pack: cLine.units_per_pack,
         unit_price: cLine.unit_price,
         mrp: rawItem.mrp || cLine.unit_price,
@@ -678,7 +684,10 @@ export class OnlineTransactionService {
     // 3. Update local batch stock cache and write stock transactions
     for (const item of payload.items) {
       const batchKey = item.batch_id || item.batch_no;
-      const qtyDeducted = (Number(item.qty || 1) * (item.units_per_pack || 1)) + (Number(item.loose_qty) || 0);
+      const upp = Math.max(1, Number(item.units_per_pack) || 1);
+      const billedUnits = (Number(item.qty || 0) * upp) + (Number(item.loose_qty) || 0);
+      const freeUnits = (Math.max(0, Number(item.free_qty) || 0) * upp) + Math.max(0, Number(item.free_loose_qty) || 0);
+      const qtyDeducted = billedUnits + freeUnits;
 
       if (batchKey) {
         const existingBatch = await sqliteStorage.findById<any>("product_batches", batchKey);
@@ -778,7 +787,12 @@ export class OnlineTransactionService {
 
         // Write stock transaction
         const stockTxId = `srv_stk_${localId}_${i}`;
-        const qtyDeducted = Number(it.qty || 1);
+        const upp = Math.max(1, Number(it.units_per_pack) || 1);
+        const qtyDeducted =
+          (Number(it.qty || 0) * upp) +
+          (Number(it.loose_qty) || 0) +
+          (Math.max(0, Number(it.free_qty) || 0) * upp) +
+          Math.max(0, Number(it.free_loose_qty) || 0);
         await sqliteStorage.insertRecord("stock_transactions", stockTxId, {
           id: stockTxId,
           store_id: storeId,

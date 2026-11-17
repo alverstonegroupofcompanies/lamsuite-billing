@@ -209,6 +209,8 @@ class InvoiceController
             // check inside the transaction is the real invariant.
             'items.*.qty' => 'required|numeric|min:0',
             'items.*.loose_qty' => 'nullable|numeric|min:0',
+            'items.*.free_qty' => 'nullable|numeric|min:0',
+            'items.*.free_loose_qty' => 'nullable|numeric|min:0',
             'items.*.units_per_pack' => 'nullable|integer|min:1',
             'items.*.unit_price' => 'required|numeric|min:0',
             'items.*.discount_percent' => 'nullable|numeric|min:0',
@@ -467,9 +469,12 @@ class InvoiceController
 
                     $qty = (float)$item['qty'];
                     $looseQty = (float)($item['loose_qty'] ?? 0);
+                    $freeQty = (float)($item['free_qty'] ?? 0);
+                    $freeLooseQty = (float)($item['free_loose_qty'] ?? 0);
                     $unitsPerPack = (int)($item['units_per_pack'] ?? $product->units_per_pack ?: 1);
                     $unitsPerPack = max(1, $unitsPerPack);
-                    $totalBaseUnits = ($qty * $unitsPerPack) + $looseQty;
+                    // Bonus units are not billed but still leave stock.
+                    $totalBaseUnits = (($qty + $freeQty) * $unitsPerPack) + $looseQty + $freeLooseQty;
 
                     if ($totalBaseUnits <= 0) {
                         throw new BusinessRuleException(
@@ -491,7 +496,17 @@ class InvoiceController
                             'Enter 2+5 for two packs and five loose units.'
                         );
                     }
-                    if ($looseQty > 0 && !($product->allow_loose_sale ?? true)) {
+                    if ($unitsPerPack > 1 && $freeQty != floor($freeQty)) {
+                        throw new BusinessRuleException(
+                            'PACKS_MUST_BE_WHOLE',
+                            "Free packs must be a whole number for '{$product->name}'.",
+                            'whole_packs',
+                            $lineNumber,
+                            'free_qty',
+                            'Enter free packs as a whole number.'
+                        );
+                    }
+                    if (($looseQty > 0 || $freeLooseQty > 0) && !($product->allow_loose_sale ?? true)) {
                         throw new BusinessRuleException(
                             'LOOSE_NOT_ALLOWED',
                             "Loose units are not enabled for '{$product->name}'.",
@@ -584,6 +599,8 @@ class InvoiceController
                         'expiry_date' => $batch->expiry_date ? $batch->expiry_date->toDateString() : null,
                         'qty' => $qty,
                         'loose_qty' => $looseQty,
+                        'free_qty' => $freeQty,
+                        'free_loose_qty' => $freeLooseQty,
                         'units_per_pack' => $unitsPerPack,
                         'unit_price' => (float)$item['unit_price'],
                         'mrp' => (float)($item['mrp'] ?? $product->mrp ?? $item['unit_price']),
@@ -620,6 +637,8 @@ class InvoiceController
                         'hsn_code' => $pItem['hsn_code'],
                         'qty' => $pItem['qty'],
                         'loose_qty' => $pItem['loose_qty'],
+                        'free_qty' => $pItem['free_qty'],
+                        'free_loose_qty' => $pItem['free_loose_qty'],
                         'units_per_pack' => $pItem['units_per_pack'],
                         'unit_price' => $pItem['unit_price'],
                         'mrp' => $pItem['mrp'],
@@ -807,6 +826,8 @@ class InvoiceController
                         'expiry_date' => $pItem['expiry_date'],
                         'qty' => $cItem['qty'],
                         'loose_qty' => $cItem['loose_qty'],
+                        'free_qty' => $pItem['free_qty'],
+                        'free_loose_qty' => $pItem['free_loose_qty'],
                         'units_per_pack' => $cItem['units_per_pack'],
                         'unit_price' => $cItem['unit_price'],
                         'mrp' => $pItem['mrp'],

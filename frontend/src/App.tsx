@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { Layout } from "./components/Layout";
+import { AccessGate } from "./components/AccessGate";
 import { DashboardPage } from "./pages/DashboardPage";
 import { PosBillingPage } from "./pages/PosBillingPage";
 import { PurchasesPage } from "./pages/PurchasesPage";
@@ -327,21 +328,21 @@ export const App: React.FC = () => {
       >
         <Routes>
           <Route path="/" element={<LandingRedirect />} />
-          <Route path="/dashboard" element={<DashboardPage />} />
-          <Route path="/pos" element={<PosBillingPage />} />
-          <Route path="/bills" element={<BillsPage />} />
-          <Route path="/purchases" element={<PurchasesPage />} />
-          <Route path="/stock" element={<StockLedgerPage />} />
-          <Route path="/stock/transfers" element={<InterStoreTransferPage />} />
-          <Route path="/reports" element={<ReportsPage />} />
-          <Route path="/masters" element={<MastersPage />} />
-          <Route path="/settings" element={<SettingsPage />} />
-          <Route path="/counters" element={<CounterStatusPage />} />
-          <Route path="/returns/sales" element={<SalesReturnPage />} />
-          <Route path="/returns/purchases" element={<PurchaseReturnPage />} />
-          <Route path="/returns/debit-notes" element={<CustomerDebitNotePage />} />
-          <Route path="/import-export" element={<ImportExportHubPage />} />
-          <Route path="/migration" element={<DataMigrationPage />} />
+          <Route path="/dashboard" element={<AccessGate menu="dashboard"><DashboardPage /></AccessGate>} />
+          <Route path="/pos" element={<AccessGate menu="pos"><PosBillingPage /></AccessGate>} />
+          <Route path="/bills" element={<AccessGate menu="bills"><BillsPage /></AccessGate>} />
+          <Route path="/purchases" element={<AccessGate menu="purchases"><PurchasesPage /></AccessGate>} />
+          <Route path="/stock" element={<AccessGate menu="stock"><StockLedgerPage /></AccessGate>} />
+          <Route path="/stock/transfers" element={<AccessGate menu="stock_transfers"><InterStoreTransferPage /></AccessGate>} />
+          <Route path="/reports" element={<AccessGate menu="reports"><ReportsPage /></AccessGate>} />
+          <Route path="/masters" element={<AccessGate menu="masters"><MastersPage /></AccessGate>} />
+          <Route path="/settings" element={<AccessGate menu="settings"><SettingsPage /></AccessGate>} />
+          <Route path="/counters" element={<AccessGate menu="counters"><CounterStatusPage /></AccessGate>} />
+          <Route path="/returns/sales" element={<AccessGate menu="sales_returns"><SalesReturnPage /></AccessGate>} />
+          <Route path="/returns/purchases" element={<AccessGate menu="purchase_returns"><PurchaseReturnPage /></AccessGate>} />
+          <Route path="/returns/debit-notes" element={<AccessGate menu="customer_debit_notes"><CustomerDebitNotePage /></AccessGate>} />
+          <Route path="/import-export" element={<AccessGate menu="import_export"><ImportExportHubPage /></AccessGate>} />
+          <Route path="/migration" element={<AccessGate menu="migration"><DataMigrationPage /></AccessGate>} />
         </Routes>
       </Layout>
       {availableUpdate && (

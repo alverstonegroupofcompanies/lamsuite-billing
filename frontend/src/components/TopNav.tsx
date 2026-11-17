@@ -23,6 +23,8 @@ import {
 } from "lucide-react";
 import { APP_FULL_VERSION } from "../config/version";
 import { useI18n } from "../lib/i18n/I18nContext";
+import { staffAuthService, type StaffUser } from "../lib/auth/staffAuthService";
+import { canAccessMenu } from "../lib/auth/accessControl";
 
 export interface NavChildItem {
   id: string;
@@ -68,6 +70,16 @@ export const TopNav: React.FC<TopNavProps> = ({ enabledMenus, onOpenShortcutsHel
   const [focusedChildIndex, setFocusedChildIndex] = useState<number>(-1);
   const buttonRefs = useRef<{ [key: string]: HTMLButtonElement | null }>({});
   const dropdownRef = useRef<HTMLDivElement | null>(null);
+  const [sessionUser, setSessionUser] = useState<StaffUser | null>(
+    () => staffAuthService.getCurrentSession()?.user || null
+  );
+
+  useEffect(() => {
+    setSessionUser(staffAuthService.getCurrentSession()?.user || null);
+    return staffAuthService.onSessionChange((session) => {
+      setSessionUser(session?.user || null);
+    });
+  }, []);
 
   const navHierarchy: NavItemConfig[] = [
     {
@@ -207,18 +219,21 @@ export const TopNav: React.FC<TopNavProps> = ({ enabledMenus, onOpenShortcutsHel
     },
   ];
 
-  // Filter items according to enabledMenus
+  // Filter items according to enabledMenus and the signed-in staff permissions
   const visibleNavItems = navHierarchy
     .map((item) => {
       if (isNavGroup(item)) {
-        const filteredChildren = item.children.filter((child) => enabledMenus.includes(child.id));
+        const filteredChildren = item.children.filter(
+          (child) => enabledMenus.includes(child.id) && canAccessMenu(sessionUser, child.id)
+        );
         if (filteredChildren.length === 0) return null;
         return {
           ...item,
           children: filteredChildren,
         };
       }
-      return item.id === "migration" || enabledMenus.includes(item.id) ? item : null;
+      const enabled = item.id === "migration" ? true : enabledMenus.includes(item.id);
+      return enabled && canAccessMenu(sessionUser, item.id) ? item : null;
     })
     .filter((item): item is NavItemConfig => item !== null);
 

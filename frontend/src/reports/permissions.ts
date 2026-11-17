@@ -1,4 +1,5 @@
 import type { ReportModule } from "./types";
+import { explicitModuleDecision, type PermissionSet } from "../lib/auth/accessControl";
 
 /**
  * Validates whether the current user session and store configuration
@@ -6,7 +7,8 @@ import type { ReportModule } from "./types";
  *
  * Rules:
  * 1. Store Menu Check: The store's enabled_menu_items MUST include 'reports' (or the report's menuVisibilityKey).
- * 2. Role Permission Check:
+ * 2. Explicit per-user permissions override role defaults ('reports' module).
+ * 3. Role Permission Check:
  *    - super_admin & store_owner: full access to all reports.
  *    - manager: full access to all operational & financial reports.
  *    - accountant: access to sales, purchase, GST, customer ageing, and supplier ledger.
@@ -14,8 +16,9 @@ import type { ReportModule } from "./types";
  */
 export function canAccessReport(
   report: ReportModule,
-  userRole: string = "admin",
-  enabledMenuItems: string[] = ["reports"]
+  userRole: string = "cashier",
+  enabledMenuItems: string[] = ["reports"],
+  permissions?: PermissionSet
 ): boolean {
   // 1. Per-Store Menu Items Check
   const isReportsGloballyEnabled = enabledMenuItems.includes("reports");
@@ -25,11 +28,28 @@ export function canAccessReport(
     return false;
   }
 
-  // 2. Role-Based Access Control (RBAC)
+  // 2. Explicit per-user permission (grant or revoke) wins over role defaults
   const normalizedRole = userRole.toLowerCase().trim();
 
-  // Super admin and store owner have unrestricted access
-  if (normalizedRole === "super_admin" || normalizedRole === "admin" || normalizedRole === "store_owner") {
+  // Super admins bypass overrides, matching backend User::hasPermission
+  if (normalizedRole === "super_admin") {
+    return true;
+  }
+
+  const explicit = explicitModuleDecision(permissions, "reports", "view");
+  if (explicit !== undefined) {
+    return explicit;
+  }
+
+  // 3. Role-Based Access Control (RBAC)
+
+  // Admin and store owner have unrestricted access
+  if (normalizedRole === "admin" || normalizedRole === "store_owner") {
+    return true;
+  }
+
+  // Support is read-only across operational reports
+  if (normalizedRole === "support") {
     return true;
   }
 

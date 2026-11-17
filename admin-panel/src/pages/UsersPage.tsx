@@ -2,6 +2,8 @@ import React, { useEffect, useState } from "react";
 import { User, UserRole, Store } from "../types";
 import { api } from "../services/api";
 import { useAuth } from "../context/AuthContext";
+import { PermissionMatrix } from "../components/PermissionMatrix";
+import { normalizePermissions, type UserPermissions } from "../lib/permissionModules";
 import {
   Users,
   Plus,
@@ -45,6 +47,7 @@ export const UsersPage: React.FC = () => {
     store_id: string;
     idle_timeout_minutes: number;
     max_failed_logins: number;
+    permissions: UserPermissions;
   }>({
     name: "",
     username: "",
@@ -55,6 +58,7 @@ export const UsersPage: React.FC = () => {
     store_id: "",
     idle_timeout_minutes: 15,
     max_failed_logins: 5,
+    permissions: {},
   });
 
   // Edit User Modal state
@@ -68,6 +72,7 @@ export const UsersPage: React.FC = () => {
     idle_timeout_minutes: number;
     password?: string;
     pin?: string;
+    permissions: UserPermissions;
   }>({
     name: "",
     username: "",
@@ -77,6 +82,7 @@ export const UsersPage: React.FC = () => {
     idle_timeout_minutes: 15,
     password: "",
     pin: "",
+    permissions: {},
   });
 
   // Reset Credentials Modal state
@@ -156,6 +162,7 @@ export const UsersPage: React.FC = () => {
         store_id: newUser.store_id ? Number(newUser.store_id) : null,
         idle_timeout_minutes: newUser.idle_timeout_minutes,
         max_failed_logins: newUser.max_failed_logins,
+        permissions: Object.keys(newUser.permissions).length ? newUser.permissions : null,
       };
       if (newUser.pin && newUser.pin.trim()) {
         const trimmed = newUser.pin.trim();
@@ -178,6 +185,7 @@ export const UsersPage: React.FC = () => {
         store_id: "",
         idle_timeout_minutes: 15,
         max_failed_logins: 5,
+        permissions: {},
       });
       await fetchUsers();
       alert(`Staff account '${payload.name}' created successfully.`);
@@ -197,6 +205,7 @@ export const UsersPage: React.FC = () => {
       idle_timeout_minutes: u.idle_timeout_minutes || 15,
       password: "",
       pin: "",
+      permissions: normalizePermissions(u.permissions),
     });
   };
 
@@ -211,6 +220,7 @@ export const UsersPage: React.FC = () => {
         role: editFormData.role,
         store_id: editFormData.store_id ? Number(editFormData.store_id) : null,
         idle_timeout_minutes: editFormData.idle_timeout_minutes,
+        permissions: Object.keys(editFormData.permissions).length ? editFormData.permissions : null,
       };
       if (editFormData.password && editFormData.password.trim()) {
         payload.password = editFormData.password.trim();
@@ -879,7 +889,7 @@ export const UsersPage: React.FC = () => {
       {/* Edit User Modal */}
       {editingUser && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
-          <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 max-w-lg w-full p-6 space-y-4">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 max-w-3xl w-full p-6 space-y-4 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
               <h3 className="font-bold text-slate-900 dark:text-white text-sm">
                 Edit Staff Account: {editingUser.name}
@@ -1024,6 +1034,17 @@ export const UsersPage: React.FC = () => {
                 </div>
               </div>
 
+              <div>
+                <h4 className="mb-2 flex items-center gap-2 text-xs font-bold text-slate-800 dark:text-slate-100">
+                  <Shield className="h-4 w-4 text-brand-600" />
+                  Module Permissions
+                </h4>
+                <PermissionMatrix
+                  value={editFormData.permissions}
+                  onChange={(next) => setEditFormData({ ...editFormData, permissions: next })}
+                />
+              </div>
+
               <div className="flex justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
                 <button
                   type="button"
@@ -1047,7 +1068,7 @@ export const UsersPage: React.FC = () => {
       {/* Create User Modal */}
       {isCreateModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
-          <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 max-w-lg w-full p-6 space-y-4">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 max-w-3xl w-full p-6 space-y-4 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
               <h3 className="font-bold text-slate-900 dark:text-white text-sm">
                 Create New Staff Account
@@ -1186,6 +1207,17 @@ export const UsersPage: React.FC = () => {
                     className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                   />
                 </div>
+              </div>
+
+              <div>
+                <h4 className="mb-2 flex items-center gap-2 text-xs font-bold text-slate-800 dark:text-slate-100">
+                  <Shield className="h-4 w-4 text-brand-600" />
+                  Module Permissions
+                </h4>
+                <PermissionMatrix
+                  value={newUser.permissions}
+                  onChange={(next) => setNewUser({ ...newUser, permissions: next })}
+                />
               </div>
 
               <div className="flex justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">

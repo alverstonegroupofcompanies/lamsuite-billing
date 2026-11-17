@@ -23,7 +23,8 @@ import {
 import { reportRegistry, REPORT_CATEGORIES } from "../registry";
 import type { ReportModule, ReportCategory } from "../types";
 import { ReportViewContainer } from "./ReportViewContainer";
-import { operatorAuthService } from "../../lib/auth/operatorAuthService";
+import { staffAuthService } from "../../lib/auth/staffAuthService";
+import type { PermissionSet } from "../../lib/auth/accessControl";
 import { companySettingsService } from "../../lib/settings/companySettingsService";
 
 export const ReportsHub: React.FC = () => {
@@ -34,8 +35,9 @@ export const ReportsHub: React.FC = () => {
   const [selectedCategory, setSelectedCategory] = useState<ReportCategory | "all">("all");
   const [searchQuery, setSearchQuery] = useState("");
 
-  // Role and Menu settings
-  const [userRole, setUserRole] = useState<string>("admin");
+  // Role and Menu settings (least privilege until the session loads)
+  const [userRole, setUserRole] = useState<string>("cashier");
+  const [permissions, setPermissions] = useState<PermissionSet>([]);
   const [enabledMenus, setEnabledMenus] = useState<string[]>(["reports"]);
 
   // Open tabs
@@ -61,18 +63,25 @@ export const ReportsHub: React.FC = () => {
     }
   });
 
-  // Load user role & store menu configuration
+  // Load user role, permissions & store menu configuration
   useEffect(() => {
-    const session = operatorAuthService.getSession();
-    if (session?.user?.role) {
-      setUserRole(session.user.role);
-    }
+    const applySession = () => {
+      const session = staffAuthService.getCurrentSession();
+      if (session?.user?.role) {
+        setUserRole(session.user.role);
+        setPermissions(session.user.permissions || []);
+      }
+    };
+    applySession();
+    const unsubscribe = staffAuthService.onSessionChange(applySession);
 
     companySettingsService.loadSettings().then((cfg) => {
       if (cfg?.enabled_menu_items) {
         setEnabledMenus(cfg.enabled_menu_items);
       }
     });
+
+    return unsubscribe;
   }, []);
 
   // Sync URL ?report=xxx parameter
@@ -85,8 +94,8 @@ export const ReportsHub: React.FC = () => {
 
   // Compute accessible reports
   const accessibleReports = useMemo(() => {
-    return reportRegistry.getAccessibleReports(userRole, enabledMenus);
-  }, [userRole, enabledMenus]);
+    return reportRegistry.getAccessibleReports(userRole, enabledMenus, permissions);
+  }, [userRole, enabledMenus, permissions]);
 
   // Filter reports by category and search
   const displayedReports = useMemo(() => {

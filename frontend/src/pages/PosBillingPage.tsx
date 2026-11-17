@@ -37,7 +37,7 @@ import {
 } from "lucide-react";
 import { posCartService, type PosCartLine } from "../lib/billing/posCartService";
 import { priceListService } from "../lib/billing/priceListService";
-import { salesOrderService } from "../lib/sales/salesOrderService";
+import { salesOrderService, type SalesOrderDetail } from "../lib/sales/salesOrderService";
 import { loyaltyService, type LoyaltyProgramInfo } from "../lib/loyalty/loyaltyService";
 import { combineBillDiscount, computePointsDiscount, netBaseAmount } from "../lib/loyalty/promotionMath";
 import {
@@ -85,6 +85,7 @@ import { KeyboardShortcutsModal } from "../components/KeyboardShortcutsModal";
 import { storeRegistryService, type RegisteredStoreRecord } from "../lib/auth/storeRegistryService";
 import { BillDiscountModal } from "../components/BillDiscountModal";
 import { RoundOffModal } from "../components/RoundOffModal";
+import { SalesOrderRecallModal } from "../components/SalesOrderRecallModal";
 import { calculateDerivedLooseRate, formatQuantityDisplay, formatExpiryDisplay } from "../lib/billing/unitConversion";
 import { partiesStore, type Customer, normalizeIndianPhone, isValidGstin } from "../lib/masters/partiesStore";
 import { syncQueueService } from "../lib/sync/syncQueueService";
@@ -117,6 +118,36 @@ const GIFT_CARD_TENDER_MODES = new Set([
   "GIFT_CARD",
   "GIFT_CARD_VOUCHER",
 ]);
+
+type CartSourceDocument = {
+  customer_id?: string | number | null;
+  customer_name?: string | null;
+  customer_phone?: string | null;
+  customer_gstin?: string | null;
+  place_of_supply?: string | null;
+  bill_discount_percent?: number | null;
+  bill_discount_amount?: number | null;
+  discount_total: number;
+};
+
+type CartSourceItem = {
+  product_id?: string | number | null;
+  product_name: string;
+  hsn_code?: string | null;
+  hsn_sac_code?: string | null;
+  batch_no?: string | null;
+  expiry_date?: string | null;
+  qty: number;
+  loose_qty?: number | null;
+  free_qty?: number | null;
+  free_loose_qty?: number | null;
+  units_per_pack?: number | null;
+  unit_price: number;
+  mrp?: number | null;
+  discount_percent?: number | null;
+  discount_amount?: number | null;
+  gst_percent?: number | null;
+};
 
 export const PosBillingPage: React.FC = () => {
   const navigate = useNavigate();
@@ -167,6 +198,7 @@ export const PosBillingPage: React.FC = () => {
   const [sourceQuotation, setSourceQuotation] = useState<InvoiceRecord | null>(null);
   const [isSavingQuotation, setIsSavingQuotation] = useState(false);
   const [isSavingOrder, setIsSavingOrder] = useState(false);
+  const [isOrderRecallOpen, setIsOrderRecallOpen] = useState(false);
 
   // Search & Auto-complete
   const [searchQuery, setSearchQuery] = useState("");
@@ -209,6 +241,8 @@ export const PosBillingPage: React.FC = () => {
   const [entryDraftBatch, setEntryDraftBatch] = useState<ProductBatch | null>(null);
   const [entryPacks, setEntryPacks] = useState<number | string>(1);
   const [entryLoose, setEntryLoose] = useState<number | string>(0);
+  const [entryFreePacks, setEntryFreePacks] = useState<number | string>(0);
+  const [entryFreeLoose, setEntryFreeLoose] = useState<number | string>(0);
   const [entryRate, setEntryRate] = useState<number | string>("");
   const [entryDiscount, setEntryDiscount] = useState<number | string>("");
   const [entryRateBasis, setEntryRateBasis] = useState<PosRateBasis>("sel_rate");
@@ -217,11 +251,16 @@ export const PosBillingPage: React.FC = () => {
     if (!entryDraftProduct || !entryDraftBatch) return null;
     const packs = Math.max(0, Number(entryPacks) || 0);
     const loose = Math.max(0, Number(entryLoose) || 0);
+    const freePacks = Math.max(0, Number(entryFreePacks) || 0);
+    const freeLoose = Math.max(0, Number(entryFreeLoose) || 0);
     const price = entryRate !== "" && !isNaN(Number(entryRate))
       ? Number(entryRate)
       : (entryDraftBatch.selling_rate || entryDraftProduct.sel_rate || entryDraftProduct.mrp);
 
     const discountVal = Number(entryDiscount) || 0;
+    const draftUpp = Math.max(1, Number(entryDraftProduct.units_per_pack) || 1);
+    const draftRequestedUnits = (packs + freePacks) * draftUpp + loose + freeLoose;
+    const draftAvailable = entryDraftBatch.stock_qty || 0;
 
     const baseLine = {
       id: "draft_preview",
@@ -229,13 +268,16 @@ export const PosBillingPage: React.FC = () => {
       selectedBatch: entryDraftBatch,
       qty: packs,
       loose_qty: loose,
+      free_qty: freePacks,
+      free_loose_qty: freeLoose,
       unit_price: price,
       rate_basis: entryRateBasis,
       discount_percent: discountVal,
       discount_amount: 0,
       discount_manual: discountVal > 0,
-      isNegativeStock: (entryDraftBatch.stock_qty || 0) <= 0,
-      availableStockSnapshot: entryDraftBatch.stock_qty,
+      isNegativeStock: draftRequestedUnits > draftAvailable || draftAvailable <= 0,
+      shortageQty: Math.max(0, draftRequestedUnits - Math.max(0, draftAvailable)),
+      availableStockSnapshot: draftAvailable,
     };
 
     const calculated = posCartService.calculateLine(baseLine);
@@ -244,7 +286,7 @@ export const PosBillingPage: React.FC = () => {
       ...baseLine,
       calculated,
     };
-  }, [entryDraftProduct, entryDraftBatch, entryPacks, entryLoose, entryRate, entryDiscount, entryRateBasis]);
+  }, [entryDraftProduct, entryDraftBatch, entryPacks, entryLoose, entryFreePacks, entryFreeLoose, entryRate, entryDiscount, entryRateBasis]);
 
   const displayTotals = useMemo(() => {
     if (addLineMode === "after_enter" && draftLine) {
@@ -458,11 +500,11 @@ export const PosBillingPage: React.FC = () => {
 
   /**
    * Load an existing document's customer, discounts and line items into the POS cart.
-   * Shared by invoice editing and quotation-to-bill conversion.
+   * Shared by invoice editing, quotation-to-bill conversion and sales-order recall.
    */
   const hydrateCartFromDocument = async (
-    invoice: InvoiceRecord,
-    items: InvoiceItemRecord[],
+    invoice: CartSourceDocument,
+    items: CartSourceItem[],
     matchedCust: Customer | null
   ) => {
     const resolvedPhone = invoice.customer_phone || matchedCust?.phone || "";
@@ -473,7 +515,7 @@ export const PosBillingPage: React.FC = () => {
     setSelectedCustomer(matchedCust);
 
     posCartService.setCustomer(
-      matchedCust?.id || invoice.customer_id || "",
+      String(matchedCust?.id || invoice.customer_id || ""),
       invoice.customer_name || "Walk-in Customer",
       invoice.customer_gstin || matchedCust?.gstin || "",
       invoice.place_of_supply || matchedCust?.place_of_supply || "32-Kerala",
@@ -531,6 +573,9 @@ export const PosBillingPage: React.FC = () => {
       );
 
       if (line) {
+        if (it.free_qty || it.free_loose_qty) {
+          posCartService.updateLineFreeQuantity(line.id, Number(it.free_qty) || 0, Number(it.free_loose_qty) || 0);
+        }
         if (it.unit_price !== undefined) {
           posCartService.updateLinePrice(line.id, Number(it.unit_price));
         }
@@ -740,6 +785,46 @@ export const PosBillingPage: React.FC = () => {
     }
   };
 
+  const handleLoadSalesOrder = async (order: SalesOrderDetail): Promise<boolean> => {
+    if (editingInvoice) {
+      showNotification("Finish or cancel the invoice edit before loading a sales order.", "error");
+      return false;
+    }
+
+    if (
+      posCartService.getLines().length > 0 &&
+      !window.confirm(`Replace the current cart with sales order ${order.order_number}?`)
+    ) {
+      return false;
+    }
+
+    const orderItems = (order.items || []).filter((it) => it.product_id !== null && it.product_id !== undefined);
+    if (orderItems.length === 0) {
+      showNotification(`Sales order ${order.order_number} has no billable items.`, "error");
+      return false;
+    }
+
+    let matchedCust: Customer | null = null;
+    if (order.customer_id) {
+      matchedCust = await partiesStore.getCustomerById(String(order.customer_id));
+    } else if (
+      order.customer_name &&
+      order.customer_name.toLowerCase() !== "walk-in" &&
+      order.customer_name.toLowerCase() !== "walk-in customer"
+    ) {
+      const matches = await partiesStore.searchCustomers(order.customer_name, 5);
+      matchedCust =
+        matches.find((m) => m.name.toLowerCase() === order.customer_name?.toLowerCase()) || matches[0] || null;
+    }
+
+    await hydrateCartFromDocument(order, orderItems, matchedCust);
+    setBillNotes(order.notes || "");
+    showNotification(
+      `Sales order ${order.order_number} loaded into the cart. Fulfil or cancel it in Admin after billing.`
+    );
+    return true;
+  };
+
   const cancelEditingMode = () => {
     if (editingInvoice) {
       const counterCode =
@@ -917,6 +1002,7 @@ export const PosBillingPage: React.FC = () => {
     if (
       isTenderModalOpen ||
       isRecallModalOpen ||
+      isOrderRecallOpen ||
       isDiffModalOpen ||
       isColumnsModalOpen ||
       selectedProductForBatch ||
@@ -936,6 +1022,7 @@ export const PosBillingPage: React.FC = () => {
   }, [
     isTenderModalOpen,
     isRecallModalOpen,
+    isOrderRecallOpen,
     isDiffModalOpen,
     isColumnsModalOpen,
     selectedProductForBatch,
@@ -1762,6 +1849,7 @@ export const PosBillingPage: React.FC = () => {
   }, [
     isTenderModalOpen,
     isRecallModalOpen,
+    isOrderRecallOpen,
     isDiffModalOpen,
     isColumnsModalOpen,
     selectedProductForBatch,
@@ -1786,6 +1874,7 @@ export const PosBillingPage: React.FC = () => {
   shortcutBlockedRef.current =
     isTenderModalOpen ||
     isRecallModalOpen ||
+    isOrderRecallOpen ||
     isDiffModalOpen ||
     isColumnsModalOpen ||
     Boolean(selectedProductForBatch) ||
@@ -2420,6 +2509,12 @@ export const PosBillingPage: React.FC = () => {
       posCartService.updateLinePrice(res.line.id, customPrice, entryRateBasis);
     }
 
+    const freePacks = Math.max(0, Number(entryFreePacks) || 0);
+    const freeLoose = Math.max(0, Number(entryFreeLoose) || 0);
+    if ((freePacks > 0 || freeLoose > 0) && res.line) {
+      posCartService.updateLineFreeQuantity(res.line.id, freePacks, freeLoose);
+    }
+
     if (entryDiscount && Number(entryDiscount) > 0 && res.line) {
       posCartService.updateLineDiscount(res.line.id, Number(entryDiscount), 0);
     }
@@ -2434,6 +2529,8 @@ export const PosBillingPage: React.FC = () => {
     setEntryDraftBatch(null);
     setEntryPacks(1);
     setEntryLoose(0);
+    setEntryFreePacks(0);
+    setEntryFreeLoose(0);
     setEntryRate("");
     setEntryDiscount("");
     setSearchQuery("");
@@ -2713,7 +2810,10 @@ export const PosBillingPage: React.FC = () => {
     setSourceQuotation((recalled.cart_payload?.sourceQuotation as InvoiceRecord) || null);
     const payloadLines = (recalled.cart_payload.lines as PosCartLine[]) || [];
     for (const line of payloadLines) {
-      posCartService.addProductToCart(line.product, line.selectedBatch, line.qty, line.loose_qty);
+      const added = posCartService.addProductToCart(line.product, line.selectedBatch, line.qty, line.loose_qty);
+      if (line.free_qty || line.free_loose_qty) {
+        posCartService.updateLineFreeQuantity(added.line.id, line.free_qty || 0, line.free_loose_qty || 0);
+      }
     }
 
     const payload = recalled.cart_payload || {};
@@ -2960,6 +3060,8 @@ export const PosBillingPage: React.FC = () => {
         expiry_date: l.selectedBatch.expiry_date,
         qty: l.qty,
         loose_qty: l.loose_qty,
+        free_qty: l.free_qty || 0,
+        free_loose_qty: l.free_loose_qty || 0,
         rate: l.unit_price,
         ptr: l.product.ptr,
         pts: l.product.pts,
@@ -3614,6 +3716,17 @@ export const PosBillingPage: React.FC = () => {
           </button>
 
           <button
+            type="button"
+            onClick={() => setIsOrderRecallOpen(true)}
+            disabled={Boolean(editingInvoice)}
+            title="Recall an open sales order into the cart"
+            className="flex items-center gap-1.5 rounded-[10px] bg-[var(--color-surface-subtle)] border border-[var(--color-border)] px-3 py-1.5 text-xs font-semibold text-[var(--color-text)] hover:bg-[var(--color-surface-hover)] disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+          >
+            <FolderOpen className="h-3.5 w-3.5 text-[var(--color-accent)]" />
+            <span>Open Orders</span>
+          </button>
+
+          <button
             onClick={() => setIsRecallModalOpen(true)}
             className="relative flex items-center gap-1.5 rounded-[10px] bg-[var(--color-accent-soft)] border border-[var(--color-accent-soft)] px-3 py-1.5 text-xs font-semibold text-[var(--color-accent)] hover:opacity-90 cursor-pointer"
           >
@@ -3867,6 +3980,10 @@ export const PosBillingPage: React.FC = () => {
                 setEntryPacks(newPacks);
                 setEntryLoose(newLoose);
               }}
+              onFreeQtyChange={(newFreePacks, newFreeLoose) => {
+                setEntryFreePacks(newFreePacks);
+                setEntryFreeLoose(newFreeLoose);
+              }}
               onQtyEnter={() => commitEntryRow()}
               onRateChange={(newPrice, basis) => {
                 setEntryRate(newPrice);
@@ -3966,6 +4083,10 @@ export const PosBillingPage: React.FC = () => {
                         onSelectRow={() => handleSelectRow(idx)}
                         onQtyChange={(newPacks, newLoose) => {
                           posCartService.updateLineQuantity(line.id, newPacks, newLoose);
+                          refreshCartState();
+                        }}
+                        onFreeQtyChange={(newFreePacks, newFreeLoose) => {
+                          posCartService.updateLineFreeQuantity(line.id, newFreePacks, newFreeLoose);
                           refreshCartState();
                         }}
                         onQtyEnter={() => handleQtyEnterAdvance(idx)}
@@ -5218,6 +5339,12 @@ export const PosBillingPage: React.FC = () => {
           })()}
         </div>
       </ModalLayer>
+
+      <SalesOrderRecallModal
+        isOpen={isOrderRecallOpen}
+        onClose={() => setIsOrderRecallOpen(false)}
+        onLoad={handleLoadSalesOrder}
+      />
 
       {/* Invoice Revision Diff Confirmation Modal */}
       {isDiffModalOpen && editingInvoice && editDiff && (

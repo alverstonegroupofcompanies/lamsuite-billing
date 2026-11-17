@@ -28,7 +28,8 @@ import {
 import { reportRegistry } from "../reports/registry";
 import { useModalEscape } from "../lib/ui/modalEscapeManager";
 import { companySettingsService } from "../lib/settings/companySettingsService";
-import { operatorAuthService } from "../lib/auth/operatorAuthService";
+import { staffAuthService } from "../lib/auth/staffAuthService";
+import { canAccessMenu } from "../lib/auth/accessControl";
 import { storeRegistryService } from "../lib/auth/storeRegistryService";
 
 interface CommandPaletteProps {
@@ -99,11 +100,13 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose 
     }
   };
 
-  const userRole = operatorAuthService.getSession()?.user?.role || "admin";
+  const session = staffAuthService.getCurrentSession();
+  const userRole = session?.user?.role || "cashier";
+  const permissions = session?.user?.permissions || [];
   const enabledMenus = companySettingsService.getSettings()?.enabled_menu_items || ["reports"];
-  const isReportsAllowed = enabledMenus.includes("reports");
+  const isReportsAllowed = enabledMenus.includes("reports") && canAccessMenu(session?.user, "reports");
   const accessibleReports = isReportsAllowed
-    ? reportRegistry.getAccessibleReports(userRole, enabledMenus)
+    ? reportRegistry.getAccessibleReports(userRole, enabledMenus, permissions)
     : [];
 
   const registeredStores = storeRegistryService.getStores();
@@ -361,7 +364,37 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose 
     },
   ];
 
-  const filtered = commands.filter((cmd) => {
+  const COMMAND_MENU_GUARDS: Record<string, string> = {
+    nav_dashboard: "dashboard",
+    nav_pos: "pos",
+    nav_bills: "bills",
+    nav_sales_returns: "sales_returns",
+    nav_customer_debit_notes: "customer_debit_notes",
+    nav_purchases: "purchases",
+    nav_purchase_returns: "purchase_returns",
+    nav_stock: "stock",
+    nav_inter_store_transfers: "stock_transfers",
+    nav_reports: "reports",
+    nav_masters: "masters",
+    nav_import_export: "import_export",
+    action_import_wizard_items: "import_export",
+    action_import_wizard_batches: "import_export",
+    action_import_wizard_parties: "import_export",
+    pos_columns_config: "pos",
+    pos_preset_pharmacy: "pos",
+    pos_preset_retail: "pos",
+    pos_preset_fast_counter: "pos",
+    nav_settings: "settings",
+    nav_counters: "counters",
+  };
+
+  const visibleCommands = commands.filter((cmd) => {
+    const menuId = COMMAND_MENU_GUARDS[cmd.id];
+    if (!menuId) return true;
+    return canAccessMenu(session?.user, menuId);
+  });
+
+  const filtered = visibleCommands.filter((cmd) => {
     if (!query.trim()) return true;
     const q = query.toLowerCase();
     return (

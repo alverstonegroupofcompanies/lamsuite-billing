@@ -106,6 +106,8 @@ export interface InvoiceItemRecord {
   expiry_date: string;
   qty: number;
   loose_qty?: number;
+  free_qty?: number;
+  free_loose_qty?: number;
   units_per_pack?: number;
   unit_price: number;
   mrp?: number;
@@ -458,6 +460,8 @@ export class InvoiceManagementService {
                   expiry_date: it.expiry_date || "",
                   qty: Number(it.qty || 0),
                   loose_qty: Number(it.loose_qty || 0),
+                  free_qty: Number(it.free_qty || 0),
+                  free_loose_qty: Number(it.free_loose_qty || 0),
                   units_per_pack: Number(it.units_per_pack || 1),
                   unit_price: Number(it.unit_price || 0),
                   mrp: Number(it.mrp || it.unit_price || 0),
@@ -611,7 +615,11 @@ export class InvoiceManagementService {
           newAmount: line.calculated.total_amount,
         });
       } else {
-        const qtyChanged = orig.qty !== line.qty || (orig.loose_qty || 0) !== (line.loose_qty || 0);
+        const qtyChanged =
+          orig.qty !== line.qty ||
+          (orig.loose_qty || 0) !== (line.loose_qty || 0) ||
+          (orig.free_qty || 0) !== (line.free_qty || 0) ||
+          (orig.free_loose_qty || 0) !== (line.free_loose_qty || 0);
         const rateChanged = Math.abs(orig.unit_price - line.unit_price) > 0.01;
 
         if (qtyChanged || rateChanged) {
@@ -705,7 +713,11 @@ export class InvoiceManagementService {
     // 1. REVERSE ORIGINAL STOCK
     for (const orig of originalItems) {
       const unitsPerPack = orig.units_per_pack || 1;
-      const baseUnits = orig.qty * unitsPerPack + (orig.loose_qty || 0);
+      const baseUnits =
+        orig.qty * unitsPerPack +
+        (orig.loose_qty || 0) +
+        (orig.free_qty || 0) * unitsPerPack +
+        (orig.free_loose_qty || 0);
 
       // Restore batch stock
       const allBatches = await sqliteStorage.findAll<ProductBatch>("product_batches");
@@ -762,6 +774,8 @@ export class InvoiceManagementService {
         expiry_date: line.selectedBatch.expiry_date,
         qty: line.qty,
         loose_qty: line.loose_qty,
+        free_qty: Math.max(0, Number(line.free_qty) || 0),
+        free_loose_qty: Math.max(0, Number(line.free_loose_qty) || 0),
         units_per_pack: line.product.units_per_pack || 1,
         unit_price: line.unit_price,
         mrp: line.product.mrp,
@@ -775,7 +789,12 @@ export class InvoiceManagementService {
       });
 
       // Deduct new stock
-      const newBaseUnits = line.qty * (line.product.units_per_pack || 1) + line.loose_qty;
+      const upp = line.product.units_per_pack || 1;
+      const newBaseUnits =
+        line.qty * upp +
+        line.loose_qty +
+        Math.max(0, Number(line.free_qty) || 0) * upp +
+        Math.max(0, Number(line.free_loose_qty) || 0);
       const allBatches = await sqliteStorage.findAll<ProductBatch>("product_batches");
       const batch = allBatches.find((b) => b.id === line.selectedBatch.id);
       if (batch) {
@@ -898,7 +917,11 @@ export class InvoiceManagementService {
     // 1. RESTORE STOCK FOR ALL ITEMS
     for (const item of items) {
       const unitsPerPack = item.units_per_pack || 1;
-      const baseUnits = item.qty * unitsPerPack + (item.loose_qty || 0);
+      const baseUnits =
+        item.qty * unitsPerPack +
+        (item.loose_qty || 0) +
+        (item.free_qty || 0) * unitsPerPack +
+        (item.free_loose_qty || 0);
 
       const allBatches = await sqliteStorage.findAll<ProductBatch>("product_batches");
       const batch = allBatches.find(

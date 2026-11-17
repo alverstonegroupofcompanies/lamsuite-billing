@@ -198,12 +198,28 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (!user) return false;
     if (user.role === "super_admin") return true;
 
+    // Explicit per-user permissions override role defaults (matches backend User::hasPermission)
+    const permissions = (user as any).permissions as
+      | Record<string, string[] | boolean | string>
+      | null
+      | undefined;
+    if (permissions && Object.prototype.hasOwnProperty.call(permissions, module)) {
+      const value = permissions[module];
+      if (value === true || value === "*") return true;
+      if (value === false) return false;
+      if (typeof value === "string") return value === "*" || value === action || value === `${module}.${action}`;
+      if (Array.isArray(value)) {
+        return value.includes("*") || value.includes(action) || value.includes(`${module}.${action}`);
+      }
+      return false;
+    }
+
     if (user.role === "support") {
       return action === "view" || action === "export";
     }
 
     if (user.role === "accountant") {
-      if (module === "reports" || module === "gst" || module === "dashboard") {
+      if (module === "reports" || module === "gst" || module === "dashboard" || module === "compliance") {
         return action === "view" || action === "export";
       }
       return false;

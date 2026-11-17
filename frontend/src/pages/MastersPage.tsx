@@ -20,6 +20,7 @@ import {
   Scale,
   RefreshCw,
   PowerOff,
+  Printer,
 } from "lucide-react";
 import { productsStore, formatExpiryDisplay, isBatchExpired, type ProductItem, type ProductBatch } from "../lib/masters/productsStore";
 import { useModalEscape } from "../lib/ui/modalEscapeManager";
@@ -40,6 +41,7 @@ import { sqliteStorage } from "../lib/db/sqliteStorage";
 import { ImportWizardModal } from "../lib/data-exchange/ui/ImportWizardModal";
 import { ExportDialogModal } from "../lib/data-exchange/ui/ExportDialogModal";
 import { UnitAutocompleteInput } from "../components/UnitAutocompleteInput";
+import { BarcodePrintModal } from "../components/purchases/BarcodePrintModal";
 
 const BATCH_EXPIRY_PATTERN = /^\d{4}-(0[1-9]|1[0-2])(-\d{2})?$/;
 
@@ -71,6 +73,7 @@ export const MastersPage: React.FC = () => {
   const [isBatchModalOpen, setIsBatchModalOpen] = useState(false);
   useModalEscape(isBatchModalOpen, () => setIsBatchModalOpen(false));
   const [editingBatch, setEditingBatch] = useState<ProductBatch | null>(null);
+  const [labelBatch, setLabelBatch] = useState<{ batch: ProductBatch; productName: string } | null>(null);
 
   // Parties state
   const [partyTypeFilter, setPartyTypeFilter] = useState<"all" | "customer" | "supplier" | "doctor" | "patient">("all");
@@ -925,6 +928,15 @@ export const MastersPage: React.FC = () => {
                         {b.mrp ? `₹${b.mrp.toFixed(2)}` : "—"}
                       </td>
                       <td className="px-4 py-2.5 text-center">
+                        <button
+                          onClick={() =>
+                            setLabelBatch({ batch: b, productName: product ? product.name : b.product_id })
+                          }
+                          className="rounded-btn p-1 text-text-muted hover:bg-canvas hover:text-accent transition-colors"
+                          title="Print Barcode Labels"
+                        >
+                          <Printer className="h-4 w-4" />
+                        </button>
                         <button
                           onClick={() => {
                             setEditingBatch(b);
@@ -1900,6 +1912,24 @@ export const MastersPage: React.FC = () => {
             loadData();
             showNotification("Master data imported successfully!");
           }}
+        />
+      )}
+
+      {labelBatch && (
+        <BarcodePrintModal
+          isOpen={Boolean(labelBatch)}
+          onClose={() => setLabelBatch(null)}
+          items={[
+            {
+              product_id: labelBatch.batch.product_id,
+              product_name: labelBatch.productName,
+              batch_no: labelBatch.batch.batch_no,
+              expiry_date: labelBatch.batch.expiry_date,
+              total_units: Math.max(1, Math.floor(Number(labelBatch.batch.stock_qty) || 1)),
+              mrp: labelBatch.batch.mrp,
+              selling_rate: labelBatch.batch.selling_rate,
+            },
+          ]}
         />
       )}
 

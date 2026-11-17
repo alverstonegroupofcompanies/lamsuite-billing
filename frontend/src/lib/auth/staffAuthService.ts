@@ -7,6 +7,11 @@ import { getOrCreateClientDeviceUuid, detectDeviceFriendlyName } from "./clientD
 import { publicIpService } from "../network/publicIpService";
 import { validatePassword, validatePin } from "./credentialPolicy";
 import { decryptStaffSecret, encryptStaffSecret } from "./offlineStaffVault";
+import {
+  canAccessMenu as canAccessMenuForSubject,
+  hasModulePermission,
+  type PermissionSet,
+} from "./accessControl";
 
 export interface StaffUser {
   id: string;
@@ -21,7 +26,7 @@ export interface StaffUser {
   biometric_registered: boolean;
   failed_attempts: number;
   locked_until: number | null;
-  permissions: string[];
+  permissions: PermissionSet;
   enabled_menus?: string[];
 }
 
@@ -80,6 +85,17 @@ export class StaffAuthService {
         if (saved) {
           const parsed = JSON.parse(saved);
           if (parsed && parsed.sessionId && parsed.user) {
+            // Legacy sessions were stored with a ["*"] wildcard for every role.
+            // Drop it for non-admins so role baselines apply after this upgrade.
+            const legacyWildcard =
+              Array.isArray(parsed.user.permissions) &&
+              parsed.user.permissions.length === 1 &&
+              parsed.user.permissions[0] === "*" &&
+              parsed.user.role !== "super_admin";
+            if (legacyWildcard) {
+              parsed.user.permissions = null;
+              localStorage.setItem("active_staff_session", JSON.stringify(parsed));
+            }
             this.currentSession = parsed;
           }
         }
@@ -159,7 +175,7 @@ export class StaffAuthService {
               biometric_registered: s.biometric_registered ? 1 : 0,
               failed_attempts: s.failed_attempts || 0,
               locked_until: s.locked_until,
-              permissions_json: JSON.stringify(s.permissions || ["*"]),
+              permissions_json: s.permissions ? JSON.stringify(s.permissions) : null,
               enabled_menus_json: JSON.stringify(s.enabled_menus || ["pos", "bills"]),
               cache_synced_at: Date.now(),
               updated_at: Date.now(),
@@ -181,7 +197,7 @@ export class StaffAuthService {
               biometric_registered: Boolean(s.biometric_registered),
               failed_attempts: s.failed_attempts || 0,
               locked_until: s.locked_until,
-              permissions: s.permissions || ["*"],
+              permissions: s.permissions || null,
               enabled_menus: s.enabled_menus || ["pos", "bills"],
             });
           }
@@ -311,10 +327,32 @@ export class StaffAuthService {
         biometric_registered: Boolean(u.biometric_registered),
         failed_attempts: Number(u.failed_attempts || 0),
         locked_until: u.locked_until ? Number(u.locked_until) : null,
-        permissions: u.permissions_json ? JSON.parse(u.permissions_json) : [],
+        permissions: this.parseCachedPermissions(u.permissions_json, u.role),
         enabled_menus: u.enabled_menus_json ? JSON.parse(u.enabled_menus_json) : [],
       }))
     );
+  }
+
+  /**
+   * Older builds cached a ["*"] wildcard for every role. Drop it for non-admins
+   * so the role baseline (and any new override) is what actually applies.
+   */
+  private parseCachedPermissions(raw: unknown, role: unknown): PermissionSet {
+    let parsed: PermissionSet = null;
+    try {
+      parsed = typeof raw === "string" ? JSON.parse(raw) : ((raw as PermissionSet) ?? null);
+    } catch (_) {
+      return null;
+    }
+    if (
+      Array.isArray(parsed) &&
+      parsed.length === 1 &&
+      parsed[0] === "*" &&
+      String(role || "") !== "super_admin"
+    ) {
+      return null;
+    }
+    return parsed;
   }
 
   async authenticateWithPin(
@@ -376,7 +414,7 @@ export class StaffAuthService {
               biometric_registered: false,
               failed_attempts: 0,
               locked_until: null,
-              permissions: body.user.permissions || ["*"],
+              permissions: body.user.permissions || null,
               enabled_menus: body.user.enabled_menus || ["pos", "bills"],
             };
             if (body.token) {
@@ -500,7 +538,7 @@ export class StaffAuthService {
               biometric_registered: false,
               failed_attempts: 0,
               locked_until: null,
-              permissions: body.user.permissions || ["*"],
+              permissions: body.user.permissions || null,
               enabled_menus: body.user.enabled_menus || ["pos", "bills"],
             };
             if (body.token) {
@@ -801,20 +839,60 @@ export class StaffAuthService {
     }
   }
 
-  hasPermission(permission: string): boolean {
+  hasPermission(module: string, action: string = "view"): boolean {
     if (!this.currentSession || this.currentSession.isLocked) return false;
-    const user = this.currentSession.user;
-    if (user.role === "admin") return true;
-    if (user.permissions.includes("*") || user.permissions.includes(permission)) return true;
+    return hasModulePermission(this.currentSession.user, module, action);
+  }
 
-    // Wildcard match e.g. "pos.*" matches "pos.bill"
-    return user.permissions.some((p) => {
-      if (p.endsWith(".*")) {
-        const prefix = p.slice(0, -2);
-        return permission.startsWith(prefix);
-      }
-      return false;
-    });
+  canAccessMenu(menuId: string): boolean {
+    if (!this.currentSession || this.currentSession.isLocked) return false;
+    return canAccessMenuForSubject(this.currentSession.user, menuId);
+  }
+
+  /**
+   * Read-only directory of staff cached for the active store. Credentials are
+   * never returned.
+   */
+  async listStaffDirectory(storeId?: string): Promise<Array<{
+    id: string;
+    full_name: string;
+    username: string;
+    role: string;
+    is_active: boolean;
+    is_locked: boolean;
+    locked_until: number | null;
+    biometric_registered: boolean;
+    permission_overrides: number;
+  }>> {
+    await this.cleanupSyntheticDemoUsers();
+    const activeStore = String(storeId || (await storeDeviceService.getDeviceProfile())?.store_id || "1");
+    const raw = await sqliteStorage.findAll<any>("staff_users");
+    return (raw || [])
+      .filter((u) => String(u.store_id) === activeStore || (activeStore === "1" && u.store_id === "store_main"))
+      .map((u) => {
+        let permissions: PermissionSet = null;
+        try {
+          permissions = u.permissions_json ? JSON.parse(u.permissions_json) : null;
+        } catch (_) {
+          permissions = null;
+        }
+        const lockedUntil = u.locked_until ? Number(u.locked_until) : null;
+        return {
+          id: String(u.id),
+          full_name: String(u.full_name || u.username || "Staff"),
+          username: String(u.username || ""),
+          role: String(u.role || "cashier"),
+          is_active: Boolean(u.is_active),
+          is_locked: Boolean(lockedUntil && lockedUntil > Date.now()),
+          locked_until: lockedUntil,
+          biometric_registered: Boolean(u.biometric_registered),
+          permission_overrides:
+            permissions && !Array.isArray(permissions) && typeof permissions === "object"
+              ? Object.keys(permissions).length
+              : 0,
+        };
+      })
+      .sort((a, b) => a.full_name.localeCompare(b.full_name));
   }
 
   private async findStaff(usernameOrId: string): Promise<StaffUser | null> {
@@ -946,7 +1024,7 @@ export class StaffAuthService {
         biometric_registered: user.biometric_registered ? 1 : 0,
         failed_attempts: user.failed_attempts || 0,
         locked_until: user.locked_until,
-        permissions_json: JSON.stringify(user.permissions || ["*"]),
+        permissions_json: user.permissions ? JSON.stringify(user.permissions) : null,
         enabled_menus_json: JSON.stringify(user.enabled_menus || []),
         updated_at: Date.now(),
       });

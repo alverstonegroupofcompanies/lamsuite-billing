@@ -9,6 +9,8 @@ export interface ItemWiseSalesRow {
   hsn_code: string;
   qty_sold: number;
   loose_qty_sold: number;
+  free_qty_sold: number;
+  free_loose_qty_sold: number;
   discount_given: number;
   taxable_amount: number;
   total_tax: number;
@@ -52,6 +54,26 @@ export const itemWiseSalesColumns: ReportColumn<ItemWiseSalesRow>[] = [
     accessor: (r) => r.loose_qty_sold,
     align: "right",
     width: 95,
+    format: "number",
+    isDefaultVisible: false,
+    totalType: "sum",
+  },
+  {
+    id: "free_qty_sold",
+    header: "Free Packs",
+    accessor: (r) => r.free_qty_sold,
+    align: "right",
+    width: 95,
+    format: "number",
+    isDefaultVisible: false,
+    totalType: "sum",
+  },
+  {
+    id: "free_loose_qty_sold",
+    header: "Free Loose Units",
+    accessor: (r) => r.free_loose_qty_sold,
+    align: "right",
+    width: 110,
     format: "number",
     isDefaultVisible: false,
     totalType: "sum",
@@ -160,6 +182,8 @@ export const itemWiseSalesReport: ReportModule<any, ItemWiseSalesRow> = {
       hsn_code: string;
       qty: number;
       loose_qty: number;
+      free_qty: number;
+      free_loose_qty: number;
       discount: number;
       taxable: number;
       tax: number;
@@ -183,6 +207,8 @@ export const itemWiseSalesReport: ReportModule<any, ItemWiseSalesRow> = {
       const disc = (Number(it.discount_amount) || 0) * sign;
       const qty = (Number(it.qty) || 0) * sign;
       const looseQty = (Number(it.loose_qty) || 0) * sign;
+      const freeQty = (Number(it.free_qty) || 0) * sign;
+      const freeLooseQty = (Number(it.free_loose_qty) || 0) * sign;
 
       if (!agg.has(pId)) {
         agg.set(pId, {
@@ -190,6 +216,8 @@ export const itemWiseSalesReport: ReportModule<any, ItemWiseSalesRow> = {
           hsn_code: it.hsn_code || "30049099",
           qty: 0,
           loose_qty: 0,
+          free_qty: 0,
+          free_loose_qty: 0,
           discount: 0,
           taxable: 0,
           tax: 0,
@@ -200,6 +228,8 @@ export const itemWiseSalesReport: ReportModule<any, ItemWiseSalesRow> = {
       const rec = agg.get(pId)!;
       rec.qty += qty;
       rec.loose_qty += looseQty;
+      rec.free_qty += freeQty;
+      rec.free_loose_qty += freeLooseQty;
       rec.discount += disc;
       rec.taxable += taxable;
       rec.tax += tax;
@@ -216,6 +246,8 @@ export const itemWiseSalesReport: ReportModule<any, ItemWiseSalesRow> = {
         hsn_code: v.hsn_code,
         qty_sold: Math.round(v.qty * 100) / 100,
         loose_qty_sold: Math.round(v.loose_qty * 100) / 100,
+        free_qty_sold: Math.round(v.free_qty * 100) / 100,
+        free_loose_qty_sold: Math.round(v.free_loose_qty * 100) / 100,
         discount_given: Math.round(v.discount * 100) / 100,
         taxable_amount: Math.round(v.taxable * 100) / 100,
         total_tax: Math.round(v.tax * 100) / 100,

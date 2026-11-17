@@ -210,6 +210,52 @@ describe("POS Cart Service & Checkout Pipeline (POS-001, POS-002, POS-007, STK-0
     expect(looseLine.isNegativeStock).toBe(false);
   });
 
+  it("tracks free (bonus) units: stock is deducted but they are never billed", async () => {
+    const product = (await productsStore.getProductById("prod_paracetamol"))!;
+    const batch = (await productsStore.getEarliestExpiringBatch("prod_paracetamol"))!;
+
+    const { line } = posCartService.addProductToCart(product, batch, 1, 0);
+    posCartService.updateLineFreeQuantity(line.id, 2, 3);
+
+    // 1 billed pack + 2 free packs + 3 free loose = 33 base units against 100 in stock.
+    const [updated] = posCartService.getLines();
+    expect(updated.free_qty).toBe(2);
+    expect(updated.free_loose_qty).toBe(3);
+    expect(updated.isNegativeStock).toBe(false);
+    expect(updated.shortageQty).toBe(0);
+
+    // Only the billed pack contributes money.
+    expect(posCartService.getTotals().grand_total).toBe(25);
+
+    const res = await posCartService.finalizeInvoice("INV-FREE-001", "Cash");
+    expect(res.success).toBe(true);
+
+    const items = await sqliteStorage.findAll<any>("invoice_items");
+    expect(items.length).toBe(1);
+    expect(items[0].qty).toBe(1);
+    expect(items[0].free_qty).toBe(2);
+    expect(items[0].free_loose_qty).toBe(3);
+    expect(items[0].total_amount).toBe(25);
+
+    const stockTxs = await sqliteStorage.findAll<any>("stock_transactions");
+    expect(stockTxs[0].qty_delta).toBe(-33);
+
+    const batchAfter = await sqliteStorage.findById<any>("product_batches", "batch_p1");
+    expect(batchAfter?.stock_qty).toBe(67);
+  });
+
+  it("flags a stock shortage when free units exceed the batch balance", async () => {
+    const product = (await productsStore.getProductById("prod_paracetamol"))!;
+    const batch = { ...(await productsStore.getEarliestExpiringBatch("prod_paracetamol"))!, stock_qty: 10 };
+
+    const { line } = posCartService.addProductToCart(product, batch, 1, 0);
+    posCartService.updateLineFreeQuantity(line.id, 1, 0);
+
+    const [updated] = posCartService.getLines();
+    expect(updated.isNegativeStock).toBe(true);
+    expect(updated.shortageQty).toBe(10);
+  });
+
   it("splits requested quantity across FEFO batches and assigns shortfall to last batch", async () => {
     const product = (await productsStore.getProductById("prod_paracetamol"))!;
     

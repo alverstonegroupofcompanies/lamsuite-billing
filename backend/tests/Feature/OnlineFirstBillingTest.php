@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Models\CompanySetting;
 use App\Models\Counter;
 use App\Models\CounterSequence;
 use App\Models\GstLockPeriod;
@@ -102,6 +103,74 @@ class OnlineFirstBillingTest extends TestCase
             'entity_type' => 'stock_event',
             'entity_id' => (string)$this->batch->id,
         ]);
+    }
+
+    public function test_free_quantity_deducts_stock_without_being_billed(): void
+    {
+        $response = $this->withHeader('X-Store-Id', $this->store->id)
+            ->postJson('/api/invoices', [
+                'counter_code' => 'C01',
+                'customer_name' => 'Walk-in Customer',
+                'payment_mode' => 'Cash',
+                'items' => [
+                    [
+                        'product_id' => $this->product->id,
+                        'batch_id' => $this->batch->id,
+                        'batch_no' => 'BCH-2026-X',
+                        'qty' => 1,
+                        'free_qty' => 2,
+                        'free_loose_qty' => 0,
+                        'units_per_pack' => 1,
+                        'unit_price' => 18.00,
+                        'gst_percent' => 12.00,
+                    ],
+                ],
+            ]);
+
+        $response->assertStatus(201)->assertJson(['success' => true]);
+
+        // 1 billed + 2 bonus units leave stock; only the billed unit is charged.
+        $this->assertEquals(7, $this->batch->fresh()->stock_qty);
+        $this->assertEquals(7, $this->product->fresh()->current_stock);
+        $this->assertEquals(18.0, (float) $response->json('invoice.grand_total'));
+
+        $this->assertDatabaseHas('invoice_items', [
+            'invoice_id' => $response->json('invoice.id'),
+            'qty' => 1,
+            'free_qty' => 2,
+            'free_loose_qty' => 0,
+        ]);
+    }
+
+    public function test_free_quantity_beyond_stock_is_rejected(): void
+    {
+        CompanySetting::create([
+            'store_id' => $this->store->id,
+            'key' => 'inventory_settings',
+            'value' => ['allow_negative_stock' => false],
+        ]);
+
+        $response = $this->withHeader('X-Store-Id', $this->store->id)
+            ->postJson('/api/invoices', [
+                'counter_code' => 'C01',
+                'customer_name' => 'Walk-in Customer',
+                'payment_mode' => 'Cash',
+                'items' => [
+                    [
+                        'product_id' => $this->product->id,
+                        'batch_id' => $this->batch->id,
+                        'batch_no' => 'BCH-2026-X',
+                        'qty' => 1,
+                        'free_qty' => 50,
+                        'units_per_pack' => 1,
+                        'unit_price' => 18.00,
+                        'gst_percent' => 12.00,
+                    ],
+                ],
+            ]);
+
+        $response->assertStatus(422);
+        $this->assertEquals(10, $this->batch->fresh()->stock_qty);
     }
 
     public function test_idempotent_retry_prevents_duplicate_billing(): void

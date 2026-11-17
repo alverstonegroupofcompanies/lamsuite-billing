@@ -400,6 +400,8 @@ class SyncController
                     'expiry_date' => !empty($item['expiry_date']) ? substr($item['expiry_date'], 0, 10) : null,
                     'qty' => $item['qty'] ?? 1,
                     'loose_qty' => $item['loose_qty'] ?? 0,
+                    'free_qty' => $item['free_qty'] ?? 0,
+                    'free_loose_qty' => $item['free_loose_qty'] ?? 0,
                     'units_per_pack' => $item['units_per_pack'] ?? 1,
                     'unit_price' => $item['unit_price'] ?? ($item['rate'] ?? 0),
                     'mrp' => $item['mrp'] ?? null,

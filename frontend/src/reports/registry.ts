@@ -1,5 +1,6 @@
 import type { ReportModule, ReportCategory, ReportCategoryMeta } from "./types";
 import { canAccessReport } from "./permissions";
+import type { PermissionSet } from "../lib/auth/accessControl";
 
 // 1. Sales & Invoicing
 import { salesRegisterReport } from "./sales/sales-register";
@@ -194,10 +195,11 @@ export class ReportRegistry {
    * Get all reports accessible by current user role and store configuration
    */
   getAccessibleReports(
-    userRole: string = "admin",
-    enabledMenuItems: string[] = ["reports"]
+    userRole: string = "cashier",
+    enabledMenuItems: string[] = ["reports"],
+    permissions?: PermissionSet
   ): ReportModule[] {
-    return this.getAll().filter((r) => canAccessReport(r, userRole, enabledMenuItems));
+    return this.getAll().filter((r) => canAccessReport(r, userRole, enabledMenuItems, permissions));
   }
 
   /**
@@ -205,10 +207,11 @@ export class ReportRegistry {
    */
   searchReports(
     query: string,
-    userRole: string = "admin",
-    enabledMenuItems: string[] = ["reports"]
+    userRole: string = "cashier",
+    enabledMenuItems: string[] = ["reports"],
+    permissions?: PermissionSet
   ): ReportModule[] {
-    const accessible = this.getAccessibleReports(userRole, enabledMenuItems);
+    const accessible = this.getAccessibleReports(userRole, enabledMenuItems, permissions);
     if (!query.trim()) return accessible;
 
     const q = query.toLowerCase().trim();

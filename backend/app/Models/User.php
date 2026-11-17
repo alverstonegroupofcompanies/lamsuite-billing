@@ -187,6 +187,13 @@ class User extends Authenticatable
             return true;
         }
 
+        // Explicit per-user overrides (set from the admin permission matrix)
+        // take precedence over the role baseline.
+        $explicit = $this->explicitPermissionDecision($module, $action);
+        if ($explicit !== null) {
+            return $explicit;
+        }
+
         // Role baseline defaults
         if ($this->role === 'support') {
             return $action === 'view' || $action === 'export';
@@ -200,19 +207,6 @@ class User extends Authenticatable
             return false;
         }
 
-        // Custom granular permissions check
-        if (!empty($this->permissions) && is_array($this->permissions)) {
-            if (isset($this->permissions[$module])) {
-                $modPerms = $this->permissions[$module];
-                if (is_array($modPerms) && in_array($action, $modPerms)) {
-                    return true;
-                }
-                if ($modPerms === true || $modPerms === '*') {
-                    return true;
-                }
-            }
-        }
-
         // Store owner default permissions
         if ($this->role === 'store_owner') {
             return true;
@@ -224,6 +218,57 @@ class User extends Authenticatable
                 return false;
             }
             return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * Evaluates the stored permissions map. Returns null when it carries no
+     * instruction for the module (fall back to the role baseline). A module key
+     * that is present acts as a complete allow-list, so an unknown action is denied.
+     */
+    private function explicitPermissionDecision(string $module, string $action): ?bool
+    {
+        $permissions = $this->permissions;
+        if (empty($permissions) || !is_array($permissions)) {
+            return null;
+        }
+
+        // Legacy list form: ["*"], ["sales"], ["sales.view"]
+        if (array_is_list($permissions)) {
+            $entries = array_map(static fn ($entry) => trim((string) $entry), $permissions);
+            if (in_array('*', $entries, true)) {
+                return true;
+            }
+            if (
+                in_array($module, $entries, true)
+                || in_array("{$module}.*", $entries, true)
+                || in_array("{$module}.{$action}", $entries, true)
+            ) {
+                return true;
+            }
+            return null;
+        }
+
+        if (!array_key_exists($module, $permissions)) {
+            return null;
+        }
+
+        $value = $permissions[$module];
+        if ($value === true || $value === '*') {
+            return true;
+        }
+        if ($value === false) {
+            return false;
+        }
+        if (is_string($value)) {
+            return $value === '*' || $value === $action || $value === "{$module}.{$action}";
+        }
+        if (is_array($value)) {
+            return in_array('*', $value, true)
+                || in_array($action, $value, true)
+                || in_array("{$module}.{$action}", $value, true);
         }
 
         return false;

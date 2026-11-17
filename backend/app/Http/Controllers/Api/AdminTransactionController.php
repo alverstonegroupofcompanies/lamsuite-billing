@@ -656,6 +656,8 @@ class AdminTransactionController
                     'expiry_date' => $item->expiry_date,
                     'qty' => $item->qty,
                     'loose_qty' => $item->loose_qty ?? 0,
+                    'free_qty' => $item->free_qty ?? 0,
+                    'free_loose_qty' => $item->free_loose_qty ?? 0,
                     'units_per_pack' => $item->units_per_pack ?? 1,
                     'unit_price' => $item->unit_price,
                     'mrp' => $item->mrp ?? null,

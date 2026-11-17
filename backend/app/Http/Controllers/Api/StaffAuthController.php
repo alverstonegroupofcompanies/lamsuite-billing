@@ -403,7 +403,7 @@ class StaffAuthController
                 'name' => $user->name,
                 'username' => $user->username ?? explode('@', $user->email)[0],
                 'role' => $user->role,
-                'permissions' => $user->permissions ?? ['*'],
+                'permissions' => $user->permissions,
                 'enabled_menus' => $user->enabled_menus ?? ['pos', 'bills'],
                 'must_change_password' => (bool)$user->must_change_password,
                 'has_pin' => !empty($user->pin_hash),
@@ -456,7 +456,7 @@ class StaffAuthController
                 'failed_attempts' => $isLocked ? ($u->failed_login_attempts ?? 0) : 0,
                 'locked_until' => $isLocked ? $u->locked_until->getTimestamp() * 1000 : null,
                 'is_locked' => $isLocked,
-                'permissions' => $u->permissions ?? ['*'],
+                'permissions' => $u->permissions,
                 'enabled_menus' => $u->enabled_menus ?? ['dashboard', 'pos', 'bills', 'stock'],
             ];
         });
