@@ -1,5 +1,38 @@
 # Changelog
 
+## 2.0.40 — 2026-11-18
+
+Branch-scoped staff management release: staff CRUD now runs from the POS terminal
+itself, every terminal-created account is pinned to the signed-in branch, legacy
+local store keys stop breaking paired workstations, and the admin panel gains a
+multi-branch access picker.
+
+### Staff management in POS
+
+1. **Staff & Access panel** — create, edit, delete, unlock and reset the PIN of operator accounts from POS → Settings → Security. Accounts are written on the server and mirrored into the terminal's offline cache; the panel requires an online sign-in.
+2. **Branch-pinned accounts** — the panel shows the terminal's branch and offers no store selector. The server enforces it for `staff_session_token` callers: create and update force the branch, and multi-branch grants are rejected. Global and multi-branch accounts stay admin-panel-only.
+3. **Cross-branch writes blocked** — edit, delete, unlock, lock, reset-PIN, biometric toggle and force-logout now refuse any account outside the signed-in branch, including global (unassigned) accounts. Previously the PIN, unlock and session routes had no store check at all.
+4. **Roster matches authority** — Super Admin accounts are no longer listed in the POS panel, since the server refuses every write to them from a terminal.
+
+### Legacy store-key compatibility
+
+5. **`store_main` resolved, not rejected** — a new normalization middleware converts local registry store keys and codes into server store ids before controllers run, so public terminal endpoints can no longer fall back to the first store.
+6. **Device token as tenant authority** — the logged-in device roster, staff sign-in and offline-cache sync now resolve the store from the paired device token instead of failing or returning empty when the client sends a key the server has never seen.
+7. **Roster errors surfaced** — Logged-In Devices reports a fetch failure rather than showing an empty list that looks like "no devices".
+
+### Access grants
+
+8. **Multi-branch picker** — Admin → Users now grants additional branches with a checkbox list on create and edit, prunes the assigned branch automatically, and summarizes extra branches in the users table.
+9. **No self-escalation** — a caller cannot grant a branch outside its own access scope; attempts are refused with 403. Super admins are unaffected.
+10. **Global admin hashes stay server-side** — Super Admin credentials are excluded from the offline staff cache and remain an online-only sign-in option.
+
+### Testing
+
+11. **Backend** — new `PosStaffCrudStorePinTest` (terminal pinning, cross-branch denial, admin-panel parity) and `PosStoreKeyCompatibilityTest`. 423 tests pass.
+12. **POS** — staff service, device session and offline-cache coverage updated. 749 tests pass.
+
+Bump desktop app, updater and admin panel versions to 2.0.40.
+
 ## 2.0.39 — 2026-11-17
 
 Roles, permissions and counter-workflow release: granular RBAC across backend,

@@ -59,7 +59,12 @@ class AuthenticateDevice
             ?? $request->query('store_id');
 
         if ($requested !== null && $requested !== '' && !$this->requestedStoreMatches($requested, $storeId)) {
-            return $this->deny('Tenant isolation violation: this device is not registered for the requested store.', 403);
+            // Older POS builds submit a local registry key ("store_main") that
+            // is not a server store. The device token is still the tenant
+            // authority, so ignore the key instead of rejecting every request.
+            if (!$this->isLocalRegistryKey($requested)) {
+                return $this->deny('Tenant isolation violation: this device is not registered for the requested store.', 403);
+            }
         }
 
         $request->attributes->set('device_id', $device?->id);
@@ -77,6 +82,11 @@ class AuthenticateDevice
         }
 
         return Store::where('id', $storeId)->where('code', $requested)->exists();
+    }
+
+    private function isLocalRegistryKey(mixed $requested): bool
+    {
+        return is_string($requested) && preg_match('/^store_/i', trim($requested)) === 1;
     }
 
     private function deny(string $message, int $status): Response

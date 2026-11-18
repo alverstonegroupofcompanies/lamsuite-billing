@@ -82,17 +82,22 @@ export const StaffLoginPage: React.FC<StaffLoginPageProps> = ({
   const pinInputRef = useRef<HTMLInputElement>(null);
 
   const loadStaffAndProfile = async () => {
-    const targetStoreId = activeStore?.id || (await storeDeviceService.getDeviceProfile())?.store_id || "1";
     const prof = await storeDeviceService.getDeviceProfile();
     setDeviceProfile(prof);
+    // The paired profile carries the server store id; the registry id may be a
+    // legacy local key the server cannot resolve directly.
+    const targetStoreId = prof?.store_id || activeStore?.id || "1";
     const list = await staffAuthService.listActiveStaff(targetStoreId, activeStore || undefined);
     setStaffList(list);
     if (list.length > 0) {
-      // Prefer selecting an unlocked operator who has a PIN configured
+      // Prefer selecting an unlocked operator who has a PIN configured. Global
+      // admins are online-only and shouldn't be the default counter operator.
+      const localStaff = list.filter((u) => !u.online_only);
+      const pool = localStaff.length > 0 ? localStaff : list;
       const preferred =
-        list.find((u) => u.pin_hash && (!u.locked_until || Date.now() >= u.locked_until)) ||
-        list.find((u) => !u.locked_until || Date.now() >= u.locked_until) ||
-        list[0];
+        pool.find((u) => u.pin_hash && (!u.locked_until || Date.now() >= u.locked_until)) ||
+        pool.find((u) => !u.locked_until || Date.now() >= u.locked_until) ||
+        pool[0];
       setSelectedUser(preferred);
     } else {
       setSelectedUser(null);
@@ -310,7 +315,22 @@ export const StaffLoginPage: React.FC<StaffLoginPageProps> = ({
             <span className="text-[11px] font-semibold text-text-muted uppercase tracking-wider">
               {t("login.select_operator")}
             </span>
-            <span className="text-[10px] text-text-muted font-mono">{t("login.press_select")}</span>
+            {staffList.length > 0 && (
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedUser(null);
+                  setManualUsername("");
+                  setPin("");
+                  setPassword("");
+                  setErrorMsg("");
+                  setIsPasswordMode(true);
+                }}
+                className="text-[10px] text-accent hover:underline font-semibold cursor-pointer"
+              >
+                {t("login.other_account")}
+              </button>
+            )}
           </div>
 
           <div className="space-y-2 max-h-[340px] overflow-y-auto pr-1">
@@ -365,6 +385,13 @@ export const StaffLoginPage: React.FC<StaffLoginPageProps> = ({
                             <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-rose-500/20 text-rose-500 border border-rose-500/30 flex items-center gap-1">
                               <Lock className="w-2.5 h-2.5" /> {t("login.locked_badge")}
                             </span>
+                          ) : user.online_only ? (
+                            <span
+                              className="px-1.5 py-0.5 rounded text-[9px] font-medium bg-blue-500/10 text-blue-400 border border-blue-500/20"
+                              title={t("login.online_admin_hint")}
+                            >
+                              {t("login.online_admin_badge")}
+                            </span>
                           ) : !user.pin_hash ? (
                             <span className="px-1.5 py-0.5 rounded text-[9px] font-medium bg-slate-500/10 text-slate-400 border border-slate-500/20">
                               {t("login.password_only_badge")}
@@ -376,7 +403,7 @@ export const StaffLoginPage: React.FC<StaffLoginPageProps> = ({
                           )}
                         </div>
                         <div className="text-[11px] text-text-muted capitalize">
-                          {user.role} • @{user.username}
+                          {user.role.replace(/_/g, " ")} • @{user.username}
                         </div>
                       </div>
                     </div>
@@ -398,11 +425,13 @@ export const StaffLoginPage: React.FC<StaffLoginPageProps> = ({
             </h3>
             <p className="text-xs text-text-muted mt-0.5">
               {selectedUser
-                ? !selectedUser.pin_hash
-                  ? t("login.no_pin_hint")
-                  : isPasswordMode
-                    ? t("login.password_hint")
-                    : t("login.pin_hint")
+                ? selectedUser.online_only
+                  ? t("login.online_admin_hint")
+                  : !selectedUser.pin_hash
+                    ? t("login.no_pin_hint")
+                    : isPasswordMode
+                      ? t("login.password_hint")
+                      : t("login.pin_hint")
                 : t("login.manual_hint")}
             </p>
           </div>

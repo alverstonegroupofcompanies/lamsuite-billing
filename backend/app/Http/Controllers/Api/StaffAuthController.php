@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Models\AuditLog;
 use App\Models\CompanySetting;
 use App\Models\Counter;
+use App\Models\Device;
 use App\Models\DeviceSession;
 use App\Models\Store;
 use App\Models\User;
@@ -41,6 +42,13 @@ class StaffAuthController
         $store = is_numeric($storeId)
             ? Store::find($storeId)
             : Store::where('code', $storeId)->first();
+
+        // Legacy installs submit a local registry key ("store_main") that the
+        // server has never heard of. The paired device token still identifies
+        // the tenant, so use it rather than failing a valid sign-in.
+        if (!$store) {
+            $store = $this->storeFromDeviceToken($request);
+        }
 
         if (!$store) {
             return response()->json(['message' => 'Store not found.'], 404);
@@ -420,6 +428,38 @@ class StaffAuthController
     }
 
     /**
+     * Resolve the tenant from the paired workstation token.
+     *
+     * Mirrors AuthenticateDevice: the raw token is hashed and matched against a
+     * device or counter registration, whose store is the tenant authority.
+     */
+    protected function storeFromDeviceToken(Request $request): ?Store
+    {
+        $token = trim((string) (
+            $request->header('X-Device-Token')
+            ?: $request->input('device_token', '')
+        ));
+
+        if ($token === '') {
+            return null;
+        }
+
+        $hash = hash('sha256', $token);
+
+        $device = Device::with('store')->where('device_token_hash', $hash)->first()
+            ?? Device::with('store')->where('device_token', $token)->first();
+
+        if ($device?->store) {
+            return $device->store;
+        }
+
+        $counter = Counter::with('store')->where('device_token_hash', $hash)->first()
+            ?? Counter::with('store')->where('device_token', $token)->first();
+
+        return $counter?->store;
+    }
+
+    /**
      * Download active staff credentials (salted hashes) for local offline authentication fallback.
      */
     public function offlineCache(Request $request): JsonResponse
@@ -461,10 +501,40 @@ class StaffAuthController
             ];
         });
 
+        // Global (store_id NULL) administrators are deliberately excluded from
+        // the offline credential cache: their hashes must never leave the
+        // server. They are still listed so a terminal can offer them as an
+        // online-only sign-in option.
+        $globalAdmins = User::whereNull('store_id')
+            ->whereIn('role', ['super_admin', 'admin'])
+            ->get()
+            ->map(function (User $u) {
+                $isLocked = !empty($u->locked_until) && $u->locked_until->isFuture();
+                return [
+                    'id' => (string)$u->id,
+                    'store_id' => null,
+                    'username' => $u->username ?? explode('@', $u->email)[0],
+                    'full_name' => $u->name,
+                    'role' => $u->role,
+                    'has_pin' => !empty($u->pin_hash),
+                    'is_active' => true,
+                    'must_change_password' => (bool)$u->must_change_password,
+                    'biometric_registered' => false,
+                    'failed_attempts' => $isLocked ? ($u->failed_login_attempts ?? 0) : 0,
+                    'locked_until' => $isLocked ? $u->locked_until->getTimestamp() * 1000 : null,
+                    'is_locked' => $isLocked,
+                    'online_only' => true,
+                    'permissions' => $u->permissions,
+                    'enabled_menus' => $u->enabled_menus ?? ['dashboard', 'pos', 'bills', 'stock'],
+                ];
+            })
+            ->values();
+
         return response()->json([
             'success' => true,
             'store_id' => (string)$store->id,
             'staff' => $staffData,
+            'global_admins' => $globalAdmins,
             'cached_at' => now()->toIso8601String(),
         ])->header('Cache-Control', 'no-store, private');
     }

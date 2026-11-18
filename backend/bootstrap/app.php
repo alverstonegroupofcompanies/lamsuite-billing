@@ -16,6 +16,13 @@ return Application::configure(basePath: dirname(__DIR__))
     ->withMiddleware(function (Middleware $middleware) {
         $middleware->trustProxies(at: '*');
 
+        // Older POS builds send local registry keys ("store_main") in place of
+        // server store ids. Normalize them once for every API request so public
+        // terminal endpoints never fall back to another tenant's store.
+        $middleware->api(prepend: [
+            \App\Http\Middleware\NormalizeStoreContext::class,
+        ]);
+
         $middleware->validateCsrfTokens(except: [
             'api/*',
             'lan/*',

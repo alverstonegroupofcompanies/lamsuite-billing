@@ -58,6 +58,13 @@ class ScopeStore
             ?? $request->input('active_store_id')
             ?? $user->store_id;
 
+        // Older POS builds send a local registry key ("store_main") that never
+        // matches a server store. Ignore it and scope to the user's own store
+        // instead of denying every request as a tenant violation.
+        if ($this->isLocalRegistryKey($requestedStoreId)) {
+            $requestedStoreId = $user->store_id;
+        }
+
         if ($requestedStoreId !== null) {
             $requestedStoreId = (int) $requestedStoreId;
 
@@ -75,5 +82,10 @@ class ScopeStore
         }
 
         return $next($request);
+    }
+
+    private function isLocalRegistryKey(mixed $value): bool
+    {
+        return is_string($value) && preg_match('/^store_/i', trim($value)) === 1;
     }
 }

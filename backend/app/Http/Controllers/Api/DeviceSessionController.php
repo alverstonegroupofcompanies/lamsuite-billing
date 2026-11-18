@@ -24,6 +24,14 @@ class DeviceSessionController
         $isAllStores = strtolower(trim((string)$requestedStore)) === 'all';
         $storeId = $isAllStores ? null : $this->resolveStoreId($request);
 
+        // Paired workstations often carry a local registry key ("store_main")
+        // that never matches a server store. Fall back to the store the
+        // presenting device token was issued for instead of reporting an empty
+        // roster for a store the device demonstrably belongs to.
+        if (!$isAllStores && $storeId === null) {
+            $storeId = $this->resolveStoreIdFromDeviceToken($request);
+        }
+
         // A named store that does not exist must never fall back to another
         // store; that would leak another branch's device roster.
         if (!$isAllStores && $requestedStore !== null && trim((string)$requestedStore) !== '' && $storeId === null) {
@@ -248,6 +256,10 @@ class DeviceSessionController
         $targetStoreId = $requestedStore !== null && trim((string)$requestedStore) !== ''
             ? $this->resolveStoreValue($requestedStore)
             : $this->resolveStoreId($request);
+
+        if ($targetStoreId === null) {
+            $targetStoreId = $this->resolveStoreIdFromDeviceToken($request);
+        }
 
         if ($requestedStore !== null && trim((string)$requestedStore) !== '' && $targetStoreId === null) {
             return response()->json([
@@ -646,6 +658,43 @@ class DeviceSessionController
             if ($user->store_id) {
                 return (int)$user->store_id;
             }
+        }
+
+        return null;
+    }
+
+    /**
+     * Resolve the store that the presented device token was issued for.
+     *
+     * This is the tenant authority for a paired workstation: the raw token is
+     * hashed the same way AuthenticateDevice does, then matched against a
+     * device or counter registration.
+     */
+    protected function resolveStoreIdFromDeviceToken(Request $request): ?int
+    {
+        $token = trim((string) (
+            $request->header('X-Device-Token')
+            ?: $request->input('device_token', '')
+        ));
+
+        if ($token === '') {
+            return null;
+        }
+
+        $hash = hash('sha256', $token);
+
+        $device = Device::where('device_token_hash', $hash)->first()
+            ?? Device::where('device_token', $token)->first();
+
+        if ($device && $device->store_id) {
+            return Store::whereKey((int)$device->store_id)->exists() ? (int)$device->store_id : null;
+        }
+
+        $counter = Counter::where('device_token_hash', $hash)->first()
+            ?? Counter::where('device_token', $token)->first();
+
+        if ($counter && $counter->store_id) {
+            return Store::whereKey((int)$counter->store_id)->exists() ? (int)$counter->store_id : null;
         }
 
         return null;

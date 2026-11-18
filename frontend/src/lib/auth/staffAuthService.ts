@@ -18,7 +18,16 @@ export interface StaffUser {
   store_id: string;
   username: string;
   full_name: string;
-  role: "admin" | "manager" | "pharmacist" | "cashier";
+  role:
+    | "super_admin"
+    | "admin"
+    | "store_owner"
+    | "manager"
+    | "pharmacist"
+    | "cashier"
+    | "support"
+    | "accountant"
+    | "operator";
   password_hash: string;
   pin_hash: string;
   is_active: boolean;
@@ -28,6 +37,8 @@ export interface StaffUser {
   locked_until: number | null;
   permissions: PermissionSet;
   enabled_menus?: string[];
+  /** Global admin: can sign in online only, never cached offline. */
+  online_only?: boolean;
 }
 
 export interface ActiveStaffSession {
@@ -63,6 +74,33 @@ export interface StaffAuthResult {
 
 export interface StaffAuthOptions {
   forceOut?: boolean;
+}
+
+export interface ManageableStaffUser {
+  id: string;
+  name: string;
+  email: string;
+  username: string | null;
+  role: string;
+  store_id: string | null;
+  allowed_store_ids?: number[] | null;
+  permissions: Record<string, unknown> | string[] | null;
+  locked_until: string | null;
+  failed_login_attempts?: number;
+  must_change_password?: boolean;
+  is_biometric_enabled?: boolean;
+  store?: { id: number; name: string; code: string } | null;
+}
+
+export interface ManageableStaffInput {
+  name?: string;
+  email?: string;
+  username?: string | null;
+  password?: string;
+  pin?: string;
+  role?: string;
+  store_id?: string | number | null;
+  permissions?: Record<string, unknown> | null;
 }
 
 const isNumericId = (val: string) => /^\d+$/.test(val);
@@ -131,12 +169,16 @@ export class StaffAuthService {
     const activeStore = String(storeId || (await storeDeviceService.getDeviceProfile())?.store_id || "1");
     try {
       const deviceHeaders = await storeDeviceService.getDeviceAuthHeaders();
-      const res = await fetch(`${API_BASE_URL}/api/staff/offline-cache?store_id=${activeStore}`, {
+      // The device token already scopes the response server-side. Sending a
+      // local registry key ("store_main") as store_id would be rejected as a
+      // tenant-isolation violation.
+      const res = await fetch(`${API_BASE_URL}/api/staff/offline-cache`, {
         headers: { Accept: "application/json", ...deviceHeaders },
       });
       if (res.ok) {
         const body = await res.json();
         if (body.success && Array.isArray(body.staff)) {
+          const serverStoreId = String(body.store_id || activeStore);
           const currentLocal = (await sqliteStorage.findAll<any>("staff_users")) || [];
           const localById = new Map<string, any>();
           const localByUsername = new Map<string, any>();
@@ -164,7 +206,7 @@ export class StaffAuthService {
 
             const userRecord = {
               id: serverId,
-              store_id: String(s.store_id || activeStore),
+              store_id: String(s.store_id || serverStoreId),
               username,
               full_name: s.full_name,
               role: s.role,
@@ -204,11 +246,36 @@ export class StaffAuthService {
 
           // Users removed or revoked at the cloud are removed locally too.
           for (const u of currentLocal) {
-            if (String(u.store_id) !== activeStore) continue;
+            if (String(u.store_id) !== serverStoreId && String(u.store_id) !== activeStore) continue;
             if (consumedLocalIds.has(String(u.id))) continue;
             if (incomingIds.has(String(u.id)) || incomingUsernames.has(String(u.username).toLowerCase())) continue;
             await sqliteStorage.deleteRecord("staff_users", u.id).catch(() => {});
           }
+
+          // Global administrators are online-only: listed for sign-in but never
+          // written to the offline cache because the server withholds their
+          // credential hashes.
+          const globalAdmins: StaffUser[] = Array.isArray(body.global_admins)
+            ? body.global_admins.map((a: any) => ({
+                id: String(a.id),
+                store_id: "",
+                username: String(a.username || ""),
+                full_name: a.full_name,
+                role: a.role,
+                password_hash: "",
+                pin_hash: "",
+                is_active: Boolean(a.is_active),
+                must_change_password: Boolean(a.must_change_password),
+                biometric_registered: false,
+                failed_attempts: a.failed_attempts || 0,
+                locked_until: a.locked_until ?? null,
+                permissions: a.permissions || null,
+                enabled_menus: a.enabled_menus || ["dashboard", "pos", "bills"],
+                online_only: true,
+              }))
+            : [];
+
+          syncedStaff.push(...globalAdmins);
 
           this.setOfflineCacheSyncedAt(activeStore);
           this.flushOfflineAudit().catch(() => {});
@@ -309,8 +376,12 @@ export class StaffAuthService {
 
     // 2. Fallback to local offline cache
     let raw = await sqliteStorage.findAll<any>("staff_users");
+    // Legacy installs tag the local store with a "store_*" key while synced
+    // rows carry the numeric server id. The sqlite file is already per-store,
+    // so a local key must not filter the roster down to nothing.
+    const isLocalStoreKey = /^store_/i.test(activeStore);
     let storeMatching = (raw || []).filter(
-      (u) => Boolean(u.is_active) && (String(u.store_id) === activeStore || (activeStore === "1" && u.store_id === "store_main"))
+      (u) => Boolean(u.is_active) && (isLocalStoreKey || String(u.store_id) === activeStore)
     );
 
     return Promise.all(
@@ -437,6 +508,12 @@ export class StaffAuthService {
               canForceOut: Boolean(err.can_force_out),
             },
           };
+        } else if (res.status === 404) {
+          const err = await res.json().catch(() => ({}));
+          return {
+            success: false,
+            error: err.message || "This workstation is not linked to a store on the server. Re-pair it.",
+          };
         } else if (res.status === 401 || res.status === 403 || res.status === 422 || res.status === 423) {
           const err = await res.json().catch(() => ({}));
           return { success: false, error: err.message || "Invalid PIN." };
@@ -560,6 +637,12 @@ export class StaffAuthService {
               activeSession: err.active_session,
               canForceOut: Boolean(err.can_force_out),
             },
+          };
+        } else if (res.status === 404) {
+          const err = await res.json().catch(() => ({}));
+          return {
+            success: false,
+            error: err.message || "This workstation is not linked to a store on the server. Re-pair it.",
           };
         } else if (res.status === 401 || res.status === 403 || res.status === 422 || res.status === 423) {
           const err = await res.json().catch(() => ({}));
@@ -866,9 +949,10 @@ export class StaffAuthService {
   }>> {
     await this.cleanupSyntheticDemoUsers();
     const activeStore = String(storeId || (await storeDeviceService.getDeviceProfile())?.store_id || "1");
+    const isLocalStoreKey = /^store_/i.test(activeStore);
     const raw = await sqliteStorage.findAll<any>("staff_users");
     return (raw || [])
-      .filter((u) => String(u.store_id) === activeStore || (activeStore === "1" && u.store_id === "store_main"))
+      .filter((u) => isLocalStoreKey || String(u.store_id) === activeStore)
       .map((u) => {
         let permissions: PermissionSet = null;
         try {
@@ -893,6 +977,122 @@ export class StaffAuthService {
         };
       })
       .sort((a, b) => a.full_name.localeCompare(b.full_name));
+  }
+
+  /**
+   * Build headers for the admin user API. POS staff tokens are Sanctum tokens
+   * for the same User record, so the admin endpoints accept them; RBAC on the
+   * server decides what the signed-in operator may actually do.
+   */
+  private async getStaffAdminContext(): Promise<{ headers: Record<string, string>; storeId: string | null }> {
+    let token: string | null = null;
+    try {
+      token = typeof localStorage !== "undefined" ? localStorage.getItem("staff_token") : null;
+    } catch (_) {
+      token = null;
+    }
+    if (!token) {
+      throw new Error("Sign in online to manage staff accounts. Staff management is unavailable offline.");
+    }
+
+    const headers: Record<string, string> = {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    };
+
+    const profile = await storeDeviceService.getDeviceProfile().catch(() => null);
+    const profileStore = profile?.store_id ? String(profile.store_id) : "";
+    const storeId = profileStore && !/^store_/i.test(profileStore) ? profileStore : null;
+    if (storeId) {
+      headers["X-Store-Id"] = storeId;
+    }
+
+    return { headers, storeId };
+  }
+
+  private async staffAdminRequest<T>(
+    path: string,
+    options?: { method?: string; body?: unknown }
+  ): Promise<T> {
+    const { headers } = await this.getStaffAdminContext();
+    const res = await fetch(`${API_BASE_URL}/api/admin${path}`, {
+      method: options?.method || "GET",
+      headers,
+      body: options?.body !== undefined ? JSON.stringify(options.body) : undefined,
+    });
+
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error((data as any)?.message || `Staff request failed (HTTP ${res.status}).`);
+    }
+    return data as T;
+  }
+
+  /**
+   * Staff accounts visible to the signed-in operator (this store plus global
+   * administrators). Requires the users.view permission server-side.
+   */
+  async listManageableStaff(search?: string): Promise<ManageableStaffUser[]> {
+    const { storeId } = await this.getStaffAdminContext();
+    const params = new URLSearchParams({ per_page: "100" });
+    if (search && search.trim()) params.set("search", search.trim());
+    if (storeId) params.set("store_id", storeId);
+
+    const data = await this.staffAdminRequest<any>(`/users?${params.toString()}`);
+    const rows = Array.isArray(data?.data) ? data.data : Array.isArray(data) ? data : [];
+    return rows
+      .map((u: any) => ({
+        ...u,
+        id: String(u.id),
+        store_id: u.store_id === null || u.store_id === undefined ? null : String(u.store_id),
+      }))
+      // The server list also carries global and multi-branch accounts, and
+      // Super Admins, none of which a terminal may edit or delete.
+      .filter(
+        (u: ManageableStaffUser) =>
+          (!storeId || u.store_id === storeId) && u.role !== "super_admin"
+      );
+  }
+
+  async createStaff(input: ManageableStaffInput): Promise<ManageableStaffUser> {
+    const { storeId } = await this.getStaffAdminContext();
+    const payload: Record<string, unknown> = { ...input };
+    delete payload.allowed_store_ids;
+    if (storeId) {
+      payload.store_id = storeId;
+    }
+    if (payload.username === "") delete payload.username;
+
+    const created = await this.staffAdminRequest<any>("/users", { method: "POST", body: payload });
+    void this.syncStaffFromBackend().catch(() => {});
+    return created;
+  }
+
+  async updateStaff(id: string, input: ManageableStaffInput): Promise<ManageableStaffUser> {
+    const payload: Record<string, unknown> = { ...input };
+    if (payload.password === "") delete payload.password;
+    if (payload.pin === "") delete payload.pin;
+    if (payload.username === "") payload.username = null;
+
+    const updated = await this.staffAdminRequest<any>(`/users/${id}`, { method: "PUT", body: payload });
+    void this.syncStaffFromBackend().catch(() => {});
+    return updated;
+  }
+
+  async deleteStaff(id: string): Promise<void> {
+    await this.staffAdminRequest(`/users/${id}`, { method: "DELETE" });
+    void this.syncStaffFromBackend().catch(() => {});
+  }
+
+  async unlockStaff(id: string): Promise<void> {
+    await this.staffAdminRequest(`/users/${id}/unlock`, { method: "POST" });
+    void this.syncStaffFromBackend().catch(() => {});
+  }
+
+  async resetStaffPin(id: string, pin: string): Promise<void> {
+    await this.staffAdminRequest(`/users/${id}/reset-pin`, { method: "POST", body: { pin } });
+    void this.syncStaffFromBackend().catch(() => {});
   }
 
   private async findStaff(usernameOrId: string): Promise<StaffUser | null> {

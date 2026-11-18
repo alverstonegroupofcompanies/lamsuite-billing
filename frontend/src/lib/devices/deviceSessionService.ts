@@ -17,6 +17,17 @@ function getStoredToken(): string | null {
   return null;
 }
 
+/**
+ * Local registry ids look like "store_main"; the server only knows numeric ids
+ * and store codes. Passing a local key makes the backend reject the request as
+ * an unknown store, so those keys are never sent.
+ */
+function isServerStoreKey(value?: string | null): value is string {
+  if (!value) return false;
+  const v = String(value).trim();
+  return v !== "" && !/^store_/i.test(v);
+}
+
 export type DeviceStatus = "Active" | "Idle" | "Offline" | "Locked" | "Revoked";
 
 export interface LoggedInDevice {
@@ -69,10 +80,19 @@ export class DeviceSessionService {
   private cachedDevices: LoggedInDevice[] = [];
   private cachedStoreId: string | null = null;
   private lastMetadata: DeviceSessionResponseMetadata = {};
+  private lastError: string | null = null;
   private listeners: Array<(devices: LoggedInDevice[]) => void> = [];
 
   getMetadata(): DeviceSessionResponseMetadata {
     return this.lastMetadata;
+  }
+
+  /**
+   * Error from the most recent roster fetch, if it failed. Null means the last
+   * fetch succeeded; an empty roster is then a genuine "nobody is signed in".
+   */
+  getLastError(): string | null {
+    return this.lastError;
   }
 
   clearCache(): void {
@@ -88,9 +108,14 @@ export class DeviceSessionService {
   async getLoggedInDevices(options?: DeviceFilterOptions): Promise<LoggedInDevice[]> {
     const activeStore = storeRegistryService.getActiveStore();
     const profile = await storeDeviceService.getDeviceProfile().catch(() => null);
+    // The paired profile is the tenant authority. The registry id is only a
+    // fallback and is skipped when it is a local "store_*" key the server
+    // cannot resolve.
     const storeId = options?.store_id !== undefined
       ? options.store_id
-      : (activeStore?.id || profile?.store_id || null);
+      : (isServerStoreKey(profile?.store_id)
+          ? profile!.store_id
+          : (isServerStoreKey(activeStore?.id) ? activeStore!.id : null));
 
     const params = new URLSearchParams();
     if (storeId) params.set("store_id", String(storeId));
@@ -118,10 +143,12 @@ export class DeviceSessionService {
       });
 
       if (!res.ok) {
-        throw new Error(`HTTP ${res.status}: Failed to fetch logged-in devices`);
+        const body = await res.json().catch(() => ({} as any));
+        throw new Error(body?.message || `HTTP ${res.status}: Failed to fetch logged-in devices`);
       }
 
       const data = await res.json();
+      this.lastError = null;
       this.lastMetadata = {
         caller_public_ip: data.caller_public_ip || null,
         other_stores_active_count: data.other_stores_active_count || 0,
@@ -154,6 +181,7 @@ export class DeviceSessionService {
       }
       return [];
     } catch (err) {
+      this.lastError = err instanceof Error ? err.message : "Failed to reach the server";
       if (this.cachedDevices.length > 0 && this.cachedStoreId === (storeId ? String(storeId) : null)) {
         return this.filterLocally(this.cachedDevices, options);
       }
@@ -180,7 +208,10 @@ export class DeviceSessionService {
       const profile = await storeDeviceService.getDeviceProfile().catch(() => null);
       const activeStore = storeRegistryService.getActiveStore();
       const deviceUuid = profile?.device_uuid || getOrCreateClientDeviceUuid();
-      const storeId = params?.store_id || activeStore?.id || profile?.store_id || "1";
+      const storeId = params?.store_id
+        || (isServerStoreKey(profile?.store_id) ? profile!.store_id : null)
+        || (isServerStoreKey(activeStore?.id) ? activeStore!.id : null)
+        || undefined;
 
       let unsynced = params?.unsynced_items_count;
       if (unsynced === undefined) {

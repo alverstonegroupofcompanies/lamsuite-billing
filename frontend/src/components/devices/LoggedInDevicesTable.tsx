@@ -66,13 +66,19 @@ export const LoggedInDevicesTable: React.FC<LoggedInDevicesTableProps> = ({
       setErrorMsg("");
 
       try {
-        const curStore = storeRegistryService.getActiveStore();
         const list = await deviceSessionService.getLoggedInDevices({
           search: searchQuery.trim() || undefined,
           status: statusFilter,
-          store_id: storeFilter === "all" ? "all" : (curStore?.id || undefined),
+          // "current" lets the service resolve the paired profile's server
+          // store id; the local registry id may be an unresolvable "store_*" key.
+          store_id: storeFilter === "all" ? "all" : undefined,
         });
         setDevices(list);
+
+        const fetchError = deviceSessionService.getLastError();
+        if (fetchError) {
+          setErrorMsg(fetchError);
+        }
 
         const meta = deviceSessionService.getMetadata();
         let pubIp = meta.caller_public_ip || publicIpService.getCachedIp();
@@ -433,15 +439,25 @@ export const LoggedInDevicesTable: React.FC<LoggedInDevicesTableProps> = ({
           </div>
         </div>
       ) : devices.length === 0 ? (
-        <div className="bg-[var(--color-surface)] border border-dashed border-[var(--color-border)] rounded-xl p-10 text-center space-y-2">
-          <Monitor className="h-8 w-8 text-[var(--color-text-muted)] mx-auto opacity-40" />
-          <h4 className="text-xs font-bold text-[var(--color-text)]">No Connected Workstations Found</h4>
-          <p className="text-[11px] text-[var(--color-text-muted)] max-w-sm mx-auto">
-            {searchQuery || statusFilter !== "all"
-              ? "No devices match the applied filter criteria. Try clearing your search."
-              : "When cash counters and workstations log in to the server, their active sessions will appear here in real time."}
-          </p>
-        </div>
+        errorMsg ? (
+          <div className="bg-[var(--color-surface)] border border-dashed border-rose-200 rounded-xl p-10 text-center space-y-2">
+            <AlertCircle className="h-8 w-8 text-rose-400 mx-auto opacity-70" />
+            <h4 className="text-xs font-bold text-[var(--color-text)]">Unable to Load Workstations</h4>
+            <p className="text-[11px] text-[var(--color-text-muted)] max-w-sm mx-auto">
+              The server could not return this store&apos;s device roster. Check the connection and store pairing, then retry.
+            </p>
+          </div>
+        ) : (
+          <div className="bg-[var(--color-surface)] border border-dashed border-[var(--color-border)] rounded-xl p-10 text-center space-y-2">
+            <Monitor className="h-8 w-8 text-[var(--color-text-muted)] mx-auto opacity-40" />
+            <h4 className="text-xs font-bold text-[var(--color-text)]">No Connected Workstations Found</h4>
+            <p className="text-[11px] text-[var(--color-text-muted)] max-w-sm mx-auto">
+              {searchQuery || statusFilter !== "all"
+                ? "No devices match the applied filter criteria. Try clearing your search."
+                : "When cash counters and workstations log in to the server, their active sessions will appear here in real time."}
+            </p>
+          </div>
+        )
       ) : (
         <div className="bg-[var(--color-surface)] border border-[var(--color-border)] rounded-xl shadow-xs overflow-hidden">
           <div className="overflow-x-auto">

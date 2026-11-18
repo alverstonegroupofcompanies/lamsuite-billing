@@ -66,14 +66,21 @@ export class BackendHttpApiClient implements SyncApiClient {
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
       Accept: "application/json",
-      "X-Store-Id": activeStoreId,
-      "Store-Id": activeStoreId,
     };
+    // A local registry key ("store_main") is not a server store. Omit it and
+    // let the device token decide the tenant.
+    const hasServerStore = activeStoreId !== "" && !/^store_/i.test(activeStoreId);
+    if (hasServerStore) {
+      headers["X-Store-Id"] = activeStoreId;
+      headers["Store-Id"] = activeStoreId;
+    }
 
     try {
       const { storeDeviceService } = await import("../auth/storeDeviceService");
       const deviceHeaders = await storeDeviceService.getDeviceAuthHeaders();
-      if (deviceHeaders["X-Store-Id"] === activeStoreId) {
+      // Attach the token when it belongs to the store we push as, or when no
+      // server-resolvable store id is known.
+      if (!hasServerStore || deviceHeaders["X-Store-Id"] === activeStoreId) {
         if (deviceHeaders["X-Device-Token"]) headers["X-Device-Token"] = deviceHeaders["X-Device-Token"];
         if (deviceHeaders["X-Device-UUID"]) headers["X-Device-UUID"] = deviceHeaders["X-Device-UUID"];
       }

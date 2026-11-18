@@ -1,6 +1,6 @@
 # Keyboard shortcut map
 
-Published from `frontend/src/lib/keyboard/centralKeyMap.ts` on 2026-11-14 (app 2.0.39).
+Published from `frontend/src/lib/keyboard/centralKeyMap.ts` on 2026-11-14 (app 2.0.40).
 
 `specs/keyboard-shortcuts.json` is the machine-readable copy; `frontend/src/lib/keyboard/publishedKeyMap.test.ts` fails if the two drift.
 

@@ -24,7 +24,86 @@ import {
   ShieldAlert,
   Eye,
   EyeOff,
+  Layers,
 } from "lucide-react";
+
+const toIdList = (ids?: (number | string)[] | null): number[] =>
+  (ids || []).map(Number).filter((n) => Number.isFinite(n));
+
+interface BranchMultiSelectProps {
+  stores: Store[];
+  value: number[];
+  primaryStoreId: string;
+  onChange: (next: number[]) => void;
+}
+
+/** Extra branches beyond the primary one; the primary store itself is not repeatable here. */
+const BranchMultiSelect: React.FC<BranchMultiSelectProps> = ({ stores, value, primaryStoreId, onChange }) => {
+  const primaryId = primaryStoreId ? Number(primaryStoreId) : null;
+  const options = stores.filter((s) => s.id !== primaryId);
+
+  const toggle = (id: number) =>
+    onChange(value.includes(id) ? value.filter((v) => v !== id) : [...value, id]);
+
+  return (
+    <div className="rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden">
+      <div className="flex items-center justify-between gap-2 px-3 py-1.5 bg-slate-50 dark:bg-slate-800/60 border-b border-slate-200 dark:border-slate-700">
+        <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+          {value.length === 0
+            ? "No extra branches"
+            : `${value.length} extra branch${value.length > 1 ? "es" : ""} selected`}
+        </span>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => onChange(options.map((s) => s.id))}
+            className="text-[10px] font-bold text-brand-600 hover:text-brand-500 cursor-pointer"
+          >
+            Select all
+          </button>
+          <button
+            type="button"
+            onClick={() => onChange([])}
+            className="text-[10px] font-bold text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 cursor-pointer"
+          >
+            Clear
+          </button>
+        </div>
+      </div>
+
+      {options.length === 0 ? (
+        <p className="px-3 py-2.5 text-[11px] text-slate-400">
+          {stores.length === 0 ? "No branches available." : "This staff member's primary branch is the only one."}
+        </p>
+      ) : (
+        <div className="max-h-40 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800">
+          {options.map((s) => (
+            <label
+              key={s.id}
+              className="flex items-center gap-2 px-3 py-2 text-xs cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/40"
+            >
+              <input
+                type="checkbox"
+                checked={value.includes(s.id)}
+                onChange={() => toggle(s.id)}
+                aria-label={`Grant access to ${s.name}`}
+                className="accent-brand-600"
+              />
+              <Building2 className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+              <span className="font-medium text-slate-700 dark:text-slate-200">{s.name}</span>
+              <span className="font-mono text-[10px] text-slate-400">({s.code})</span>
+              {!s.is_active && (
+                <span className="ml-auto text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 dark:bg-amber-950/60 dark:text-amber-400">
+                  Inactive
+                </span>
+              )}
+            </label>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
 
 export const UsersPage: React.FC = () => {
   const { user: currentUser, startImpersonation, hasPermission } = useAuth();
@@ -45,6 +124,7 @@ export const UsersPage: React.FC = () => {
     pin: string;
     role: UserRole;
     store_id: string;
+    allowed_store_ids: number[];
     idle_timeout_minutes: number;
     max_failed_logins: number;
     permissions: UserPermissions;
@@ -56,6 +136,7 @@ export const UsersPage: React.FC = () => {
     pin: "",
     role: "manager",
     store_id: "",
+    allowed_store_ids: [],
     idle_timeout_minutes: 15,
     max_failed_logins: 5,
     permissions: {},
@@ -69,6 +150,7 @@ export const UsersPage: React.FC = () => {
     email: string;
     role: UserRole;
     store_id: string;
+    allowed_store_ids: number[];
     idle_timeout_minutes: number;
     password?: string;
     pin?: string;
@@ -79,6 +161,7 @@ export const UsersPage: React.FC = () => {
     email: "",
     role: "manager",
     store_id: "",
+    allowed_store_ids: [],
     idle_timeout_minutes: 15,
     password: "",
     pin: "",
@@ -112,6 +195,14 @@ export const UsersPage: React.FC = () => {
   // Impersonation state
   const [impersonateTarget, setImpersonateTarget] = useState<User | null>(null);
   const [impersonateReason, setImpersonateReason] = useState("");
+
+  const extraBranchLabels = (u: User): string[] =>
+    toIdList(u.allowed_store_ids)
+      .filter((id) => id !== u.store_id)
+      .map((id) => {
+        const s = stores.find((st) => st.id === id);
+        return s ? `${s.name} (${s.code})` : `Branch #${id}`;
+      });
 
   const fetchUsers = async () => {
     setIsLoading(true);
@@ -160,6 +251,7 @@ export const UsersPage: React.FC = () => {
         password: newUser.password,
         role: newUser.role,
         store_id: newUser.store_id ? Number(newUser.store_id) : null,
+        allowed_store_ids: newUser.allowed_store_ids.length ? newUser.allowed_store_ids : null,
         idle_timeout_minutes: newUser.idle_timeout_minutes,
         max_failed_logins: newUser.max_failed_logins,
         permissions: Object.keys(newUser.permissions).length ? newUser.permissions : null,
@@ -183,6 +275,7 @@ export const UsersPage: React.FC = () => {
         pin: "",
         role: "manager",
         store_id: "",
+        allowed_store_ids: [],
         idle_timeout_minutes: 15,
         max_failed_logins: 5,
         permissions: {},
@@ -202,6 +295,7 @@ export const UsersPage: React.FC = () => {
       email: u.email,
       role: u.role,
       store_id: u.store_id ? String(u.store_id) : "",
+      allowed_store_ids: toIdList(u.allowed_store_ids).filter((id) => id !== u.store_id),
       idle_timeout_minutes: u.idle_timeout_minutes || 15,
       password: "",
       pin: "",
@@ -219,6 +313,7 @@ export const UsersPage: React.FC = () => {
         username: editFormData.username || undefined,
         role: editFormData.role,
         store_id: editFormData.store_id ? Number(editFormData.store_id) : null,
+        allowed_store_ids: editFormData.allowed_store_ids.length ? editFormData.allowed_store_ids : null,
         idle_timeout_minutes: editFormData.idle_timeout_minutes,
         permissions: Object.keys(editFormData.permissions).length ? editFormData.permissions : null,
       };
@@ -486,7 +581,9 @@ export const UsersPage: React.FC = () => {
                   </td>
                 </tr>
               ) : (
-                users.map((u) => (
+                users.map((u) => {
+                  const extras = extraBranchLabels(u);
+                  return (
                   <tr key={u.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/40">
                     <td className="px-4 py-3">
                       <div className="font-bold text-slate-900 dark:text-white flex items-center gap-2">
@@ -527,16 +624,39 @@ export const UsersPage: React.FC = () => {
                       </span>
                     </td>
                     <td className="px-4 py-3 font-medium">
-                      {u.store ? (
-                        <div className="flex items-center gap-1.5">
-                          <Building2 className="w-3.5 h-3.5 text-slate-400" />
-                          <span>{u.store.name}</span>
-                          <span className="font-mono text-[10px] text-slate-400">({u.store.code})</span>
-                        </div>
+                      {extras.length === 0 ? (
+                        u.store ? (
+                          <div className="flex items-center gap-1.5">
+                            <Building2 className="w-3.5 h-3.5 text-slate-400" />
+                            <span>{u.store.name}</span>
+                            <span className="font-mono text-[10px] text-slate-400">({u.store.code})</span>
+                          </div>
+                        ) : (
+                          <span className="text-purple-600 dark:text-purple-400 font-semibold flex items-center gap-1">
+                            <span>Global (All Stores)</span>
+                          </span>
+                        )
                       ) : (
-                        <span className="text-purple-600 dark:text-purple-400 font-semibold flex items-center gap-1">
-                          <span>Global (All Stores)</span>
-                        </span>
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span
+                            title={extras.join(", ")}
+                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-brand-100 text-brand-700 dark:bg-brand-950/60 dark:text-brand-300"
+                          >
+                            <Layers className="w-3 h-3" />
+                            <span>
+                              {u.store ? 1 + extras.length : extras.length} branches
+                            </span>
+                          </span>
+                          {u.store ? (
+                            <span className="text-[11px] text-slate-500 dark:text-slate-400 truncate max-w-[140px]">
+                              {u.store.name} +{extras.length}
+                            </span>
+                          ) : (
+                            <span className="text-[11px] text-slate-500 dark:text-slate-400 truncate max-w-[180px]">
+                              {extras.join(", ")}
+                            </span>
+                          )}
+                        </div>
                       )}
                     </td>
                     <td className="px-4 py-3 text-center">
@@ -675,7 +795,8 @@ export const UsersPage: React.FC = () => {
                       </div>
                     </td>
                   </tr>
-                ))
+                  );
+                })
               )}
             </tbody>
           </table>
@@ -969,7 +1090,15 @@ export const UsersPage: React.FC = () => {
                   </label>
                   <select
                     value={editFormData.store_id}
-                    onChange={(e) => setEditFormData({ ...editFormData, store_id: e.target.value })}
+                    onChange={(e) =>
+                      setEditFormData({
+                        ...editFormData,
+                        store_id: e.target.value,
+                        allowed_store_ids: editFormData.allowed_store_ids.filter(
+                          (id) => id !== Number(e.target.value)
+                        ),
+                      })
+                    }
                     className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                   >
                     <option value="">Global / Unassigned (Super Admin)</option>
@@ -979,6 +1108,22 @@ export const UsersPage: React.FC = () => {
                       </option>
                     ))}
                   </select>
+                </div>
+
+                <div className="col-span-2">
+                  <label className="block font-medium text-slate-700 dark:text-slate-300 mb-1">
+                    Additional Branch Access (optional)
+                  </label>
+                  <BranchMultiSelect
+                    stores={stores}
+                    value={editFormData.allowed_store_ids}
+                    primaryStoreId={editFormData.store_id}
+                    onChange={(next) => setEditFormData({ ...editFormData, allowed_store_ids: next })}
+                  />
+                  <span className="text-[10px] text-slate-400 mt-1 block">
+                    Checked branches join this account&apos;s usable scope alongside the assigned branch. With no
+                    assigned branch, only the checked branches are reachable; leave both empty for global access.
+                  </span>
                 </div>
 
                 <div>
@@ -1182,7 +1327,13 @@ export const UsersPage: React.FC = () => {
                   </label>
                   <select
                     value={newUser.store_id}
-                    onChange={(e) => setNewUser({ ...newUser, store_id: e.target.value })}
+                    onChange={(e) =>
+                      setNewUser({
+                        ...newUser,
+                        store_id: e.target.value,
+                        allowed_store_ids: newUser.allowed_store_ids.filter((id) => id !== Number(e.target.value)),
+                      })
+                    }
                     className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                   >
                     <option value="">Global / Unassigned (Super Admin)</option>
@@ -1192,6 +1343,22 @@ export const UsersPage: React.FC = () => {
                       </option>
                     ))}
                   </select>
+                </div>
+
+                <div className="col-span-2">
+                  <label className="block font-medium text-slate-700 dark:text-slate-300 mb-1">
+                    Additional Branch Access (optional)
+                  </label>
+                  <BranchMultiSelect
+                    stores={stores}
+                    value={newUser.allowed_store_ids}
+                    primaryStoreId={newUser.store_id}
+                    onChange={(next) => setNewUser({ ...newUser, allowed_store_ids: next })}
+                  />
+                  <span className="text-[10px] text-slate-400 mt-1 block">
+                    Checked branches join this account&apos;s usable scope alongside the assigned branch. With no
+                    assigned branch, only the checked branches are reachable; leave both empty for global access.
+                  </span>
                 </div>
 
                 <div className="col-span-2">

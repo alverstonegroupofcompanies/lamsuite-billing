@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { deviceSessionService } from "./deviceSessionService";
 import { storeDeviceService } from "../auth/storeDeviceService";
+import { storeRegistryService } from "../auth/storeRegistryService";
 import { staffAuthService } from "../auth/staffAuthService";
 
 describe("deviceSessionService - Centralized Logged-In Device Tracking (Item 2)", () => {
@@ -333,7 +334,116 @@ describe("deviceSessionService - Centralized Logged-In Device Tracking (Item 2)"
     expect(lockSpy).not.toHaveBeenCalled();
   });
 
-  it("11. heartbeat 403 revocation locks and resets the workstation", async () => {
+  it("12. roster prefers the paired numeric store over a local registry key", async () => {
+    vi.spyOn(storeRegistryService, "getActiveStore").mockReturnValue({
+      id: "store_main",
+      name: "Main Store",
+    } as any);
+    vi.spyOn(storeDeviceService, "getDeviceProfile").mockResolvedValue({
+      device_uuid: "uuid-paired",
+      store_id: "4",
+    } as any);
+
+    const fetchSpy = vi.spyOn(global, "fetch").mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ success: true, devices: [] }),
+    } as Response);
+
+    await deviceSessionService.getLoggedInDevices();
+
+    const calledUrl = fetchSpy.mock.calls[0][0] as string;
+    expect(calledUrl).toContain("store_id=4");
+    expect(calledUrl).not.toContain("store_main");
+  });
+
+  it("13. roster omits store_id when only a local registry key is available", async () => {
+    vi.spyOn(storeRegistryService, "getActiveStore").mockReturnValue({
+      id: "store_main",
+      name: "Main Store",
+    } as any);
+    vi.spyOn(storeDeviceService, "getDeviceProfile").mockResolvedValue({
+      device_uuid: "uuid-unpaired",
+      store_id: "store_main",
+    } as any);
+
+    const fetchSpy = vi.spyOn(global, "fetch").mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ success: true, devices: [] }),
+    } as Response);
+
+    const devices = await deviceSessionService.getLoggedInDevices();
+
+    expect(devices).toEqual([]);
+    const calledUrl = fetchSpy.mock.calls[0][0] as string;
+    expect(calledUrl).not.toContain("store_id=");
+  });
+
+  it("14. roster surfaces the server error message instead of pretending nobody is signed in", async () => {
+    vi.spyOn(storeDeviceService, "getDeviceProfile").mockResolvedValue({
+      device_uuid: "uuid-paired",
+      store_id: "4",
+    } as any);
+    vi.spyOn(global, "fetch").mockResolvedValueOnce({
+      ok: false,
+      status: 404,
+      json: async () => ({ success: false, message: "Store not found." }),
+    } as Response);
+
+    const devices = await deviceSessionService.getLoggedInDevices();
+
+    expect(devices).toEqual([]);
+    expect(deviceSessionService.getLastError()).toBe("Store not found.");
+  });
+
+  it("15. a successful roster refresh clears the previous error", async () => {
+    vi.spyOn(storeDeviceService, "getDeviceProfile").mockResolvedValue({
+      device_uuid: "uuid-paired",
+      store_id: "4",
+    } as any);
+    const fetchSpy = vi.spyOn(global, "fetch");
+    fetchSpy.mockResolvedValueOnce({
+      ok: false,
+      status: 500,
+      json: async () => ({ message: "Server exploded" }),
+    } as Response);
+    fetchSpy.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ success: true, devices: [] }),
+    } as Response);
+
+    await deviceSessionService.getLoggedInDevices();
+    expect(deviceSessionService.getLastError()).toBe("Server exploded");
+
+    await deviceSessionService.getLoggedInDevices();
+    expect(deviceSessionService.getLastError()).toBeNull();
+  });
+
+  it("16. heartbeat does not send a local registry store key as store_id", async () => {
+    vi.spyOn(storeRegistryService, "getActiveStore").mockReturnValue({
+      id: "store_main",
+      name: "Main Store",
+    } as any);
+    vi.spyOn(storeDeviceService, "getDeviceProfile").mockResolvedValue({
+      device_uuid: "uuid-unpaired",
+      store_id: "store_main",
+    } as any);
+
+    const fetchSpy = vi.spyOn(global, "fetch").mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ success: true }),
+    } as Response);
+
+    await deviceSessionService.sendHeartbeat();
+
+    const body = JSON.parse((fetchSpy.mock.calls[0][1] as RequestInit).body as string);
+    expect(body.store_id).toBeUndefined();
+  });
+
+  it("17. heartbeat 403 revocation locks and resets the workstation", async () => {
     vi.spyOn(storeDeviceService, "getDeviceProfile").mockResolvedValueOnce({
       device_uuid: "uuid-test-123",
       store_id: "4",

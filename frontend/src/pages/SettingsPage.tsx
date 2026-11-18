@@ -87,7 +87,7 @@ import { APP_FULL_VERSION } from "../config/version";
 import { UpdateNotificationModal } from "../components/UpdateNotificationModal";
 import { SoftwareUpdatesTab } from "../components/settings/SoftwareUpdatesTab";
 import { storeRegistryService } from "../lib/auth/storeRegistryService";
-import { staffAuthService } from "../lib/auth/staffAuthService";
+import { StaffManagementPanel } from "../components/settings/StaffManagementPanel";
 
 export const SettingsPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState<
@@ -135,13 +135,6 @@ export const SettingsPage: React.FC = () => {
   const [isScanningPrinters, setIsScanningPrinters] = useState(false);
   const [testPrintFeedback, setTestPrintFeedback] = useState<{ text: string; success: boolean } | null>(null);
   const [selectedHexDumpLog, setSelectedHexDumpLog] = useState<PrintJobRecord | null>(null);
-
-  // Staff directory (read-only; managed from the Admin Panel)
-  const [staffDirectory, setStaffDirectory] = useState<
-    Awaited<ReturnType<typeof staffAuthService.listStaffDirectory>>
-  >([]);
-  const [isLoadingStaffDirectory, setIsLoadingStaffDirectory] = useState(false);
-  const [staffDirectoryQuery, setStaffDirectoryQuery] = useState("");
 
   // Test QR Modal State
   const [testQrModal, setTestQrModal] = useState<{
@@ -207,23 +200,6 @@ export const SettingsPage: React.FC = () => {
       setIsTestingWa(false);
     }
   };
-
-  const loadStaffDirectory = async () => {
-    setIsLoadingStaffDirectory(true);
-    try {
-      setStaffDirectory(await staffAuthService.listStaffDirectory());
-    } catch (err: any) {
-      showNotification(err?.message || "Could not load the staff directory", "error");
-    } finally {
-      setIsLoadingStaffDirectory(false);
-    }
-  };
-
-  useEffect(() => {
-    if (activeTab === "security") {
-      loadStaffDirectory();
-    }
-  }, [activeTab]);
 
   useEffect(() => {
     if (activeTab === "printing") {
@@ -3549,93 +3525,7 @@ export const SettingsPage: React.FC = () => {
                 </label>
               </div>
 
-              <div className="rounded-xl border border-slate-200 p-4 space-y-3">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div>
-                    <div className="text-xs font-bold text-slate-800">Staff Directory (This Store)</div>
-                    <p className="text-[10px] text-slate-500">
-                      Staff accounts and role-based access are created and edited in the Admin Panel → Users &amp; Roles.
-                      This view is read-only and shows what this terminal has cached for offline sign-in.
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={loadStaffDirectory}
-                    disabled={isLoadingStaffDirectory}
-                    className="inline-flex items-center gap-1 rounded border border-slate-300 px-2 py-1 text-[11px] font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-50"
-                  >
-                    <RefreshCw className={`h-3.5 w-3.5 ${isLoadingStaffDirectory ? "animate-spin" : ""}`} />
-                    Refresh
-                  </button>
-                </div>
-
-                <input
-                  type="text"
-                  value={staffDirectoryQuery}
-                  onChange={(e) => setStaffDirectoryQuery(e.target.value)}
-                  placeholder="Filter by name, username or role"
-                  className="w-full rounded border border-slate-300 p-2 text-xs focus:border-blue-500 focus:outline-none"
-                />
-
-                {staffDirectory.length === 0 ? (
-                  <p className="py-6 text-center text-xs text-slate-400">
-                    {isLoadingStaffDirectory ? "Loading staff directory..." : "No staff accounts cached for this store yet."}
-                  </p>
-                ) : (
-                  <div className="overflow-x-auto rounded-lg border border-slate-200">
-                    <table className="w-full text-left text-xs">
-                      <thead className="bg-slate-50 text-[10px] uppercase text-slate-500">
-                        <tr>
-                          <th className="px-3 py-2">Name</th>
-                          <th className="px-3 py-2">Username</th>
-                          <th className="px-3 py-2">Role</th>
-                          <th className="px-3 py-2">Status</th>
-                          <th className="px-3 py-2">Overrides</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100">
-                        {staffDirectory
-                          .filter((staff) => {
-                            const q = staffDirectoryQuery.trim().toLowerCase();
-                            if (!q) return true;
-                            return [staff.full_name, staff.username, staff.role].some((v) =>
-                              String(v || "").toLowerCase().includes(q)
-                            );
-                          })
-                          .map((staff) => (
-                            <tr key={staff.id} className="text-slate-700">
-                              <td className="px-3 py-2 font-semibold">{staff.full_name}</td>
-                              <td className="px-3 py-2 font-mono text-[11px]">{staff.username || "—"}</td>
-                              <td className="px-3 py-2 uppercase text-[10px] font-bold text-slate-500">
-                                {staff.role.replace(/_/g, " ")}
-                              </td>
-                              <td className="px-3 py-2">
-                                {!staff.is_active ? (
-                                  <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-500">
-                                    Inactive
-                                  </span>
-                                ) : staff.is_locked ? (
-                                  <span className="rounded-full bg-rose-100 px-2 py-0.5 text-[10px] font-bold text-rose-700">
-                                    Locked
-                                  </span>
-                                ) : (
-                                  <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-700">
-                                    Active
-                                  </span>
-                                )}
-                              </td>
-                              <td className="px-3 py-2 text-[10px] text-slate-500">
-                                {staff.permission_overrides > 0
-                                  ? `${staff.permission_overrides} module(s)`
-                                  : "Role defaults"}
-                              </td>
-                            </tr>
-                          ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </div>
+              <StaffManagementPanel />
             </div>
           )}
 

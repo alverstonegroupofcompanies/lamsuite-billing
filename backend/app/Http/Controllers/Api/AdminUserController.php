@@ -9,9 +9,79 @@ use App\Services\PermissionMap;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
+use Laravel\Sanctum\PersonalAccessToken;
 
 class AdminUserController
 {
+    /**
+     * POS terminals authenticate with a staff_session_token. They may only
+     * manage the branch they are signed in to; multi-branch and global
+     * accounts are created from the admin panel.
+     */
+    private function isTerminalRequest(Request $request): bool
+    {
+        $token = $request->user()?->currentAccessToken();
+
+        return $token instanceof PersonalAccessToken && $token->name === 'staff_session_token';
+    }
+
+    private function terminalStoreId(Request $request): ?int
+    {
+        $activeStoreId = $request->attributes->get('active_store_id');
+
+        return $activeStoreId ? (int) $activeStoreId : null;
+    }
+
+    /**
+     * Blocks a terminal from touching an account outside its signed-in branch.
+     * Global accounts (null store) and other branches belong to the admin panel.
+     */
+    private function guardTerminalTarget(Request $request, User $user): ?JsonResponse
+    {
+        if (!$this->isTerminalRequest($request)) {
+            return null;
+        }
+
+        $terminalStoreId = $this->terminalStoreId($request);
+
+        if (!$terminalStoreId) {
+            return response()->json([
+                'message' => 'Register this terminal to a store before managing staff accounts.',
+            ], 422);
+        }
+
+        if ((int) $user->store_id !== $terminalStoreId) {
+            return response()->json([
+                'message' => 'Staff outside this store can only be managed from the admin panel.',
+            ], 403);
+        }
+
+        return null;
+    }
+
+    /**
+     * No caller may hand out branch access it does not hold itself. ScopeStore
+     * validates the store context of a request, never the store ids inside the
+     * payload, so an admin-panel caller with users:edit could otherwise grant
+     * another tenant's branch through allowed_store_ids.
+     */
+    private function denyGrantOutsideCallerScope(array $validated, User $currentUser): ?JsonResponse
+    {
+        if ($currentUser->isSuperAdmin()) {
+            return null;
+        }
+
+        foreach ((array) ($validated['allowed_store_ids'] ?? []) as $storeId) {
+            if (!$currentUser->canAccessStore((int) $storeId)) {
+                return response()->json([
+                    'message' => "Branch {$storeId} is outside your access scope, so it cannot be granted.",
+                ], 403);
+            }
+        }
+
+        return null;
+    }
+
     public function index(Request $request): JsonResponse
     {
         $currentUser = $request->user();
@@ -97,6 +167,37 @@ class AdminUserController
 
         if ($validated['role'] === 'super_admin' && !$currentUser->isSuperAdmin()) {
             return response()->json(['message' => 'Only Super Admins can create Super Admin accounts.'], 403);
+        }
+
+        if ($this->isTerminalRequest($request)) {
+            $terminalStoreId = $this->terminalStoreId($request);
+            if (!$terminalStoreId) {
+                return response()->json([
+                    'message' => 'Register this terminal to a store before creating staff accounts.',
+                ], 422);
+            }
+            if (array_key_exists('allowed_store_ids', $validated)) {
+                return response()->json([
+                    'message' => 'Multi-branch access can only be granted from the admin panel.',
+                ], 422);
+            }
+            if (!empty($validated['store_id']) && (int) $validated['store_id'] !== $terminalStoreId) {
+                return response()->json([
+                    'message' => "Terminal staff accounts can only be assigned to store {$terminalStoreId}.",
+                ], 422);
+            }
+            $validated['store_id'] = $terminalStoreId;
+        } else {
+            if ($denied = $this->denyGrantOutsideCallerScope($validated, $currentUser)) {
+                return $denied;
+            }
+        }
+
+        // Omitted store_id means "the caller's store", never a global account.
+        // A global account must be requested explicitly with store_id null by a
+        // super admin.
+        if (!array_key_exists('store_id', $validated) && $currentUser->store_id) {
+            $validated['store_id'] = $currentUser->store_id;
         }
 
         if (array_key_exists('permissions', $validated)) {
@@ -186,6 +287,30 @@ class AdminUserController
                 : PermissionMap::normalize($validated['permissions']);
         }
 
+        if ($denied = $this->guardTerminalTarget($request, $user)) {
+            return $denied;
+        }
+
+        if ($this->isTerminalRequest($request)) {
+            $terminalStoreId = (int) $this->terminalStoreId($request);
+            if (array_key_exists('allowed_store_ids', $validated)) {
+                return response()->json([
+                    'message' => 'Multi-branch access can only be granted from the admin panel.',
+                ], 422);
+            }
+            if (array_key_exists('store_id', $validated) && !empty($validated['store_id'])
+                && (int) $validated['store_id'] !== $terminalStoreId) {
+                return response()->json([
+                    'message' => "Terminal staff accounts can only be assigned to store {$terminalStoreId}.",
+                ], 422);
+            }
+            $validated['store_id'] = $terminalStoreId;
+        } else {
+            if ($denied = $this->denyGrantOutsideCallerScope($validated, $currentUser)) {
+                return $denied;
+            }
+        }
+
         if (array_key_exists('store_id', $validated)) {
             $validated['store_id'] = empty($validated['store_id']) ? null : (int)$validated['store_id'];
         }
@@ -244,6 +369,10 @@ class AdminUserController
     {
         $currentUser = $request->user();
         $user = User::findOrFail($id);
+
+        if ($denied = $this->guardTerminalTarget($request, $user)) {
+            return $denied;
+        }
 
         $validated = $request->validate([
             'pin' => 'required|string',
@@ -314,6 +443,10 @@ class AdminUserController
         $currentUser = $request->user();
         $user = User::findOrFail($id);
 
+        if ($denied = $this->guardTerminalTarget($request, $user)) {
+            return $denied;
+        }
+
         $user->update([
             'failed_login_attempts' => 0,
             'locked_until' => null,
@@ -337,6 +470,10 @@ class AdminUserController
             return response()->json(['message' => 'You cannot lock your own account.'], 400);
         }
 
+        if ($denied = $this->guardTerminalTarget($request, $user)) {
+            return $denied;
+        }
+
         $user->update([
             'locked_until' => now()->addMinutes(60),
             'failed_login_attempts' => $user->max_failed_logins ?? 5,
@@ -358,6 +495,10 @@ class AdminUserController
 
         if ($currentUser && $currentUser->id === $user->id) {
             return response()->json(['message' => 'You cannot delete your own account.'], 422);
+        }
+
+        if ($denied = $this->guardTerminalTarget($request, $user)) {
+            return $denied;
         }
 
         if ($currentUser && !$currentUser->isSuperAdmin() && $user->role === 'super_admin') {
@@ -384,6 +525,11 @@ class AdminUserController
     public function toggleBiometric(Request $request, string $id): JsonResponse
     {
         $user = User::findOrFail($id);
+
+        if ($denied = $this->guardTerminalTarget($request, $user)) {
+            return $denied;
+        }
+
         $user->update(['is_biometric_enabled' => !$user->is_biometric_enabled]);
 
         AuditLog::log('toggle_biometric', 'User', (string)$user->id, null, ['is_biometric_enabled' => $user->is_biometric_enabled], $user->store_id);
@@ -398,6 +544,11 @@ class AdminUserController
     public function forceLogout(Request $request, string $id): JsonResponse
     {
         $user = User::findOrFail($id);
+
+        if ($denied = $this->guardTerminalTarget($request, $user)) {
+            return $denied;
+        }
+
         $user->tokens()->delete();
         UserSession::where('user_id', $user->id)->update(['is_active' => false]);
 

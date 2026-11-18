@@ -87,7 +87,9 @@ export class StoreDeviceService {
       const token = await this.getDeviceToken();
       if (token) headers["X-Device-Token"] = token;
       if (profile?.device_uuid) headers["X-Device-UUID"] = profile.device_uuid;
-      if (profile?.store_id) {
+      // A local registry key ("store_main") is not a server store; sending it
+      // would be treated as a tenant-isolation violation.
+      if (profile?.store_id && !/^store_/i.test(String(profile.store_id))) {
         headers["X-Store-Id"] = String(profile.store_id);
         headers["Store-Id"] = String(profile.store_id);
       }
