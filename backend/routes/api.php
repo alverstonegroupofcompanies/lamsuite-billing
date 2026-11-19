@@ -334,10 +334,10 @@ Route::middleware(['auth:sanctum', 'ip.allowlist', 'scope.store'])->prefix('admi
     Route::post('/products/{id}/batches', [AdminMasterController::class, 'addBatch'])->middleware('rbac:masters,create');
     Route::post('/products/bulk-edit', [AdminMasterController::class, 'bulkEditProducts'])->middleware('rbac:masters,edit');
 
-    // Shared central catalog publishing
-    Route::get('/catalog/publications', [AdminCatalogController::class, 'publications'])->middleware('rbac:masters,view');
-    Route::post('/catalog/publish', [AdminCatalogController::class, 'publish'])->middleware('rbac:masters,create');
-    Route::post('/catalog/unpublish', [AdminCatalogController::class, 'unpublish'])->middleware('rbac:masters,edit');
+    // One-time audited "Copy products to another store" tool (P-STORE-SCOPE)
+    Route::post('/catalog/copy', [AdminCatalogController::class, 'copy'])->middleware('rbac:masters,create');
+    Route::get('/catalog/copy-runs', [AdminCatalogController::class, 'copyRuns'])->middleware('rbac:masters,view');
+    Route::post('/catalog/copy-runs/{id}/revert', [AdminCatalogController::class, 'revertCopyRun'])->middleware('rbac:masters,edit');
 
     Route::get('/batches', [AdminMasterController::class, 'batches'])->middleware('rbac:masters,view');
     Route::put('/batches/{id}', [AdminMasterController::class, 'updateBatch'])->middleware('rbac:masters,edit');
@@ -501,6 +501,7 @@ Route::middleware(['auth:sanctum', 'ip.allowlist', 'scope.store'])->prefix('admi
 
     // Module 9: Reports (Accessible to Accountant & Managers)
     Route::get('/reports/sales', [AdminReportController::class, 'salesSummary'])->middleware('rbac:reports,view');
+    Route::get('/reports/consolidated-sales', [AdminReportController::class, 'consolidatedSales'])->middleware('rbac:reports,view');
     Route::get('/reports/gstr1', [AdminReportController::class, 'gstr1'])->middleware('rbac:reports,view');
     Route::get('/reports/gstr3b', [AdminGstWorkingPaperController::class, 'gstr3b'])->middleware('rbac:reports,view');
     Route::get('/reports/gstr3b/export', [AdminGstWorkingPaperController::class, 'gstr3bExport'])->middleware('rbac:reports,export');

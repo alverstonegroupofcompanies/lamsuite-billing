@@ -41,6 +41,12 @@ export class CloudDeltaSyncService {
     let appliedBatches = 0;
     let appliedParties = 0;
 
+    // P-STORE-SCOPE: every ingested row is tagged with the store the delta was pulled for.
+    const { storeRegistryService } = await import("../auth/storeRegistryService");
+    const deltaStoreId = String(
+      (delta as any).store_id || storeRegistryService.getActiveStore()?.id || ""
+    );
+
     // 1. Ingest Products
     if (Array.isArray(delta.products) && delta.products.length > 0) {
       const productBatch: Array<{ id: string; record: Record<string, unknown> }> = [];
@@ -58,6 +64,8 @@ export class CloudDeltaSyncService {
             prod.is_active !== undefined
               ? Boolean(prod.is_active) && (prod.is_active as any) !== "0" && (prod.is_active as any) !== 0
               : true,
+          store_id: String((prod as any).store_id || deltaStoreId || "") || undefined,
+          sync_state: "synced",
         };
         productBatch.push({ id: normalizedProd.id, record: normalizedProd as unknown as Record<string, unknown> });
       }
@@ -77,6 +85,7 @@ export class CloudDeltaSyncService {
           mrp: batch.mrp !== undefined ? Number(batch.mrp) : undefined,
           purchase_rate: batch.purchase_rate !== undefined ? Number(batch.purchase_rate) : undefined,
           selling_rate: batch.selling_rate !== undefined ? Number(batch.selling_rate) : undefined,
+          store_id: String((batch as any).store_id || deltaStoreId || "") || undefined,
         };
         batchItems.push({ id: normalizedBatch.id, record: normalizedBatch as unknown as Record<string, unknown> });
       }

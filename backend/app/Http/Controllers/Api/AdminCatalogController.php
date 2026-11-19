@@ -4,103 +4,147 @@ namespace App\Http\Controllers\Api;
 
 use App\Models\AuditLog;
 use App\Models\Product;
-use App\Services\Catalog\CatalogPublishService;
+use App\Models\ProductCopyRun;
+use App\Services\Catalog\StoreCatalogCopyService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
 class AdminCatalogController
 {
-    public function __construct(private CatalogPublishService $catalog)
+    public function __construct(private StoreCatalogCopyService $copyService)
     {
     }
 
     /**
-     * Publication footprint of one product across all stores.
+     * Copy products into another store as independent rows (audited, reversible 7 days).
+     * With `preview: true` returns the would-be result (new vs conflicts) without writing.
      */
-    public function publications(Request $request): JsonResponse
+    public function copy(Request $request): JsonResponse
     {
-        $validated = $request->validate([
-            'product_id' => 'required|integer|exists:products,id',
-        ]);
+        $validated = $this->validateCopyRequest($request);
+        $storeId = (int) $validated['source_store_id'];
+        $targetStoreId = (int) $validated['target_store_id'];
+        $products = $this->resolveSourceProducts($request, $validated['product_ids'], $storeId);
 
-        $product = Product::findOrFail($validated['product_id']);
-        $this->assertStoreAccessible($request, (int) $product->store_id);
-
-        return response()->json([
-            'product' => [
-                'id' => $product->id,
-                'name' => $product->name,
-                'store_id' => $product->store_id,
-                'product_family_id' => $product->product_family_id,
-            ],
-            'stores' => $this->catalog->publicationState($product),
-        ]);
-    }
-
-    /**
-     * Publish (or refresh) a catalog product into other stores.
-     */
-    public function publish(Request $request): JsonResponse
-    {
-        $validated = $request->validate([
-            'product_id' => 'required|integer|exists:products,id',
-            'store_ids' => 'required|array|min:1',
-            'store_ids.*' => 'integer|exists:stores,id',
-        ]);
-
-        $product = Product::findOrFail($validated['product_id']);
-        $this->assertStoreAccessible($request, (int) $product->store_id);
-        foreach ($validated['store_ids'] as $storeId) {
-            $this->assertStoreAccessible($request, (int) $storeId);
+        if ($request->boolean('preview')) {
+            return response()->json([
+                'preview' => $this->copyService->preview($products, $targetStoreId),
+            ]);
         }
 
-        $results = $this->catalog->publish($product, $validated['store_ids'], $request->user()?->id);
+        $run = $this->copyService->copy($products, $storeId, $targetStoreId, $request->user()?->id);
 
         AuditLog::log(
-            'publish_catalog_product',
-            'Product',
-            (string) $product->id,
+            'copy_products_to_store',
+            'ProductCopyRun',
+            (string) $run->id,
             null,
-            ['store_ids' => $validated['store_ids'], 'results' => $results],
-            $product->store_id
+            [
+                'source_store_id' => $storeId,
+                'target_store_id' => $targetStoreId,
+                'copied_count' => $run->copied_count,
+                'skipped_count' => $run->skipped_count,
+                'product_ids' => $validated['product_ids'],
+            ],
+            $storeId
         );
 
         return response()->json([
             'success' => true,
-            'family_id' => $product->fresh()->product_family_id,
-            'results' => $results,
+            'run' => $run->toArray(),
         ]);
     }
 
     /**
-     * Withdraw a published product from stores (their copies are deactivated).
+     * Revert a copy run: delete unreferenced copies, archive referenced ones.
      */
-    public function unpublish(Request $request): JsonResponse
+    public function revertCopyRun(Request $request, int $id): JsonResponse
     {
-        $validated = $request->validate([
-            'product_id' => 'required|integer|exists:products,id',
-            'store_ids' => 'required|array|min:1',
-            'store_ids.*' => 'integer|exists:stores,id',
-        ]);
+        $run = ProductCopyRun::findOrFail($id);
+        $this->assertStoreAccessible($request, (int) $run->source_store_id);
 
-        $product = Product::findOrFail($validated['product_id']);
-        $this->assertStoreAccessible($request, (int) $product->store_id);
-        foreach ($validated['store_ids'] as $storeId) {
-            $this->assertStoreAccessible($request, (int) $storeId);
-        }
-
-        $results = $this->catalog->unpublish($product, $validated['store_ids'], $request->user()?->id);
+        $result = $this->copyService->revert($run, $request->user()?->id);
 
         AuditLog::log(
-            'unpublish_catalog_product',
-            'Product',
-            (string) $product->id,
+            'revert_product_copy_run',
+            'ProductCopyRun',
+            (string) $run->id,
             null,
-            ['store_ids' => $validated['store_ids'], 'results' => $results],
-            $product->store_id
+            $result,
+            $run->source_store_id
         );
 
-        return response()->json(['success' => true, 'results' => $results]);
+        return response()->json(['success' => true, 'run_id' => $run->id] + $result);
+    }
+
+    /**
+     * Copy-run history for the source store.
+     */
+    public function copyRuns(Request $request): JsonResponse
+    {
+        $storeId = (int) ($request->attributes->get('active_store_id')
+            ?? $request->get('active_store_id')
+            ?? $request->input('store_id'));
+        if (empty($storeId)) {
+            abort(422, 'A specific store context is required for this change (All Stores scope is read-only).');
+        }
+
+        $runs = ProductCopyRun::with(['sourceStore:id,name,code', 'targetStore:id,name,code'])
+            ->where('source_store_id', $storeId)
+            ->orderByDesc('id')
+            ->limit(50)
+            ->get();
+
+        return response()->json(['data' => $runs]);
+    }
+
+    private function validateCopyRequest(Request $request): array
+    {
+        $validated = $request->validate([
+            'source_store_id' => 'nullable|integer|exists:stores,id',
+            'target_store_id' => 'required|integer|exists:stores,id|different:source_store_id',
+            'product_ids' => 'required|array|min:1|max:500',
+            'product_ids.*' => 'integer',
+        ]);
+
+        $storeId = $validated['source_store_id']
+            ?? $request->attributes->get('active_store_id')
+            ?? $request->get('active_store_id')
+            ?? $request->input('store_id');
+
+        if (empty($storeId)) {
+            abort(422, 'A specific source store context is required (All Stores scope is read-only).');
+        }
+        if ((int) $storeId === (int) $validated['target_store_id']) {
+            abort(422, 'Source and target stores must differ.');
+        }
+
+        $this->assertStoreAccessible($request, (int) $storeId);
+        $this->assertStoreAccessible($request, (int) $validated['target_store_id']);
+
+        $validated['source_store_id'] = (int) $storeId;
+
+        return $validated;
+    }
+
+    private function resolveSourceProducts(Request $request, array $requestedIds, int $storeId)
+    {
+        $products = Product::whereIn('id', $requestedIds)
+            ->where('store_id', $storeId)
+            ->orderBy('id')
+            ->get();
+
+        $expectedCount = count(array_map('intval', array_unique($requestedIds)));
+        if ($products->count() !== $expectedCount) {
+            $foreignNames = Product::whereIn('id', $requestedIds)
+                ->where('store_id', '!=', $storeId)
+                ->pluck('name')
+                ->all();
+            abort(422, 'All selected products must belong to the source store. Foreign products: '
+                . implode(', ', $foreignNames));
+        }
+
+        return $products;
     }
 
     private function assertStoreAccessible(Request $request, int $storeId): void

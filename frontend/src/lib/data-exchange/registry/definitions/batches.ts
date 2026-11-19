@@ -1,5 +1,6 @@
 import type { EntityDefinition } from "../types";
 import { sqliteStorage } from "../../../db/sqliteStorage";
+import { isForActiveStore } from "../storeScope";
 
 export const batchesDefinition: EntityDefinition = {
   id: "batches",
@@ -143,8 +144,13 @@ export const batchesDefinition: EntityDefinition = {
     // 1. Update product current_stock
     // 2. Insert into stock_transactions (audit ledger)
     const now = Date.now();
+    const catalog = await sqliteStorage.findAll<any>("products");
     for (const b of batches) {
-      const product = await sqliteStorage.findByField<any>("products", "barcode", b.product_barcode);
+      // P-STORE-SCOPE: only the active store's product gets restocked by this
+      // import — the same barcode may exist in another store's catalog.
+      const product = catalog.find(
+        (p) => String(p.barcode) === String(b.product_barcode) && isForActiveStore(p)
+      );
       if (product) {
         // Record stock transaction for audit trail
         const txId = `stk_op_${now}_${Math.random().toString(36).slice(2, 7)}`;
@@ -161,11 +167,11 @@ export const batchesDefinition: EntityDefinition = {
         });
 
         // Recalculate parent product total stock
-        const allBatches = await sqliteStorage.findAll<any>("product_batches");
+        const allBatches = (await sqliteStorage.findAll<any>("product_batches")).filter(isForActiveStore);
         const totalStock = allBatches
           .filter((item) => item.product_id === product.id)
           .reduce((sum, item) => sum + Number(item.stock_qty || 0), 0);
-        
+
         await sqliteStorage.updateRecord("products", product.id, {
           current_stock: totalStock,
         });
@@ -177,13 +183,21 @@ export const batchesDefinition: EntityDefinition = {
     const products = await sqliteStorage.findAll<any>("products");
     const prodMap = new Map(products.map((p) => [p.id, p]));
 
-    return batches.map((b) => {
-      const p = prodMap.get(b.product_id);
-      return {
-        ...b,
-        product_barcode: p?.barcode || "",
-        product_name: p?.name || "",
-      };
-    });
+    // P-STORE-SCOPE: a batch belongs to this store's catalog — via its own
+    // store_id tag or, for legacy untagged rows, its parent product's.
+    return batches
+      .filter((b) => {
+        if (b.store_id) return isForActiveStore(b);
+        const p = prodMap.get(b.product_id);
+        return !p || isForActiveStore(p);
+      })
+      .map((b) => {
+        const p = prodMap.get(b.product_id);
+        return {
+          ...b,
+          product_barcode: p?.barcode || "",
+          product_name: p?.name || "",
+        };
+      });
   },
 };

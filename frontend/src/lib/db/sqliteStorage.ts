@@ -674,6 +674,23 @@ export class SqliteStorageService {
     this.registerMockIpcHandlers();
   }
 
+  /**
+   * Active store context for catalog scoping (P-STORE-SCOPE). Resolution order:
+   * explicit switchStore value → registry/localStorage active store.
+   */
+  getActiveStoreId(): string {
+    if (this.currentStoreId && this.currentStoreId !== "default") return this.currentStoreId;
+    if (typeof window !== "undefined" && window.localStorage) {
+      try {
+        const fromRegistry = window.localStorage.getItem("lamsuite_active_store_id");
+        if (fromRegistry) return fromRegistry;
+      } catch {
+        // ignore
+      }
+    }
+    return "";
+  }
+
   registerMockIpcHandlers() {
     const db = getMockDatabase();
 
@@ -781,7 +798,24 @@ export class SqliteStorageService {
         }
       }
 
-      const existing = await this.findAll("products");
+      // P-STORE-SCOPE: rows without store_id are legacy pre-scope data on this
+      // device — adopt them into the active store so they stay self-describing.
+      const adoptLegacyRows = async (table: "products" | "product_batches") => {
+        const rows = (await this.findAll<Record<string, unknown>>(table).catch(() => [])) || [];
+        const legacy = rows.filter((r) => !r.store_id);
+        if (legacy.length === 0) return 0;
+        await this.insertBatch(
+          table,
+          legacy.map((r) => ({ id: String(r.id), record: { ...r, store_id: activeId } }))
+        ).catch(() => {});
+        return legacy.length;
+      };
+      await adoptLegacyRows("products");
+      await adoptLegacyRows("product_batches");
+
+      const existing = ((await this.findAll<Record<string, any>>("products")) || []).filter(
+        (r) => !r.store_id || String(r.store_id) === activeId
+      );
       if (Array.isArray(existing) && existing.length > 0) {
         return { populated: false, count: existing.length, source: "already_populated" };
       }
@@ -817,10 +851,10 @@ export class SqliteStorageService {
         // Offline or backend unavailable
       }
 
-      // 2. If backend is unreachable or returned 0 products, seed standard 50 test products & batches
-      const { seed50Products } = await import("../masters/seedProductsData");
-      const seedRes = await seed50Products();
-      return { populated: true, count: seedRes.productsCount, source: "seed_50_products" };
+      // P-STORE-SCOPE: never fabricate a demo catalog inside a real store.
+      // A store with no products yet simply has no products until the owner
+      // imports or copies them (seed data remains available to unit tests).
+      return { populated: false, count: 0, source: "backend_empty" };
     } catch (err) {
       console.warn("ensureCatalogReady warning:", err);
       return { populated: false, count: 0, source: "error" };

@@ -6,13 +6,17 @@ use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use App\Models\Product;
 use App\Models\ProductBatch;
+use App\Models\StockTransfer;
+use App\Services\Stock\InterStoreTransferService;
 use App\Services\StockAdjustmentService;
 use Illuminate\Validation\ValidationException;
 
 class StockController
 {
-    public function __construct(private StockAdjustmentService $adjustments)
-    {
+    public function __construct(
+        private StockAdjustmentService $adjustments,
+        private InterStoreTransferService $transfers
+    ) {
     }
 
     /**
@@ -118,61 +122,137 @@ class StockController
 
     public function listTransfers(Request $request): JsonResponse
     {
+        $storeId = $this->resolveStoreId($request, $request->all());
+        $direction = $request->query('direction', 'all');
+
+        $query = StockTransfer::with(['items.product:id,name,barcode', 'fromStore:id,name,code', 'toStore:id,name,code'])
+            ->orderByDesc('id')
+            ->limit(100);
+
+        if ($direction === 'inbound') {
+            $query->where('to_store_id', $storeId);
+        } elseif ($direction === 'outbound') {
+            $query->where('from_store_id', $storeId);
+        } else {
+            $query->where(fn ($q) => $q->where('to_store_id', $storeId)->orWhere('from_store_id', $storeId));
+        }
+
         return response()->json([
             'success' => true,
-            'data' => [],
+            'data' => $query->get(),
         ]);
     }
 
     public function dispatchTransfer(Request $request): JsonResponse
     {
         $validated = $request->validate([
-            'from_store_id' => 'nullable|string',
-            'to_store_id' => 'required|string',
+            'from_store_id' => 'nullable',
+            'store_id' => 'nullable',
+            'to_store_id' => 'required',
             'transfer_no' => 'nullable|string',
+            'notes' => 'nullable|string',
             'lines' => 'required|array|min:1',
-            'lines.*.product_id' => 'required|string',
+            'lines.*.product_id' => 'required',
             'lines.*.batch_no' => 'required|string',
             'lines.*.qty' => 'required|numeric|min:0.01',
         ]);
 
-        $transferId = 'st_' . time() . '_' . substr(md5(uniqid()), 0, 4);
+        $toStoreId = \App\Models\Store::where('id', $validated['to_store_id'])
+            ->orWhere('code', $validated['to_store_id'])
+            ->first()?->id;
+        if (!$toStoreId) {
+            throw ValidationException::withMessages(['to_store_id' => 'Destination store not found.']);
+        }
+
+        $fromStoreId = $this->resolveStoreId($request, array_merge($validated, [
+            'store_id' => $validated['store_id'] ?? $validated['from_store_id'] ?? null,
+        ]));
+
+        $transfer = $this->transfers->dispatch(
+            $fromStoreId,
+            (int) $toStoreId,
+            $validated['lines'],
+            $request->user(),
+            $validated['transfer_no'] ?? null,
+            $validated['notes'] ?? null
+        );
 
         return response()->json([
             'success' => true,
-            'transfer_id' => $transferId,
-            'transfer_no' => $validated['transfer_no'] ?? ('TRF-' . date('Ymd') . '-' . rand(100, 999)),
-            'status' => 'dispatched',
-            'item_count' => count($validated['lines']),
+            'transfer_id' => $transfer->id,
+            'id' => $transfer->id,
+            'transfer_no' => $transfer->transfer_number,
+            'status' => $transfer->status,
+            'item_count' => $transfer->items->count(),
+            'lines' => $transfer->items,
         ], 201);
     }
 
     public function receiveTransfer(Request $request, string $id): JsonResponse
     {
+        $transfer = StockTransfer::findOrFail($id);
+        $storeId = $this->resolveStoreId($request, $request->all());
+
+        if ((int) $transfer->to_store_id !== (int) $storeId) {
+            throw ValidationException::withMessages([
+                'transfer' => 'A transfer can only be received at its destination store.',
+            ]);
+        }
+
+        $instructions = [];
+        foreach ((array) $request->input('lines', []) as $line) {
+            if (is_array($line) && isset($line['item_id'])) {
+                $instructions[] = [
+                    'item_id' => $line['item_id'],
+                    'dest_product_id' => $line['dest_product_id'] ?? null,
+                ];
+            }
+        }
+
+        $result = $this->transfers->receive(
+            $transfer,
+            $request->user(),
+            $instructions,
+            $request->boolean('auto_create')
+        );
+
         return response()->json([
             'success' => true,
-            'transfer_id' => $id,
-            'status' => 'received',
-            'received_at' => date('Y-m-d H:i:s'),
+            'transfer_id' => $transfer->id,
+            'status' => $result['transfer']->status,
+            'received_at' => optional($result['transfer']->received_at)->toDateTimeString(),
+            'resolutions' => $result['resolutions'],
         ]);
     }
 
     public function cancelTransfer(Request $request, string $id): JsonResponse
     {
+        $transfer = StockTransfer::findOrFail($id);
+        $storeId = $this->resolveStoreId($request, $request->all());
+
+        if ((int) $transfer->from_store_id !== (int) $storeId) {
+            throw ValidationException::withMessages([
+                'transfer' => 'A transfer can only be cancelled by its sending store.',
+            ]);
+        }
+
+        $cancelled = $this->transfers->cancel($transfer, $request->user(), (string) $request->input('reason', ''));
+
         return response()->json([
             'success' => true,
-            'transfer_id' => $id,
-            'status' => 'cancelled',
-            'cancelled_at' => date('Y-m-d H:i:s'),
+            'transfer_id' => $cancelled->id,
+            'status' => $cancelled->status,
         ]);
     }
 
     public function nearExpiry(Request $request): JsonResponse
     {
+        $storeId = $this->resolveStoreId($request, $request->all());
         $days = (int) $request->query('threshold_days', 60);
         $cutoff = date('Y-m-d', strtotime("+{$days} days"));
 
         $batches = ProductBatch::with('product')
+            ->where('store_id', $storeId)
             ->where('stock_qty', '>', 0)
             ->where('expiry_date', '<=', $cutoff)
             ->orderBy('expiry_date', 'asc')
@@ -183,7 +263,9 @@ class StockController
 
     public function lowStock(Request $request): JsonResponse
     {
-        $products = Product::where('is_active', true)
+        $storeId = $this->resolveStoreId($request, $request->all());
+        $products = Product::where('store_id', $storeId)
+            ->where('is_active', true)
             ->whereColumn('current_stock', '<=', 'reorder_level')
             ->get();
 

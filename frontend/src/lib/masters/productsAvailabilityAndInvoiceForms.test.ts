@@ -2,7 +2,6 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { productsStore, type ProductItem } from "./productsStore";
 import { getMockDatabase, sqliteStorage } from "../db/sqliteStorage";
 import { cloudDeltaSyncService } from "../sync/cloudDeltaSyncService";
-import { TEST_SEED_PRODUCTS } from "./seedProductsData";
 
 describe("Products Availability in Masters & All Invoice Forms", () => {
   beforeEach(async () => {
@@ -10,16 +9,18 @@ describe("Products Availability in Masters & All Invoice Forms", () => {
     await sqliteStorage.initDatabase(false);
   });
 
-  it("auto-populates products via ensureCatalogPopulated when starting with an empty database", async () => {
+  it("keeps a fresh store empty when the backend has no catalog (P-STORE-SCOPE: no fabricated demo products)", async () => {
     const initial = await sqliteStorage.findAll("products");
     expect(initial.length).toBe(0);
 
+    // Offline, empty backend: the store simply has no products yet — the owner
+    // imports or copies them. Seeding demo rows into a real store is forbidden.
     const result = await productsStore.ensureCatalogPopulated("1");
-    expect(result.populated).toBe(true);
-    expect(result.count).toBeGreaterThan(0);
+    expect(result.populated).toBe(false);
+    expect(result.source).toBe("backend_empty");
 
     const prods = await productsStore.getAllProducts();
-    expect(prods.length).toBeGreaterThanOrEqual(50);
+    expect(prods.length).toBe(0);
   }, 15000);
 
   it("handles products with is_active as 1, true, and undefined as active in POS search", async () => {

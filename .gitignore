@@ -39,3 +39,6 @@ stores_registry.json
 test-reports/
 tests/qa/admin_token.txt
 tests/qa/manifest.json
+
+# Runtime state
+backend/store-scope-migration.json

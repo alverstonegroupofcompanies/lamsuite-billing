@@ -53,3 +53,28 @@
 | `SEC-004` | Security | Device activation via hardware UUID fingerprint | Task 1.1 | `ipcBridge.test.ts` | Verified |
 | `CFG-001` | Settings | Store profile, sequences, and GST tax mode config | Task 1.1 | `companySettingsService.test.ts` | Verified |
 | `CFG-002` | Settings | Dynamic per-store menu visibility (`enabled_menu_items`)| Task 1.1 | `companySettingsService.test.ts` | Verified |
+
+## Store-scope constitution (P-STORE-SCOPE) — added 2026-11-19
+
+Change request: products belong to one store only; stores do not share products.
+Rules are defined in [constitution.md](constitution.md) and enforced by CI in
+`backend/tests/Feature/Constitution/`.
+
+| Rule / Flow | Description | Implementation | Verification Test | Status |
+|---|---|---|---|:---:|
+| R1 | `products.store_id` NOT NULL — every product belongs to exactly one store | Migration `*_add_store_scope_to_catalog.php` | `ProductStoreScopeSchemaTest` | Verified |
+| R2 | Barcode unique within a store; duplicate create/import/sync → HTTP 422 naming the existing product | Unique index `(store_id, barcode)` + `ProductController`/`AdminMasterController`/`DataExchangeController` checks | `ProductStoreScopingApiTest`, `ProductStoreScopeSchemaTest`, `DataExchangeStoreScopeTest` | Verified |
+| R3 | A batch cannot exist in a different store than its product (composite FK at the data layer) | Migration composite FK + runtime insert guard | `ProductStoreScopeSchemaTest` | Verified |
+| R4 | Stock ledger, transfer items and price lists are store-scoped | Migration store columns + scoped queries | `ProductStoreScopeSchemaTest`, `TransferReceiveMatchingTest` | Verified |
+| R5 | No central catalogue: no family linkage, no publish flow; sync upserts keyed `(store_id, external_id)` | Publish flow removed (`CatalogPublishService` deleted); `SyncController` keyed upsert | `SyncPushStoreScopeTest`, `ProductQueryScopeTest` | Verified |
+| R6 | Products visible/editable/deletable only within their store; admin cross-store views show a store column and are read-only aggregation | Scoped controllers + store columns in Masters/Transactions/Inventory admin tables + `?store=` URL scope in admin panel | `ProductQueryScopeTest`, `ProductStoreScopingApiTest`, `AdminMasterStoreScopeTest` | Verified |
+| R7 | Archives/deletes are per-store and never leak | `AdminMasterController::deleteProduct` scoped | `AdminMasterStoreScopeTest` | Verified |
+| R8 | Parties governed by their own spec (explicit scope note) | — | Scope note in constitution | N/A |
+| R9 | Rate/tax revisions apply per store; multi-store change is N previewed jobs | `AdminMasterController::bulkEditProducts` store-scoped | `AdminMasterStoreScopeTest` | Verified |
+| R10 | Imports target exactly one store; exports are store-filtered | `DataExchangeController::commit/export` require explicit store context; local-first entity definitions tag/filter rows | `DataExchangeStoreScopeTest`, `frontend storeScope.dom.test.ts` | Verified |
+| Flow: Copy products to another store | One-time audited reversible copy — masters + rates only, never stock/batches/history | `AdminCatalogController::copy/revertCopyRun`, `/admin/catalog/copy*` routes, MastersPage modal | `CopyProductsToStoreTest` | Verified |
+| Flow: Inter-store transfers | Receiver matches by barcode then item code; create-in-my-store or map-to-existing; ledger in both stores | `StockTransferController` receive matching | `TransferReceiveMatchingTest` | Verified |
+| Flow: Consolidated reports | Admin-chosen matching key per run (barcode → item code → name+unit), unmatched listed separately, no merges stored | `AdminReportController::consolidatedSales`, ReportsPage "Consolidated Items" tab | `ConsolidatedReportMatchingTest` | Verified |
+| Flow: Store-scope migration | One-time migration with reconciliation, dry run and rollback; NULL-store rows adopted by owner store | `php artisan stores:scope-catalog` command | `StoreScopeMigrationCommandTest` | Verified |
+| Flow: Offline tills | POS keeps local `store_id` columns; per-store delta pull; no fabricated demo catalog in a real store | `frontend storeScope.ts`, `cloudDeltaSyncService`, `sqliteStorage.ensureCatalogReady` | `frontend storeScope.dom.test.ts`, `productsStore.storeScope.dom.test.ts` | Verified |
+| Admin UX | Store scope carried in the URL (`?store=<id|all>`, URL wins over saved scope, invalid params fall back); cross-store lists carry store identity | `admin-panel AuthContext`, `AdminTransactionController` store eager-loads | Live browser verification + suites | Verified |

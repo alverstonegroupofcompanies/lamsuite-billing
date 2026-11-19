@@ -120,6 +120,7 @@ export interface Product {
   is_active: boolean;
   version: number;
   batches?: ProductBatch[];
+  store?: { id: number; name: string; code: string };
 }
 
 export interface Party {

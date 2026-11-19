@@ -1,5 +1,6 @@
 import type { EntityDefinition } from "../types";
 import { sqliteStorage } from "../../../db/sqliteStorage";
+import { isForActiveStore, withStore } from "../storeScope";
 
 export const itemsDefinition: EntityDefinition = {
   id: "items",
@@ -287,7 +288,7 @@ export const itemsDefinition: EntityDefinition = {
   ],
   transformRow: (raw) => {
     const id = raw.id || `prod_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-    return {
+    return withStore({
       id,
       barcode: String(raw.barcode || "").trim(),
       name: String(raw.name || "").trim(),
@@ -310,14 +311,18 @@ export const itemsDefinition: EntityDefinition = {
       unit_name: raw.unit_name ? String(raw.unit_name).trim() : "STRIP",
       is_active: raw.is_active === false || raw.is_active === "false" || raw.is_active === 0 ? 0 : 1,
       external_id: raw.external_id || `ext_${id}`,
-    };
+    });
   },
   exportQuery: async (filters) => {
     const rows = await sqliteStorage.findAll<any>("products");
+    // P-STORE-SCOPE: exports (and import duplicate detection) see only this
+    // store's catalog — an import into one store must never match another
+    // store's barcode.
+    const scoped = rows.filter(isForActiveStore);
     if (filters?.search) {
       const q = String(filters.search).toLowerCase();
-      return rows.filter((r) => r.name?.toLowerCase().includes(q) || r.barcode?.includes(q));
+      return scoped.filter((r) => r.name?.toLowerCase().includes(q) || r.barcode?.includes(q));
     }
-    return rows;
+    return scoped;
   },
 };

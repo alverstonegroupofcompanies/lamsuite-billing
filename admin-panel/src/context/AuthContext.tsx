@@ -24,6 +24,19 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | null>(null);
 
+// P-STORE-SCOPE: the selected store lives in the URL (?store=<id|all>) so a
+// shared or refreshed link restores exactly that scope. AuthProvider sits
+// outside <BrowserRouter>, so the window.history API is used.
+const syncStoreUrlParam = (value: string | null) => {
+  const url = new URL(window.location.href);
+  if (value) url.searchParams.set("store", value);
+  else url.searchParams.delete("store");
+  window.history.replaceState({}, "", url.toString());
+};
+
+const storeUrlParam = (): string | null =>
+  new URL(window.location.href).searchParams.get("store");
+
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
   const [stores, setStores] = useState<Store[]>([]);
@@ -57,11 +70,34 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setIsImpersonating(res.is_impersonated || false);
       setImpersonatedBy(res.impersonated_by || null);
 
+      // A valid store in the URL wins over the saved selection so a shared or
+      // bookmarked link opens exactly the store it names.
+      const urlStore = storeUrlParam();
+      if (urlStore === "all") {
+        if (res.can_view_all_stores) {
+          setActiveStoreState(null);
+          setIsAllStores(true);
+          localStorage.setItem("admin_store_id", "all");
+          return;
+        }
+        syncStoreUrlParam(null);
+      } else if (urlStore) {
+        const match = res.stores?.find((s) => String(s.id) === urlStore);
+        if (match) {
+          setActiveStoreState(match);
+          setIsAllStores(false);
+          localStorage.setItem("admin_store_id", String(match.id));
+          return;
+        }
+        syncStoreUrlParam(null);
+      }
+
       // Restore consolidated scope when it was explicitly selected and is still permitted
       const savedStoreId = localStorage.getItem("admin_store_id");
       if (savedStoreId === "all" && res.can_view_all_stores) {
         setActiveStoreState(null);
         setIsAllStores(true);
+        syncStoreUrlParam("all");
         return;
       }
 
@@ -71,6 +107,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setActiveStoreState(found);
         setIsAllStores(false);
         localStorage.setItem("admin_store_id", String(found.id));
+        syncStoreUrlParam(String(found.id));
+      } else {
+        syncStoreUrlParam(null);
       }
     } catch (err) {
       console.error("Failed to load user profile:", err);
@@ -106,6 +145,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setIsAllStores(true);
       localStorage.setItem("admin_store_id", "all");
     }
+    syncStoreUrlParam(store ? String(store.id) : "all");
     window.location.reload(); // Refresh views with new scoped store
   };
 
@@ -147,6 +187,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     localStorage.removeItem("admin_token");
     localStorage.removeItem("admin_store_id");
     localStorage.removeItem("impersonator_id");
+    syncStoreUrlParam(null);
     setToken(null);
     setUser(null);
     setIsAllStores(false);
@@ -168,8 +209,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     localStorage.setItem("impersonator_id", String(res.impersonator_id));
     if (res.store) {
       localStorage.setItem("admin_store_id", String(res.store.id));
+      syncStoreUrlParam(String(res.store.id));
     } else {
       localStorage.removeItem("admin_store_id");
+      syncStoreUrlParam(null);
     }
     setToken(res.token);
     setUser(res.user);

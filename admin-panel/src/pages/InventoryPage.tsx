@@ -60,7 +60,7 @@ interface AdjustmentPolicy {
 }
 
 export const InventoryPage: React.FC = () => {
-  const { activeStore, stores, hasPermission } = useAuth();
+  const { activeStore, stores, hasPermission, isAllStores } = useAuth();
   const [activeTab, setActiveTab] = useState<
     "batches" | "ledger" | "near_expiry" | "transfers" | "adjustments"
   >("batches");
@@ -324,6 +324,7 @@ export const InventoryPage: React.FC = () => {
               <thead className="bg-slate-50 dark:bg-slate-800/50 text-slate-500 uppercase text-[10px] font-semibold border-b border-slate-200 dark:border-slate-800">
                 <tr>
                   <th className="px-4 py-3">Product Name</th>
+                  {isAllStores && <th className="px-4 py-3">Store</th>}
                   <th className="px-4 py-3">Batch Number</th>
                   <th className="px-4 py-3">Expiry Date</th>
                   <th className="px-4 py-3 text-right">MRP</th>
@@ -335,13 +336,13 @@ export const InventoryPage: React.FC = () => {
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                 {isLoading ? (
                   <tr>
-                    <td colSpan={7} className="px-4 py-8 text-center text-slate-400">
+                    <td colSpan={isAllStores ? 8 : 7} className="px-4 py-8 text-center text-slate-400">
                       Loading batch inventory...
                     </td>
                   </tr>
                 ) : batches.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="px-4 py-8 text-center text-slate-400">
+                    <td colSpan={isAllStores ? 8 : 7} className="px-4 py-8 text-center text-slate-400">
                       No batch inventory recorded.
                     </td>
                   </tr>
@@ -351,6 +352,11 @@ export const InventoryPage: React.FC = () => {
                       <td className="px-4 py-3 font-bold text-slate-900 dark:text-white">
                         {b.product?.name || "SKU Item"}
                       </td>
+                      {isAllStores && (
+                        <td className="px-4 py-3">
+                          <div className="font-semibold text-slate-700 dark:text-slate-300">{b.store?.name || `Store #${b.store_id}`}</div>
+                        </td>
+                      )}
                       <td className="px-4 py-3 font-mono font-semibold text-slate-700 dark:text-slate-300">
                         {b.batch_no}
                       </td>

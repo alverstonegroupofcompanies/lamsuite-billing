@@ -168,7 +168,7 @@ describe("AutoUpdateService - Mocked Feed Scenarios", () => {
 
   it("2. Mocked feed returning a newer version -> Offers new version with release notes", async () => {
     const mockFeed = {
-      version: "2.1.0",
+      version: "2.2.0",
       notes: "- Security patch\n- Enhanced offline reconciliation",
       pub_date: new Date().toISOString(),
       platforms: {},
@@ -180,7 +180,7 @@ describe("AutoUpdateService - Mocked Feed Scenarios", () => {
 
     const result = await autoUpdateService.checkForUpdates();
     expect(result.shouldUpdate).toBe(true);
-    expect(result.manifest?.version).toBe("2.1.0");
+    expect(result.manifest?.version).toBe("2.2.0");
     expect(result.manifest?.body).toContain("Security patch");
   });
 

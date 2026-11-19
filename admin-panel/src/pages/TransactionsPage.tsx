@@ -53,7 +53,7 @@ const toDateInputValue = (value: unknown): string => {
 };
 
 export const TransactionsPage: React.FC = () => {
-  const { hasPermission, activeStore, role } = useAuth();
+  const { hasPermission, activeStore, role, isAllStores } = useAuth();
   const canIssueEditPin =
     hasPermission("transactions", "edit") &&
     ["super_admin", "store_owner", "admin"].includes(role || "");
@@ -779,6 +779,7 @@ export const TransactionsPage: React.FC = () => {
               <thead className="bg-slate-50 dark:bg-slate-800/50 text-slate-500 dark:text-slate-400 uppercase text-[10px] font-semibold border-b border-slate-200 dark:border-slate-800">
                 <tr>
                   <th className="px-4 py-3">Invoice No & Date</th>
+                  {isAllStores && <th className="px-4 py-3">Store</th>}
                   <th className="px-4 py-3">{isPharmacy ? "Customer / Patient" : "Customer"}</th>
                   {isPharmacy && <th className="px-4 py-3">Prescription Doctor</th>}
                   <th className="px-4 py-3 text-right">Taxable</th>
@@ -791,13 +792,13 @@ export const TransactionsPage: React.FC = () => {
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                 {isLoading ? (
                   <tr>
-                    <td colSpan={isPharmacy ? 8 : 7} className="px-4 py-8 text-center text-slate-400">
+                    <td colSpan={(isPharmacy ? 8 : 7) + (isAllStores ? 1 : 0)} className="px-4 py-8 text-center text-slate-400">
                       Loading invoices...
                     </td>
                   </tr>
                 ) : invoices.length === 0 ? (
                   <tr>
-                    <td colSpan={isPharmacy ? 8 : 7} className="px-4 py-8 text-center text-slate-400">
+                    <td colSpan={(isPharmacy ? 8 : 7) + (isAllStores ? 1 : 0)} className="px-4 py-8 text-center text-slate-400">
                       No invoices found.
                     </td>
                   </tr>
@@ -808,6 +809,11 @@ export const TransactionsPage: React.FC = () => {
                         <div className="font-bold text-slate-900 dark:text-white">{inv.invoice_number}</div>
                         <div className="text-[10px] text-slate-400">{formatDate(inv.invoice_date)}</div>
                       </td>
+                      {isAllStores && (
+                        <td className="px-4 py-3">
+                          <div className="font-semibold text-slate-700 dark:text-slate-300">{inv.store?.name || `Store #${inv.store_id}`}</div>
+                        </td>
+                      )}
                       <td className="px-4 py-3">
                         <div className="font-semibold text-slate-800 dark:text-slate-200">{inv.customer_name}</div>
                         {isPharmacy && inv.patient_name && (
@@ -914,6 +920,7 @@ export const TransactionsPage: React.FC = () => {
             <thead className="bg-slate-50 dark:bg-slate-800/50 text-slate-500 uppercase text-[10px] font-semibold border-b border-slate-200 dark:border-slate-800">
               <tr>
                 <th className="px-4 py-3">Return / Credit Note No</th>
+                {isAllStores && <th className="px-4 py-3">Store</th>}
                 <th className="px-4 py-3">Customer</th>
                 <th className="px-4 py-3 text-right">Tax Refunded</th>
                 <th className="px-4 py-3 text-right">Credit Amount</th>
@@ -924,7 +931,7 @@ export const TransactionsPage: React.FC = () => {
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
               {returnsList.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-4 py-8 text-center text-slate-400">
+                  <td colSpan={isAllStores ? 7 : 6} className="px-4 py-8 text-center text-slate-400">
                     No sales returns or credit notes recorded.
                   </td>
                 </tr>
@@ -935,6 +942,9 @@ export const TransactionsPage: React.FC = () => {
                       {r.invoice_number}
                       <div className="text-[10px] text-slate-400 font-normal">{formatDate(r.invoice_date)}</div>
                     </td>
+                    {isAllStores && (
+                      <td className="px-4 py-3 font-semibold">{r.store?.name || `Store #${r.store_id}`}</td>
+                    )}
                     <td className="px-4 py-3 font-semibold">{r.customer_name}</td>
                     <td className="px-4 py-3 text-right font-mono">{formatINR(r.tax_total)}</td>
                     <td className="px-4 py-3 text-right font-mono font-bold text-red-600 dark:text-red-400">
@@ -961,6 +971,7 @@ export const TransactionsPage: React.FC = () => {
             <thead className="bg-slate-50 dark:bg-slate-800/50 text-slate-500 uppercase text-[10px] font-semibold border-b border-slate-200 dark:border-slate-800">
               <tr>
                 <th className="px-4 py-3">Quotation No & Date</th>
+                {isAllStores && <th className="px-4 py-3">Store</th>}
                 <th className="px-4 py-3">Customer</th>
                 <th className="px-4 py-3 text-right">Taxable</th>
                 <th className="px-4 py-3 text-right">Tax Total</th>
@@ -972,7 +983,7 @@ export const TransactionsPage: React.FC = () => {
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
               {quotationsList.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-4 py-8 text-center text-slate-400">
+                  <td colSpan={isAllStores ? 8 : 7} className="px-4 py-8 text-center text-slate-400">
                     No pro-forma quotations or estimates recorded.
                   </td>
                 </tr>
@@ -983,6 +994,9 @@ export const TransactionsPage: React.FC = () => {
                       {q.invoice_number}
                       <div className="text-[10px] text-slate-400 font-normal">{formatDate(q.invoice_date)}</div>
                     </td>
+                    {isAllStores && (
+                      <td className="px-4 py-3 font-semibold">{q.store?.name || `Store #${q.store_id}`}</td>
+                    )}
                     <td className="px-4 py-3 font-semibold">{q.customer_name}</td>
                     <td className="px-4 py-3 text-right font-mono">{formatINR(q.subtotal)}</td>
                     <td className="px-4 py-3 text-right font-mono">{formatINR(q.tax_total)}</td>
@@ -1046,6 +1060,7 @@ export const TransactionsPage: React.FC = () => {
             <thead className="bg-slate-50 dark:bg-slate-800/50 text-slate-500 uppercase text-[10px] font-semibold border-b border-slate-200 dark:border-slate-800">
               <tr>
                 <th className="px-4 py-3">Bill No & Date</th>
+                {isAllStores && <th className="px-4 py-3">Store</th>}
                 <th className="px-4 py-3">Supplier Name</th>
                 <th className="px-4 py-3">Supplier GSTIN</th>
                 <th className="px-4 py-3 text-right">Tax Total</th>
@@ -1056,7 +1071,7 @@ export const TransactionsPage: React.FC = () => {
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
               {purchases.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-4 py-8 text-center text-slate-400">
+                  <td colSpan={isAllStores ? 7 : 6} className="px-4 py-8 text-center text-slate-400">
                     No inward purchase bills recorded.
                   </td>
                 </tr>
@@ -1067,6 +1082,9 @@ export const TransactionsPage: React.FC = () => {
                       {p.invoice_number}
                       <div className="text-[10px] text-slate-400">{formatDate(p.invoice_date)}</div>
                     </td>
+                    {isAllStores && (
+                      <td className="px-4 py-3 font-semibold">{p.store?.name || `Store #${p.store_id}`}</td>
+                    )}
                     <td className="px-4 py-3 font-semibold">{p.supplier_name}</td>
                     <td className="px-4 py-3 font-mono">{p.supplier_gstin || "—"}</td>
                     <td className="px-4 py-3 text-right font-mono">{formatINR(p.tax_total)}</td>
@@ -1089,6 +1107,7 @@ export const TransactionsPage: React.FC = () => {
             <thead className="bg-slate-50 dark:bg-slate-800/50 text-slate-500 uppercase text-[10px] font-semibold border-b border-slate-200 dark:border-slate-800">
               <tr>
                 <th className="px-4 py-3">Debit Note No & Date</th>
+                {isAllStores && <th className="px-4 py-3">Store</th>}
                 <th className="px-4 py-3">Supplier Name</th>
                 <th className="px-4 py-3 text-right">Debit Total</th>
                 <th className="px-4 py-3 text-center">Status</th>
@@ -1097,7 +1116,7 @@ export const TransactionsPage: React.FC = () => {
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
               {purchaseReturnsList.length === 0 ? (
                 <tr>
-                  <td colSpan={4} className="px-4 py-8 text-center text-slate-400">
+                  <td colSpan={isAllStores ? 5 : 4} className="px-4 py-8 text-center text-slate-400">
                     No purchase return debit notes recorded.
                   </td>
                 </tr>
@@ -1108,6 +1127,9 @@ export const TransactionsPage: React.FC = () => {
                       {pr.invoice_number}
                       <div className="text-[10px] text-slate-400">{formatDate(pr.invoice_date)}</div>
                     </td>
+                    {isAllStores && (
+                      <td className="px-4 py-3 font-semibold">{pr.store?.name || `Store #${pr.store_id}`}</td>
+                    )}
                     <td className="px-4 py-3 font-semibold">{pr.supplier_name}</td>
                     <td className="px-4 py-3 text-right font-mono font-bold text-red-600 dark:text-red-400">
                       {formatINR(pr.grand_total)}
@@ -1128,6 +1150,7 @@ export const TransactionsPage: React.FC = () => {
             <thead className="bg-slate-50 dark:bg-slate-800/50 text-slate-500 uppercase text-[10px] font-semibold border-b border-slate-200 dark:border-slate-800">
               <tr>
                 <th className="px-4 py-3">PO Number & Date</th>
+                {isAllStores && <th className="px-4 py-3">Store</th>}
                 <th className="px-4 py-3">Supplier Name</th>
                 <th className="px-4 py-3 text-center">Lines</th>
                 <th className="px-4 py-3">Expected Delivery</th>
@@ -1139,7 +1162,7 @@ export const TransactionsPage: React.FC = () => {
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
               {purchaseOrdersList.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-4 py-8 text-center text-slate-400">
+                  <td colSpan={isAllStores ? 8 : 7} className="px-4 py-8 text-center text-slate-400">
                     No purchase orders placed.
                   </td>
                 </tr>
@@ -1150,6 +1173,9 @@ export const TransactionsPage: React.FC = () => {
                       {po.invoice_number}
                       <div className="text-[10px] text-slate-400">{formatDate(po.invoice_date)}</div>
                     </td>
+                    {isAllStores && (
+                      <td className="px-4 py-3 font-semibold">{po.store?.name || `Store #${po.store_id}`}</td>
+                    )}
                     <td className="px-4 py-3 font-semibold">{po.supplier_name}</td>
                     <td className="px-4 py-3 text-center font-mono">
                       {Array.isArray(po.items) ? po.items.length : 0}

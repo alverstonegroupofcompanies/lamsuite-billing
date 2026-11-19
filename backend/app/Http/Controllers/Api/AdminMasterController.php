@@ -16,11 +16,12 @@ class AdminMasterController
 {
     /**
      * List products with batches and stock.
+     * Cross-store read (All Stores scope) is admin aggregation; store identity always included.
      */
     public function products(Request $request): JsonResponse
     {
-        $storeId = $request->get('active_store_id');
-        $query = Product::with('batches')
+        $storeId = $request->attributes->get('active_store_id') ?? $request->get('active_store_id');
+        $query = Product::with(['batches', 'store:id,name,code'])
             ->when($storeId, fn($q) => $q->where('store_id', $storeId));
 
         if ($search = $request->query('search')) {
@@ -83,6 +84,14 @@ class AdminMasterController
         $validated['version'] = 1;
         $validated['is_active'] = true;
 
+        if ($existing = Product::where('store_id', $validated['store_id'])->where('barcode', $validated['barcode'] ?? null)->first()) {
+            return response()->json([
+                'message' => "Barcode {$validated['barcode']} is already used by \"{$existing->name}\" in this store.",
+                'errors' => ['barcode' => ["Barcode {$validated['barcode']} is already used by \"{$existing->name}\" in this store."]],
+                'existing_product' => $existing->name,
+            ], 422);
+        }
+
         $product = Product::create($validated);
 
         // Optional initial batch
@@ -114,7 +123,7 @@ class AdminMasterController
      */
     public function updateProduct(Request $request, string $id): JsonResponse
     {
-        $product = Product::findOrFail($id);
+        $product = Product::where('store_id', $this->requireStoreId($request))->findOrFail($id);
 
         if ($request->has('version') && (int)$request->input('version') !== (int)$product->version) {
             return response()->json([
@@ -148,6 +157,21 @@ class AdminMasterController
 
         $oldValues = $product->toArray();
         $validated['version'] = $product->version + 1;
+
+        if (array_key_exists('barcode', $validated) && $validated['barcode'] && $validated['barcode'] !== $product->barcode) {
+            $clash = Product::where('store_id', $product->store_id)
+                ->where('barcode', $validated['barcode'])
+                ->where('id', '!=', $product->id)
+                ->first();
+            if ($clash) {
+                return response()->json([
+                    'message' => "Barcode {$validated['barcode']} is already used by \"{$clash->name}\" in this store.",
+                    'errors' => ['barcode' => ["Barcode {$validated['barcode']} is already used by \"{$clash->name}\" in this store."]],
+                    'existing_product' => $clash->name,
+                ], 422);
+            }
+        }
+
         $product->update($validated);
 
         AuditLog::log('update_product', 'Product', (string)$product->id, $oldValues, $product->toArray(), $product->store_id);
@@ -160,7 +184,7 @@ class AdminMasterController
      */
     public function deleteProduct(Request $request, string $id): JsonResponse
     {
-        $product = Product::findOrFail($id);
+        $product = Product::where('store_id', $this->requireStoreId($request))->findOrFail($id);
         $oldData = $product->toArray();
 
         $hasInvoices = DB::table('invoice_items')->where('product_id', $product->id)->exists();
@@ -227,7 +251,7 @@ class AdminMasterController
      */
     public function updateBatch(Request $request, string $id): JsonResponse
     {
-        $batch = ProductBatch::findOrFail($id);
+        $batch = ProductBatch::where('store_id', $this->requireStoreId($request))->findOrFail($id);
         $oldData = $batch->toArray();
 
         $validated = $request->validate([
@@ -259,7 +283,7 @@ class AdminMasterController
      */
     public function deleteBatch(Request $request, string $id): JsonResponse
     {
-        $batch = ProductBatch::findOrFail($id);
+        $batch = ProductBatch::where('store_id', $this->requireStoreId($request))->findOrFail($id);
         $productId = $batch->product_id;
         $storeId = $batch->store_id;
         $oldData = $batch->toArray();
@@ -297,7 +321,7 @@ class AdminMasterController
      */
     public function addBatch(Request $request, string $productId): JsonResponse
     {
-        $product = Product::findOrFail($productId);
+        $product = Product::where('store_id', $this->requireStoreId($request))->findOrFail($productId);
 
         $validated = $request->validate([
             'batch_no' => 'required|string|max:50',
@@ -348,12 +372,20 @@ class AdminMasterController
         ]);
 
         $count = 0;
+        $storeId = $this->requireStoreId($request);
+
+        $products = Product::whereIn('id', $validated['product_ids'])->where('store_id', $storeId)->get();
+        if ($products->count() !== count(array_unique($validated['product_ids']))) {
+            $foreign = Product::whereIn('id', $validated['product_ids'])->where('store_id', '!=', $storeId)->pluck('name')->all();
+            return response()->json([
+                'message' => 'Bulk edits apply to a single store per job. These products belong to another store: ' . implode(', ', $foreign),
+                'foreign_products' => $foreign,
+            ], 422);
+        }
+
         DB::beginTransaction();
         try {
-            foreach ($validated['product_ids'] as $id) {
-                $p = Product::find($id);
-                if (!$p) continue;
-
+            foreach ($products as $p) {
                 if ($validated['action'] === 'set_gst') {
                     $p->update(['gst_percent' => (float)$validated['value'], 'version' => $p->version + 1]);
                 } elseif ($validated['action'] === 'set_category') {
@@ -616,12 +648,22 @@ class AdminMasterController
             'reason' => 'required|string',
         ]);
 
+        // Store-scope check happens before any write: merging across stores is forbidden.
+        if ($validated['entity_type'] === 'party') {
+            $primary = Party::findOrFail($validated['primary_id']);
+            $duplicate = Party::findOrFail($validated['duplicate_id']);
+            $this->assertSameStore($primary->store_id, $duplicate->store_id, 'party');
+        } else {
+            $primary = Product::findOrFail($validated['primary_id']);
+            $duplicate = Product::findOrFail($validated['duplicate_id']);
+            $this->assertSameStore($primary->store_id, $duplicate->store_id, 'product');
+        }
+
         DB::beginTransaction();
         try {
             if ($validated['entity_type'] === 'party') {
                 $primary = Party::findOrFail($validated['primary_id']);
                 $duplicate = Party::findOrFail($validated['duplicate_id']);
-
                 // Combine balances
                 $primary->update([
                     'current_balance' => $primary->current_balance + $duplicate->current_balance,
@@ -638,7 +680,6 @@ class AdminMasterController
             } elseif ($validated['entity_type'] === 'product') {
                 $primary = Product::findOrFail($validated['primary_id']);
                 $duplicate = Product::findOrFail($validated['duplicate_id']);
-
                 // Re-link batches and recalculate stock
                 ProductBatch::where('product_id', $duplicate->id)->update(['product_id' => $primary->id]);
                 $newStock = ProductBatch::where('product_id', $primary->id)->sum('stock_qty');
@@ -684,10 +725,15 @@ class AdminMasterController
                     $errors[] = "Row #" . ($index + 1) . ": Item name is required.";
                     continue;
                 }
+                $barcode = $row['barcode'] ?? null;
+                if ($barcode && ($clash = Product::where('store_id', $validated['store_id'])->where('barcode', $barcode)->first())) {
+                    $errors[] = "Row #" . ($index + 1) . ": Barcode {$barcode} is already used by \"{$clash->name}\" in this store. Row skipped.";
+                    continue;
+                }
                 $validRows[] = [
                     'store_id' => $validated['store_id'],
                     'name' => $row['name'],
-                    'barcode' => $row['barcode'] ?? null,
+                    'barcode' => $barcode,
                     'hsn_sac_code' => $row['hsn_sac_code'] ?? '30049099',
                     'mrp' => (float)($row['mrp'] ?? 0),
                     'sel_rate' => (float)($row['sel_rate'] ?? 0),
@@ -720,5 +766,27 @@ class AdminMasterController
             'imported_count' => count($validRows),
             'errors' => $errors,
         ]);
+    }
+
+    /**
+     * Admin writes always run inside a pinned store context (enforced by scope.store);
+     * target rows must live in that same store or the request is a cross-store IDOR.
+     */
+    private function requireStoreId(Request $request): int
+    {
+        $storeId = $request->attributes->get('active_store_id') ?? $request->get('active_store_id') ?? $request->input('store_id');
+        if (empty($storeId)) {
+            abort(422, 'A specific store context is required for this change (All Stores scope is read-only).');
+        }
+        return (int) $storeId;
+    }
+
+    private function assertSameStore($storeIdA, $storeIdB, string $entityType): void
+    {
+        if ((int) $storeIdA !== (int) $storeIdB) {
+            throw \Illuminate\Validation\ValidationException::withMessages([
+                'entity' => "Both {$entityType} records must belong to the same store. Stores do not share {$entityType}s.",
+            ]);
+        }
     }
 }

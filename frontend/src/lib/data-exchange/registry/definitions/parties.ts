@@ -1,6 +1,7 @@
 import type { EntityDefinition } from "../types";
 import { sqliteStorage } from "../../../db/sqliteStorage";
 import { isValidGstin, normalizeIndianPhone } from "../../../masters/partiesStore";
+import { isForActiveStore, withStore } from "../storeScope";
 
 export const customersDefinition: EntityDefinition = {
   id: "customers",
@@ -127,7 +128,7 @@ export const customersDefinition: EntityDefinition = {
   ],
   transformRow: (raw) => {
     const id = raw.id || `cust_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-    return {
+    return withStore({
       id,
       name: String(raw.name || "").trim(),
       phone: normalizeIndianPhone(String(raw.phone || "")),
@@ -139,9 +140,12 @@ export const customersDefinition: EntityDefinition = {
       is_active: raw.is_active === false || raw.is_active === "false" || raw.is_active === 0 ? 0 : 1,
       created_at: raw.created_at || Date.now(),
       updated_at: Date.now(),
-    };
+    });
   },
-  exportQuery: async () => sqliteStorage.findAll<any>("customers"),
+  exportQuery: async () => {
+    const rows = await sqliteStorage.findAll<any>("customers");
+    return rows.filter(isForActiveStore);
+  },
 };
 
 export const suppliersDefinition: EntityDefinition = {
@@ -268,7 +272,7 @@ export const suppliersDefinition: EntityDefinition = {
   ],
   transformRow: (raw) => {
     const id = raw.id || `supp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-    return {
+    return withStore({
       id,
       name: String(raw.name || "").trim(),
       gstin: raw.gstin ? String(raw.gstin).trim().toUpperCase() : undefined,
@@ -282,9 +286,12 @@ export const suppliersDefinition: EntityDefinition = {
       is_active: raw.is_active === false || raw.is_active === "false" || raw.is_active === 0 ? 0 : 1,
       created_at: raw.created_at || Date.now(),
       updated_at: Date.now(),
-    };
+    });
   },
-  exportQuery: async () => sqliteStorage.findAll<any>("suppliers"),
+  exportQuery: async () => {
+    const rows = await sqliteStorage.findAll<any>("suppliers");
+    return rows.filter(isForActiveStore);
+  },
 };
 
 export const doctorsDefinition: EntityDefinition = {
@@ -354,15 +361,18 @@ export const doctorsDefinition: EntityDefinition = {
   ],
   transformRow: (raw) => {
     const id = raw.id || `doc_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-    return {
+    return withStore({
       id,
       name: String(raw.name || "").trim(),
       medical_reg_no: String(raw.medical_reg_no || "").trim(),
       clinic_name: raw.clinic_name ? String(raw.clinic_name).trim() : undefined,
       phone: raw.phone ? normalizeIndianPhone(String(raw.phone)) : undefined,
-    };
+    });
   },
-  exportQuery: async () => sqliteStorage.findAll<any>("doctors"),
+  exportQuery: async () => {
+    const rows = await sqliteStorage.findAll<any>("doctors");
+    return rows.filter(isForActiveStore);
+  },
 };
 
 export const patientsDefinition: EntityDefinition = {
@@ -439,13 +449,16 @@ export const patientsDefinition: EntityDefinition = {
   ],
   transformRow: (raw) => {
     const id = raw.id || `pat_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-    return {
+    return withStore({
       id,
       name: String(raw.name || "").trim(),
       age: raw.age ? Number(raw.age) : undefined,
       gender: raw.gender || "Other",
       phone: raw.phone ? normalizeIndianPhone(String(raw.phone)) : undefined,
-    };
+    });
   },
-  exportQuery: async () => sqliteStorage.findAll<any>("patients"),
+  exportQuery: async () => {
+    const rows = await sqliteStorage.findAll<any>("patients");
+    return rows.filter(isForActiveStore);
+  },
 };

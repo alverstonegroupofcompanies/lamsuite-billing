@@ -64,7 +64,8 @@ class AdminTransactionController
         $store = $storeId ? Store::find($storeId) : null;
         $isPharmacy = !$store || $store->store_type === 'pharmacy';
 
-        $query = Invoice::with(['items', 'customer:id,name,phone,gstin', 'payments'])
+        // R6: cross-store lists must carry store identity for the admin store column
+        $query = Invoice::with(['items', 'customer:id,name,phone,gstin', 'payments', 'store:id,name,code'])
             ->when($storeId, fn($q) => $q->where('store_id', $storeId));
 
         if ($moduleKey = $request->query('module_key')) {
@@ -468,7 +469,7 @@ class AdminTransactionController
         $store = $storeId ? Store::find($storeId) : null;
         $isPharmacy = !$store || $store->store_type === 'pharmacy';
 
-        $query = Invoice::with(['items', 'customer:id,name,phone,gstin', 'payments'])
+        $query = Invoice::with(['items', 'customer:id,name,phone,gstin', 'payments', 'store:id,name,code'])
             ->where(function ($q) {
                 $q->whereIn('module_key', ['credit_note', 'sales_return'])
                   ->orWhere('grand_total', '<', 0);
@@ -517,7 +518,7 @@ class AdminTransactionController
         $store = $storeId ? Store::find($storeId) : null;
         $isPharmacy = !$store || $store->store_type === 'pharmacy';
 
-        $query = Invoice::with(['items', 'customer:id,name,phone,gstin'])
+        $query = Invoice::with(['items', 'customer:id,name,phone,gstin', 'store:id,name,code'])
             ->where('module_key', 'quotation')
             ->when($storeId, fn($q) => $q->where('store_id', $storeId));
 
@@ -949,7 +950,7 @@ class AdminTransactionController
     public function purchases(Request $request): JsonResponse
     {
         $storeId = $request->get('active_store_id');
-        $query = Purchase::with(['items', 'supplier'])
+        $query = Purchase::with(['items', 'supplier', 'store:id,name,code'])
             ->where(function ($q) {
                 $q->whereNull('module_key')
                   ->orWhere('module_key', 'purchase')
@@ -986,7 +987,7 @@ class AdminTransactionController
     public function purchaseReturns(Request $request): JsonResponse
     {
         $storeId = $request->get('active_store_id');
-        $query = Purchase::with(['items', 'supplier'])
+        $query = Purchase::with(['items', 'supplier', 'store:id,name,code'])
             ->whereIn('module_key', ['debit_note', 'purchase_return'])
             ->when($storeId, fn($q) => $q->where('store_id', $storeId));
 
@@ -1013,7 +1014,7 @@ class AdminTransactionController
     public function purchaseOrders(Request $request): JsonResponse
     {
         $storeId = $request->get('active_store_id');
-        $query = Purchase::with(['items', 'supplier'])
+        $query = Purchase::with(['items', 'supplier', 'store:id,name,code'])
             ->whereIn('module_key', ['purchase_order', 'order'])
             ->when($storeId, fn($q) => $q->where('store_id', $storeId));
 

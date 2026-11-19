@@ -81,6 +81,10 @@ export interface InterStoreTransferLine {
   variance_reason?: string;
   variance_action?: "return_source" | "write_off_damage" | "pending_approval";
   receipt_notes?: string;
+
+  /** Product in THIS store that received the goods (P-STORE-SCOPE receive matching). */
+  dest_product_id?: string;
+  dest_match?: "barcode" | "created";
 }
 
 export interface InterStoreTransfer {
@@ -648,6 +652,34 @@ export class InterStoreTransferService {
   }
 
   /**
+   * P-STORE-SCOPE: a transfer line references the SENDING store's product, so
+   * receiving must resolve it to THIS store's own product — by barcode first,
+   * otherwise create an independent local copy (queued for sync).
+   */
+  async matchDestinationProduct(line: InterStoreTransferLine): Promise<{ product: ProductItem; match: "barcode" | "created" }> {
+    if (line.barcode) {
+      const byBarcode = await productsStore.findProductByBarcode(line.barcode);
+      if (byBarcode) return { product: byBarcode, match: "barcode" };
+    }
+
+    const now = Date.now();
+    const created: ProductItem = {
+      id: `prod_${now}_${Math.random().toString(16).slice(2, 8)}`,
+      name: line.product_name,
+      barcode: line.barcode,
+      hsn_sac_code: line.hsn_code,
+      gst_percent: line.gst_percent,
+      units_per_pack: Math.max(1, line.units_per_pack || 1),
+      mrp: line.mrp,
+      sel_rate: line.loose_rate || line.unit_rate || 0,
+      current_stock: 0,
+      is_active: true,
+    };
+    await productsStore.upsertProduct(created, true);
+    return { product: created, match: "created" };
+  }
+
+  /**
    * Receive Transfer at Destination Store with Line Variance Reconciliation
    */
   async receiveTransfer(
@@ -690,6 +722,11 @@ export class InterStoreTransferService {
       line.variance_action = receipt.variance_action || (shortQty > 0 || damagedQty > 0 ? "return_source" : undefined);
       line.receipt_notes = receipt.receipt_notes;
 
+      const matched = await this.matchDestinationProduct(line);
+      line.dest_product_id = matched.product.id;
+      line.dest_match = matched.match;
+      const destBatchId = `${transfer.destination_store_id}_${matched.product.id}_${line.batch_no}`;
+
       if (shortQty > 0 || damagedQty > 0) {
         hasVariance = true;
       }
@@ -697,7 +734,6 @@ export class InterStoreTransferService {
       // Step 1: Add accepted stock to destination inventory
       if (acceptedQty > 0) {
         // Upsert matching batch in destination store
-        const destBatchId = `${transfer.destination_store_id}_${line.product_id}_${line.batch_no}`;
         const existingDestBatch = await sqliteStorage.findById<ProductBatch>("product_batches", destBatchId);
         if (existingDestBatch) {
           existingDestBatch.stock_qty = round2(existingDestBatch.stock_qty + acceptedQty);
@@ -706,7 +742,7 @@ export class InterStoreTransferService {
           // Create new batch record for destination store
           const newBatch: ProductBatch = {
             id: destBatchId,
-            product_id: line.product_id,
+            product_id: matched.product.id,
             batch_no: line.batch_no,
             expiry_date: line.expiry_date,
             stock_qty: acceptedQty,
@@ -717,17 +753,14 @@ export class InterStoreTransferService {
           await productsStore.upsertBatch(newBatch);
         }
 
-        const product = await productsStore.getProductById(line.product_id);
-        if (product) {
-          product.current_stock = round2((product.current_stock || 0) + acceptedQty);
-          await productsStore.upsertProduct(product);
-        }
+        matched.product.current_stock = round2((matched.product.current_stock || 0) + acceptedQty);
+        await productsStore.upsertProduct(matched.product, matched.match === "created");
 
         // Log double-entry TRANSFER_IN
         const inTxId = `st_tx_in_${now}_${Math.random().toString(16).slice(2, 6)}`;
         await sqliteStorage.insertRecord("stock_transactions", inTxId, {
           id: inTxId,
-          product_id: line.product_id,
+          product_id: matched.product.id,
           batch_id: destBatchId,
           event_type: "TRANSFER_IN",
           qty_delta: acceptedQty,
@@ -772,8 +805,8 @@ export class InterStoreTransferService {
         const dmgTxId = `st_tx_dmg_${now}_${Math.random().toString(16).slice(2, 6)}`;
         await sqliteStorage.insertRecord("stock_transactions", dmgTxId, {
           id: dmgTxId,
-          product_id: line.product_id,
-          batch_id: line.batch_id,
+          product_id: matched.product.id,
+          batch_id: destBatchId,
           event_type: "TRANSFER_DAMAGE_LOSS",
           qty_delta: -damagedQty,
           reference_type: "INTER_STORE_TRANSFER_VARIANCE",

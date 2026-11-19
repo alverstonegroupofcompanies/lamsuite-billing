@@ -171,6 +171,7 @@ export class SyncQueueService {
   private static readonly documentTables: Partial<Record<SyncQueueItem["entity_type"], string>> = {
     invoice: "invoices",
     purchase: "purchase_documents",
+    product: "products",
   };
 
   /**

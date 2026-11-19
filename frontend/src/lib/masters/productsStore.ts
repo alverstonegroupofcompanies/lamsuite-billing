@@ -13,6 +13,7 @@ export interface ProductBatch {
   selling_rate?: number;
   rack_location?: string;
   shelf_location?: string;
+  store_id?: string;
 }
 
 /**
@@ -126,14 +127,44 @@ export interface ProductItem {
   schedule_type?: "H" | "H1" | "X" | "G" | "NONE";
   is_active: boolean;
   external_id?: string;
+  /** Store this catalog row belongs to (P-STORE-SCOPE: products are per-store). */
+  store_id?: string;
+  /** Offline-created products wait for the next successful sync push. */
+  sync_state?: "pending" | "synced";
 }
 
 export class ProductsStore {
+  /** Rows with no store_id are legacy pre-scope data on this device; they count as this store's. */
+  private isForActiveStore(row: { store_id?: string } | null | undefined): boolean {
+    if (!row || !row.store_id) return true;
+    return String(row.store_id) === sqliteStorage.getActiveStoreId();
+  }
+
   async upsertProduct(product: ProductItem, enqueueSync = false): Promise<void> {
-    await sqliteStorage.insertRecord("products", product.id, product as unknown as Record<string, unknown>);
+    const storeId = product.store_id || sqliteStorage.getActiveStoreId();
+    const record: ProductItem = {
+      ...product,
+      store_id: storeId || undefined,
+      // Offline-created / locally-edited products wait for the next sync push.
+      sync_state: enqueueSync ? "pending" : product.sync_state ?? "synced",
+    };
+    await sqliteStorage.insertRecord("products", record.id, record as unknown as Record<string, unknown>);
     if (enqueueSync) {
       try {
-        await syncQueueService.enqueue("product", product.id, "update", product as unknown as Record<string, unknown>);
+        await syncQueueService.enqueue("product", record.id, "update", record as unknown as Record<string, unknown>);
+      } catch (_) {}
+    }
+  }
+
+  async deactivateProduct(id: string, enqueueSync = true): Promise<void> {
+    const existing = await this.getProductById(id);
+    if (!existing) return;
+    const deactivated: ProductItem = { ...existing, is_active: false };
+    if (enqueueSync) deactivated.sync_state = "pending";
+    await sqliteStorage.insertRecord("products", id, deactivated as unknown as Record<string, unknown>);
+    if (enqueueSync) {
+      try {
+        await syncQueueService.enqueue("product", id, "update", deactivated as unknown as Record<string, unknown>);
       } catch (_) {}
     }
   }
@@ -144,9 +175,10 @@ export class ProductsStore {
 
   async getAllProducts(autoSeedIfEmpty = true): Promise<ProductItem[]> {
     let prods = await sqliteStorage.findAll<ProductItem>("products");
+    prods = (prods || []).filter((p) => this.isForActiveStore(p));
     if (autoSeedIfEmpty && (!prods || prods.length === 0)) {
       await sqliteStorage.ensureCatalogReady();
-      prods = await sqliteStorage.findAll<ProductItem>("products");
+      prods = ((await sqliteStorage.findAll<ProductItem>("products")) || []).filter((p) => this.isForActiveStore(p));
     }
     return prods;
   }
@@ -159,11 +191,7 @@ export class ProductsStore {
     const cleanBarcode = String(barcode || "").trim();
     if (!cleanBarcode) return null;
 
-    let all = await sqliteStorage.findAll<ProductItem>("products");
-    if (!all || all.length === 0) {
-      await sqliteStorage.ensureCatalogReady();
-      all = await sqliteStorage.findAll<ProductItem>("products");
-    }
+    const all = await this.getAllProducts();
 
     for (const item of all) {
       if (item.barcode && String(item.barcode).trim() === cleanBarcode) return item;
@@ -178,11 +206,7 @@ export class ProductsStore {
     const q = query.trim().toLowerCase();
     if (!q) return [];
 
-    let all = await sqliteStorage.findAll<ProductItem>("products");
-    if (!all || all.length === 0) {
-      await sqliteStorage.ensureCatalogReady();
-      all = await sqliteStorage.findAll<ProductItem>("products");
-    }
+    const all = await this.getAllProducts();
 
     return all.filter((item) => {
       // Treat as active if true, 1, "1", or undefined/null (default active)
@@ -205,12 +229,16 @@ export class ProductsStore {
   }
 
   async upsertBatch(batch: ProductBatch, enqueueSync = false): Promise<void> {
-    await sqliteStorage.insertRecord("product_batches", batch.id, batch as unknown as Record<string, unknown>);
+    const record: ProductBatch = {
+      ...batch,
+      store_id: batch.store_id || sqliteStorage.getActiveStoreId() || undefined,
+    };
+    await sqliteStorage.insertRecord("product_batches", record.id, record as unknown as Record<string, unknown>);
     if (enqueueSync) {
       try {
-        await syncQueueService.enqueue("product", batch.product_id, "update", {
-          id: batch.product_id,
-          batches: [batch],
+        await syncQueueService.enqueue("product", record.product_id, "update", {
+          id: record.product_id,
+          batches: [record],
         });
       } catch (_) {}
     }
@@ -218,7 +246,12 @@ export class ProductsStore {
 
   async getBatchesForProduct(productId: string, onlyInStock = true): Promise<ProductBatch[]> {
     const all = await sqliteStorage.findAll<ProductBatch>("product_batches");
-    const matched = all.filter((b) => String(b.product_id) === String(productId) && (!onlyInStock || (b.stock_qty || 0) > 0));
+    const matched = all.filter(
+      (b) =>
+        this.isForActiveStore(b) &&
+        String(b.product_id) === String(productId) &&
+        (!onlyInStock || (b.stock_qty || 0) > 0)
+    );
 
     // Sort FEFO (First-Expiry, First-Out)
     return matched.sort((a, b) => (a.expiry_date || "").localeCompare(b.expiry_date || ""));

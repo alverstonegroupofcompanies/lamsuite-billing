@@ -1,5 +1,56 @@
 # Changelog
 
+## 2.1.0 — 2026-11-19
+
+Store-scope constitution (P-STORE-SCOPE): **products belong to one store only; stores do not
+share products.** The change request reversed the centralized-catalogue design after a till
+showed products with stock that did not belong to its store. Rules live in
+`specs/constitution.md` and are enforced by CI (`backend/tests/Feature/Constitution/`, 10 suites).
+
+### Data layer
+
+1. **Per-store identity at the schema level** — `products.store_id` is NOT NULL with a unique
+   index on `(store_id, barcode)` and composite foreign keys so a batch, ledger entry or
+   price-list row cannot point across stores. Cross-store inserts are impossible, not merely
+   blocked by controllers.
+2. **One-time scope migration with reconciliation** — `php artisan stores:scope-catalog`
+   adopts legacy NULL-store rows (POS-created products), supports `--dry-run` and rollback, and
+   prints a before/after reconciliation.
+
+### Server
+
+3. **Per-store scoping everywhere products flow** — POS/staff product endpoints 404 across
+   stores; admin masters endpoints scope by the active store; duplicate barcodes on
+   create/import/sync answer `422` naming the existing product in that store.
+4. **Sync can never hijack another store's product** — push upserts are keyed
+   `(store_id, external_id)`; conflicts route to the sync centre.
+5. **The publish-to-stores flow is gone** — `CatalogPublishService` and catalog publications
+   were removed with the centralized catalogue they served.
+6. **Copy products to another store** replaces publishing: a one-time, audited, reversible
+   admin tool (`/admin/catalog/copy*`) that carries masters and rates — never stock, batches or
+   history — and leaves the copies fully independent.
+7. **Data exchange honours store scope** — imports target exactly one store and commit/export
+   without a specific store context answer `422`; exports are store-filtered; the local-first
+   import engine tags and filters rows per store (units stay shared, per the carve-out).
+8. **Inter-store transfers** — the receiver matches lines by barcode then item code, offers
+   create-in-my-store or map-to-existing (mapping remembered per store pair), and writes ledger
+   entries in both stores.
+9. **Consolidated reports** — a new admin report groups lines by an admin-chosen matching key
+   per run (barcode → item code → name+unit), lists unmatched lines separately, and stores no
+   merges.
+
+### Admin panel
+
+10. **Store scope lives in the URL** — `?store=<id|all>`; the URL wins over the saved scope so
+    a shared or bookmarked link opens exactly the store it names, invalid params fall back
+    safely, and switching stores keeps the URL in step.
+11. **Cross-store views show a store column** — Masters products, inventory batches and the six
+    transaction tables (invoices, returns, quotations, purchases, debit notes, purchase orders)
+    display store identity under All Stores scope, matching read-only aggregation.
+12. **No fabricated demo catalog** — a fresh store with no products and no backend catalog
+    simply has no products until the owner imports or copies them; the 50-product seed remains
+    available to unit tests only.
+
 ## 2.0.42 — 2026-11-19
 
 Follow-up to the server-side GST parity release. The whole GST and stock QA pass was re-run

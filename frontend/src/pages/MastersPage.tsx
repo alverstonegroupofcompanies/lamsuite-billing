@@ -23,6 +23,7 @@ import {
   Printer,
 } from "lucide-react";
 import { productsStore, formatExpiryDisplay, isBatchExpired, type ProductItem, type ProductBatch } from "../lib/masters/productsStore";
+import { staffAuthService } from "../lib/auth/staffAuthService";
 import { useModalEscape } from "../lib/ui/modalEscapeManager";
 import {
   partiesStore,
@@ -318,6 +319,19 @@ export const MastersPage: React.FC = () => {
       } catch (err: any) {
         showNotification("Failed to delete unit", "error");
       }
+    }
+  };
+
+  // Deactivate Product (soft delete — hidden from billing, kept for history)
+  const canDeleteProducts = staffAuthService.hasPermission("masters", "delete");
+  const handleDeactivateProduct = async (product: ProductItem) => {
+    if (!confirm(`Deactivate "${product.name}"? It will no longer appear in billing or this list.`)) return;
+    try {
+      await productsStore.deactivateProduct(product.id);
+      showNotification(`Product "${product.name}" deactivated`);
+      setProducts(await productsStore.getAllProducts(false));
+    } catch (err: any) {
+      showNotification(err.message || "Failed to deactivate product", "error");
     }
   };
 
@@ -820,7 +834,17 @@ export const MastersPage: React.FC = () => {
                 filteredProducts.map((p) => (
                   <tr key={p.id} className="hover:bg-canvas/50 transition-colors">
                     <td className="px-4 py-2.5 font-medium text-text-main">
-                      <div>{p.name}</div>
+                      <div className="flex items-center gap-1.5">
+                        {p.name}
+                        {p.sync_state === "pending" && (
+                          <span
+                            className="inline-flex shrink-0 items-center rounded-full bg-amber-100 px-1.5 py-0.5 text-[9px] font-semibold text-amber-700"
+                            title="Created offline — waiting to sync to the server"
+                          >
+                            Waiting to sync
+                          </span>
+                        )}
+                      </div>
                       {p.generic_name && (
                         <div className="text-[10px] text-text-muted italic">{p.generic_name}</div>
                       )}
@@ -854,6 +878,15 @@ export const MastersPage: React.FC = () => {
                       >
                         <Edit2 className="h-4 w-4" />
                       </button>
+                      {canDeleteProducts && (
+                        <button
+                          onClick={() => handleDeactivateProduct(p)}
+                          className="rounded-btn p-1 text-text-muted hover:bg-rose-50 hover:text-rose-600 transition-colors"
+                          title="Deactivate Product"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      )}
                     </td>
                   </tr>
                 ))

@@ -47,13 +47,22 @@ describe("seedProductsData - 50 Test Products", () => {
       batchIds.add(b.id);
       expect(b.batch_no).toBeTruthy();
       expect(b.expiry_date).toMatch(/^\d{4}-\d{2}/);
-      expect(b.stock_qty).toBeGreaterThan(0);
+      expect(b.stock_qty).toBe(0);
       expect(b.selling_rate).toBeGreaterThan(0);
     }
 
     // Every product should have at least 1 batch
     const productsWithBatches = new Set(TEST_SEED_BATCHES.map((b) => b.product_id));
     expect(productsWithBatches.size).toBe(50);
+  });
+
+  it("should not fabricate stock in seed data", () => {
+    for (const p of TEST_SEED_PRODUCTS) {
+      expect(p.current_stock ?? 0).toBe(0);
+    }
+    for (const b of TEST_SEED_BATCHES) {
+      expect(b.stock_qty).toBe(0);
+    }
   });
 
   it("should successfully seed all 50 products and their batches into storage", async () => {
@@ -76,8 +85,9 @@ describe("seedProductsData - 50 Test Products", () => {
     expect(foundBarcode).not.toBeNull();
     expect(foundBarcode?.name).toBe("Dolo 650 Tablet");
 
-    // FEFO batches
-    const doloBatches = await productsStore.getBatchesForProduct("prod_seed_01", true);
+    // FEFO batches — seed batches are intentionally zero-stock, so include
+    // out-of-stock batches explicitly
+    const doloBatches = await productsStore.getBatchesForProduct("prod_seed_01", false);
     expect(doloBatches.length).toBe(2);
     // Earlier expiry should come first
     expect(doloBatches[0].batch_no).toBe("DL2601");

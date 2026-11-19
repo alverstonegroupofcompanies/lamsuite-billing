@@ -14,6 +14,7 @@ import {
   FileSpreadsheet,
   Download,
   Receipt,
+  Layers,
   Building,
   Users,
   Stethoscope,
@@ -50,7 +51,7 @@ const emptyScheduleForm = {
 export const ReportsPage: React.FC = () => {
   const { activeStore, hasPermission } = useAuth();
   const [activeTab, setActiveTab] = useState<
-    "sales" | "gstr1" | "gstr3b" | "gstr9" | "gstr2b" | "aging" | "pharmacy" | "scheduled"
+    "sales" | "consolidated" | "gstr1" | "gstr3b" | "gstr9" | "gstr2b" | "aging" | "pharmacy" | "scheduled"
   >("sales");
 
   const [startDate, setStartDate] = useState(
@@ -59,6 +60,8 @@ export const ReportsPage: React.FC = () => {
   const [endDate, setEndDate] = useState(new Date().toISOString().split("T")[0]);
 
   const [salesReport, setSalesReport] = useState<any>(null);
+  const [consolidatedReport, setConsolidatedReport] = useState<any>(null);
+  const [matchBy, setMatchBy] = useState<"barcode" | "external_id" | "name_unit">("barcode");
   const [gstr1Report, setGstr1Report] = useState<any>(null);
   const [agingReport, setAgingReport] = useState<any>(null);
   const [pharmacyReport, setPharmacyReport] = useState<any>(null);
@@ -85,6 +88,13 @@ export const ReportsPage: React.FC = () => {
       if (activeTab === "sales") {
         const res = await api.get("/admin/reports/sales", { start_date: startDate, end_date: endDate });
         setSalesReport(res);
+      } else if (activeTab === "consolidated") {
+        const res = await api.get("/admin/reports/consolidated-sales", {
+          start_date: startDate,
+          end_date: endDate,
+          match_by: matchBy,
+        });
+        setConsolidatedReport(res);
       } else if (activeTab === "gstr1") {
         const res = await api.get("/admin/reports/gstr1", { start_date: startDate, end_date: endDate });
         setGstr1Report(res);
@@ -107,7 +117,7 @@ export const ReportsPage: React.FC = () => {
 
   useEffect(() => {
     fetchReports();
-  }, [activeTab, startDate, endDate, activeStore]);
+  }, [activeTab, startDate, endDate, activeStore, matchBy]);
 
   const openScheduleModal = (schedule?: any) => {
     if (schedule) {
@@ -241,9 +251,16 @@ export const ReportsPage: React.FC = () => {
             />
           </div>
 
-          {["sales", "gstr1", "aging", "pharmacy"].includes(activeTab) && (
+          {["sales", "consolidated", "gstr1", "aging", "pharmacy"].includes(activeTab) && (
             <button
-              onClick={() => exportCsv(`report_${activeTab}`, [salesReport || gstr1Report || {}])}
+              onClick={() =>
+                exportCsv(
+                  `report_${activeTab}`,
+                  activeTab === "consolidated"
+                    ? consolidatedReport?.groups || []
+                    : [salesReport || gstr1Report || {}]
+                )
+              }
               className="flex items-center gap-1 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold shadow-2xs transition-colors"
             >
               <Download className="w-3.5 h-3.5" />
@@ -257,6 +274,7 @@ export const ReportsPage: React.FC = () => {
       <div className="flex border-b border-slate-200 dark:border-slate-800 gap-4 text-xs font-semibold overflow-x-auto pb-0.5">
         {[
           { id: "sales", label: "Daily Sales & Collection", icon: Receipt },
+          { id: "consolidated", label: "Consolidated Items", icon: Layers },
           { id: "gstr1", label: "GSTR-1 Statutory Summary", icon: FileBarChart2 },
           { id: "gstr3b", label: "GSTR-3B Working Paper", icon: ClipboardCheck },
           { id: "gstr2b", label: "GSTR-2B ITC Matching", icon: FileSearch },
@@ -485,8 +503,120 @@ export const ReportsPage: React.FC = () => {
             </tbody>
           </table>
         </div>
+      ) : activeTab === "consolidated" && consolidatedReport ? (
+        /* Consolidated Items — matching key chosen per run (P-STORE-SCOPE) */
+        <div className="space-y-6">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <label className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">
+                Matching key
+              </label>
+              <select
+                value={matchBy}
+                onChange={(e) => setMatchBy(e.target.value as any)}
+                className="px-3 py-1.5 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100"
+              >
+                <option value="barcode">Barcode</option>
+                <option value="external_id">Item Code (External ID)</option>
+                <option value="name_unit">Name + Unit</option>
+              </select>
+            </div>
+            <div className="flex items-center gap-3 text-xs font-mono">
+              <span className="text-emerald-600 dark:text-emerald-400">
+                Matched: {formatINR(consolidatedReport.totals?.matched_revenue)}
+              </span>
+              <span className="text-amber-600 dark:text-amber-400">
+                Unmatched: {formatINR(consolidatedReport.totals?.unmatched_revenue)}
+              </span>
+            </div>
+          </div>
+
+          <p className="text-[11px] text-slate-500 dark:text-slate-400">
+            Products belong to one store only, so the same physical item can exist in several stores. Lines are grouped
+            by the chosen key per run — nothing is merged in the catalog. Lines without a value for the key are listed
+            as unmatched.
+          </p>
+
+          {/* Matched groups */}
+          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs overflow-hidden">
+            <div className="p-4 border-b border-slate-200 dark:border-slate-800">
+              <h3 className="font-bold text-slate-900 dark:text-white text-sm">Grouped Sales</h3>
+            </div>
+            <table className="w-full text-xs text-left text-slate-600 dark:text-slate-300">
+              <thead className="bg-slate-50 dark:bg-slate-800/50 text-slate-500 uppercase text-[10px] font-semibold border-b border-slate-200 dark:border-slate-800">
+                <tr>
+                  <th className="px-4 py-3">Key</th>
+                  <th className="px-4 py-3">Item</th>
+                  <th className="px-4 py-3">Stores</th>
+                  <th className="px-4 py-3 text-center">Qty Sold</th>
+                  <th className="px-4 py-3 text-right">Revenue</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 dark:divide-slate-800 font-mono">
+                {consolidatedReport.groups?.length === 0 && (
+                  <tr>
+                    <td colSpan={5} className="px-4 py-6 text-center text-slate-400 font-sans">
+                      No sales lines in this period.
+                    </td>
+                  </tr>
+                )}
+                {consolidatedReport.groups?.map((g: any, i: number) => (
+                  <tr key={i}>
+                    <td className="px-4 py-3 font-bold text-slate-900 dark:text-white">{g.key}</td>
+                    <td className="px-4 py-3 font-sans">{g.label}</td>
+                    <td className="px-4 py-3 font-sans">
+                      {(g.stores || []).map((s: any) => `${s.store_name} (${s.qty_sold})`).join(", ")}
+                    </td>
+                    <td className="px-4 py-3 text-center">{formatIndianNumber(g.qty_sold)}</td>
+                    <td className="px-4 py-3 text-right font-bold text-slate-900 dark:text-white">
+                      {formatINR(g.revenue)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Unmatched lines */}
+          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs overflow-hidden">
+            <div className="p-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
+              <h3 className="font-bold text-slate-900 dark:text-white text-sm">
+                Unmatched Lines
+                <span className="ml-2 text-[10px] font-semibold text-amber-600 dark:text-amber-400">
+                  no {matchBy === "barcode" ? "barcode" : matchBy === "external_id" ? "item code" : "name"} on the line
+                </span>
+              </h3>
+            </div>
+            <table className="w-full text-xs text-left text-slate-600 dark:text-slate-300">
+              <thead className="bg-slate-50 dark:bg-slate-800/50 text-slate-500 uppercase text-[10px] font-semibold border-b border-slate-200 dark:border-slate-800">
+                <tr>
+                  <th className="px-4 py-3">Store</th>
+                  <th className="px-4 py-3">Product</th>
+                  <th className="px-4 py-3 text-center">Qty</th>
+                  <th className="px-4 py-3 text-right">Revenue</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 dark:divide-slate-800 font-mono">
+                {consolidatedReport.unmatched?.length === 0 && (
+                  <tr>
+                    <td colSpan={4} className="px-4 py-6 text-center text-emerald-500 font-sans">
+                      Every line carries the chosen matching key.
+                    </td>
+                  </tr>
+                )}
+                {consolidatedReport.unmatched?.map((u: any, i: number) => (
+                  <tr key={i}>
+                    <td className="px-4 py-3 font-sans">{u.store_name}</td>
+                    <td className="px-4 py-3 font-sans font-bold text-slate-900 dark:text-white">{u.product_name}</td>
+                    <td className="px-4 py-3 text-center">{formatIndianNumber(u.qty_sold)}</td>
+                    <td className="px-4 py-3 text-right">{formatINR(u.revenue)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
       ) : (
-        /* Scheduled Email Reports */
         <div className="space-y-4">
           <div className="flex items-center justify-between gap-3">
             <div>

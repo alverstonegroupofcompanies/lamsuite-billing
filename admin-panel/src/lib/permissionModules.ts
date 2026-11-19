@@ -97,3 +97,97 @@ export function normalizePermissions(raw: unknown): UserPermissions {
 export function permissionCount(permissions: UserPermissions): number {
   return Object.keys(permissions).length;
 }
+
+type ActionFilter = (action: string) => boolean;
+
+const ALL: ActionFilter = () => true;
+const NO_DELETE: ActionFilter = (a) => a !== "delete";
+const READ: ActionFilter = (a) => a === "view";
+const READ_EXPORT: ActionFilter = (a) => a === "view" || a === "export";
+
+function baseline(spec: Record<string, ActionFilter>): UserPermissions {
+  const result: UserPermissions = {};
+  for (const [moduleId, filter] of Object.entries(spec)) {
+    const actions = (MODULE_ACTIONS.get(moduleId) || []).filter(filter);
+    if (actions.length) result[moduleId] = actions;
+  }
+  return result;
+}
+
+/**
+ * Role baselines mirrored from backend User::hasPermission and the POS
+ * accessControl role defaults. Admin roles bypass permission checks on both
+ * sides, so they stay on Inherit (empty override set).
+ */
+export const ROLE_PERMISSION_BASELINE: Record<string, UserPermissions> = {
+  super_admin: {},
+  store_owner: {},
+  admin: {},
+  manager: baseline({
+    dashboard: ALL,
+    billing: ALL,
+    sales: ALL,
+    purchases: ALL,
+    inventory: ALL,
+    masters: ALL,
+    reports: ALL,
+    devices: ALL,
+    import_export: ALL,
+    migration: ALL,
+    settings: ALL,
+    stores: NO_DELETE,
+    users: ALL,
+    features: ALL,
+    transactions: ALL,
+    sales_orders: ALL,
+    pricing: ALL,
+    loyalty: ALL,
+    compliance: ALL,
+    sync: ALL,
+    audit: ALL,
+    notifications: ALL,
+  }),
+  accountant: baseline({
+    dashboard: READ,
+    reports: READ_EXPORT,
+    compliance: READ_EXPORT,
+  }),
+  support: baseline({
+    dashboard: READ,
+    sales: READ,
+    purchases: READ,
+    inventory: READ,
+    masters: READ,
+    reports: READ_EXPORT,
+  }),
+  cashier: baseline({
+    dashboard: READ,
+    billing: ALL,
+    sales: ALL,
+    reports: ALL,
+    settings: ALL,
+    devices: ALL,
+  }),
+  operator: baseline({
+    dashboard: READ,
+    billing: ALL,
+    sales: ALL,
+    settings: ALL,
+    devices: ALL,
+  }),
+  pharmacist: baseline({
+    dashboard: NO_DELETE,
+    billing: NO_DELETE,
+    sales: NO_DELETE,
+    reports: NO_DELETE,
+    inventory: NO_DELETE,
+    masters: NO_DELETE,
+    settings: NO_DELETE,
+    devices: NO_DELETE,
+  }),
+};
+
+export function getRoleBaselinePermissions(role?: string | null): UserPermissions {
+  const key = String(role || "").trim().toLowerCase();
+  return { ...(ROLE_PERMISSION_BASELINE[key] || {}) };
+}

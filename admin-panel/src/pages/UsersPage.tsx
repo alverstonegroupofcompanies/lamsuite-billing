@@ -3,7 +3,7 @@ import { User, UserRole, Store } from "../types";
 import { api } from "../services/api";
 import { useAuth } from "../context/AuthContext";
 import { PermissionMatrix } from "../components/PermissionMatrix";
-import { normalizePermissions, type UserPermissions } from "../lib/permissionModules";
+import { normalizePermissions, getRoleBaselinePermissions, type UserPermissions } from "../lib/permissionModules";
 import {
   Users,
   Plus,
@@ -490,7 +490,13 @@ export const UsersPage: React.FC = () => {
 
           {hasPermission("users", "create") && (
             <button
-              onClick={() => setIsCreateModalOpen(true)}
+              onClick={() => {
+                setNewUser((prev) => ({
+                  ...prev,
+                  permissions: getRoleBaselinePermissions(prev.role),
+                }));
+                setIsCreateModalOpen(true);
+              }}
               className="flex items-center gap-1.5 px-3.5 py-2 bg-brand-600 hover:bg-brand-500 text-white text-xs font-bold rounded-xl shadow-sm transition-all cursor-pointer"
             >
               <Plus className="w-4 h-4" />
@@ -1307,7 +1313,13 @@ export const UsersPage: React.FC = () => {
                   </label>
                   <select
                     value={newUser.role}
-                    onChange={(e) => setNewUser({ ...newUser, role: e.target.value as UserRole })}
+                    onChange={(e) =>
+                      setNewUser({
+                        ...newUser,
+                        role: e.target.value as UserRole,
+                        permissions: getRoleBaselinePermissions(e.target.value),
+                      })
+                    }
                     className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                   >
                     <option value="store_owner">Store Owner</option>

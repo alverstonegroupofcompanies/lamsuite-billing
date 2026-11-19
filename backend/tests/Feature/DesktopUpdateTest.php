@@ -44,7 +44,7 @@ class DesktopUpdateTest extends TestCase
 
     public function test_dynamic_update_returns_204_when_up_to_date(): void
     {
-        $response = $this->getJson('/api/app/update/windows-x86_64/2.0.42');
+        $response = $this->getJson('/api/app/update/windows-x86_64/2.1.0');
 
         $response->assertStatus(204);
     }

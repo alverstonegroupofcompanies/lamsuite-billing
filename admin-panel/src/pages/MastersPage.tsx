@@ -5,7 +5,7 @@ import { formatINR, formatIndianNumber, formatDate } from "../utils/formatters";
 import { useAuth } from "../context/AuthContext";
 import { ConflictModal } from "../components/ConflictModal";
 import { ConfirmModal } from "../components/ConfirmModal";
-import { CatalogPublishModal } from "../components/masters/CatalogPublishModal";
+import { CopyProductsModal } from "../components/masters/CopyProductsModal";
 import {
   Package,
   Layers,
@@ -31,7 +31,7 @@ import {
   CheckCircle,
   FileSpreadsheet,
   SlidersHorizontal,
-  Share2,
+  Copy as CopyIcon,
 } from "lucide-react";
 
 export type MasterTab =
@@ -48,7 +48,7 @@ export type MasterTab =
   | "banks";
 
 export const MastersPage: React.FC = () => {
-  const { activeStore, hasPermission } = useAuth();
+  const { activeStore, hasPermission, isAllStores } = useAuth();
   const [activeTab, setActiveTab] = useState<MasterTab>("products");
 
   const [isLoading, setIsLoading] = useState(true);
@@ -69,7 +69,7 @@ export const MastersPage: React.FC = () => {
   const [productPerPage, setProductPerPage] = useState(50);
   const [selectedProductIds, setSelectedProductIds] = useState<number[]>([]);
   const [isProductModalOpen, setIsProductModalOpen] = useState(false);
-  const [publishingProduct, setPublishingProduct] = useState<Product | null>(null);
+  const [copyModalProducts, setCopyModalProducts] = useState<Product[]>([]);
   const [editingProduct, setEditingProduct] = useState<Partial<Product> | null>(null);
   const [initialBatchData, setInitialBatchData] = useState<{ batch_no: string; expiry_date: string; stock_qty: number }>({
     batch_no: "B1",
@@ -908,6 +908,7 @@ export const MastersPage: React.FC = () => {
                     />
                   </th>
                   <th className="px-4 py-3">Product Name & Barcode</th>
+                  {isAllStores && <th className="px-4 py-3">Store</th>}
                   <th className="px-4 py-3">HSN & GST</th>
                   <th className="px-4 py-3 text-right">MRP</th>
                   <th className="px-4 py-3 text-right">Selling Rate</th>
@@ -919,13 +920,13 @@ export const MastersPage: React.FC = () => {
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                 {isLoading ? (
                   <tr>
-                    <td colSpan={8} className="px-4 py-8 text-center text-slate-400">
+                    <td colSpan={isAllStores ? 9 : 8} className="px-4 py-8 text-center text-slate-400">
                       Loading catalog products...
                     </td>
                   </tr>
                 ) : products.length === 0 ? (
                   <tr>
-                    <td colSpan={8} className="px-4 py-8 text-center text-slate-400">
+                    <td colSpan={isAllStores ? 9 : 8} className="px-4 py-8 text-center text-slate-400">
                       No products found.
                     </td>
                   </tr>
@@ -948,6 +949,12 @@ export const MastersPage: React.FC = () => {
                           {p.barcode || "No barcode"} • {p.generic_name || "Standard Form"}
                         </div>
                       </td>
+                      {isAllStores && (
+                        <td className="px-4 py-3">
+                          <div className="font-semibold text-slate-700 dark:text-slate-300">{p.store?.name || `Store #${p.store_id}`}</div>
+                          <div className="text-[10px] text-slate-400 font-mono">{p.store?.code || ""}</div>
+                        </td>
+                      )}
                       <td className="px-4 py-3 font-mono">
                         <div>{p.hsn_sac_code}</div>
                         <div className="text-[10px] text-brand-600 font-semibold">{p.gst_percent}% GST</div>
@@ -995,11 +1002,11 @@ export const MastersPage: React.FC = () => {
                           </button>
                           {hasPermission("masters", "create") && (
                             <button
-                              onClick={() => setPublishingProduct(p)}
+                              onClick={() => setCopyModalProducts([p])}
                               className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-950/40 rounded-lg"
-                              title="Publish to stores"
+                              title="Copy to another store"
                             >
-                              <Share2 className="w-3.5 h-3.5" />
+                              <CopyIcon className="w-3.5 h-3.5" />
                             </button>
                           )}
                           {hasPermission("masters", "delete") && (
@@ -2639,8 +2646,12 @@ export const MastersPage: React.FC = () => {
       {/* ---------------------------------------------------------------------------------- */}
       {/* CATALOG PUBLISH MODAL                                                              */}
       {/* ---------------------------------------------------------------------------------- */}
-      {publishingProduct && (
-        <CatalogPublishModal product={publishingProduct} onClose={() => setPublishingProduct(null)} />
+      {copyModalProducts.length > 0 && (
+        <CopyProductsModal
+          initialProducts={copyModalProducts}
+          onClose={() => setCopyModalProducts([])}
+          onCopied={fetchData}
+        />
       )}
 
       {/* ---------------------------------------------------------------------------------- */}

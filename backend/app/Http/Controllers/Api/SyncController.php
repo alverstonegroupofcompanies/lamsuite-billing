@@ -28,8 +28,10 @@ use Illuminate\Validation\ValidationException;
 
 class SyncController
 {
-    public function __construct(private StockAdjustmentService $stockAdjustments)
-    {
+    public function __construct(
+        private StockAdjustmentService $stockAdjustments,
+        private \App\Services\Stock\InterStoreTransferService $transfers
+    ) {
     }
 
     /**
@@ -57,17 +59,35 @@ class SyncController
         if ($candidate !== null && $candidate !== '') {
             if (is_numeric($candidate)) {
                 $store = Store::find((int)$candidate);
-                if ($store) return $store->id;
+                if ($store) {
+                    $this->assertUserMayWriteStore($request, $store->id);
+                    return $store->id;
+                }
             }
             $store = Store::where('code', $candidate)
                 ->orWhere('id', $candidate)
                 ->orWhere('name', $candidate)
                 ->first();
-            if ($store) return $store->id;
+            if ($store) {
+                $this->assertUserMayWriteStore($request, $store->id);
+                return $store->id;
+            }
         }
 
         $firstStore = Store::first();
         return $firstStore ? $firstStore->id : 1;
+    }
+
+    /**
+     * A user token may only sync into stores it belongs to (device tokens are
+     * already pinned by their device_store_id attribute upstream).
+     */
+    private function assertUserMayWriteStore(Request $request, int $storeId): void
+    {
+        $user = $request->user();
+        if ($user && !$user->canAccessStore($storeId)) {
+            abort(403, 'You are not allowed to sync into this store.');
+        }
     }
 
     /**
@@ -232,7 +252,8 @@ class SyncController
         $storeId = $this->resolveStoreId($request, $inv);
         $store = Store::find($storeId);
 
-        // Find existing invoice either by external_id OR (store_id + invoice_number) to prevent duplicates
+        // Find existing invoice either by external_id OR (store_id + invoice_number) to prevent duplicates.
+        // R5: never reach into another store's documents.
         $invoice = null;
         if ($externalId) {
             $invoice = Invoice::where('store_id', $storeId)
@@ -243,11 +264,6 @@ class SyncController
                     }
                 })
                 ->first();
-
-            if (!$invoice) {
-                // Also check by external_id across stores if storeId wasn't matched exactly
-                $invoice = Invoice::where('external_id', $externalId)->first();
-            }
         } elseif (!empty($inv['invoice_number'])) {
             $invoice = Invoice::where('store_id', $storeId)
                 ->where('invoice_number', $inv['invoice_number'])
@@ -262,19 +278,19 @@ class SyncController
             return $this->patchInvoiceFromSync($request, $invoice, $inv);
         }
 
-        // Resolve customer_id if party exists
+        // Resolve customer_id if party exists (scoped to this store)
         $customerId = $inv['customer_id'] ?? null;
         $matchedParty = null;
         if ($customerId) {
             $matchedParty = is_numeric($customerId)
-                ? Party::find($customerId)
-                : Party::where('external_id', $customerId)->first();
+                ? Party::where('store_id', $storeId)->where('id', (int) $customerId)->first()
+                : Party::where('store_id', $storeId)->where('external_id', $customerId)->first();
             if ($matchedParty) {
                 $customerId = $matchedParty->id;
             }
         }
         if (!$matchedParty && !empty($inv['customer_phone'])) {
-            $matchedParty = Party::where('phone', $inv['customer_phone'])->first();
+            $matchedParty = Party::where('store_id', $storeId)->where('phone', $inv['customer_phone'])->first();
             if ($matchedParty) {
                 $customerId = $matchedParty->id;
             }
@@ -488,9 +504,15 @@ class SyncController
             foreach ($inv['items'] as $idx => $item) {
                 $productId = $item['product_id'] ?? null;
                 if ($productId && !is_numeric($productId)) {
-                    $prod = Product::where('external_id', $productId)
-                        ->orWhere('name', $item['product_name'] ?? '')
+                    $prod = Product::where('store_id', $storeId)
+                        ->where(function ($q) use ($productId, $item) {
+                            $q->where('external_id', $productId)
+                              ->orWhere('name', $item['product_name'] ?? '');
+                        })
                         ->first();
+                    $productId = $prod ? $prod->id : null;
+                } elseif ($productId) {
+                    $prod = Product::where('store_id', $storeId)->where('id', (int) $productId)->first();
                     $productId = $prod ? $prod->id : null;
                 }
 
@@ -754,7 +776,7 @@ class SyncController
 
             $gstPercent = (float) ($item['gst_percent'] ?? 0);
             if ($gstPercent <= 0) {
-                $gstPercent = $this->resolveLineGstRate($item);
+                $gstPercent = $this->resolveLineGstRate($item, $storeId);
             }
 
             $lines[] = [
@@ -819,15 +841,15 @@ class SyncController
     /**
      * GST rate for a line whose payload left it out: the product master is the only source.
      */
-    private function resolveLineGstRate(array $item): float
+    private function resolveLineGstRate(array $item, int $storeId): float
     {
         $productId = $item['product_id'] ?? null;
 
         $product = is_numeric($productId)
-            ? Product::find($productId)
+            ? Product::where('store_id', $storeId)->where('id', (int) $productId)->first()
             : ($productId
-                ? Product::where('external_id', $productId)->orWhere('name', $item['product_name'] ?? '')->first()
-                : Product::where('name', $item['product_name'] ?? '')->first());
+                ? Product::where('store_id', $storeId)->where(fn ($q) => $q->where('external_id', $productId)->orWhere('name', $item['product_name'] ?? ''))->first()
+                : Product::where('store_id', $storeId)->where('name', $item['product_name'] ?? '')->first());
 
         return $product ? (float) $product->gst_percent : 0.0;
     }
@@ -1059,53 +1081,64 @@ class SyncController
             return null;
         }
 
-        $product = Product::updateOrCreate(
-            ['external_id' => $externalId],
-            [
-                'store_id' => $storeId,
-                'barcode' => $p['barcode'] ?? null,
-                'name' => $name,
-                'print_name' => $p['print_name'] ?? $name,
-                'generic_name' => $p['generic_name'] ?? null,
-                'hsn_sac_code' => $p['hsn_sac_code'] ?? null,
-                'category_id' => $p['category_id'] ?? 'General',
-                'brand_id' => $p['brand_id'] ?? null,
-                'unit_id' => $p['unit_id'] ?? null,
-                'mrp' => $p['mrp'] ?? 0,
-                'sel_rate' => $p['sel_rate'] ?? 0,
-                'ptr' => $p['ptr'] ?? 0,
-                'pts' => $p['pts'] ?? 0,
-                'gst_percent' => $p['gst_percent'] ?? 0,
-                'units_per_pack' => $p['units_per_pack'] ?? 1,
-                'rack_location' => $p['rack_location'] ?? null,
-                'shelf_location' => $p['shelf_location'] ?? null,
-                'reorder_level' => $p['reorder_level'] ?? 10,
-                'current_stock' => $p['current_stock'] ?? 0,
-                'is_active' => $p['is_active'] ?? true,
-                'version' => $p['version'] ?? 1,
-            ]
-        );
+        // R5: rows are keyed by (store_id, external_id) — a till can never touch
+        // another store's row. A rejected push (e.g. per-store barcode clash)
+        // becomes a sync-centre conflict instead of a hijack or a crash.
+        try {
+            $product = Product::updateOrCreate(
+                ['store_id' => $storeId, 'external_id' => $externalId],
+                [
+                    'barcode' => $p['barcode'] ?? null,
+                    'name' => $name,
+                    'print_name' => $p['print_name'] ?? $name,
+                    'generic_name' => $p['generic_name'] ?? null,
+                    'hsn_sac_code' => $p['hsn_sac_code'] ?? null,
+                    'category_id' => $p['category_id'] ?? 'General',
+                    'brand_id' => $p['brand_id'] ?? null,
+                    'unit_id' => $p['unit_id'] ?? null,
+                    'mrp' => $p['mrp'] ?? 0,
+                    'sel_rate' => $p['sel_rate'] ?? 0,
+                    'ptr' => $p['ptr'] ?? 0,
+                    'pts' => $p['pts'] ?? 0,
+                    'gst_percent' => $p['gst_percent'] ?? 0,
+                    'units_per_pack' => $p['units_per_pack'] ?? 1,
+                    'rack_location' => $p['rack_location'] ?? null,
+                    'shelf_location' => $p['shelf_location'] ?? null,
+                    'reorder_level' => $p['reorder_level'] ?? 10,
+                    'current_stock' => $p['current_stock'] ?? 0,
+                    'is_active' => $p['is_active'] ?? true,
+                    'version' => $p['version'] ?? 1,
+                ]
+            );
+        } catch (\Illuminate\Database\QueryException $e) {
+            // Per-store barcode uniqueness or a trigger guard rejected the row.
+            $this->recordSyncConflict($request, 'product', (string) $externalId, $p, 'Store-scope constraint rejected the push: ' . $e->getMessage());
+            return null;
+        }
 
         // If batch data is included
         if (!empty($p['batches']) && is_array($p['batches'])) {
             foreach ($p['batches'] as $b) {
                 $batchExtId = $b['external_id'] ?? $b['id'] ?? null;
-                ProductBatch::updateOrCreate(
-                    ['external_id' => $batchExtId],
-                    [
-                        'store_id' => $storeId,
-                        'product_id' => $product->id,
-                        'batch_no' => $b['batch_no'] ?? 'BAT-01',
-                        'mfg_date' => !empty($b['mfg_date']) ? substr($b['mfg_date'], 0, 10) : null,
-                        'expiry_date' => !empty($b['expiry_date']) ? substr($b['expiry_date'], 0, 10) : now()->addYear()->toDateString(),
-                        'stock_qty' => $b['stock_qty'] ?? 0,
-                        'mrp' => $b['mrp'] ?? $product->mrp,
-                        'purchase_rate' => $b['purchase_rate'] ?? $product->ptr,
-                        'selling_rate' => $b['selling_rate'] ?? $product->sel_rate,
-                        'rack_location' => $b['rack_location'] ?? null,
-                        'shelf_location' => $b['shelf_location'] ?? null,
-                    ]
-                );
+                try {
+                    ProductBatch::updateOrCreate(
+                        ['store_id' => $storeId, 'external_id' => $batchExtId],
+                        [
+                            'product_id' => $product->id,
+                            'batch_no' => $b['batch_no'] ?? 'BAT-01',
+                            'mfg_date' => !empty($b['mfg_date']) ? substr($b['mfg_date'], 0, 10) : null,
+                            'expiry_date' => !empty($b['expiry_date']) ? substr($b['expiry_date'], 0, 10) : now()->addYear()->toDateString(),
+                            'stock_qty' => $b['stock_qty'] ?? 0,
+                            'mrp' => $b['mrp'] ?? $product->mrp,
+                            'purchase_rate' => $b['purchase_rate'] ?? $product->ptr,
+                            'selling_rate' => $b['selling_rate'] ?? $product->sel_rate,
+                            'rack_location' => $b['rack_location'] ?? null,
+                            'shelf_location' => $b['shelf_location'] ?? null,
+                        ]
+                    );
+                } catch (\Illuminate\Database\QueryException $e) {
+                    $this->recordSyncConflict($request, 'product_batch', (string) $batchExtId, $b, 'Store-scope constraint rejected the batch push: ' . $e->getMessage());
+                }
             }
         }
 
@@ -1143,9 +1176,8 @@ class SyncController
         $externalId = $party['external_id'] ?? $party['id'] ?? null;
 
         $p = Party::updateOrCreate(
-            ['external_id' => $externalId],
+            ['store_id' => $storeId, 'external_id' => $externalId],
             [
-                'store_id' => $storeId,
                 'type' => $party['type'] ?? 'customer',
                 'name' => $party['name'] ?? 'Unnamed Party',
                 'phone' => $party['phone'] ?? null,
@@ -1661,7 +1693,7 @@ class SyncController
 
         $supplierId = $po['supplier_id'] ?? null;
         if ($supplierId && !is_numeric($supplierId)) {
-            $supplierId = Party::where('external_id', $supplierId)->value('id');
+            $supplierId = Party::where('store_id', $storeId)->where('external_id', $supplierId)->value('id');
         }
 
         $total = (float) ($po['grand_total'] ?? $po['total_amount'] ?? 0);
@@ -1693,9 +1725,11 @@ class SyncController
             foreach ($po['items'] as $item) {
                 $productId = $item['product_id'] ?? null;
                 if ($productId && !is_numeric($productId)) {
-                    $productId = Product::where('external_id', $productId)
-                        ->orWhere('name', $item['product_name'] ?? '')
+                    $productId = Product::where('store_id', $storeId)
+                        ->where(fn ($q) => $q->where('external_id', $productId)->orWhere('name', $item['product_name'] ?? ''))
                         ->value('id');
+                } elseif ($productId) {
+                    $productId = Product::where('store_id', $storeId)->where('id', (int) $productId)->value('id');
                 }
 
                 $qty = (float) ($item['ordered_qty'] ?? $item['qty'] ?? 1);
@@ -1897,33 +1931,60 @@ class SyncController
     private function upsertSingleTransfer(Request $request, array $transfer): StockTransfer
     {
         $storeId = $this->resolveStoreId($request, $transfer);
+
+        // R4: the destination store must be named by the payload — never defaulted.
+        $toStoreId = $transfer['destination_store_id'] ?? $transfer['to_store_id'] ?? null;
+        if (empty($toStoreId) || !is_numeric($toStoreId) || (int) $toStoreId === (int) $storeId) {
+            throw \Illuminate\Validation\ValidationException::withMessages([
+                'destination_store_id' => 'A stock transfer needs a destination store different from the sending store.',
+            ]);
+        }
+
+        $transferNumber = $transfer['transfer_no'] ?? $transfer['transfer_number'] ?? ('TRF-' . time());
+        $existing = StockTransfer::where('transfer_number', $transferNumber)->first();
+        $wasNew = $existing === null;
+        $previousStatus = $existing?->status;
+
         $stkTransfer = StockTransfer::updateOrCreate(
-            ['transfer_number' => $transfer['transfer_no'] ?? $transfer['transfer_number'] ?? ('TRF-' . time())],
+            ['transfer_number' => $transferNumber],
             [
                 'from_store_id' => $storeId,
-                'to_store_id' => !empty($transfer['destination_store_id']) && is_numeric($transfer['destination_store_id']) ? (int)$transfer['destination_store_id'] : 2,
+                'to_store_id' => (int) $toStoreId,
                 'status' => $transfer['status'] ?? 'dispatched',
                 'notes' => $transfer['notes'] ?? null,
-                'created_by' => 1,
+                'created_by' => $request->user()?->id ?? $existing?->created_by,
             ]
         );
 
-        if (!empty($transfer['lines']) && is_array($transfer['lines'])) {
-            StockTransferItem::where('stock_transfer_id', $stkTransfer->id)->delete();
-            foreach ($transfer['lines'] as $line) {
-                $productId = $line['product_id'] ?? null;
-                if ($productId && !is_numeric($productId)) {
-                    $p = Product::where('external_id', $productId)->first();
-                    $productId = $p ? $p->id : null;
+        // A received/cancelled transfer is closed — a late re-push must not
+        // rewrite its lines or re-apply stock effects.
+        if (!in_array($stkTransfer->status, ['received', 'cancelled'], true)) {
+            if (!empty($transfer['lines']) && is_array($transfer['lines'])) {
+                StockTransferItem::where('stock_transfer_id', $stkTransfer->id)->delete();
+                foreach ($transfer['lines'] as $line) {
+                    $productId = $line['product_id'] ?? null;
+                    if ($productId && !is_numeric($productId)) {
+                        // R5: match the sending store's product only.
+                        $p = Product::where('store_id', $storeId)->where('external_id', $productId)->first();
+                        $productId = $p ? $p->id : null;
+                    } elseif ($productId) {
+                        $p = Product::where('store_id', $storeId)->where('id', (int) $productId)->first();
+                        $productId = $p ? $p->id : null;
+                    }
+                    if ($productId) {
+                        StockTransferItem::create([
+                            'stock_transfer_id' => $stkTransfer->id,
+                            'store_id' => $storeId,
+                            'product_id' => $productId,
+                            'batch_no' => $line['batch_no'] ?? 'BAT-01',
+                            'qty' => $line['transfer_total_qty'] ?? ($line['qty'] ?? 1),
+                        ]);
+                    }
                 }
-                if ($productId) {
-                    StockTransferItem::create([
-                        'stock_transfer_id' => $stkTransfer->id,
-                        'product_id' => $productId,
-                        'batch_no' => $line['batch_no'] ?? 'BAT-01',
-                        'qty' => $line['transfer_total_qty'] ?? ($line['qty'] ?? 1),
-                    ]);
-                }
+            }
+
+            if ($stkTransfer->status === 'dispatched' && ($wasNew || $previousStatus !== 'dispatched')) {
+                $this->transfers->applyDispatchEffects($stkTransfer->refresh(), $request->user());
             }
         }
 
@@ -1944,7 +2005,7 @@ class SyncController
         $customerId = $payment['customer_id'] ?? ($payment['party_id'] ?? null);
 
         if ($customerId && !is_numeric($customerId)) {
-            $p = Party::where('external_id', $customerId)->first();
+            $p = Party::where('store_id', $storeId)->where('external_id', $customerId)->first();
             $customerId = $p ? $p->id : null;
         }
 
@@ -2213,6 +2274,31 @@ class SyncController
     /**
      * Record sync event into sync_events table for Admin Sync Center visibility.
      */
+    /**
+     * Route a rejected push into the sync centre instead of mutating another store's row.
+     */
+    private function recordSyncConflict(Request $request, string $entityType, string $entityId, array $clientData, string $reason): void
+    {
+        try {
+            SyncEvent::create([
+                'store_id' => $this->resolveStoreId($request, $clientData),
+                'entity_type' => $entityType,
+                'entity_id' => $entityId,
+                'action' => 'update',
+                'client_version' => 1,
+                'server_version' => 1,
+                'client_data' => $clientData,
+                'server_data' => null,
+                'status' => 'conflict',
+                'conflict_reason' => $reason,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+        } catch (\Throwable $e) {
+            report($e);
+        }
+    }
+
     private function recordSyncEvent(Request $request, string $entityType, string $entityId, string $action, array $payload): void
     {
         $storeId = $this->resolveStoreId($request, $payload);

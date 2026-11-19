@@ -77,7 +77,12 @@ class DataExchangeController
 
         $rows = $validated['rows'];
         $entityType = $validated['entity_type'];
-        $storeId = $validated['store_id'] ?? 1;
+        $storeId = (int) ($validated['store_id']
+            ?? $request->attributes->get('active_store_id')
+            ?? 0);
+        if ($storeId <= 0) {
+            abort(422, 'A specific store context is required for this change (All Stores scope is read-only).');
+        }
 
         DB::beginTransaction();
         try {
@@ -87,7 +92,11 @@ class DataExchangeController
             if ($entityType === 'items' || $entityType === 'products') {
                 foreach ($rows as $row) {
                     $barcode = $row['barcode'] ?? null;
-                    $existing = $barcode ? Product::where('barcode', $barcode)->first() : null;
+                    // P-STORE-SCOPE: barcode identity is per store — an import
+                    // into one store must never update another store's product.
+                    $existing = $barcode
+                        ? Product::where('store_id', $storeId)->where('barcode', $barcode)->first()
+                        : null;
 
                     if ($existing) {
                         $existing->update([
@@ -201,19 +210,25 @@ class DataExchangeController
      */
     public function export(Request $request, string $type): JsonResponse
     {
-        $storeId = $request->query('store_id');
+        $storeId = (int) ($request->query('store_id')
+            ?? $request->attributes->get('active_store_id')
+            ?? 0);
+        if ($storeId <= 0) {
+            abort(422, 'A specific store context is required for export (All Stores scope has no single store catalog).');
+        }
+
         $query = null;
 
         if ($type === 'items' || $type === 'products') {
-            $query = Product::when($storeId, fn($q) => $q->where('store_id', $storeId));
+            $query = Product::where('store_id', $storeId);
         } elseif ($type === 'customers') {
-            $query = Party::where('type', 'customer')->when($storeId, fn($q) => $q->where('store_id', $storeId));
+            $query = Party::where('type', 'customer')->where('store_id', $storeId);
         } elseif ($type === 'suppliers') {
-            $query = Party::where('type', 'supplier')->when($storeId, fn($q) => $q->where('store_id', $storeId));
+            $query = Party::where('type', 'supplier')->where('store_id', $storeId);
         } elseif ($type === 'invoices') {
-            $query = Invoice::when($storeId, fn($q) => $q->where('store_id', $storeId));
+            $query = Invoice::where('store_id', $storeId);
         } elseif ($type === 'purchases') {
-            $query = Purchase::when($storeId, fn($q) => $q->where('store_id', $storeId));
+            $query = Purchase::where('store_id', $storeId);
         } else {
             return response()->json(['message' => "Unsupported export entity: {$type}"], 404);
         }

@@ -8,6 +8,7 @@ use App\Models\ProductBatch;
 use App\Models\StockAdjustmentDocument;
 use App\Models\StockTransfer;
 use App\Models\StockTransferItem;
+use App\Services\Stock\InterStoreTransferService;
 use App\Services\StockAdjustmentPolicy;
 use App\Services\StockAdjustmentService;
 use Illuminate\Http\JsonResponse;
@@ -19,7 +20,8 @@ class AdminInventoryController
 {
     public function __construct(
         private StockAdjustmentService $adjustmentService,
-        private StockAdjustmentPolicy $adjustmentPolicy
+        private StockAdjustmentPolicy $adjustmentPolicy,
+        private InterStoreTransferService $transferService
     ) {
     }
 
@@ -147,52 +149,24 @@ class AdminInventoryController
             'to_store_id' => 'required|exists:stores,id|different:from_store_id',
             'notes' => 'nullable|string',
             'items' => 'required|array|min:1',
-            'items.*.product_id' => 'required|exists:products,id',
+            'items.*.product_id' => 'required',
             'items.*.batch_no' => 'required|string',
             'items.*.qty' => 'required|numeric|min:0.01',
         ]);
 
-        DB::beginTransaction();
         try {
-            $transferNo = 'TRF-' . date('Ymd') . '-' . rand(100, 999);
-
-            $transfer = StockTransfer::create([
-                'from_store_id' => $validated['from_store_id'],
-                'to_store_id' => $validated['to_store_id'],
-                'transfer_number' => $transferNo,
-                'status' => 'dispatched',
-                'notes' => $validated['notes'] ?? null,
-                'created_by' => $request->user() ? $request->user()->id : null,
-            ]);
-
-            foreach ($validated['items'] as $it) {
-                // Deduct source stock
-                $batch = ProductBatch::where('store_id', $validated['from_store_id'])
-                    ->where('product_id', $it['product_id'])
-                    ->where('batch_no', $it['batch_no'])
-                    ->first();
-
-                if ($batch) {
-                    $batch->decrement('stock_qty', $it['qty']);
-                    Product::where('id', $it['product_id'])->decrement('current_stock', $it['qty']);
-                }
-
-                StockTransferItem::create([
-                    'stock_transfer_id' => $transfer->id,
-                    'product_id' => $it['product_id'],
-                    'batch_no' => $it['batch_no'],
-                    'qty' => $it['qty'],
-                ]);
-            }
-
-            AuditLog::log('dispatch_transfer', 'StockTransfer', (string)$transfer->id, null, $transfer->toArray(), $validated['from_store_id']);
-
-            DB::commit();
+            $transfer = $this->transferService->dispatch(
+                (int) $validated['from_store_id'],
+                (int) $validated['to_store_id'],
+                $validated['items'],
+                $request->user(),
+                null,
+                $validated['notes'] ?? null
+            );
 
             return response()->json($transfer->load('items'), 201);
-        } catch (\Throwable $e) {
-            DB::rollBack();
-            return response()->json(['message' => 'Transfer dispatch failed: ' . $e->getMessage()], 500);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json(['message' => $e->getMessage(), 'errors' => $e->errors()], 422);
         }
     }
 
@@ -203,48 +177,32 @@ class AdminInventoryController
     {
         $transfer = StockTransfer::with('items')->findOrFail($id);
 
-        if ($transfer->status !== 'dispatched') {
-            return response()->json(['message' => 'Only dispatched transfers can be received.'], 422);
-        }
-
-        DB::beginTransaction();
-        try {
-            foreach ($transfer->items as $it) {
-                // Find or create batch in destination store
-                $destBatch = ProductBatch::firstOrCreate(
-                    [
-                        'store_id' => $transfer->to_store_id,
-                        'product_id' => $it->product_id,
-                        'batch_no' => $it->batch_no,
-                    ],
-                    [
-                        'expiry_date' => date('Y-m-d', strtotime('+1 year')),
-                        'stock_qty' => 0,
-                        'mrp' => 100,
-                        'selling_rate' => 90,
-                        'version' => 1,
-                    ]
-                );
-
-                $destBatch->increment('stock_qty', $it->qty);
-                Product::where('id', $it->product_id)->increment('current_stock', $it->qty);
+        $instructions = [];
+        foreach ((array) ($request->input('lines') ?? $request->input('items') ?? []) as $line) {
+            if (is_array($line) && isset($line['item_id'])) {
+                $instructions[] = [
+                    'item_id' => $line['item_id'],
+                    'dest_product_id' => $line['dest_product_id'] ?? null,
+                ];
             }
-
-            $transfer->update([
-                'status' => 'received',
-                'approved_by' => $request->user() ? $request->user()->id : null,
-                'received_at' => now(),
-            ]);
-
-            AuditLog::log('receive_transfer', 'StockTransfer', (string)$transfer->id, ['status' => 'dispatched'], ['status' => 'received'], $transfer->to_store_id);
-
-            DB::commit();
-
-            return response()->json(['success' => true, 'transfer' => $transfer]);
-        } catch (\Throwable $e) {
-            DB::rollBack();
-            return response()->json(['message' => 'Transfer receive failed: ' . $e->getMessage()], 500);
         }
+
+        try {
+            $result = $this->transferService->receive(
+                $transfer,
+                $request->user(),
+                $instructions,
+                $request->boolean('auto_create')
+            );
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json(['message' => $e->getMessage(), 'errors' => $e->errors()], 422);
+        }
+
+        return response()->json([
+            'success' => true,
+            'transfer' => $result['transfer'],
+            'resolutions' => $result['resolutions'],
+        ]);
     }
 
     /**

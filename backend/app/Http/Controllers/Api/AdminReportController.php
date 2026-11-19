@@ -57,6 +57,146 @@ class AdminReportController
     }
 
     /**
+     * Consolidated item-level sales with an admin-chosen matching key.
+     * P-STORE-SCOPE: products are per-store, so under All-Stores scope the
+     * same physical item exists as several independent product rows. This
+     * read-only aggregation groups lines per run by barcode / item code
+     * (external_id) / name+unit and lists lines lacking the chosen key as
+     * unmatched. No merges are stored.
+     */
+    public function consolidatedSales(Request $request): JsonResponse
+    {
+        $storeId = $request->get('active_store_id');
+        $matchBy = (string) $request->query('match_by', 'barcode');
+        if (!in_array($matchBy, ['barcode', 'external_id', 'name_unit'], true)) {
+            return response()->json([
+                'message' => 'match_by must be one of: barcode, external_id, name_unit.',
+            ], 422);
+        }
+
+        $startDate = $request->query('start_date', Carbon::today()->startOfMonth()->toDateString());
+        $endDate = $request->query('end_date', Carbon::today()->toDateString());
+        $limit = max(1, min(200, (int) $request->query('limit', 100)));
+
+        $storeNames = Store::pluck('name', 'id');
+
+        $rows = InvoiceItem::query()
+            ->join('invoices', 'invoice_items.invoice_id', '=', 'invoices.id')
+            ->leftJoin('products', 'invoice_items.product_id', '=', 'products.id')
+            ->where('invoices.status', '!=', 'cancelled')
+            ->whereDate('invoices.invoice_date', '>=', substr($startDate, 0, 10))
+            ->whereDate('invoices.invoice_date', '<=', substr($endDate, 0, 10))
+            ->when($storeId, fn($q) => $q->where('invoices.store_id', $storeId))
+            ->select(
+                'invoice_items.product_name',
+                'invoice_items.qty',
+                'invoice_items.total_amount',
+                'invoice_items.units_per_pack',
+                'invoices.store_id',
+                'invoices.module_key',
+                'products.barcode',
+                'products.external_id',
+                'products.units_per_pack as product_units_per_pack',
+            )
+            ->get();
+
+        $groups = [];
+        $unmatched = [];
+        $matchedRevenue = 0.0;
+        $unmatchedRevenue = 0.0;
+
+        foreach ($rows as $row) {
+            $isReturn = in_array($row->module_key, ['credit_note', 'sales_return']);
+            $sign = $isReturn ? -1 : 1;
+            $qty = (float) $row->qty * $sign;
+            $revenue = (float) $row->total_amount * $sign;
+
+            $storeName = $storeNames[$row->store_id] ?? ('Store ' . $row->store_id);
+
+            $key = match ($matchBy) {
+                'barcode' => trim((string) $row->barcode),
+                'external_id' => trim((string) $row->external_id),
+                'name_unit' => strtolower(trim((string) $row->product_name))
+                    . '|u' . (int) ($row->product_units_per_pack ?? $row->units_per_pack ?? 1),
+            };
+
+            if ($key === '' || ($matchBy === 'name_unit' && strtolower(trim((string) $row->product_name)) === '')) {
+                $unmatchedRevenue += $revenue;
+                $unmatched[] = [
+                    'store_id' => $row->store_id,
+                    'store_name' => $storeName,
+                    'product_name' => $row->product_name,
+                    'qty_sold' => round($qty, 2),
+                    'revenue' => round($revenue, 2),
+                ];
+                continue;
+            }
+
+            $matchedRevenue += $revenue;
+
+            if (!isset($groups[$key])) {
+                $groups[$key] = [
+                    'key' => $key,
+                    'label' => $row->product_name,
+                    'stores' => [],
+                    'qty_sold' => 0.0,
+                    'revenue' => 0.0,
+                ];
+            }
+
+            $group = &$groups[$key];
+            $group['qty_sold'] += $qty;
+            $group['revenue'] += $revenue;
+
+            $storeBucket = &$group['stores'];
+            if (!isset($storeBucket[$row->store_id])) {
+                $storeBucket[$row->store_id] = [
+                    'store_id' => $row->store_id,
+                    'store_name' => $storeName,
+                    'qty_sold' => 0.0,
+                    'revenue' => 0.0,
+                ];
+            }
+            $storeBucket[$row->store_id]['qty_sold'] += $qty;
+            $storeBucket[$row->store_id]['revenue'] += $revenue;
+
+            unset($group, $storeBucket);
+        }
+
+        $groups = collect($groups)
+            ->sortByDesc('revenue')
+            ->take($limit)
+            ->map(function ($g) {
+                return [
+                    'key' => $g['key'],
+                    'label' => $g['label'],
+                    'stores' => array_values($g['stores']),
+                    'qty_sold' => round($g['qty_sold'], 2),
+                    'revenue' => round($g['revenue'], 2),
+                ];
+            })
+            ->values()
+            ->all();
+
+        $unmatched = collect($unmatched)
+            ->sortByDesc('revenue')
+            ->take($limit)
+            ->values()
+            ->all();
+
+        return response()->json([
+            'match_by' => $matchBy,
+            'date_range' => ['start_date' => $startDate, 'end_date' => $endDate],
+            'groups' => $groups,
+            'unmatched' => $unmatched,
+            'totals' => [
+                'matched_revenue' => round($matchedRevenue, 2),
+                'unmatched_revenue' => round($unmatchedRevenue, 2),
+            ],
+        ]);
+    }
+
+    /**
      * GSTR-1 Compliance Summary (B2B, B2CL, B2CS, Table 12 HSN, Table 13 Docs).
      */
     public function gstr1(Request $request): JsonResponse

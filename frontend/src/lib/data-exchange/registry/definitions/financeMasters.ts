@@ -1,5 +1,6 @@
 import type { EntityDefinition } from "../types";
 import { sqliteStorage } from "../../../db/sqliteStorage";
+import { isForActiveStore, withStore } from "../storeScope";
 
 export const discountSchemasDefinition: EntityDefinition = {
   id: "discount_schemas",
@@ -73,16 +74,20 @@ export const discountSchemasDefinition: EntityDefinition = {
     { name: "Senior Citizen Flat 5%", rule_type: "percentage", discount_percent: 5, min_quantity: 1, is_active: true },
     { name: "Bulk Purchase 10% Off", rule_type: "percentage", discount_percent: 10, min_quantity: 5, is_active: true },
   ],
-  transformRow: (raw) => ({
-    id: raw.id || `disc_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-    rule_id: raw.id || `rule_${Date.now()}`,
-    name: String(raw.name || "").trim(),
-    rule_type: raw.rule_type || "percentage",
-    discount_percent: Number(raw.discount_percent || 0),
-    min_quantity: Number(raw.min_quantity || 1),
-    is_active: raw.is_active === false || raw.is_active === 0 ? 0 : 1,
-  }),
-  exportQuery: async () => sqliteStorage.findAll<any>("discount_rules"),
+  transformRow: (raw) =>
+    withStore({
+      id: raw.id || `disc_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      rule_id: raw.id || `rule_${Date.now()}`,
+      name: String(raw.name || "").trim(),
+      rule_type: raw.rule_type || "percentage",
+      discount_percent: Number(raw.discount_percent || 0),
+      min_quantity: Number(raw.min_quantity || 1),
+      is_active: raw.is_active === false || raw.is_active === 0 ? 0 : 1,
+    }),
+  exportQuery: async () => {
+    const rows = await sqliteStorage.findAll<any>("discount_rules");
+    return rows.filter(isForActiveStore);
+  },
 };
 
 export const banksDefinition: EntityDefinition = {
@@ -166,16 +171,20 @@ export const banksDefinition: EntityDefinition = {
       is_active: true,
     },
   ],
-  transformRow: (raw) => ({
-    id: raw.id || `bnk_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-    bank_name: String(raw.bank_name || "").trim(),
-    account_number: String(raw.account_number || "").trim(),
-    ifsc_code: raw.ifsc_code ? String(raw.ifsc_code).trim().toUpperCase() : undefined,
-    branch: raw.branch ? String(raw.branch).trim() : undefined,
-    upi_id: raw.upi_id ? String(raw.upi_id).trim() : undefined,
-    is_active: raw.is_active === false || raw.is_active === 0 ? 0 : 1,
-  }),
-  exportQuery: async () => sqliteStorage.findAll<any>("bank_accounts"),
+  transformRow: (raw) =>
+    withStore({
+      id: raw.id || `bnk_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      bank_name: String(raw.bank_name || "").trim(),
+      account_number: String(raw.account_number || "").trim(),
+      ifsc_code: raw.ifsc_code ? String(raw.ifsc_code).trim().toUpperCase() : undefined,
+      branch: raw.branch ? String(raw.branch).trim() : undefined,
+      upi_id: raw.upi_id ? String(raw.upi_id).trim() : undefined,
+      is_active: raw.is_active === false || raw.is_active === 0 ? 0 : 1,
+    }),
+  exportQuery: async () => {
+    const rows = await sqliteStorage.findAll<any>("bank_accounts");
+    return rows.filter(isForActiveStore);
+  },
 };
 
 export const expenseHeadsDefinition: EntityDefinition = {
@@ -232,11 +241,15 @@ export const expenseHeadsDefinition: EntityDefinition = {
     { name: "Shop Rent", category: "operational", is_active: true },
     { name: "Delivery Fuel & Freight", category: "logistics", is_active: true },
   ],
-  transformRow: (raw) => ({
-    id: raw.id || `exp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-    name: String(raw.name || "").trim(),
-    category: raw.category || "operational",
-    is_active: raw.is_active === false || raw.is_active === 0 ? 0 : 1,
-  }),
-  exportQuery: async () => sqliteStorage.findAll<any>("expense_heads"),
+  transformRow: (raw) =>
+    withStore({
+      id: raw.id || `exp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      name: String(raw.name || "").trim(),
+      category: raw.category || "operational",
+      is_active: raw.is_active === false || raw.is_active === 0 ? 0 : 1,
+    }),
+  exportQuery: async () => {
+    const rows = await sqliteStorage.findAll<any>("expense_heads");
+    return rows.filter(isForActiveStore);
+  },
 };

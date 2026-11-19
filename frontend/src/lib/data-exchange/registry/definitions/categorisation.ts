@@ -1,5 +1,6 @@
 import type { EntityDefinition } from "../types";
 import { sqliteStorage } from "../../../db/sqliteStorage";
+import { isForActiveStore, withStore } from "../storeScope";
 
 export const groupsDefinition: EntityDefinition = {
   id: "groups",
@@ -47,16 +48,17 @@ export const groupsDefinition: EntityDefinition = {
     { name: "Antibiotics", parent_group: "Medicines", is_active: true },
     { name: "Pain Relief", parent_group: "Medicines", is_active: true },
   ],
-  transformRow: (raw) => ({
-    id: raw.id || `grp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-    type: "category",
-    name: String(raw.name || "").trim(),
-    parent_name: raw.parent_group ? String(raw.parent_group).trim() : null,
-    is_active: raw.is_active === false || raw.is_active === 0 ? 0 : 1,
-  }),
+  transformRow: (raw) =>
+    withStore({
+      id: raw.id || `grp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      type: "category",
+      name: String(raw.name || "").trim(),
+      parent_name: raw.parent_group ? String(raw.parent_group).trim() : null,
+      is_active: raw.is_active === false || raw.is_active === 0 ? 0 : 1,
+    }),
   exportQuery: async () => {
     const list = await sqliteStorage.findAll<any>("master_lookups");
-    return list.filter((item) => item.type === "category");
+    return list.filter((item) => item.type === "category" && isForActiveStore(item));
   },
 };
 
@@ -98,15 +100,16 @@ export const brandsDefinition: EntityDefinition = {
     { name: "Sun Pharma", is_active: true },
     { name: "Abbott", is_active: true },
   ],
-  transformRow: (raw) => ({
-    id: raw.id || `brd_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-    type: "brand",
-    name: String(raw.name || "").trim(),
-    is_active: raw.is_active === false || raw.is_active === 0 ? 0 : 1,
-  }),
+  transformRow: (raw) =>
+    withStore({
+      id: raw.id || `brd_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      type: "brand",
+      name: String(raw.name || "").trim(),
+      is_active: raw.is_active === false || raw.is_active === 0 ? 0 : 1,
+    }),
   exportQuery: async () => {
     const list = await sqliteStorage.findAll<any>("master_lookups");
-    return list.filter((item) => item.type === "brand");
+    return list.filter((item) => item.type === "brand" && isForActiveStore(item));
   },
 };
 
@@ -156,16 +159,17 @@ export const manufacturersDefinition: EntityDefinition = {
     { name: "GlaxoSmithKline Ltd", address: "Mumbai, Maharashtra", is_active: true },
     { name: "Pfizer India Ltd", address: "Navi Mumbai", is_active: true },
   ],
-  transformRow: (raw) => ({
-    id: raw.id || `mfg_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-    type: "manufacturer",
-    name: String(raw.name || "").trim(),
-    address: raw.address ? String(raw.address).trim() : null,
-    is_active: raw.is_active === false || raw.is_active === 0 ? 0 : 1,
-  }),
+  transformRow: (raw) =>
+    withStore({
+      id: raw.id || `mfg_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      type: "manufacturer",
+      name: String(raw.name || "").trim(),
+      address: raw.address ? String(raw.address).trim() : null,
+      is_active: raw.is_active === false || raw.is_active === 0 ? 0 : 1,
+    }),
   exportQuery: async () => {
     const list = await sqliteStorage.findAll<any>("master_lookups");
-    return list.filter((item) => item.type === "manufacturer");
+    return list.filter((item) => item.type === "manufacturer" && isForActiveStore(item));
   },
 };
 
