@@ -2,7 +2,6 @@
 
 namespace App\Services\Sales;
 
-use App\Models\CompanySetting;
 use App\Models\Store;
 use App\Services\Tax\TaxEngine;
 use Illuminate\Support\Carbon;
@@ -66,16 +65,15 @@ class SalesOrderTaxService
     private function taxContext(Store $store, array $meta): array
     {
         $storeState = $store->state_code ?: '32';
-        $storeGstType = $store->gst_type ?: 'regular';
-        $setting = CompanySetting::where('store_id', $store->id)->where('key', 'tax_settings')->first();
-        $defaultTaxMode = $setting ? ($setting->value['tax_mode'] ?? 'inclusive') : 'inclusive';
+        $policy = app(\App\Services\Tax\StoreTaxPolicy::class)->forStore($store->id);
+        $storeGstType = $policy['gst_type'];
         $isComposition = in_array($storeGstType, ['composition', 'no_tax', 'unregistered'], true);
 
         return [
             'store_state' => $storeState,
             'customer_gstin' => $meta['customer_gstin'] ?? null,
             'place_of_supply' => $meta['place_of_supply'] ?? $storeState,
-            'default_tax_mode' => $defaultTaxMode,
+            'default_tax_mode' => $policy['tax_mode'],
             'gst_type' => $storeGstType,
             'is_composition' => $isComposition,
         ];

@@ -89,6 +89,58 @@ describe("Sync Queue Service (SYNC-002, SYNC-003)", () => {
     expect(updated?.status).toBe("synced");
   });
 
+  it("flags the local document synced once the server has taken it", async () => {
+    await sqliteStorage.insertRecord("invoices", "inv_flag_1", {
+      id: "inv_flag_1",
+      invoice_number: "INV-2026-901",
+      grand_total: 988,
+      sync_state: "pending",
+      updated_at: 111,
+    });
+    await syncQueueService.enqueue("invoice", "inv_flag_1", "update", {
+      id: "inv_flag_1",
+      grand_total: 988,
+      updated_at: 111,
+    });
+
+    const mockApi: SyncApiClient = {
+      pushBatch: async (items) => ({
+        success: true,
+        results: { total: items.length, processed: items.length, failed: 0 },
+      }),
+    };
+
+    await syncQueueService.processQueue(mockApi);
+
+    const row = await sqliteStorage.findById<{ sync_state: string }>("invoices", "inv_flag_1");
+    expect(row?.sync_state).toBe("synced");
+  });
+
+  it("keeps a document pending when it was edited again while the push was in flight", async () => {
+    await sqliteStorage.insertRecord("purchase_documents", "pur_flag_2", {
+      id: "pur_flag_2",
+      invoice_number: "PUR-902",
+      sync_state: "pending",
+      updated_at: 222,
+    });
+    await syncQueueService.enqueue("purchase", "pur_flag_2", "update", {
+      id: "pur_flag_2",
+      updated_at: 111,
+    });
+
+    const mockApi: SyncApiClient = {
+      pushBatch: async (items) => ({
+        success: true,
+        results: { total: items.length, processed: items.length, failed: 0 },
+      }),
+    };
+
+    await syncQueueService.processQueue(mockApi);
+
+    const row = await sqliteStorage.findById<{ sync_state: string }>("purchase_documents", "pur_flag_2");
+    expect(row?.sync_state).toBe("pending");
+  });
+
   it("deletes a queue item and clears synced items", async () => {
     const q1 = await syncQueueService.enqueue("invoice", "inv_del_1", "create", { amount: 100 });
     const q2 = await syncQueueService.enqueue("invoice", "inv_del_2", "create", { amount: 200 });

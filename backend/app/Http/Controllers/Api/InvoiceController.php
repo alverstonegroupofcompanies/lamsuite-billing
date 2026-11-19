@@ -85,16 +85,16 @@ class InvoiceController
             ->with(['items', 'payments', 'customer'])
             ->orderBy('id', 'desc');
 
-        if ($startDate && $endDate) {
-            $s = strlen($startDate) === 10 ? $startDate . ' 00:00:00' : $startDate;
-            $e = strlen($endDate) === 10 ? $endDate . ' 23:59:59' : $endDate;
-            $builder->whereBetween('invoice_date', [$s, $e]);
-        } elseif ($startDate) {
-            $s = strlen($startDate) === 10 ? $startDate . ' 00:00:00' : $startDate;
-            $builder->where('invoice_date', '>=', $s);
-        } elseif ($endDate) {
-            $e = strlen($endDate) === 10 ? $endDate . ' 23:59:59' : $endDate;
-            $builder->where('invoice_date', '<=', $e);
+        // invoice_date is TEXT and the till has written both a bare 'YYYY-MM-DD' and a full
+        // timestamp into it, so the window is matched on the date part. A string range against
+        // '... 00:00:00' silently drops every bare-date bill, which made "Today" come back empty.
+        $from = $startDate ? substr($startDate, 0, 10) : null;
+        $to = $endDate ? substr($endDate, 0, 10) : null;
+        if ($from) {
+            $builder->whereDate('invoice_date', '>=', $from);
+        }
+        if ($to) {
+            $builder->whereDate('invoice_date', '<=', $to);
         }
 
         if ($status && strtolower($status) !== 'all') {
@@ -197,6 +197,8 @@ class InvoiceController
             'bill_discount_percent' => 'nullable|numeric',
             'bill_discount_amount' => 'nullable|numeric',
             'manual_round_off' => 'nullable|numeric',
+            'tax_mode' => 'nullable|in:inclusive,exclusive',
+            'gst_type' => 'nullable|in:regular,composition,no_tax,unregistered',
             'is_inter_state' => 'nullable|boolean',
             'is_offline_temp' => 'nullable|boolean',
             'items' => 'required|array|min:1',
@@ -618,13 +620,11 @@ class InvoiceController
                 // Resolve Store Tax Profile
                 $storeModel = Store::find($storeId);
                 $storeStateCode = $storeModel ? ($storeModel->state_code ?: '32') : '32';
-                $storeGstType = $storeModel ? ($storeModel->gst_type ?: 'regular') : 'regular';
-                $taxSetting = CompanySetting::where('store_id', $storeId)->where('key', 'tax_settings')->first();
-                $defaultTaxMode = $taxSetting ? ($taxSetting->value['tax_mode'] ?? 'inclusive') : 'inclusive';
-                $allowOverride = $taxSetting ? (bool)($taxSetting->value['allow_tax_override_per_bill'] ?? false) : false;
+                $taxPolicy = app(\App\Services\Tax\StoreTaxPolicy::class)->forStore($storeId);
+                $storeGstType = $taxPolicy['gst_type'];
 
-                $effectiveGstType = ($allowOverride && !empty($validated['gst_type'])) ? $validated['gst_type'] : $storeGstType;
-                $effectiveTaxMode = ($allowOverride && !empty($validated['tax_mode'])) ? $validated['tax_mode'] : $defaultTaxMode;
+                $effectiveGstType = ($taxPolicy['allow_override'] && !empty($validated['gst_type'])) ? $validated['gst_type'] : $storeGstType;
+                $effectiveTaxMode = ($taxPolicy['allow_override'] && !empty($validated['tax_mode'])) ? $validated['tax_mode'] : $taxPolicy['tax_mode'];
                 $isComposition = in_array($effectiveGstType, ['composition', 'no_tax', 'unregistered'], true);
 
                 // Authoritative Tax Calculation via TaxEngine
@@ -1048,129 +1048,10 @@ class InvoiceController
         app(\App\Services\DayClose\StoreDayCloseService::class)
             ->assertDayOpen((int) $invoice->store_id, $invoice->invoice_date?->toDateString());
 
-        DB::transaction(function () use ($invoice, $reason, $request) {
-            $invoice->update([
-                'status' => 'cancelled',
-                'cancel_reason' => $reason,
-                'cancelled_at' => now(),
-            ]);
-
-            // Revert customer credit balance if any
-            $creditRefund = $invoice->payments()->where('payment_mode', 'Credit')->sum('amount');
-            if ($creditRefund <= 0 && strtolower($invoice->payment_mode) === 'credit') {
-                $creditRefund = (float)$invoice->grand_total;
-            }
-            if ($creditRefund > 0 && $invoice->customer_id) {
-                $customer = Party::find($invoice->customer_id);
-                if ($customer) {
-                    $customer->decrement('current_balance', $creditRefund);
-                }
-            }
-
-            // Mark associated payments refunded
-            $invoice->payments()->update(['status' => 'refunded']);
-
-            // Return gift card value used on this invoice
-            $giftCardService = app(\App\Services\Payments\GiftCardService::class);
-            foreach ($invoice->payments as $payment) {
-                $mode = strtoupper(trim((string) $payment->payment_mode));
-                if (!in_array($mode, ['GIFT CARD', 'GIFT VOUCHER', 'GIFT_VOUCHER', 'GIFT_CARD', 'GIFTCARD'], true)) {
-                    continue;
-                }
-                $code = $payment->extra_fields['gift_card_code'] ?? $payment->reference_no ?? null;
-                if (!$code) continue;
-                try {
-                    $giftCardService->refund($invoice->store_id, (string) $code, (float) $payment->amount, $invoice->id, $request->user()?->id);
-                } catch (\Throwable $e) {
-                    \Illuminate\Support\Facades\Log::warning('[GiftCard] Refund on cancellation failed', [
-                        'invoice_id' => $invoice->id,
-                        'payment_id' => $payment->id,
-                        'error' => $e->getMessage(),
-                    ]);
-                }
-            }
-
-            // Revert stock for each item
-            foreach ($invoice->items as $item) {
-                if ($item->product_id) {
-                    $product = Product::find($item->product_id);
-                    $batch = null;
-                    if ($item->batch_no) {
-                        $batch = ProductBatch::where('product_id', $item->product_id)
-                            ->where('batch_no', $item->batch_no)
-                            ->lockForUpdate()
-                            ->first();
-                    }
-
-                    $qty = (float)$item->qty;
-                    if ($batch) {
-                        $batch->increment('stock_qty', $qty);
-                    }
-                    if ($product) {
-                        $product->increment('current_stock', $qty);
-                    }
-
-                    StockLedgerEntry::create([
-                        'store_id' => $invoice->store_id,
-                        'product_id' => $item->product_id,
-                        'batch_id' => $batch ? $batch->id : null,
-                        'counter_id' => $invoice->counter_id,
-                        'counter_code' => $invoice->counter_code,
-                        'location_name' => $invoice->location_name,
-                        'event_type' => 'CANCEL_RESTORE',
-                        'qty_delta' => $qty,
-                        'reference_type' => 'INVOICE_CANCEL',
-                        'reference_id' => (string)$invoice->id,
-                        'balance_after' => $batch ? $batch->stock_qty : 0,
-                    ]);
-
-                    // Broadcast stock restoration to all counters
-                    SyncEvent::create([
-                        'store_id' => $invoice->store_id,
-                        'entity_type' => 'stock_event',
-                        'entity_id' => (string)($batch ? $batch->id : $item->product_id),
-                        'action' => 'update',
-                        'client_data' => [
-                            'product_id' => $item->product_id,
-                            'batch_id' => $batch ? $batch->id : null,
-                            'batch_no' => $item->batch_no,
-                            'remaining_stock' => $batch ? $batch->stock_qty : null,
-                            'qty_delta' => $qty,
-                            'reference_id' => "CANCEL-{$invoice->invoice_number}",
-                        ],
-                        'status' => 'resolved',
-                    ]);
-                }
-            }
-
-            // Broadcast invoice cancellation event
-            SyncEvent::create([
-                'store_id' => $invoice->store_id,
-                'entity_type' => 'invoice',
-                'entity_id' => (string)$invoice->id,
-                'action' => 'cancel',
-                'client_data' => [
-                    'id' => $invoice->id,
-                    'invoice_number' => $invoice->invoice_number,
-                    'status' => 'cancelled',
-                ],
-                'status' => 'resolved',
-            ]);
-        });
-
-        app(WebhookOutboxService::class)->enqueue(
-            'invoice.cancelled',
-            [
-                'id' => $invoice->id,
-                'invoice_number' => $invoice->invoice_number,
-                'grand_total' => (float) $invoice->grand_total,
-                'customer_id' => $invoice->customer_id,
-                'reason' => $reason,
-                'cancelled_at' => optional($invoice->cancelled_at)->toIso8601String() ?? now()->toIso8601String(),
-            ],
-            $invoice->store_id,
-            'invoice',
-            (string) $invoice->id
+        app(\App\Services\Sales\InvoiceCancellationService::class)->cancel(
+            $invoice,
+            $reason,
+            $request->user()?->id
         );
 
         return response()->json([

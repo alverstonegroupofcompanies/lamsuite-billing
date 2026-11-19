@@ -384,7 +384,7 @@ export const PurchaseDetailsDrawer: React.FC<PurchaseDetailsDrawerProps> = ({
 
       {/* Cancel Confirmation Modal */}
       {isCancelConfirmOpen && (
-        <div className="fixed inset-0 z-60 flex items-center justify-center bg-black/40 p-4">
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4">
           <div className="w-full max-w-md rounded-[14px] bg-[var(--color-surface)] p-5 shadow-modal border border-[var(--color-border)] space-y-3 font-sans">
             <div className="flex items-center gap-2 text-[var(--color-danger-text)] font-bold text-sm">
               <AlertTriangle className="h-5 w-5 shrink-0" />

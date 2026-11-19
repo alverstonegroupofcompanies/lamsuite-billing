@@ -1,6 +1,6 @@
 {
   "name": "LamSuite Billing keyboard shortcuts",
-  "version": "2.0.40",
+  "version": "2.0.41",
   "updated": "2026-11-14",
   "rule": "A screen scope always wins over the global scope. Two bindings in the same scope are a conflict and fail CI.",
   "scopePriority": [

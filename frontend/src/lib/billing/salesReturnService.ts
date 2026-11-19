@@ -566,8 +566,37 @@ export class SalesReturnService {
       await sqliteStorage.insertRecord("invoice_items", item.id, mirrorItem);
     }
 
-    // 7. Enqueue for offline cloud sync
-    await syncQueueService.enqueue("invoice", returnId, "create", returnRecord as unknown as Record<string, unknown>);
+    // 7. Enqueue for offline cloud sync. This has to be the credit note the reports read — the raw
+    // return record has no module_key and keeps its lines under `lines`, so the server stored a
+    // zero-line bill and recomputed its tax from an empty line set.
+    await syncQueueService.enqueue("invoice", returnId, "create", {
+      ...mirrorInvoice,
+      items: returnLines.map((item) => ({
+        product_id: item.product_id,
+        product_name: item.product_name,
+        hsn_code: item.hsn_code,
+        batch_no: item.batch_no,
+        expiry_date: item.expiry_date,
+        qty: item.return_qty,
+        loose_qty: item.loose_qty || 0,
+        units_per_pack: item.units_per_pack || 1,
+        unit_price: item.unit_price,
+        // The server restocks a credit note from its own lines, so it has to be told which lines
+        // the till deliberately kept off the shelf.
+        stock_action: item.condition,
+        discount_percent: item.discount_percent,
+        discount_amount: item.discount_amount,
+        gst_percent: item.gst_percent,
+        taxable_amount: item.taxable_amount,
+        cgst_amount: item.cgst_amount,
+        sgst_amount: item.sgst_amount,
+        igst_amount: item.igst_amount,
+        tax_amount: Math.round(
+          (item.cgst_amount + item.sgst_amount + item.igst_amount) * 100
+        ) / 100,
+        total_amount: item.total_amount,
+      })),
+    } as unknown as Record<string, unknown>);
 
     return {
       success: true,
@@ -594,9 +623,10 @@ export class SalesReturnService {
     // 1. Reverse stock changes
     for (const line of ret.lines) {
       if (line.condition === "restock") {
+        const returnedBaseUnits = toBaseUnits(line.return_qty, line.loose_qty, line.units_per_pack);
         const batch = await sqliteStorage.findById<ProductBatch>("product_batches", line.batch_id);
         if (batch) {
-          batch.stock_qty = Math.max(0, batch.stock_qty - line.return_qty);
+          batch.stock_qty = Math.max(0, batch.stock_qty - returnedBaseUnits);
           await productsStore.upsertBatch(batch);
         }
 
@@ -607,7 +637,7 @@ export class SalesReturnService {
           product_id: line.product_id,
           batch_id: line.batch_id,
           event_type: "RETURN_CANCELLED",
-          qty_delta: -line.return_qty,
+          qty_delta: -returnedBaseUnits,
           unit_cost: line.unit_price,
           reference_type: "SALES_RETURN",
           reference_id: ret.return_number,
@@ -638,6 +668,16 @@ export class SalesReturnService {
       mirrorInvoice.status = "cancelled";
       await sqliteStorage.insertRecord("invoices", mirrorInvoice.id, mirrorInvoice);
     }
+
+    // 5. Push the cancellation. Header only: a payload with money and no lines is read as a full
+    // document and would re-store the credit note with its lines deleted.
+    await syncQueueService.enqueue("invoice", ret.id, "update", {
+      id: ret.id,
+      invoice_number: ret.return_number,
+      status: "cancelled",
+      cancel_reason: reason.trim(),
+      updated_at: now,
+    });
 
     return { success: true };
   }

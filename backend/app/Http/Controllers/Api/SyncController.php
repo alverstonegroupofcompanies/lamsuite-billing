@@ -254,6 +254,14 @@ class SyncController
                 ->first();
         }
 
+        // A status-only payload (an offline cancellation, a note update) carries neither lines
+        // nor money. Running it through the document path would re-derive the totals and store
+        // zeros against a bill that already has payments, so patch the described columns only
+        // and let the shared cancellation service reverse the bill properly.
+        if ($invoice && !$this->isInvoiceDocumentPayload($inv)) {
+            return $this->patchInvoiceFromSync($request, $invoice, $inv);
+        }
+
         // Resolve customer_id if party exists
         $customerId = $inv['customer_id'] ?? null;
         $matchedParty = null;
@@ -331,12 +339,98 @@ class SyncController
             }
         }
 
+        $igstTotal = (float)($inv['igst_total'] ?? 0);
+        $cessTotal = (float)($inv['cess_total'] ?? 0);
+        $bookedFromHeader = $grandTotal;
+
+        // A synced bill's lines are what the counter screen charged and what the GST returns are
+        // built from, so when they travel with the payload the document is re-priced here instead
+        // of trusting a header a revision can leave stale (or re-based into the wrong tax mode).
+        $engineDoc = $this->recalculateInvoiceFromLines($inv, $storeId, $matchedParty);
+        $syncNote = null;
+        $engineLines = null;
+
+        if ($engineDoc !== null) {
+            // One paisa per line of legitimate CGST/SGST split drift, plus the usual paisa margin.
+            $tolerance = 0.05 + 0.01 * count($engineDoc['lines']);
+
+            $payloadLineSum = 0.0;
+            foreach ($inv['items'] as $item) {
+                $payloadLineSum += (float) ($item['total_amount'] ?? 0);
+            }
+
+            $headerAgrees = abs($engineDoc['grand_total'] - $grandTotal) <= $tolerance;
+            $linesAgree = abs($engineDoc['grand_total'] - round($payloadLineSum, 2)) <= $tolerance;
+
+            if ($headerAgrees || $linesAgree) {
+                $grandTotal = $engineDoc['grand_total'];
+                $taxableSubtotal = $engineDoc['taxable_subtotal'];
+                $taxTotal = $engineDoc['total_tax'];
+                $cgstTotal = $engineDoc['cgst_total'];
+                $sgstTotal = $engineDoc['sgst_total'];
+                $igstTotal = $engineDoc['igst_total'];
+                $cessTotal = $engineDoc['cess_total'];
+                $roundOff = $engineDoc['round_off'];
+                $engineLines = $engineDoc['lines'];
+
+                if (!$headerAgrees) {
+                    $syncNote = sprintf(
+                        'Header Rs %.2f contradicted its own lines (Rs %.2f); booked from the lines.',
+                        $bookedFromHeader,
+                        $grandTotal
+                    );
+                }
+            } else {
+                $syncNote = sprintf(
+                    'Lines re-price to Rs %.2f but the till booked Rs %.2f; collected money left untouched.',
+                    $engineDoc['grand_total'],
+                    $grandTotal
+                );
+            }
+        }
+
+        // Money the counter actually took outranks what a revision claims. A payload that ships
+        // no tender lines cannot prove it collected anything, so keep the stored tenders and let
+        // paid_amount follow them.
+        $payloadHasTenders = $this->payloadTenderLines($inv) !== [];
+        $paidAmount = (float) ($inv['paid_amount'] ?? $grandTotal);
+        if ($invoice && !$payloadHasTenders) {
+            $collected = $invoice->payments()
+                ->whereNotIn('status', ['refunded', 'cancelled', 'bounced'])
+                ->get()
+                ->reject(fn ($payment) => in_array(
+                    strtoupper(trim((string) $payment->payment_mode)),
+                    ['CREDIT', 'UDHARI'],
+                    true
+                ))
+                ->sum('amount');
+            if ($invoice->payments()->exists()) {
+                $paidAmount = round((float) $collected, 2);
+            }
+        }
+
+        // The till keeps its own counter identifiers (device-scoped strings), so resolve the
+        // server counter row from the code and never blank out what an earlier sync stored.
+        $counterId = null;
+        if (!empty($inv['counter_id']) && is_numeric($inv['counter_id'])) {
+            $counterId = (int) $inv['counter_id'];
+        } elseif (!empty($inv['counter_code'])) {
+            $counterId = \App\Models\Counter::where('store_id', $storeId)
+                ->where('counter_code', $inv['counter_code'])
+                ->value('id');
+        }
+        if (!$counterId) {
+            $counterId = $invoice?->counter_id;
+        }
+
         $invoiceData = [
             'store_id' => $storeId,
-            'counter_id' => !empty($inv['counter_id']) && is_numeric($inv['counter_id']) ? (int)$inv['counter_id'] : null,
-            'counter_code' => $inv['counter_code'] ?? null,
-            'location_name' => $inv['location_name'] ?? null,
-            'module_key' => $inv['module_key'] ?? 'invoice',
+            'counter_id' => $counterId,
+            'counter_code' => $inv['counter_code'] ?? ($invoice?->counter_code),
+            'location_name' => $inv['location_name'] ?? ($invoice?->location_name),
+            // A payload that has no module_key but does carry its own return number is a credit
+            // note pushed by an older till; storing it as a plain bill books a refund as a sale.
+            'module_key' => $inv['module_key'] ?? ($this->syncedDocumentStockDirection($inv) > 0 ? 'credit_note' : 'invoice'),
             'invoice_number' => $inv['invoice_number'] ?? ('INV-' . time()),
             'invoice_date' => $invoiceDate,
             'due_date' => !empty($inv['due_date']) ? substr($inv['due_date'], 0, 10) : null,
@@ -345,20 +439,20 @@ class SyncController
             'customer_phone' => $inv['customer_phone'] ?? ($matchedParty ? $matchedParty->phone : null),
             'customer_gstin' => $inv['customer_gstin'] ?? null,
             'place_of_supply' => $inv['place_of_supply'] ?? null,
-            'subtotal' => $inv['subtotal'] ?? $taxableSubtotal,
+            'subtotal' => $engineDoc ? $engineDoc['gross_subtotal'] : ($inv['subtotal'] ?? $taxableSubtotal),
             'taxable_subtotal' => $taxableSubtotal,
             'discount_total' => $inv['discount_total'] ?? 0,
             'tax_total' => $taxTotal,
             'cgst_total' => $cgstTotal,
             'sgst_total' => $sgstTotal,
-            'igst_total' => $inv['igst_total'] ?? 0,
-            'cess_total' => $inv['cess_total'] ?? 0,
+            'igst_total' => $igstTotal,
+            'cess_total' => $cessTotal,
             'store_state_code' => $inv['store_state_code'] ?? '32',
             'original_invoice_id' => $inv['original_invoice_id'] ?? null,
             'original_invoice_number' => $inv['original_invoice_number'] ?? null,
             'round_off' => $roundOff,
             'grand_total' => $grandTotal,
-            'paid_amount' => $inv['paid_amount'] ?? $grandTotal,
+            'paid_amount' => $paidAmount,
             'payment_mode' => $inv['payment_mode'] ?? 'Cash',
             'status' => $inv['status'] ?? 'issued',
             'cancel_reason' => $inv['cancel_reason'] ?? null,
@@ -367,6 +461,14 @@ class SyncController
             'doctor_reg_no' => $inv['doctor_reg_no'] ?? null,
             'synced_at' => now(),
         ];
+
+        // Remembered before the header is rewritten: a revise that changes the payable has to
+        // replace the stored tenders, while a plain re-sync of the same bill must stay a no-op.
+        $previousGrandTotal = $invoice ? (float) $invoice->grand_total : null;
+
+        // The line rows stored here are the units this document already took out of stock, so
+        // they are captured before the revision replaces them.
+        $previousItems = $invoice ? InvoiceItem::where('invoice_id', $invoice->id)->get() : collect();
 
         if ($invoice) {
             // Keep original external_id unless empty
@@ -383,7 +485,7 @@ class SyncController
         if (!empty($inv['items']) && is_array($inv['items'])) {            // Delete previous synced items to maintain idempotent consistency
             InvoiceItem::where('invoice_id', $invoice->id)->delete();
 
-            foreach ($inv['items'] as $item) {
+            foreach ($inv['items'] as $idx => $item) {
                 $productId = $item['product_id'] ?? null;
                 if ($productId && !is_numeric($productId)) {
                     $prod = Product::where('external_id', $productId)
@@ -391,6 +493,10 @@ class SyncController
                         ->first();
                     $productId = $prod ? $prod->id : null;
                 }
+
+                // When the document was re-priced from its lines, the line figures that produced
+                // the header are stored, so header and lines can never disagree on the server.
+                $calc = $engineLines[$idx] ?? null;
 
                 InvoiceItem::create([
                     'invoice_id' => $invoice->id,
@@ -405,73 +511,415 @@ class SyncController
                     'units_per_pack' => $item['units_per_pack'] ?? 1,
                     'unit_price' => $item['unit_price'] ?? ($item['rate'] ?? 0),
                     'mrp' => $item['mrp'] ?? null,
+                    'stock_action' => $item['stock_action'] ?? null,
                     'discount_percent' => $item['discount_percent'] ?? 0,
                     'discount_amount' => $item['discount_amount'] ?? 0,
-                    'allocated_discount' => $item['allocated_discount'] ?? 0,
-                    'taxable_amount' => $item['taxable_amount'] ?? 0,
-                    'gst_percent' => $item['gst_percent'] ?? 0,
-                    'cgst_amount' => $item['cgst_amount'] ?? 0,
-                    'sgst_amount' => $item['sgst_amount'] ?? 0,
-                    'igst_amount' => $item['igst_amount'] ?? 0,
-                    'cess_rate' => $item['cess_rate'] ?? 0,
-                    'cess_amount' => $item['cess_amount'] ?? 0,
-                    'tax_amount' => $item['tax_amount'] ?? ($item['total_tax'] ?? 0),
-                    'total_amount' => $item['total_amount'] ?? ($item['grand_total'] ?? 0),
+                    'allocated_discount' => $calc ? $calc['allocated_bill_discount'] : ($item['allocated_discount'] ?? 0),
+                    'taxable_amount' => $calc ? $calc['taxable_amount'] : ($item['taxable_amount'] ?? 0),
+                    'gst_percent' => $calc ? $calc['gst_rate'] : ($item['gst_percent'] ?? 0),
+                    'cgst_amount' => $calc ? $calc['cgst_amount'] : ($item['cgst_amount'] ?? 0),
+                    'sgst_amount' => $calc ? $calc['sgst_amount'] : ($item['sgst_amount'] ?? 0),
+                    'igst_amount' => $calc ? $calc['igst_amount'] : ($item['igst_amount'] ?? 0),
+                    'cess_rate' => $calc ? $calc['cess_rate'] : ($item['cess_rate'] ?? 0),
+                    'cess_amount' => $calc ? $calc['cess_amount'] : ($item['cess_amount'] ?? 0),
+                    'tax_amount' => $calc ? $calc['total_tax'] : ($item['tax_amount'] ?? ($item['total_tax'] ?? 0)),
+                    'total_amount' => $calc ? $calc['total_amount'] : ($item['total_amount'] ?? ($item['grand_total'] ?? 0)),
                 ]);
             }
         }
 
-        // Ingest tender lines so offline references reconcile and gift cards redeem
-        $this->syncInvoicePayments($invoice, $inv, $matchedParty);
+        // Ingest tender lines so offline references reconcile and gift cards redeem. Only a
+        // rupee-meaningful change in the payable counts as a revision, so paisa-level split
+        // drift between the till and this engine can never revoke a collected tender.
+        $this->syncInvoicePayments(
+            $invoice,
+            $inv,
+            $matchedParty,
+            $previousGrandTotal !== null && abs($previousGrandTotal - $grandTotal) > 0.05
+        );
 
-        // Record in sync_events for Admin Sync Center visibility
-        $this->recordSyncEvent($request, 'invoice', (string)$invoice->id, 'create', [
+        // A synced document also changes what is on the shelf. A bill created while the line was
+        // down has to leave the same stock behind as the same bill billed online, and a credit
+        // note has to bring it back; the units already stored against this document are given
+        // first, so re-sending the same bill nets to nothing.
+        $direction = $this->syncedDocumentStockDirection($inv);
+        if ($direction !== null && !empty($inv['items']) && is_array($inv['items'])) {
+            $this->applyRevisedLineStock(
+                $invoice,
+                $previousItems,
+                InvoiceItem::where('invoice_id', $invoice->id)->get(),
+                $direction
+            );
+        }
+
+        $eventDetails = [
             'invoice_number' => $invoice->invoice_number,
             'grand_total' => $invoice->grand_total,
             'customer_name' => $invoice->customer_name,
             'external_id' => $externalId,
-        ]);
+        ];
+        if ($syncNote !== null) {
+            $eventDetails['recalculation'] = $syncNote;
+        }
+
+        // Record in sync_events for Admin Sync Center visibility
+        $this->recordSyncEvent($request, 'invoice', (string)$invoice->id, 'create', $eventDetails);
 
         return $invoice;
     }
 
     /**
-     * Recreate invoice payment lines for offline-synced bills, redeem gift card
-     * tenders, and carry the credit portion into the customer ledger.
+     * Move the stock a synced document changed. The lines being replaced are given back to the
+     * batches that gave them out and the revised lines are taken out, netted per batch before
+     * anything is written, so a bill synced twice with the same lines moves nothing and leaves no
+     * ledger noise.
+     *
+     * $direction is the side the document's own lines sit on: a bill takes units off the shelf
+     * (-1) and a credit note puts them back (+1), so the same netting serves both.
      */
-    private function syncInvoicePayments(Invoice $invoice, array $inv, ?Party $matchedParty): void
+    private function applyRevisedLineStock(Invoice $invoice, $before, $after, float $direction = -1.0): void
     {
-        if ($invoice->payments()->exists()) {
-            return;
+        $moves = [];
+
+        $inwardEvent = $direction > 0 ? 'SALES_RETURN' : 'INVOICE_EDIT_REVERSAL';
+        $outwardEvent = $direction > 0 ? 'SALES_RETURN_REVERSAL' : 'SALE';
+
+        $tally = function ($items, float $sign) use (&$moves, $invoice, $direction): void {
+            foreach ($items as $item) {
+                if (!$item->product_id) {
+                    continue;
+                }
+                if ($direction > 0 && !$item->restocksShelf()) {
+                    continue;
+                }
+
+                $unitsPerPack = max(1, (float) ($item->units_per_pack ?: 1));
+                $units = ((float) $item->qty + (float) $item->free_qty) * $unitsPerPack
+                    + (float) $item->loose_qty + (float) $item->free_loose_qty;
+                if (abs($units) < 0.0001) {
+                    continue;
+                }
+
+                $batch = $item->batch_no
+                    ? ProductBatch::where('store_id', $invoice->store_id)
+                        ->where('product_id', $item->product_id)
+                        ->where('batch_no', $item->batch_no)
+                        ->lockForUpdate()
+                        ->first()
+                    : null;
+
+                $key = $item->product_id . '|' . ($batch ? $batch->id : (string) $item->batch_no);
+                if (!isset($moves[$key])) {
+                    $moves[$key] = ['product_id' => (int) $item->product_id, 'batch' => $batch, 'qty' => 0.0];
+                }
+                $moves[$key]['qty'] += $sign * $units;
+            }
+        };
+
+        DB::transaction(function () use ($tally, $before, $after, $invoice, &$moves, $direction, $inwardEvent, $outwardEvent) {
+            $tally($before, -$direction);
+            $tally($after, $direction);
+
+            foreach ($moves as $move) {
+                $qty = round($move['qty'], 4);
+                if (abs($qty) < 0.0001) {
+                    continue;
+                }
+
+                $batch = $move['batch'];
+                if ($batch) {
+                    $batch->increment('stock_qty', $qty);
+                }
+                $product = Product::find($move['product_id']);
+                if ($product) {
+                    $product->increment('current_stock', $qty);
+                }
+
+                \App\Models\StockLedgerEntry::create([
+                    'store_id' => $invoice->store_id,
+                    'product_id' => $move['product_id'],
+                    'batch_id' => $batch ? $batch->id : null,
+                    'counter_id' => $invoice->counter_id,
+                    'counter_code' => $invoice->counter_code,
+                    'location_name' => $invoice->location_name,
+                    'event_type' => $qty > 0 ? $inwardEvent : $outwardEvent,
+                    'qty_delta' => $qty,
+                    'reference_type' => 'INVOICE',
+                    'reference_id' => (string) $invoice->id,
+                    'balance_after' => $batch ? (float) $batch->stock_qty : 0,
+                    'staff_user_id' => $invoice->user_id,
+                ]);
+
+                SyncEvent::create([
+                    'store_id' => $invoice->store_id,
+                    'entity_type' => 'stock_event',
+                    'entity_id' => (string) ($batch ? $batch->id : $move['product_id']),
+                    'action' => 'update',
+                    'client_data' => [
+                        'product_id' => $move['product_id'],
+                        'batch_id' => $batch ? $batch->id : null,
+                        'batch_no' => $batch ? $batch->batch_no : null,
+                        'remaining_stock' => $batch ? (float) $batch->stock_qty : null,
+                        'qty_delta' => $qty,
+                        'reference_id' => "REVISE-{$invoice->invoice_number}",
+                    ],
+                    'status' => 'resolved',
+                ]);
+            }
+        });
+    }
+
+    /**
+     * Which side of the shelf a synced document sits on: -1 takes units out, +1 puts them back,
+     * and null leaves stock alone. A bill and a credit note arrive through the same queue entry,
+     * so the document has to say what it is — the till marks credit notes by module_key, and a
+     * return queued before that field existed still carries its own return number and must not be
+     * booked as a second sale. Anything the register has not identified is left untouched rather
+     * than guessed at, because a wrong guess moves real stock.
+     */
+    private function syncedDocumentStockDirection(array $inv): ?float
+    {
+        $module = strtolower((string) ($inv['module_key'] ?? ''));
+
+        if (in_array($module, ['credit_note', 'sales_return', 'debit_note'], true)) {
+            return 1.0;
         }
 
+        if (in_array($module, ['invoice', 'bill', 'sale', ''], true)) {
+            return !empty($inv['return_number']) ? 1.0 : -1.0;
+        }
+
+        return null;
+    }
+
+    /**
+     * Does this payload describe a whole bill (lines and/or money), or only a status change?
+     */
+    private function isInvoiceDocumentPayload(array $inv): bool
+    {
+        if (!empty($inv['items'])) {
+            return true;
+        }
+
+        foreach (['grand_total', 'taxable_subtotal', 'subtotal', 'tax_total'] as $key) {
+            if (isset($inv[$key]) && (float) $inv[$key] != 0) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Tender lines exactly as the till describes them, or an empty list when the payload carries
+     * none. A revision without tender lines has not collected anything new, so it may not rewrite
+     * money the counter already took.
+     */
+    private function payloadTenderLines(array $inv): array
+    {
         $raw = $inv['payments'] ?? null;
         if (is_string($raw)) {
             $raw = json_decode($raw, true) ?: [];
         }
+        if (!is_array($raw)) {
+            return [];
+        }
 
         $lines = [];
-        if (is_array($raw) && $raw !== []) {
-            foreach ($raw as $p) {
-                if (!is_array($p)) continue;
-                $amount = round((float) ($p['amount'] ?? 0), 2);
-                if ($amount <= 0) continue;
-
-                $extra = $p['extra_fields'] ?? null;
-                if (is_string($extra)) {
-                    $extra = json_decode($extra, true) ?: null;
-                }
-
-                $lines[] = [
-                    'mode' => trim((string) ($p['mode'] ?? $p['payment_mode'] ?? 'Cash')) ?: 'Cash',
-                    'amount' => $amount,
-                    'reference_no' => $p['reference_no'] ?? ($p['reference'] ?? null),
-                    'status' => $p['status'] ?? 'received',
-                    'extra_fields' => is_array($extra) ? $extra : null,
-                    'notes' => $p['notes'] ?? null,
-                ];
+        foreach ($raw as $p) {
+            if (is_array($p) && round((float) ($p['amount'] ?? 0), 2) > 0) {
+                $lines[] = $p;
             }
-        } elseif (round((float) ($inv['paid_amount'] ?? 0), 2) > 0) {
+        }
+
+        return $lines;
+    }
+
+    /**
+     * Re-price a synced bill from its own line records with the authoritative tax engine.
+     * Returns null when the payload has no priceable lines, leaving the till's figures alone.
+     */
+    private function recalculateInvoiceFromLines(array $inv, int $storeId, ?Party $party): ?array
+    {
+        $items = $inv['items'] ?? null;
+        if (!is_array($items) || $items === []) {
+            return null;
+        }
+
+        $lines = [];
+        foreach ($items as $item) {
+            if (!is_array($item)) {
+                return null; // index alignment with the engine output is required
+            }
+
+            $gstPercent = (float) ($item['gst_percent'] ?? 0);
+            if ($gstPercent <= 0) {
+                $gstPercent = $this->resolveLineGstRate($item);
+            }
+
+            $lines[] = [
+                'product_name' => $item['product_name'] ?? null,
+                'hsn_code' => $item['hsn_code'] ?? null,
+                'qty' => (float) ($item['qty'] ?? 0),
+                'loose_qty' => (float) ($item['loose_qty'] ?? 0),
+                'free_qty' => (float) ($item['free_qty'] ?? 0),
+                'free_loose_qty' => (float) ($item['free_loose_qty'] ?? 0),
+                'units_per_pack' => max(1, (float) ($item['units_per_pack'] ?? 1)),
+                'unit_price' => (float) ($item['unit_price'] ?? ($item['rate'] ?? 0)),
+                'mrp' => $item['mrp'] ?? null,
+                'rate_basis' => $item['rate_basis'] ?? 'sel_rate',
+                'discount_percent' => (float) ($item['discount_percent'] ?? 0),
+                'discount_amount' => (float) ($item['discount_amount'] ?? 0),
+                'gst_percent' => $gstPercent,
+                'cess_percent' => (float) ($item['cess_percent'] ?? ($item['cess_rate'] ?? 0)),
+            ];
+        }
+
+        $priceable = false;
+        foreach ($lines as $line) {
+            if ($line['unit_price'] > 0 && $line['qty'] + $line['loose_qty'] > 0) {
+                $priceable = true;
+                break;
+            }
+        }
+        if (!$priceable) {
+            return null;
+        }
+
+        $store = Store::find($storeId);
+        $policy = app(\App\Services\Tax\StoreTaxPolicy::class)->forStore($storeId);
+        $canOverride = (bool) $policy['allow_override'];
+
+        $taxMode = $canOverride
+            && in_array($inv['tax_mode'] ?? null, \App\Services\Tax\StoreTaxPolicy::TAX_MODES, true)
+            ? $inv['tax_mode'] : $policy['tax_mode'];
+        $gstType = $canOverride
+            && in_array($inv['gst_type'] ?? null, \App\Services\Tax\StoreTaxPolicy::GST_TYPES, true)
+            ? $inv['gst_type'] : $policy['gst_type'];
+
+        return \App\Services\Tax\TaxEngine::calculateDocumentTaxes([
+            'store_state' => $store?->state_code ?: '32',
+            'customer_gstin' => $inv['customer_gstin'] ?? ($party?->gstin),
+            'place_of_supply' => $inv['place_of_supply'] ?? null,
+            'default_tax_mode' => $taxMode,
+            'gst_type' => $gstType,
+            'is_composition' => in_array($gstType, ['composition', 'no_tax', 'unregistered'], true),
+            'lines' => $lines,
+            'bill_discount' => [
+                'type' => !empty($inv['bill_discount_percent']) ? 'percent' : 'amount',
+                'value' => (float) (!empty($inv['bill_discount_percent'])
+                    ? $inv['bill_discount_percent']
+                    : ($inv['bill_discount_amount'] ?? 0)),
+            ],
+            'auto_round_off' => !isset($inv['manual_round_off']),
+            'manual_round_off' => isset($inv['manual_round_off']) ? (float) $inv['manual_round_off'] : null,
+        ]);
+    }
+
+    /**
+     * GST rate for a line whose payload left it out: the product master is the only source.
+     */
+    private function resolveLineGstRate(array $item): float
+    {
+        $productId = $item['product_id'] ?? null;
+
+        $product = is_numeric($productId)
+            ? Product::find($productId)
+            : ($productId
+                ? Product::where('external_id', $productId)->orWhere('name', $item['product_name'] ?? '')->first()
+                : Product::where('name', $item['product_name'] ?? '')->first());
+
+        return $product ? (float) $product->gst_percent : 0.0;
+    }
+
+    /**
+     * Apply a status/metadata-only sync payload without touching booked money, lines or tenders.
+     */
+    private function patchInvoiceFromSync(Request $request, Invoice $invoice, array $inv): Invoice
+    {
+        $patchable = [
+            'customer_name', 'customer_phone', 'customer_gstin', 'payment_mode', 'payment_status',
+            'patient_name', 'doctor_name', 'doctor_reg_no', 'due_date', 'place_of_supply',
+        ];
+
+        $patch = [];
+        foreach ($patchable as $key) {
+            if (array_key_exists($key, $inv)) {
+                $patch[$key] = $inv[$key];
+            }
+        }
+
+        if (strcasecmp((string) ($inv['status'] ?? ''), 'cancelled') === 0 && $invoice->status !== 'cancelled') {
+            app(\App\Services\Sales\InvoiceCancellationService::class)->cancel(
+                $invoice,
+                trim((string) ($inv['cancel_reason'] ?? '')) ?: 'Cancelled on offline counter',
+                $request->user()?->id
+            );
+        } elseif (array_key_exists('status', $inv)) {
+            $patch['status'] = $inv['status'];
+            if (array_key_exists('cancel_reason', $inv)) {
+                $patch['cancel_reason'] = $inv['cancel_reason'];
+            }
+        }
+
+        if ($patch) {
+            $invoice->update($patch);
+        }
+
+        $this->recordSyncEvent($request, 'invoice', (string) $invoice->id, 'update', [
+            'invoice_number' => $invoice->invoice_number,
+            'status' => $invoice->status,
+            'grand_total' => $invoice->grand_total,
+            'external_id' => $invoice->external_id,
+            'patched' => array_keys($patch),
+        ]);
+
+        return $invoice->fresh();
+    }
+
+    /**
+     * Recreate invoice payment lines for offline-synced bills, redeem gift card
+     * tenders, and carry the credit portion into the customer ledger.
+     *
+     * $isRevision is only true when a stored bill is re-posted with a materially different
+     * payable; the old tenders are then reversed and replaced, but only if the payload actually
+     * ships the tenders that replace them.
+     */
+    private function syncInvoicePayments(Invoice $invoice, array $inv, ?Party $matchedParty, bool $isRevision = false): void
+    {
+        $tenders = $this->payloadTenderLines($inv);
+
+        if ($invoice->payments()->exists()) {
+            // Reversing without a replacement would delete cash the counter really collected,
+            // so a tender-less revision leaves the stored money exactly as it stands.
+            if (!$isRevision || $tenders === []) {
+                return;
+            }
+            $this->reverseStoredPayments($invoice, $matchedParty);
+        }
+
+        $lines = [];
+        foreach ($tenders as $p) {
+            if (!is_array($p)) continue;
+            $amount = round((float) ($p['amount'] ?? 0), 2);
+            if ($amount <= 0) continue;
+
+            $extra = $p['extra_fields'] ?? null;
+            if (is_string($extra)) {
+                $extra = json_decode($extra, true) ?: null;
+            }
+
+            $lines[] = [
+                'mode' => trim((string) ($p['mode'] ?? $p['payment_mode'] ?? 'Cash')) ?: 'Cash',
+                'amount' => $amount,
+                'reference_no' => $p['reference_no'] ?? ($p['reference'] ?? null),
+                'status' => $p['status'] ?? 'received',
+                'extra_fields' => is_array($extra) ? $extra : null,
+                'notes' => $p['notes'] ?? null,
+            ];
+        }
+
+        if ($lines === [] && round((float) ($inv['paid_amount'] ?? 0), 2) > 0) {
             $lines[] = [
                 'mode' => trim((string) ($inv['payment_mode'] ?? 'Cash')) ?: 'Cash',
                 'amount' => round((float) $inv['paid_amount'], 2),
@@ -531,6 +979,44 @@ class SyncController
 
             if ($creditPortion > 0 && $matchedParty) {
                 $matchedParty->increment('current_balance', $creditPortion);
+            }
+        });
+    }
+
+    /**
+     * Undo the tenders a bill was originally paid with, before a revision replaces them:
+     * gift card balances go back, credit portions leave the customer ledger again.
+     */
+    private function reverseStoredPayments(Invoice $invoice, ?Party $matchedParty): void
+    {
+        $previous = $invoice->payments()->get();
+        $giftCardService = app(GiftCardService::class);
+
+        DB::transaction(function () use ($previous, $giftCardService, $invoice, $matchedParty) {
+            foreach ($previous as $payment) {
+                $amount = (float) $payment->amount;
+                if ($amount <= 0) {
+                    continue;
+                }
+
+                if ($this->isGiftCardMode((string) $payment->payment_mode)) {
+                    $extra = is_array($payment->extra_fields) ? $payment->extra_fields : [];
+                    $code = (string) ($extra['gift_card_code'] ?? ($payment->reference_no ?? ''));
+                    if ($code !== '') {
+                        $giftCardService->refund($invoice->store_id, $code, $amount, $invoice->id, null);
+                    }
+                }
+
+                if (in_array(strtoupper(trim((string) $payment->payment_mode)), ['CREDIT', 'UDHARI'], true) && $matchedParty) {
+                    $matchedParty->decrement('current_balance', $amount);
+                }
+
+                // 'refunded' is the status every collector already excludes (day close and the
+                // report queries), so a superseded tender drops out of cash totals with it.
+                $payment->update([
+                    'status' => 'refunded',
+                    'notes' => trim(((string) $payment->notes) . ' | Superseded by revised bill'),
+                ]);
             }
         });
     }
@@ -737,58 +1223,90 @@ class SyncController
     private function upsertSinglePurchase(Request $request, array $pur): Purchase
     {
         $storeId = $this->resolveStoreId($request, $pur);
-        $externalId = $pur['external_id'] ?? $pur['id'] ?? null;
 
-        $rawDate = $pur['invoice_date'] ?? $pur['purchase_date'] ?? null;
+        $rawDate = $pur['invoice_date'] ?? $pur['purchase_date'] ?? $pur['return_date'] ?? null;
         $invoiceDate = !empty($rawDate)
             ? (strlen($rawDate) === 10 ? $rawDate : substr($rawDate, 0, 10))
             : now()->toDateString();
 
-        $purchase = Purchase::updateOrCreate(
-            ['invoice_number' => $pur['invoice_number'] ?? $pur['supplier_invoice_no'] ?? ('PUR-' . time())],
-            [
-                'store_id' => $storeId,
-                'supplier_name' => $pur['supplier_name'] ?? 'Supplier',
-                'supplier_gstin' => $pur['supplier_gstin'] ?? null,
-                'invoice_date' => $invoiceDate,
-                'module_key' => $pur['module_key'] ?? 'purchase',
-                'subtotal' => $pur['subtotal'] ?? 0,
-                'tax_total' => $pur['tax_total'] ?? 0,
-                'cgst_total' => $pur['cgst_total'] ?? 0,
-                'sgst_total' => $pur['sgst_total'] ?? 0,
-                'igst_total' => $pur['igst_total'] ?? 0,
-                'cess_total' => $pur['cess_total'] ?? 0,
-                'is_interstate' => (bool)($pur['is_interstate'] ?? false),
-                'is_rcm' => (bool)($pur['is_rcm'] ?? false),
-                'itc_eligibility' => $pur['itc_eligibility'] ?? 'eligible',
-                'freight_charges' => $pur['freight_charges'] ?? 0,
-                'bill_discount_type' => $pur['bill_discount_type'] ?? 'amount',
-                'bill_discount' => $pur['bill_discount'] ?? 0,
-                'round_off' => $pur['round_off'] ?? 0,
-                'grand_total' => $pur['grand_total'] ?? 0,
-                'paid_amount' => $pur['paid_amount'] ?? 0,
-                'status' => $pur['status'] ?? 'received',
-                'cancel_reason' => $pur['cancel_reason'] ?? null,
-            ]
-        );
+        // A debit note is a purchase document that takes stock out instead of bringing it in, so it
+        // shares this ingest path — but it must never match the inward bill it is returning against.
+        $isReturn = $this->purchaseDocumentIsReturn($pur);
 
-        if (!empty($pur['items']) && is_array($pur['items'])) {
+        // A till names a purchase bill by the supplier's own bill number and keeps its running
+        // number beside it. Whichever the payload carries is the key this store's book is matched
+        // on — matching globally, or on a number the till never sent, lets one store's inward
+        // overwrite another's and turns every re-sync into a fresh duplicate.
+        $invoiceNumber = $isReturn
+            ? ($this->firstFilled($pur, ['return_number', 'invoice_number']) ?? ('PR-' . $storeId . '-' . time()))
+            : ($this->firstFilled($pur, ['invoice_number', 'supplier_invoice_no', 'purchase_number']) ?? ('PUR-' . $storeId . '-' . time()));
+
+        $status = $pur['status'] ?? ($isReturn ? 'completed' : 'received');
+
+        // Returns keep their own row even when a number collides with an inward bill, because the
+        // two documents move stock in opposite directions.
+        $purchase = $isReturn
+            ? Purchase::firstOrNew(['store_id' => $storeId, 'invoice_number' => $invoiceNumber, 'module_key' => 'purchase_return'])
+            : Purchase::firstOrNew(['store_id' => $storeId, 'invoice_number' => $invoiceNumber]);
+        $heldItems = $purchase->exists
+            ? PurchaseItem::where('purchase_id', $purchase->id)->get()
+            : collect();
+        $wasCancelled = strtolower((string) $purchase->status) === 'cancelled';
+
+        $purchase->fill([
+            'store_id' => $storeId,
+            'supplier_id' => $this->matchPurchaseSupplier($pur, $storeId),
+            'supplier_name' => $pur['supplier_name'] ?? 'Supplier',
+            'supplier_gstin' => $pur['supplier_gstin'] ?? null,
+            'invoice_date' => $invoiceDate,
+            'module_key' => $pur['module_key'] ?? ($isReturn ? 'purchase_return' : 'purchase'),
+            'subtotal' => $pur['subtotal'] ?? 0,
+            'tax_total' => $pur['tax_total'] ?? 0,
+            'cgst_total' => $pur['cgst_total'] ?? 0,
+            'sgst_total' => $pur['sgst_total'] ?? 0,
+            'igst_total' => $pur['igst_total'] ?? 0,
+            'cess_total' => $pur['cess_total'] ?? 0,
+            'is_interstate' => (bool)($pur['is_interstate'] ?? false),
+            'is_rcm' => (bool)($pur['is_rcm'] ?? false),
+            'itc_eligibility' => $pur['itc_eligibility'] ?? 'eligible',
+            'freight_charges' => $pur['freight_charges'] ?? 0,
+            'bill_discount_type' => $pur['bill_discount_type'] ?? 'amount',
+            'bill_discount' => $pur['bill_discount'] ?? 0,
+            'round_off' => $pur['round_off'] ?? 0,
+            'grand_total' => $pur['grand_total'] ?? 0,
+            'paid_amount' => $pur['paid_amount'] ?? 0,
+            'status' => $status,
+            'cancel_reason' => $pur['cancel_reason'] ?? ($pur['cancellation_reason'] ?? null),
+            'notes' => $isReturn
+                ? $this->purchaseReturnNotes($pur)
+                : (($pur['notes'] ?? null) !== null ? $pur['notes'] : $purchase->notes),
+        ]);
+        $purchase->save();
+
+        $payloadItems = $isReturn
+            ? $this->normalizeReturnLines($pur)
+            : ((isset($pur['items']) && is_array($pur['items'])) ? $pur['items'] : []);
+
+        if ($payloadItems) {
             PurchaseItem::where('purchase_id', $purchase->id)->delete();
-            foreach ($pur['items'] as $item) {
+            foreach ($payloadItems as $item) {
+                $packQty = $this->firstFilledNumber($item, ['pack_qty', 'qty']) ?? 1;
+
                 PurchaseItem::create([
                     'purchase_id' => $purchase->id,
+                    'product_id' => $this->matchPurchaseProduct($item, $storeId),
                     'product_name' => $item['product_name'] ?? 'Item',
                     'batch_no' => ($item['batch_no'] ?? null) ?: null,
                     'expiry_date' => !empty($item['expiry_date']) ? substr($item['expiry_date'], 0, 10) : null,
                     'mfg_date' => !empty($item['mfg_date']) ? substr($item['mfg_date'], 0, 10) : null,
                     'hsn_code' => $item['hsn_code'] ?? null,
                     'selling_rate' => $item['selling_rate'] ?? null,
-                    'pack_qty' => $item['pack_qty'] ?? ($item['qty'] ?? 1),
+                    'pack_qty' => $packQty,
                     'loose_qty' => $item['loose_qty'] ?? 0,
                     'free_qty' => $item['free_qty'] ?? 0,
                     'free_loose_qty' => $item['free_loose_qty'] ?? 0,
                     'units_per_pack' => $item['units_per_pack'] ?? 1,
-                    'qty' => $item['qty'] ?? 1,
+                    'qty' => $packQty,
                     'purchase_rate' => $item['purchase_rate'] ?? ($item['unit_price'] ?? 0),
                     'ptr' => $item['ptr'] ?? ($item['purchase_rate'] ?? ($item['unit_price'] ?? 0)),
                     'pts' => $item['pts'] ?? null,
@@ -810,13 +1328,313 @@ class SyncController
             }
         }
 
+        // A cancellation is pushed as a header with no lines, so the quantities the server already
+        // holds are the ones that have to go back; an edit pushes the whole new set, so only the
+        // difference moves. Re-sending a bill that is already cancelled nets to nothing.
+        $cancelled = strtolower((string) $status) === 'cancelled';
+        $afterItems = $cancelled
+            ? ($wasCancelled ? $heldItems : collect())
+            : ($payloadItems ? PurchaseItem::where('purchase_id', $purchase->id)->get() : $heldItems);
+
+        $this->applyPurchaseLineStock($purchase, $heldItems, $afterItems, $isReturn ? -1.0 : 1.0);
+
         $this->recordSyncEvent($request, 'purchase', (string)$purchase->id, 'create', [
             'invoice_number' => $purchase->invoice_number,
             'supplier' => $purchase->supplier_name,
             'grand_total' => $purchase->grand_total,
+            'status' => $purchase->status,
         ]);
 
         return $purchase;
+    }
+
+    /**
+     * A debit note arrives shaped like the inward bill it returns against: its own return number,
+     * a reference to the original and a `lines` array of returned units. Anything matching that is
+     * ingested as a return so it can never be merged into the bill it partially undoes.
+     */
+    private function purchaseDocumentIsReturn(array $pur): bool
+    {
+        $module = strtolower(trim((string) ($pur['module_key'] ?? '')));
+        if (in_array($module, ['purchase_return', 'debit_note'], true)) {
+            return true;
+        }
+
+        return isset($pur['original_purchase_number'])
+            || isset($pur['original_purchase_id'])
+            || (isset($pur['return_number']) && isset($pur['lines']));
+    }
+
+    /**
+     * Return lines count what the supplier gets back, in units, priced at the unit rate paid for
+     * them. Purchase lines are counted in packs, so returns are normalised onto the same footing
+     * before storage: one unit per pack keeps the base-unit arithmetic identical for both.
+     */
+    private function normalizeReturnLines(array $ret): array
+    {
+        $source = (isset($ret['lines']) && is_array($ret['lines'])) ? $ret['lines'] : [];
+
+        $normalised = [];
+        foreach ($source as $line) {
+            if (!is_array($line)) {
+                continue;
+            }
+
+            $units = $this->firstFilledNumber($line, ['return_qty', 'total_units', 'qty']) ?? 0;
+            $rate = $this->firstFilledNumber($line, ['purchase_rate', 'unit_price', 'effective_unit_cost']) ?? 0;
+
+            // The till's debit note line carries the CGST/SGST split but not a combined tax figure,
+            // and a line with no tax_amount is useless to every GST report that reads it.
+            $splits = (float) ($line['cgst_amount'] ?? 0) + (float) ($line['sgst_amount'] ?? 0)
+                + (float) ($line['igst_amount'] ?? 0) + (float) ($line['cess_amount'] ?? 0);
+            $tax = $splits > 0
+                ? $splits
+                : ($this->firstFilledNumber($line, ['tax_amount', 'total_tax']) ?? 0.0);
+
+            $normalised[] = [
+                'product_id' => $line['product_id'] ?? null,
+                'product_name' => $line['product_name'] ?? 'Item',
+                'batch_no' => $line['batch_no'] ?? null,
+                'expiry_date' => $line['expiry_date'] ?? null,
+                'hsn_code' => $line['hsn_code'] ?? null,
+                'pack_qty' => $units,
+                'units_per_pack' => 1,
+                'purchase_rate' => $rate,
+                'effective_unit_cost' => $rate,
+                'taxable_amount' => $line['taxable_amount'] ?? round($units * $rate, 2),
+                'gst_percent' => $line['gst_percent'] ?? 0,
+                'cgst_amount' => $line['cgst_amount'] ?? 0,
+                'sgst_amount' => $line['sgst_amount'] ?? 0,
+                'igst_amount' => $line['igst_amount'] ?? 0,
+                'cess_amount' => $line['cess_amount'] ?? 0,
+                'tax_amount' => round($tax, 2),
+                'total_amount' => $line['total_amount'] ?? 0,
+            ];
+        }
+
+        return $normalised;
+    }
+
+    /**
+     * Nothing on the purchases table names the inward bill a debit note belongs to, and a return
+     * that cannot name its original is useless in a GST audit, so the link rides in the notes.
+     */
+    private function purchaseReturnNotes(array $ret): string
+    {
+        $notes = trim((string) ($ret['notes'] ?? ''));
+        $original = $this->firstFilled($ret, ['original_purchase_number', 'supplier_invoice_no']);
+
+        if ($original === null) {
+            return $notes;
+        }
+
+        return $notes === '' ? "Return against {$original}" : "{$notes} (return against {$original})";
+    }
+
+    /**
+     * The first key of this payload that carries a non-empty string.
+     */
+    private function firstFilled(array $data, array $keys): ?string
+    {
+        foreach ($keys as $key) {
+            if (isset($data[$key]) && is_string($data[$key]) && trim($data[$key]) !== '') {
+                return trim($data[$key]);
+            }
+            if (isset($data[$key]) && is_numeric($data[$key])) {
+                return (string) $data[$key];
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * The first key of this payload that carries a usable quantity.
+     */
+    private function firstFilledNumber(array $data, array $keys): ?float
+    {
+        foreach ($keys as $key) {
+            if (isset($data[$key]) && is_numeric($data[$key])) {
+                return (float) $data[$key];
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * A purchase line arrives with the product the till was looking at, which the server knows by
+     * its own id. Left unresolved the line stores no product at all, so the inward report cannot
+     * group it and the batch it should have created has nothing to belong to.
+     */
+    private function matchPurchaseProduct(array $item, int $storeId): ?int
+    {
+        $productId = $item['product_id'] ?? null;
+
+        if (is_numeric($productId)) {
+            $local = Product::where('store_id', $storeId)->where('id', (int) $productId)->first();
+            if ($local) {
+                return $local->id;
+            }
+        } elseif ($productId) {
+            $local = Product::where('store_id', $storeId)->where('external_id', $productId)->first();
+            if ($local) {
+                return $local->id;
+            }
+        }
+
+        $name = $item['product_name'] ?? null;
+        if (!$name) {
+            return null;
+        }
+
+        return Product::where('store_id', $storeId)->where('name', $name)->value('id');
+    }
+
+    /**
+     * Same for the supplier: a purchase without its party is a name on a page, not a ledger.
+     */
+    private function matchPurchaseSupplier(array $pur, int $storeId): ?int
+    {
+        $supplierId = $pur['supplier_id'] ?? null;
+
+        if (is_numeric($supplierId)) {
+            $local = Party::where('store_id', $storeId)->where('id', (int) $supplierId)->first();
+            if ($local) {
+                return $local->id;
+            }
+        } elseif ($supplierId) {
+            $local = Party::where('store_id', $storeId)->where('external_id', $supplierId)->first();
+            if ($local) {
+                return $local->id;
+            }
+        }
+
+        if (!empty($pur['supplier_gstin'])) {
+            $byGstin = Party::where('store_id', $storeId)->where('gstin', $pur['supplier_gstin'])->first();
+            if ($byGstin) {
+                return $byGstin->id;
+            }
+        }
+
+        if (!empty($pur['supplier_name'])) {
+            return Party::where('store_id', $storeId)->where('name', $pur['supplier_name'])->value('id');
+        }
+
+        return null;
+    }
+
+    /**
+     * Move the stock a purchase document changes. Inward is the only way stock arrives, so a synced
+     * purchase that credits nothing leaves the server permanently short — every later sale then
+     * reports a batch as negative even though the register counted correctly. A debit note is the
+     * same arithmetic turned round ($direction = -1). The lines being replaced give their units
+     * back and the lines being kept take theirs, netted per batch before anything is written, so
+     * the same bill synced twice moves nothing and a cancel restores exactly what it had changed.
+     */
+    private function applyPurchaseLineStock(Purchase $purchase, $before, $after, float $direction = 1.0): void
+    {
+        $moves = [];
+
+        $tally = function ($items, float $sign) use (&$moves, $purchase): void {
+            foreach ($items as $item) {
+                if (!$item->product_id) {
+                    continue;
+                }
+
+                $unitsPerPack = max(1, (float) ($item->units_per_pack ?: 1));
+                $units = ((float) $item->qty + (float) $item->free_qty) * $unitsPerPack
+                    + (float) $item->loose_qty + (float) $item->free_loose_qty;
+                if (abs($units) < 0.0001) {
+                    continue;
+                }
+
+                $batch = $item->batch_no
+                    ? ProductBatch::where('store_id', $purchase->store_id)
+                        ->where('product_id', $item->product_id)
+                        ->where('batch_no', $item->batch_no)
+                        ->lockForUpdate()
+                        ->first()
+                    : null;
+
+                $key = $item->product_id . '|' . ($batch ? $batch->id : (string) $item->batch_no);
+                if (!isset($moves[$key])) {
+                    $moves[$key] = ['product_id' => (int) $item->product_id, 'batch' => $batch, 'line' => $item, 'qty' => 0.0];
+                }
+                $moves[$key]['qty'] += $sign * $units;
+            }
+        };
+
+        DB::transaction(function () use ($tally, $before, $after, $purchase, $direction, &$moves) {
+            $tally($before, -$direction);
+            $tally($after, $direction);
+
+            foreach ($moves as $move) {
+                $qty = round($move['qty'], 4);
+                if (abs($qty) < 0.0001) {
+                    continue;
+                }
+
+                $batch = $move['batch'];
+                if (!$batch && $qty > 0) {
+                    $line = $move['line'];
+                    $batch = ProductBatch::create([
+                        'store_id' => $purchase->store_id,
+                        'product_id' => $move['product_id'],
+                        'batch_no' => (string) ($line->batch_no ?: 'BAT-01'),
+                        'mfg_date' => $line->mfg_date ? $line->mfg_date->format('Y-m-d') : null,
+                        'expiry_date' => $line->expiry_date
+                            ? $line->expiry_date->format('Y-m-d')
+                            : now()->addYear()->toDateString(),
+                        'stock_qty' => 0,
+                        'mrp' => $line->mrp ?? 0,
+                        'purchase_rate' => $line->purchase_rate ?? 0,
+                        'selling_rate' => $line->selling_rate ?? 0,
+                    ]);
+                }
+
+                if ($batch) {
+                    $batch->increment('stock_qty', $qty);
+                }
+                $product = Product::find($move['product_id']);
+                if ($product) {
+                    $product->increment('current_stock', $qty);
+                }
+
+                $cancelled = strtolower((string) $purchase->status) === 'cancelled';
+                $returning = $direction < 0;
+                $prefix = $returning ? 'PURCHASE_RETURN' : 'PURCHASE';
+
+                \App\Models\StockLedgerEntry::create([
+                    'store_id' => $purchase->store_id,
+                    'product_id' => $move['product_id'],
+                    'batch_id' => $batch ? $batch->id : null,
+                    'event_type' => $qty > 0
+                        ? ($returning ? ($cancelled ? 'PURCHASE_RETURN_CANCEL' : 'PURCHASE_RETURN_EDIT_REVERSAL') : 'PURCHASE_RECEIPT')
+                        : ($returning ? 'PURCHASE_RETURN' : ($cancelled ? 'PURCHASE_CANCEL' : 'PURCHASE_EDIT_REVERSAL')),
+                    'qty_delta' => $qty,
+                    'reference_type' => $prefix,
+                    'reference_id' => (string) $purchase->id,
+                    'balance_after' => $batch ? (float) $batch->stock_qty : 0,
+                ]);
+
+                SyncEvent::create([
+                    'store_id' => $purchase->store_id,
+                    'entity_type' => 'stock_event',
+                    'entity_id' => (string) ($batch ? $batch->id : $move['product_id']),
+                    'action' => 'update',
+                    'client_data' => [
+                        'product_id' => $move['product_id'],
+                        'batch_id' => $batch ? $batch->id : null,
+                        'batch_no' => $batch ? $batch->batch_no : null,
+                        'remaining_stock' => $batch ? (float) $batch->stock_qty : null,
+                        'qty_delta' => $qty,
+                        'reference_id' => "{$prefix}-{$purchase->invoice_number}",
+                    ],
+                    'status' => 'resolved',
+                ]);
+            }
+        });
     }
 
     /**
@@ -916,6 +1734,57 @@ class SyncController
     }
 
     /**
+     * A stock event names the product and batch the till was standing at, which may be the
+     * server's own id, the id the till holds for it, or the printed batch number. Matching on
+     * whichever row carries that value — with no bound to the store the event came from — lets one
+     * store's adjustment move another store's shelf, so every lookup here is bounded by the store
+     * that pushed it.
+     */
+    private function matchStockEventProduct(array $event, int $storeId): ?int
+    {
+        $ref = $event['product_id'] ?? null;
+        if ($ref === null || $ref === '') {
+            return null;
+        }
+
+        if (is_numeric($ref)) {
+            return Product::where('store_id', $storeId)->where('id', (int) $ref)->value('id');
+        }
+
+        return Product::where('store_id', $storeId)->where('external_id', $ref)->value('id')
+            ?? Product::where('store_id', $storeId)->where('id', $ref)->value('id');
+    }
+
+    private function matchStockEventBatch(array $event, int $storeId, ?int $productId): ?int
+    {
+        foreach (['batch_id', 'batch_no'] as $key) {
+            $ref = $event[$key] ?? null;
+            if ($ref === null || $ref === '') {
+                continue;
+            }
+
+            if (is_numeric($ref)) {
+                $id = ProductBatch::where('store_id', $storeId)->where('id', (int) $ref)->value('id');
+            } else {
+                $batch = ProductBatch::where('store_id', $storeId)->where('external_id', $ref)->first()
+                    ?: ($productId
+                        ? ProductBatch::where('store_id', $storeId)
+                            ->where('product_id', $productId)
+                            ->where('batch_no', $ref)
+                            ->first()
+                        : null);
+                $id = $batch ? $batch->id : null;
+            }
+
+            if ($id) {
+                return $id;
+            }
+        }
+
+        return null;
+    }
+
+    /**
      * Upsert stock adjustment.
      */
     private function upsertSingleStockEvent(Request $request, array $event): void
@@ -947,17 +1816,8 @@ class SyncController
             return;
         }
 
-        $productId = $event['product_id'] ?? null;
-        if ($productId && !is_numeric($productId)) {
-            $p = Product::where('external_id', $productId)->first();
-            $productId = $p ? $p->id : null;
-        }
-
-        $batchId = $event['batch_id'] ?? null;
-        if ($batchId && !is_numeric($batchId)) {
-            $b = ProductBatch::where('batch_no', $batchId)->first();
-            $batchId = $b ? $b->id : null;
-        }
+        $productId = $this->matchStockEventProduct($event, $storeId);
+        $batchId = $this->matchStockEventBatch($event, $storeId, $productId);
 
         $qtyDelta = (float)($event['qty_delta'] ?? 0);
         $idempotencyKey = $event['idempotency_key'] ?? ($event['id'] ?? null);

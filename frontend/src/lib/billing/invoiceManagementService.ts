@@ -1,4 +1,5 @@
 import { sqliteStorage } from "../db/sqliteStorage";
+import { canonicalizeInvoiceIdentity, clearInvoiceChildren } from "../db/invoiceCacheIdentity";
 import { productsStore, type ProductBatch, type ProductItem } from "../masters/productsStore";
 import { partiesStore } from "../masters/partiesStore";
 import { syncQueueService } from "../sync/syncQueueService";
@@ -392,7 +393,12 @@ export class InvoiceManagementService {
       : [];
 
     // Fallback: If invoice not found in local cache OR items are empty, fetch from authoritative backend API
-    if (!invoice || items.length === 0) {
+    // A locally-pending bill outranks that snapshot: the till has a revision the server has not
+    // been given yet, and re-seeding from the server would put the pre-edit figures back.
+    const isPendingLocal =
+      !!invoice && (invoice.sync_state === "pending" || (invoice as { sync_status?: string }).sync_status === "pending");
+
+    if ((!invoice || items.length === 0) && !isPendingLocal) {
       try {
         const baseUrl = onlineTransactionService.getEffectiveBaseUrl();
         const activeStore = storeRegistryService.getActiveStore();
@@ -407,8 +413,21 @@ export class InvoiceManagementService {
         if (res.ok) {
           const sinv = await res.json();
           if (sinv && (sinv.id || sinv.invoice_number)) {
+            // Write the snapshot onto whichever key this device already uses for the bill, so
+            // pulling one up from the server cannot leave the till holding it twice.
+            const identity = await canonicalizeInvoiceIdentity({
+              id: sinv.id,
+              external_id: sinv.external_id,
+              invoice_number: sinv.invoice_number,
+              store_id: sinv.store_id || storeId,
+            });
+            const invoiceKey = identity.canonicalKey || String(sinv.id);
+            // An unpushed edit of this bill is still on the till, so the server copy in front of us
+            // is older than the till's own book: read it, write nothing.
+            const mirrorAllowed = !identity.skip;
             const serverInvoiceRecord: InvoiceRecord = {
-              id: String(sinv.id),
+              id: invoiceKey,
+              external_id: identity.external_id,
               store_id: sinv.store_id,
               module_key: "invoice",
               invoice_number: sinv.invoice_number,
@@ -445,15 +464,18 @@ export class InvoiceManagementService {
             };
 
             Object.assign(serverInvoiceRecord, extractComplianceFields(sinv));
-            await sqliteStorage.insertRecord("invoices", String(sinv.id), serverInvoiceRecord);
+            if (mirrorAllowed) {
+              await sqliteStorage.insertRecord("invoices", invoiceKey, serverInvoiceRecord);
+              await clearInvoiceChildren(invoiceKey);
+            }
 
             const serverItems: InvoiceItemRecord[] = [];
             if (Array.isArray(sinv.items)) {
               for (let idx = 0; idx < sinv.items.length; idx++) {
                 const it = sinv.items[idx];
                 const itemRec: InvoiceItemRecord = {
-                  id: String(it.id || `item_${sinv.id}_${idx}`),
-                  invoice_id: String(sinv.id),
+                  id: String(it.id || `item_${invoiceKey}_${idx}`),
+                  invoice_id: invoiceKey,
                   product_id: String(it.product_id),
                   product_name: it.product_name,
                   batch_no: it.batch_no || "NO_BATCH",
@@ -477,7 +499,7 @@ export class InvoiceManagementService {
                   total_amount: Number(it.total_amount || 0),
                 };
                 serverItems.push(itemRec);
-                await sqliteStorage.insertRecord("invoice_items", itemRec.id, itemRec);
+                if (mirrorAllowed) await sqliteStorage.insertRecord("invoice_items", itemRec.id, itemRec);
               }
             }
 
@@ -485,9 +507,9 @@ export class InvoiceManagementService {
               for (let idx = 0; idx < sinv.payments.length; idx++) {
                 const p = sinv.payments[idx];
                 const paymentRec: any = {
-                  id: String(p.id || `pay_${sinv.id}_${idx}`),
+                  id: String(p.id || `pay_${invoiceKey}_${idx}`),
                   store_id: p.store_id ? String(p.store_id) : String(sinv.store_id),
-                  invoice_id: String(sinv.id),
+                  invoice_id: invoiceKey,
                   counter_id: p.counter_id ? String(p.counter_id) : undefined,
                   counter_code: p.counter_code ?? undefined,
                   payment_mode: p.payment_mode || p.mode || "Cash",
@@ -505,12 +527,14 @@ export class InvoiceManagementService {
                   created_at: p.created_at ? new Date(p.created_at).getTime() : Date.now(),
                   updated_at: p.updated_at ? new Date(p.updated_at).getTime() : Date.now(),
                 };
-                await sqliteStorage.insertRecord("invoice_payments", paymentRec.id, paymentRec);
+                if (mirrorAllowed) await sqliteStorage.insertRecord("invoice_payments", paymentRec.id, paymentRec);
               }
             }
 
-            invoice = serverInvoiceRecord;
-            items = serverItems;
+            if (mirrorAllowed) {
+              invoice = serverInvoiceRecord;
+              items = serverItems;
+            }
           }
         }
       } catch (err) {
@@ -666,11 +690,12 @@ export class InvoiceManagementService {
   /**
    * Save an edited invoice:
    * 1. Reverses original stock deductions in ledger
-   * 2. Replaces invoice items with updated lines
-   * 3. Applies new stock deductions in ledger
-   * 4. Recalculates GST and totals
-   * 5. Marks is_revised = 1 and appends to audit log
-   * 6. Enqueues update to sync queue
+   * 2. Recalculates GST and totals with the store's tax profile
+   * 3. Replaces invoice items and applies the new stock deductions
+   * 4. Supersedes the collected tenders with the revised payable
+   * 5. Appends the revision to the audit log
+   * 6. Marks is_revised = 1 and rewrites the invoice row
+   * 7. Enqueues update to sync queue
    */
   async saveInvoiceEdit(
     originalInvoiceId: string,
@@ -757,9 +782,19 @@ export class InvoiceManagementService {
       discount_percent: l.discount_percent,
       discount_amount: l.discount_amount,
       gst_percent: l.product.gst_percent,
+      rate_basis: l.rate_basis,
     }));
 
-    const totals: InvoiceTotals = calculateInvoiceTotals(billingLines, { type: "amount", value: 0 }, "inclusive", false, true);
+    // A revision has to be re-priced with the store's own GST profile. Hard-coding a mode here
+    // silently re-bases every exclusive-mode bill to inclusive the moment a cashier edits it.
+    const storeSettings = companySettingsService.getSettings();
+    const totals: InvoiceTotals = calculateInvoiceTotals(billingLines, { type: "amount", value: 0 }, {
+      companyTaxMode: storeSettings.tax_mode,
+      storeState: storeSettings.state_code,
+      gstType: storeSettings.gst_type,
+      customerGstin: payload.customerGstin ?? originalInvoice.customer_gstin ?? null,
+      placeOfSupply: originalInvoice.place_of_supply ?? null,
+    }, false, true);
 
     // 3. APPLY NEW ITEMS & DEDUCT NEW STOCK
     for (const line of payload.lines) {
@@ -782,9 +817,12 @@ export class InvoiceManagementService {
         discount_percent: line.discount_percent,
         discount_amount: line.discount_amount,
         gst_percent: line.product.gst_percent,
+        taxable_amount: line.calculated.taxable_amount,
+        tax_amount: line.calculated.total_tax,
         cgst_amount: line.calculated.cgst_amount,
         sgst_amount: line.calculated.sgst_amount,
         igst_amount: line.calculated.igst_amount,
+        cess_amount: line.calculated.cess_amount ?? 0,
         total_amount: line.calculated.total_amount,
       });
 
@@ -816,7 +854,51 @@ export class InvoiceManagementService {
       });
     }
 
-    // 4. PREPARE AUDIT LOG
+    // 4. RE-BOOK THE MONEY AGAINST THE REVISED PAYABLE
+    // The edit screen charges one payable in one mode, so the tenders collected under the old
+    // figures are superseded rather than left beside a header that no longer matches them.
+    const activeStoreId = String(originalInvoice.store_id || storeRegistryService.getActiveStore()?.id || "1");
+    const previousTenders = (
+      await sqliteStorage.findAll<InvoicePaymentRecord>("invoice_payments").catch(() => [])
+    ).filter((p) => String(p.invoice_id) === String(originalInvoice.id));
+    const collectedTenders = previousTenders.filter((p) => p.status !== "refunded");
+    const tenderMode =
+      payload.paymentMode || collectedTenders[0]?.payment_mode || originalInvoice.payment_mode || "Cash";
+
+    for (const p of collectedTenders) {
+      await sqliteStorage.insertRecord("invoice_payments", p.id, {
+        ...p,
+        status: "refunded",
+        notes: (p.notes ? p.notes + " | " : "") + "Superseded by revised bill",
+        updated_at: now,
+      });
+    }
+
+    const revisedTenders: InvoicePaymentRecord[] = [];
+    if (totals.grand_total > 0) {
+      const tender: InvoicePaymentRecord = {
+        id: `pay_${now}_${Math.random().toString(16).slice(2, 6)}`,
+        invoice_id: originalInvoice.id,
+        store_id: activeStoreId,
+        counter_id: collectedTenders[0]?.counter_id,
+        counter_code: collectedTenders[0]?.counter_code,
+        payment_mode: tenderMode,
+        amount: totals.grand_total,
+        status: "received",
+        notes: `Collected against revised bill ${originalInvoice.invoice_number}`,
+        received_by: collectedTenders[0]?.received_by,
+        created_at: now,
+        updated_at: now,
+      };
+      await sqliteStorage.insertRecord(
+        "invoice_payments",
+        tender.id,
+        tender as unknown as Record<string, unknown>
+      );
+      revisedTenders.push(tender);
+    }
+
+    // 5. PREPARE AUDIT LOG
     const diff = this.computeDiff(originalItems, payload.lines);
     const auditEntry: InvoiceAuditEntry = {
       timestamp: now,
@@ -832,8 +914,7 @@ export class InvoiceManagementService {
     };
     const updatedAuditLog = [...auditLog, auditEntry];
 
-    // 5. UPDATE INVOICE RECORD
-    const activeStoreId = String(originalInvoice.store_id || storeRegistryService.getActiveStore()?.id || "1");
+    // 6. UPDATE INVOICE RECORD
     const updatedInvoiceRow: InvoiceRecord = {
       ...originalInvoice,
       store_id: activeStoreId,
@@ -841,14 +922,21 @@ export class InvoiceManagementService {
       customer_name: payload.customerName || originalInvoice.customer_name,
       customer_phone: payload.customerPhone || originalInvoice.customer_phone,
       customer_gstin: payload.customerGstin ?? originalInvoice.customer_gstin,
-      payment_mode: payload.paymentMode || originalInvoice.payment_mode,
+      payment_mode: tenderMode,
+      payment_status: tenderMode.toLowerCase() === "credit" ? "unpaid" : "paid",
       notes: payload.notes ?? originalInvoice.notes,
-      subtotal: totals.taxable_subtotal,
+      subtotal: totals.gross_subtotal ?? totals.taxable_subtotal,
+      taxable_subtotal: totals.taxable_subtotal,
       discount_total: totals.line_discount_total + totals.bill_discount_amount,
       tax_total: totals.total_tax,
+      cgst_total: totals.cgst_total,
+      sgst_total: totals.sgst_total,
+      igst_total: totals.igst_total,
+      cess_total: totals.cess_total ?? 0,
       round_off: totals.round_off,
       grand_total: totals.grand_total,
       paid_amount: totals.grand_total,
+      payments: revisedTenders,
       is_revised: 1,
       edit_history: JSON.stringify(updatedAuditLog),
       updated_at: now,
@@ -857,20 +945,34 @@ export class InvoiceManagementService {
 
     await sqliteStorage.insertRecord("invoices", originalInvoice.id, updatedInvoiceRow as unknown as Record<string, unknown>);
 
-    // 6. ENQUEUE TO SYNC QUEUE WITH UPDATED LINE ITEMS
+    // 7. ENQUEUE TO SYNC QUEUE WITH UPDATED LINE ITEMS
+    // The same line shape a new bill posts, otherwise the server stores the revised header
+    // against lines that have no quantity split and no taxable value.
     await syncQueueService.enqueue("invoice", originalInvoice.id, "update", {
       ...updatedInvoiceRow,
       items: payload.lines.map((line) => ({
         product_id: line.product.id,
         product_name: line.product.name,
+        batch_id: line.selectedBatch.id,
         batch_no: line.selectedBatch.batch_no,
         expiry_date: line.selectedBatch.expiry_date,
         qty: line.qty,
+        loose_qty: line.loose_qty,
+        free_qty: Math.max(0, Number(line.free_qty) || 0),
+        free_loose_qty: Math.max(0, Number(line.free_loose_qty) || 0),
+        units_per_pack: line.product.units_per_pack,
         unit_price: line.unit_price,
+        mrp: line.product.mrp,
         discount_percent: line.discount_percent,
         discount_amount: line.discount_amount,
         gst_percent: line.product.gst_percent,
-        tax_amount: line.calculated.cgst_amount + line.calculated.sgst_amount + line.calculated.igst_amount,
+        rate_basis: line.rate_basis,
+        taxable_amount: line.calculated.taxable_amount,
+        cgst_amount: line.calculated.cgst_amount,
+        sgst_amount: line.calculated.sgst_amount,
+        igst_amount: line.calculated.igst_amount,
+        cess_amount: line.calculated.cess_amount ?? 0,
+        tax_amount: line.calculated.total_tax,
         total_amount: line.calculated.total_amount,
       })),
     });

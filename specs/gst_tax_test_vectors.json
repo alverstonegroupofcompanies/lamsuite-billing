@@ -1,6 +1,7 @@
 {
   "version": "1.0",
   "description": "LamSuite Billing Statutory GST Test Vectors covering all statutory and commercial edge cases to the paisa",
+  "rounding_convention": "Per line, in integer paisa: EXCLUSIVE taxable = discounted base, GST = round_half_up(taxable * gst_percent / 100) and cess = round_half_up(taxable * cess_percent / 100). INCLUSIVE (MRP includes tax) taxable = round_half_up(discounted base / (1 + (gst+cess)/100)) and total tax = discounted base - taxable, so taxable + tax is exactly what the customer is charged. The GST amount is then split cgst = round_half_up(gst/2), sgst = gst - cgst, so the two halves always sum to the line's GST. Rounding each half off the taxable base instead loses a paisa whenever both halves round down.",
   "store_defaults": {
     "state_code": "32",
     "state_name": "Kerala",
@@ -245,12 +246,12 @@
           "cgst_rate": 2.5,
           "cgst_amount": 2.03,
           "sgst_rate": 2.5,
-          "sgst_amount": 2.03,
+          "sgst_amount": 2.02,
           "igst_rate": 0.0,
           "igst_amount": 0.00,
           "cess_amount": 0.00,
-          "total_tax": 4.06,
-          "total_amount": 85.06
+          "total_tax": 4.05,
+          "total_amount": 85.05
         },
         {
           "line_id": "L2",
@@ -291,12 +292,12 @@
         "bill_discount_total": 57.00,
         "taxable_subtotal": 513.00,
         "cgst_total": 33.35,
-        "sgst_total": 33.35,
+        "sgst_total": 33.34,
         "igst_total": 0.00,
         "cess_total": 0.00,
-        "total_tax": 66.70,
-        "net_before_round": 579.70,
-        "round_off": 0.30,
+        "total_tax": 66.69,
+        "net_before_round": 579.69,
+        "round_off": 0.31,
         "grand_total": 580.00
       }
     },
@@ -449,14 +450,14 @@
           "allocated_bill_discount": 0.00,
           "taxable_amount": 87.72,
           "cgst_rate": 6.0,
-          "cgst_amount": 5.26,
+          "cgst_amount": 5.27,
           "sgst_rate": 6.0,
           "sgst_amount": 5.26,
           "igst_rate": 0.0,
           "igst_amount": 0.00,
           "cess_amount": 1.75,
-          "total_tax": 12.27,
-          "total_amount": 99.99
+          "total_tax": 12.28,
+          "total_amount": 100.00
         }
       ],
       "expected_totals": {
@@ -464,13 +465,13 @@
         "line_discount_total": 0.00,
         "bill_discount_total": 0.00,
         "taxable_subtotal": 87.72,
-        "cgst_total": 5.26,
+        "cgst_total": 5.27,
         "sgst_total": 5.26,
         "igst_total": 0.00,
         "cess_total": 1.75,
-        "total_tax": 12.27,
-        "net_before_round": 99.99,
-        "round_off": 0.01,
+        "total_tax": 12.28,
+        "net_before_round": 100.00,
+        "round_off": 0.00,
         "grand_total": 100.00
       }
     },
@@ -623,14 +624,14 @@
           "allocated_bill_discount": 0.00,
           "taxable_amount": 85.04,
           "cgst_rate": 9.0,
-          "cgst_amount": 7.65,
+          "cgst_amount": 7.66,
           "sgst_rate": 9.0,
           "sgst_amount": 7.65,
           "igst_rate": 0.0,
           "igst_amount": 0.00,
           "cess_amount": 0.00,
-          "total_tax": 15.30,
-          "total_amount": 100.34
+          "total_tax": 15.31,
+          "total_amount": 100.35
         }
       ],
       "expected_totals": {
@@ -638,13 +639,13 @@
         "line_discount_total": 0.00,
         "bill_discount_total": 0.00,
         "taxable_subtotal": 85.04,
-        "cgst_total": 7.65,
+        "cgst_total": 7.66,
         "sgst_total": 7.65,
         "igst_total": 0.00,
         "cess_total": 0.00,
-        "total_tax": 15.30,
-        "net_before_round": 100.34,
-        "round_off": -0.34,
+        "total_tax": 15.31,
+        "net_before_round": 100.35,
+        "round_off": -0.35,
         "grand_total": 100.00
       }
     }

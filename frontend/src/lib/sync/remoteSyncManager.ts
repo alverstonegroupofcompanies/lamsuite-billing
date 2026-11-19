@@ -1,4 +1,5 @@
 import { sqliteStorage } from "../db/sqliteStorage";
+import { canonicalizeInvoiceIdentity, clearInvoiceChildren } from "../db/invoiceCacheIdentity";
 import { cloudDeltaSyncService } from "./cloudDeltaSyncService";
 import { syncQueueService, defaultBackendApiClient } from "./syncQueueService";
 import { multiCounterStockService } from "../stock/multiCounterStockService";
@@ -242,17 +243,33 @@ export class RemoteSyncManager {
     } else if (syncEvt.entity_type === "invoice") {
       const payload = typeof syncEvt.client_data === "string" ? JSON.parse(syncEvt.client_data) : syncEvt.client_data;
       if (payload && (payload.id || payload.invoice_number)) {
-        const idKey = String(payload.id || payload.invoice_number);
-        await sqliteStorage.insertRecord("invoices", idKey, {
+        // The broadcast carries a summary of the bill, not its lines, and it also reaches the
+        // counter that created it. Merge it onto the one row this device keeps for that document:
+        // replacing the row would drop the money the till has already booked, and keying by
+        // invoice number would store a second copy of a bill the till holds under its own id.
+        const identity = await canonicalizeInvoiceIdentity({
+          id: payload.id,
+          external_id: payload.external_id,
+          invoice_number: payload.invoice_number,
+          store_id: syncEvt.store_id,
+        });
+        if (identity.skip || !identity.canonicalKey) return;
+        const held = await sqliteStorage.findById<Record<string, unknown>>("invoices", identity.canonicalKey);
+        await sqliteStorage.insertRecord("invoices", identity.canonicalKey, {
+          ...(held || {}),
           ...payload,
-          id: idKey,
+          id: identity.canonicalKey,
+          external_id: identity.external_id || payload.external_id || null,
           sync_state: "synced",
         });
         if (Array.isArray(payload.items)) {
+          await clearInvoiceChildren(identity.canonicalKey);
           for (const item of payload.items) {
-            await sqliteStorage.insertRecord("invoice_items", `item_${item.id || Math.random()}`, {
+            const itemKey = `item_${item.id || Math.random()}`;
+            await sqliteStorage.insertRecord("invoice_items", itemKey, {
               ...item,
-              invoice_id: idKey,
+              id: itemKey,
+              invoice_id: identity.canonicalKey,
             });
           }
         }

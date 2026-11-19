@@ -47,6 +47,7 @@ import {
   companySettingsService,
 } from "../lib/settings/companySettingsService";
 import { sqliteStorage } from "../lib/db/sqliteStorage";
+import { canonicalizeInvoiceIdentity, clearInvoiceChildren } from "../lib/db/invoiceCacheIdentity";
 import { onlineTransactionService } from "../lib/sync/onlineTransactionService";
 import { storeRegistryService, type RegisteredStoreRecord } from "../lib/auth/storeRegistryService";
 import { storeDeviceService, type StoreDeviceProfile } from "../lib/auth/storeDeviceService";
@@ -352,8 +353,20 @@ export const BillsPage: React.FC = () => {
             // Ingest server bills into local SQLite cache in background
             try {
               for (const sinv of serverList) {
+                // A bill the till has revised or cancelled but not pushed yet carries money and a
+                // status the server snapshot predates, and the same bill can already sit in the
+                // cache under the key the till minted for it. Resolve one key before writing.
+                const identity = await canonicalizeInvoiceIdentity({
+                  id: sinv.id,
+                  external_id: sinv.external_id,
+                  invoice_number: sinv.invoice_number,
+                  store_id: sinv.store_id || activeStoreId,
+                });
+                if (identity.skip) continue;
+                const invoiceKey = identity.canonicalKey;
                 const rec: InvoiceRecord = {
-                  id: String(sinv.id),
+                  id: invoiceKey,
+                  external_id: identity.external_id,
                   store_id: String(sinv.store_id || activeStoreId),
                   module_key: sinv.module_key || "invoice",
                   invoice_number: sinv.invoice_number,
@@ -385,12 +398,14 @@ export const BillsPage: React.FC = () => {
                   created_at: sinv.created_at ? new Date(sinv.created_at).getTime() : Date.now(),
                   updated_at: sinv.updated_at ? new Date(sinv.updated_at).getTime() : Date.now(),
                 };
-                await sqliteStorage.insertRecord("invoices", String(sinv.id), rec);
+                await sqliteStorage.insertRecord("invoices", invoiceKey, rec);
+                await clearInvoiceChildren(invoiceKey);
                 if (Array.isArray(sinv.items)) {
                   for (const item of sinv.items) {
-                    await sqliteStorage.insertRecord("invoice_items", `item_${item.id || Math.random()}`, {
-                      id: String(item.id || `item_${Math.random()}`),
-                      invoice_id: String(sinv.id),
+                    const itemKey = `item_${item.id || Math.random()}`;
+                    await sqliteStorage.insertRecord("invoice_items", itemKey, {
+                      id: itemKey,
+                      invoice_id: invoiceKey,
                       product_id: String(item.product_id),
                       product_name: item.product_name,
                       hsn_code: item.hsn_code,
@@ -419,6 +434,7 @@ export const BillsPage: React.FC = () => {
                   for (const p of payments) {
                     await sqliteStorage.insertRecord("invoice_payments", p.id, {
                       ...p,
+                      invoice_id: invoiceKey,
                       store_id: String(sinv.store_id || activeStoreId),
                     } as unknown as Record<string, unknown>);
                   }
@@ -547,8 +563,17 @@ export const BillsPage: React.FC = () => {
         totalPages = json.last_page || 1;
 
         for (const sinv of serverInvoices) {
-          await sqliteStorage.insertRecord("invoices", String(sinv.id), {
-            id: String(sinv.id),
+          const identity = await canonicalizeInvoiceIdentity({
+            id: sinv.id,
+            external_id: sinv.external_id,
+            invoice_number: sinv.invoice_number,
+            store_id: sinv.store_id || activeStoreId,
+          });
+          if (identity.skip) continue;
+          const invoiceKey = identity.canonicalKey;
+          await sqliteStorage.insertRecord("invoices", invoiceKey, {
+            id: invoiceKey,
+            external_id: identity.external_id,
             module_key: sinv.module_key || "invoice",
             invoice_number: sinv.invoice_number,
             invoice_date: toStoreDateString(sinv.invoice_date),
@@ -579,11 +604,13 @@ export const BillsPage: React.FC = () => {
             created_at: sinv.created_at ? new Date(sinv.created_at).getTime() : Date.now(),
             updated_at: sinv.updated_at ? new Date(sinv.updated_at).getTime() : Date.now(),
           });
+          await clearInvoiceChildren(invoiceKey);
           if (Array.isArray(sinv.items)) {
             for (const item of sinv.items) {
-              await sqliteStorage.insertRecord("invoice_items", `item_${item.id || Math.random()}`, {
-                id: String(item.id || `item_${Math.random()}`),
-                invoice_id: String(sinv.id),
+              const itemKey = `item_${item.id || Math.random()}`;
+              await sqliteStorage.insertRecord("invoice_items", itemKey, {
+                id: itemKey,
+                invoice_id: invoiceKey,
                 product_id: String(item.product_id),
                 product_name: item.product_name,
                 hsn_code: item.hsn_code,
@@ -612,6 +639,7 @@ export const BillsPage: React.FC = () => {
             for (const p of payments) {
               await sqliteStorage.insertRecord("invoice_payments", p.id, {
                 ...p,
+                invoice_id: invoiceKey,
                 store_id: String(sinv.store_id || activeStoreId),
               } as unknown as Record<string, unknown>);
             }

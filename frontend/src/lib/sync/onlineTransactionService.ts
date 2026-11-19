@@ -1,4 +1,5 @@
 import { sqliteStorage } from "../db/sqliteStorage";
+import { canonicalizeInvoiceIdentity, clearInvoiceChildren } from "../db/invoiceCacheIdentity";
 import { getResolvedApiBaseUrl } from "../../config/env";
 import { counterSequenceService, type DocType } from "../auth/counterSequenceService";
 import { storeDeviceService } from "../auth/storeDeviceService";
@@ -754,39 +755,45 @@ export class OnlineTransactionService {
     const activeStore = storeRegistryService.getActiveStore();
     const storeId = String(serverInvoice.store_id || activeStore?.id || "1");
 
-    // Upsert invoice in local cache under both localId and server numeric ID
+    // One bill, one row: the server id is the key the register, the drawer and the receipt use, so
+    // the authoritative record is written there and the till's own idempotency key is kept as a
+    // field instead of being stored a second time under a second primary key. A pending copy of
+    // this same document is not a reason to skip — the server has just accepted it.
+    const identity = await canonicalizeInvoiceIdentity({
+      id: serverInvoice.id,
+      external_id: serverInvoice.external_id,
+      invoice_number: serverInvoice.invoice_number,
+      store_id: storeId,
+    });
+    const canonicalId = identity.canonicalKey || localId;
+
     const invRow = {
       ...serverInvoice,
       customer_phone: serverInvoice.customer_phone || serverInvoice.customer?.phone || (serverInvoice as any).phone || "",
       store_id: storeId,
-      id: localId,
+      id: canonicalId,
+      external_id: identity.external_id || serverInvoice.external_id || null,
       server_id: serverInvoice.id,
       sync_state: "synced",
       updated_at: Date.now(),
     };
-    await sqliteStorage.insertRecord("invoices", localId, invRow);
-    const serverIdStr = String(serverInvoice.id);
-    if (serverIdStr && serverIdStr !== localId) {
-      await sqliteStorage.insertRecord("invoices", serverIdStr, {
-        ...invRow,
-        id: serverIdStr,
-      });
-    }
+    await sqliteStorage.insertRecord("invoices", canonicalId, invRow);
+    await clearInvoiceChildren(canonicalId);
 
     // Upsert line items in local cache
     if (serverInvoice.items && Array.isArray(serverInvoice.items)) {
       for (let i = 0; i < serverInvoice.items.length; i++) {
         const it = serverInvoice.items[i];
-        const itemId = String(it.id || `srv_item_${localId}_${i}`);
+        const itemId = `item_${String(it.id || `${canonicalId}_${i}`)}`;
         await sqliteStorage.insertRecord("invoice_items", itemId, {
           ...it,
           id: itemId,
-          invoice_id: localId,
+          invoice_id: canonicalId,
           store_id: storeId,
         });
 
         // Write stock transaction
-        const stockTxId = `srv_stk_${localId}_${i}`;
+        const stockTxId = `srv_stk_${canonicalId}_${i}`;
         const upp = Math.max(1, Number(it.units_per_pack) || 1);
         const qtyDeducted =
           (Number(it.qty || 0) * upp) +
@@ -801,7 +808,7 @@ export class OnlineTransactionService {
           event_type: "SALE",
           qty_delta: -qtyDeducted,
           reference_type: "INVOICE",
-          reference_id: localId,
+          reference_id: canonicalId,
           counter_id: serverInvoice.counter_id,
           created_at: Date.now(),
         });

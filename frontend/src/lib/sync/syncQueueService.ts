@@ -167,6 +167,40 @@ export class SyncQueueService {
     return backoff;
   }
 
+  /** Local table a queued entity type was written into, for documents that carry a sync_state. */
+  private static readonly documentTables: Partial<Record<SyncQueueItem["entity_type"], string>> = {
+    invoice: "invoices",
+    purchase: "purchase_documents",
+  };
+
+  /**
+   * The server took this document, so the local copy is no longer a pending edit. Only a row that
+   * still carries the figures that were pushed is flipped, so an edit made while the push was in
+   * flight keeps its pending flag and goes out on the next flush.
+   */
+  private async markSourceDocumentsSynced(items: SyncQueueItem[]): Promise<void> {
+    for (const item of items) {
+      const table = SyncQueueService.documentTables[item.entity_type];
+      if (!table || !item.entity_id) continue;
+
+      let payload: Record<string, unknown> = {};
+      try {
+        payload = JSON.parse(item.payload_json);
+      } catch (_) {}
+
+      const row = await sqliteStorage.findById<Record<string, unknown>>(table, String(item.entity_id));
+      if (!row || row.sync_state === "synced") continue;
+      if (
+        payload.updated_at !== undefined &&
+        String(row.updated_at ?? "") !== String(payload.updated_at)
+      ) {
+        continue;
+      }
+
+      await sqliteStorage.insertRecord(table, String(item.entity_id), { ...row, sync_state: "synced" });
+    }
+  }
+
   async enqueue(
     entityType: SyncQueueItem["entity_type"],
     entityId: string,
@@ -318,6 +352,11 @@ export class SyncQueueService {
               processed++;
             }
             this.lastSyncedAt = Date.now();
+            // The queue rows above all cleared, but a partially rejected batch leaves documents the
+            // server never took, so only a batch with nothing failed marks its sources synced.
+            if (!res.results || res.results.failed === 0) {
+              await this.markSourceDocumentsSynced(items);
+            }
           } else {
             throw new Error("Batch sync push failed on server");
           }
@@ -355,6 +394,7 @@ export class SyncQueueService {
             // Mark synced
             item.status = "synced";
             await sqliteStorage.insertRecord("sync_queue", item.id, item as unknown as Record<string, unknown>);
+            await this.markSourceDocumentsSynced([item]);
             processed += 1;
             this.lastSyncedAt = Date.now();
           } catch (error) {
@@ -417,6 +457,9 @@ export class SyncQueueService {
           item.status = "synced";
           item.last_error = undefined;
           await sqliteStorage.insertRecord("sync_queue", item.id, item as unknown as Record<string, unknown>);
+          if (!res.results || res.results.failed === 0) {
+            await this.markSourceDocumentsSynced([item]);
+          }
           this.lastSyncedAt = Date.now();
           this.notifyListeners();
           return { success: true };
@@ -430,6 +473,7 @@ export class SyncQueueService {
           item.status = "synced";
           item.last_error = undefined;
           await sqliteStorage.insertRecord("sync_queue", item.id, item as unknown as Record<string, unknown>);
+          await this.markSourceDocumentsSynced([item]);
           this.lastSyncedAt = Date.now();
           this.notifyListeners();
           return { success: true };

@@ -326,10 +326,7 @@ class AdminTransactionController
             ];
         }
 
-        $taxSetting = \App\Models\CompanySetting::where('store_id', $store->id)
-            ->where('key', 'tax_settings')
-            ->first();
-        $taxMode = $taxSetting ? ($taxSetting->value['tax_mode'] ?? 'inclusive') : 'inclusive';
+        $taxMode = app(\App\Services\Tax\StoreTaxPolicy::class)->forStore($store->id)['tax_mode'];
 
         $tax = \App\Services\Tax\TaxEngine::calculate([
             'store_state' => $store->state_code ?: '32',

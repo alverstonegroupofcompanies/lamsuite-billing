@@ -13,10 +13,10 @@ const puppeteer = require('../node_modules/puppeteer-core');
 const { execSync } = require('child_process');
 
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
-const POS_URL = 'http://localhost:5173';
-const ADMIN_URL = 'http://localhost:5174';
-const BACKEND = 'http://127.0.0.1:8000';
-const DB_PATH = path.resolve(__dirname, 'qa_fresh.sqlite');
+const POS_URL = process.env.QA_POS_URL || 'http://localhost:5173';
+const ADMIN_URL = process.env.QA_ADMIN_URL || 'http://localhost:5174';
+const BACKEND = process.env.QA_BACKEND || 'http://127.0.0.1:8000';
+const DB_PATH = process.env.QA_DB ? path.resolve(process.env.QA_DB) : path.resolve(__dirname, 'qa_fresh.sqlite');
 const EVIDENCE = path.resolve(__dirname, '../../test-reports/evidence');
 const SHOTS = path.resolve(__dirname, '../../test-reports/screenshots/qa_run');
 for (const d of [EVIDENCE, SHOTS]) if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true });
@@ -45,6 +45,8 @@ async function newSession(name, { url = POS_URL, viewport = { width: 1920, heigh
     executablePath: CHROME,
     headless: 'new',
     userDataDir,
+    // A busy sync or a heavy render can block the renderer long enough to time out a key event.
+    protocolTimeout: 180000,
     args: ['--no-sandbox', '--disable-setuid-sandbox', `--window-size=${viewport.width},${viewport.height}`, '--allow-file-access-from-files'],
     defaultViewport: viewport,
   });
@@ -106,7 +108,14 @@ async function newSession(name, { url = POS_URL, viewport = { width: 1920, heigh
   page.on('console', (m) => { if (m.type() === 'error' || m.type() === 'warning') consoleErrs.push({ type: m.type(), text: m.text().slice(0, 500) }); });
   page.on('pageerror', (e) => pageErrs.push(String(e).slice(0, 500)));
 
-  const ctx = { browser, page, net, consoleErrs, pageErrs, blockedExternal, name, url, userDataDir };
+  // a native alert/confirm blocks every later CDP call until it is answered
+  const dialogs = [];
+  page.on('dialog', async (d) => {
+    dialogs.push({ type: d.type(), message: (d.message() || '').slice(0, 200) });
+    try { await d.dismiss(); } catch { /* already handled */ }
+  });
+
+  const ctx = { browser, page, net, consoleErrs, pageErrs, blockedExternal, name, url, userDataDir, dialogs };
   ctx.goOffline = () => { netRules.offline = true; };
   ctx.goOnline = () => { netRules.offline = false; };
   ctx.dropUrl = (frag) => netRules.drop.push(frag);

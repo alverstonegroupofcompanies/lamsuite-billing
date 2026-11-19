@@ -302,6 +302,118 @@ describe("salesReturnService - Credit Notes & Sales Returns", () => {
     expect(ret?.cancellation_reason).toBe("Customer decided to keep items");
   });
 
+  const queueItemFor = async (returnId: string) => {
+    const queue = await sqliteStorage.findAll<any>("sync_queue");
+    return queue
+      .filter((q) => q.entity_id === returnId)
+      .sort((a, b) => Number(a.created_at ?? 0) - Number(b.created_at ?? 0))
+      .pop();
+  };
+
+  const parsePayload = (item: any) => JSON.parse(item.payload_json ?? item.payload ?? "{}");
+
+  const returnInput: SalesReturnInput = {
+    original_invoice_number: "INV-2026-0009",
+    customer_id: "cust_test_sr",
+    customer_name: "Amit Sharma",
+    refund_mode: "Cash",
+    lines: [
+      {
+        product_id: "prod_dolo_sr",
+        product_name: "Dolo 650 Tablet",
+        hsn_code: "30049099",
+        batch_id: "batch_dolo_sr1",
+        batch_no: "DL2601",
+        sold_qty: 4,
+        return_qty: 1,
+        unit_price: 30.0,
+        gst_percent: 12,
+        reason: "customer_return",
+        condition: "restock",
+      },
+    ],
+  };
+
+  it("cancelling a pack return takes the same base units back out of stock", async () => {
+    // 1 pack of 15 went back on the shelf when the return was booked; cancelling has to remove 15.
+    const input: SalesReturnInput = {
+      original_invoice_number: "INV-2026-0010",
+      customer_name: "Amit Sharma",
+      refund_mode: "Cash",
+      lines: [
+        {
+          product_id: "prod_dolo_sr",
+          product_name: "Dolo 650 Tablet",
+          batch_id: "batch_dolo_sr1",
+          batch_no: "DL2601",
+          sold_qty: 30,
+          return_qty: 1,
+          loose_qty: 2,
+          units_per_pack: 15,
+          unit_price: 30.0,
+          gst_percent: 12,
+          reason: "customer_return",
+          condition: "restock",
+        },
+      ],
+    };
+
+    const created = await salesReturnService.createSalesReturn(input);
+    expect((await sqliteStorage.findById<any>("product_batches", "batch_dolo_sr1")).stock_qty).toBe(117);
+
+    await salesReturnService.cancelSalesReturn(created.returnId, "Customer kept the goods");
+
+    const batch = await sqliteStorage.findById<any>("product_batches", "batch_dolo_sr1");
+    expect(batch.stock_qty).toBe(100);
+
+    const reversal = (await sqliteStorage.findAll<any>("stock_transactions")).find(
+      (t) => t.event_type === "RETURN_CANCELLED"
+    );
+    expect(reversal.qty_delta).toBe(-17);
+  });
+
+  it("pushes the credit note with its lines, not the bare return record", async () => {
+    const created = await salesReturnService.createSalesReturn(returnInput);
+
+    const queued = await queueItemFor(created.returnId);
+    expect(queued).toBeDefined();
+    expect(queued.entity_type).toBe("invoice");
+    expect(queued.action).toBe("create");
+
+    const payload = parsePayload(queued);
+    expect(payload.module_key).toBe("credit_note");
+    expect(payload.invoice_number).toBe(created.returnNumber);
+    expect(payload.status).toBe("issued");
+    expect(payload.original_invoice_number).toBe("INV-2026-0009");
+    expect(payload.grand_total).toBe(created.grandTotal);
+
+    expect(payload.items.length).toBe(1);
+    expect(payload.items[0].qty).toBe(1);
+    // The server has to be told which lines never went back on the shelf, or it restocks discards.
+    expect(payload.items[0].stock_action).toBe("restock");
+    expect(payload.items[0].taxable_amount).toBe(30);
+    expect(payload.items[0].cgst_amount).toBe(1.8);
+    expect(payload.items[0].sgst_amount).toBe(1.8);
+    // The server only re-prices from lines it can see, and a line with no tax_amount reads as
+    // untaxed in every GST report.
+    expect(payload.items[0].tax_amount).toBe(3.6);
+  });
+
+  it("pushes a cancellation as header only so the credit note keeps its lines", async () => {
+    const created = await salesReturnService.createSalesReturn(returnInput);
+    await salesReturnService.cancelSalesReturn(created.returnId, "Entered in error");
+
+    const queued = await queueItemFor(created.returnId);
+    expect(queued.action).toBe("update");
+
+    const payload = parsePayload(queued);
+    expect(payload.status).toBe("cancelled");
+    expect(payload.cancel_reason).toBe("Entered in error");
+    expect(payload.invoice_number).toBe(created.returnNumber);
+    expect(payload.items).toBeUndefined();
+    expect(payload.grand_total).toBeUndefined();
+  });
+
   it("converts packs and loose units into base units", () => {
     expect(toBaseUnits(2, 3, 10)).toBe(23);
     expect(toBaseUnits(undefined, undefined, undefined)).toBe(0);

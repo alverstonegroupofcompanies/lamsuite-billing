@@ -20,6 +20,7 @@ import {
   type PurchaseReturnReason,
   type PurchaseReturnSettlement,
 } from "../lib/purchases/purchaseReturnService";
+import { purchaseService } from "../lib/purchases/purchaseService";
 import { sqliteStorage } from "../lib/db/sqliteStorage";
 import { printingEngine, type DebitNotePrintData } from "../lib/printing/printingEngine";
 import { companySettingsService } from "../lib/settings/companySettingsService";
@@ -34,6 +35,25 @@ const RETURN_REASONS: { value: PurchaseReturnReason; label: string }[] = [
   { value: "excess", label: "Excess Stock" },
   { value: "other", label: "Other" },
 ];
+
+// The debit note prices one returned quantity with `purchase_rate` and takes that same quantity out
+// of batch stock, while an inward bill is keyed in packs — both have to be in base units here.
+function baseUnitsOf(item: any): number {
+  if (item.total_units != null) return Number(item.total_units);
+  const packs = Number(item.pack_qty ?? item.qty ?? item.quantity ?? 0);
+  if (item.pack_qty != null || item.units_per_pack != null) {
+    return packs * Number(item.units_per_pack || 1) + Number(item.loose_qty || 0);
+  }
+  return packs;
+}
+
+function unitRateOf(item: any, units: number): number {
+  const perUnit = Number(item.effective_unit_cost || 0);
+  if (perUnit > 0) return perUnit;
+  const taxable = Number(item.taxable_amount || 0);
+  if (units > 0 && taxable > 0) return taxable / units;
+  return Number(item.purchase_rate || item.rate || 0);
+}
 
 interface PurchaseDoc {
   id: string;
@@ -186,21 +206,29 @@ export const PurchaseReturnPage: React.FC = () => {
     setPurchaseSearchResults([]);
     setPurchaseSearchQuery(purchase.purchase_number);
 
+    // A purchase's lines live in purchase_items; the document row only carries `lines` on records
+    // migrated from the old store, so reading it alone showed every posted bill as empty.
+    const loaded = await purchaseService.getPurchaseBillById(purchase.id);
+    const rawLines: any[] = loaded && loaded.items.length > 0 ? loaded.items : purchase.lines || [];
+
     // Build return lines from purchase lines
-    const lines: ReturnLineState[] = (purchase.lines || []).map((item: any, i: number) => ({
-      product_id: item.product_id || `prod_${i}`,
-      product_name: item.product_name || item.name || "Unknown",
-      hsn_code: item.hsn_code,
-      batch_id: item.batch_id || "",
-      batch_no: item.batch_no || "",
-      expiry_date: item.expiry_date,
-      purchased_qty: item.qty || item.quantity || 0,
-      purchase_rate: item.purchase_rate || item.rate || 0,
-      gst_percent: item.gst_percent || item.gst || 12,
-      reason: "expired",
-      return_qty: 0,
-      selected: false,
-    }));
+    const lines: ReturnLineState[] = rawLines.map((item: any, i: number) => {
+      const units = baseUnitsOf(item);
+      return {
+        product_id: item.product_id || `prod_${i}`,
+        product_name: item.product_name || item.name || "Unknown",
+        hsn_code: item.hsn_code,
+        batch_id: item.batch_id || "",
+        batch_no: item.batch_no || "",
+        expiry_date: item.expiry_date,
+        purchased_qty: units,
+        purchase_rate: unitRateOf(item, units),
+        gst_percent: item.gst_percent || item.gst || 12,
+        reason: "expired" as PurchaseReturnReason,
+        return_qty: 0,
+        selected: false,
+      };
+    });
     setReturnLines(lines);
     setFormStep("line_selection");
   };

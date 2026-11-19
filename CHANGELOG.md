@@ -1,5 +1,41 @@
 # Changelog
 
+## 2.0.41 — 2026-11-19
+
+Centralised-billing release: the server now calculates every document a till sends the
+way the till itself calculated it. GST mode and paisa rounding agree across both engines,
+offline bills, purchases, returns, credit notes, edits and cancels land on the server with
+their lines, batches, payments and stock effects intact, and the day-window filters that
+silently hid today's bills are gone.
+
+### GST mode and totals
+
+1. **The store's tax mode is honoured server-side** — a new `StoreTaxPolicy` reads the billing setting the POS and admin panel actually write, falls back to the legacy key, and only then to the stores columns, so an exclusive store no longer gets inclusive math from `/api/sync`.
+2. **One paisa law in both engines** — a line's GST amount is rounded once and then split `cgst = round(gst/2)`, `sgst = gst - cgst`. Rounding each half off the taxable base lost a paisa whenever both halves rounded down, so the server reported up to 2 paise less tax than the receipt printed and pushed the difference into round-off. Inclusive lines now satisfy `taxable + tax == the amount charged`.
+3. **Golden vectors corrected** — `specs/gst_tax_test_vectors.json` carries the rounding convention in words, and TC04, TC07 and TC10 were fixed where they encoded the double-rounded paisa (₹81 at 5% is ₹4.05, not ₹4.06; a ₹100 MRP line at 12%+2% carries ₹12.28 of tax; the ₹100.35 net that TC10 names is now the net it asserts).
+
+### Offline documents reaching the server intact
+
+4. **Purchase inward sync** — a queued purchase creates its batches, keeps its line links and its own bill number, and is marked synced, so ITC, supplier ledger and stock all survive the replay.
+5. **Returns and credit notes stay themselves** — a sales return arrives as a credit note against the original invoice with its lines and links, and cancelled documents keep their booked money instead of being rewritten.
+6. **One canonical cancel path** — `InvoiceCancellationService` is the single place a sale is reversed, used by both `POST /api/invoices/{id}/cancel` and the sync queue, so stock returns exactly once and the ledger entry matches.
+7. **Stock action per line** — `invoice_items.stock_action` lets a credit-note line marked discard or quarantine stay non-restocking, instead of the server adding returned-then-destroyed stock back.
+8. **No duplicate rows on pull** — invoices and returns are identified by a canonical document key across the queue, the ingest and the local cache.
+
+### POS and Past Bills
+
+9. **"Today" shows today's bills** — every invoice date window compares on `whereDate` instead of string ranges, so the bare `YYYY-MM-DD` dates the till syncs and the stamped `YYYY-MM-DD HH:MM:SS` dates both match. Reports used the same broken bounds and had been summarising an empty day.
+10. **Purchase cancel dialog is usable** — the Confirm button in the purchase details drawer is reachable and clickable again.
+11. **Debit notes load their purchase** — a purchase return now pulls the original inward lines instead of opening empty.
+
+### Testing
+
+12. **Backend** — 483 tests / 2,934 assertions pass, including new `StoreTaxModeTest`, `SyncPurchaseIngestTest`, `SyncPurchaseReturnIngestTest`, `SyncCreditNoteIngestTest`, `SyncDocumentStockTest`, `SyncInvoiceEditCancelTest` and `InvoiceDateWindowFilterTest`.
+13. **POS** — 97 files / 761 tests pass and `tsc --noEmit` is clean, including the shared tax-engine vectors, `invoiceCacheIdentity` and the sales/purchase return services.
+14. **Live** — the GST QA harness (`tests/qa/gst_s1…s7`) drives the real POS web build against a running API and checks the money the till printed against the rows the server stored, plus batch stock before and after.
+
+Bump desktop app, updater and admin panel versions to 2.0.41.
+
 ## 2.0.40 — 2026-11-18
 
 Branch-scoped staff management release: staff CRUD now runs from the POS terminal

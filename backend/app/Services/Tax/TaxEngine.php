@@ -244,8 +244,10 @@ class TaxEngine
             } else {
                 $cgstRate = $gstPercent / 2.0;
                 $sgstRate = $gstPercent / 2.0;
-                $cgstPaise = (int) round(($taxablePaise * $cgstRate) / 100);
-                $sgstPaise = (int) round(($taxablePaise * $sgstRate) / 100);
+                // Split the GST amount of the line; rounding each half off the taxable base
+                // can drop a paisa, and on inclusive lines that breaks taxable + tax = MRP.
+                $cgstPaise = (int) round($gstPaise / 2);
+                $sgstPaise = $gstPaise - $cgstPaise;
             }
 
             $totalTaxPaise = $cgstPaise + $sgstPaise + $igstPaise + $cessPaise;

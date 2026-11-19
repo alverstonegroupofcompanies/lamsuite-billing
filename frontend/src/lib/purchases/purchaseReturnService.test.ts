@@ -48,6 +48,16 @@ describe("purchaseReturnService - Debit Notes & Purchase Returns", () => {
     });
   });
 
+  const queueItemFor = async (returnId: string) => {
+    const queue = await sqliteStorage.findAll<any>("sync_queue");
+    return queue
+      .filter((q) => q.entity_id === returnId)
+      .sort((a, b) => Number(a.created_at ?? 0) - Number(b.created_at ?? 0))
+      .pop();
+  };
+
+  const parsePayload = (item: any) => JSON.parse(item.payload_json ?? item.payload ?? "{}");
+
   it("successfully creates a purchase return, reduces batch stock, and records debit note", async () => {
     const input: PurchaseReturnInput = {
       original_purchase_number: "PUR-2026-001",
@@ -211,5 +221,68 @@ describe("purchaseReturnService - Debit Notes & Purchase Returns", () => {
     const saved = await purchaseReturnService.getPurchaseReturnById(res.returnId);
     expect(saved?.status).toBe("cancelled");
     expect(saved?.cancellation_reason).toBe("Supplier rejected return note");
+  });
+
+  it("queues the debit note as a purchase document, not as a product", async () => {
+    const res = await purchaseReturnService.createPurchaseReturn({
+      original_purchase_number: "PUR-2026-001",
+      supplier_id: "supp_apollo_pr",
+      supplier_name: "Apollo Pharma Distributors Pvt Ltd",
+      supplier_gstin: "32AAACA1234B1Z2",
+      settlement_type: "credit_adjust",
+      lines: [
+        {
+          product_id: "prod_amx_pr",
+          product_name: "Amoxicillin 500mg Capsule",
+          batch_id: "batch_amx_pr1",
+          batch_no: "AMX501",
+          purchased_qty: 20,
+          return_qty: 10,
+          purchase_rate: 60.0,
+          gst_percent: 12,
+          reason: "damaged",
+        },
+      ],
+    });
+
+    // entity_type "product" made the server drop the whole document: it has no name to match.
+    const queued = await queueItemFor(res.returnId);
+    expect(queued).toBeDefined();
+    expect(queued.entity_type).toBe("purchase");
+    expect(queued.action).toBe("create");
+    const payload = parsePayload(queued);
+    expect(payload.module_key).toBe("purchase_return");
+    expect(payload.return_number).toBe(res.returnNumber);
+    expect(payload.original_purchase_number).toBe("PUR-2026-001");
+    expect(payload.lines[0].return_qty).toBe(10);
+  });
+
+  it("queues the cancellation so the server gives the units back too", async () => {
+    const res = await purchaseReturnService.createPurchaseReturn({
+      original_purchase_number: "PUR-2026-002",
+      supplier_id: "supp_apollo_pr",
+      supplier_name: "Apollo Pharma Distributors Pvt Ltd",
+      settlement_type: "credit_adjust",
+      lines: [
+        {
+          product_id: "prod_amx_pr",
+          product_name: "Amoxicillin 500mg Capsule",
+          batch_id: "batch_amx_pr1",
+          batch_no: "AMX501",
+          purchased_qty: 20,
+          return_qty: 4,
+          purchase_rate: 60.0,
+          gst_percent: 12,
+          reason: "wrong_supply",
+        },
+      ],
+    });
+    await purchaseReturnService.cancelPurchaseReturn(res.returnId, "Entered in error");
+
+    const queued = await queueItemFor(res.returnId);
+    expect(queued.action).toBe("update");
+    const payload = parsePayload(queued);
+    expect(payload.status).toBe("cancelled");
+    expect(payload.module_key).toBe("purchase_return");
   });
 });

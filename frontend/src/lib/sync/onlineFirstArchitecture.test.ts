@@ -100,10 +100,14 @@ describe("LamSuite Billing Online-First Architecture & Resilient Offline Fallbac
     expect(res.isOnline).toBe(true);
     expect(res.invoice.invoice_number).toBe("C01-INV-1001");
 
-    // Local SQLite cache must be updated with the authoritative server record
-    const cachedInv = await sqliteStorage.findById("invoices", "tx_test_online_1");
+    // Local SQLite cache must be updated with the authoritative server record — as one row, keyed
+    // by the id the server gave the bill, with the till's own idempotency key kept on it.
+    const cachedInv = await sqliteStorage.findById("invoices", "991");
     expect(cachedInv).not.toBeNull();
     expect((cachedInv as any).server_id).toBe(991);
+    expect((cachedInv as any).external_id).toBe("tx_test_online_1");
+    const cachedRows = await sqliteStorage.findAll<any>("invoices");
+    expect(cachedRows.filter((r) => r.invoice_number === "C01-INV-1001").length).toBe(1);
 
     // Remaining stock in local cache updated to 8
     const cachedBatch = await sqliteStorage.findById<any>("product_batches", "batch_pcm_01");

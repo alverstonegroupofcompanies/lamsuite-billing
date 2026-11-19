@@ -22,6 +22,7 @@ class InvoiceItem extends Model
         'units_per_pack',
         'unit_price',
         'mrp',
+        'stock_action',
         'discount_percent',
         'discount_amount',
         'allocated_discount',
@@ -62,6 +63,19 @@ class InvoiceItem extends Model
     public function invoice(): BelongsTo
     {
         return $this->belongsTo(Invoice::class);
+    }
+
+    /**
+     * A credit-note line the till logged as damaged or quarantined never went back onto the
+     * shelf, so nothing about that line may move stock on either the booking or the void.
+     */
+    public function restocksShelf(): bool
+    {
+        return !in_array(
+            strtolower(trim((string) $this->stock_action)),
+            ['damaged_discard', 'quarantine'],
+            true
+        );
     }
 
     public function product(): BelongsTo

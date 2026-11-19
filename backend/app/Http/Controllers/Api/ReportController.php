@@ -360,7 +360,8 @@ class ReportController
         $groupBy = $request->query('group_by', 'item');
 
         $invoices = Invoice::with(['items.product'])
-            ->whereBetween('invoice_date', [$startDate, $endDate])
+            ->whereDate('invoice_date', '>=', substr($startDate, 0, 10))
+            ->whereDate('invoice_date', '<=', substr($endDate, 0, 10))
             ->where('status', '!=', 'cancelled')
             ->when($storeId, fn($q) => $q->where('store_id', $storeId))
             ->get();
@@ -441,7 +442,8 @@ class ReportController
         $endDate = $request->query('end_date', Carbon::today()->toDateString());
 
         $invoices = Invoice::with(['items.product'])
-            ->whereBetween('invoice_date', [$startDate, $endDate])
+            ->whereDate('invoice_date', '>=', substr($startDate, 0, 10))
+            ->whereDate('invoice_date', '<=', substr($endDate, 0, 10))
             ->where('status', '!=', 'cancelled')
             ->when($storeId, fn($q) => $q->where('store_id', $storeId))
             ->get();
@@ -627,11 +629,11 @@ class ReportController
         $endDate = $request->query('end_date', date('Y-m-t'));
         $storeState = $request->query('store_state_code', '32');
 
-        $s = strlen($startDate) === 10 ? $startDate . ' 00:00:00' : $startDate;
-        $e = strlen($endDate) === 10 ? $endDate . ' 23:59:59' : $endDate;
-
+        // GSTR-1 must not lose the bills whose invoice_date is a bare date: this column is TEXT
+        // and holds both shapes, so the window is compared on the date part.
         $invoicesQuery = Invoice::with('items')
-            ->whereBetween('invoice_date', [$s, $e])
+            ->whereDate('invoice_date', '>=', substr($startDate, 0, 10))
+            ->whereDate('invoice_date', '<=', substr($endDate, 0, 10))
             ->where('status', '!=', 'cancelled');
         if ($storeId) {
             $invoicesQuery->where('store_id', $storeId);
@@ -952,11 +954,9 @@ class ReportController
         $storeStateCode = $request->query('store_state_code', '32');
         $storeId = $this->resolveStoreId($request);
 
-        $s = strlen($startDate) === 10 ? $startDate . ' 00:00:00' : $startDate;
-        $e = strlen($endDate) === 10 ? $endDate . ' 23:59:59' : $endDate;
-
         $invoicesQuery = Invoice::with('items')
-            ->whereBetween('invoice_date', [$s, $e])
+            ->whereDate('invoice_date', '>=', substr($startDate, 0, 10))
+            ->whereDate('invoice_date', '<=', substr($endDate, 0, 10))
             ->where('status', '!=', 'cancelled');
         if ($storeId) {
             $invoicesQuery->where('store_id', $storeId);

@@ -357,20 +357,10 @@ export function calculateDocumentTaxes(input: TaxEngineDocumentInput): TaxEngine
     } else {
       cgstRate = gstPercent / 2;
       sgstRate = gstPercent / 2;
-      if (pl.isInclusive && cessPercent === 0) {
-        // When there is no cess in tax-inclusive pricing, split gstPaise cleanly so taxable + tax === discountedBasePaise
-        cgstPaise = Math.round(gstPaise / 2);
-        sgstPaise = gstPaise - cgstPaise;
-      } else {
-        cgstPaise = Math.round((taxablePaise * cgstRate) / 100);
-        sgstPaise = Math.round((taxablePaise * sgstRate) / 100);
-        if (pl.isInclusive) {
-          const diff = (taxablePaise + cgstPaise + sgstPaise + cessPaise) - discountedBasePaise;
-          if (diff === 1) {
-            sgstPaise -= 1;
-          }
-        }
-      }
+      // Split the GST amount of the line; rounding each half off the taxable base can drop a
+      // paisa, and on inclusive lines that breaks taxable + tax === discountedBasePaise.
+      cgstPaise = Math.round(gstPaise / 2);
+      sgstPaise = gstPaise - cgstPaise;
     }
 
     const totalTaxPaise = cgstPaise + sgstPaise + igstPaise + cessPaise;

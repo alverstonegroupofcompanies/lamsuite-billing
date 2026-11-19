@@ -315,8 +315,12 @@ export class PurchaseReturnService {
 
     await sqliteStorage.insertRecord("purchase_returns", returnId, returnRecord);
 
-    // 6. Enqueue for sync
-    await syncQueueService.enqueue("product", returnId, "create", returnRecord as unknown as Record<string, unknown>);
+    // 6. Enqueue for sync — a debit note is a purchase document, and pushing it as a "product"
+    // made the server drop it (no name to match), so the return never reached the backend.
+    await syncQueueService.enqueue("purchase", returnId, "create", {
+      ...returnRecord,
+      module_key: "purchase_return",
+    } as unknown as Record<string, unknown>);
 
     return {
       success: true,
@@ -374,6 +378,13 @@ export class PurchaseReturnService {
     ret.cancelled_at = now;
     ret.updated_at = now;
     await sqliteStorage.insertRecord("purchase_returns", ret.id, ret);
+
+    // Without this the server keeps the debit note as if it were still live and never gives the
+    // returned units back to the batch.
+    await syncQueueService.enqueue("purchase", ret.id, "update", {
+      ...ret,
+      module_key: "purchase_return",
+    } as unknown as Record<string, unknown>);
 
     return { success: true };
   }
