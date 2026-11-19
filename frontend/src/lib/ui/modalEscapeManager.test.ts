@@ -95,6 +95,33 @@ describe("ModalEscapeManager", () => {
     expect(modalEscapeManager.hasOpenModal()).toBe(false);
   });
 
+  it("keeps a handler that reports the surface stayed open, so no DOM fallback runs", async () => {
+    const { modalEscapeManager } = await import("./modalEscapeManager");
+
+    const clicked = vi.fn();
+    (globalThis as any).document.querySelectorAll = vi.fn().mockImplementation(() => [
+      { clientHeight: 500, querySelector: () => null, querySelectorAll: () => [{ click: clicked, textContent: "✕" }] },
+    ]);
+
+    const stayOpen = vi.fn(() => false);
+    modalEscapeManager.register(stayOpen);
+
+    const escapeEvent = {
+      key: "Escape",
+      preventDefault: vi.fn(),
+      stopPropagation: vi.fn(),
+      stopImmediatePropagation: vi.fn(),
+    };
+    const keydownHandlers = listeners["keydown"] || [];
+
+    keydownHandlers.forEach((h) => h(escapeEvent));
+    keydownHandlers.forEach((h) => h(escapeEvent));
+
+    expect(stayOpen).toHaveBeenCalledTimes(2);
+    expect(modalEscapeManager.hasOpenModal()).toBe(true);
+    expect(clicked).not.toHaveBeenCalled();
+  });
+
   it("prevents fullscreen exit when Lock Screen is active without dismissing the lock screen", async () => {
     const { modalEscapeManager } = await import("./modalEscapeManager");
 

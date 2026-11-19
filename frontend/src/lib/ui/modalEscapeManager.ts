@@ -182,13 +182,21 @@ export const modalEscapeManager = new ModalEscapeManager();
  * React hook to register a modal's close callback on the global Escape stack.
  * Preserves LIFO ordering across re-renders using ref.
  */
-export function useModalEscape(isOpen: boolean, onClose: () => void) {
+export function useModalEscape(isOpen: boolean, onClose: () => boolean | void) {
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
 
   useEffect(() => {
     if (!isOpen) return;
-    const handler = () => onCloseRef.current();
+    // `false` keeps this registration alive: the effect cleanup owns its lifetime,
+    // not the first Escape press. Surfaces that stay mounted after Escape (a
+    // full-screen form, a close guarded by a confirm) would otherwise be consumed,
+    // and the next press would take the DOM fallback that clicks the first
+    // "X/Cancel/Close" button it finds in the overlay.
+    const handler = () => {
+      onCloseRef.current();
+      return false;
+    };
     return modalEscapeManager.register(handler);
   }, [isOpen]);
 }

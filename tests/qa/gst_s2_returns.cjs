@@ -229,7 +229,6 @@ function localBatchMap(s, storeId, productId) {
   const retLocal = (await localTable(s, 'sales_returns', store.id)).rows.filter(r => r.original_invoice_number === shown);
   const mirrorLocal = (await localTable(s, 'invoices', store.id)).rows.filter(i => i.module_key === 'credit_note');
   const queue = await localQueue(s, store.id);
-  const serverCredit = sql(`select * from invoices where store_id=${store.id} and (module_key='credit_note' or original_invoice_number='${shown}')`);
   const serverRetRows = sql(`select count(*) c from sqlite_master where name='sales_returns'`)[0].c;
   const stockAfter = {};
   for (const a of added) stockAfter[a.prod.id] = { server: serverBatchMap(a.prod.id), till: await localBatchMap(s, store.id, a.prod.id) };
@@ -266,8 +265,12 @@ function localBatchMap(s, storeId, productId) {
       { credit_note_no: cr.return_number, money_till: { gross: cr.subtotal, taxable: cr.taxable_subtotal ?? null, tax: cr.tax_total, round: cr.round_off, grand: cr.grand_total }, money_screen: screenTotals, money_oracle: oracle.totals, lines_set: setRes, lines_on_screen: linesOnScreen, till_stock: stockAfter, server_stock: stockBefore });
     if (bad.length) def({ id: 'S2.1-MONEY/STOCK', severity: 'Critical', type: 'Logic', module: 'Sales Return', title: 'credit note money or stock does not match the oracle/till expectation', expected: checks, actual: bad, diffs: bad });
 
-    // the "did it reach the backend" question, answered per surface
-    const srvRow = serverCredit[0] || null;
+    // the "did it reach the backend" question, answered per surface. This note only: a store
+    // holds many credit notes, and matching on module_key alone compares against an old one.
+    const returnNo = String(cr.return_number || '').trim().replace(/'/g, "''");
+    const srvRow = sql(`select * from invoices where store_id=${store.id}
+                          and (invoice_number='${returnNo}' or original_invoice_number='${shown}')
+                        order by id desc`)[0] || null;
     const srvItems = srvRow ? sql(`select * from invoice_items where invoice_id=${srvRow.id}`) : [];
     const persisted = {
       till_rows: { sales_returns: retLocal.length, credit_note_mirrors_in_invoices: mirrorLocal.length },

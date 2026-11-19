@@ -1,5 +1,47 @@
 # Changelog
 
+## 2.0.42 — 2026-11-19
+
+Follow-up to the server-side GST parity release. The whole GST and stock QA pass was re-run
+against the live POS web build and came back clean, and it turned up one keyboard defect that
+could silently strip the supplier from a purchase bill mid-entry.
+
+### Purchase entry keyboard
+
+1. **Escape no longer wipes the inward supplier** — a `useModalEscape` registration now lives
+   with its component instead of being consumed by the first Escape press. The inward form holds
+   the Escape key for as long as it is open, so its handler was popped on press one and press two
+   fell through to `ModalEscapeManager`'s DOM fallback, which clicks the first
+   "X/Cancel/Close" button it finds in the overlay — the supplier combobox's clear button. The
+   selected supplier vanished, the header chips went with it, and Post answered
+   "Please select a supplier (Alt+S)" while the typed lines stayed on screen.
+2. **Escape dismisses the entry row first** — the form's capture-phase listener reached the
+   discard confirm before the draft row's own handler could run, so Escape now clears a half-typed
+   product or draft line and only offers "Close purchase bill entry?" when the row is empty.
+
+### QA harness
+
+3. **Credit notes are compared per note** — the sales-return suite matched any
+   `module_key='credit_note'` row on the store and so checked a fresh note against the oldest one;
+   it now selects by return number or original invoice.
+4. **The report-window suite survives a settling frame** — `/api/invoices` calls issued straight
+   after checkout retry on a detached frame instead of ending the run, and the day and month
+   windows now pass over HTTP as well as out of process.
+
+### Testing
+
+5. **POS** — 98 files / 764 tests pass and `tsc --noEmit` is clean, including a new
+   `useModalEscape` suite and a manager case that a handler reporting "still open" stays
+   registered.
+6. **Backend** — 483 tests / 2,934 assertions pass.
+7. **Live** — S1 68/68 GST and stock checks in both tax modes, S2 returns and credit notes,
+   S3 inward bill and debit note, S4 bill revise and cancel, S5 purchase cancel and edit,
+   S6 date windows, S7 batch picker. Still open: F12 on "Post Purchase (F12)" opens the
+   Switch Account modal (Medium), and the server purchase row does not retain the till's own
+   document number (Low).
+
+Bump desktop app, updater and admin panel versions to 2.0.42.
+
 ## 2.0.41 — 2026-11-19
 
 Centralised-billing release: the server now calculates every document a till sends the

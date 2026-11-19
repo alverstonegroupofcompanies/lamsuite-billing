@@ -24,7 +24,7 @@ const rec = (id, title, status, evidence) => {
 const def = (d) => { out.defects.push(d); console.log(`  >>> DEFECT ${d.severity} ${d.id}: ${d.title}`); };
 
 /** Ask the live API something the cashier's own session is allowed to ask. */
-async function apiGet(s, path) {
+async function apiCall(s, path) {
   return await s.page.evaluate(async (p) => {
     const base = (() => {
       try { return (window.localStorage.getItem('lamsuite_api_base_url') || '').replace(/"/g, ''); } catch { return ''; }
@@ -41,6 +41,25 @@ async function apiGet(s, path) {
     try { json = JSON.parse(text); } catch { /* keep the raw text for evidence */ }
     return { path: p, status: res.status, json, text: json ? undefined : text.slice(0, 400) };
   }, path);
+}
+
+/**
+ * Right after checkout the till can still be settling, which surfaces as a detached
+ * frame inside page.evaluate. Wait for the frame instead of ending the run.
+ */
+async function apiGet(s, path) {
+  for (let i = 0; i < 4; i++) {
+    try {
+      return await apiCall(s, path);
+    } catch (e) {
+      const msg = String((e && e.message) || e);
+      if (!/detached Frame|context destroyed|Execution context was destroyed|navigating/i.test(msg)) throw e;
+      out.notes.push({ step: 'apiGet retried after a detached frame', attempt: i + 1, path, error: msg.slice(0, 120) });
+      await sleep(3000);
+      try { await s.page.waitForLoadState('domcontentloaded', { timeout: 15000 }); } catch { /* still settling */ }
+    }
+  }
+  return { path, status: 0, why: 'the till frame stayed detached through 4 attempts' };
 }
 
 const q = (v) => String(v).replace(/'/g, "''");

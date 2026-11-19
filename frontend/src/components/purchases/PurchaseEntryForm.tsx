@@ -86,6 +86,13 @@ export const PurchaseEntryForm: React.FC<PurchaseEntryFormProps> = ({
       entryProductInputRef.current?.focus();
       return;
     }
+    // This capture-phase listener eats Escape before the entry row's own onKeyDown
+    // can, so dismissing a half-typed product or draft line has to happen here —
+    // otherwise every Escape in a live bill raises the discard confirm.
+    if (searchQuery || draftLine) {
+      clearDraftLine();
+      return;
+    }
     if (confirm("Close purchase bill entry? Any unsaved line items will be lost.")) {
       onClose();
     }
