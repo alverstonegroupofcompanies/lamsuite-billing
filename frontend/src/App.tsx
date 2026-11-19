@@ -35,6 +35,7 @@ import { API_BASE_URL } from "./config/env";
 import { cloudDeltaSyncService } from "./lib/sync/cloudDeltaSyncService";
 import { deviceSessionService } from "./lib/devices/deviceSessionService";
 import { productsStore } from "./lib/masters/productsStore";
+import { unitsStore } from "./lib/masters/unitsStore";
 import { ModalStackProvider } from "./lib/modal/CentralModalManager";
 
 const LandingRedirect: React.FC = () => {
@@ -138,6 +139,7 @@ export const App: React.FC = () => {
           setRegisteredStores(updated.stores);
           setActiveStore(storeRegistryService.getActiveStore());
           productsStore.ensureCatalogPopulated(storeRegistryService.getActiveStore()?.id || "1").catch(() => {});
+          unitsStore.seedDefaultsIfEmpty().catch(() => {});
         } else {
           setRegisteredStores([]);
         }
@@ -163,6 +165,7 @@ export const App: React.FC = () => {
 
           const activeStoreId = String(currentActive?.id || "1");
           productsStore.ensureCatalogPopulated(activeStoreId).catch(() => {});
+          unitsStore.seedDefaultsIfEmpty().catch(() => {});
 
           // Fast online verification of store status and remote reset events.
           // Check every registered store so a reset clears the local DB of

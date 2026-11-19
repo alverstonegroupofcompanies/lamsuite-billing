@@ -59,12 +59,12 @@ describe("data-exchange registry store scoping", () => {
     expect((supp as any).store_id).toBe("store_A");
   });
 
-  it("groups are per-store while units stay shared", async () => {
+  it("groups and units are per-store (units carve-out reversed)", async () => {
     const groupRow = groupsDefinition.transformRow({ name: "Analgesics" });
     expect((groupRow as any).store_id).toBe("store_A");
 
     const unitRow = unitsDefinition.transformRow({ name: "STRIP", symbol: "STP" });
-    expect((unitRow as any).store_id).toBeUndefined();
+    expect((unitRow as any).store_id).toBe("store_A");
 
     await sqliteStorage.insertRecord("master_lookups", "g_a", {
       id: "g_a", type: "category", name: "A Group", store_id: "store_A",
@@ -72,10 +72,20 @@ describe("data-exchange registry store scoping", () => {
     await sqliteStorage.insertRecord("master_lookups", "g_b", {
       id: "g_b", type: "category", name: "B Group", store_id: "store_B",
     });
+    await sqliteStorage.insertRecord("master_lookups", "u_a", {
+      id: "u_a", type: "unit", name: "A Unit", symbol: "AU", store_id: "store_A",
+    });
+    await sqliteStorage.insertRecord("master_lookups", "u_b", {
+      id: "u_b", type: "unit", name: "B Unit", symbol: "BU", store_id: "store_B",
+    });
 
     const groupNames = (await groupsDefinition.exportQuery()).map((r: any) => r.name);
     expect(groupNames).toContain("A Group");
     expect(groupNames).not.toContain("B Group");
+
+    const unitNames = (await unitsDefinition.exportQuery()).map((r: any) => r.name);
+    expect(unitNames).toContain("A Unit");
+    expect(unitNames).not.toContain("B Unit");
   });
 
   it("batch export follows the parent product's store", async () => {

@@ -234,16 +234,17 @@ export const unitsDefinition: EntityDefinition = {
     { name: "BOTTLE", symbol: "BTL", precision: 0, is_active: true },
     { name: "KILOGRAM", symbol: "KGS", precision: 3, is_active: true },
   ],
-  transformRow: (raw) => ({
-    id: raw.id || `unt_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-    type: "unit",
-    name: String(raw.name || "").trim(),
-    symbol: String(raw.symbol || raw.name || "").trim().toUpperCase(),
-    precision: Number(raw.precision || 0),
-    is_active: raw.is_active === false || raw.is_active === 0 ? 0 : 1,
-  }),
+  transformRow: (raw) =>
+    withStore({
+      id: raw.id || `unt_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      type: "unit",
+      name: String(raw.name || "").trim(),
+      symbol: String(raw.symbol || raw.name || "").trim().toUpperCase(),
+      precision: Number(raw.precision || 0),
+      is_active: raw.is_active === false || raw.is_active === 0 ? 0 : 1,
+    }),
   exportQuery: async () => {
     const list = await sqliteStorage.findAll<any>("master_lookups");
-    return list.filter((item) => item.type === "unit");
+    return list.filter((item) => item.type === "unit" && isForActiveStore(item));
   },
 };

@@ -8,6 +8,7 @@ use App\Models\Party;
 use App\Models\Product;
 use App\Models\ProductBatch;
 use App\Models\Store;
+use App\Services\Masters\UnitDefaultsService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -419,6 +420,13 @@ class AdminMasterController
         $storeId = $request->get('active_store_id');
         $type = $request->query('type');
 
+        // Units are store-scoped: a store without unit rows gets its default set
+        // on first use (self-heals stores that predate the store-scoped units).
+        if ($type === 'unit' && $storeId
+            && MasterLookup::where('store_id', $storeId)->where('type', 'unit')->count() === 0) {
+            app(UnitDefaultsService::class)->seedDefaultsForStore((int) $storeId);
+        }
+
         $query = MasterLookup::query()
             ->when($type, fn($q) => $q->where('type', $type))
             ->when($storeId, fn($q) => $q->where(fn($sub) => $sub->where('store_id', $storeId)->orWhereNull('store_id')));
@@ -472,6 +480,7 @@ class AdminMasterController
     public function updateLookup(Request $request, string $id): JsonResponse
     {
         $lookup = MasterLookup::findOrFail($id);
+        $this->assertSameActiveStore($request, $lookup);
         $oldData = $lookup->toArray();
 
         $validated = $request->validate([
@@ -491,12 +500,70 @@ class AdminMasterController
     public function deleteLookup(Request $request, string $id): JsonResponse
     {
         $lookup = MasterLookup::findOrFail($id);
+        $this->assertSameActiveStore($request, $lookup);
         $oldData = $lookup->toArray();
+
+        // Unit delete guard: a unit assigned to products must have its products
+        // reassigned to a replacement unit first (reassign_to completes that).
+        if ($lookup->type === 'unit' && ($lookup->store_id || $request->get('active_store_id'))) {
+            $unitStoreId = (int) ($lookup->store_id ?? $request->get('active_store_id'));
+            $service = app(UnitDefaultsService::class);
+            $references = $service->referencingProducts($unitStoreId, $lookup);
+
+            if ($references !== []) {
+                if (!$request->filled('reassign_to')) {
+                    return response()->json([
+                        'message' => "Unit \"{$lookup->name}\" is assigned to " . count($references)
+                            . ' product(s) in this store. Choose a replacement unit to reassign them before deleting.',
+                        'reassignment_required' => true,
+                        'referencing_products' => $references,
+                        'candidate_units' => $service->candidateUnits($unitStoreId, $lookup),
+                    ], 409);
+                }
+
+                $reassigned = $service->reassignAndDelete($unitStoreId, $lookup, (int) $request->input('reassign_to'));
+                AuditLog::log('delete_lookup', 'MasterLookup', (string)$id, $oldData, [
+                    'reassigned_to' => (int) $request->input('reassign_to'),
+                    'reassigned_count' => $reassigned,
+                ], $lookup->store_id);
+
+                return response()->json([
+                    'success' => true,
+                    'message' => "Unit deleted and {$reassigned} product(s) reassigned.",
+                    'reassigned_count' => $reassigned,
+                ]);
+            }
+        }
 
         $lookup->delete();
         AuditLog::log('delete_lookup', 'MasterLookup', (string)$id, $oldData, null, $lookup->store_id);
 
         return response()->json(['success' => true, 'message' => 'Lookup record deleted successfully.']);
+    }
+
+    /**
+     * Restore the store's default unit set: missing defaults re-seeded, unused
+     * custom units removed, assigned custom units kept.
+     */
+    public function resetUnits(Request $request): JsonResponse
+    {
+        $storeId = $this->requireStoreId($request);
+
+        $summary = app(UnitDefaultsService::class)->resetForStore($storeId);
+        AuditLog::log('reset_units', 'MasterLookup', 'units', null, $summary, $storeId);
+
+        return response()->json(['success' => true] + $summary);
+    }
+
+    /**
+     * A lookup row owned by another store is invisible to this store's writes.
+     */
+    private function assertSameActiveStore(Request $request, MasterLookup $lookup): void
+    {
+        $storeId = $request->get('active_store_id');
+        if ($lookup->store_id && $storeId && (int) $lookup->store_id !== (int) $storeId) {
+            abort(404);
+        }
     }
 
     /**

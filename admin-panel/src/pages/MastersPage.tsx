@@ -109,6 +109,14 @@ export const MastersPage: React.FC = () => {
   const [brandLookups, setBrandLookups] = useState<MasterLookup[]>([]);
   const [mfgLookups, setMfgLookups] = useState<MasterLookup[]>([]);
 
+  // Units are store-scoped: deleting an assigned unit requires reassignment first
+  const [unitReassign, setUnitReassign] = useState<{
+    lookup: MasterLookup;
+    references: string[];
+    candidates: Array<{ id: number; name: string; code?: string }>;
+  } | null>(null);
+  const [unitReassignTarget, setUnitReassignTarget] = useState<number | "">("");
+
   // Ledger Modal State
   const [selectedLedgerParty, setSelectedLedgerParty] = useState<Party | null>(null);
   const [ledgerData, setLedgerData] = useState<any | null>(null);
@@ -511,10 +519,49 @@ export const MastersPage: React.FC = () => {
           await fetchData();
           fetchAuxiliaryLookups();
         } catch (err: any) {
+          if (err instanceof ApiError && err.status === 409 && err.data?.reassignment_required) {
+            setUnitReassignTarget("");
+            setUnitReassign({
+              lookup,
+              references: err.data.referencing_products || [],
+              candidates: err.data.candidate_units || [],
+            });
+            setDeleteConfirm((prev) => ({ ...prev, isOpen: false }));
+            return;
+          }
           showToast(err?.message || "Failed to delete lookup record.", "error");
         }
       },
     });
+  };
+
+  const handleConfirmUnitReassign = async () => {
+    if (!unitReassign || !unitReassignTarget) return;
+    try {
+      const res = await api.delete(`/admin/lookups/${unitReassign.lookup.id}?reassign_to=${unitReassignTarget}`);
+      showToast(res?.message || "Unit deleted and products reassigned.");
+      setUnitReassign(null);
+      await fetchData();
+      fetchAuxiliaryLookups();
+    } catch (err: any) {
+      showToast(err?.message || "Failed to reassign products.", "error");
+    }
+  };
+
+  const handleResetUnits = async () => {
+    try {
+      const res = await api.post("/admin/lookups/reset-units", {});
+      const parts = [
+        res?.seeded?.length ? `${res.seeded.length} default unit(s) restored` : "",
+        res?.removed?.length ? `${res.removed.length} unused custom unit(s) removed` : "",
+        res?.kept?.length ? `${res.kept.length} assigned custom unit(s) kept` : "",
+      ].filter(Boolean);
+      showToast(parts.length ? `Units reset — ${parts.join("; ")}.` : "Units already match the default set.");
+      await fetchData();
+      fetchAuxiliaryLookups();
+    } catch (err: any) {
+      showToast(err?.message || "Failed to reset units.", "error");
+    }
   };
 
   // ----------------------------------------------------
@@ -779,6 +826,17 @@ export const MastersPage: React.FC = () => {
                 >
                   <Merge className="w-3.5 h-3.5" />
                   <span>Merge Parties</span>
+                </button>
+              )}
+
+              {activeTab === "units" && (
+                <button
+                  onClick={handleResetUnits}
+                  title="Restore missing default units and remove unused custom units for this store"
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-semibold rounded-xl text-slate-700 dark:text-slate-300 shadow-2xs hover:bg-slate-50 dark:hover:bg-slate-700"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" />
+                  <span>Reset to Defaults</span>
                 </button>
               )}
 
@@ -2652,6 +2710,71 @@ export const MastersPage: React.FC = () => {
           onClose={() => setCopyModalProducts([])}
           onCopied={fetchData}
         />
+      )}
+
+      {/* ---------------------------------------------------------------------------------- */}
+      {/* UNIT REASSIGN-BEFORE-DELETE MODAL                                                  */}
+      {/* ---------------------------------------------------------------------------------- */}
+      {unitReassign && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-md rounded-2xl bg-white dark:bg-slate-800 p-6 shadow-2xl border border-slate-200 dark:border-slate-700">
+            <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-700 pb-3">
+              <h2 className="text-base font-bold text-slate-800 dark:text-white">Reassign products before deleting</h2>
+              <button
+                onClick={() => setUnitReassign(null)}
+                className="text-slate-400 hover:text-slate-700 dark:hover:text-white transition"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="mt-4 space-y-3 text-sm text-slate-700 dark:text-slate-300">
+              <p>
+                Unit <strong>"{unitReassign.lookup.name}"</strong> is assigned to{" "}
+                {unitReassign.references.length} product{unitReassign.references.length === 1 ? "" : "s"} in this store.
+                Choose a replacement unit to move them onto, then the unit can be deleted.
+              </p>
+              <ul className="max-h-32 overflow-y-auto rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 p-2 space-y-1 text-xs">
+                {unitReassign.references.map((name) => (
+                  <li key={name} className="truncate">• {name}</li>
+                ))}
+              </ul>
+              <div>
+                <label className="block font-medium mb-1 text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                  Replacement unit
+                </label>
+                <select
+                  value={unitReassignTarget}
+                  onChange={(e) => setUnitReassignTarget(e.target.value ? Number(e.target.value) : "")}
+                  className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 dark:bg-slate-800 dark:text-white text-sm"
+                >
+                  <option value="">Select replacement unit...</option>
+                  {unitReassign.candidates.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}{c.code ? ` (${c.code})` : ""}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 border-t border-slate-200 dark:border-slate-700 pt-4 mt-4">
+              <button
+                onClick={() => setUnitReassign(null)}
+                className="px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 text-sm font-semibold text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleConfirmUnitReassign}
+                disabled={!unitReassignTarget}
+                className="px-4 py-2 rounded-xl bg-red-600 hover:bg-red-500 text-white text-sm font-bold shadow-sm transition disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Reassign &amp; Delete Unit
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* ---------------------------------------------------------------------------------- */}

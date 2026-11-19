@@ -2374,9 +2374,20 @@ class SyncController
         $products = Product::where('store_id', $storeId)->where('updated_at', '>=', $sinceDate)->get();
         $batches = ProductBatch::where('store_id', $storeId)->where('updated_at', '>=', $sinceDate)->get();
         $parties = Party::where('store_id', $storeId)->where('updated_at', '>=', $sinceDate)->get();
-        $lookups = MasterLookup::where(function ($query) use ($storeId) {
-            $query->whereNull('store_id')->orWhere('store_id', $storeId);
-        })->where('updated_at', '>=', $sinceDate)->get();
+
+        // Units are store-scoped (the shared-units carve-out is reversed): a till
+        // pulls only its own store's units. Other lookup types keep the shared + own rule.
+        $lookups = MasterLookup::where('updated_at', '>=', $sinceDate)
+            ->where(function ($query) use ($storeId) {
+                $query->where(function ($unitScope) use ($storeId) {
+                    $unitScope->where('type', 'unit')->where('store_id', $storeId);
+                })->orWhere(function ($otherScope) use ($storeId) {
+                    $otherScope->where('type', '!=', 'unit')->where(function ($shared) use ($storeId) {
+                        $shared->whereNull('store_id')->orWhere('store_id', $storeId);
+                    });
+                });
+            })
+            ->get();
 
         $store = Store::find($storeId) ?? Store::first();
         $settings = $store ? (new AdminSettingController())->getSettingsPayload($store) : null;

@@ -1,5 +1,49 @@
 # Changelog
 
+## 2.1.1 — 2026-11-19
+
+Units join store scope (R11): **the shared-units carve-out is reversed — every store owns its
+own units of measure**, seeded with defaults at start, resettable, and protected from deletes
+that would orphan products.
+
+### Server
+
+1. **Units are store-scoped everywhere** — `master_lookups` of type `unit` are always
+   store-owned; the sync delta pull delivers only the active store's units (other shared
+   lookups keep the legacy rule), and the catalog copy tool copies units as per-store rows.
+2. **Defaults seed themselves** — creating a store through the admin API, first listing units
+   for a store that has none, or running `php artisan units:seed-store-defaults`
+   (`--store=`, `--dry-run`) seeds the 17 default units (Strip, Tablet, Capsule, Bottle, Box,
+   Kilogram/Gram at 3-decimal precision, Litre/Millilitre at 2, …); the same command purges
+   legacy shared unit rows.
+3. **Delete guard with reassignment** — deleting a unit that products reference answers
+   `409 reassignment_required` with the referencing products and candidate replacements;
+   `?reassign_to=<unit>` repoints those products (version bumped) and deletes the unit in one
+   audited step. A store cannot update or delete another store's unit.
+4. **Reset to defaults** — `POST /api/admin/lookups/reset-units` restores missing defaults and
+   removes only unused custom units; units assigned to products are kept, matching the delete
+   rule.
+
+### POS (till)
+
+5. **Local units follow the store** — units seed locally at app start and on store switch, are
+   tagged with the store id, and listings show only the active store's set; reset, add and
+   remove run locally with the same delete guard (an assigned unit asks for a replacement and
+   moves the products before deletion).
+
+### Admin panel
+
+6. **Units tab is per-store** — the Units of Measure tab lists the active store's units with a
+   Reset to Defaults action; deleting an assigned unit opens a "Reassign products before
+   deleting" dialog that names the referencing products and moves them to the chosen
+   replacement.
+
+### Tests
+
+7. `UnitStoreScopeTest` (constitution suite) locks seeding, scoping, cross-store 404s, the 409
+   guard, reassign-then-delete, reset semantics and delta isolation; the POS local store's
+   units are covered by 8 dom tests.
+
 ## 2.1.0 — 2026-11-19
 
 Store-scope constitution (P-STORE-SCOPE): **products belong to one store only; stores do not

@@ -8,6 +8,8 @@ export interface UnitMaster {
   symbol: string;
   precision?: number;
   is_active: boolean;
+  /** P-STORE-SCOPE: units belong to one store. Rows without it are legacy data on this device. */
+  store_id?: string;
 }
 
 export const DEFAULT_UNITS: Omit<UnitMaster, "id" | "type">[] = [
@@ -31,14 +33,26 @@ export const DEFAULT_UNITS: Omit<UnitMaster, "id" | "type">[] = [
 ];
 
 export class UnitsStore {
+  private activeStoreId(): string {
+    return sqliteStorage.getActiveStoreId() || "";
+  }
+
+  /** Rows with no store_id are legacy pre-scope data on this device; they count as this store's. */
+  private isForActiveStore(row: { store_id?: string } | null | undefined): boolean {
+    if (!row || !row.store_id) return true;
+    return String(row.store_id) === this.activeStoreId();
+  }
+
   /**
-   * Seed standard units if master_lookups has no unit records
+   * Seed the default unit set for the active store when it has no unit rows.
+   * Called on billing app start so the default units are always available.
    */
   async seedDefaultsIfEmpty(): Promise<UnitMaster[]> {
     const existing = await this.getAllUnits(false);
     if (existing.length > 0) return existing;
 
     const seeded: UnitMaster[] = [];
+    const storeId = this.activeStoreId();
     for (const def of DEFAULT_UNITS) {
       const unit: UnitMaster = {
         id: `unt_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
@@ -47,6 +61,7 @@ export class UnitsStore {
         symbol: def.symbol,
         precision: def.precision ?? 0,
         is_active: def.is_active,
+        store_id: storeId || undefined,
       };
       await sqliteStorage.insertRecord("master_lookups", unit.id, {
         id: unit.id,
@@ -55,6 +70,7 @@ export class UnitsStore {
         symbol: unit.symbol,
         precision: unit.precision,
         is_active: unit.is_active ? 1 : 0,
+        store_id: unit.store_id,
       });
       seeded.push(unit);
     }
@@ -62,13 +78,51 @@ export class UnitsStore {
   }
 
   /**
-   * Get all units from master_lookups
+   * Restore the default unit set for the active store: missing defaults are
+   * re-seeded, unused custom units removed, custom units still assigned to
+   * products kept (an assigned unit can never be silently dropped).
+   */
+  async resetToDefaults(): Promise<{ seeded: string[]; removed: string[]; kept: string[] }> {
+    const before = await this.getAllUnits(false);
+    const defaultNames = new Set(DEFAULT_UNITS.map((d) => d.name.toLowerCase()));
+    const existingNames = new Set(before.map((u) => u.name.toLowerCase()));
+
+    const seeded: string[] = [];
+    for (const def of DEFAULT_UNITS) {
+      if (existingNames.has(def.name.toLowerCase())) continue;
+      await this.upsertUnit({
+        name: def.name,
+        symbol: def.symbol,
+        precision: def.precision ?? 0,
+        is_active: def.is_active,
+      });
+      seeded.push(def.name);
+    }
+
+    const removed: string[] = [];
+    const kept: string[] = [];
+    for (const unit of await this.getAllUnits(false)) {
+      if (defaultNames.has(unit.name.toLowerCase())) continue;
+      const references = await this.getUnitReferences(unit.id);
+      if (references.length > 0) {
+        kept.push(unit.name);
+        continue;
+      }
+      await this.deleteUnit(unit.id);
+      removed.push(unit.name);
+    }
+
+    return { seeded, removed, kept };
+  }
+
+  /**
+   * Get all units belonging to the active store
    */
   async getAllUnits(autoSeed = true): Promise<UnitMaster[]> {
     try {
       const records = await sqliteStorage.findAll<any>("master_lookups");
       const units = records
-        .filter((r) => r && r.type === "unit")
+        .filter((r) => r && r.type === "unit" && this.isForActiveStore(r))
         .map((r) => ({
           id: String(r.id),
           type: "unit" as const,
@@ -76,6 +130,7 @@ export class UnitsStore {
           symbol: String(r.symbol || r.code || r.name || "").trim().toUpperCase(),
           precision: Number(r.precision ?? 0),
           is_active: r.is_active === 1 || r.is_active === true,
+          store_id: r.store_id ? String(r.store_id) : undefined,
         }));
 
       if (units.length === 0 && autoSeed) {
@@ -111,6 +166,58 @@ export class UnitsStore {
           u.symbol.toLowerCase() === clean
       ) || null
     );
+  }
+
+  /**
+   * Products on this till that reference the unit — by its id, by the unit name
+   * in unit_id/unit_name, or as the sub-unit. Deleting an assigned unit requires
+   * reassigning these products to a replacement unit first.
+   */
+  async getUnitReferences(unitId: string): Promise<string[]> {
+    const unit = await this.getUnitById(unitId);
+    if (!unit) return [];
+    const target = unit.name.toLowerCase();
+    const products = await sqliteStorage.findAll<any>("products");
+    return products
+      .filter((p) =>
+        p.unit_id === unit.id ||
+        String(p.unit_id || "").trim().toLowerCase() === target ||
+        String(p.unit_name || "").trim().toLowerCase() === target ||
+        String(p.sub_unit_name || "").trim().toLowerCase() === target
+      )
+      .map((p) => String(p.name || p.id));
+  }
+
+  /**
+   * Move every product referencing `fromUnitId` onto the replacement unit and
+   * delete the source unit — the reassign-then-delete path for assigned units.
+   */
+  async reassignUnit(fromUnitId: string, toUnitId: string): Promise<number> {
+    const from = await this.getUnitById(fromUnitId);
+    const to = await this.getUnitById(toUnitId);
+    if (!from || !to) throw new Error("Unit not found");
+    if (fromUnitId === toUnitId) throw new Error("Choose a different replacement unit");
+
+    const target = from.name.toLowerCase();
+    const products = await sqliteStorage.findAll<any>("products");
+    let count = 0;
+    for (const p of products) {
+      const byId = p.unit_id === from.id;
+      const byName = String(p.unit_id || "").trim().toLowerCase() === target;
+      const byUnitName = String(p.unit_name || "").trim().toLowerCase() === target;
+      const bySubUnit = String(p.sub_unit_name || "").trim().toLowerCase() === target;
+      if (!byId && !byName && !byUnitName && !bySubUnit) continue;
+
+      const updated: Record<string, unknown> = { ...p };
+      if (byId || byName) updated.unit_id = to.name;
+      if (byUnitName) updated.unit_name = to.name;
+      if (bySubUnit) updated.sub_unit_name = to.name;
+      await sqliteStorage.insertRecord("products", p.id, updated);
+      count++;
+    }
+
+    await this.deleteUnit(fromUnitId);
+    return count;
   }
 
   /**
@@ -161,6 +268,7 @@ export class UnitsStore {
     const symbol = (unit.symbol || name.replace(/[^a-zA-Z0-9]/g, "").slice(0, 4)).toUpperCase();
     const precision = Math.max(0, Number(unit.precision ?? 0));
     const is_active = unit.is_active !== false;
+    const store_id = unit.store_id || this.activeStoreId() || undefined;
 
     const fullUnit: UnitMaster = {
       id,
@@ -169,6 +277,7 @@ export class UnitsStore {
       symbol,
       precision,
       is_active,
+      store_id,
     };
 
     await sqliteStorage.insertRecord("master_lookups", id, {
@@ -178,6 +287,7 @@ export class UnitsStore {
       symbol,
       precision,
       is_active: is_active ? 1 : 0,
+      store_id,
     });
 
     try {
@@ -188,6 +298,7 @@ export class UnitsStore {
         symbol,
         precision,
         is_active,
+        store_id,
       } as unknown as Record<string, unknown>);
     } catch {
       // offline/background

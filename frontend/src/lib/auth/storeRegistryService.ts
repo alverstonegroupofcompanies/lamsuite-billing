@@ -625,6 +625,12 @@ export class StoreRegistryService {
     // 1. Flush/Close current store DB & switch connection
     await sqliteStorage.switchStore(idStr, target.db_path);
 
+    // Units are store-scoped: the newly active store always has its default set.
+    // Dynamic import keeps the units <-> sync-queue module graph acyclic.
+    import("../masters/unitsStore")
+      .then(({ unitsStore }) => unitsStore.seedDefaultsIfEmpty())
+      .catch(() => {});
+
     // 2. Load and set the target store's device profile & tokens in memory
     const profileJson = await invokeCommand<string | null>("secure_store_get", {
       key: `store:${idStr}:profile`,

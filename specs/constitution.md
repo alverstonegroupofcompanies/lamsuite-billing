@@ -11,9 +11,9 @@ Every product belongs to exactly one store. Stores do not share products.
 
 A product's **batches, rates, barcodes, groups, brands, manufacturers, images, price-list entries and history** all belong to the same single store as the product. Two stores always have completely separate product lists, even for the identical physical medicine.
 
-### The one carve-out: common master lookups
+### Units are store-scoped (carve-out reversed, 2026-11-19)
 
-**Common master items like units remain shared across stores.** Generic lookup masters in `master_lookups` with `store_id = NULL` are global (units/uom and similar system-wide enumerations). A store may additionally keep its own private lookups (`store_id` set) when it needs a local variant. Product rows never reference another store's private lookups.
+**Units are NOT shared.** Every unit in `master_lookups` belongs to exactly one store (`store_id` NOT NULL for units). Each store gets the default unit set seeded at billing app start (and on store creation), can add or remove units, and can reset its unit set to the defaults. A unit that is assigned to products cannot be deleted until its products are reassigned to a replacement unit — the delete is rejected with the referencing products listed, and completes only via an explicit reassign-then-delete. Other generic lookup masters keep the legacy shared rule (`store_id = NULL` rows stay global). Product rows never reference another store's lookups.
 
 ### Rules
 
@@ -29,6 +29,7 @@ A product's **batches, rates, barcodes, groups, brands, manufacturers, images, p
 | R8 | Parties (customers/suppliers/doctors) are governed by their own spec — **not** by this constitution. | Scope note |
 | R9 | Rate/tax revisions apply per store. A multi-store price change is N separate previewed jobs. | Copy-tool + revision tests |
 | R10 | Imports target exactly one store, confirmed by name on the confirmation step. Exports are store-filtered. | Import tests |
+| R11 | Units are store-scoped: every unit row belongs to one store, defaults are seeded per store (store creation, billing app start, first use), and the set can be reset to defaults. An assigned unit cannot be deleted until its products are reassigned to a replacement unit. | `UnitStoreScopeTest` + till dom tests |
 
 ### Flows under P-STORE-SCOPE
 
@@ -36,12 +37,13 @@ A product's **batches, rates, barcodes, groups, brands, manufacturers, images, p
 - **Inter-store transfers**: the receiver matches incoming lines by **barcode, then item code**. Unmatched lines become "create in my store" (prefilled, unlinked) or "map to existing" (mapping remembered per store pair). Ledger entries are written in **both** stores.
 - **Consolidated reports** group lines by an admin-chosen matching key per run (barcode → item code → name+unit) and list unmatched lines separately; no merges are stored.
 - **Offline tills**: products created offline sit in a "waiting to sync" state and are persisted before any success is shown; conflicts route to the sync centre, never overwrite another store's row.
+- **Unit lifecycle per store**: the default unit set (Strip, Tablet, Capsule, Bottle, Box, Kilogram, Litre, …) is seeded when a store is created, when the billing app starts, and on first units read; "Reset to defaults" restores missing defaults, removes unused custom units and keeps assigned ones; deleting a unit that products reference is rejected with the referencing product list and completes only as reassign-then-delete. Till unit deltas pull only their own store's units.
 
 ### Shared vs store-scoped reference
 
 | Data | Scope |
 |------|-------|
-| Units / uom and system enumerations | Shared (`master_lookups.store_id IS NULL`) |
+| Units / uom | Store-scoped (carve-out reversed — per-store defaults, reset, reassign-before-delete) |
 | Groups, brands, manufacturers | Store-scoped (copies travel with the product on copy) |
 | Products, barcodes, rates, images, batches, stock, history | Store-scoped |
 | Parties, invoices, purchases, payments | Store-scoped (separate spec) |
@@ -51,3 +53,4 @@ A product's **batches, rates, barcodes, groups, brands, manufacturers, images, p
 
 - `ProductStoreScopeSchemaTest` — schema shape (R1–R5) and runtime cross-store insert impossibility (R3).
 - `ProductQueryScopeTest` — static scan: any `Product::` query in `app/` must be store-scoped or carry a `@store-scope-ok: <reason>` annotation for reviewed cross-store admin aggregation code (R6).
+- `UnitStoreScopeTest` — per-store unit seeding, isolation, reset, delete guard with reassignment, cross-store 404, per-store pull-delta (R11).

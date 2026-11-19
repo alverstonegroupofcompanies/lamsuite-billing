@@ -227,8 +227,9 @@ class StoreCatalogCopyService
     }
 
     /**
-     * Shared lookups (store_id NULL, e.g. units) stay referenced by id; private
-     * lookups are copied into the target store so the copy is fully self-owned.
+     * Lookups owned by the source store are copied into the target store so the
+     * copy is fully self-owned (units are store-scoped too); legacy shared rows
+     * (store_id NULL) stay referenced by id.
      */
     private function lookupIdForTarget($lookupId, int $targetStoreId)
     {

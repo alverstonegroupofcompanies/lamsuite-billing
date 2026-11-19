@@ -345,6 +345,7 @@ Route::middleware(['auth:sanctum', 'ip.allowlist', 'scope.store'])->prefix('admi
 
     Route::get('/lookups', [AdminMasterController::class, 'lookups'])->middleware('rbac:masters,view');
     Route::post('/lookups', [AdminMasterController::class, 'storeLookup'])->middleware('rbac:masters,create');
+    Route::post('/lookups/reset-units', [AdminMasterController::class, 'resetUnits'])->middleware('rbac:masters,edit');
     Route::put('/lookups/{id}', [AdminMasterController::class, 'updateLookup'])->middleware('rbac:masters,edit');
     Route::delete('/lookups/{id}', [AdminMasterController::class, 'deleteLookup'])->middleware('rbac:masters,delete');
 

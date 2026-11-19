@@ -104,6 +104,7 @@ class AdminStoreController
         $validated['version'] = 1;
 
         $store = Store::create($validated);
+        app(\App\Services\Masters\UnitDefaultsService::class)->seedDefaultsForStore($store->id);
         $keyResult = \App\Models\ActivationKey::generateKey($store, ['created_by' => auth()->id()]);
         $store->activation_key = $keyResult['raw_key']; // Temporary attribute for presentation to creator
 

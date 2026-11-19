@@ -78,3 +78,18 @@ Rules are defined in [constitution.md](constitution.md) and enforced by CI in
 | Flow: Store-scope migration | One-time migration with reconciliation, dry run and rollback; NULL-store rows adopted by owner store | `php artisan stores:scope-catalog` command | `StoreScopeMigrationCommandTest` | Verified |
 | Flow: Offline tills | POS keeps local `store_id` columns; per-store delta pull; no fabricated demo catalog in a real store | `frontend storeScope.ts`, `cloudDeltaSyncService`, `sqliteStorage.ensureCatalogReady` | `frontend storeScope.dom.test.ts`, `productsStore.storeScope.dom.test.ts` | Verified |
 | Admin UX | Store scope carried in the URL (`?store=<id|all>`, URL wins over saved scope, invalid params fall back); cross-store lists carry store identity | `admin-panel AuthContext`, `AdminTransactionController` store eager-loads | Live browser verification + suites | Verified |
+
+## Units store-scope reversal (R11) — added 2026-11-19
+
+Change request: "instead unit share use store scope but i want default units should be
+there on billing app start and i can add or remove units also can be reset. if delete a
+unit and that unit assigned to anything ask to change the unit to another unit before
+deleting." Reverses the units carve-out in the store-scope constitution.
+
+| Rule / Flow | Description | Implementation | Verification Test | Status |
+|---|---|---|---|:---:|
+| R11: per-store seeding | Default unit set (17 units) seeded per store on store creation, billing app start and first units read | `UnitDefaultsService::seedDefaultsForStore` + `AdminStoreController::store` hook + `unitsStore.seedDefaultsIfEmpty` on App boot / `switchActiveStore` + lazy seed in `AdminMasterController::lookups` | `UnitStoreScopeTest` | Verified |
+| R11: no shared units | Legacy NULL-store unit rows are removed; till pull-delta delivers only own-store units (other lookup types keep shared+own) | `units:seed-store-defaults` command; `SyncController::pullDeltas` unit split | `UnitStoreScopeTest` | Verified |
+| R11: reset to defaults | Missing defaults re-seeded, unused custom units removed, assigned custom units kept | `UnitDefaultsService::resetForStore`, POST `/admin/lookups/reset-units`, `unitsStore.resetToDefaults` + POS "Reset to Defaults" | `UnitStoreScopeTest`, `unitsStore.storeScope.dom.test.ts` | Verified |
+| R11: delete guard | Deleting an assigned unit → HTTP 409 with referencing products + candidate replacement units; reassign-then-delete completes | `AdminMasterController::deleteLookup` guard + `?reassign_to=`; POS reassign dialog; admin reassign modal | `UnitStoreScopeTest` | Verified |
+| R11: data-exchange parity | Units import/export is store-tagged and store-filtered | `unitsDefinition` withStore + isForActiveStore | `storeScope.dom.test.ts` | Verified |

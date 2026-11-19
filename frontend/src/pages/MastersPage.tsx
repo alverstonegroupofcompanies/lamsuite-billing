@@ -99,6 +99,8 @@ export const MastersPage: React.FC = () => {
     precision: 0,
     is_active: true,
   });
+  const [unitReassign, setUnitReassign] = useState<{ unit: UnitMaster; references: string[] } | null>(null);
+  const [unitReassignTarget, setUnitReassignTarget] = useState("");
 
   // Product Form state
   const [prodForm, setProdForm] = useState<Partial<ProductItem>>({
@@ -309,8 +311,14 @@ export const MastersPage: React.FC = () => {
     }
   };
 
-  // Delete Unit
+  // Delete Unit — an assigned unit must have its products reassigned first
   const handleDeleteUnit = async (unit: UnitMaster) => {
+    const references = await unitsStore.getUnitReferences(unit.id);
+    if (references.length > 0) {
+      setUnitReassignTarget("");
+      setUnitReassign({ unit, references });
+      return;
+    }
     if (confirm(`Are you sure you want to delete unit "${unit.name}" (${unit.symbol})?`)) {
       try {
         await unitsStore.deleteUnit(unit.id);
@@ -319,6 +327,34 @@ export const MastersPage: React.FC = () => {
       } catch (err: any) {
         showNotification("Failed to delete unit", "error");
       }
+    }
+  };
+
+  const handleConfirmUnitReassign = async () => {
+    if (!unitReassign || !unitReassignTarget) return;
+    try {
+      const moved = await unitsStore.reassignUnit(unitReassign.unit.id, unitReassignTarget);
+      showNotification(`Unit "${unitReassign.unit.name}" deleted — ${moved} product(s) moved to the replacement unit`);
+      setUnitReassign(null);
+      await loadData();
+    } catch (err: any) {
+      showNotification(err.message || "Failed to reassign products", "error");
+    }
+  };
+
+  // Reset units back to the default set
+  const handleResetUnits = async () => {
+    try {
+      const summary = await unitsStore.resetToDefaults();
+      const parts = [
+        summary.seeded.length ? `${summary.seeded.length} default unit(s) restored` : "",
+        summary.removed.length ? `${summary.removed.length} unused custom unit(s) removed` : "",
+        summary.kept.length ? `${summary.kept.length} assigned custom unit(s) kept` : "",
+      ].filter(Boolean);
+      showNotification(parts.length ? `Units reset — ${parts.join("; ")}` : "Units already match the default set");
+      await loadData();
+    } catch (err: any) {
+      showNotification(err.message || "Failed to reset units", "error");
     }
   };
 
@@ -784,6 +820,14 @@ export const MastersPage: React.FC = () => {
               >
                 <Upload className="h-3.5 w-3.5 text-accent" />
                 <span>Import Units</span>
+              </button>
+              <button
+                onClick={handleResetUnits}
+                className="flex items-center gap-1.5 rounded-btn border border-border-main bg-surface px-3 py-2 text-xs font-semibold text-text-main shadow-xs hover:bg-canvas cursor-pointer transition-colors"
+                title="Restore missing default units and remove unused custom units"
+              >
+                <RefreshCw className="h-3.5 w-3.5 text-accent" />
+                <span>Reset to Defaults</span>
               </button>
               <button
                 onClick={() => {
@@ -1931,6 +1975,71 @@ export const MastersPage: React.FC = () => {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Reassign-before-delete dialog for an assigned unit */}
+      {unitReassign && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-md rounded-card bg-surface p-6 shadow-2xl border border-border-main">
+            <div className="flex items-center justify-between border-b border-border-main pb-3">
+              <h2 className="text-base font-bold text-text-main">Reassign products before deleting</h2>
+              <button
+                onClick={() => setUnitReassign(null)}
+                className="text-text-muted hover:text-text-main transition-colors cursor-pointer"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="mt-4 space-y-3 text-xs text-text-main">
+              <p>
+                Unit <strong>"{unitReassign.unit.name}" ({unitReassign.unit.symbol})</strong> is
+                assigned to {unitReassign.references.length} product{unitReassign.references.length === 1 ? "" : "s"}.
+                Choose a replacement unit to move them onto, then the unit can be deleted.
+              </p>
+              <ul className="max-h-32 overflow-y-auto rounded-btn border border-border-main bg-canvas p-2 space-y-1">
+                {unitReassign.references.map((name) => (
+                  <li key={name} className="truncate">• {name}</li>
+                ))}
+              </ul>
+              <div>
+                <label className="block text-[11px] font-semibold uppercase tracking-wider text-text-muted">
+                  Replacement unit *
+                </label>
+                <select
+                  value={unitReassignTarget}
+                  onChange={(e) => setUnitReassignTarget(e.target.value)}
+                  className="mt-1 w-full rounded-input border border-border-main bg-surface p-2 text-xs text-text-main shadow-2xs focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
+                >
+                  <option value="">Select replacement unit...</option>
+                  {units
+                    .filter((u) => u.id !== unitReassign.unit.id)
+                    .map((u) => (
+                      <option key={u.id} value={u.id}>
+                        {u.name} ({u.symbol})
+                      </option>
+                    ))}
+                </select>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 border-t border-border-main pt-4 mt-4">
+              <button
+                onClick={() => setUnitReassign(null)}
+                className="rounded-btn border border-border-main px-4 py-2 text-xs font-semibold text-text-muted hover:bg-canvas cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleConfirmUnitReassign}
+                disabled={!unitReassignTarget}
+                className="rounded-btn bg-red-500 px-4 py-2 text-xs font-semibold text-white shadow-xs hover:bg-red-600 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Reassign &amp; Delete Unit
+              </button>
+            </div>
           </div>
         </div>
       )}
