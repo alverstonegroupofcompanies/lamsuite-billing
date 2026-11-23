@@ -1,0 +1,34 @@
+{
+  "offline_bill_screen": [
+    "Offline Mode",
+    "C02-INV-1102",
+    "Next: C02-INV-1103"
+  ],
+  "counter_after_reissue": {
+    "status": "unclaimed",
+    "device_uuid": null,
+    "current_device_id": null
+  },
+  "screen_after_reconnect": [
+    "LamSuite Billing Setup",
+    "Enter the counter activation code the store owner issued for this workstation",
+    "COUNTER ACTIVATION CODE",
+    "Type the code, or paste the text of the QR the admin panel shows. One code opens exactly one counter on exactly one machine, and works once.",
+    "Activate this counter",
+    "No owner login and no shared store key are entered here.",
+    "Server: http://127.0.0.1:8013",
+    "Change"
+  ],
+  "locked": true,
+  "offline_bill_synced": 1,
+  "calls": [
+    "GET /counter/profile-version 401",
+    "GET /counter/profile-version 401",
+    "OPTIONS /device-sessions/heartbeat 204",
+    "POST /device-sessions/heartbeat 401",
+    "GET /counter/profile-version 401",
+    "GET /counter/profile-version 401",
+    "GET /counter/profile-version 401",
+    "GET /counter/profile-version 401"
+  ]
+}

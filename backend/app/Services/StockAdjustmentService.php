@@ -334,7 +334,7 @@ class StockAdjustmentService
                 ? 'RECONCILIATION_ADJUSTMENT'
                 : ($delta >= 0 ? 'ADJUSTMENT_IN' : 'ADJUSTMENT_OUT');
 
-            StockLedgerEntry::firstOrCreate(
+            $ledgerEntry = StockLedgerEntry::firstOrCreate(
                 ['idempotency_key' => 'stock_adj_' . $document->document_id . '_' . ($lineNo + 1)],
                 [
                     'store_id' => $storeId,
@@ -354,6 +354,11 @@ class StockAdjustmentService
                     'staff_user_id' => $user?->id,
                 ]
             );
+
+            // AUD-02: a write-off that takes the shelf below zero is the owner's business too.
+            if ($ledgerEntry->wasRecentlyCreated && $newBalance < 0) {
+                app(\App\Services\Alerts\OperationalAlertService::class)->negativeStockFromLedger($ledgerEntry);
+            }
 
             // Keep the legacy line-level table populated for older admin views.
             StockAdjustment::create([

@@ -1934,6 +1934,13 @@ export const PosBillingPage: React.FC = () => {
     editingInvoice,
     originalInvoiceItems,
     totals.grand_total,
+    // The settlement keys read the tender lines: without these the listener kept the lines from
+    // when the modal opened, so Option+2 after typing cash 50 saw a fully paid bill and switched
+    // the cash line to UPI instead of adding one (KB-03).
+    tenders,
+    tenderCalc,
+    activeTenderIndex,
+    printFormat,
   ]);
 
   // Central shortcut registrations for the POS screen. Screen scope wins over

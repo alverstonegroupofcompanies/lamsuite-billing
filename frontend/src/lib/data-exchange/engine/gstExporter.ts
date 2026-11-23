@@ -1,5 +1,20 @@
 import { sqliteStorage } from "../../db/sqliteStorage";
 import { universalExporter, type ExportFormat, type ExportResult } from "./exporter";
+import { companySettingsService } from "../../settings/companySettingsService";
+import { documentPlaceOfSupply, stateCodeOf } from "../../gst/stateCodes";
+
+/**
+ * TAX-03: where a sale was supplied and whether that crosses a state line, judged
+ * against the store that issued it — never against Kerala.
+ */
+export function gstr1PlaceOfSupply(
+  inv: { place_of_supply?: string | null; customer_gstin?: string | null; store_state_code?: string | null },
+  storeState?: string | null
+): { pos: string; isInterState: boolean } {
+  const home = stateCodeOf(inv.store_state_code) ?? stateCodeOf(storeState) ?? "32";
+  const pos = documentPlaceOfSupply(inv.place_of_supply, inv.customer_gstin, home);
+  return { pos, isInterState: stateCodeOf(pos) !== home };
+}
 
 export interface Gstr1SummaryData {
   b2b: any[];
@@ -43,9 +58,11 @@ export class GstStatutoryExporter {
       itemsByInvoice.get(item.invoice_id)!.push(item);
     }
 
+    const storeState = companySettingsService.getSettings().state_code;
+
     for (const inv of rangeInvoices) {
+      const { pos: placeOfSupply, isInterState } = gstr1PlaceOfSupply(inv, storeState);
       const isB2b = Boolean(inv.customer_gstin && inv.customer_gstin.trim().length === 15);
-      const isInterState = inv.place_of_supply && inv.place_of_supply !== "Kerala" && !inv.place_of_supply.startsWith("32");
       const isLarge = Number(inv.grand_total || 0) > 250000;
       const invItems = itemsByInvoice.get(inv.id) || [];
 
@@ -75,7 +92,7 @@ export class GstStatutoryExporter {
             invoice_number: inv.invoice_number,
             invoice_date: inv.invoice_date,
             invoice_value: inv.grand_total,
-            place_of_supply: inv.place_of_supply || "32-Kerala",
+            place_of_supply: placeOfSupply,
             reverse_charge: "N",
             rate,
             taxable_value: Math.round((grp.taxable + Number.EPSILON) * 100) / 100,
@@ -86,13 +103,13 @@ export class GstStatutoryExporter {
             invoice_number: inv.invoice_number,
             invoice_date: inv.invoice_date,
             invoice_value: inv.grand_total,
-            place_of_supply: inv.place_of_supply || "32-Kerala",
+            place_of_supply: placeOfSupply,
             rate,
             taxable_value: Math.round((grp.taxable + Number.EPSILON) * 100) / 100,
             cess: Math.round((grp.cess + Number.EPSILON) * 100) / 100,
           });
         } else {
-          const pos = inv.place_of_supply || "32-Kerala";
+          const pos = placeOfSupply;
           const key = `${pos}_${rate}`;
           const existing = b2csMap.get(key) || { pos, rate, taxable: 0, cess: 0 };
           existing.taxable += grp.taxable;

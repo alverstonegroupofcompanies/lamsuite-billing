@@ -31,9 +31,16 @@ final class OutwardSalesService
     /** @var array<string, float>|null */
     private ?array $tenders = null;
 
+    /**
+     * Only sale and return documents are outward supplies. Quotations (and any
+     * other module stored in `invoices`) carry no money and no tax, so they are
+     * dropped here once rather than in every report that reads the service.
+     */
     public function __construct(iterable $invoices)
     {
-        $this->invoices = collect($invoices);
+        $this->invoices = collect($invoices)
+            ->filter(fn (Invoice $invoice) => self::isSale($invoice) || self::isReturn($invoice))
+            ->values();
     }
 
     public static function forWindow(?int $storeId, string $startDate, string $endDate, ?string $counterId = null): self
@@ -313,6 +320,11 @@ final class OutwardSalesService
                     $paise[self::tenderBucket($payment->payment_mode)] += $applied * $sign;
                 }
 
+                // Whatever was not paid is still part of the sale: it is owed
+                // (or, on a return, still credited), so every rupee of net
+                // sales lands in exactly one bucket.
+                $paise['credit'] += $remaining * $sign;
+
                 continue;
             }
 
@@ -322,7 +334,9 @@ final class OutwardSalesService
                 $fallback = $collectible;
             }
 
-            $paise[self::tenderBucket($invoice->payment_mode)] += min($fallback, $collectible) * $sign;
+            $applied = min($fallback, $collectible);
+            $paise[self::tenderBucket($invoice->payment_mode)] += $applied * $sign;
+            $paise['credit'] += ($collectible - $applied) * $sign;
         }
 
         $totals = [];

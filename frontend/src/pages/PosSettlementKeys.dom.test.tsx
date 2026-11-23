@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { PosBillingPage } from "./PosBillingPage";
@@ -86,5 +86,33 @@ describe("Settlement mode keys survive macOS Option (KB-03)", () => {
     });
 
     await waitFor(() => expect(tenderModes()).toContain("Credit"));
+  });
+
+  // QA saw cash 50 + Option+2 saved as one Cash tender of 90: with no UPI line added, the lone
+  // short Cash line was topped up to the bill total. The split must reach the invoice as typed.
+  it("saves a keyboard-only cash 50 + UPI split as two tenders, not one cash 100", async () => {
+    const finalize = vi.spyOn(posCartService, "finalizeInvoice");
+    await openSettlement();
+
+    // Settlement puts the caret in the first tender's amount a beat after it opens.
+    await waitFor(() => expect((document.activeElement as HTMLInputElement).type).toBe("number"));
+    const cashInput = document.activeElement as HTMLInputElement;
+    fireEvent.change(cashInput, { target: { value: "50" } });
+
+    fireEvent.keyDown(cashInput, { key: "™", code: "Digit2", altKey: true });
+    await waitFor(() => expect(tenderModes()).toEqual(["Cash", "UPI"]));
+
+    const ref = await screen.findByPlaceholderText(/UTR or txn ID/i);
+    fireEvent.change(ref, { target: { value: "UPI-QA-0001" } });
+
+    fireEvent.keyDown(ref, { key: "s", code: "KeyS", ctrlKey: true });
+
+    await waitFor(() => expect(finalize).toHaveBeenCalled());
+    const tenders = finalize.mock.calls[0][1] as Array<{ mode: string; amount: number; reference_no?: string }>;
+    expect(tenders.map((t) => [t.mode, t.amount])).toEqual([
+      ["Cash", 50],
+      ["UPI", 50],
+    ]);
+    expect(tenders[1].reference_no).toBe("UPI-QA-0001");
   });
 });

@@ -23,6 +23,7 @@ import {
   type PharmacistCredential,
 } from "./pharmacistGate";
 import { companySettingsService } from "../settings/companySettingsService";
+import { findMrpBreach, mrpCeilingEnforced } from "./mrpCeiling";
 import { storeToday, toStoreDateString, getStoreTimezone } from "../dateTimeUtils";
 
 export interface PosCartLine {
@@ -766,6 +767,15 @@ export class PosCartService {
     // keep taking bills. Once that window closes the cart stops, here rather
     // than in the sync queue, so nothing is written that cannot be defended.
     counterGraceService.assertWorkAllowed();
+
+    // TAX-02: the server refuses a rate above MRP, but an offline bill never reaches it
+    // before the customer leaves, so the counter holds the same ceiling here.
+    if (mrpCeilingEnforced(companySettingsService.getSettings().enforce_mrp_capping)) {
+      const breach = findMrpBreach(linesToFinalize);
+      if (breach) {
+        throw new Error(breach.message);
+      }
+    }
 
     const totals = options?.totalsSnapshot || this.getTotals();
 

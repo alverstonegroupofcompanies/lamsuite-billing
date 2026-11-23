@@ -2,6 +2,160 @@
 
 # Changelog
 
+## 2.1.3 — 2026-11-23
+
+A till the owner retired while it was sitting offline kept the bills it had saved and then lost
+them for good: its credential stopped opening anything, the queue rows said `sent`, and a fresh
+claim started a different counter. The first half of this release is that door. The second half is
+the drift QA found between what a bill says at the counter, what the panel reports and what the
+GSTR-1 files — the MRP ceiling, the place of supply and the batch expiry date.
+
+### Existing stores catch up with the 2.1.2 defaults (G10 follow-up)
+
+v2.1.2 made UPI and Card references required by default and put Expenses on the till, but only
+for stores set up after it. Every older store already had the till's previous payment rules saved
+for it automatically ("optional" for UPI and Card). The server keeps a saved setting, so those stores
+went on accepting UPI with no reference (PAY-04). Their menus and counter profiles had also been
+written before Expenses existed, so the till refused the new route (EXP-01).
+
+1. **`php artisan payments:adopt-g10-defaults`** (`AdoptG10DefaultsCommand`) — a dry run by
+   default; it lists every change and writes only with `--apply`. Use `--store=<id>` for one
+   store, and `--saved-before="<upgrade date-time>"` so a value saved after the upgrade, which
+   could be a deliberate choice, is left alone. Each change writes a `g10_defaults_adopted` audit
+   entry. A second run finds nothing.
+   - **Payment rules:** only a store whose reference rules are still exactly the old shipped
+     ones gets UPI and Card set to `required`. If any rule was changed by hand, the owner
+     chose those rules and they are left alone. Everything else in the setting is kept, and the
+     store's settings version is bumped so a till still holding the old copy is refused on its
+     next save (SET-03) and re-reads instead of writing "optional" back.
+   - **Expenses:** a store menu gains `expenses` after `purchases`. A counter profile gains it
+     after `purchase_returns` only if it still has every pre-2.1.2 module (a trimmed profile was
+     curated) and its cash drawer is on. Its profile version is bumped so the till picks it up.
+   - **QA database copy:** 28 changes (2 stores' payment rules, 9 store menus, 17 counters).
+     Afterwards UPI and Card without a reference returned 422, and counter C02 booked a cash
+     expense that came off the drawer, with no manual edit.
+   - Tests: `backend/tests/Feature/AdoptG10DefaultsCommandTest.php` (6).
+
+### A till retired while it was offline no longer loses its bills (SYNC-01, SYNC-02)
+
+2. **Every revocation records when it happened** — `devices.revoked_at`
+   (`2026_11_23_090001_add_revoked_at_to_devices_table.php`) is stamped by `Device::saving`,
+   whichever screen or command revoked the device, and cleared again when one is reinstated. The
+   devices-console query update skips model hooks, so it stamps the moment itself and leaves a row
+   already revoked at the time it was first retired.
+   `php artisan devices:backfill-revoked-at` fills devices retired before the column existed from
+   the row's last update — dry run by default, `--apply` to write (2 tests).
+3. **One door, and only one** — the `retired.device` middleware (`AuthenticateRetiredDevice`)
+   accepts a revoked device token for `POST /api/sync/push/stranded` alone, and only while the
+   revocation is under 7 days old. An active, unknown or out-of-window token is turned away, and
+   the request is pinned to the store the device belonged to, so a retired token cannot file into
+   another tenant. Throttled to 30 a minute.
+4. **What may still come through** — only new `invoice`, `purchase`, `payment` and `expense`
+   documents saved before the revocation. Masters, settings and edits are refused, as is any
+   document with no save time. Accepted rows go through the ordinary batch ingest, so numbering,
+   stock, tax and idempotency are exactly what a live till gets, and each is filed as
+   `filed_by_retired_device` in that counter's exception register for the owner to review.
+   Tests: `SyncStrandedDocumentsTest` (9).
+5. **The till keeps just enough to deliver them** — resetting a till with bills still queued sets
+   the old credential aside instead of deleting it, and the store record stays `revoked`: the
+   store's own licence answering "active" no longer reopens a counter this machine no longer holds
+   — only a fresh claim does. A fresh claim drops the old credential and sends the ordinary way.
+   Waiting bills go out in the order they were saved; one the server refuses stays on the till with
+   the reason and is not resent; when the door has already closed the credential is dropped and
+   every bill kept. The waiting-bills banner on the claim screen now says which of the two happens
+   to a bill. Tests: `storeRevokedShell` (3), `syncStranded` (6).
+6. **Bills an older build marked sent are found again (SYNC-01)** — a queue row stamped `synced`
+   that the server never took used to hide its document forever. `requeueOrphanedDocuments()` now
+   compares the local documents against the queue's own rows, reports the orphans on a dry run, and
+   requeues them with the payload and save time they had. The till runs the report at boot, so an
+   owner sees the count instead of discovering it months later (2 tests).
+
+### The ceiling and the place of supply are one answer in three places (TAX-02, TAX-03)
+
+7. **A till refuses above-MRP rates while it is offline** — the store's `enforce_mrp_capping` flag
+   now travels in the settings document a till caches (a store flag, never a billing setting a
+   device may write back), and `lib/billing/mrpCeiling.ts` mirrors `Services/Tax/MrpCeiling.php`:
+   the batch's MRP, the product's when the batch carries none, and a loose rate capped at the pack
+   MRP split over the pack. The counter now stops the bill at the first breach (a paisa of
+   tolerance) instead of letting the server refuse it after the customer has left. Unset means on.
+   Tests: `posCartService.mrp` (5), `G11TillMrpFlagTest` (2).
+8. **Place of supply is derived in one function** — `documentPlaceOfSupply()`
+   (`lib/gst/stateCodes.ts`) takes the place a document states, else the buyer's GSTIN state, else
+   the store's own, and the GSTR-1 export, customer debit notes and the bill headers now all call
+   it. The printed headers used to fall back to a hard-coded `32-Kerala`, so a Karnataka store's
+   walk-in sale filed as inter-state. Tests: `gstExporter.pos` (3),
+   `customerDebitNoteService.pos` (5).
+9. **B2C (Summary) stops splitting one state in two** — tills store both `32` and `32-Kerala` in
+   `place_of_supply`; the report now compares the first two digits, so a state makes one row and a
+   home-state bill is not read as inter-state.
+
+### Reports, the dashboard and the ledger agree (RPT-01…04, PAY-01, AUD-01, AUD-02)
+
+10. **Only outward supplies count as outward sales** — `OutwardSalesService` drops quotations (and
+    anything else sharing the `invoices` table) once, in its constructor, so no report has to
+    remember to. The unpaid remainder of a bill now lands in the `credit` bucket, which makes the
+    tender buckets sum to net sales to the paisa, and "Collected" on the daily summary means money
+    received — cash, UPI, card, transfer, other — without it.
+11. **Receivables count only what is still owed** — the dashboard's credit figure is
+    `grand_total - paid_amount` on return documents, so a note settled in cash at the counter no
+    longer shrinks what other customers owe. Top items rank sale and return modules only, and the
+    store-comparison tile reads month sales, net of returns, through the same window as the tiles
+    above it.
+12. **A report day is the store's day** — `StoreClock` replaces `date('Y-m-d')` in the daily
+    summary and daily-collection defaults (the server clock is UTC), one-day callers may send
+    `date`, and the admin GSTR-1 honours `from`/`to` instead of silently answering month-to-date.
+13. **A till's re-push no longer restates a supplier's balance (PAY-01)** — the server posts
+    supplier balances from bills, returns and payments, but the running figure the till carries on
+    its own party record won on every sync and reset the payable. A new supplier starts at its
+    opening balance, an existing one keeps its balance, and only a changed `opening_balance` moves
+    it — by the difference, through `SupplierBalanceService::shift()` (3 tests).
+14. **`parties:rebuild-supplier-balances` will not erase an imported debt** — a supplier whose
+    balance no bill or payment explains is reported and left alone; `--include-undocumented` resets
+    it deliberately. Every applied write is audited as `supplier_balance_recomputed` (2 tests).
+15. **A purchase posted by a counter names that counter (AUD-01)** — `POST /api/purchases` is
+    opened by a claimed till, so the bill, the shelf movements it causes and its audit row now
+    carry `counter_id` / `counter_code`, as a bill pushed through the sync queue already did.
+16. **Negative stock alerts from every road (AUD-02)** — the stock-event stream of an offline till
+    and a write-off posted through `StockAdjustmentService` both raise
+    `OperationalAlertService::negativeStockFromLedger()`: one notification per product per day,
+    naming the counter and the units left, so a run of sales off an empty shelf does not bury the
+    inbox (2 tests). Tests: `LedgerGapsTest` (8), `ReportParityTest` (9).
+
+### A batch expiry is a calendar day, not an instant (UI-03, G8)
+
+17. **The `date` cast was moving expiries a day early on every round trip** — Laravel serialised
+    31-03-2027 as `2027-03-30T18:30:00Z` (midnight IST in UTC); a return posted that string back
+    and each trip dropped another day. `App\Casts\CalendarDate` stores and serialises `Y-m-d`,
+    reads a timestamp in the store's timezone before taking its day, and still returns a Carbon, so
+    every caller keeps `->toDateString()` and its comparisons. Applied to `invoice_items.expiry_date`
+    and `purchase_items.mfg_date` / `expiry_date` (4 tests).
+18. **`php artisan lamsuite:expiry-date-repair` fixes what already drifted** — a return line earlier
+    than the line or batch it came from is set back to that source date, and any line still holding
+    a time of day becomes the store's calendar day for it. Anything else that disagrees is reported
+    and never rewritten. Dry run by default, `--apply` writes, every change is journalled to
+    `storage/app/expiry-date-repair.json` and reversible with `--rollback` (4 tests).
+19. **Return slips print the expiry the way the shelf shows it** — credit and debit notes on 80 mm
+    and 58 mm, and the purchase-return grid, print `MM/YY` instead of a raw timestamp (5 tests).
+
+### Till and panel
+
+20. **The update prompt shows wherever the till is** — the setup/claim screen and the store gateway
+    draw it as well as the signed-in shell, so a till sitting on the login screen still learns a
+    release is out.
+21. **The claim screen says less and shows its version** — "Enter your counter activation code", the
+    build's version where the endpoint used to sit, and a quieter `Server settings` disclosure.
+22. **Settlement keys keep the tender split as typed (KB-03)** — the listener re-reads the tender
+    lines when the modal opens, so Option+2 after typing cash 50 adds a UPI line instead of topping
+    the lone cash line to the bill total.
+23. **The WhatsApp gateway field can be emptied** — neither the panel nor the till pre-fills
+    `https://wa-api.alverstone.in` as a value any more, which made the field impossible to clear
+    and the address impossible to remove; the till keeps it as a placeholder only (1 test).
+
+### Tests
+
+24. Backend 1,231 passing (44 of them new in this wave); till and panel 1,213 across 168 files
+    (31 new). Every claim above is covered by the file named beside it.
+
 ## 2.1.2 — 2026-11-23
 
 Store reset now really resets the till. QA'ing a reset of Test Store (store 4) showed the Masters

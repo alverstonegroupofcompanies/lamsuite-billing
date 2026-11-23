@@ -1775,9 +1775,34 @@ class SyncController
         $externalId = $party['external_id'] ?? $party['id'] ?? null;
         $gstin = $party['gstin'] ?? null;
 
+        // PAY-01: a supplier's balance is posted on the server by its bills, returns and
+        // payments (SupplierBalanceService). The till keeps its own running figure on the
+        // record it pushes, and letting that figure win reset the server's payable on every
+        // re-sync. A new supplier starts at its opening balance; an existing one keeps its
+        // balance and only moves by a change of opening balance the till actually sent.
+        $existing = Party::where('store_id', $storeId)->where('external_id', $externalId)->first();
+        $isSupplier = ($existing?->type ?? ($party['type'] ?? 'customer')) === 'supplier';
+        $openingShift = 0.0;
+
+        if (!$isSupplier) {
+            $balances = [
+                'opening_balance' => $party['opening_balance'] ?? 0,
+                'current_balance' => $party['outstanding_balance'] ?? ($party['current_balance'] ?? 0),
+            ];
+        } elseif (!$existing) {
+            $opening = round((float) ($party['opening_balance'] ?? 0), 2);
+            $balances = ['opening_balance' => $opening, 'current_balance' => $opening];
+        } elseif (array_key_exists('opening_balance', $party) && $party['opening_balance'] !== null) {
+            $opening = round((float) $party['opening_balance'], 2);
+            $openingShift = $opening - round((float) $existing->opening_balance, 2);
+            $balances = ['opening_balance' => $opening];
+        } else {
+            $balances = [];
+        }
+
         $p = Party::updateOrCreate(
             ['store_id' => $storeId, 'external_id' => $externalId],
-            [
+            $balances + [
                 'type' => $party['type'] ?? 'customer',
                 'name' => $party['name'] ?? 'Unnamed Party',
                 'phone' => $party['phone'] ?? null,
@@ -1791,13 +1816,16 @@ class SyncController
                     $storeId ? Store::find($storeId) : null
                 ),
                 'credit_limit' => $party['credit_limit'] ?? 0,
-                'opening_balance' => $party['opening_balance'] ?? 0,
-                'current_balance' => $party['outstanding_balance'] ?? ($party['current_balance'] ?? 0),
                 'reg_no' => $party['reg_no'] ?? ($party['medical_reg_no'] ?? null),
                 'is_active' => $party['is_active'] ?? true,
                 'version' => $party['version'] ?? 1,
             ]
         );
+
+        if (abs($openingShift) >= 0.005) {
+            app(SupplierBalanceService::class)->shift($p->id, $openingShift, (int) $p->store_id);
+            $p->refresh();
+        }
 
         $this->recordSyncEvent($request, $p->type, (string)$p->id, 'create', [
             'name' => $p->name,
@@ -2743,7 +2771,7 @@ class SyncController
             $companySetting = \App\Models\CompanySetting::where('store_id', $storeId)->first();
             $allowNegative = $companySetting ? ($companySetting->allow_negative_stock ?? true) : true;
 
-            \App\Models\StockLedgerEntry::create([
+            $ledgerEntry = \App\Models\StockLedgerEntry::create([
                 'store_id' => $storeId,
                 'product_id' => $productId,
                 'batch_id' => $batchId,
@@ -2763,6 +2791,11 @@ class SyncController
             // Update product batch stock quantity
             if ($batchId && isset($batch) && $batch) {
                 $batch->update(['stock_qty' => $newBalance]);
+            }
+
+            // AUD-02: an offline sale stream can empty a shelf as surely as a live bill.
+            if ($isNegative) {
+                app(OperationalAlertService::class)->negativeStockFromLedger($ledgerEntry);
             }
 
             // Also keep standard StockAdjustment record for legacy views

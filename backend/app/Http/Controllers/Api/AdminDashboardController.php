@@ -80,10 +80,13 @@ class AdminDashboardController
                 ->whereIn('module_key', ['invoice', 'pos'])
                 ->sum(DB::raw('CASE WHEN grand_total > paid_amount THEN grand_total - paid_amount ELSE 0 END'))
         );
+        // Only the part of a credit note that was not refunded is still owed
+        // back to the customer; a note settled in cash at the counter must not
+        // shrink what other customers owe.
         $documentCredits = Money::paise(
             (clone $openInvoiceQuery)
-                ->whereIn('module_key', ['credit_note', 'sales_return'])
-                ->sum('grand_total')
+                ->whereIn('module_key', OutwardSalesService::RETURN_MODULES)
+                ->sum(DB::raw('CASE WHEN grand_total > paid_amount THEN grand_total - paid_amount ELSE 0 END'))
         );
         $outstandingReceivables = Money::toFloat(max(0, $openBalances - $documentCredits));
 
@@ -99,6 +102,7 @@ class AdminDashboardController
             ->join('invoices', 'invoice_items.invoice_id', '=', 'invoices.id')
             ->when($storeId, fn($q) => $q->where('invoices.store_id', $storeId))
             ->where('invoices.status', '!=', 'cancelled')
+            ->whereIn('invoices.module_key', array_merge(OutwardSalesService::SALES_MODULES, OutwardSalesService::RETURN_MODULES))
             ->select(
                 'invoice_items.product_name',
                 DB::raw("SUM(invoice_items.qty * ({$returnSign})) as total_qty"),
@@ -118,8 +122,9 @@ class AdminDashboardController
         $storeComparison = Store::withCount(['invoices', 'devices'])
             ->when($storeId, fn($q) => $q->where('id', $storeId))
             ->get()
-            ->map(function ($s) {
-                $monthSales = Invoice::where('store_id', $s->id)->where('status', '!=', 'cancelled')->sum('grand_total');
+            ->map(function ($s) use ($startOfMonth, $today) {
+                // Month sales, net of returns, through the same reading as the tiles.
+                $monthSales = OutwardSalesService::forWindow((int) $s->id, $startOfMonth, $today)->netSales();
                 $pendingSync = SyncEvent::where('store_id', $s->id)->where('status', 'pending')->count();
                 $failedSync = SyncEvent::where('store_id', $s->id)->where('status', 'failed')->count();
                 $devicesActive = Device::where('store_id', $s->id)->where('status', 'active')->count();

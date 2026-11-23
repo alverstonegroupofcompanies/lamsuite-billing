@@ -8,8 +8,12 @@ async function sellOne(s, packs) {
   if (/Select Batch/.test(await s.text())) { await s.page.keyboard.press('Enter'); await sleep(600); }
   await put(s, String(packs)); await s.page.keyboard.press('Enter'); await sleep(600);
   await s.page.keyboard.press('F12'); await sleep(1200);
+  // G13: the header number the cashier sees BEFORE saving. After saving, the
+  // header already shows the next bill's number, which round 3 misread as a renumber.
+  const before_save = ((await s.text()).match(/C0\d-INV-\d+/g) || []).slice(-1)[0] || null;
   await s.page.keyboard.down('Control'); await s.page.keyboard.press('KeyS'); await s.page.keyboard.up('Control'); await sleep(3500);
-  return (await s.text()).split('\n').filter((l) => /offline|queued|saved|C0\d-INV|sync|pending|error|failed/i.test(l)).slice(-6);
+  const after_save = (await s.text()).split('\n').filter((l) => /offline|queued|saved|C0\d-INV|sync|pending|error|failed/i.test(l)).slice(-6);
+  return { before_save, after_save };
 }
 (async () => {
   const ev = { bills: [] };

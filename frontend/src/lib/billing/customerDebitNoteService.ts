@@ -6,6 +6,7 @@ import { companySettingsService } from "../settings/companySettingsService";
 import { storeToday } from "../dateTimeUtils";
 import { round2 } from "./billingCalculations";
 import { calculateDocumentTaxes } from "../tax-engine/taxEngine";
+import { documentPlaceOfSupply } from "../gst/stateCodes";
 import type { InvoiceRecord, InvoiceItemRecord } from "../reports/reportEngine";
 
 export type DebitNoteStatus =
@@ -539,8 +540,9 @@ export class CustomerDebitNoteService {
     reason: ReturnReason = "customer_return"
   ): InvoiceAllocation {
     const isTaxInclusive = candidate.is_tax_inclusive || false;
-    const storeState = candidate.store_state_code || "32";
-    const placeOfSupply = candidate.place_of_supply || (candidate.is_inter_state ? "99-Other" : "32-Kerala");
+    const storeState = candidate.store_state_code || companySettingsService.getSettings().state_code || "32";
+    // TAX-03: a reversal follows its invoice; one that never stated it falls to the store's state.
+    const placeOfSupply = candidate.place_of_supply || (candidate.is_inter_state ? "99-Other" : documentPlaceOfSupply(null, null, storeState));
 
     const taxResult = calculateDocumentTaxes({
       store_state: storeState,
@@ -676,7 +678,11 @@ export class CustomerDebitNoteService {
     const customerName = customer?.name || input.customer_name || "B2B Customer";
     const customerGstin = customer?.gstin || input.customer_gstin;
     const customerPhone = customer?.phone || input.customer_phone;
-    const placeOfSupply = input.place_of_supply || "32-Kerala";
+    const placeOfSupply = documentPlaceOfSupply(
+      input.place_of_supply,
+      customerGstin,
+      companySettingsService.getSettings().state_code
+    );
 
     // Validate uniqueness of customer_id + debit_note_number
     const existing = await sqliteStorage.findAll<CustomerDebitNoteRecord>("customer_debit_notes");
@@ -1096,7 +1102,7 @@ export class CustomerDebitNoteService {
         customer_name: dn.customer_name,
         customer_phone: dn.customer_phone,
         customer_gstin: dn.customer_gstin,
-        place_of_supply: dn.place_of_supply || "32-Kerala",
+        place_of_supply: documentPlaceOfSupply(dn.place_of_supply, dn.customer_gstin, companySettingsService.getSettings().state_code),
         original_invoice_ids: group.invoiceIds,
         original_invoice_numbers: group.invoiceNumbers,
         invoice_references: invRefs,
@@ -1128,7 +1134,7 @@ export class CustomerDebitNoteService {
         customer_id: dn.customer_id,
         customer_name: dn.customer_name,
         customer_gstin: dn.customer_gstin,
-        place_of_supply: dn.place_of_supply || "32-Kerala",
+        place_of_supply: documentPlaceOfSupply(dn.place_of_supply, dn.customer_gstin, companySettingsService.getSettings().state_code),
         subtotal,
         discount_total: discountTotal,
         tax_total: taxTotal,

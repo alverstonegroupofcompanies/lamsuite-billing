@@ -8,6 +8,7 @@ use App\Models\Invoice;
 use App\Models\Notification;
 use App\Models\Product;
 use App\Models\ProductBatch;
+use App\Models\StockLedgerEntry;
 use App\Models\SyncEvent;
 use Illuminate\Support\Carbon;
 
@@ -80,6 +81,54 @@ class OperationalAlertService
         }
 
         return $created;
+    }
+
+    /**
+     * AUD-02: stock reaches the server by more roads than a bill — a till's stock-event
+     * stream, a stock adjustment — and a shelf driven below zero by any of them is the
+     * same problem. One alert per product per day, whichever road raised it first, so a
+     * run of sales off an empty shelf does not bury the inbox.
+     */
+    public function negativeStockFromLedger(StockLedgerEntry $entry): int
+    {
+        if (!$entry->is_reconciled_negative || !$entry->product_id || (float) $entry->qty_delta >= 0) {
+            return 0;
+        }
+
+        $alreadyRaised = Notification::where('type', 'negative_stock')
+            ->where('store_id', $entry->store_id)
+            ->where('data->product_id', (int) $entry->product_id)
+            ->where('created_at', '>=', now()->subHours(24))
+            ->exists();
+        if ($alreadyRaised) {
+            return 0;
+        }
+
+        $product = Product::where('store_id', $entry->store_id)->whereKey($entry->product_id)->first();
+        $batch = $entry->batch_id ? ProductBatch::whereKey($entry->batch_id)->first() : null;
+        $name = $product?->name ?? 'Unknown item';
+        $remaining = (float) $entry->balance_after;
+        $where = $entry->counter_code ? " on counter {$entry->counter_code}" : '';
+
+        Notification::create([
+            'store_id' => $entry->store_id,
+            'title' => "Negative Stock: {$name}",
+            'message' => "'{$name}'" . ($batch ? " (batch {$batch->batch_no})" : '')
+                . " went below zero{$where}; {$remaining} units remain on hand.",
+            'type' => 'negative_stock',
+            'data' => [
+                'product_id' => (int) $entry->product_id,
+                'batch_id' => $entry->batch_id,
+                'batch_no' => $batch?->batch_no,
+                'remaining' => $remaining,
+                'ledger_entry_id' => $entry->id,
+                'reference_type' => $entry->reference_type,
+                'reference_id' => $entry->reference_id,
+                'counter_code' => $entry->counter_code,
+            ],
+        ]);
+
+        return 1;
     }
 
     /**

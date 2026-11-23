@@ -37,6 +37,8 @@ return Application::configure(basePath: dirname(__DIR__))
             'ip.allowlist' => \App\Http\Middleware\CheckIpAllowlist::class,
             'portal.auth' => \App\Http\Middleware\AuthenticatePortal::class,
             'device.auth' => \App\Http\Middleware\AuthenticateDevice::class,
+            // SYNC-02: the one door a recently retired workstation may still use.
+            'retired.device' => \App\Http\Middleware\AuthenticateRetiredDevice::class,
             'counter.auth' => \App\Http\Middleware\AuthenticateCounterOrUser::class,
             // PRF-003: the profile is applied by the server, after whichever
             // principal opened the route, and fails closed on an undeclared one.

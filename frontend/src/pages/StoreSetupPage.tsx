@@ -1,8 +1,9 @@
 import React, { useState } from "react";
-import { Building2, KeyRound, CheckCircle2, AlertCircle, ArrowRight, RefreshCw } from "lucide-react";
+import { Building2, KeyRound, AlertCircle, ArrowRight, RefreshCw } from "lucide-react";
 import { storeDeviceService, type StoreDeviceProfile } from "../lib/auth/storeDeviceService";
 import { cloudDeltaSyncService } from "../lib/sync/cloudDeltaSyncService";
 import { API_BASE_URL, getResolvedApiBaseUrl, setApiBaseUrl } from "../config/env";
+import { APP_VERSION } from "../config/version";
 
 interface StoreSetupPageProps {
   onSetupComplete: (profile: StoreDeviceProfile) => void;
@@ -101,7 +102,7 @@ export const StoreSetupPage: React.FC<StoreSetupPageProps> = ({ onSetupComplete,
           </div>
           <h1 className="text-[26px] font-bold tracking-tight text-text-main">LamSuite Billing Setup</h1>
           <p className="text-xs text-text-muted mt-1">
-            Enter the counter activation code the store owner issued for this workstation
+            Enter your counter activation code
           </p>
         </div>
 
@@ -168,10 +169,6 @@ export const StoreSetupPage: React.FC<StoreSetupPageProps> = ({ onSetupComplete,
                     className="w-full pl-9 pr-3.5 py-2.5 bg-surface border border-border-main rounded-btn text-text-main font-mono text-xs focus:border-accent focus:outline-none"
                   />
                 </div>
-                <p className="text-[11px] text-text-muted mt-1">
-                  Type the code, or paste the text of the QR the admin panel shows. One code opens exactly one
-                  counter on exactly one machine, and works once.
-                </p>
               </div>
 
               {/* Submit Button */}
@@ -183,26 +180,20 @@ export const StoreSetupPage: React.FC<StoreSetupPageProps> = ({ onSetupComplete,
                 <ArrowRight className="w-4 h-4" aria-hidden="true" />
               </button>
 
-              <p className="flex items-center gap-1.5 text-[11px] text-text-muted">
-                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" aria-hidden="true" />
-                No owner login and no shared store key are entered here.
-              </p>
-
               {/* Server Endpoint Indicator & Switcher */}
               <div className="pt-3 border-t border-border-main text-center">
                 {!isEditingServer ? (
-                  <div className="flex items-center justify-center gap-1.5 text-[11px] text-text-muted">
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                    <span>Server: <code className="font-mono text-text-main font-semibold">{currentApiUrl}</code></span>
+                  <div className="flex items-center justify-between text-[11px] text-text-muted">
+                    <span className="tabular-nums">Version {APP_VERSION}</span>
                     <button
                       type="button"
                       onClick={() => {
                         setCustomServerInput(currentApiUrl);
                         setIsEditingServer(true);
                       }}
-                      className="ml-1 text-accent hover:underline font-semibold cursor-pointer text-[11px]"
+                      className="text-text-muted hover:text-accent hover:underline cursor-pointer text-[11px]"
                     >
-                      Change
+                      Server settings
                     </button>
                   </div>
                 ) : (

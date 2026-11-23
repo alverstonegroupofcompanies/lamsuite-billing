@@ -332,6 +332,8 @@ export interface CompanySettings {
 
   // Store & Tax Configuration
   store_type?: "pharmacy" | "cosmetics" | "kirana_general" | "clothing" | "electronics" | "stationery" | "wholesale" | "restaurant" | "other";
+  /** TAX-02: the store's MRP ceiling switch, read from the server. Unset means on. */
+  enforce_mrp_capping?: boolean;
   gst_type: "regular" | "composition" | "no_tax";
   allow_tax_override_per_bill?: boolean;
 
@@ -1604,6 +1606,12 @@ export class CompanySettingsService {
       currency_symbol: payload.currency_symbol || this.currentSettings.currency_symbol,
 
       store_type: payload.store_type || this.currentSettings.store_type,
+      enforce_mrp_capping:
+        typeof billing.enforce_mrp_capping === "boolean"
+          ? billing.enforce_mrp_capping
+          : typeof payload.feature_flags?.enforce_mrp_capping === "boolean"
+          ? payload.feature_flags.enforce_mrp_capping
+          : this.currentSettings.enforce_mrp_capping,
       gst_type: gstType,
       allow_tax_override_per_bill: allowTaxOverride,
       tax_mode: taxMode,

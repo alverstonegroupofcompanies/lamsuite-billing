@@ -44,6 +44,14 @@ export interface SyncQueueItem {
   last_error?: string;
   created_at: number;
   next_retry_at?: number;
+  /** SYNC-02: the retired-workstation door refused it; it waits for a fresh claim instead. */
+  stranded_refused?: boolean;
+}
+
+export interface OrphanRepairReport {
+  /** Local documents still pending whose only queue row was marked sent. */
+  found: string[];
+  requeued: number;
 }
 
 export interface SyncPushResponse {
@@ -364,7 +372,178 @@ export class SyncQueueService {
   /** Called once a counter code is claimed again; the preserved queue resumes. */
   resumeAfterClaim(): void {
     this.authPaused = false;
+    // A fresh claim sends the waiting bills the ordinary way; the old
+    // credential has nothing left to do.
+    void import("../auth/storeDeviceService")
+      .then(({ storeDeviceService }) => storeDeviceService.clearRetiredDeviceToken())
+      .catch(() => {});
     this.notifyListeners();
+  }
+
+  private static byCreation(a: SyncQueueItem, b: SyncQueueItem): number {
+    const byTime = (a.created_at || 0) - (b.created_at || 0);
+    return byTime !== 0 ? byTime : String(a.id).localeCompare(String(b.id));
+  }
+
+  /**
+   * SYNC-02 / CR Q1: while this till is retired, the bills it saved before then
+   * go to the one server door that still takes its old credential. The server
+   * keeps what predates the retirement and flags it for the owner; a bill it
+   * refuses stays here with the reason, for the next claim. A closed door (the
+   * credential is unknown or the window has passed) drops the credential and
+   * keeps every bill; a network fault just waits for the next tick.
+   */
+  async flushStranded(): Promise<{ sent: number; refused: number }> {
+    const { storeDeviceService } = await import("../auth/storeDeviceService");
+    const token = await storeDeviceService.getRetiredDeviceToken();
+    if (!token) return { sent: 0, refused: 0 };
+
+    const all = await sqliteStorage.findAll<SyncQueueItem>("sync_queue");
+    const sendable = all
+      .filter((item) => item.status !== "synced" && !item.stranded_refused)
+      .sort(SyncQueueService.byCreation);
+
+    if (sendable.length === 0) {
+      await storeDeviceService.clearRetiredDeviceToken();
+      return { sent: 0, refused: 0 };
+    }
+
+    const items = sendable.map((it) => {
+      let payload: Record<string, unknown> = {};
+      try {
+        payload = JSON.parse(it.payload_json);
+      } catch (_) {}
+      return { id: it.id, entity_type: it.entity_type, action: it.action, payload };
+    });
+
+    let res: Response;
+    try {
+      res = await fetch(`${getResolvedApiBaseUrl()}/api/sync/push/stranded`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+          "X-Device-Token": token,
+        },
+        body: JSON.stringify({ items }),
+      });
+    } catch (_) {
+      return { sent: 0, refused: 0 };
+    }
+
+    if (res.status === 401 || res.status === 403) {
+      await storeDeviceService.clearRetiredDeviceToken();
+      return { sent: 0, refused: 0 };
+    }
+    if (!res.ok) return { sent: 0, refused: 0 };
+
+    const body = (await res.json().catch(() => null)) as
+      | (SyncPushResponse & { results?: BatchPushResults })
+      | null;
+    const results = body?.results;
+    if (!results) return { sent: 0, refused: 0 };
+
+    const rejected = new Map<string, string>();
+    for (const entry of results.errors ?? []) {
+      if (entry?.id !== undefined && entry?.id !== null) {
+        rejected.set(String(entry.id), entry.error || "Refused by the store server.");
+      }
+    }
+    const taken = new Set((results.processed_ids ?? []).map((id) => String(id)));
+
+    const accepted: SyncQueueItem[] = [];
+    let refused = 0;
+    for (const item of sendable) {
+      const rejection = rejected.get(item.id);
+      // Same reading as the batch push: an explicit list wins, else anything not refused was taken.
+      const wasTaken = taken.size > 0 ? taken.has(item.id) : !rejection;
+      if (wasTaken && !rejection) {
+        item.status = "synced";
+        item.last_error = undefined;
+        accepted.push(item);
+      } else if (rejection) {
+        item.status = "failed";
+        item.last_error = rejection;
+        item.stranded_refused = true;
+        item.next_retry_at = undefined;
+        refused++;
+      } else {
+        continue;
+      }
+      await sqliteStorage.insertRecord("sync_queue", item.id, item as unknown as Record<string, unknown>);
+    }
+
+    if (accepted.length > 0) {
+      this.lastSyncedAt = Date.now();
+      await this.markSourceDocumentsSynced(accepted, body?.renumbered ?? []);
+    }
+    this.recordRenumberings(body?.renumbered);
+
+    const stillSendable = (await sqliteStorage.findAll<SyncQueueItem>("sync_queue")).some(
+      (item) => item.status !== "synced" && !item.stranded_refused
+    );
+    if (!stillSendable) await storeDeviceService.clearRetiredDeviceToken();
+
+    return { sent: accepted.length, refused };
+  }
+
+  /**
+   * SYNC-01 repair for tills that ran a build which marked a whole batch sent
+   * when the server refused part of it. Such a document is still pending
+   * locally, but its only queue row says "synced", so nothing would ever send
+   * it again. A dry run lists them; a real run queues each one again with the
+   * payload and save time it had, so it keeps its place in the order. The
+   * server files documents by their external id, so a bill it did take is not
+   * filed twice.
+   */
+  async requeueOrphanedDocuments(options: { dryRun: boolean }): Promise<OrphanRepairReport> {
+    const queue = await sqliteStorage.findAll<SyncQueueItem>("sync_queue");
+    const key = (type: string, id: string) => `${type}:${id}`;
+
+    const unsent = new Set(queue.filter((q) => q.status !== "synced").map((q) => key(q.entity_type, q.entity_id)));
+    const lastSent = new Map<string, SyncQueueItem>();
+    for (const row of queue) {
+      if (row.status !== "synced") continue;
+      const k = key(row.entity_type, row.entity_id);
+      const seen = lastSent.get(k);
+      if (!seen || (row.created_at || 0) >= (seen.created_at || 0)) lastSent.set(k, row);
+    }
+
+    const found: SyncQueueItem[] = [];
+    const documentTypes: Array<SyncQueueItem["entity_type"]> = ["invoice", "purchase"];
+    for (const type of documentTypes) {
+      const table = SyncQueueService.documentTables[type];
+      if (!table) continue;
+      const rows = await sqliteStorage.findAll<Record<string, unknown>>(table).catch(() => []);
+      for (const row of rows) {
+        if (row.sync_state !== "pending" || row.id === undefined) continue;
+        const k = key(type, String(row.id));
+        const sent = lastSent.get(k);
+        if (sent && !unsent.has(k)) found.push(sent);
+      }
+    }
+
+    if (options.dryRun || found.length === 0) {
+      return { found: found.map((item) => item.entity_id), requeued: 0 };
+    }
+
+    for (const sent of found) {
+      const id = `sync_requeue_${sent.created_at || Date.now()}_${sent.entity_id}`;
+      const item: SyncQueueItem = {
+        id,
+        entity_type: sent.entity_type,
+        entity_id: sent.entity_id,
+        action: sent.action,
+        payload_json: sent.payload_json,
+        status: "pending",
+        retry_count: 0,
+        created_at: sent.created_at || Date.now(),
+      };
+      await sqliteStorage.insertRecord("sync_queue", id, item as unknown as Record<string, unknown>);
+    }
+    await this.notifyListeners();
+
+    return { found: found.map((item) => item.entity_id), requeued: found.length };
   }
 
   isOnline(): boolean {
@@ -433,6 +612,8 @@ export class SyncQueueService {
   private async pauseForDeviceAuth(): Promise<void> {
     this.authPaused = true;
     await handleDeviceAuthFailure().catch(() => ({ locked: false }));
+    // The lock above set the old credential aside if bills were waiting.
+    await this.flushStranded().catch(() => ({ sent: 0, refused: 0 }));
   }
 
   /**
@@ -459,7 +640,17 @@ export class SyncQueueService {
 
   async processQueue(apiClient: SyncApiClient = defaultBackendApiClient): Promise<{ processed: number; failed: number }> {
     if (this.isProcessing) return { processed: 0, failed: 0 };
-    if (this.authPaused) return { processed: 0, failed: 0 };
+    if (this.authPaused) {
+      // Retired: only the retired-workstation door is tried until a fresh claim.
+      this.isProcessing = true;
+      try {
+        await this.flushStranded().catch(() => ({ sent: 0, refused: 0 }));
+      } finally {
+        this.isProcessing = false;
+        await this.notifyListeners();
+      }
+      return { processed: 0, failed: 0 };
+    }
     this.isProcessing = true;
     this.notifyListeners();
 

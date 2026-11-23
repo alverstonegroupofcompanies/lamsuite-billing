@@ -61,3 +61,17 @@ export function stateLabel(value?: string | null, fallbackCode = "32"): string {
   const code = stateCodeOf(value) ?? stateCodeOf(fallbackCode) ?? "32";
   return `${code}-${GST_STATE_NAMES[code]}`;
 }
+
+/**
+ * Place of supply for a sales document (TAX-03), as the server decides it: the state the
+ * document already states, else the buyer's GSTIN state, else the store's own state.
+ */
+export function documentPlaceOfSupply(
+  stated?: string | null,
+  customerGstin?: string | null,
+  storeState?: string | null
+): string {
+  if (stateCodeOf(stated)) return stateLabel(stated);
+  if (stateCodeOf(customerGstin)) return stateLabel(customerGstin);
+  return stateLabel(storeState);
+}

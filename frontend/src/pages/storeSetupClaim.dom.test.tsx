@@ -100,12 +100,17 @@ describe("Counter code setup screen (CNT-006, CNT-013)", () => {
   it("lets the backend endpoint be changed without a credential", async () => {
     render(<StoreSetupPage onSetupComplete={vi.fn()} />);
 
-    fireEvent.click(screen.getByRole("button", { name: /change/i }));
+    fireEvent.click(screen.getByRole("button", { name: /server settings/i }));
     const serverField = screen.getByLabelText(/backend api endpoint/i) as HTMLInputElement;
     fireEvent.change(serverField, { target: { value: "http://192.168.1.20:8000" } });
     fireEvent.click(screen.getByRole("button", { name: /save/i }));
 
-    await waitFor(() => expect(screen.getByText(/192\.168\.1\.20:8000/)).toBeInTheDocument());
+    // The saved endpoint collapses the editor, so reopening it is what proves
+    // the screen holds the address the till will actually call.
+    await waitFor(() => expect(screen.queryByLabelText(/backend api endpoint/i)).toBeNull());
+    fireEvent.click(screen.getByRole("button", { name: /server settings/i }));
+    expect((screen.getByLabelText(/backend api endpoint/i) as HTMLInputElement).value)
+      .toBe("http://192.168.1.20:8000");
     expect(document.querySelectorAll('input[type="password"]')).toHaveLength(0);
   });
 });

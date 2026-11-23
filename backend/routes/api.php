@@ -88,6 +88,12 @@ Route::post('/counters/claim', [CounterClaimController::class, 'claim']);
 Route::get('/counters/{id}/watch', [CounterController::class, 'watch']);
 Route::get('/license/check', [AuthController::class, 'checkLicense']);
 
+// SYNC-02 / CR Q1: a till the owner retired while it was offline sends the
+// bills it saved before then. Only a recently revoked device token opens this,
+// only new documents dated before the revocation pass, and each is flagged.
+Route::post('/sync/push/stranded', [\App\Http\Controllers\Api\StrandedSyncController::class, 'push'])
+    ->middleware(['retired.device', 'throttle:30,1,sync-stranded']);
+
 // Staff Terminal Authentication & Offline Hash Cache
 Route::post('/staff/login', [StaffAuthController::class, 'login'])->middleware('throttle:30,1,staff-login');
 

@@ -34,7 +34,8 @@ class RouteAuthAllowlistTest extends TestCase
         'api/app/update/{target}/{current_version}',
     ];
 
-    private const AUTH_MIDDLEWARE = ['auth:sanctum', 'counter.auth', 'device.auth', 'portal.auth'];
+    // retired.device (SYNC-02) authenticates a recently revoked device token, for one route only.
+    private const AUTH_MIDDLEWARE = ['auth:sanctum', 'counter.auth', 'device.auth', 'portal.auth', 'retired.device'];
 
     public function test_every_api_route_is_authenticated_unless_public_by_design(): void
     {

@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Casts\CalendarDate;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
@@ -39,7 +40,7 @@ class InvoiceItem extends Model
     ];
 
     protected $casts = [
-        'expiry_date' => 'date',
+        'expiry_date' => CalendarDate::class,
         'qty' => 'decimal:2',
         'loose_qty' => 'decimal:2',
         'free_qty' => 'decimal:2',

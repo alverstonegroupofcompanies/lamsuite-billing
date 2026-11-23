@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Casts\CalendarDate;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -50,8 +51,8 @@ class PurchaseItem extends Model
     ];
 
     protected $casts = [
-        'mfg_date' => 'date',
-        'expiry_date' => 'date',
+        'mfg_date' => CalendarDate::class,
+        'expiry_date' => CalendarDate::class,
         'pack_qty' => 'decimal:2',
         'loose_qty' => 'decimal:2',
         'free_qty' => 'decimal:2',

@@ -93,6 +93,13 @@ export function counterSequenceKey(
  * panel prints. The QR carries store and counter ids, and only the code is
  * ever sent back — the server reads the tenancy off the code (IS2).
  */
+/**
+ * SYNC-02: where a retired counter's token waits while its offline bills are
+ * sent. The name ends in "device_token" so the vault treats it as a credential
+ * and never copies it to web storage.
+ */
+export const RETIRED_TOKEN_KEY = "retired_device_token";
+
 export function extractClaimCode(input: string): string {
   const raw = String(input ?? "").trim();
 
@@ -517,6 +524,29 @@ export class StoreDeviceService {
     }
   }
 
+  /** The credential of the counter this till was retired from, kept only while bills wait. */
+  async getRetiredDeviceToken(): Promise<string | null> {
+    return await invokeCommand<string | null>("secure_store_get", { key: RETIRED_TOKEN_KEY }).catch(() => null);
+  }
+
+  async clearRetiredDeviceToken(): Promise<void> {
+    await invokeCommand("secure_store_delete", { key: RETIRED_TOKEN_KEY }).catch(() => {});
+  }
+
+  private async retireCredentialForUnsentBills(): Promise<void> {
+    try {
+      const token = await this.getDeviceToken();
+      if (!token) return;
+      // Read lazily: the sync queue already imports this module.
+      const { syncQueueService } = await import("../sync/syncQueueService");
+      if ((await syncQueueService.getUnsentCount()) === 0) return;
+      await invokeCommand("secure_store_set", { key: RETIRED_TOKEN_KEY, value: token });
+    } catch (_) {
+      // Nothing to keep, or the vault is unavailable: the bills stay queued
+      // for the next claim either way.
+    }
+  }
+
   async lockAndResetWorkstation(wipeLocalData = false): Promise<void> {
     this.activeProfile = null;
     this.isAccessRevoked = true;
@@ -532,6 +562,11 @@ export class StoreDeviceService {
     const { counterSessionService } = await import("./counterSessionService");
     await counterSessionService.clear();
 
+    // SYNC-02 / CR Q1: bills this till saved before the owner retired it are
+    // still the store's. The old token stops working everywhere except the one
+    // door the server keeps for them, so it is set aside rather than lost.
+    await this.retireCredentialForUnsentBills();
+
     await invokeCommand("secure_store_delete", { key: "device_token" });
     await invokeCommand("secure_store_delete", { key: "refresh_token" });
     await invokeCommand("secure_store_delete", { key: "store_device_profile" });
@@ -543,8 +578,13 @@ export class StoreDeviceService {
         if (wipeLocalData) {
           await storeRegistryService.disconnectStore(activeStore.id, true);
         } else {
+          // SYNC-02: "revoked", not just inactive. The store itself is still
+          // licensed, and its licence check must not reopen a counter this
+          // machine no longer holds; only a fresh claim does.
           await storeRegistryService.updateStoreMeta(activeStore.id, {
             is_active: false,
+            sync_status: "revoked",
+            disabled_reason: "This counter was re-issued or revoked by the store owner.",
           });
         }
       }

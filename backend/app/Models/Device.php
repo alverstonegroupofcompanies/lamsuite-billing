@@ -27,6 +27,7 @@ class Device extends Model
         'last_sync_at',
         'force_resync',
         'revoke_reason',
+        'revoked_at',
     ];
 
     protected $hidden = [
@@ -39,7 +40,28 @@ class Device extends Model
         'approved_at' => 'datetime',
         'last_seen_at' => 'datetime',
         'last_sync_at' => 'datetime',
+        'revoked_at' => 'datetime',
     ];
+
+    /**
+     * SYNC-02: every revocation records when it happened, whichever screen or
+     * command did it, so bills a retired till sold before that moment can still
+     * be told apart from anything it wrote afterwards. Reinstating clears it.
+     */
+    protected static function booted(): void
+    {
+        static::saving(function (Device $device) {
+            if (!$device->isDirty('status')) {
+                return;
+            }
+
+            if ($device->status === 'revoked') {
+                $device->revoked_at = $device->revoked_at ?? now();
+            } else {
+                $device->revoked_at = null;
+            }
+        });
+    }
 
     public function store(): BelongsTo
     {

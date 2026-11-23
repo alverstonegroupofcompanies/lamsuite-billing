@@ -901,7 +901,7 @@ export const SettingsPage: React.FC = () => {
                   <input
                     type="url"
                     required
-                    value={settingsData.whatsapp?.api_url || "https://wa-api.alverstone.in"}
+                    value={settingsData.whatsapp?.api_url ?? ""}
                     onChange={(e) =>
                       setSettingsData({
                         ...settingsData,

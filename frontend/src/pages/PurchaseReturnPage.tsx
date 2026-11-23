@@ -26,6 +26,7 @@ import { printingEngine, type DebitNotePrintData } from "../lib/printing/printin
 import { companySettingsService } from "../lib/settings/companySettingsService";
 import { PrintPreviewModal } from "../components/PrintPreviewModal";
 import { useModalEscape } from "../lib/ui/modalEscapeManager";
+import { formatExpiryDisplay } from "../lib/masters/productsStore";
 
 const RETURN_REASONS: { value: PurchaseReturnReason; label: string }[] = [
   { value: "expired", label: "Expired" },
@@ -737,7 +738,7 @@ export const PurchaseReturnPage: React.FC = () => {
                               <td className="px-3 py-2 text-center font-mono text-slate-700">
                                 <div>{line.batch_no || "—"}</div>
                                 {line.expiry_date && (
-                                  <div className="text-[10px] text-slate-400">Exp: {line.expiry_date}</div>
+                                  <div className="text-[10px] text-slate-400">Exp: {formatExpiryDisplay(line.expiry_date)}</div>
                                 )}
                               </td>
                               <td className="px-3 py-2 text-center font-mono">{line.purchased_qty}</td>

@@ -545,10 +545,15 @@ class DeviceSessionController
         if ($session->counter_id) {
             Counter::where('id', $session->counter_id)->update(['status' => 'revoked']);
         }
-        Device::where('device_uuid', $session->device_uuid)->update([
-            'status' => 'revoked',
-            'revoke_reason' => $request->input('reason', 'Revoked from devices console'),
-        ]);
+        // A query update skips the model hook, so the revocation time is stamped
+        // here; a row already revoked keeps the moment it was first retired.
+        Device::where('device_uuid', $session->device_uuid)
+            ->where('status', '!=', 'revoked')
+            ->update([
+                'status' => 'revoked',
+                'revoke_reason' => $request->input('reason', 'Revoked from devices console'),
+                'revoked_at' => now(),
+            ]);
 
         AuditLog::log(
             'device_session_revoked',

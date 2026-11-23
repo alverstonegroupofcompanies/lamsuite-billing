@@ -3717,7 +3717,8 @@ export const SettingsPage: React.FC = () => {
                     <label className="block text-[11px] font-semibold text-slate-600">OpenWA Gateway URL</label>
                     <input
                       type="text"
-                      value={settings.whatsapp?.apiUrl || "https://wa-api.alverstone.in"}
+                      value={settings.whatsapp?.apiUrl ?? ""}
+                      placeholder="https://wa-api.alverstone.in"
                       onChange={(e) =>
                         setSettings({
                           ...settings,

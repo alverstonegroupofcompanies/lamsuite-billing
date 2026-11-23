@@ -137,6 +137,11 @@ class AdminSettingController
             'max_percent_of_goods' => is_numeric($chargeCap) ? (float) $chargeCap : null,
         ];
 
+        // TAX-02: a till billing offline enforces the MRP ceiling itself, so the store's
+        // switch travels in the settings document it caches. It is a store flag, never a
+        // billing setting a device may write back.
+        $billingFull['enforce_mrp_capping'] = \App\Services\Tax\MrpCeiling::enforcedFor($store);
+
         $sequencesFull = array_merge([
             'invoicePrefix' => $invoicePrefix,
             'invoice_prefix' => $invoicePrefix,

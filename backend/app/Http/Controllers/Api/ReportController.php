@@ -55,6 +55,12 @@ class ReportController
         return null;
     }
 
+    /** Today's calendar date in the store's timezone (server clock is UTC). */
+    protected function storeToday(?int $storeId): string
+    {
+        return StoreClock::today($storeId ? Store::find($storeId) : null)->toDateString();
+    }
+
     /**
      * The same scope as `resolveStoreId`, as the list some reports filter with `whereIn`.
      *
@@ -73,8 +79,10 @@ class ReportController
     public function dailyCollection(Request $request): JsonResponse
     {
         $storeId = $this->resolveStoreId($request);
-        $startDate = $request->query('start_date', date('Y-m-d'));
-        $endDate = $request->query('end_date', date('Y-m-d'));
+        // One-day callers send `date`; the default is the store's day, not the server's.
+        $day = $request->query('date') ?: $this->storeToday($storeId);
+        $startDate = $request->query('start_date', $day);
+        $endDate = $request->query('end_date', $day);
         $counterId = $request->query('counter_id');
 
         $service = OutwardSalesService::forWindow($storeId, $startDate, $endDate, $counterId);
@@ -246,7 +254,7 @@ class ReportController
     public function dailySummary(Request $request): JsonResponse
     {
         $storeId = $this->resolveStoreId($request);
-        $date = $request->query('date', date('Y-m-d'));
+        $date = $request->query('date') ?: $this->storeToday($storeId);
 
         $service = OutwardSalesService::forWindow($storeId, $date, $date);
         $tenders = $service->tenders();
@@ -657,7 +665,12 @@ class ReportController
             }
 
             $hasGstin = !empty($inv->customer_gstin) && strlen(trim($inv->customer_gstin)) === 15;
-            $targetState = !empty($inv->customer_gstin) ? substr(trim($inv->customer_gstin), 0, 2) : ($inv->place_of_supply ?? $storeState);
+            // Place of supply is the 2-digit state code. Tills store both "32" and
+            // "32-Kerala"; left raw, one state splits into two B2CS rows and a
+            // home-state bill compares as inter-state.
+            $targetState = !empty($inv->customer_gstin)
+                ? substr(trim($inv->customer_gstin), 0, 2)
+                : (substr(trim((string) ($inv->place_of_supply ?: $storeState)), 0, 2) ?: $storeState);
             $taxable = $service->taxableBase($inv);
 
             if ($isReturn) {
@@ -768,7 +781,10 @@ class ReportController
         $avgTicket = $billsCount > 0 ? Money::round2($grossSales / $billsCount) : 0.0;
 
         $digitalTotal = Money::sum([$tenders['upi'], $tenders['card'], $tenders['bank_transfer']]);
-        $totalCollected = Money::sum(array_values($tenders));
+        // Collected means money received; the credit bucket is what is still owed.
+        $totalCollected = Money::sum([
+            $tenders['cash'], $tenders['upi'], $tenders['card'], $tenders['bank_transfer'], $tenders['other'],
+        ]);
         $digitalPercent = $totalCollected > 0 ? round(($digitalTotal / $totalCollected) * 100, 1) : 0.0;
 
         $slabs = [];

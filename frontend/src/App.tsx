@@ -219,6 +219,16 @@ export const App: React.FC = () => {
       // PRF-001: the counter's own document is in hand before the first screen
       // draws, so a till never paints a surface the owner closed.
       await counterSessionService.hydrate().catch(() => {});
+      // SYNC-01 repair: bills an older build marked sent when the server had
+      // refused them are found first (logged), then queued again in order.
+      syncQueueService
+        .requeueOrphanedDocuments({ dryRun: true })
+        .then(async (report) => {
+          if (report.found.length === 0) return;
+          console.info(`[sync] ${report.found.length} saved document(s) were never taken by the server; queuing them again.`);
+          await syncQueueService.requeueOrphanedDocuments({ dryRun: false });
+        })
+        .catch(() => {});
       setIsInitializing(false);
     });
 
@@ -274,15 +284,27 @@ export const App: React.FC = () => {
     );
   }
 
+  // The update prompt is drawn on every screen — setup/claim and the store
+  // gateway as well as the signed-in shell — so a till sitting on the login
+  // screen still learns a new release is out.
+  const updateModal = availableUpdate ? (
+    <UpdateNotificationModal
+      updateInfo={availableUpdate}
+      onClose={() => setAvailableUpdate(null)}
+    />
+  ) : null;
+
   // If no stores are registered at all, or user clicked "Add Store"
   if (registeredStores.length === 0 || isAddingStore) {
     return (
       <>
+        {updateModal}
         {unsentBillCount > 0 && (
           <div className="fixed inset-x-0 top-0 z-50 border-b border-amber-300 bg-amber-50 px-4 py-2 text-center text-xs font-semibold text-amber-900">
             {unsentBillCount} bill{unsentBillCount === 1 ? "" : "s"} saved on this till{" "}
-            {unsentBillCount === 1 ? "is" : "are"} waiting to be sent. They stay on this machine
-            until a counter code is claimed again.
+            {unsentBillCount === 1 ? "is" : "are"} waiting to be sent. Bills saved before the owner
+            re-issued this counter are sent to the owner for review as soon as the store server is
+            reachable; anything else stays on this machine until a counter code is claimed again.
           </div>
         )}
         <StoreSetupPage
@@ -307,14 +329,17 @@ export const App: React.FC = () => {
   // Tally-style Store Gateway Selection Screen
   if (showGateway || !activeStore) {
     return (
-      <StoreGatewayPage
-        onSelectStore={(selected) => {
-          setActiveStore(selected);
-          setShowGateway(false);
-          productsStore.ensureCatalogPopulated(selected.id).catch(() => {});
-        }}
-        onAddNewStore={() => setIsAddingStore(true)}
-      />
+      <>
+        <StoreGatewayPage
+          onSelectStore={(selected) => {
+            setActiveStore(selected);
+            setShowGateway(false);
+            productsStore.ensureCatalogPopulated(selected.id).catch(() => {});
+          }}
+          onAddNewStore={() => setIsAddingStore(true)}
+        />
+        {updateModal}
+      </>
     );
   }
 
@@ -347,12 +372,7 @@ export const App: React.FC = () => {
           <Route path="/migration" element={<AccessGate menu="migration"><DataMigrationPage /></AccessGate>} />
         </Routes>
       </Layout>
-      {availableUpdate && (
-        <UpdateNotificationModal
-          updateInfo={availableUpdate}
-          onClose={() => setAvailableUpdate(null)}
-        />
-      )}
+      {updateModal}
       {showWin7Modal && win7Status && (
         <Windows7PrereqModal
           status={win7Status}

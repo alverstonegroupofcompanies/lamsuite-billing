@@ -13,16 +13,30 @@ const D = '2026-11-21';
   const o = { sales_count: 0n, gross: 0n, taxable: 0n, tax: 0n, cgst: 0n, sgst: 0n, igst: 0n, returns: 0n, cancelled: 0, slab: {}, tender: {} };
   for (const i of inv) {
     if (i.status === 'cancelled') { o.cancelled++; continue; }
-    if (i.module_key === 'invoice') { o.sales_count++; o.gross += P(i.grand_total); } else o.returns += P(i.grand_total);
+    if (i.module_key === 'invoice') { o.sales_count++; o.gross += P(i.grand_total); } else if (['credit_note', 'sales_return'].includes(i.module_key)) o.returns += P(i.grand_total);
   }
   for (const l of lines) {
-    const i = byId[l.invoice_id]; if (!i || i.status === 'cancelled') continue;
+    const i = byId[l.invoice_id]; if (!i || i.status === 'cancelled' || !['invoice', 'credit_note', 'sales_return'].includes(i.module_key)) continue;
     const sign = i.module_key === 'invoice' ? 1n : -1n;
     o.taxable += sign * P(l.taxable_amount); o.cgst += sign * P(l.cgst_amount); o.sgst += sign * P(l.sgst_amount); o.igst += sign * P(l.igst_amount);
     const k = String(l.gst_percent); o.slab[k] = (o.slab[k] || 0n) + sign * P(l.taxable_amount);
   }
   o.tax = o.cgst + o.sgst + o.igst;
-  for (const p of pays) { const i = byId[p.invoice_id]; if (!i || i.status === 'cancelled' || i.module_key !== 'invoice') continue; o.tender[p.payment_mode] = (o.tender[p.payment_mode] || 0n) + P(p.amount); }
+  // Tenders = money that stayed with the business: each document's rows are applied up to its
+  // grand total (a 500 note on a 210 bill is 210, the 290 change is not takings); what is left
+  // unpaid is Credit; returns subtract. Sum of tenders therefore equals net sales.
+  const paysBy = {}; for (const p of pays) (paysBy[p.invoice_id] ||= []).push(p);
+  const addT = (k, v) => { o.tender[k] = (o.tender[k] || 0n) + v; };
+  for (const i of inv) {
+    if (i.status === 'cancelled' || !['invoice', 'credit_note', 'sales_return'].includes(i.module_key)) continue;
+    const sign = i.module_key === 'invoice' ? 1n : -1n;
+    let left = P(i.grand_total) > 0n ? P(i.grand_total) : 0n;
+    for (const p of paysBy[i.id] || []) {
+      if (p.status === 'refunded' || p.status === 'bounced') continue;
+      const amt = P(p.amount) < left ? P(p.amount) : left; left -= amt; addT(p.payment_mode, sign * amt);
+    }
+    if (left > 0n) addT('Credit', sign * left);
+  }
   const oracle = { sales_count: Number(o.sales_count), cancelled_excluded: o.cancelled, gross_sales: R(o.gross), returns: R(o.returns), net_sales: R(o.gross - o.returns), taxable_net: R(o.taxable), tax_net: R(o.tax), cgst: R(o.cgst), sgst: R(o.sgst), igst: R(o.igst),
     taxable_by_slab: Object.fromEntries(Object.entries(o.slab).map(([k, v]) => [k, R(v)])), tenders: Object.fromEntries(Object.entries(o.tender).map(([k, v]) => [k, R(v)])) };
   ev.oracle = oracle; console.log('ORACLE', JSON.stringify(oracle));
@@ -30,15 +44,15 @@ const D = '2026-11-21';
   ev.header_vs_lines = sql(`select i.invoice_number,i.tax_total,round(sum(ii.tax_amount),2) line_tax,i.grand_total,round(sum(ii.total_amount),2) line_total,i.paid_amount from invoices i join invoice_items ii on ii.invoice_id=i.id where i.store_id=4 group by i.id having abs(i.tax_total-sum(ii.tax_amount))>0.005 or abs(i.grand_total-sum(ii.total_amount)-coalesce(i.round_off,0))>0.005`);
   // ---- product surfaces
   const get = async (label, url, H) => { const r = await api('GET', url, undefined, H); ev[label] = { st: r.status, body: r.json ?? r.text.slice(0, 1500) }; console.log(label, r.status, JSON.stringify(r.json ?? r.text).slice(0, 900)); };
-  await get('till_daily_summary', `/reports/daily-summary?date=${D}&from=${D}&to=${D}`, C);
-  await get('till_dashboard', `/dashboard/metrics?from=${D}&to=${D}&period=today`, C);
-  await get('till_gstr1', `/reports/gstr-1?from=${D}&to=${D}`, C);
-  await get('till_hsn', `/reports/hsn-summary?from=${D}&to=${D}`, C);
-  await get('till_daily_collection', `/reports/daily-collection?date=${D}&from=${D}&to=${D}`, C);
-  await get('admin_dashboard', `/admin/dashboard?store_id=4&from=${D}&to=${D}`, A);
-  await get('admin_sales_register', `/admin/reports/sales-register?store_id=4&from=${D}&to=${D}`, A);
-  await get('admin_gstr1', `/admin/reports/gstr1?store_id=4&from=${D}&to=${D}`, A);
-  await get('admin_daily_summary', `/admin/reports/daily-summary?store_id=4&from=${D}&to=${D}&date=${D}`, A);
-  await get('admin_invoices', `/admin/invoices?store_id=4&from=${D}&to=${D}&per_page=200`, A);
+  await get('till_daily_summary', `/reports/daily-summary?date=${D}&start_date=${D}&end_date=${D}`, C);
+  await get('till_dashboard', `/dashboard/metrics?start_date=${D}&end_date=${D}&period=today`, C);
+  await get('till_gstr1', `/reports/gstr-1?start_date=${D}&end_date=${D}`, C);
+  await get('till_hsn', `/reports/hsn-summary?start_date=${D}&end_date=${D}`, C);
+  await get('till_daily_collection', `/reports/daily-collection?date=${D}&start_date=${D}&end_date=${D}`, C);
+  await get('admin_dashboard', `/admin/dashboard?store_id=4&start_date=${D}&end_date=${D}`, A);
+  await get('admin_sales_register', `/admin/reports/sales-register?store_id=4&start_date=${D}&end_date=${D}`, A);
+  await get('admin_gstr1', `/admin/reports/gstr1?store_id=4&start_date=${D}&end_date=${D}`, A);
+  await get('admin_daily_summary', `/admin/reports/daily-summary?store_id=4&start_date=${D}&end_date=${D}&date=${D}`, A);
+  await get('admin_invoices', `/admin/invoices?store_id=4&start_date=${D}&end_date=${D}&per_page=200`, A);
   evidence('J9_reports', ev);
 })();

@@ -1,0 +1,159 @@
+[
+  [
+    "product",
+    null,
+    "DIV:purchase-batch-0="
+  ],
+  [
+    "batch trigger",
+    "purchase-batch-0"
+  ],
+  [
+    "batch options",
+    [
+      "QA Cough Syrup 100ml Batch: CS-A1 • Stock: 33 • Exp: 06/27 • ₹115.00"
+    ]
+  ],
+  [
+    "entry row after pick",
+    "+ QA Cough Syrup 100ml HSN: 30049011 QA Cough Syrup 100ml Batch: CS-A1 (33 on hand) % 22.1% ₹ 80.00 ₹ 9.60 ₹ 89.60"
+  ],
+  [
+    "set",
+    "Packs",
+    "ok"
+  ],
+  [
+    "set",
+    "Rate",
+    "ok"
+  ],
+  [
+    "set",
+    "Sell",
+    "ok"
+  ],
+  [
+    "entry row before commit",
+    "+ QA Cough Syrup 100ml HSN: 30049011 QA Cough Syrup 100ml Batch: CS-A1 (33 on hand) % 25.3% ₹ 600.00 ₹ 72.00 ₹ 672.00"
+  ],
+  [
+    "PUR-02 toasts",
+    [
+      "#\tPRODUCT\tBATCH\tEXPIRY (MM/YY)\tQUANTITY\tFREE QTY\tMRP (₹)\tPUR. RATE (₹)\tDISC %/₹\tGST %\tSELLING RATE (₹)\tMARGIN %\tTAXABLE (₹)\tTAX (₹)\tTOTAL (₹)\tACTION",
+      "Expiry Mask"
+    ]
+  ],
+  [
+    "PUR-02 committed rows",
+    [
+      "1 QA Cough Syrup 100ml HSN: 30049011 CS-A1 06/27 10 0 ₹ 120.00 ₹ 60.00 — 12% ₹ 90.00 25.3% ₹ 600.00 ₹ 72.00 ₹ 672.00"
+    ]
+  ],
+  [
+    "totals with 1 committed line",
+    [
+      "BILL NUMBER\tSUPPLIER NAME\tSUPPLIER INV #\tDATE\tTAXABLE\tGST TAX\tGRAND TOTAL\tPAYMENT\tSTATUS\tACTIONS",
+      "No purchase bills match the selected filters",
+      "GST TAX MODE",
+      "SUBTOTAL: ₹ 600.00",
+      "GST TAX: ₹ 72.00",
+      "Round: +₹0.00",
+      "NET PAYABLE",
+      "Round-off",
+      "Shortcuts"
+    ]
+  ],
+  [
+    "product 2",
+    null
+  ],
+  [
+    "totals with entry-row line",
+    [
+      "BILL NUMBER\tSUPPLIER NAME\tSUPPLIER INV #\tDATE\tTAXABLE\tGST TAX\tGRAND TOTAL\tPAYMENT\tSTATUS\tACTIONS",
+      "No purchase bills match the selected filters",
+      "GST TAX MODE",
+      "SUBTOTAL: ₹ 600.00",
+      "GST TAX: ₹ 72.00",
+      "Round: +₹0.00",
+      "NET PAYABLE",
+      "Round-off",
+      "Shortcuts"
+    ],
+    "unchanged=true"
+  ],
+  [
+    "PUR-04 entry-row margin",
+    [
+      "25.3%"
+    ]
+  ],
+  [
+    "PUR-03 F12 with entry row",
+    {
+      "refusal": [
+        "QA Paracet 500 Strip is still in the entry row. Press Enter to add the line in the entry row, or Esc to clear it."
+      ],
+      "summaryOpen": false
+    }
+  ],
+  [
+    "entry row after Esc",
+    "+ Scan — — — — — — — — — — ₹ 0.00 ₹ 0.00 ₹ 0.00"
+  ],
+  [
+    "screen before post",
+    [
+      "BILL NUMBER\tSUPPLIER NAME\tSUPPLIER INV #\tDATE\tTAXABLE\tGST TAX\tGRAND TOTAL\tPAYMENT\tSTATUS\tACTIONS",
+      "No purchase bills match the selected filters",
+      "GST TAX MODE",
+      "SUBTOTAL: ₹ 600.00",
+      "GST TAX: ₹ 72.00",
+      "Round: +₹0.00",
+      "NET PAYABLE",
+      "Round-off",
+      "Shortcuts"
+    ]
+  ],
+  [
+    "summary open",
+    true
+  ],
+  [
+    "success modal",
+    [
+      "GST TAX: ₹ 72.00",
+      "₹ 0.00",
+      "Round: +₹0.00",
+      "₹ 672.00",
+      "Purchase Bill Posted!",
+      "TOTAL INWARD",
+      "₹ 672.00",
+      "Posted to the server: batch stock credited & supplier ledger updated. Select next action with hotkey:"
+    ]
+  ],
+  [
+    "post calls",
+    [
+      {
+        "u": "http://127.0.0.1:8030/api/sync/push/batch",
+        "st": 200,
+        "req": "{\"items\":[{\"id\":\"sync_1795412914090_000011\",\"entity_type\":\"purchase\",\"action\":\"create\",\"payload\":{\"id\":\"pb_1795412914088_b9c5\",\"purchase_number\":\"C01-PUR-1001\",\"module_key\":\"purchase\",\"supplier_id\":\"8\",\"supplier_name\":\"QA Pharma Distributors\",\"supplier_gstin\":\"32AAACQ1234A1Z1\",\"supplier_invoice_no\":\"QA-PB-G3-2\",\"purchase_date\":\"2026-11-23\",\"place_of_supply\":\"32-State\",\"is_interstate\":0,\"is_rcm\":0,\"itc_eligibility\":\"eligible\",\"subtotal\":600,\"discount_total\":0,\"bill_discount_type\":\"amount\",\"bill_discount\":0,\"freight_charges\":0,\"tax_total\":72,\"cgst_total\":36,\"sgst_total\":36,\"igst_total\":0,\"cess_total\":0,\"round_off\":0,\"grand_total\":672,\"paid_amount\":0,\"payment_status\":\"unpaid\",\"status\":\"received\",\"notes\":\"\",\"sync_state\":\"pending\",\"external_id\":\"pb_1795412914088_b9c5\",\"created_at\":1795412914088,\"updated_at\":1795412914088,\"items\":[{\"id\":\"pbi_1795412914089_2c54\",\"purchase_id\":\"pb_1795412914088_b9c5\",\"product_id\":\"6\",\"product_name\":\"QA Cough Syrup 100ml\",\"hsn_code\":\"30049011\",\"batch_id\":\"batch_6_CS-A1\",\"batch_no\":\"CS-A1\",\"expiry_date\":\"2027-06-30\",\"pack_qty\":10,\"loose_qty\":0,\"gross_weight_kg\":null,\"free_qty\":0,\"free_loose_qty\":0,\"units_per_pack\":1,\"total_units\":10,\"purchase_rate\":60,\"ptr\":80,\"pts\":0,\"discount_type\":\"percent\",\"discount_percent\":0,\"discount_amount\":0,\"effective_unit_cost\":60,\"taxable_amount\":600,\"mrp\":120,\"selling_rate\":90,\"gst_percent\":12,\"cgst_amount\":36,\"sgst_amount\":36,\"igst_amount\":0,\"cess_amount\":0,\"tax_amount\":72,\"total_amount\":672}],\"charges\":[],\"idempotency_key\":\"purchase_pb_1795412914088_b9c5\",\"client_timestamp\":1795412914090,\"permission_profile_version\":1,\"store_id\":\"4\"}}],\"store_id\":\"4\"}"
+      }
+    ]
+  ],
+  [
+    "server row",
+    [
+      {
+        "id": 15,
+        "invoice_number": "QA-PB-G3-2",
+        "subtotal": 600,
+        "tax_total": 72,
+        "grand_total": 672,
+        "status": "received"
+      }
+    ]
+  ]
+]

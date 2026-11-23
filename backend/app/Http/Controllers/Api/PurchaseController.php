@@ -120,7 +120,14 @@ class PurchaseController
         $chargeService = app(PurchaseChargeService::class);
         $posting = app(PurchasePostingService::class);
 
-        $purchase = DB::transaction(function () use ($validated, $storeId, $storeStateCode, $chargeService, $posting, $request) {
+        // AUD-01: this route is opened by a claimed counter, so the bill and every shelf
+        // movement it causes name that counter, as a bill pushed through the sync queue does.
+        $counter = \App\Http\Middleware\AuthenticateCounterProfile::counterFor($request);
+        if ($counter && (int) $counter->store_id !== (int) $storeId) {
+            $counter = null;
+        }
+
+        $purchase = DB::transaction(function () use ($validated, $storeId, $storeStateCode, $chargeService, $posting, $request, $counter) {
             $engineLines = $chargeService->engineLines($validated['lines']);
 
             $freightCharges = round((float)($validated['freight_charges'] ?? 0), 2);
@@ -179,6 +186,8 @@ class PurchaseController
                 'supplier_gstin' => $validated['supplier_gstin'] ?? null,
                 'invoice_number' => $validated['invoice_number'],
                 'supplier_invoice_no' => $validated['invoice_number'],
+                'counter_id' => $counter?->id,
+                'counter_code' => $counter?->counter_code,
                 'invoice_date' => $validated['invoice_date'],
                 'subtotal' => $calcResult['gross_subtotal'],
                 'tax_total' => $calcResult['total_tax'],
@@ -253,7 +262,7 @@ class PurchaseController
                 PurchaseItem::where('purchase_id', $purchase->id)->get(),
                 0.0,
                 null,
-                null,
+                $counter,
                 $request->user()?->id
             );
 
@@ -274,6 +283,7 @@ class PurchaseController
                     'grand_total' => (float) $purchase->grand_total,
                     'document_number' => $purchase->document_number,
                     'supplier_invoice_no' => $purchase->supplier_invoice_no,
+                    'counter_code' => $purchase->counter_code,
                 ],
                 (int) $storeId,
                 $request->user()?->id

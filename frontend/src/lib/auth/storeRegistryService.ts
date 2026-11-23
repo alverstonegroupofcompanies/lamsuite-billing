@@ -427,6 +427,9 @@ export class StoreRegistryService {
 
   async setStoreActiveStatus(storeId: string, isActive: boolean, reason?: string): Promise<void> {
     const store = this.registry.stores.find((s) => String(s.id) === String(storeId));
+    // SYNC-02: the store's licence says nothing about a counter this machine
+    // was retired from. A revoked record changes only through a fresh claim.
+    if (store?.sync_status === "revoked") return;
     if (store) {
       store.is_active = isActive;
       store.sync_status = isActive ? "synced" : "disabled";

@@ -204,8 +204,11 @@ class AdminReportController
     public function gstr1(Request $request): JsonResponse
     {
         $storeId = $request->get('active_store_id');
-        $startDate = $request->query('start_date', Carbon::today()->startOfMonth()->toDateString());
-        $endDate = $request->query('end_date', Carbon::today()->toDateString());
+        // Default to the store's own calendar month, and accept `from`/`to`:
+        // a caller that sent them used to get month-to-date silently.
+        $storeToday = \App\Services\StoreClock::today($storeId ? Store::find($storeId) : null);
+        $startDate = substr((string) ($request->query('start_date') ?? $request->query('from') ?? $storeToday->copy()->startOfMonth()->toDateString()), 0, 10);
+        $endDate = substr((string) ($request->query('end_date') ?? $request->query('to') ?? $storeToday->toDateString()), 0, 10);
 
         $query = Invoice::with(['items', 'payments'])
             ->whereDate('invoice_date', '>=', substr($startDate, 0, 10))

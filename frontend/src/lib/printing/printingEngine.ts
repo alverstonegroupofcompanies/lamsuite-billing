@@ -9,6 +9,7 @@ import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
 import { isClinicalSupported } from "../settings/storeTypePresets";
 import { companySettingsService } from "../settings/companySettingsService";
+import { documentPlaceOfSupply } from "../gst/stateCodes";
 import { formatExpiryDisplay } from "../masters/productsStore";
 import * as QRCodeModule from "qrcode";
 import { ROBOTO_REGULAR_BASE64, ROBOTO_BOLD_BASE64 } from "./embeddedFonts";
@@ -1269,7 +1270,7 @@ export class PrintingEngine {
             <div style="font-size: 12px; font-weight: 800; color: #1d4ed8;">#${data.invoice_number}</div>
             <div>Date: ${data.invoice_date}${data.invoice_time ? ` ${data.invoice_time}` : ""}</div>
             <div>Payment Mode: <strong>${data.payment_mode || "Cash"}</strong> (${data.payment_status || "Paid"})</div>
-            <div>Place of Supply: ${data.place_of_supply || "32-Kerala"}</div>
+            <div>Place of Supply: ${documentPlaceOfSupply(data.place_of_supply, data.customer_gstin, data.store_gstin || companySettingsService.getSettings().state_code)}</div>
           </div>
         </div>
         `
@@ -1946,7 +1947,7 @@ export class PrintingEngine {
     doc.setTextColor(71, 85, 105);
     doc.text(`Date: ${data.invoice_date}${data.invoice_time ? ` ${data.invoice_time}` : ""}`, rightColX, metaBoxY + 8.5);
     doc.text(`Payment: ${data.payment_mode || "Cash"} (${data.payment_status || "Paid"})`, rightColX, metaBoxY + 12.5);
-    doc.text(`Place of Supply: ${data.place_of_supply || "32-Kerala"}`, rightColX, metaBoxY + 16.5);
+    doc.text(`Place of Supply: ${documentPlaceOfSupply(data.place_of_supply, data.customer_gstin, data.store_gstin || companySettingsService.getSettings().state_code)}`, rightColX, metaBoxY + 16.5);
 
     // Items Table using jspdf-autotable
     const activeColumns = resolvePrintColumns(options, isPharmacy);
@@ -2798,7 +2799,7 @@ export class PrintingEngine {
               <span>${l.qty} × ${curr}${l.rate.toFixed(2)}${l.gst_percent ? ` (${l.gst_percent}%)` : ""}</span>
               <span style="font-weight: 700; color: #000; font-variant-numeric: tabular-nums;">${curr}${l.amount.toFixed(2)}</span>
             </div>
-            ${(l.batch_no || l.expiry_date) ? `<div style="font-size: 8px; color: #64748b;">${l.batch_no ? `B: ${l.batch_no}` : ""}${l.batch_no && l.expiry_date ? " " : ""}${l.expiry_date ? `Exp: ${l.expiry_date}` : ""}</div>` : ""}
+            ${(l.batch_no || l.expiry_date) ? `<div style="font-size: 8px; color: #64748b;">${l.batch_no ? `B: ${l.batch_no}` : ""}${l.batch_no && l.expiry_date ? " " : ""}${l.expiry_date ? `Exp: ${formatExpiryDisplay(l.expiry_date)}` : ""}</div>` : ""}
             ${l.reason ? `<div style="font-size: 8px; color: #2563eb;">Reason: ${l.reason}</div>` : ""}
           </div>`;
         }
@@ -2809,7 +2810,7 @@ export class PrintingEngine {
             <span style="font-variant-numeric: tabular-nums;">${curr}${l.amount.toFixed(2)}</span>
           </div>
           <div style="display: flex; justify-content: space-between; font-size: 9.5px; color: #475569; margin-top: 1px;">
-            <span>${l.batch_no ? `B: ${l.batch_no}` : ""}${l.expiry_date ? ` | Exp: ${l.expiry_date}` : ""}${l.hsn_code ? ` | HSN: ${l.hsn_code}` : ""}${l.reason ? ` | ${l.reason}` : ""}</span>
+            <span>${l.batch_no ? `B: ${l.batch_no}` : ""}${l.expiry_date ? ` | Exp: ${formatExpiryDisplay(l.expiry_date)}` : ""}${l.hsn_code ? ` | HSN: ${l.hsn_code}` : ""}${l.reason ? ` | ${l.reason}` : ""}</span>
             <span style="font-variant-numeric: tabular-nums;">${l.qty} @ ${curr}${l.rate.toFixed(2)}${l.gst_percent ? ` (${l.gst_percent}%)` : ""}</span>
           </div>
         </div>`;
@@ -2948,7 +2949,7 @@ export class PrintingEngine {
               <span>${l.qty} × ${curr}${l.rate.toFixed(2)}${l.gst_percent ? ` (${l.gst_percent}%)` : ""}</span>
               <span style="font-weight: 700; color: #000; font-variant-numeric: tabular-nums;">${curr}${l.amount.toFixed(2)}</span>
             </div>
-            ${(l.batch_no || l.expiry_date) ? `<div style="font-size: 8px; color: #64748b;">${l.batch_no ? `B: ${l.batch_no}` : ""}${l.batch_no && l.expiry_date ? " " : ""}${l.expiry_date ? `Exp: ${l.expiry_date}` : ""}</div>` : ""}
+            ${(l.batch_no || l.expiry_date) ? `<div style="font-size: 8px; color: #64748b;">${l.batch_no ? `B: ${l.batch_no}` : ""}${l.batch_no && l.expiry_date ? " " : ""}${l.expiry_date ? `Exp: ${formatExpiryDisplay(l.expiry_date)}` : ""}</div>` : ""}
             ${l.reason ? `<div style="font-size: 8px; color: #2563eb;">Reason: ${l.reason}</div>` : ""}
           </div>`;
         }
@@ -2959,7 +2960,7 @@ export class PrintingEngine {
             <span style="font-variant-numeric: tabular-nums;">${curr}${l.amount.toFixed(2)}</span>
           </div>
           <div style="display: flex; justify-content: space-between; font-size: 9.5px; color: #475569; margin-top: 1px;">
-            <span>${l.batch_no ? `B: ${l.batch_no}` : ""}${l.expiry_date ? ` | Exp: ${l.expiry_date}` : ""}${l.hsn_code ? ` | HSN: ${l.hsn_code}` : ""}${l.reason ? ` | ${l.reason}` : ""}</span>
+            <span>${l.batch_no ? `B: ${l.batch_no}` : ""}${l.expiry_date ? ` | Exp: ${formatExpiryDisplay(l.expiry_date)}` : ""}${l.hsn_code ? ` | HSN: ${l.hsn_code}` : ""}${l.reason ? ` | ${l.reason}` : ""}</span>
             <span style="font-variant-numeric: tabular-nums;">${l.qty} @ ${curr}${l.rate.toFixed(2)}${l.gst_percent ? ` (${l.gst_percent}%)` : ""}</span>
           </div>
         </div>`;
