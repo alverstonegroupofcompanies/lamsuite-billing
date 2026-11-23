@@ -2,6 +2,34 @@
 
 # Changelog
 
+## 2.1.4 — 2026-11-23
+
+A migration that v2.1.2 shipped — and that v2.1.3 depends on — could never finish on MySQL, and a
+server that looked fully deployed was answering 500 on the Counters screen. This release exists to
+make v2.1.3 deployable; it carries no other change.
+
+`2026_11_21_100002_create_counter_profile_exceptions_table.php` builds two indexes, both unnamed.
+Laravel compiles the table and each index as separate statements, and it generates an index name as
+`table_columns_index`. The first came to 60 characters; the second,
+`counter_profile_exceptions_counter_id_document_type_document_id_index`, came to 69 — past MySQL's
+64-character limit. So the table and its first index were created, the second `alter table` died,
+and the migration was never recorded. Every migration dated after it (`counter_presence_spans`,
+`devices.revoked_at`) was therefore never reached, and each retry of `php artisan migrate --force`
+failed earlier still, on a table that already existed. `GET /api/admin/counters` — which reads the
+exception register and the presence spans — answered 500 on a server that looked deployed.
+
+1. **The index is named** — `cpe_counter_document_index`, 26 characters.
+2. **`up()` clears a leftover table before building it** — it only runs while the migration is
+   unrecorded, so any `counter_profile_exceptions` it finds is exactly the half-built remnant of the
+   run that died on that index. A host where the migration is already recorded is untouched by this
+   change.
+3. **No other migration carries the trap** — every unnamed `index` / `unique` across
+   `backend/database/migrations` was measured against the 64-character limit and none exceeds it;
+   the chain now runs from an empty database to the current head in one pass.
+
+After pulling: `php artisan migrate --force`, then the three dry-run-by-default commands v2.1.3
+adds (`payments:adopt-g10-defaults`, `devices:backfill-revoked-at`, `lamsuite:expiry-date-repair`).
+
 ## 2.1.3 — 2026-11-23
 
 A till the owner retired while it was sitting offline kept the bills it had saved and then lost
