@@ -54,6 +54,27 @@ The printing engine replaces legacy browser print dialogs and third-party WebSoc
   - **When** the user clicks "Save as PDF",
   - **Then** a vector PDF is written to disk natively with clean typography, sharp vector barcodes/QRs, and selectable text.
 
+### [PRN-007] Purchase Document Charge Footing (CR-C)
+- **Story:** As a store accountant, I want the supplier bill I print to name every extra cost the supplier
+  billed besides the goods, so the paper I file foots against the payable the system posted instead of
+  leaving a rupee of the total unexplained.
+- **Acceptance Criteria:**
+  - **Given** a purchase bill whose charge rows the engine priced (CR-C, `PUR-007`/`PUR-009`),
+  - **When** the till renders it — the A4 purchase layout, the invoice layout a saved bill reprints, or any
+    dot-matrix width (60/80/120/132 columns) —
+  - **Then** every charge head prints with its head name, taxable value, GST and total.
+  - **And** a row whose `in_payable` is true is printed **inside** the footings that reach the grand total;
+    a row outside the payable (separately paid, or a separately-paid row the store policy keeps outside) is
+    printed as a memo **below** the grand total and marked, so the memo never appears to be part of the
+    payable.
+  - **When** the document has no charge rows,
+  - **Then** no charge block prints at all — a bill that never had charges looks exactly as it did before
+    CR-C, and a sales document is untouched whatever else is configured.
+  - **And** the grand total printed equals the posted bill's payable to the paisa; the charge block's own
+    "in payable" sum plus the goods equals that footing.
+  - **Note:** a bill keyed before CR-C contributes its legacy `freight_charges` scalar as one 0 % Freight
+    row (`PUR-017`), so both generations of bill print the same way.
+
 ---
 
 ## 3. Architecture & OS Integration

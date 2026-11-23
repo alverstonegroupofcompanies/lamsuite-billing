@@ -1,0 +1,172 @@
+{
+  "checks": [
+    {
+      "name": "TAX-03 a Karnataka GSTIN buyer bills IGST",
+      "pass": true,
+      "detail": {
+        "st": 201,
+        "invoice_number": "C02-INV-1021",
+        "customer_name": "Bengaluru Boutique",
+        "place_of_supply": "29-Karnataka",
+        "subtotal": 180,
+        "taxable_subtotal": 160.71,
+        "discount_total": 0,
+        "cgst_total": 0,
+        "sgst_total": 0,
+        "igst_total": 19.29,
+        "tax_total": 19.29,
+        "grand_total": 180
+      }
+    },
+    {
+      "name": "TAX-03 a walk-in follows its own store (Kerala => CGST+SGST, no IGST)",
+      "pass": true,
+      "detail": {
+        "st": 201,
+        "invoice_number": "C02-INV-1022",
+        "customer_name": "Walk-in Customer",
+        "place_of_supply": "32-Kerala",
+        "subtotal": 180,
+        "taxable_subtotal": 160.71,
+        "discount_total": 0,
+        "cgst_total": 9.65,
+        "sgst_total": 9.64,
+        "igst_total": 0,
+        "tax_total": 19.29,
+        "grand_total": 180
+      }
+    },
+    {
+      "name": "TAX-03 the cosmetics store (KA 29) walk-in bills its own state, exclusive tax",
+      "pass": true,
+      "detail": {
+        "st": 201,
+        "invoice_number": "C02-INV-1004",
+        "customer_name": "Walk-in Customer",
+        "place_of_supply": "29-Karnataka",
+        "subtotal": 250,
+        "taxable_subtotal": 250,
+        "discount_total": 0,
+        "cgst_total": 22.5,
+        "sgst_total": 22.5,
+        "igst_total": 0,
+        "tax_total": 45,
+        "grand_total": 295
+      }
+    },
+    {
+      "name": "TAX-01 the echo of a percent does not discount the line twice",
+      "pass": true,
+      "detail": {
+        "st": 201,
+        "head": {
+          "invoice_number": "C02-INV-1023",
+          "customer_name": "Walk-in Customer",
+          "place_of_supply": "32-Kerala",
+          "subtotal": 90,
+          "taxable_subtotal": 72.32,
+          "discount_total": 9,
+          "cgst_total": 4.34,
+          "sgst_total": 4.34,
+          "igst_total": 0,
+          "tax_total": 8.68,
+          "grand_total": 81
+        },
+        "line": {
+          "discount_percent": 10,
+          "discount_amount": 9,
+          "taxable_amount": 72.32,
+          "tax_amount": 8.68,
+          "total_amount": 81
+        }
+      }
+    },
+    {
+      "name": "TAX-01b a real second discount is not swallowed",
+      "pass": true,
+      "detail": {
+        "st": 201,
+        "invoice_number": "C02-INV-1024",
+        "customer_name": "Walk-in Customer",
+        "place_of_supply": "32-Kerala",
+        "subtotal": 900,
+        "taxable_subtotal": 705.36,
+        "discount_total": 110,
+        "cgst_total": 42.32,
+        "sgst_total": 42.32,
+        "igst_total": 0,
+        "tax_total": 84.64,
+        "grand_total": 790
+      }
+    },
+    {
+      "name": "TAX-02 a rate above MRP is refused with MRP_EXCEEDED",
+      "pass": true,
+      "detail": {
+        "st": 422,
+        "body": "{\"success\":false,\"error\":\"'QA Paracet 500 Strip' is billed at Rs 150 against a ceiling of Rs 90.00.\",\"code\":\"MRP_EXCEEDED\",\"rule\":\"mrp_ceiling\",\"line\""
+      }
+    },
+    {
+      "name": "TAX-02 an offline bill over MRP is booked as sold and flagged for review",
+      "pass": true,
+      "detail": {
+        "st": 200,
+        "synced": {
+          "id": 37,
+          "invoice_number": "C02-INV-MRPSYNC-1795317003203",
+          "grand_total": 150,
+          "taxable_subtotal": 133.93,
+          "tax_total": 16.07
+        },
+        "recalc": "Line 1 billed \"QA Paracet 500 Strip\" at Rs 150.00 against an MRP of Rs 90.00; booked as sold and flagged for review."
+      }
+    },
+    {
+      "name": "inclusive bill seeded (1 strip of 15 tabs at Rs 90 incl 12% = Rs 90.00)",
+      "pass": true,
+      "detail": {
+        "st": 201,
+        "invoice_number": "C02-INV-1025",
+        "customer_name": "Walk-in Customer",
+        "place_of_supply": "32-Kerala",
+        "subtotal": 90,
+        "taxable_subtotal": 80.36,
+        "discount_total": 0,
+        "cgst_total": 4.82,
+        "sgst_total": 4.82,
+        "igst_total": 0,
+        "tax_total": 9.64,
+        "grand_total": 90
+      }
+    },
+    {
+      "name": "RET-01 five of fifteen Rs 90.00-inclusive tablets credit Rs 30.00, not Rs 33.60",
+      "pass": true,
+      "detail": {
+        "st": 201,
+        "note": {
+          "invoice_number": "CN-4-1002",
+          "module_key": "credit_note",
+          "status": "issued",
+          "subtotal": 30,
+          "taxable_subtotal": 26.79,
+          "discount_total": 0,
+          "tax_total": 3.21,
+          "cgst_total": 1.61,
+          "sgst_total": 1.6,
+          "round_off": 0,
+          "grand_total": 30
+        },
+        "line": {
+          "qty": 0,
+          "loose_qty": 5,
+          "unit_price": 90,
+          "taxable_amount": 26.79,
+          "tax_amount": 3.21,
+          "total_amount": 30
+        }
+      }
+    }
+  ]
+}

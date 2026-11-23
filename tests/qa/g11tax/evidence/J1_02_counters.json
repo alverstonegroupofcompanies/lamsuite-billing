@@ -1,0 +1,108 @@
+{
+  "create": [
+    {
+      "p": {
+        "store": "QA-PH",
+        "name": "PH Front Till",
+        "loc": "Front desk"
+      },
+      "calls": [
+        {
+          "u": "http://127.0.0.1:8123/api/admin/counters",
+          "req": "{\"counter_name\":\"PH Front Till\",\"counter_code\":\"\",\"location_name\":\"Front desk\",\"is_remote\":false,\"is_hub\":false,\"is_digital_only\":false}",
+          "res": ""
+        }
+      ],
+      "ui_code_seen": null,
+      "ui_tail": "NCILIATION\nGift Cards & Credit\nAlt+G\nSettlement Recon\nAlt+R\nDay Close & Cash\nAlt+D\nSTATUTORY & ANALYTICS\nReports & GST\nAlt+9\nE-Invoice & E-Way\nAlt+E\nAccounting Exports\nAlt+X\nSync Center\nAlt+S\nSYSTEM & GOVERNANCE\nCompany Settings\nAlt+C\nAudit Log\nAlt+A\nMigration Hub\nAlt+M\nadmin@lamstone.in\nv2.1.1\nQA Pharma Kochi\nQA-PH\nEN\nRA\nRajesh Sharma\nSuper Admin\nCounters\n\nThe counter master: create it, name it, issue its activation code and watch what it is doing.\n\nNew counter\n\nPH Front Till\n\nC01\n\nFront desk\n\nUnclaimed\nNo workstation yet\nLast activity\n—\nLast bill\nNo bill yet\nLast salesperson\nNone yet\nUnsynced items: 0\nNo presence yet\nNo unlock PIN\nGenerate code\nCodes\nSet unlock PIN\nApproval PIN\nEdit\nDelete"
+    },
+    {
+      "p": {
+        "store": "QA-PH",
+        "name": "PH Back Till",
+        "loc": "Back desk"
+      },
+      "calls": [
+        {
+          "u": "http://127.0.0.1:8123/api/admin/counters",
+          "req": "{\"counter_name\":\"PH Back Till\",\"counter_code\":\"C02\",\"location_name\":\"Back desk\",\"is_remote\":false,\"is_hub\":false,\"is_digital_only\":false}",
+          "res": ""
+        }
+      ],
+      "ui_code_seen": null,
+      "ui_tail": "+C\nAudit Log\nAlt+A\nMigration Hub\nAlt+M\nadmin@lamstone.in\nv2.1.1\nQA Pharma Kochi\nQA-PH\nEN\nRA\nRajesh Sharma\nSuper Admin\nCounters\n\nThe counter master: create it, name it, issue its activation code and watch what it is doing.\n\nNew counter\n\nPH Front Till\n\nC01\n\nFront desk\n\nUnclaimed\nNo workstation yet\nLast activity\n—\nLast bill\nNo bill yet\nLast salesperson\nNone yet\nUnsynced items: 0\nNo presence yet\nNo unlock PIN\nGenerate code\nCodes\nSet unlock PIN\nApproval PIN\nEdit\nDelete\n\nPH Back Till\n\nC02\n\nBack desk\n\nUnclaimed\nNo workstation yet\nLast activity\n—\nLast bill\nNo bill yet\nLast salesperson\nNone yet\nUnsynced items: 0\nNo presence yet\nNo unlock PIN\nGenerate code\nCodes\nSet unlock PIN\nApproval PIN\nEdit\nDelete"
+    },
+    {
+      "p": {
+        "store": "QA-CS",
+        "name": "CS Front Till",
+        "loc": "Entrance"
+      },
+      "calls": [
+        {
+          "u": "http://127.0.0.1:8123/api/admin/counters",
+          "req": "{\"counter_name\":\"CS Front Till\",\"counter_code\":\"\",\"location_name\":\"Entrance\",\"is_remote\":false,\"is_hub\":false,\"is_digital_only\":false}",
+          "res": ""
+        }
+      ],
+      "ui_code_seen": null,
+      "ui_tail": "NCILIATION\nGift Cards & Credit\nAlt+G\nSettlement Recon\nAlt+R\nDay Close & Cash\nAlt+D\nSTATUTORY & ANALYTICS\nReports & GST\nAlt+9\nE-Invoice & E-Way\nAlt+E\nAccounting Exports\nAlt+X\nSync Center\nAlt+S\nSYSTEM & GOVERNANCE\nCompany Settings\nAlt+C\nAudit Log\nAlt+A\nMigration Hub\nAlt+M\nadmin@lamstone.in\nv2.1.1\nQA Glow Cosmetics\nQA-CS\nEN\nRA\nRajesh Sharma\nSuper Admin\nCounters\n\nThe counter master: create it, name it, issue its activation code and watch what it is doing.\n\nNew counter\n\nCS Front Till\n\nC01\n\nEntrance\n\nUnclaimed\nNo workstation yet\nLast activity\n—\nLast bill\nNo bill yet\nLast salesperson\nNone yet\nUnsynced items: 0\nNo presence yet\nNo unlock PIN\nGenerate code\nCodes\nSet unlock PIN\nApproval PIN\nEdit\nDelete"
+    },
+    {
+      "p": {
+        "store": "QA-CS",
+        "name": "CS Back Till",
+        "loc": "Makeup bar"
+      },
+      "calls": [
+        {
+          "u": "http://127.0.0.1:8123/api/admin/counters",
+          "req": "{\"counter_name\":\"CS Back Till\",\"counter_code\":\"C02\",\"location_name\":\"Makeup bar\",\"is_remote\":false,\"is_hub\":false,\"is_digital_only\":false}",
+          "res": ""
+        }
+      ],
+      "ui_code_seen": null,
+      "ui_tail": "C\nAudit Log\nAlt+A\nMigration Hub\nAlt+M\nadmin@lamstone.in\nv2.1.1\nQA Glow Cosmetics\nQA-CS\nEN\nRA\nRajesh Sharma\nSuper Admin\nCounters\n\nThe counter master: create it, name it, issue its activation code and watch what it is doing.\n\nNew counter\n\nCS Front Till\n\nC01\n\nEntrance\n\nUnclaimed\nNo workstation yet\nLast activity\n—\nLast bill\nNo bill yet\nLast salesperson\nNone yet\nUnsynced items: 0\nNo presence yet\nNo unlock PIN\nGenerate code\nCodes\nSet unlock PIN\nApproval PIN\nEdit\nDelete\n\nCS Back Till\n\nC02\n\nMakeup bar\n\nUnclaimed\nNo workstation yet\nLast activity\n—\nLast bill\nNo bill yet\nLast salesperson\nNone yet\nUnsynced items: 0\nNo presence yet\nNo unlock PIN\nGenerate code\nCodes\nSet unlock PIN\nApproval PIN\nEdit\nDelete"
+    }
+  ],
+  "codes": [],
+  "db": [
+    {
+      "id": 1,
+      "store_id": 4,
+      "counter_code": "C01",
+      "counter_name": "PH Front Till",
+      "location_name": "Front desk",
+      "status": "unclaimed",
+      "device_uuid": null
+    },
+    {
+      "id": 2,
+      "store_id": 4,
+      "counter_code": "C02",
+      "counter_name": "PH Back Till",
+      "location_name": "Back desk",
+      "status": "unclaimed",
+      "device_uuid": null
+    },
+    {
+      "id": 3,
+      "store_id": 5,
+      "counter_code": "C01",
+      "counter_name": "CS Front Till",
+      "location_name": "Entrance",
+      "status": "unclaimed",
+      "device_uuid": null
+    },
+    {
+      "id": 4,
+      "store_id": 5,
+      "counter_code": "C02",
+      "counter_name": "CS Back Till",
+      "location_name": "Makeup bar",
+      "status": "unclaimed",
+      "device_uuid": null
+    }
+  ],
+  "codes_db": []
+}

@@ -4,11 +4,13 @@ namespace App\Http\Controllers\Api;
 
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
+use App\Models\Counter;
 use App\Models\Product;
 use App\Models\ProductBatch;
 use App\Models\StockTransfer;
 use App\Services\Stock\InterStoreTransferService;
 use App\Services\StockAdjustmentService;
+use App\Support\RequestTenant;
 use Illuminate\Validation\ValidationException;
 
 class StockController
@@ -81,7 +83,7 @@ class StockController
             'lines' => $lines,
         ];
 
-        $result = $this->adjustments->post($storeId, $request->user(), $payload);
+        $result = $this->adjustments->post($storeId, $request->user(), $payload, $this->resolveCounter($request, $storeId));
         /** @var \App\Models\StockAdjustmentDocument $document */
         $document = $result['document'];
 
@@ -98,6 +100,28 @@ class StockController
                 ? 'Stock adjustment submitted for manager approval.'
                 : 'Stock adjustment posted to the ledger.',
         ], $result['duplicate'] ? 200 : 201);
+    }
+
+    /**
+     * The till principal posting this adjustment. Authenticated device traffic
+     * names its counter on the request; older payloads may still send a
+     * counter_code, which is resolved inside the same store.
+     */
+    private function resolveCounter(Request $request, int $storeId): ?Counter
+    {
+        $counterId = RequestTenant::counterId($request);
+        if ($counterId !== null) {
+            return Counter::find($counterId);
+        }
+
+        $code = trim((string) $request->input('counter_code', ''));
+        if ($code === '') {
+            return null;
+        }
+
+        return Counter::where('store_id', $storeId)
+            ->where('counter_code', strtoupper($code))
+            ->first();
     }
 
     private function resolveStoreId(Request $request, array $validated): int
@@ -205,6 +229,8 @@ class StockController
                 $instructions[] = [
                     'item_id' => $line['item_id'],
                     'dest_product_id' => $line['dest_product_id'] ?? null,
+                    'received_qty' => $line['received_qty'] ?? null,
+                    'shortage_reason' => $line['shortage_reason'] ?? null,
                 ];
             }
         }

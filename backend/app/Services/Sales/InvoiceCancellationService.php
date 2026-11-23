@@ -2,12 +2,14 @@
 
 namespace App\Services\Sales;
 
+use App\Models\AuditLog;
 use App\Models\Invoice;
 use App\Models\Party;
 use App\Models\Product;
 use App\Models\ProductBatch;
 use App\Models\StockLedgerEntry;
 use App\Models\SyncEvent;
+use App\Services\DayClose\StoreDayCloseService;
 use App\Services\Payments\GiftCardService;
 use App\Services\Webhook\WebhookOutboxService;
 use Illuminate\Support\Facades\DB;
@@ -20,16 +22,48 @@ use Illuminate\Support\Facades\Log;
  */
 class InvoiceCancellationService
 {
-    public function cancel(Invoice $invoice, string $reason, ?int $userId = null): Invoice
-    {
+    public function cancel(
+        Invoice $invoice,
+        string $reason,
+        ?int $userId = null,
+        ?string $approvalToken = null
+    ): Invoice {
         $invoice->load('items');
 
-        DB::transaction(function () use ($invoice, $reason, $userId) {
+        $quotation = strtolower((string) $invoice->module_key) === 'quotation';
+
+        // G12: a counted day has nothing to gain from a reversal, and a quotation
+        // never moved money, so only real bills are held to the closed-day rule.
+        if (! $quotation) {
+            app(StoreDayCloseService::class)->assertDayNotClosed(
+                (int) $invoice->store_id,
+                $invoice->invoice_date?->toDateString(),
+                'invoice_cancel'
+            );
+        }
+
+        DB::transaction(function () use ($invoice, $reason, $userId, $approvalToken, $quotation) {
+            $oldStatus = (string) $invoice->status;
+
+            $approval = null;
+            if (! $quotation) {
+                $approval = app(InvoiceApprovalService::class)->consume(
+                    $invoice,
+                    'cancel',
+                    $approvalToken,
+                    $userId
+                );
+            }
+
+            // A device-authenticated till has no person on the request, so the
+            // grant's requester (or, failing that, the approver) is the audit trail.
+            $cancelledBy = $userId ?? $approval?->requested_by_user_id ?? $approval?->approved_by_user_id;
+
             $invoice->update([
                 'status' => 'cancelled',
                 'cancel_reason' => $reason,
                 'cancelled_at' => now(),
-                'cancelled_by' => $userId,
+                'cancelled_by' => $cancelledBy,
             ]);
 
             // Revert customer credit balance if any
@@ -47,8 +81,38 @@ class InvoiceCancellationService
             // Mark associated payments refunded
             $invoice->payments()->update(['status' => 'refunded']);
 
+            // PAY-05: a receipt that settled this bill is free again.
+            app(\App\Services\Payments\PaymentAllocationService::class)->releaseForDocument(
+                \App\Models\PaymentAllocation::DOCUMENT_INVOICE,
+                (int) $invoice->id,
+                $cancelledBy
+            );
+
             $this->refundGiftCardTenders($invoice, $userId);
             $this->restoreStock($invoice);
+
+            // A void is one of the few actions that takes money and stock back out of a
+            // closed day, so it must leave the same kind of trail whether it was pressed
+            // on the till or replayed from a disconnected queue.
+            AuditLog::log(
+                'invoice_cancelled',
+                'Invoice',
+                (string) $invoice->id,
+                ['status' => $oldStatus, 'grand_total' => (float) $invoice->grand_total],
+                [
+                    'status' => 'cancelled',
+                    'reason' => $reason,
+                    'credit_refunded' => round($creditRefund, 2),
+                    'stock_restored' => true,
+                    'approval_id' => $approval?->id,
+                    'approved_by_user_id' => $approval?->approved_by_user_id,
+                    // G12: the workstation that pressed cancel, which need not be the one that sold.
+                    'cancelled_on_counter_id' => \App\Support\RequestTenant::counterId(request()),
+                    'sold_on_counter_id' => $invoice->counter_id,
+                ],
+                (int) $invoice->store_id,
+                $cancelledBy
+            );
 
             SyncEvent::create([
                 'store_id' => $invoice->store_id,

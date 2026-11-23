@@ -19,6 +19,14 @@ class AdminLoyaltyController
 {
     private function resolveStore(Request $request): ?Store
     {
+        // A paired counter may only act against the store its token was issued
+        // for, and nothing that names no store is pointed at whichever tenant
+        // happens to be first.
+        $deviceStoreId = $request->attributes->get('device_store_id');
+        if (!empty($deviceStoreId)) {
+            return Store::find((int) $deviceStoreId);
+        }
+
         $candidate = $request->attributes->get('active_store_id')
             ?? $request->get('active_store_id')
             ?? $request->header('X-Store-Id')
@@ -29,7 +37,7 @@ class AdminLoyaltyController
             return Store::find((int) $candidate);
         }
 
-        return Store::query()->orderBy('id')->first();
+        return null;
     }
 
     private function programFor(Store $store): LoyaltyProgram

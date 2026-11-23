@@ -5,14 +5,21 @@ namespace Tests\Feature;
 use App\Models\Counter;
 use App\Models\DeviceSession;
 use App\Models\Store;
+use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
+/**
+ * CNT-002 / CNT-010 — a counter name is unique among the live counters of one
+ * store. Since CNT-013 the owner pre-creates counters from the admin panel, so
+ * that is where the rule is enforced; a till no longer names itself.
+ */
 class CounterNameUniquenessTest extends TestCase
 {
     use RefreshDatabase;
 
     protected Store $store;
+    private User $owner;
 
     protected function setUp(): void
     {
@@ -22,6 +29,14 @@ class CounterNameUniquenessTest extends TestCase
             'name' => 'Counter Name Store',
             'code' => 'NAME-01',
             'is_active' => true,
+        ]);
+
+        $this->owner = User::create([
+            'name' => 'Owner',
+            'email' => 'owner@name-test.in',
+            'password' => bcrypt('password123'),
+            'role' => 'super_admin',
+            'store_id' => $this->store->id,
         ]);
     }
 
@@ -37,27 +52,27 @@ class CounterNameUniquenessTest extends TestCase
         ]);
     }
 
-    public function test_enroll_rejects_duplicate_counter_name_with_holder_details(): void
+    private function ownerCreatesCounter(string $name, string $code, ?Store $inStore = null)
     {
-        $holder = $this->makeCounter('Front Counter', 'C01');
+        return $this->actingAs($this->owner, 'sanctum')
+            ->withHeaders(['X-Store-Id' => (string) ($inStore ?? $this->store)->id])
+            ->postJson('/api/admin/counters', [
+                'counter_name' => $name,
+                'counter_code' => $code,
+            ]);
+    }
 
-        $res = $this->postJson('/api/counters/enroll', [
-            'store_id' => $this->store->id,
-            'device_uuid' => 'uuid_new_till',
-            'counter_name' => 'Front Counter',
-            'counter_code' => 'C02',
-        ]);
+    public function test_creating_a_duplicate_counter_name_is_refused_with_holder_details(): void
+    {
+        $this->makeCounter('Front Counter', 'C01');
+
+        $res = $this->ownerCreatesCounter('Front Counter', 'C02');
 
         $res->assertStatus(422);
-        $res->assertJson([
-            'success' => false,
-            'error' => 'COUNTER_NAME_TAKEN',
-            'conflict' => [
-                'counter_name' => 'Front Counter',
-                'counter_code' => 'C01',
-                'device_uuid' => $holder->device_uuid,
-            ],
-        ]);
+        $res->assertJsonPath(
+            'errors.counter_name.0',
+            'The name "Front Counter" (C01) is already live in this store. Revoked counters release their name.'
+        );
         $this->assertFalse(Counter::where('counter_code', 'C02')->exists());
     }
 
@@ -65,44 +80,29 @@ class CounterNameUniquenessTest extends TestCase
     {
         $this->makeCounter('Front Counter', 'C01');
 
-        $res = $this->postJson('/api/counters/enroll', [
-            'store_id' => $this->store->id,
-            'device_uuid' => 'uuid_case_dup',
-            'counter_name' => '  front COUNTER  ',
-            'counter_code' => 'C03',
-        ]);
-
-        $res->assertStatus(422);
-        $res->assertJson(['error' => 'COUNTER_NAME_TAKEN']);
+        $this->ownerCreatesCounter('  front COUNTER  ', 'C03')->assertStatus(422);
     }
 
-    public function test_device_can_re_enroll_with_its_own_existing_name(): void
+    public function test_a_counter_may_keep_its_own_name_when_the_owner_edits_it(): void
     {
-        $existing = $this->makeCounter('Front Counter', 'C01', 'pending_approval', 'uuid_same_device');
+        $existing = $this->makeCounter('Front Counter', 'C01');
 
-        $res = $this->postJson('/api/counters/enroll', [
-            'store_id' => $this->store->id,
-            'device_uuid' => 'uuid_same_device',
-            'counter_name' => 'Front Counter',
-            'counter_code' => 'C01',
-        ]);
+        $this->actingAs($this->owner, 'sanctum')
+            ->withHeaders(['X-Store-Id' => (string) $this->store->id])
+            ->putJson("/api/admin/counters/{$existing->id}", [
+                'counter_name' => 'Front Counter',
+                'location_name' => 'Ground Floor',
+            ])
+            ->assertStatus(200);
 
-        $res->assertStatus(200);
-        $this->assertEquals($existing->id, $res->json('counter.id'));
+        $this->assertSame('Ground Floor', $existing->fresh()->location_name);
     }
 
     public function test_revoked_counter_name_becomes_available_again(): void
     {
         $this->makeCounter('Retired Counter', 'C90', 'revoked');
 
-        $res = $this->postJson('/api/counters/enroll', [
-            'store_id' => $this->store->id,
-            'device_uuid' => 'uuid_take_over',
-            'counter_name' => 'Retired Counter',
-            'counter_code' => 'C91',
-        ]);
-
-        $res->assertStatus(201);
+        $this->ownerCreatesCounter('Retired Counter', 'C91')->assertCreated();
     }
 
     public function test_same_name_is_allowed_in_a_different_store(): void
@@ -115,14 +115,8 @@ class CounterNameUniquenessTest extends TestCase
             'is_active' => true,
         ]);
 
-        $res = $this->postJson('/api/counters/enroll', [
-            'store_id' => $otherStore->id,
-            'device_uuid' => 'uuid_other_store',
-            'counter_name' => 'Front Counter',
-            'counter_code' => 'C01',
-        ]);
-
-        $res->assertStatus(201);
+        $this->ownerCreatesCounter('Front Counter', 'C01', $otherStore)->assertCreated();
+        $this->assertSame(1, Counter::where('store_id', $otherStore->id)->where('counter_name', 'Front Counter')->count());
     }
 
     public function test_rename_endpoint_rejects_duplicate_and_allows_free_name(): void
@@ -139,13 +133,13 @@ class CounterNameUniquenessTest extends TestCase
             'C02'
         );
 
-        $conflict = $this->postJson("/api/device-sessions/{$session->id}/rename", [
+        $conflict = $this->actingAs($this->owner, "sanctum")->postJson("/api/device-sessions/{$session->id}/rename", [
             'counter_name' => 'front counter',
         ]);
         $conflict->assertStatus(422);
         $conflict->assertJson(['error' => 'COUNTER_NAME_TAKEN']);
 
-        $ok = $this->postJson("/api/device-sessions/{$session->id}/rename", [
+        $ok = $this->actingAs($this->owner, "sanctum")->postJson("/api/device-sessions/{$session->id}/rename", [
             'counter_name' => 'Express Counter',
         ]);
         $ok->assertStatus(200);

@@ -8,6 +8,7 @@ use App\Models\Product;
 use App\Models\ProductBatch;
 use App\Models\StockLedgerEntry;
 use App\Models\Store;
+use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -24,11 +25,12 @@ class SyncCreditNoteIngestTest extends TestCase
     private Store $store;
     private Product $product;
     private ProductBatch $batch;
+    private User $approver;
 
     protected function setUp(): void
     {
         parent::setUp();
-        $this->withoutMiddleware(\App\Http\Middleware\AuthenticateDevice::class);
+        $this->actAsClaimedCounterOfRequestedStore();
 
         $this->store = Store::create([
             'name' => 'Credit Note Store',
@@ -45,6 +47,14 @@ class SyncCreditNoteIngestTest extends TestCase
             'counter_name' => 'Counter 01',
             'status' => 'active',
             'device_uuid' => 'uuid_crt_note_c01',
+        ]);
+
+        $this->approver = User::create([
+            'name' => 'Credit Note Owner',
+            'email' => 'owner@crtnote.test',
+            'password' => bcrypt('owner-pass'),
+            'role' => 'store_owner',
+            'store_id' => $this->store->id,
         ]);
 
         $this->product = Product::create([
@@ -80,6 +90,19 @@ class SyncCreditNoteIngestTest extends TestCase
                     'payload' => $payload,
                 ]],
             ])->assertStatus(200);
+    }
+
+    /**
+     * The till must hold a grant before the server accepts a cancellation.
+     */
+    private function grantCancel(Invoice $invoice): string
+    {
+        return $this->grantCancellationToken($invoice, [
+            'action' => 'cancel',
+            'mode' => 'manager',
+            'identifier' => 'owner@crtnote.test',
+            'secret' => 'owner-pass',
+        ]);
     }
 
     /**
@@ -163,6 +186,92 @@ class SyncCreditNoteIngestTest extends TestCase
         $this->assertEqualsWithDelta(24.00, (float) $lines[0]->tax_amount, 0.001);
     }
 
+    public function test_a_synced_credit_note_reverses_an_mrp_inclusive_bill(): void
+    {
+        // 15 tablets were sold at Rs 6.00 each, tax already inside the price.
+        $original = Invoice::create([
+            'store_id' => $this->store->id,
+            'module_key' => 'invoice',
+            'invoice_number' => 'C01-INV-INC',
+            'invoice_date' => '2026-11-18',
+            'customer_name' => 'Walk-in Customer',
+            'subtotal' => 90.00,
+            'taxable_subtotal' => 80.36,
+            'tax_total' => 9.64,
+            'cgst_total' => 4.82,
+            'sgst_total' => 4.82,
+            'grand_total' => 90.00,
+            'paid_amount' => 90.00,
+            'status' => 'issued',
+            'store_state_code' => '32',
+        ]);
+        \App\Models\InvoiceItem::create([
+            'invoice_id' => $original->id,
+            'product_id' => $this->product->id,
+            'product_name' => $this->product->name,
+            'batch_no' => 'BCH-CN-1',
+            'qty' => 15,
+            'loose_qty' => 0,
+            'units_per_pack' => 1,
+            'unit_price' => 6.00,
+            'gst_percent' => 12,
+            'taxable_amount' => 80.36,
+            'cgst_amount' => 4.82,
+            'sgst_amount' => 4.82,
+            'tax_amount' => 9.64,
+            'total_amount' => 90.00,
+        ]);
+
+        // The till's own note re-added GST on top of the MRP price: 5 × 6.72 = 33.60.
+        $this->push($this->creditNote([
+            'id' => 'sr_inc_1',
+            'invoice_number' => 'SR-INC-1',
+            'original_invoice_number' => 'C01-INV-INC',
+            'subtotal' => 30.00,
+            'taxable_subtotal' => 30.00,
+            'tax_total' => 3.60,
+            'cgst_total' => 1.80,
+            'sgst_total' => 1.80,
+            'grand_total' => 33.60,
+            'paid_amount' => 33.60,
+            'items' => [[
+                'product_id' => $this->product->id,
+                'product_name' => $this->product->name,
+                'batch_no' => 'BCH-CN-1',
+                'qty' => 5,
+                'loose_qty' => 0,
+                'units_per_pack' => 1,
+                'unit_price' => 6.72,
+                'gst_percent' => 12,
+                'taxable_amount' => 30.00,
+                'cgst_amount' => 1.80,
+                'sgst_amount' => 1.80,
+                'tax_amount' => 3.60,
+                'total_amount' => 33.60,
+            ]],
+        ]));
+
+        $note = Invoice::where('store_id', $this->store->id)
+            ->where('invoice_number', 'SR-INC-1')
+            ->firstOrFail();
+
+        // Five of fifteen tablets: one third of 90.00, GST still inside the price.
+        $this->assertEqualsWithDelta(30.00, (float) $note->subtotal, 0.001);
+        $this->assertEqualsWithDelta(26.79, (float) $note->taxable_subtotal, 0.001);
+        $this->assertEqualsWithDelta(3.21, (float) $note->tax_total, 0.001);
+        $this->assertEqualsWithDelta(1.61, (float) $note->cgst_total, 0.001);
+        $this->assertEqualsWithDelta(1.60, (float) $note->sgst_total, 0.001);
+        $this->assertEqualsWithDelta(30.00, (float) $note->grand_total, 0.001);
+        $this->assertEqualsWithDelta(0.0, (float) $note->round_off, 0.001);
+
+        $line = $note->items()->firstOrFail();
+        $this->assertEqualsWithDelta(26.79, (float) $line->taxable_amount, 0.001);
+        $this->assertEqualsWithDelta(3.21, (float) $line->tax_amount, 0.001);
+        $this->assertEqualsWithDelta(30.00, (float) $line->total_amount, 0.001);
+
+        $this->assertEqualsWithDelta(45.0, (float) $this->batch->fresh()->stock_qty, 0.001);
+    }
+
     public function test_a_credit_note_puts_its_units_back_on_the_shelf(): void
     {
         $this->push($this->creditNote());
@@ -238,6 +347,7 @@ class SyncCreditNoteIngestTest extends TestCase
             'invoice_number' => 'SR-0001',
             'status' => 'cancelled',
             'cancel_reason' => 'Return entered against the wrong bill',
+            'approval_token' => $this->grantCancel($this->note()),
         ], 'update');
 
         $note = $this->note();
@@ -279,11 +389,13 @@ class SyncCreditNoteIngestTest extends TestCase
         ]);
         $this->assertEqualsWithDelta(38.0, (float) $this->batch->fresh()->stock_qty, 0.001);
 
+        $bill = Invoice::where('invoice_number', 'C01-INV-PLAIN')->firstOrFail();
         $this->push([
             'id' => 'bill_plain_1',
             'invoice_number' => 'C01-INV-PLAIN',
             'status' => 'cancelled',
             'cancel_reason' => 'Customer walked away',
+            'approval_token' => $this->grantCancel($bill),
         ], 'update');
 
         $this->assertEqualsWithDelta(40.0, (float) $this->batch->fresh()->stock_qty, 0.001);
@@ -412,6 +524,7 @@ class SyncCreditNoteIngestTest extends TestCase
             'invoice_number' => 'SR-0002',
             'status' => 'cancelled',
             'cancel_reason' => 'Both lines booked in error',
+            'approval_token' => $this->grantCancel($this->mixedNoteInvoice()),
         ], 'update');
 
         $this->assertEqualsWithDelta(40.0, (float) $this->batch->fresh()->stock_qty, 0.001);

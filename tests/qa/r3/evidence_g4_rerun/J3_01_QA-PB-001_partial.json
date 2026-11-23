@@ -1,0 +1,146 @@
+{
+  "bill": "QA-PB-001",
+  "steps": [
+    {
+      "line": 0,
+      "at": "INPUT:text:Scan barcode or type product name [F1]...=",
+      "seq": [
+        "DIV::purchase-batch-0=",
+        "INPUT:text:MM/YY=2028-01-31",
+        "INPUT:text:Packs=1",
+        "INPUT:number:MRP=90",
+        "INPUT:number:Rate=60",
+        "INPUT:number:Line discount percent=0",
+        "INPUT:number:=12",
+        "INPUT:number:Sell=90",
+        "INPUT:text:Scan barcode or type product name [F1]...="
+      ]
+    },
+    {
+      "line": 1,
+      "at": "INPUT:text:Scan barcode or type product name [F1]...=",
+      "seq": [
+        "DIV::purchase-batch-1=",
+        "INPUT:text:MM/YY=2027-03-31",
+        "INPUT:text:Packs=1",
+        "INPUT:number:MRP=90",
+        "INPUT:number:Rate=50",
+        "INPUT:number:Line discount percent=0",
+        "INPUT:number:=12",
+        "INPUT:number:Sell=90",
+        "INPUT:text:Scan barcode or type product name [F1]...="
+      ]
+    },
+    {
+      "line": 2,
+      "at": "INPUT:text:Scan barcode or type product name [F1]...=",
+      "seq": [
+        "DIV::purchase-batch-2=",
+        "INPUT:text:MM/YY=2027-06-30",
+        "INPUT:text:Packs=1",
+        "INPUT:number:MRP=120",
+        "INPUT:number:Rate=60",
+        "INPUT:number:Line discount percent=0",
+        "INPUT:number:=12",
+        "INPUT:number:Sell=115",
+        "INPUT:text:Scan barcode or type product name [F1]...="
+      ]
+    }
+  ],
+  "pre": {
+    "batches": [
+      {
+        "id": 6,
+        "product_id": 5,
+        "batch_no": "B1",
+        "stock_qty": 0,
+        "purchase_rate": 60,
+        "landed_cost_rate": null
+      },
+      {
+        "id": 7,
+        "product_id": 6,
+        "batch_no": "CS-A1",
+        "stock_qty": 33,
+        "purchase_rate": 80,
+        "landed_cost_rate": null
+      },
+      {
+        "id": 8,
+        "product_id": 7,
+        "batch_no": "B1",
+        "stock_qty": -50,
+        "purchase_rate": 18,
+        "landed_cost_rate": null
+      },
+      {
+        "id": 11,
+        "product_id": 5,
+        "batch_no": "PA-NEW",
+        "stock_qty": 1148,
+        "purchase_rate": 60,
+        "landed_cost_rate": null
+      },
+      {
+        "id": 12,
+        "product_id": 5,
+        "batch_no": "PA-OLD",
+        "stock_qty": 110,
+        "purchase_rate": 50,
+        "landed_cost_rate": null
+      },
+      {
+        "id": 13,
+        "product_id": 6,
+        "batch_no": "CS-B2",
+        "stock_qty": -1,
+        "purchase_rate": 60,
+        "landed_cost_rate": null
+      }
+    ],
+    "supplier": [
+      {
+        "id": 8,
+        "current_balance": 17429
+      }
+    ],
+    "ledger_rows": 86
+  },
+  "grid_before_charges": [
+    "₹ 0.00",
+    "₹ 0.00",
+    "₹ 0.00",
+    "BILL NUMBER\tSUPPLIER NAME\tSUPPLIER INV #\tDATE\tTAXABLE\tGST TAX\tGRAND TOTAL\tPAYMENT\tSTATUS\tACTIONS",
+    "₹ 0.00",
+    "GST TAX MODE",
+    "#\tPRODUCT\tBATCH\tEXPIRY (MM/YY)\tQUANTITY\tFREE QTY\tMRP (₹)\tPUR. RATE (₹)\tDISC %/₹\tGST %\tSELLING RATE (₹)\tMARGIN %\tTAXABLE (₹)\tTAX (₹)\tTOTAL (₹)\tACTION",
+    "QA Paracet 500 Strip",
+    "\tPA-NEW\t",
+    "\t100\t0\t₹ 90.00\t₹ 60.00\t—\t12%\t₹ 90.00\t25.3%\t₹ 6000.00\t₹ 720.00\t₹ 6720.00\t",
+    "QA Paracet 500 Strip",
+    "\tPA-OLD\t",
+    "\t50\t0\t₹ 90.00\t₹ 50.00\t—\t12%\t₹ 90.00\t37.8%\t₹ 2500.00\t₹ 300.00\t₹ 2800.00\t",
+    "QA Cough Syrup 100ml",
+    "\t25\t0\t₹ 120.00\t₹ 60.00\t—\t12%\t₹ 115.00\t41.6%\t₹ 1500.00\t₹ 180.00\t₹ 1680.00\t",
+    "\t—\t—\t—\t—\t—\t—\t—\t—\t—\t—\t₹ 0.00\t₹ 0.00\t₹ 0.00\t",
+    "SUBTOTAL: ₹ 10000.00",
+    "GST TAX: ₹ 1200.00",
+    "CHARGES (ALT+F):",
+    "₹ 0.00",
+    "Round: +₹0.00",
+    "NET PAYABLE",
+    "₹ 11200.00"
+  ],
+  "charges_open": [
+    "CHARGES (ALT+F):",
+    "Bill Charges",
+    "Supplier Bill Charges",
+    "Freight, loading, insurance — anything the supplier billed besides the goods. Space cycles a cell, Enter types it, ↑↓←→ moves.",
+    "#\tHEAD\tAMOUNT\tGST %\tTREATMENT\tSPREAD BY\tITC\tRCM\tPAID SEPARATELY\tPAID TO\tNOTE\tREMOVE",
+    "FREIGHT",
+    "Add charge",
+    "\"Freight\" needs an amount.",
+    "Charges ₹0.00",
+    "Apply charges"
+  ]
+}

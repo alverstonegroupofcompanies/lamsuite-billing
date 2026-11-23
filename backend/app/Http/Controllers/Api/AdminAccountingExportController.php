@@ -9,6 +9,8 @@ use App\Models\Party;
 use App\Models\Product;
 use App\Models\Purchase;
 use App\Models\Store;
+use App\Services\Reports\ExpenseRegisterService;
+use App\Services\Reports\PurchaseRegisterService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
@@ -22,6 +24,7 @@ class AdminAccountingExportController
     private const FORMATS = [
         'sales' => ['tally', 'busy', 'csv'],
         'purchases' => ['tally', 'busy', 'csv'],
+        'expenses' => ['csv'],
         'customers' => ['tally', 'csv'],
         'suppliers' => ['tally', 'csv'],
         'products' => ['tally', 'csv'],
@@ -33,6 +36,7 @@ class AdminAccountingExportController
     private const LABELS = [
         'sales' => 'Sales & credit notes',
         'purchases' => 'Purchase bills',
+        'expenses' => 'Expense register (manual + bill charges)',
         'customers' => 'Customer masters (Sundry Debtors)',
         'suppliers' => 'Supplier masters (Sundry Creditors)',
         'products' => 'Item masters & stock items',
@@ -143,6 +147,11 @@ class AdminAccountingExportController
             $type === 'purchases' => $this->csvResponse(
                 "purchases-{$stamp}.csv",
                 ...$this->purchasesCsv($storeIds, $from, $to)
+            ),
+
+            $type === 'expenses' => $this->csvResponse(
+                "expense-register-{$stamp}.csv",
+                ...$this->expensesCsv($storeIds, $from, $to)
             ),
 
             $type === 'customers' && $format === 'tally' => $this->xmlResponse(
@@ -302,13 +311,34 @@ class AdminAccountingExportController
     private function purchasesQuery(?array $storeIds, string $from, string $to)
     {
         return Purchase::query()
-            ->with(['items', 'store:id,name', 'supplier:id,name,gstin'])
+            ->with(['items', 'charges', 'store:id,name', 'supplier:id,name,gstin'])
             ->where('status', '!=', 'cancelled')
             ->whereNotIn('module_key', ['purchase_order', 'order'])
             ->whereBetween('invoice_date', [$from, $to])
             ->when($storeIds, fn ($q) => $q->whereIn('store_id', $storeIds))
             ->orderBy('invoice_date')
             ->orderBy('id');
+    }
+
+    /**
+     * REP-007: the goods half and the charge half of a bill, read exactly the way the register
+     * reads it — including a pre-CR-C bill, whose freight arrives as one Freight head.
+     *
+     * @return array<string, mixed>
+     */
+    private function chargeRegister(Purchase $purchase): array
+    {
+        return (new PurchaseRegisterService())->summary($purchase);
+    }
+
+    /**
+     * The head ledger a charge is booked under; a head with no name still needs a place to go.
+     */
+    private function chargeLedgerName(array $head): string
+    {
+        $name = trim((string) ($head['head_name'] ?: $head['head_code']));
+
+        return $name !== '' ? $name : 'Bill Charges';
     }
 
     /* ------------------------------------------------------------------ */
@@ -360,13 +390,32 @@ class AdminAccountingExportController
     {
         $headers = [
             'Bill No', 'Supplier Bill No', 'Date', 'Supplier', 'GSTIN', 'Subtotal', 'Tax',
-            'CGST', 'SGST', 'IGST', 'Cess', 'Freight', 'Bill Discount', 'Round Off',
-            'Grand Total', 'Paid', 'Balance', 'Interstate', 'RCM', 'ITC Eligibility',
-            'Status', 'Items', 'Store',
+            'CGST', 'SGST', 'IGST', 'Cess', 'Freight', 'Charge Taxable', 'Charge Tax',
+            'Charge Total', 'Add To Cost', 'Expensed', 'Paid Separately', 'Charge Heads',
+            'Landed Value', 'Payable', 'Bill Discount', 'Round Off', 'Grand Total', 'Paid',
+            'Balance', 'Interstate', 'RCM', 'ITC Eligibility', 'Status', 'Items', 'Store',
         ];
 
         $rows = [];
         foreach ($this->purchasesQuery($storeIds, $from, $to)->get() as $purchase) {
+            $register = $this->chargeRegister($purchase);
+            $inBill = array_values(array_filter(
+                $register['by_head'],
+                fn (array $head) => $head['in_payable']
+            ));
+
+            $headOf = fn (string $treatment) => array_sum(array_map(
+                fn (array $head) => $head['treatment'] === $treatment ? (float) $head['total'] : 0.0,
+                $inBill
+            ));
+
+            // The freight scalar is only what the books carried when the bill has no charge rows
+            // of its own; a migrated or entered head is the same rupee seen the new way (PUR-017).
+            $legacyFreight = array_sum(array_map(
+                fn (array $head) => $head['source'] === 'legacy_freight' ? (float) $head['total'] : 0.0,
+                $register['by_head']
+            ));
+
             $rows[] = [
                 $purchase->id,
                 $purchase->invoice_number,
@@ -379,7 +428,23 @@ class AdminAccountingExportController
                 $this->moneyText($purchase->sgst_total),
                 $this->moneyText($purchase->igst_total),
                 $this->moneyText($purchase->cess_total),
-                $this->moneyText($purchase->freight_charges),
+                $this->moneyText($legacyFreight),
+                $this->moneyText($register['charge_taxable']),
+                $this->moneyText($register['charge_tax']),
+                $this->moneyText($register['charge_total']),
+                $this->moneyText($headOf('add_to_cost')),
+                $this->moneyText($headOf('expense')),
+                $this->moneyText($register['separately_paid']['total']),
+                implode('; ', array_map(fn (array $head) => sprintf(
+                    '%s %s@%s%% %s%s',
+                    $head['head_code'],
+                    $this->moneyText($head['taxable']),
+                    rtrim(rtrim(number_format((float) $head['gst_percent'], 2, '.', ''), '0'), '.'),
+                    $head['in_payable'] ? 'in bill' : 'paid separately',
+                    $head['is_rcm'] ? ' RCM' : ''
+                ), $register['by_head'])),
+                $this->moneyText($register['landed_value']),
+                $this->moneyText($register['payable']),
                 $this->moneyText($purchase->bill_discount),
                 $this->moneyText($purchase->round_off),
                 $this->moneyText($purchase->grand_total),
@@ -393,6 +458,80 @@ class AdminAccountingExportController
                 $purchase->store?->name,
             ];
         }
+
+        return [$headers, $rows];
+    }
+
+    /**
+     * REP-008 — the expense register as a spreadsheet: every manual expense and every
+     * expense-treated bill charge, with the tax columns and the ITC flag that booked them.
+     */
+    private function expensesCsv(?array $storeIds, string $from, string $to): array
+    {
+        $register = (new ExpenseRegisterService())->register([
+            'from' => $from,
+            'to' => $to,
+            'store_ids' => $storeIds,
+            'source' => ExpenseRegisterService::SOURCE_ALL,
+        ]);
+
+        $storeNames = Store::when($storeIds, fn ($q) => $q->whereIn('id', $storeIds))
+            ->pluck('name', 'id');
+
+        $headers = [
+            'Date', 'Source', 'Origin', 'Bill No', 'Supplier', 'Head', 'Head Code', 'SAC',
+            'Taxable', 'GST %', 'CGST', 'SGST', 'IGST', 'Cess', 'Tax Total', 'Posted Amount',
+            'ITC Eligibility', 'Creditable Tax', 'Non-Creditable Tax', 'RCM', 'Paid Separately',
+            'In Payable', 'Paid To', 'Payment Mode', 'Reference', 'Reversed', 'Note', 'Store',
+        ];
+
+        $rows = [];
+        foreach ($register['rows'] as $row) {
+            $rows[] = [
+                $row['date'],
+                $row['source'],
+                $row['origin'],
+                $row['purchase_number'],
+                $row['supplier_name'],
+                $row['head'],
+                $row['head_code'],
+                $row['sac_code'],
+                $this->moneyText($row['taxable_amount']),
+                $this->moneyText($row['gst_percent']),
+                $this->moneyText($row['cgst_amount']),
+                $this->moneyText($row['sgst_amount']),
+                $this->moneyText($row['igst_amount']),
+                $this->moneyText($row['cess_amount']),
+                $this->moneyText($row['tax_amount']),
+                $this->moneyText($row['amount']),
+                $row['itc_eligibility'],
+                $this->moneyText($row['creditable_tax']),
+                $this->moneyText($row['non_creditable_tax']),
+                $row['is_rcm'],
+                $row['paid_separately'],
+                $row['in_payable'],
+                $row['paid_to_label'],
+                $row['payment_mode'],
+                $row['reference_no'],
+                $this->moneyText($row['reversed_amount']),
+                $row['note'],
+                $storeNames[$row['store_id']] ?? '',
+            ];
+        }
+
+        $totals = $register['totals'];
+        $footing = array_fill(0, count($headers), '');
+        $footing[1] = 'TOTAL';
+        $footing[8] = $this->moneyText($totals['taxable']);
+        $footing[14] = $this->moneyText($totals['tax']);
+        $footing[15] = $this->moneyText($totals['postings']);
+        $footing[17] = $this->moneyText($totals['creditable_tax']);
+        $footing[18] = $this->moneyText($totals['non_creditable_tax']);
+        $footing[25] = $this->moneyText(array_sum(array_map(
+            fn (array $row) => (float) $row['reversed_amount'],
+            $register['rows']
+        )));
+        $rows[] = $footing;
 
         return [$headers, $rows];
     }
@@ -564,6 +703,26 @@ class AdminAccountingExportController
             }
         }
 
+        // REP-009: the tax on a bill charge is input tax too, and the item rows above never saw
+        // it. Each head is bucketed on its own SAC and rate, reversals included as negatives.
+        $chargeRegister = new PurchaseRegisterService();
+        foreach ($purchases as $purchase) {
+            foreach ($chargeRegister->chargeRows($purchase) as $head) {
+                $add(
+                    'purchase-charge',
+                    $head['sac_code'] ?: null,
+                    (float) $head['gst_percent'],
+                    (float) $head['taxable'],
+                    (float) $head['cgst'],
+                    (float) $head['sgst'],
+                    (float) $head['igst'],
+                    (float) $head['cess'],
+                    (float) $head['total'],
+                    $purchase->id
+                );
+            }
+        }
+
         ksort($buckets);
 
         $rows = [];
@@ -630,19 +789,30 @@ class AdminAccountingExportController
 
         $expenses = Expense::with('store:id,name')
             ->whereBetween('expense_date', [$from, $to])
+            // REP-008: a supplier-borne charge is already inside the purchase row above, so only
+            // the money that left through its own till — a manual expense or a separately paid
+            // charge — may appear here. Otherwise the day book counts the same rupee twice.
+            ->where(fn ($q) => $q->whereNull('purchase_charge_id')->orWhere('paid_separately', true))
             ->when($storeIds, fn ($q) => $q->whereIn('store_id', $storeIds))
             ->get();
 
         foreach ($expenses as $expense) {
+            // PUR-012 put the tax that can never be claimed inside `amount`, so the day book has
+            // to take it back out before it can show what was paid for the bill charge itself.
+            $tax = round((float) $expense->cgst_amount + (float) $expense->sgst_amount
+                + (float) $expense->igst_amount, 2);
+            $blocked = $tax > 0 && ($expense->itc_eligibility ?? 'eligible') !== 'eligible';
+            $taxable = round((float) $expense->amount - ($blocked ? $tax : 0), 2);
+
             $rows[] = [
                 'date' => $this->date($expense->expense_date),
-                'type' => 'Expense',
+                'type' => $expense->purchase_charge_id ? 'Expense (bill charge)' : 'Expense',
                 'no' => $expense->expense_number,
                 'party' => $expense->expense_head,
                 'gstin' => '',
-                'taxable' => '',
-                'tax' => '',
-                'total' => $this->moneyText($expense->amount),
+                'taxable' => $tax > 0 ? $this->moneyText($taxable) : '',
+                'tax' => $tax > 0 ? $this->moneyText($tax) : '',
+                'total' => $this->moneyText($tax > 0 ? round($taxable + $tax, 2) : (float) $expense->amount),
                 'mode' => $expense->payment_mode,
                 'status' => 'posted',
                 'store' => $expense->store?->name,
@@ -799,6 +969,7 @@ class AdminAccountingExportController
         $body = '';
         foreach ($this->purchasesQuery($storeIds, $from, $to)->get() as $purchase) {
             $party = $purchase->supplier_name ?: ($purchase->supplier?->name ?? 'Supplier');
+            $register = $this->chargeRegister($purchase);
             $taxable = (float) $purchase->subtotal - (float) $purchase->bill_discount;
 
             $ledgers = '';
@@ -808,7 +979,15 @@ class AdminAccountingExportController
             $ledgers .= $this->tallyLedger('SGST (Input)', -1 * (float) $purchase->sgst_total);
             $ledgers .= $this->tallyLedger('IGST (Input)', -1 * (float) $purchase->igst_total);
             $ledgers .= $this->tallyLedger('Cess (Input)', -1 * (float) $purchase->cess_total);
-            $ledgers .= $this->tallyLedger('Freight Charges', -1 * (float) $purchase->freight_charges);
+
+            // The header tax totals already carry the charge GST (PUR-001), so only the taxable
+            // half of each in-bill charge is missing: without it the voucher cannot balance.
+            foreach ($register['by_head'] as $head) {
+                if ($head['in_payable']) {
+                    $ledgers .= $this->tallyLedger($this->chargeLedgerName($head), -1 * (float) $head['taxable']);
+                }
+            }
+
             $ledgers .= $this->tallyLedger('Round Off', -1 * (float) $purchase->round_off);
 
             $inventory = '';
@@ -833,6 +1012,31 @@ class AdminAccountingExportController
                 'ledgers' => $ledgers,
                 'inventory' => $inventory,
             ]);
+
+            // A charge paid separately never enters the payable, so it leaves as its own voucher.
+            foreach ($register['by_head'] as $head) {
+                if ($head['in_payable']) {
+                    continue;
+                }
+
+                $payee = trim((string) ($head['paid_to_label'] ?? '')) ?: 'Cash';
+                $body .= $this->tallyVoucher([
+                    'type' => 'Payment',
+                    'number' => $purchase->invoice_number . '-C' . $head['seq'],
+                    'date' => $this->date($purchase->invoice_date, 'Ymd'),
+                    'party' => $payee,
+                    'partyGstin' => '',
+                    'placeOfSupply' => '',
+                    'narration' => $head['head_name'] . ' paid separately on bill ' . $purchase->invoice_number,
+                    'ledgers' => $this->tallyLedger($payee, (float) $head['total'])
+                        . $this->tallyLedger($this->chargeLedgerName($head), -1 * (float) $head['taxable'])
+                        . $this->tallyLedger('CGST (Input)', -1 * (float) $head['cgst'])
+                        . $this->tallyLedger('SGST (Input)', -1 * (float) $head['sgst'])
+                        . $this->tallyLedger('IGST (Input)', -1 * (float) $head['igst'])
+                        . $this->tallyLedger('Cess (Input)', -1 * (float) $head['cess']),
+                    'inventory' => '',
+                ]);
+            }
         }
 
         return $this->tallyEnvelope($company, 'Vouchers', $body);
@@ -1001,18 +1205,52 @@ class AdminAccountingExportController
             }
         } else {
             foreach ($this->purchasesQuery($storeIds, $from, $to)->get() as $purchase) {
+                $register = $this->chargeRegister($purchase);
+
+                $chargeLedgers = '';
+                $separateVouchers = '';
+                foreach ($register['by_head'] as $head) {
+                    if (!$head['in_payable']) {
+                        // Never part of the payable, so it is not a line of this voucher.
+                        $payee = trim((string) ($head['paid_to_label'] ?? '')) ?: 'Cash';
+                        $separateVouchers .= '<Voucher VchType="Payment">'
+                            . '<VchNo>' . $this->esc($purchase->invoice_number . '-C' . $head['seq']) . '</VchNo>'
+                            . '<Date>' . $this->esc($this->date($purchase->invoice_date)) . '</Date>'
+                            . '<PartyName>' . $this->esc($payee) . '</PartyName>'
+                            . '<Narration>' . $this->esc($head['head_name']
+                                . ' paid separately on bill ' . $purchase->invoice_number) . '</Narration>'
+                            . '<LedgerEntries>'
+                            . $this->busyLedger($this->chargeLedgerName($head), (float) $head['taxable'], 'Dr')
+                            . $this->busyLedger('CGST (Input)', (float) $head['cgst'], 'Dr')
+                            . $this->busyLedger('SGST (Input)', (float) $head['sgst'], 'Dr')
+                            . $this->busyLedger('IGST (Input)', (float) $head['igst'], 'Dr')
+                            . $this->busyLedger('Cess (Input)', (float) $head['cess'], 'Dr')
+                            . '</LedgerEntries>'
+                            . '<Totals GrandTotal="' . $this->moneyText($head['total']) . '"/>'
+                            . '</Voucher>';
+
+                        continue;
+                    }
+
+                    $chargeLedgers .= $this->busyLedger(
+                        $this->chargeLedgerName($head),
+                        (float) $head['taxable'],
+                        'Dr'
+                    );
+                }
+
                 $xml .= '<Voucher VchType="Purchase">'
                     . '<VchNo>' . $this->esc($purchase->invoice_number) . '</VchNo>'
                     . '<Date>' . $this->esc($this->date($purchase->invoice_date)) . '</Date>'
                     . '<PartyName>' . $this->esc($purchase->supplier_name ?: ($purchase->supplier?->name ?? '')) . '</PartyName>'
-                    . '<PartyGSTIN>' . $this->esc($purchase->supplier_gstin ?: $purchase->supplier?->gstin) . '</PartyGSTIN>'
+                    . '<PartyGSTIN>' . $this->esc($purchase->supplier_gstin ?: ($purchase->supplier?->gstin ?? '')) . '</PartyGSTIN>'
                     . '<LedgerEntries>'
                     . $this->busyLedger('Purchase', (float) $purchase->subtotal - (float) $purchase->bill_discount, 'Dr')
                     . $this->busyLedger('CGST (Input)', (float) $purchase->cgst_total, 'Dr')
                     . $this->busyLedger('SGST (Input)', (float) $purchase->sgst_total, 'Dr')
                     . $this->busyLedger('IGST (Input)', (float) $purchase->igst_total, 'Dr')
                     . $this->busyLedger('Cess (Input)', (float) $purchase->cess_total, 'Dr')
-                    . $this->busyLedger('Freight Charges', (float) $purchase->freight_charges, 'Dr')
+                    . $chargeLedgers
                     . $this->busyLedger('Round Off', (float) $purchase->round_off, (float) $purchase->round_off >= 0 ? 'Dr' : 'Cr')
                     . '</LedgerEntries>'
                     . '<Items>';
@@ -1025,11 +1263,12 @@ class AdminAccountingExportController
                         . ' GSTPercent="' . $this->moneyText($item->gst_percent) . '"/>';
                 }
                 $xml .= '</Items>'
-                    . '<Totals Taxable="' . $this->moneyText((float) $purchase->subtotal - (float) $purchase->bill_discount) . '"'
+                    . '<Totals Taxable="' . $this->moneyText((float) $purchase->subtotal - (float) $purchase->bill_discount + $register['charge_taxable']) . '"'
                     . ' Tax="' . $this->moneyText($purchase->tax_total) . '"'
+                    . ' Charges="' . $this->moneyText($register['charge_total']) . '"'
                     . ' RoundOff="' . $this->moneyText($purchase->round_off) . '"'
                     . ' GrandTotal="' . $this->moneyText($purchase->grand_total) . '"/>'
-                    . '</Voucher>';
+                    . '</Voucher>' . $separateVouchers;
             }
         }
 

@@ -2,6 +2,16 @@ import type { EntityDefinition } from "../types";
 import { sqliteStorage } from "../../../db/sqliteStorage";
 import { isValidGstin, normalizeIndianPhone } from "../../../masters/partiesStore";
 import { isForActiveStore, withStore } from "../storeScope";
+import { stateCodeOf } from "../../../gst/stateCodes";
+import { companySettingsService } from "../../../settings/companySettingsService";
+
+function importedStateCode(state: unknown, gstin: unknown): string {
+  const fromGstin = stateCodeOf(String(gstin ?? ""));
+  if (fromGstin) return fromGstin;
+  const given = String(state ?? "").trim();
+  if (/^\d{2}$/.test(given) && stateCodeOf(given)) return given;
+  return stateCodeOf(companySettingsService.getSettings()?.state_code) ?? "";
+}
 
 export const customersDefinition: EntityDefinition = {
   id: "customers",
@@ -210,7 +220,6 @@ export const suppliersDefinition: EntityDefinition = {
       label: "State Code (2 Digits)",
       type: "string",
       required: false,
-      defaultValue: "32",
       example: "32",
       description: "GST state code (e.g. 32 for Kerala, 33 for Tamil Nadu, 29 for Karnataka)",
       aliases: ["state_code", "pos_code"],
@@ -278,7 +287,9 @@ export const suppliersDefinition: EntityDefinition = {
       gstin: raw.gstin ? String(raw.gstin).trim().toUpperCase() : undefined,
       phone: raw.phone ? normalizeIndianPhone(String(raw.phone)) : undefined,
       address: raw.address ? String(raw.address).trim() : undefined,
-      state_code: String(raw.state_code || "32").trim(),
+      // MST-01: the GSTIN decides the state; else the row's own two-digit code;
+      // else the store's state. Never a Kerala default.
+      state_code: importedStateCode(raw.state_code, raw.gstin),
       place_of_supply: String(raw.place_of_supply || "Kerala").trim(),
       credit_period_days: Number(raw.credit_period_days || 30),
       opening_balance: Number(raw.opening_balance || 0),

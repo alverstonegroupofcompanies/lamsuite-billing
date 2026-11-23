@@ -1,0 +1,202 @@
+{
+  "layouts": {
+    "1366_dashboard": {
+      "hscroll": false,
+      "scrollWidth": 1366,
+      "vw": 1366,
+      "clipped": [],
+      "placeholder_text": []
+    },
+    "1366_billing": {
+      "hscroll": false,
+      "scrollWidth": 1366,
+      "vw": 1366,
+      "clipped": [
+        "Alt+L\nRecall",
+        "Ctrl+N\nNew Bill",
+        "Ctrl+Shift+C\nColumns"
+      ],
+      "placeholder_text": []
+    },
+    "1366_purchases": {
+      "hscroll": false,
+      "scrollWidth": 1366,
+      "vw": 1366,
+      "clipped": [],
+      "placeholder_text": []
+    },
+    "1366_stock": {
+      "hscroll": false,
+      "scrollWidth": 1366,
+      "vw": 1366,
+      "clipped": [],
+      "placeholder_text": []
+    },
+    "1366_reports": {
+      "hscroll": false,
+      "scrollWidth": 1366,
+      "vw": 1366,
+      "clipped": [],
+      "placeholder_text": []
+    },
+    "1366_masters": {
+      "hscroll": false,
+      "scrollWidth": 1366,
+      "vw": 1366,
+      "clipped": [],
+      "placeholder_text": []
+    },
+    "1366_bills": {
+      "hscroll": false,
+      "scrollWidth": 1366,
+      "vw": 1366,
+      "clipped": [],
+      "placeholder_text": []
+    },
+    "1366_returns": {
+      "hscroll": false,
+      "scrollWidth": 1366,
+      "vw": 1366,
+      "clipped": [],
+      "placeholder_text": []
+    },
+    "1366_counters": {
+      "hscroll": false,
+      "scrollWidth": 1366,
+      "vw": 1366,
+      "clipped": [],
+      "placeholder_text": []
+    },
+    "1366_settings": {
+      "hscroll": false,
+      "scrollWidth": 1366,
+      "vw": 1366,
+      "clipped": [],
+      "placeholder_text": []
+    },
+    "1920_dashboard": {
+      "hscroll": false,
+      "scrollWidth": 1920,
+      "vw": 1920,
+      "clipped": [],
+      "placeholder_text": []
+    },
+    "1920_billing": {
+      "hscroll": false,
+      "scrollWidth": 1920,
+      "vw": 1920,
+      "clipped": [],
+      "placeholder_text": []
+    },
+    "1920_purchases": {
+      "hscroll": false,
+      "scrollWidth": 1920,
+      "vw": 1920,
+      "clipped": [],
+      "placeholder_text": []
+    },
+    "1920_stock": {
+      "hscroll": false,
+      "scrollWidth": 1920,
+      "vw": 1920,
+      "clipped": [],
+      "placeholder_text": []
+    },
+    "1920_reports": {
+      "hscroll": false,
+      "scrollWidth": 1920,
+      "vw": 1920,
+      "clipped": [],
+      "placeholder_text": []
+    },
+    "1920_masters": {
+      "hscroll": false,
+      "scrollWidth": 1920,
+      "vw": 1920,
+      "clipped": [],
+      "placeholder_text": []
+    },
+    "1920_bills": {
+      "hscroll": false,
+      "scrollWidth": 1920,
+      "vw": 1920,
+      "clipped": [],
+      "placeholder_text": []
+    },
+    "1920_returns": {
+      "hscroll": false,
+      "scrollWidth": 1920,
+      "vw": 1920,
+      "clipped": [],
+      "placeholder_text": []
+    },
+    "1920_counters": {
+      "hscroll": false,
+      "scrollWidth": 1920,
+      "vw": 1920,
+      "clipped": [],
+      "placeholder_text": []
+    },
+    "1920_settings": {
+      "hscroll": false,
+      "scrollWidth": 1920,
+      "vw": 1920,
+      "clipped": [],
+      "placeholder_text": []
+    }
+  },
+  "print": {
+    "preview_open": true,
+    "has_rupee": true,
+    "store_name": true,
+    "gstin": false,
+    "lines": [
+      "Inventory",
+      "Reports",
+      "Import / Export",
+      "INVOICE NO",
+      "C01-INV-11751",
+      "#\tPRODUCT NAME\tBATCH\tEXPIRY\tQUANTITY\tMRP (₹)\tRATE (₹)\tDISC %\tGST %\tTOTAL (₹)\tACTION",
+      "SUBTOTAL: ₹ 0.00",
+      "Round-off: +₹0.00",
+      "Round-off",
+      "Tax Invoice Preview - #C01-INV-11651",
+      "Printer",
+      "Export",
+      "TARGET PRINTER (ALT+P)",
+      "Driver:",
+      "EPSON Advanced Printer Driver 5",
+      "Port:",
+      "Silent Background Print (No OS popup)",
+      "Printer: EPSON TM-T82 Thermal",
+      "Added QA Cough Syrup 100ml, Quantity 1. Total: ₹115.00"
+    ],
+    "iframes": [
+      ""
+    ],
+    "sizes": [
+      {
+        "size": "★ EPSON TM-T82 Receipt (Thermal 80mm)",
+        "has_rupee": true
+      },
+      {
+        "size": "HP LaserJet Pro 4104 (A4 / A5 Laser)",
+        "has_rupee": true
+      },
+      {
+        "size": "TVS MSP 245 (Dot Matrix 12\" / 120-Col)",
+        "has_rupee": true
+      },
+      {
+        "size": "Epson LQ-2090 (Dot Matrix 15\" / 132-Col Wide)",
+        "has_rupee": true
+      }
+    ],
+    "saved_invoice": {
+      "invoice_number": "C01-INV-11651",
+      "grand_total": 115,
+      "tax_total": 12.32
+    },
+    "number_on_preview": true
+  }
+}

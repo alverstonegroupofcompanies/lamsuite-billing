@@ -12,10 +12,16 @@ class Purchase extends Model
 
     protected $fillable = [
         'store_id',
+        'external_id',
+        'bill_key',
         'supplier_id',
         'supplier_name',
         'supplier_gstin',
         'invoice_number',
+        'document_number',
+        'supplier_invoice_no',
+        'counter_id',
+        'counter_code',
         'invoice_date',
         'expected_delivery_date',
         'module_key',
@@ -31,6 +37,7 @@ class Purchase extends Model
         'freight_charges',
         'bill_discount_type',
         'bill_discount',
+        'place_of_supply',
         'round_off',
         'grand_total',
         'paid_amount',
@@ -72,5 +79,14 @@ class Purchase extends Model
     public function items(): HasMany
     {
         return $this->hasMany(PurchaseItem::class);
+    }
+
+    /**
+     * Charge lines belong to the purchase aggregate (CR-C / PUR-017): they are never
+     * queued, pushed or deleted independently of this bill.
+     */
+    public function charges(): HasMany
+    {
+        return $this->hasMany(PurchaseCharge::class)->orderBy('seq');
     }
 }

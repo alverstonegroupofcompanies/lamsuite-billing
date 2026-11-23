@@ -10,9 +10,11 @@ import { LoginPage } from "./pages/LoginPage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { StoresPage } from "./pages/StoresPage";
 import { DevicesPage } from "./pages/DevicesPage";
+import { CountersPage } from "./pages/CountersPage";
 import { FeaturesPage } from "./pages/FeaturesPage";
 import { UsersPage } from "./pages/UsersPage";
 import { MastersPage } from "./pages/MastersPage";
+import { SalespeoplePage } from "./pages/SalespeoplePage";
 import { TransactionsPage } from "./pages/TransactionsPage";
 import { GiftCardsPage } from "./pages/GiftCardsPage";
 import { SettlementsPage } from "./pages/SettlementsPage";
@@ -65,9 +67,11 @@ const ProtectedRoutes: React.FC = () => {
         <Route path="/" element={<DashboardPage />} />
         <Route path="/stores" element={<StoresPage />} />
         <Route path="/devices" element={<DevicesPage />} />
+        <Route path="/counters" element={<CountersPage />} />
         <Route path="/features" element={<FeaturesPage />} />
         <Route path="/users" element={<UsersPage />} />
         <Route path="/masters" element={<MastersPage />} />
+        <Route path="/salespeople" element={<SalespeoplePage />} />
         <Route path="/transactions" element={<TransactionsPage />} />
         <Route path="/gift-cards" element={<GiftCardsPage />} />
         <Route path="/settlements" element={<SettlementsPage />} />

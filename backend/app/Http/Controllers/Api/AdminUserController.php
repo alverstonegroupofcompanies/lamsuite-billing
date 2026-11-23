@@ -3,8 +3,10 @@
 namespace App\Http\Controllers\Api;
 
 use App\Models\AuditLog;
+use App\Models\Counter;
 use App\Models\User;
 use App\Models\UserSession;
+use App\Services\Auth\PinPolicy;
 use App\Services\PermissionMap;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -14,22 +16,56 @@ use Laravel\Sanctum\PersonalAccessToken;
 class AdminUserController
 {
     /**
-     * POS terminals authenticate with a staff_session_token. They may only
-     * manage the branch they are signed in to; multi-branch and global
-     * accounts are created from the admin panel.
+     * POS terminals authenticate with a staff_session_token or, since the CR
+     * made the counter the tenant principal, with the claimed counter's device
+     * token and nobody signed in. Either way they may only manage the branch
+     * they are registered to; multi-branch and global accounts are created from
+     * the admin panel.
      */
     private function isTerminalRequest(Request $request): bool
     {
         $token = $request->user()?->currentAccessToken();
 
-        return $token instanceof PersonalAccessToken && $token->name === 'staff_session_token';
+        if ($token instanceof PersonalAccessToken && $token->name === 'staff_session_token') {
+            return true;
+        }
+
+        return $request->attributes->get('device_store_id') !== null;
     }
 
     private function terminalStoreId(Request $request): ?int
     {
-        $activeStoreId = $request->attributes->get('active_store_id');
+        $activeStoreId = $request->attributes->get('active_store_id')
+            ?? $request->attributes->get('device_store_id');
 
         return $activeStoreId ? (int) $activeStoreId : null;
+    }
+
+    /**
+     * Who to name in the audit trail. A counter has no email address, and
+     * naming a person who never signed in would invent a trail that does not
+     * exist — so the counter is named as itself.
+     */
+    private function actorLabel(Request $request): string
+    {
+        $user = $request->user();
+        if ($user) {
+            return (string) $user->email;
+        }
+
+        $counterId = $request->attributes->get('device_counter_id');
+
+        if ($counterId) {
+            $counter = Counter::find($counterId);
+
+            return $counter
+                ? "counter:{$counter->counter_code} ({$counter->counter_name})"
+                : "counter:{$counterId}";
+        }
+
+        $deviceId = $request->attributes->get('device_id');
+
+        return $deviceId ? "device:{$deviceId}" : 'terminal';
     }
 
     /**
@@ -90,7 +126,19 @@ class AdminUserController
 
         $query = User::with('store:id,name,code');
 
-        if ($currentUser->isSuperAdmin()) {
+        if (!$currentUser) {
+            // A16b: a counter reads exactly its own branch. Global accounts and
+            // other branches never leave the admin panel.
+            $counterStoreId = $this->terminalStoreId($request);
+
+            if (!$counterStoreId) {
+                return response()->json([
+                    'message' => 'Claim this terminal to a counter before managing staff accounts.',
+                ], 422);
+            }
+
+            $query->where('store_id', $counterStoreId);
+        } elseif ($currentUser->isSuperAdmin()) {
             // Super Admin can view all staff users across all branches, or filter by a specific store
             if ($storeFilter && $storeFilter !== 'all') {
                 $query->where(function ($q) use ($storeFilter) {
@@ -163,10 +211,17 @@ class AdminUserController
             'max_failed_logins' => 'nullable|integer|min:3|max:20',
             'ip_allowlist' => 'nullable|string',
             'is_biometric_enabled' => 'nullable|boolean',
+            // APR-001 / Q6: who may hold the approval PIN is the owner's choice.
+            'is_approver' => 'nullable|boolean',
         ]);
 
-        if ($validated['role'] === 'super_admin' && !$currentUser->isSuperAdmin()) {
+        if ($validated['role'] === 'super_admin' && !$currentUser?->isSuperAdmin()) {
             return response()->json(['message' => 'Only Super Admins can create Super Admin accounts.'], 403);
+        }
+
+        if ($this->isTerminalRequest($request)) {
+            // A counter may manage its staff, not decide who approves for it.
+            unset($validated['is_approver']);
         }
 
         if ($this->isTerminalRequest($request)) {
@@ -196,7 +251,7 @@ class AdminUserController
         // Omitted store_id means "the caller's store", never a global account.
         // A global account must be requested explicitly with store_id null by a
         // super admin.
-        if (!array_key_exists('store_id', $validated) && $currentUser->store_id) {
+        if (!array_key_exists('store_id', $validated) && $currentUser?->store_id) {
             $validated['store_id'] = $currentUser->store_id;
         }
 
@@ -232,7 +287,7 @@ class AdminUserController
         unset($validated['pin']);
 
         $validated['idle_timeout_minutes'] = $validated['idle_timeout_minutes'] ?? 15;
-        $validated['max_failed_logins'] = $validated['max_failed_logins'] ?? 5;
+        $validated['max_failed_logins'] = $validated['max_failed_logins'] ?? PinPolicy::MAX_FAILED_ATTEMPTS;
 
         $user = User::create($validated);
 
@@ -241,6 +296,7 @@ class AdminUserController
             'username' => $user->username,
             'role' => $user->role,
             'store_id' => $user->store_id,
+            'created_by' => $this->actorLabel($request),
         ], $user->store_id);
 
         return response()->json($user, 201);
@@ -257,7 +313,7 @@ class AdminUserController
         $currentUser = $request->user();
         $user = User::findOrFail($id);
 
-        if ($user->role === 'super_admin' && !$currentUser->isSuperAdmin()) {
+        if ($user->role === 'super_admin' && !$currentUser?->isSuperAdmin()) {
             return response()->json(['message' => 'Only Super Admins can modify Super Admin accounts.'], 403);
         }
 
@@ -275,9 +331,14 @@ class AdminUserController
             'max_failed_logins' => 'nullable|integer|min:3|max:20',
             'ip_allowlist' => 'nullable|string',
             'is_biometric_enabled' => 'nullable|boolean',
+            'is_approver' => 'nullable|boolean',
         ]);
 
-        if (($validated['role'] ?? null) === 'super_admin' && !$currentUser->isSuperAdmin()) {
+        if ($this->isTerminalRequest($request)) {
+            unset($validated['is_approver']);
+        }
+
+        if (($validated['role'] ?? null) === 'super_admin' && !$currentUser?->isSuperAdmin()) {
             return response()->json(['message' => 'Only Super Admins can assign the Super Admin role.'], 403);
         }
 
@@ -360,14 +421,15 @@ class AdminUserController
         $oldValues = $user->only(['name', 'email', 'role', 'permissions', 'store_id', 'username']);
         $user->update($validated);
 
-        AuditLog::log('update_user', 'User', (string)$user->id, $oldValues, $user->only(['name', 'email', 'role', 'permissions', 'store_id', 'username']), $user->store_id);
+        AuditLog::log('update_user', 'User', (string)$user->id, $oldValues, $user->only(['name', 'email', 'role', 'permissions', 'store_id', 'username']) + [
+            'updated_by' => $this->actorLabel($request),
+        ], $user->store_id);
 
         return response()->json($user->fresh());
     }
 
     public function resetPin(Request $request, string $id): JsonResponse
     {
-        $currentUser = $request->user();
         $user = User::findOrFail($id);
 
         if ($denied = $this->guardTerminalTarget($request, $user)) {
@@ -389,7 +451,7 @@ class AdminUserController
             'locked_until' => null,
         ]);
 
-        AuditLog::log('reset_user_pin', 'User', (string)$user->id, null, ['reset_by' => $currentUser->email], $user->store_id);
+        AuditLog::log('reset_user_pin', 'User', (string)$user->id, null, ['reset_by' => $this->actorLabel($request)], $user->store_id);
 
         return response()->json([
             'success' => true,
@@ -440,7 +502,6 @@ class AdminUserController
 
     public function unlock(Request $request, string $id): JsonResponse
     {
-        $currentUser = $request->user();
         $user = User::findOrFail($id);
 
         if ($denied = $this->guardTerminalTarget($request, $user)) {
@@ -452,7 +513,7 @@ class AdminUserController
             'locked_until' => null,
         ]);
 
-        AuditLog::log('unlock_user', 'User', (string)$user->id, null, ['unlocked_by' => $currentUser->email], $user->store_id);
+        AuditLog::log('unlock_user', 'User', (string)$user->id, null, ['unlocked_by' => $this->actorLabel($request)], $user->store_id);
 
         return response()->json([
             'success' => true,
@@ -476,10 +537,10 @@ class AdminUserController
 
         $user->update([
             'locked_until' => now()->addMinutes(60),
-            'failed_login_attempts' => $user->max_failed_logins ?? 5,
+            'failed_login_attempts' => PinPolicy::attemptsAllowed($user->max_failed_logins),
         ]);
 
-        AuditLog::log('lock_user', 'User', (string)$user->id, null, ['locked_by' => $currentUser->email], $user->store_id);
+        AuditLog::log('lock_user', 'User', (string)$user->id, null, ['locked_by' => $this->actorLabel($request)], $user->store_id);
 
         return response()->json([
             'success' => true,
@@ -501,7 +562,7 @@ class AdminUserController
             return $denied;
         }
 
-        if ($currentUser && !$currentUser->isSuperAdmin() && $user->role === 'super_admin') {
+        if (!$currentUser?->isSuperAdmin() && $user->role === 'super_admin') {
             return response()->json(['message' => 'Only Super Admins can delete Super Admin accounts.'], 403);
         }
 
@@ -514,7 +575,9 @@ class AdminUserController
 
         $user->delete();
 
-        AuditLog::log('delete_user', 'User', (string)$id, ['name' => $userName, 'email' => $userEmail], null, $storeId);
+        AuditLog::log('delete_user', 'User', (string)$id, ['name' => $userName, 'email' => $userEmail], [
+            'deleted_by' => $this->actorLabel($request),
+        ], $storeId);
 
         return response()->json([
             'success' => true,

@@ -3,6 +3,7 @@ import { Store } from "../types";
 import { api, ApiError } from "../services/api";
 import { formatDate } from "../utils/formatters";
 import { useAuth } from "../context/AuthContext";
+import { GST_STATE_OPTIONS, isStateCode, stateCodeFromGstin } from "../lib/gstStates";
 import { ConfirmModal } from "../components/ConfirmModal";
 import {
   Store as StoreIcon,
@@ -198,8 +199,10 @@ export const StoresPage: React.FC = () => {
             onClick={() => {
               setEditingStore({
                 name: "",
-                code: `STORE-0${stores.length + 1}`,
-                state_code: "32",
+                // SET-01: no pre-filled code; typing after a pre-filled value is
+                // how "STORE-04QA-PH" happened. The suggestion is a placeholder.
+                code: "",
+                state_code: "",
                 timezone: "Asia/Kolkata",
                 tax_mode: "inclusive",
                 license_plan: "Professional Store",
@@ -257,7 +260,7 @@ export const StoresPage: React.FC = () => {
               <tr>
                 <th className="px-4 py-3">Store Details</th>
                 <th className="px-4 py-3">Code / GSTIN</th>
-                <th className="px-4 py-3">Store Activation Key</th>
+                <th className="px-4 py-3">Joining a till</th>
                 <th className="px-4 py-3">Drug Licenses</th>
                 <th className="px-4 py-3">Plan / Expiry</th>
                 <th className="px-4 py-3 text-center">Status</th>
@@ -289,46 +292,10 @@ export const StoresPage: React.FC = () => {
                       <div className="text-[10px] text-slate-400">{s.gstin || "No GSTIN registered"}</div>
                     </td>
                     <td className="px-4 py-3">
-                      <div className="flex items-center gap-1.5 font-mono text-[11px]">
-                        <span className="bg-slate-100 dark:bg-slate-800 px-2 py-1 rounded text-slate-700 dark:text-slate-200 font-semibold border border-slate-200 dark:border-slate-700">
-                          {s.activation_key || `LAM-${s.code}-KEY`}
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            navigator.clipboard.writeText(s.activation_key || `LAM-${s.code}-KEY`);
-                            alert(`Copied activation key: ${s.activation_key || `LAM-${s.code}-KEY`}`);
-                          }}
-                          title="Copy Activation Key to Clipboard"
-                          className="p-1 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 rounded"
-                        >
-                          <Copy className="w-3.5 h-3.5" />
-                        </button>
-                        {hasPermission("stores", "edit") && (
-                          <button
-                            type="button"
-                            onClick={async () => {
-                              if (confirm(`Regenerate activation key for store "${s.name}"? Previous keys will be revoked.`)) {
-                                try {
-                                  const res = await api.post<{ success: boolean; activation_key: string; message: string }>(`/admin/stores/${s.id}/regenerate-key`);
-                                  setStores((prev) =>
-                                    prev.map((store) =>
-                                      store.id === s.id ? { ...store, activation_key: res.activation_key } : store
-                                    )
-                                  );
-                                  alert(res.message + "\nNew Key: " + res.activation_key);
-                                  fetchStores();
-                                } catch (e: any) {
-                                  alert("Failed to regenerate key: " + (e.message || "Unknown error"));
-                                }
-                              }
-                            }}
-                            title="Regenerate Activation Key (Invalidates previous keys)"
-                            className="p-1 text-slate-400 hover:text-amber-600 dark:hover:text-amber-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded"
-                          >
-                            <RefreshCw className="w-3.5 h-3.5" />
-                          </button>
-                        )}
+                      <div className="text-[11px] text-slate-500 dark:text-slate-400 max-w-xs">
+                        Codes are issued per counter. Open{" "}
+                        <span className="font-semibold text-slate-700 dark:text-slate-200">Counters</span>{" "}
+                        to create one and hand over its activation code.
                       </div>
                     </td>
                     <td className="px-4 py-3">
@@ -464,29 +431,49 @@ export const StoresPage: React.FC = () => {
                 </div>
 
                 <div>
-                  <label className="block font-medium text-slate-700 dark:text-slate-300 mb-1">
+                  <label htmlFor="store-code" className="block font-medium text-slate-700 dark:text-slate-300 mb-1">
                     Store Code *
                   </label>
                   <input
+                    id="store-code"
                     type="text"
                     required
+                    maxLength={20}
                     value={editingStore.code || ""}
-                    onChange={(e) => setEditingStore({ ...editingStore, code: e.target.value })}
+                    onChange={(e) =>
+                      setEditingStore({
+                        ...editingStore,
+                        // Uppercase letters, digits and dashes — the same rule
+                        // the server enforces (SET-01), so a typo cannot be typed in.
+                        code: e.target.value.toUpperCase().replace(/[^A-Z0-9-]/g, ""),
+                      })
+                    }
+                    placeholder={`STORE-0${stores.length + 1}`}
                     className="w-full px-3 py-2 rounded-xl font-mono border border-slate-200 dark:border-slate-700 dark:bg-slate-800 dark:text-white focus:outline-hidden"
                   />
+                  <p className="mt-1 text-[10px] text-slate-400">Uppercase letters, digits and dashes; up to 20 characters.</p>
                 </div>
 
                 <div>
-                  <label className="block font-medium text-slate-700 dark:text-slate-300 mb-1">
+                  <label htmlFor="store-state-code" className="block font-medium text-slate-700 dark:text-slate-300 mb-1">
                     State Code (GST) *
                   </label>
-                  <input
-                    type="text"
+                  <select
+                    id="store-state-code"
                     required
-                    value={editingStore.state_code || "32"}
+                    value={isStateCode(editingStore.state_code) ? editingStore.state_code : ""}
                     onChange={(e) => setEditingStore({ ...editingStore, state_code: e.target.value })}
                     className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
-                  />
+                  >
+                    <option value="" disabled>
+                      Select GST state
+                    </option>
+                    {GST_STATE_OPTIONS.map((opt) => (
+                      <option key={opt.code} value={opt.code}>
+                        {opt.label}
+                      </option>
+                    ))}
+                  </select>
                 </div>
 
                 <div>
@@ -495,7 +482,7 @@ export const StoresPage: React.FC = () => {
                   </label>
                   <input
                     type="text"
-                    value={editingStore.timezone || "Asia/Kolkata"}
+                    value={editingStore.timezone ?? ""}
                     onChange={(e) => setEditingStore({ ...editingStore, timezone: e.target.value })}
                     placeholder="Asia/Kolkata"
                     className="w-full px-3 py-2 rounded-xl font-mono border border-slate-200 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
@@ -503,13 +490,22 @@ export const StoresPage: React.FC = () => {
                 </div>
 
                 <div>
-                  <label className="block font-medium text-slate-700 dark:text-slate-300 mb-1">
+                  <label htmlFor="store-gstin" className="block font-medium text-slate-700 dark:text-slate-300 mb-1">
                     GSTIN Number
                   </label>
                   <input
+                    id="store-gstin"
                     type="text"
+                    maxLength={15}
                     value={editingStore.gstin || ""}
-                    onChange={(e) => setEditingStore({ ...editingStore, gstin: e.target.value })}
+                    onChange={(e) => setEditingStore({ ...editingStore, gstin: e.target.value.toUpperCase() })}
+                    onBlur={() => {
+                      // The GSTIN already declares the state; do not let the two disagree.
+                      const code = stateCodeFromGstin(editingStore.gstin);
+                      if (code && code !== editingStore.state_code) {
+                        setEditingStore({ ...editingStore, state_code: code });
+                      }
+                    }}
                     placeholder="32AAAAA0000A1Z5"
                     className="w-full px-3 py-2 rounded-xl font-mono uppercase border border-slate-200 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                   />
@@ -579,7 +575,7 @@ export const StoresPage: React.FC = () => {
                   </label>
                   <input
                     type="text"
-                    value={editingStore.license_plan || "Professional"}
+                    value={editingStore.license_plan ?? ""}
                     onChange={(e) => setEditingStore({ ...editingStore, license_plan: e.target.value })}
                     className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                   />

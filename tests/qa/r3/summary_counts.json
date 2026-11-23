@@ -1,0 +1,334 @@
+{
+  "status": {
+    "FAIL": 35,
+    "PASS": 17,
+    "NOT_RUN": 6,
+    "NOT_TESTABLE": 3,
+    "FLAKY": 1
+  },
+  "byJourney": {
+    "J1": {
+      "Critical": 2,
+      "High": 2,
+      "Medium": 2,
+      "Low": 1
+    },
+    "J11": {
+      "Critical": 1,
+      "High": 2,
+      "Medium": 0,
+      "Low": 1
+    },
+    "J2": {
+      "Critical": 1,
+      "High": 1,
+      "Medium": 2,
+      "Low": 0
+    },
+    "J3": {
+      "Critical": 4,
+      "High": 2,
+      "Medium": 2,
+      "Low": 0
+    },
+    "J14": {
+      "Critical": 0,
+      "High": 1,
+      "Medium": 2,
+      "Low": 2
+    },
+    "J10": {
+      "Critical": 0,
+      "High": 3,
+      "Medium": 1,
+      "Low": 0
+    },
+    "J15": {
+      "Critical": 0,
+      "High": 0,
+      "Medium": 2,
+      "Low": 0
+    },
+    "J4": {
+      "Critical": 4,
+      "High": 5,
+      "Medium": 3,
+      "Low": 0
+    },
+    "J5": {
+      "Critical": 2,
+      "High": 0,
+      "Medium": 0,
+      "Low": 1
+    },
+    "J7": {
+      "Critical": 1,
+      "High": 2,
+      "Medium": 0,
+      "Low": 0
+    },
+    "J6": {
+      "Critical": 0,
+      "High": 2,
+      "Medium": 0,
+      "Low": 0
+    },
+    "J8": {
+      "Critical": 0,
+      "High": 2,
+      "Medium": 1,
+      "Low": 0
+    },
+    "J9": {
+      "Critical": 1,
+      "High": 2,
+      "Medium": 0,
+      "Low": 1
+    }
+  },
+  "jStatus": {
+    "J1": {
+      "FAIL": 3,
+      "PASS": 5,
+      "NOT_RUN": 1
+    },
+    "J2": {
+      "FAIL": 2,
+      "PASS": 3,
+      "NOT_RUN": 1,
+      "NOT_TESTABLE": 1
+    },
+    "J3": {
+      "FAIL": 4,
+      "NOT_RUN": 2
+    },
+    "J4": {
+      "FAIL": 6,
+      "PASS": 1
+    },
+    "J5": {
+      "FAIL": 2,
+      "NOT_RUN": 1
+    },
+    "J6": {
+      "PASS": 1,
+      "FAIL": 2
+    },
+    "J7": {
+      "FAIL": 2,
+      "PASS": 1
+    },
+    "J8": {
+      "FAIL": 4
+    },
+    "J9": {
+      "FAIL": 2,
+      "NOT_TESTABLE": 1,
+      "PASS": 1
+    },
+    "J10": {
+      "FLAKY": 1,
+      "FAIL": 3,
+      "NOT_RUN": 1
+    },
+    "J11": {
+      "PASS": 3,
+      "FAIL": 1
+    },
+    "J12": {
+      "PASS": 1,
+      "NOT_TESTABLE": 1
+    },
+    "J13": {
+      "PASS": 1,
+      "FAIL": 1
+    },
+    "J14": {
+      "FAIL": 1
+    },
+    "J15": {
+      "FAIL": 1
+    },
+    "INT": {
+      "FAIL": 1
+    }
+  },
+  "bySeverity": {
+    "Critical": 16,
+    "High": 24,
+    "Medium": 15,
+    "Low": 6
+  },
+  "byType": {
+    "Security": 12,
+    "Data": 20,
+    "UI": 6,
+    "Workflow": 9,
+    "Logic": 14
+  },
+  "order": [
+    [
+      "G1-SEC",
+      "Tenant security: anonymous and cross-store access",
+      [
+        "SEC-01",
+        "SEC-02",
+        "SEC-04",
+        "SEC-05",
+        "SEC-03"
+      ]
+    ],
+    [
+      "G11-TAX",
+      "Tax and GST computation",
+      [
+        "RET-01",
+        "TAX-01",
+        "TAX-03",
+        "TAX-02"
+      ]
+    ],
+    [
+      "G10-PAYMENTS",
+      "Payments, receipts, shifts and expenses",
+      [
+        "PAY-02",
+        "PAY-03",
+        "PAY-05",
+        "SHF-01",
+        "EXP-01",
+        "PAY-04"
+      ]
+    ],
+    [
+      "G3-PURCHASE-SYNC",
+      "Purchase posting on the server",
+      [
+        "PUR-01",
+        "PUR-05",
+        "PUR-06",
+        "PUR-07"
+      ]
+    ],
+    [
+      "G3-PURCHASE-UI",
+      "Purchase entry screen",
+      [
+        "PUR-03",
+        "PUR-02",
+        "PUR-04"
+      ]
+    ],
+    [
+      "G2-STOCK",
+      "Stock integrity: opening stock, transfers, adjustments",
+      [
+        "STK-01",
+        "STK-02",
+        "ADJ-01",
+        "STK-03",
+        "PRD-01",
+        "PRD-02"
+      ]
+    ],
+    [
+      "G9-LEDGER",
+      "Party balances and audit trail",
+      [
+        "AUD-02",
+        "PAY-01",
+        "AUD-01"
+      ]
+    ],
+    [
+      "G14-REPORTS",
+      "Reports and dashboards disagree",
+      [
+        "RPT-01",
+        "RPT-02",
+        "RPT-03",
+        "RPT-04"
+      ]
+    ],
+    [
+      "G4-NUMBERING",
+      "Document number series",
+      [
+        "NUM-01",
+        "NUM-02"
+      ]
+    ],
+    [
+      "G13-SYNC",
+      "Offline sync and revocation",
+      [
+        "SYNC-01",
+        "SYNC-02"
+      ]
+    ],
+    [
+      "G12-APPROVALS",
+      "Approvals and closed periods",
+      [
+        "APR-01",
+        "PER-01"
+      ]
+    ],
+    [
+      "G5-COUNTER",
+      "Counter activation and monitoring",
+      [
+        "ACT-01",
+        "CNT-01"
+      ]
+    ],
+    [
+      "G6-SETUP",
+      "Master data and settings defaults",
+      [
+        "MST-01",
+        "SET-01",
+        "SET-03",
+        "MST-02",
+        "SET-02"
+      ]
+    ],
+    [
+      "G7-ENV",
+      "Environment, updater and error exposure",
+      [
+        "UPD-01",
+        "UPD-02",
+        "SEC-06"
+      ]
+    ],
+    [
+      "G15-GAPS",
+      "Required features not yet implemented (planned Waves C-E)",
+      [
+        "GAP-01",
+        "GAP-02",
+        "GAP-03"
+      ]
+    ],
+    [
+      "G8-KEYBOARD",
+      "Keyboard-only operation",
+      [
+        "KB-02",
+        "KB-01",
+        "KB-03"
+      ]
+    ],
+    [
+      "G8-UI",
+      "UI copy and layout",
+      [
+        "UI-01",
+        "UI-02",
+        "UI-03",
+        "UI-04"
+      ]
+    ]
+  ]
+}

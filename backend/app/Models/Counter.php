@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Support\Carbon;
 
 class Counter extends Model
 {
@@ -22,6 +23,18 @@ class Counter extends Model
         'mac_address',
         'ip_address',
         'role_profile',
+        'permission_profile',
+        'permission_profile_version',
+        'idle_lock_minutes',
+        'grace_hours',
+        'unlock_pin_hash',
+        'unlock_failed_attempts',
+        'unlock_locked_until',
+        'current_device_id',
+        'last_salesperson_id',
+        'last_salesperson_name',
+        'retired_at',
+        'created_by',
         'allowed_user_ids',
         'printer_profile',
         'receipt_customization',
@@ -38,9 +51,40 @@ class Counter extends Model
         'approved_by',
     ];
 
+    protected $attributes = [
+        'status' => self::STATUS_UNCLAIMED,
+        'permission_profile_version' => 1,
+    ];
+
+    public const STATUS_UNCLAIMED = 'unclaimed';
+    public const STATUS_ACTIVE = 'active';
+    public const STATUS_LOCKED = 'locked';
+    public const STATUS_REVOKED = 'revoked';
+
+    public const STATUSES = [
+        self::STATUS_UNCLAIMED,
+        self::STATUS_ACTIVE,
+        self::STATUS_LOCKED,
+        self::STATUS_REVOKED,
+    ];
+
+    /** CNT-011 / PRF-005: what an owner gets until they set their own values. */
+    public const DEFAULT_IDLE_LOCK_MINUTES = 5;
+
+    public const DEFAULT_GRACE_HOURS = 24;
+
+    /** Statuses that still hold a live name and device binding for the store. */
+    public const LIVE_STATUSES = [
+        self::STATUS_UNCLAIMED,
+        self::STATUS_ACTIVE,
+        self::STATUS_LOCKED,
+    ];
+
     protected $hidden = [
+        'device_token',
         'device_token_hash',
-        'manager_pin',
+        'pairing_code',
+        'unlock_pin_hash',
     ];
 
     protected $casts = [
@@ -48,6 +92,12 @@ class Counter extends Model
         'is_hub' => 'boolean',
         'is_digital_only' => 'boolean',
         'role_profile' => 'array',
+        'permission_profile' => 'array',
+        'permission_profile_version' => 'integer',
+        'idle_lock_minutes' => 'integer',
+        'grace_hours' => 'integer',
+        'unlock_failed_attempts' => 'integer',
+        'unlock_locked_until' => 'datetime',
         'allowed_user_ids' => 'array',
         'printer_profile' => 'array',
         'receipt_customization' => 'array',
@@ -56,6 +106,7 @@ class Counter extends Model
         'last_sync_at' => 'datetime',
         'last_synced_watermark' => 'integer',
         'pairing_expires_at' => 'datetime',
+        'retired_at' => 'datetime',
         'approved_at' => 'datetime',
     ];
 
@@ -96,7 +147,7 @@ class Counter extends Model
         }
 
         return self::where('store_id', $storeId)
-            ->whereIn('status', ['active', 'locked', 'pending_approval'])
+            ->whereIn('status', self::LIVE_STATUSES)
             ->whereRaw('LOWER(TRIM(counter_name)) = ?', [$normalized])
             ->when($ignoreId, fn ($q) => $q->where('id', '!=', $ignoreId))
             ->orderBy('id')
@@ -136,6 +187,45 @@ class Counter extends Model
     public function isRevoked(): bool
     {
         return $this->status === 'revoked';
+    }
+
+    /** CNT-011: how many hours the owner allows this counter to work dark. */
+    public function graceHours(): int
+    {
+        return (int) ($this->grace_hours ?? self::DEFAULT_GRACE_HOURS);
+    }
+
+    /**
+     * CNT-011: the last moment the store server heard from this counter. A
+     * handshake writes `last_seen_at`; before any handshake there is only the
+     * day the counter was opened, which is still a date the owner agreed to.
+     */
+    public function lastContactAt(): ?Carbon
+    {
+        return $this->last_seen_at ?: $this->last_sync_at ?: $this->approved_at ?: $this->created_at;
+    }
+
+    /** CNT-011: the absolute moment the offline window closes, on the server's clock. */
+    public function graceDeadline(): ?Carbon
+    {
+        $from = $this->lastContactAt();
+
+        return $from ? $from->copy()->addHours($this->graceHours()) : null;
+    }
+
+    /**
+     * CNT-011: the clock a till arms itself against. It carries a deadline and
+     * the watermark it was measured from — never a token, a PIN or a hash.
+     *
+     * @return array{grace_hours:int, last_seen_at:?string, grace_until:?string}
+     */
+    public function offlinePayload(): array
+    {
+        return [
+            'grace_hours' => $this->graceHours(),
+            'last_seen_at' => $this->last_seen_at?->toIso8601String(),
+            'grace_until' => $this->graceDeadline()?->toIso8601String(),
+        ];
     }
 
     /**

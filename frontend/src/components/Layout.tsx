@@ -1,10 +1,9 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
   Wifi,
   WifiOff,
   Languages,
-  User,
   Clock,
   Search,
   Maximize,
@@ -18,15 +17,18 @@ import { onlineTransactionService, type NetworkHealth } from "../lib/sync/online
 import { CommandPalette } from "./CommandPalette";
 import { TopNav } from "./TopNav";
 import { KeyboardShortcutsModal } from "./KeyboardShortcutsModal";
-import { staffAuthService, type ActiveStaffSession } from "../lib/auth/staffAuthService";
 import { storeDeviceService } from "../lib/auth/storeDeviceService";
+import { counterLockingService } from "../lib/auth/counterLockingService";
 import { LockOverlay } from "./LockOverlay";
-import { AccountSwitcherModal } from "./AccountSwitcherModal";
+import { counterSessionService, type CounterSessionState } from "../lib/auth/counterSessionService";
 import { StoreSwitcherModal } from "./StoreSwitcherModal";
 import { storeRegistryService, type RegisteredStoreRecord, STORE_PRESET_COLORS } from "../lib/auth/storeRegistryService";
 import { Lock, Users, Building2 } from "lucide-react";
+import { CounterIdentityChip } from "./CounterIdentityChip";
+import type { ServerRenumbering } from "../lib/billing/documentIdentity";
 import { APP_FULL_VERSION } from "../config/version";
 import { shortcutDispatcher } from "../lib/keyboard/shortcutDispatcher";
+import { requestKeyboardNavigation } from "../lib/keyboard/navigationGuard";
 import { useI18n } from "../lib/i18n/I18nContext";
 
 interface LayoutProps {
@@ -47,12 +49,14 @@ export const Layout: React.FC<LayoutProps> = ({ children, onOpenGateway, onAddNe
   const [activeStore, setActiveStore] = useState<RegisteredStoreRecord | null>(storeRegistryService.getActiveStore());
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isStoreDisabled, setIsStoreDisabled] = useState(false);
-  const [session, setSession] = useState<ActiveStaffSession | null>(staffAuthService.getCurrentSession());
-  const [isAccountSwitcherOpen, setIsAccountSwitcherOpen] = useState(false);
-  const [syncState, setSyncState] = useState<{ pendingCount: number; isProcessing: boolean }>({
+  const [counter, setCounter] = useState<CounterSessionState>(() => counterSessionService.state());
+  const [syncState, setSyncState] = useState<{ pendingCount: number; unsentCount: number; isProcessing: boolean }>({
     pendingCount: 0,
+    unsentCount: 0,
     isProcessing: false,
   });
+  const [renumberNotice, setRenumberNotice] = useState<ServerRenumbering[]>([]);
+  const dismissedRenumberSignature = useRef("");
   const [networkHealth, setNetworkHealth] = useState<NetworkHealth>({
     state: "online",
     latencyMs: 40,
@@ -70,6 +74,7 @@ export const Layout: React.FC<LayoutProps> = ({ children, onOpenGateway, onAddNe
     "customer_debit_notes",
     "purchases",
     "purchase_returns",
+    "expenses",
     "stock",
     "stock_transfers",
     "reports",
@@ -81,12 +86,21 @@ export const Layout: React.FC<LayoutProps> = ({ children, onOpenGateway, onAddNe
   ]);
 
   useEffect(() => {
-    const unsubStaff = staffAuthService.onSessionChange(setSession);
+    const unsubCounter = counterSessionService.subscribe(setCounter);
     const unsubSync = syncQueueService.subscribe((s) => {
       setSyncState({
         pendingCount: s.pendingCount,
+        unsentCount: s.unsentCount,
         isProcessing: s.isProcessing,
       });
+      if (s.renumbered?.length) {
+        const signature = s.renumbered
+          .map((entry) => `${entry.external_id ?? ""}|${entry.from ?? ""}|${entry.to}`)
+          .join(",");
+        if (signature !== dismissedRenumberSignature.current) {
+          setRenumberNotice(s.renumbered);
+        }
+      }
     });
     const unsubReg = storeRegistryService.onRegistryChange((reg) => {
       const cur = storeRegistryService.getActiveStore();
@@ -109,7 +123,7 @@ export const Layout: React.FC<LayoutProps> = ({ children, onOpenGateway, onAddNe
     window.addEventListener("beforeunload", handleBeforeUnload);
 
     return () => {
-      unsubStaff();
+      unsubCounter();
       unsubSync();
       unsubReg();
       unsubHealth();
@@ -125,14 +139,13 @@ export const Layout: React.FC<LayoutProps> = ({ children, onOpenGateway, onAddNe
     window.addEventListener("online", handleOnline);
     window.addEventListener("offline", handleOffline);
 
-    const isPosPage = () => location.pathname === "/pos" || location.pathname.startsWith("/pos");
     const isTyping = (event: KeyboardEvent) =>
       event.target instanceof HTMLInputElement ||
       event.target instanceof HTMLTextAreaElement ||
       event.target instanceof HTMLSelectElement;
 
     const nav = (path: string) => () => {
-      navigate(path);
+      if (requestKeyboardNavigation(path)) navigate(path);
       return true;
     };
 
@@ -146,16 +159,11 @@ export const Layout: React.FC<LayoutProps> = ({ children, onOpenGateway, onAddNe
           return true;
         },
         lockTerminal: () => {
-          staffAuthService.lockCurrentSession();
+          counterLockingService.lock();
           return true;
         },
         commandPalette: () => {
           setIsCmdPaletteOpen((prev) => !prev);
-          return true;
-        },
-        accountSwitcher: () => {
-          if (isPosPage()) return false;
-          setIsAccountSwitcherOpen(true);
           return true;
         },
         navPos: nav("/pos"),
@@ -177,7 +185,7 @@ export const Layout: React.FC<LayoutProps> = ({ children, onOpenGateway, onAddNe
         },
         navDashboard: (event) => {
           if (isTyping(event as KeyboardEvent)) return false;
-          navigate("/dashboard");
+          if (requestKeyboardNavigation("/dashboard")) navigate("/dashboard");
           return true;
         },
       },
@@ -192,27 +200,26 @@ export const Layout: React.FC<LayoutProps> = ({ children, onOpenGateway, onAddNe
     };
   }, [navigate, location.pathname]);
 
-  // Idle auto-lock watcher
+  // The counter's idle lock: the owner's minutes for this counter, counted here.
   useEffect(() => {
-    let idleTimer: NodeJS.Timeout;
-    const resetIdle = () => {
-      staffAuthService.recordActivity();
-      clearTimeout(idleTimer);
-      idleTimer = setTimeout(() => {
-        staffAuthService.lockCurrentSession();
-      }, staffAuthService.getIdleTimeoutMs());
-    };
+    let stop: (() => void) | null = null;
+    let cancelled = false;
 
-    window.addEventListener("mousemove", resetIdle);
-    window.addEventListener("keydown", resetIdle);
-    window.addEventListener("click", resetIdle);
-    resetIdle();
+    // What this counter's owner set is read back before anything is counted, so
+    // a till that rebooted while the store server was out of reach still locks
+    // on its owner's clock rather than the till's own default.
+    counterLockingService
+      .hydrate()
+      .catch(() => null)
+      .finally(() => {
+        if (cancelled) return;
+        stop = counterLockingService.startIdleWatch();
+        counterLockingService.refresh().catch(() => {});
+      });
 
     return () => {
-      clearTimeout(idleTimer);
-      window.removeEventListener("mousemove", resetIdle);
-      window.removeEventListener("keydown", resetIdle);
-      window.removeEventListener("click", resetIdle);
+      cancelled = true;
+      if (stop) stop();
     };
   }, []);
 
@@ -402,22 +409,15 @@ export const Layout: React.FC<LayoutProps> = ({ children, onOpenGateway, onAddNe
             {isFullscreen ? <Minimize className="h-4 w-4" /> : <Maximize className="h-4 w-4" />}
           </button>
 
-          <div
-            onClick={() => setIsAccountSwitcherOpen(true)}
-            title="Click to Switch Cashier (F12)"
-            className="flex items-center gap-1.5 rounded-full bg-[var(--color-surface-subtle)] hover:bg-[var(--color-surface-hover)] border border-[var(--color-border)] px-3 py-1 cursor-pointer transition-colors shadow-2xs"
-          >
-            <User className="h-3.5 w-3.5 text-[var(--color-accent)]" />
-            <span className="whitespace-nowrap font-bold text-[var(--color-text)]">
-              {session?.user.full_name || t("layout.cashier")}
-            </span>
-            <span className="text-[10px] font-mono bg-[var(--color-accent-soft)] text-[var(--color-accent)] font-bold px-1.5 py-0.2 rounded-full uppercase">
-              {session?.counterCode || "C01"}
-            </span>
-          </div>
+          {/* The counter is the identity here — no person signs in at the till. */}
+          <CounterIdentityChip
+            counterName={counter.counterName}
+            counterCode={counter.counterCode}
+            fallbackName={t("layout.counter")}
+          />
 
           <button
-            onClick={() => staffAuthService.lockCurrentSession()}
+            onClick={() => counterLockingService.lock()}
             title="Lock Terminal (Ctrl+L)"
             className="rounded-[8px] p-1.5 text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)] cursor-pointer"
           >
@@ -437,8 +437,8 @@ export const Layout: React.FC<LayoutProps> = ({ children, onOpenGateway, onAddNe
                 ? `Slow Connection (${networkHealth.latencyMs}ms). Operating in live cloud mode.`
                 : syncState.isProcessing
                 ? "Syncing data to cloud..."
-                : syncState.pendingCount > 0
-                ? `${syncState.pendingCount} change(s) queued for sync. Click to push now.`
+                : syncState.unsentCount > 0
+                ? `${syncState.unsentCount} bill(s)/change(s) waiting to be sent. Click to push now.`
                 : `Live connected to backend cloud (${networkHealth.latencyMs}ms latency)`
             }
             className={`flex items-center gap-1.5 rounded-full px-3 py-1 text-xs cursor-pointer transition-colors shadow-2xs ${
@@ -448,7 +448,7 @@ export const Layout: React.FC<LayoutProps> = ({ children, onOpenGateway, onAddNe
                 ? "bg-amber-50 text-amber-700 border border-amber-300 dark:bg-amber-950/40 dark:text-amber-400 dark:border-amber-800"
                 : syncState.isProcessing
                 ? "bg-accent-soft text-accent border border-accent/30"
-                : syncState.pendingCount > 0
+                : syncState.unsentCount > 0
                 ? "bg-[var(--color-warning-bg)] text-[var(--color-warning-text)] border border-[var(--color-warning-border)]"
                 : "bg-accent-soft text-accent border border-accent/20"
             }`}
@@ -479,12 +479,12 @@ export const Layout: React.FC<LayoutProps> = ({ children, onOpenGateway, onAddNe
                 <RefreshCw className="h-3.5 w-3.5 text-[var(--color-accent)] animate-spin shrink-0" />
                 <span className="whitespace-nowrap font-semibold">Syncing...</span>
               </>
-            ) : syncState.pendingCount > 0 ? (
+            ) : syncState.unsentCount > 0 ? (
               <>
                 <RefreshCw className="h-3.5 w-3.5 text-[var(--color-warning-text)] shrink-0" />
-                <span className="whitespace-nowrap font-semibold">Syncing</span>
+                <span className="whitespace-nowrap font-semibold">Waiting to send</span>
                 <span className="bg-[var(--color-warning-border)] text-[var(--color-warning-text)] rounded-full px-1.5 py-0.2 text-[10px] font-bold font-mono">
-                  {syncState.pendingCount}
+                  {syncState.unsentCount}
                 </span>
               </>
             ) : (
@@ -501,6 +501,51 @@ export const Layout: React.FC<LayoutProps> = ({ children, onOpenGateway, onAddNe
           </div>
         </div>
       </header>
+
+      {/* A bill saved offline was filed under the store's own number when it synced. */}
+      {renumberNotice.length > 0 && (
+        <div
+          role="status"
+          className="flex shrink-0 items-center justify-between gap-3 border-b border-[var(--color-warning-border)] bg-[var(--color-warning-bg)] px-4 py-1.5 text-[11px] font-medium text-[var(--color-warning-text)]"
+        >
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+            <span>
+              {renumberNotice.length === 1 ? (
+                <>
+                  {renumberNotice[0].from ? `Offline number ${renumberNotice[0].from} was` : "A bill saved offline was"}{" "}
+                  given the store's number <strong className="font-mono">{renumberNotice[0].to}</strong> when it synced.
+                </>
+              ) : (
+                <>
+                  {renumberNotice.length} bills saved offline were given the store's own numbers when they synced.
+                </>
+              )}
+            </span>
+          </div>
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={() => navigate("/bills")}
+              className="rounded px-1.5 py-0.5 font-semibold underline decoration-dotted cursor-pointer"
+            >
+              View bills
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                dismissedRenumberSignature.current = renumberNotice
+                  .map((entry) => `${entry.external_id ?? ""}|${entry.from ?? ""}|${entry.to}`)
+                  .join(",");
+                setRenumberNotice([]);
+              }}
+              className="rounded px-1.5 py-0.5 font-semibold hover:bg-[var(--color-warning-border)] cursor-pointer"
+            >
+              Dismiss
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Redesigned Navigation Sub-Header */}
       <TopNav
@@ -520,30 +565,14 @@ export const Layout: React.FC<LayoutProps> = ({ children, onOpenGateway, onAddNe
         onClose={() => setIsShortcutsModalOpen(false)}
       />
 
-      {/* Security Lock Overlay */}
-      {session?.isLocked && (
-        <LockOverlay
-          session={session}
-          onSwitchUser={() => setIsAccountSwitcherOpen(true)}
-        />
-      )}
-
-      {/* Account Switcher Modal */}
-      <AccountSwitcherModal
-        isOpen={isAccountSwitcherOpen}
-        onClose={() => setIsAccountSwitcherOpen(false)}
-        onSwitched={() => setSession(staffAuthService.getCurrentSession())}
-      />
+      {/* The counter's idle lock sits over the screens, which stay mounted. */}
+      <LockOverlay />
 
       {/* Tally-Style Store Switcher Modal */}
       <StoreSwitcherModal
         isOpen={isStoreSwitcherOpen}
         onClose={() => setIsStoreSwitcherOpen(false)}
-        onStoreSwitched={(switched) => {
-          setActiveStore(switched);
-          // Trigger reload of session state since store switched
-          setSession(staffAuthService.getCurrentSession());
-        }}
+        onStoreSwitched={(switched) => setActiveStore(switched)}
         onAddNewStore={onAddNewStore}
         onOpenGateway={onOpenGateway}
       />

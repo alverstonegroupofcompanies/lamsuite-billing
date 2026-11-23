@@ -1,7 +1,9 @@
-import { checkUpdate, installUpdate, onUpdaterEvent, type UpdateStatusResult } from "@tauri-apps/api/updater";
+import { onUpdaterEvent, type UpdateStatusResult } from "@tauri-apps/api/updater";
 import { relaunch } from "@tauri-apps/api/process";
 import { sqliteStorage } from "../db/sqliteStorage";
 import { deviceSessionService } from "../devices/deviceSessionService";
+import { getResolvedApiBaseUrl } from "../../config/env";
+import { invokeCommand } from "../ipc/ipcBridge";
 
 export type UpdateChannel = "stable" | "legacy_win7" | "beta";
 
@@ -41,7 +43,7 @@ export interface UpdateSettingsConfig {
 
 export type UpdateProgressCallback = (status: UpdateStatusResult) => void;
 
-const CURRENT_VERSION = "2.1.1";
+const CURRENT_VERSION = "2.1.2";
 const STORAGE_KEY_CONFIG = "lamsuite_updater_config";
 const STORAGE_KEY_DIAGNOSTICS = "lamsuite_updater_diagnostics";
 
@@ -62,20 +64,26 @@ function safeSetStorage(key: string, val: string): void {
   } catch {}
 }
 
-const CHANNEL_ENDPOINTS: Record<UpdateChannel, string[]> = {
-  stable: [
-    "https://api.lamstonehealthcare.com/api/app/update/latest.json",
-    "https://github.com/alverstonegroupofcompanies/lamsuite-billing/releases/latest/download/latest.json",
-  ],
-  legacy_win7: [
-    "https://api.lamstonehealthcare.com/api/app/update/latest-legacy-win7.json",
-    "https://github.com/alverstonegroupofcompanies/lamsuite-billing/releases/latest/download/latest-legacy-win7.json",
-  ],
-  beta: [
-    "https://api.lamstonehealthcare.com/api/app/update/latest.json",
-    "https://github.com/alverstonegroupofcompanies/lamsuite-billing/releases/latest/download/latest-beta.json",
-  ],
-};
+/**
+ * UPD-01: the update feed belongs to whichever server this till is configured
+ * against. There is no hard-coded production or GitHub fallback: a till on a
+ * LAN or test server asks only that server, and the desktop build ships with
+ * no updater endpoints of its own (packages are still checked against the
+ * public key baked into the build).
+ */
+export function resolveUpdateEndpoints(
+  channel: UpdateChannel = "stable",
+  baseUrl: string = getResolvedApiBaseUrl()
+): string[] {
+  const base = baseUrl.trim().replace(/\/+$/, "");
+  const manifest = channel === "legacy_win7" ? "latest-legacy-win7.json" : "latest.json";
+  return [`${base}/api/app/update/${manifest}`];
+}
+
+interface NativeUpdateCheck {
+  shouldUpdate: boolean;
+  manifest?: { version: string; date?: string | null; body?: string };
+}
 
 /**
  * Classifies an updater error into a specific, readable message with actionable context.
@@ -258,7 +266,7 @@ class AutoUpdateService {
    */
   public getPrimaryEndpoint(channel?: UpdateChannel): string {
     const ch = channel || this.getConfig().channel;
-    return CHANNEL_ENDPOINTS[ch]?.[0] || CHANNEL_ENDPOINTS.stable[0];
+    return resolveUpdateEndpoints(ch)[0];
   }
 
   /**
@@ -293,7 +301,7 @@ class AutoUpdateService {
     attempts: number;
   }> {
     const ch = channel || this.getConfig().channel;
-    const endpoints = CHANNEL_ENDPOINTS[ch] || CHANNEL_ENDPOINTS.stable;
+    const endpoints = resolveUpdateEndpoints(ch);
 
     let lastError: any = null;
     let lastUrl = endpoints[0];
@@ -322,6 +330,18 @@ class AutoUpdateService {
 
           const responseTimeMs = Date.now() - startTime;
           lastStatus = res.status;
+
+          if (res.status === 204) {
+            // Server has no update published for this channel.
+            return {
+              url,
+              status: 204,
+              statusText: res.statusText || "No Content",
+              data: null,
+              responseTimeMs,
+              attempts,
+            };
+          }
 
           if (res.ok) {
             let json = null;
@@ -373,14 +393,38 @@ class AutoUpdateService {
 
     this.isChecking = true;
     const config = this.getConfig();
+    const useNativeUpdater = this.isTauri();
     const primaryUrl = this.getPrimaryEndpoint(config.channel);
     const startTime = Date.now();
 
     try {
-      if (!this.isTauri()) {
-        // In browser development, perform simulated feed check against real endpoint
+      if (!useNativeUpdater) {
+        // Browser build: probe the configured server's feed directly.
         const probe = await this.probeUpdateFeed(config.channel, 1);
         const responseTimeMs = probe.responseTimeMs || Date.now() - startTime;
+
+        if (probe.status === 204) {
+          const diag: UpdateCheckDiagnostic = {
+            timestamp: new Date().toISOString(),
+            url: probe.url,
+            status: 204,
+            statusText: probe.statusText,
+            errorCategory: "no_update",
+            readableMessage: "No updates published by this server",
+            rawError: "",
+            currentVersion: CURRENT_VERSION,
+            responseTimeMs,
+            retryAttempts: probe.attempts,
+          };
+          this.recordDiagnostic(diag);
+          const result: UpdateInfo = {
+            shouldUpdate: false,
+            message: diag.readableMessage,
+            diagnostic: diag,
+          };
+          this.cacheLastCheck(result);
+          return result;
+        }
 
         if (probe.error || !probe.data) {
           const classified = classifyUpdaterError(probe.error, probe.url, probe.status);
@@ -443,10 +487,11 @@ class AutoUpdateService {
         return result;
       }
 
-      // Desktop Tauri Environment
-      let updateResult: any = null;
+      // Desktop build: the native updater checks the configured server's feed
+      // and verifies the package signature against the bundled public key.
+      let updateResult: NativeUpdateCheck;
       try {
-        updateResult = await checkUpdate();
+        updateResult = await invokeCommand<NativeUpdateCheck>("updater_check", { endpoint: primaryUrl });
       } catch (ipcErr: any) {
         // Native Tauri updater encountered an issue; probe endpoint to gather granular error details
         const probe = await this.probeUpdateFeed(config.channel, 1);
@@ -510,7 +555,7 @@ class AutoUpdateService {
         manifest: manifest
           ? {
               version: manifest.version,
-              date: manifest.date,
+              date: manifest.date || undefined,
               body: manifest.body,
               downloadUrl: this.cachedDownloadUrl || undefined,
             }
@@ -576,7 +621,7 @@ class AutoUpdateService {
         });
       }
 
-      await installUpdate();
+      await invokeCommand("updater_install", { endpoint: this.getPrimaryEndpoint() });
 
       // Relaunch the app to apply the installed update
       await relaunch();

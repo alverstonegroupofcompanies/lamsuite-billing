@@ -195,6 +195,90 @@ The database seeder pre-populates the administrative roles below. Seeded account
 - Old vs. New state mutation diff inspection.
 - Strictly tamper-evident: **No deletion or modification endpoint exists**.
 
+### 13. Supplier Bill Charges
+- Freight, packing, loading, insurance and turnover money on a purchase bill is captured as
+  charge lines (head, taxable amount, GST rate, treatment, spread basis, ITC eligibility, RCM,
+  paid-separately) rather than one freight number on the header.
+- Charge heads are a **store-scoped master** (rule R12): each store owns its set, defaults seed
+  themselves, and a head still referenced by posted charges cannot be deleted until those charges
+  are reassigned.
+- Posting is double-sided and paisa-exact: add-to-cost charges land on
+  `product_batches.landed_cost_rate` (purchase rate stays intact), expense charges post to the
+  expense register linked to the bill, and returns, edits and cancellations reverse spread, stock
+  cost, payable and tax together.
+- Whether a **separately-paid** charge also counts as money owed to the supplier is a per-store
+  policy (`billing.purchase_charges.separately_paid_in_payable`, default off). The answer is stored
+  on each charge row, so changing the policy later cannot restate a bill that has already printed.
+- The remaining store policies — **allow negative charges** and **max charge % of goods value** —
+  are enforced at posting, in one place inside the bill's own transaction, before any charge row is
+  written. A till that syncs an invalid bill is refused at the link; no partial bill is ever saved.
+- Owner-facing surfaces live in the admin panel: the **Charge Heads** tab on Masters (defaults
+  reset, reassign-before-delete), the **Supplier bill charges** switches on Settings, and the
+  **Bill Charges** register for one bill or every bill in a filtered range.
+- Registers and exports are charge-aware: purchase register items-vs-charges split, expense
+  register, margin on landed cost, ITC by charge eligibility, RCM review flags, and Tally/Busy/CSV
+  columns.
+
+### 14. Purchase Posting On The Server
+- **One posting path.** The till's sync push, `POST /api/purchases` and a goods receipt against a
+  purchase order all end in `PurchasePostingService`, so a bill that is *saved* is a bill that has
+  created its batch, written its stock-ledger row, kept `products.current_stock` equal to the sum
+  of its batches and raised the supplier's payable — in the bill's own transaction. A bill entered
+  on the server and a bill pushed from a till price and post identically.
+- **One supplier bill, once.** A second non-cancelled document with the same supplier and bill
+  number is refused and names the bill it collides with; the refusal happens before anything is
+  written. A replay of the till's own document id is idempotent, and a retry that changes that id
+  but not the supplier number fails instead of duplicating. An inward bill is identified by the
+  supplier's number; a debit note by its **own** note number, so partial returns do not collide.
+- **Returns are real documents.** A pushed return keeps its lines, takes the goods back out of the
+  batch they came from, credits the supplier and reduces claimable ITC. Returning more than the
+  batch holds is refused with the on-hand figure and changes nothing.
+- **The till tells the truth.** A bill the server has not accepted yet stays in the till's queue
+  with the server's own error shown at the counter; only a server-accepted bill is reported as
+  posted. A batch sync settles item by item, so one refused document cannot mark the rest synced.
+- **Existing damage, repaired by hand.** `php artisan purchases:dedupe-bills` and
+  `php artisan purchases:repair-postings` report first and act only with `--apply`; both are safe
+  to re-run, and the uniqueness migration refuses to install until the duplicates are merged.
+
+### 15. Payments, Receipts, Shifts and Expenses
+- **A tender is settled, not stored.** `TenderSettlementService` recomputes every payment line on
+  the server — cash applies `min(tendered, remaining)`, the rest is change — so a ₹500 note against
+  a ₹210 bill books `amount 210.00 / tendered_amount 500.00 / change_amount 290.00` and a header
+  `paid_amount` that is the applied total, never the note. The till's own `settleTenders()` is the
+  same arithmetic, so a bill priced at the counter and a bill pushed to the API read identically;
+  `invoice_payments` carries the tender columns on both paths.
+- **A walk-in bill leaves paid.** A bill with no registered customer cannot be closed half-settled:
+  the server refuses it with *"Walk-in bills must be settled in full. Add a payment line or select a
+  registered customer for credit."* rather than booking a customer-less `partially_paid` invoice
+  whose balance belongs to nobody. Credit is a customer's option, not a walk-in's.
+- **A receipt names the bills it settles.** `PaymentAllocationService` writes `payment_allocations`
+  rows for customer receipts and supplier payouts, `GET /api/admin/outstanding-documents` lists the
+  party's open bills, and the panel's `AllocationPicker` lets the operator tick them and edit each
+  take. Unticked means the server still clears oldest-first, so FIFO remains the fallback rather
+  than the only rule; either way the party's balance moves **once** per receipt, and a bill the
+  money settled reads `partially_paid` or `paid` instead of staying `unpaid`.
+- **Digital tender carries its reference by default.** `PaymentModePolicy` requires a reference for
+  UPI, Card, Cheque and Gift Voucher, and the till blocks the save and names the field until it is
+  typed. A store that has already saved its own `payments` setting keeps its own choice — the
+  default is for the stores that never had one.
+- **Shifts are tallied from the server's own numbers.** `CounterShiftService::serverTally()` counts
+  this counter's cash taken, refunded and paid out over the shift's *own* `opened_at → close` span,
+  so a drawer is never reconciled against a whole day's business, and `reconciliation_json` records
+  what was counted, which till-typed figures were ignored and whether the drawer matched. Till
+  totals are reported, never trusted.
+- **Cash out happens at the drawer.** `POST /api/expenses` books an expense against the counter and
+  store that paid it, numbers it `EXP-00001` per store, treats a resend of the same till number as
+  the same document, and attributes a cash expense to the open shift so the tally subtracts it. The
+  till's **Expenses** screen sits behind the counter's `expenses` module, so a till that should not
+  pay anything out still cannot. That number-as-key is an open limitation: the till numbers from its
+  own local row count, so two tills at one store can hand the server the same number for two
+  different expenses and the second rewrites the first.
+- **Existing damage, repaired by hand.** `php artisan invoices:reconcile-tenders` rewrites applied
+  amounts and change on bills booked before settlement existed, and `php artisan payments:allocate-outstanding`
+  places receipts and payouts onto the bills they actually settled. Both report first, act only
+  with `--apply`, accept `--store=`, and are safe to re-run; neither touches a party balance,
+  because the money moved when the receipt was recorded.
+
 ---
 
 ## Test Suites & Verification
@@ -208,6 +292,13 @@ cd backend
 - `MultiTenantIsolationTest`: Cross-store isolation, unauthorized store headers rejection, super-admin global scope.
 - `RolePermissionTest`: Support user mutation prohibition, Accountant module restriction, Manager reset barrier.
 - `AdminKeyFlowsTest`: Store creation/disablement, optimistic locking concurrency conflicts (HTTP 409), invoice cancellation with stock restoration and GST lock verification, sync conflict resolution.
+- `PurchasePostingGuardsTest`: a till-shaped charge place of supply accepted, a server-entered bill posting its batch + ledger + payable, a duplicate supplier bill refused, a replayed push failed rather than duplicated, and returns that take stock back, refuse an over-return and net the ITC.
+- `TenderAppliedAmountTest`: a ₹500 note against a smaller bill stored as applied + tendered + change, explicit applied lines preserved, a non-cash overpayment refused, and a legacy offline sync capped at the bill.
+- `PaymentReferencePolicyTest`: UPI and Card references required by default, cash exempt, a too-short reference refused, a blocked duplicate refused, and a store that saved `optional` left alone.
+- `PaymentAllocationTest`: a receipt that marks the named bill paid, FIFO when no bills are named, another party's bill refused, an allocation over the receipt refused, a supplier payout settling a purchase bill, a synced payment allocating and moving the balance once, and the outstanding-documents list per party.
+- `CounterShiftOpenCloseTest`: expected cash computed from the server's own documents, till-typed sales figures ignored on an online close, a reopen of an open shift idempotent, a cash expense reducing expected cash, and a second shift the same day counting only its own drawer.
+- `TillExpenseTest`: a counter cash expense reducing the shift, the till route stamping `counter_id`, a replayed `expense_number` staying one row, the `expenses` module answering to the drawer control, and a UPI expense without a reference refused.
+- `PaymentBackfillCommandTest`: both repair commands reporting first and writing nothing on a dry run, a note split into what the bill kept and the change handed back, split tenders taking change only from the cash line, credit kept out of money handed over, allocations placed oldest-debt-first without moving the balance, and a receipt already placed left alone.
 
 ### Running Desktop POS Frontend Tests
 ```bash
@@ -215,7 +306,7 @@ cd frontend
 npm test
 ```
 **Tests Covered:**
-- 22 test suites with 111 tests validating POS cart, offline sync queue, tax computations, printing engine, and company settings killswitch handling.
+- 153 test suites with 1140 tests validating POS cart, offline sync queue, tax computations, printing engine, company settings killswitch handling, tender settlement (`billingTenderService.test.ts`: applied vs tendered vs change, and the reference a digital line needs before the till will save) and the till's expense and credit queue.
 
 ---
 

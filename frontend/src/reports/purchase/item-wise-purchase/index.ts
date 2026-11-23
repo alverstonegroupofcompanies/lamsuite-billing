@@ -14,6 +14,8 @@ export interface ItemWisePurchaseRow {
   taxable_amount: number;
   total_tax: number;
   total_cost: number;
+  charge_allocation: number;
+  landed_cost: number;
   supplier_count: number;
 }
 
@@ -109,8 +111,32 @@ export const itemWisePurchaseColumns: ReportColumn<ItemWisePurchaseRow>[] = [
   },
   {
     id: "total_cost",
-    header: "Landed Cost (₹)",
+    header: "Billed Cost (₹)",
+    // REP-007: what the supplier billed for the goods, never merged with what was spread onto them.
     accessor: (r) => r.total_cost,
+    align: "right",
+    width: 135,
+    format: "currency",
+    isDefaultVisible: true,
+    canHide: false,
+    totalType: "sum",
+    canSort: true,
+  },
+  {
+    id: "charge_allocation",
+    header: "Charge Allocation (₹)",
+    accessor: (r) => r.charge_allocation,
+    align: "right",
+    width: 145,
+    format: "currency",
+    isDefaultVisible: true,
+    totalType: "sum",
+    canSort: true,
+  },
+  {
+    id: "landed_cost",
+    header: "Landed Cost (₹)",
+    accessor: (r) => r.landed_cost,
     align: "right",
     width: 135,
     format: "currency",
@@ -137,12 +163,12 @@ export const itemWisePurchaseFilters: ReportFilterDef[] = [
 export const itemWisePurchaseReport: ReportModule<any, ItemWisePurchaseRow> = {
   id: "item-wise-purchase",
   title: "Item-Wise Inward Procurement Register",
-  description: "Comprehensive product purchase report tracking billed vs free quantities, effective purchase rates, and landed procurement costs.",
+  description: "Product-wise inward register that keeps the three costs apart: what the supplier billed, what bill charges were spread onto the line, and the landed cost that results.",
   category: "purchase",
   permission: "reports.purchase.view",
   menuVisibilityKey: "reports",
-  keywords: ["item purchase", "procurement", "product purchase", "free quantity", "purchase rate", "cost analysis"],
-  defaultSort: { column: "total_cost", direction: "desc" },
+  keywords: ["item purchase", "procurement", "product purchase", "free quantity", "purchase rate", "cost analysis", "charges", "landed cost", "allocation"],
+  defaultSort: { column: "landed_cost", direction: "desc" },
   supportedPrintLayouts: ["a4", "dot-matrix"],
   exportFormats: ["csv", "excel", "pdf"],
   filters: itemWisePurchaseFilters,
@@ -207,6 +233,7 @@ export const itemWisePurchaseReport: ReportModule<any, ItemWisePurchaseRow> = {
             discount_percent: line.discount_percent || 0,
             discount_amount: line.discount_amount || 0,
             effective_unit_cost: line.effective_unit_cost || line.purchase_rate || 0,
+            charge_allocation: line.charge_allocation || 0,
             gst_percent: line.gst_percent || 0,
             cgst_amount: line.cgst_amount || 0,
             sgst_amount: line.sgst_amount || 0,
@@ -232,6 +259,7 @@ export const itemWisePurchaseReport: ReportModule<any, ItemWisePurchaseRow> = {
         taxable: number;
         tax: number;
         cost: number;
+        allocation: number;
         suppliers: Set<string>;
       }
     >();
@@ -252,6 +280,9 @@ export const itemWisePurchaseReport: ReportModule<any, ItemWisePurchaseRow> = {
       const gstRate = Number((item as any).gst_percent || (item as any).gst_rate) || 0;
       const tax = (Number((item as any).total_tax) || (taxable * gstRate) / 100) * sign;
       const cost = taxable + tax;
+      // PUR-010: the spread the bill posted on this line. A return's reversal is priced at bill
+      // level and shows in the purchase register's landed value, so it is not re-derived here.
+      const allocation = (Number(item.charge_allocation) || 0) * sign;
 
       const cur = prodMap.get(item.product_id) || {
         name: item.product_name,
@@ -263,6 +294,7 @@ export const itemWisePurchaseReport: ReportModule<any, ItemWisePurchaseRow> = {
         taxable: 0,
         tax: 0,
         cost: 0,
+        allocation: 0,
         suppliers: new Set<string>(),
       };
 
@@ -273,6 +305,7 @@ export const itemWisePurchaseReport: ReportModule<any, ItemWisePurchaseRow> = {
       cur.taxable += taxable;
       cur.tax += tax;
       cur.cost += cost;
+      cur.allocation += allocation;
       cur.suppliers.add(p.supplier_id);
 
       prodMap.set(item.product_id, cur);
@@ -294,6 +327,8 @@ export const itemWisePurchaseReport: ReportModule<any, ItemWisePurchaseRow> = {
         taxable_amount: round(data.taxable),
         total_tax: round(data.tax),
         total_cost: round(data.cost),
+        charge_allocation: round(data.allocation),
+        landed_cost: round(data.cost + data.allocation),
         supplier_count: data.suppliers.size,
       };
     });

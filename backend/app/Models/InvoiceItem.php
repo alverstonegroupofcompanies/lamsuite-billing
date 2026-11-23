@@ -22,6 +22,7 @@ class InvoiceItem extends Model
         'units_per_pack',
         'unit_price',
         'mrp',
+        'rate_basis',
         'stock_action',
         'discount_percent',
         'discount_amount',

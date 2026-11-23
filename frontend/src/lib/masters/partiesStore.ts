@@ -1,6 +1,8 @@
 import { sqliteStorage } from "../db/sqliteStorage";
 import { syncQueueService } from "../sync/syncQueueService";
 import { getResolvedApiBaseUrl } from "../../config/env";
+import { companySettingsService } from "../settings/companySettingsService";
+import { stateCodeOf, stateLabel } from "../gst/stateCodes";
 
 export interface Customer {
   id: string;
@@ -11,6 +13,7 @@ export interface Customer {
   gstin?: string;
   address?: string;
   place_of_supply?: string;
+  state_code?: string;
   price_list?: string;
   default_discount_percent?: number;
   outstanding_balance?: number;
@@ -59,6 +62,7 @@ export interface PartyMaster {
   gstin?: string;
   address?: string;
   place_of_supply?: string;
+  state_code?: string;
   outstanding_balance?: number;
   credit_limit?: number;
   credit_period_days?: number;
@@ -68,6 +72,12 @@ export interface PartyMaster {
   clinic_name?: string;
   age?: number | string;
   gender?: "Male" | "Female" | "Other";
+}
+
+/** Accept only a bare two-digit GST state code; "3232" is not a state. */
+function explicitStateCode(value?: string | null): string | null {
+  const raw = String(value ?? "").trim();
+  return /^\d{2}$/.test(raw) ? stateCodeOf(raw) : null;
 }
 
 /** Validate standard 15-character Indian GSTIN */
@@ -235,6 +245,7 @@ export class PartiesStore {
     phone?: string;
     gstin?: string;
     address?: string;
+    state_code?: string;
     credit_limit?: number;
     default_discount_percent?: number;
   }): Promise<Customer> {
@@ -257,6 +268,13 @@ export class PartiesStore {
     const customerCode = `CUST-${Date.now().toString().slice(-4)}`;
     const now = Date.now();
 
+    // GSTIN prefix wins, then an explicit choice, then the store's own state.
+    const stateCode =
+      stateCodeOf(data.gstin) ??
+      explicitStateCode(data.state_code) ??
+      explicitStateCode(companySettingsService.getSettings().state_code) ??
+      "32";
+
     const newCustomer: Customer = {
       id,
       customer_code: customerCode,
@@ -264,6 +282,8 @@ export class PartiesStore {
       phone: cleanPhone || (data.phone ? data.phone.trim() : ""),
       gstin: data.gstin ? data.gstin.trim().toUpperCase() : undefined,
       address: data.address ? data.address.trim() : undefined,
+      state_code: stateCode,
+      place_of_supply: stateLabel(stateCode),
       credit_limit: data.credit_limit !== undefined ? Number(data.credit_limit) : undefined,
       default_discount_percent: data.default_discount_percent !== undefined ? Number(data.default_discount_percent) : undefined,
       outstanding_balance: 0,
@@ -286,6 +306,7 @@ export class PartiesStore {
           phone: newCustomer.phone,
           gstin: newCustomer.gstin,
           address: newCustomer.address,
+          state_code: newCustomer.state_code,
         }),
       }).then(async (res) => {
         if (res.ok) {
@@ -486,6 +507,8 @@ export class PartiesStore {
         phones: party.phones,
         gstin: party.gstin,
         address: party.address,
+        state_code: party.state_code,
+        place_of_supply: party.place_of_supply || (party.state_code ? stateLabel(party.state_code) : undefined),
         outstanding_balance: party.outstanding_balance,
         credit_limit: party.credit_limit,
         is_active: party.is_active ?? true,

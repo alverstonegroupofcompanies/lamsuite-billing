@@ -3,12 +3,18 @@
 namespace App\Http\Controllers\Api;
 
 use App\Models\Product;
+use App\Services\Stock\StockLedgerService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
 class ProductController
 {
+    public function __construct(private StockLedgerService $stockLedger)
+    {
+    }
+
     public function index(Request $request): JsonResponse
     {
         $storeId = $this->resolveStoreId($request);
@@ -114,13 +120,20 @@ class ProductController
         $validated = $request->validate([
             'batch_no' => 'required|string',
             'expiry_date' => 'required|date',
-            'stock_qty' => 'sometimes|numeric',
+            'stock_qty' => 'sometimes|numeric|min:0',
             'mrp' => 'sometimes|numeric',
             'purchase_rate' => 'sometimes|numeric',
             'selling_rate' => 'sometimes|numeric',
         ]);
 
-        $batch = $product->batches()->create($validated + ['store_id' => $product->store_id]);
+        $actor = $request->user();
+        $batch = DB::transaction(function () use ($product, $validated, $actor) {
+            $batch = $product->batches()->create($validated + ['store_id' => $product->store_id]);
+            $this->stockLedger->postOpeningStock($batch, $actor);
+
+            return $batch;
+        });
+
         return response()->json($batch, 201);
     }
 

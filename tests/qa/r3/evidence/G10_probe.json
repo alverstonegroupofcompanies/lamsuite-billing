@@ -1,0 +1,817 @@
+{
+  "checks": [
+    {
+      "id": "PAY-02a",
+      "desc": "₹500 tender on a ₹210 bill is accepted",
+      "ok": true,
+      "detail": {
+        "http": 201,
+        "body": "{\"success\":true,\"invoice\":{\"store_id\":4,\"counter_id\":3,\"counter_code\":\"C02\",\"location_name\":\"Back desk\",\"salesperson_id\":null,\"salesperson_name\":null,\"module_ke"
+      }
+    },
+    {
+      "id": "PAY-02b",
+      "desc": "tender row applies ₹210, records ₹500 tendered / ₹290 change",
+      "ok": true,
+      "detail": {
+        "amount": 210,
+        "tendered_amount": 500,
+        "change_amount": 290,
+        "payment_mode": "Cash"
+      }
+    },
+    {
+      "id": "PAY-02c",
+      "desc": "bill paid_amount is ₹210, not ₹500",
+      "ok": true,
+      "detail": {
+        "id": 157,
+        "invoice_number": "C02-INV-1058",
+        "grand_total": 210,
+        "paid_amount": 210,
+        "payment_status": "paid"
+      }
+    },
+    {
+      "id": "PAY-02d",
+      "desc": "the till's sync path settles an over-collection instead of storing it",
+      "ok": true,
+      "detail": {
+        "http": 200,
+        "tender": {
+          "amount": 210,
+          "tendered_amount": 500,
+          "change_amount": 290
+        }
+      }
+    },
+    {
+      "id": "PAY-03a",
+      "desc": "walk-in ₹300 against a ₹500 bill is refused",
+      "ok": true,
+      "detail": {
+        "http": 422,
+        "msg": "Walk-in bills must be settled in full. Add a payment line or select a registered customer for credit."
+      }
+    },
+    {
+      "id": "PAY-03b",
+      "desc": "no unpaid walk-in bill was written",
+      "ok": true,
+      "detail": {
+        "rows": 0
+      }
+    },
+    {
+      "id": "PAY-04a",
+      "desc": "unconfigured store: UPI with no reference is refused",
+      "ok": true,
+      "detail": {
+        "http": 422,
+        "msg": "UPI Transaction ID / UTR is required for UPI payments."
+      }
+    },
+    {
+      "id": "PAY-04b",
+      "desc": "UPI with a valid UTR is accepted",
+      "ok": true,
+      "detail": {
+        "http": 201
+      }
+    },
+    {
+      "id": "PAY-04c",
+      "desc": "a store that saved 'optional' keeps its own choice",
+      "ok": true,
+      "detail": {
+        "http": 201,
+        "body": "{\"success\":true,\"invoice\":{\"store_id\":4,\"counter_id\":3,\"counter_code\":\"C02\",\"location_name\":\"Back desk\",\"salesperson_id\":null,\"salesperson_name\":null,\"module_ke"
+      }
+    },
+    {
+      "id": "SHF-01a",
+      "desc": "shift open answers 200 with the shift document (no \"Undefined array key opened_at\")",
+      "ok": true,
+      "detail": {
+        "http": 200,
+        "keys": [
+          "success",
+          "already_open",
+          "shift",
+          "message"
+        ]
+      }
+    },
+    {
+      "id": "SHF-01b",
+      "desc": "opened_at is stamped",
+      "ok": true,
+      "detail": {
+        "id": 8,
+        "status": "open",
+        "opening_float": 1000,
+        "opened_at": "2026-11-22 09:54:08",
+        "closed_at": null
+      }
+    },
+    {
+      "id": "EXP-01a",
+      "desc": "a counter profile that predates the expenses module is refused at the API",
+      "ok": true,
+      "detail": {
+        "http": 403,
+        "msg": "This counter's profile does not carry the expenses screen."
+      }
+    },
+    {
+      "id": "EXP-01b",
+      "desc": "the owner can turn the expenses module on for the counter",
+      "ok": true,
+      "detail": {
+        "http": 200,
+        "body": "{\"success\":true,\"counter_id\":3,\"profile\":{\"permissions\":{\"version\":13,\"modules\":[\"dashboard\",\"pos\",\"bills\",\"sales_returns\",\"customer_debit_notes\",\"purchases\",\"purchase_returns\",\"stock\",\"stock_transfer"
+      }
+    },
+    {
+      "id": "EXP-01c",
+      "desc": "the till books a cash expense against its own counter",
+      "ok": true,
+      "detail": {
+        "http": 201,
+        "row": {
+          "id": 19,
+          "expense_number": "EXP-00007",
+          "store_id": 4,
+          "counter_id": "3",
+          "expense_head": "Tea & snacks",
+          "amount": 50,
+          "payment_mode": "Cash"
+        }
+      }
+    },
+    {
+      "id": "EXP-01d",
+      "desc": "replaying a queued offline expense stays one row",
+      "ok": true,
+      "detail": {
+        "http": [
+          201,
+          201
+        ],
+        "rows": 1
+      }
+    },
+    {
+      "id": "EXP-01e",
+      "desc": "a digital till expense obeys the same reference policy",
+      "ok": true,
+      "detail": {
+        "without_ref": {
+          "http": 422,
+          "body": "{\"success\":false,\"error\":\"Card Approval Code \\/ Auth Code is required for Card payments.\"}"
+        },
+        "with_ref": {
+          "http": 201
+        }
+      }
+    },
+    {
+      "id": "SHF-01c",
+      "desc": "shift close answers 200",
+      "ok": true,
+      "detail": {
+        "http": 200,
+        "body": "{\"success\":true,\"shift\":{\"id\":8,\"store_id\":4,\"counter_id\":3,\"status\":\"closed\",\"opening_float\":1000,\"cash_in\":0,\"cash_sales\":200,\"digital_sales\":300,\"cash_refunds\":0,\"cash_drops\":0,\"expected_cash\":1110"
+      }
+    },
+    {
+      "id": "SHF-01d",
+      "desc": "the server's own tally wins over the till's zeros",
+      "ok": true,
+      "detail": {
+        "cash_sales": 200,
+        "digital_sales": 300,
+        "expected_cash": 1110,
+        "discrepancy": 40
+      }
+    },
+    {
+      "id": "SHF-01e",
+      "desc": "the till cash expenses land in the same shift reconciliation, and expected cash is the server figure",
+      "ok": true,
+      "detail": {
+        "server": {
+          "cash_collected": 200,
+          "digital_collected": 300,
+          "cash_refunded": 0,
+          "cash_expenses": 90,
+          "receipts": 2,
+          "returns": 0,
+          "opening_float": 1000,
+          "expected_cash": 1110
+        },
+        "drawer": {
+          "opening_float": 1000,
+          "cash_in": 0,
+          "cash_sales": 200,
+          "cash_refunds": 0,
+          "cash_drops": 0,
+          "cash_expenses": 90,
+          "counted_cash": 1150,
+          "expected_cash": 1110
+        },
+        "matches_server": true,
+        "window": [
+          "2026-11-22 09:54:08",
+          "2026-11-22 09:54:08"
+        ]
+      }
+    },
+    {
+      "id": "PAY-05setup",
+      "desc": "three credit bills for one customer are open",
+      "ok": true,
+      "detail": {
+        "p5setup": [
+          {
+            "n": "A",
+            "http": 201,
+            "body": "{\"success\":true,\"invoice\":{\"store_id\":4,\"counter_id\":3,\"counter_code\":\"C02\",\"location_name\":\"Back desk\",\"salesperson_id\":null,\"salesperson_name\":null,\"module_ke"
+          },
+          {
+            "n": "B",
+            "http": 201,
+            "body": "{\"success\":true,\"invoice\":{\"store_id\":4,\"counter_id\":3,\"counter_code\":\"C02\",\"location_name\":\"Back desk\",\"salesperson_id\":null,\"salesperson_name\":null,\"module_ke"
+          },
+          {
+            "n": "C",
+            "http": 201,
+            "body": "{\"success\":true,\"invoice\":{\"store_id\":4,\"counter_id\":3,\"counter_code\":\"C02\",\"location_name\":\"Back desk\",\"salesperson_id\":null,\"salesperson_name\":null,\"module_ke"
+          }
+        ],
+        "open": [
+          [
+            "C02-INV-1062",
+            300
+          ],
+          [
+            "C02-INV-1063",
+            200
+          ],
+          [
+            "C02-INV-1064",
+            100
+          ]
+        ]
+      }
+    },
+    {
+      "id": "PAY-05a",
+      "desc": "outstanding-documents lists the open bills oldest-first with outstanding amounts",
+      "ok": true,
+      "detail": {
+        "http": 200,
+        "rows": [
+          [
+            "C02-INV-1062",
+            "2026-10-28",
+            300
+          ],
+          [
+            "C02-INV-1063",
+            "2026-10-29",
+            200
+          ],
+          [
+            "C02-INV-1064",
+            "2026-10-30",
+            100
+          ]
+        ]
+      }
+    },
+    {
+      "id": "PAY-05b",
+      "desc": "a receipt with explicit allocations settles exactly the named bill",
+      "ok": true,
+      "detail": {
+        "http": 201,
+        "A": {
+          "paid_amount": 150,
+          "payment_status": "partially_paid"
+        },
+        "allocated": 150,
+        "unallocated": 100
+      }
+    },
+    {
+      "id": "PAY-05c",
+      "desc": "the customer balance moves once (₹250), not once per allocation",
+      "ok": true,
+      "detail": {
+        "before": 600,
+        "after": 350
+      }
+    },
+    {
+      "id": "PAY-05d",
+      "desc": "a receipt with no allocations still clears A(150 left) then B by FIFO",
+      "ok": true,
+      "detail": {
+        "http": 201,
+        "A": {
+          "paid_amount": 300,
+          "payment_status": "paid"
+        },
+        "B": {
+          "paid_amount": 110,
+          "payment_status": "partially_paid"
+        },
+        "C": {
+          "paid_amount": 0
+        }
+      }
+    },
+    {
+      "id": "PAY-05e",
+      "desc": "the balance is debited by the receipts only (₹510 total)",
+      "ok": true,
+      "detail": {
+        "before": 600,
+        "after": 90
+      }
+    },
+    {
+      "id": "PAY-05f",
+      "desc": "a supplier payment settles the purchase bill it names",
+      "ok": true,
+      "detail": {
+        "http": 201,
+        "allocated": 400,
+        "take": 400,
+        "purchase": {
+          "invoice_number": "QA-PB-002",
+          "grand_total": 11200,
+          "paid_amount": 6200
+        }
+      }
+    }
+  ],
+  "ev": {
+    "claimed": {
+      "store4_counter": 3,
+      "store2_counter": 1,
+      "tokens": "redacted"
+    },
+    "expenses_enabled_store2": {
+      "http": 200
+    },
+    "pay02": {
+      "http": 201,
+      "body": "{\"success\":true,\"invoice\":{\"store_id\":4,\"counter_id\":3,\"counter_code\":\"C02\",\"location_name\":\"Back desk\",\"salesperson_id\":null,\"salesperson_name\":null,\"module_key\":\"invoice\",\"invoice_number\":\"C02-INV-1",
+      "invoice": {
+        "id": 157,
+        "invoice_number": "C02-INV-1058",
+        "grand_total": 210,
+        "paid_amount": 210,
+        "payment_status": "paid"
+      },
+      "tender": {
+        "amount": 210,
+        "tendered_amount": 500,
+        "change_amount": 290,
+        "payment_mode": "Cash"
+      }
+    },
+    "pay02_sync": {
+      "http": 200,
+      "body": "{\"success\":true,\"ingested_count\":1,\"failed_count\":0,\"errors\":[],\"renumbered\":[]}",
+      "invoice": {
+        "id": 158,
+        "grand_total": 210,
+        "paid_amount": 210
+      },
+      "tender": {
+        "amount": 210,
+        "tendered_amount": 500,
+        "change_amount": 290
+      }
+    },
+    "pay03": {
+      "http": 422,
+      "body": "{\"success\":false,\"error\":\"Walk-in bills must be settled in full. Add a payment line or select a registered customer for credit.\"}",
+      "rows": 0
+    },
+    "pay04": {
+      "default_without_ref": {
+        "http": 422,
+        "body": "{\"success\":false,\"error\":\"UPI Transaction ID \\/ UTR is required for UPI payments.\"}"
+      },
+      "default_with_ref": {
+        "http": 201,
+        "body": "{\"success\":true,\"invoice\":{\"store_id\":2,\"counter_id\":1,\"counter_code\":\"C01\",\"location_name\":\"Main Shop\",\"salesperson_id\":null,\"salesperson_name\":null,\"module_ke"
+      },
+      "saved_optional_without_ref": {
+        "http": 201,
+        "body": "{\"success\":true,\"invoice\":{\"store_id\":4,\"counter_id\":3,\"counter_code\":\"C02\",\"location_name\":\"Back desk\",\"salesperson_id\":null,\"salesperson_name\":null,\"module_key\":\"invoice\",\"invoice_number\":\"C02-INV-1059\",\"invoice_date\":\"2026-11-22\",\"due_da"
+      }
+    },
+    "shift_open_body": "{\"success\":true,\"already_open\":false,\"shift\":{\"id\":8,\"store_id\":4,\"counter_id\":3,\"status\":\"open\",\"opening_float\":1000,\"cash_in\":0,\"cash_sales\":0,\"digital_sales\":0,\"cash_refunds\":0,\"cash_drops\":0,\"expected_cash\":null,\"closing_cash_actual\":null,\"closing_discrepancy\":null,\"opened_at\":\"2026-11-22T09:54:",
+    "shift_sale_CASH": {
+      "http": 201,
+      "body": "{\"success\":true,\"invoice\":{\"store_id\":4,\"counter_id\":3,\"counter_code\":\"C02\",\"location_name\":\"Back desk\",\"salesperson_id\":null,\"salesperson_name\":null,\"module_ke"
+    },
+    "shift_sale_UPI": {
+      "http": 201,
+      "body": "{\"success\":true,\"invoice\":{\"store_id\":4,\"counter_id\":3,\"counter_code\":\"C02\",\"location_name\":\"Back desk\",\"salesperson_id\":null,\"salesperson_name\":null,\"module_ke"
+    },
+    "expense_legacy_profile": {
+      "http": 403,
+      "body": "{\"success\":false,\"code\":\"counter_action_not_permitted\",\"action\":\"expense.create\",\"message\":\"This counter's profile does not carry the expenses screen.\",\"profile_version\":12}"
+    },
+    "expense_profile_enable": {
+      "http": 200,
+      "sent_modules": [
+        "dashboard",
+        "pos",
+        "bills",
+        "sales_returns",
+        "customer_debit_notes",
+        "purchases",
+        "purchase_returns",
+        "stock",
+        "stock_transfers",
+        "reports",
+        "masters",
+        "import_export",
+        "migration",
+        "settings",
+        "counters",
+        "expenses"
+      ],
+      "body": "{\"success\":true,\"counter_id\":3,\"profile\":{\"permissions\":{\"version\":13,\"modules\":[\"dashboard\",\"pos\",\"bills\",\"sales_returns\",\"customer_debit_notes\",\"purchases\",\"purchase_returns\",\"stock\",\"stock_transfer"
+    },
+    "expense_cash": {
+      "http": 201,
+      "body": "{\"success\":true,\"message\":\"Expense recorded.\",\"expense\":{\"id\":19,\"store_id\":4,\"counter_id\":3,\"counter_code\":\"C02\",\"expense_number\":\"EXP-00007\",\"expense_head\":\"Tea & snacks\",\"amount\":50,\"payment_mode\":\"Cash\",\"reference_no\":null,\"notes\":\"QA G10\",\"expense_date\":\"2026-11-22\"}}",
+      "row": {
+        "id": 19,
+        "expense_number": "EXP-00007",
+        "store_id": 4,
+        "counter_id": "3",
+        "expense_head": "Tea & snacks",
+        "amount": 50,
+        "payment_mode": "Cash"
+      }
+    },
+    "expense_replay": {
+      "http": [
+        201,
+        201
+      ],
+      "rows": 1
+    },
+    "expense_digital": {
+      "without_ref": {
+        "http": 422,
+        "body": "{\"success\":false,\"error\":\"Card Approval Code \\/ Auth Code is required for Card payments.\"}"
+      },
+      "with_ref": {
+        "http": 201
+      }
+    },
+    "shift_close": {
+      "http": 200,
+      "body": "{\"success\":true,\"shift\":{\"id\":8,\"store_id\":4,\"counter_id\":3,\"status\":\"closed\",\"opening_float\":1000,\"cash_in\":0,\"cash_sales\":200,\"digital_sales\":300,\"cash_refunds\":0,\"cash_drops\":0,\"expected_cash\":1110,\"closing_cash_actual\":1150,\"closing_discrepancy\":40,\"opened_at\":\"2026-11-22T09:54:08+05:30\",\"closed_at\":\"2026-11-22T09:54:08+05:30\",\"opened_via\":\"counter_pin\",\"closed_via\":\"counter_pin\",\"notes\":\"Shift opened at counter terminal\",\"reconciliation\":{\"window_days\":[\"2026-11-22\",\"2026-11-22\"],\"window\":[\"2026-11-22 09:54:08\",\"2026-11-22 09:54:08\"],\"authority\":\"server\",\"drawer\":{\"opening_float\":1000,\"cash_in\":0,\"cash_sales\":200,\"cash_refunds\":0,\"cash_drops\":0,\"cash_expenses\":90,\"counted_cash\":1150,\"expected_cash\":1110},\"server\":{\"cash_collected\":200,\"digital_collected\":300,\"cash_refunded\":0,\"cash_ex",
+      "row": {
+        "id": 8,
+        "store_id": 4,
+        "counter_id": 3,
+        "opened_by_user_id": null,
+        "closed_by_user_id": null,
+        "opening_float": 1000,
+        "cash_sales": 200,
+        "digital_sales": 300,
+        "cash_refunds": 0,
+        "cash_drops": 0,
+        "closing_cash_actual": 1150,
+        "closing_discrepancy": 40,
+        "status": "closed",
+        "opened_at": "2026-11-22 09:54:08",
+        "closed_at": "2026-11-22 09:54:08",
+        "notes": "Shift opened at counter terminal",
+        "created_at": "2026-11-22 09:54:08",
+        "updated_at": "2026-11-22 09:54:08",
+        "cash_in": 0,
+        "expected_cash": 1110,
+        "opened_via": "counter_pin",
+        "closed_via": "counter_pin",
+        "reconciliation_json": "{\"window_days\":[\"2026-11-22\",\"2026-11-22\"],\"window\":[\"2026-11-22 09:54:08\",\"2026-11-22 09:54:08\"],\"authority\":\"server\",\"drawer\":{\"opening_float\":1000,\"cash_in\":0,\"cash_sales\":200,\"cash_refunds\":0,\"cash_drops\":0,\"cash_expenses\":90,\"counted_cash\":1150,\"expected_cash\":1110},\"server\":{\"cash_collected\":200,\"digital_collected\":300,\"cash_refunded\":0,\"cash_expenses\":90,\"receipts\":2,\"returns\":0,\"opening_float\":1000,\"expected_cash\":1110},\"ignored_client_totals\":{\"cash_sales\":0,\"digital_sales\":0},\"matches_server\":true}",
+        "external_id": null
+      },
+      "recon": {
+        "window_days": [
+          "2026-11-22",
+          "2026-11-22"
+        ],
+        "window": [
+          "2026-11-22 09:54:08",
+          "2026-11-22 09:54:08"
+        ],
+        "authority": "server",
+        "drawer": {
+          "opening_float": 1000,
+          "cash_in": 0,
+          "cash_sales": 200,
+          "cash_refunds": 0,
+          "cash_drops": 0,
+          "cash_expenses": 90,
+          "counted_cash": 1150,
+          "expected_cash": 1110
+        },
+        "server": {
+          "cash_collected": 200,
+          "digital_collected": 300,
+          "cash_refunded": 0,
+          "cash_expenses": 90,
+          "receipts": 2,
+          "returns": 0,
+          "opening_float": 1000,
+          "expected_cash": 1110
+        },
+        "ignored_client_totals": {
+          "cash_sales": 0,
+          "digital_sales": 0
+        },
+        "matches_server": true
+      }
+    },
+    "pay05": {
+      "party": {
+        "http": 201,
+        "id": 21,
+        "body": "{\"store_id\":4,\"type\":\"customer\",\"name\":\"G10 Credit Customer mwrc1ahv\",\"credit_limit\":\"100000.00\",\"state_code\":\"32\",\"current_balance\":\"0.00\",\"updated_at\":\"2026-1"
+      },
+      "credit_sales": [
+        {
+          "n": "A",
+          "http": 201,
+          "body": "{\"success\":true,\"invoice\":{\"store_id\":4,\"counter_id\":3,\"counter_code\":\"C02\",\"location_name\":\"Back desk\",\"salesperson_id\":null,\"salesperson_name\":null,\"module_ke"
+        },
+        {
+          "n": "B",
+          "http": 201,
+          "body": "{\"success\":true,\"invoice\":{\"store_id\":4,\"counter_id\":3,\"counter_code\":\"C02\",\"location_name\":\"Back desk\",\"salesperson_id\":null,\"salesperson_name\":null,\"module_ke"
+        },
+        {
+          "n": "C",
+          "http": 201,
+          "body": "{\"success\":true,\"invoice\":{\"store_id\":4,\"counter_id\":3,\"counter_code\":\"C02\",\"location_name\":\"Back desk\",\"salesperson_id\":null,\"salesperson_name\":null,\"module_ke"
+        }
+      ],
+      "endpoint": {
+        "http": 200,
+        "rows": [
+          {
+            "document_type": "invoice",
+            "document_id": 163,
+            "document_number": "C02-INV-1062",
+            "document_date": "2026-10-28",
+            "grand_total": 300,
+            "paid_amount": 0,
+            "outstanding": 300
+          },
+          {
+            "document_type": "invoice",
+            "document_id": 164,
+            "document_number": "C02-INV-1063",
+            "document_date": "2026-10-29",
+            "grand_total": 200,
+            "paid_amount": 0,
+            "outstanding": 200
+          },
+          {
+            "document_type": "invoice",
+            "document_id": 165,
+            "document_number": "C02-INV-1064",
+            "document_date": "2026-10-30",
+            "grand_total": 100,
+            "paid_amount": 0,
+            "outstanding": 100
+          }
+        ]
+      },
+      "receipt1": {
+        "http": 201,
+        "body": {
+          "success": true,
+          "payment": {
+            "store_id": 4,
+            "customer_id": 21,
+            "amount": "250.00",
+            "payment_mode": "Cash",
+            "notes": "G10 explicit",
+            "payment_date": "2026-11-21T18:30:00.000000Z",
+            "created_by": 1,
+            "updated_at": "2026-11-22T04:24:08.000000Z",
+            "created_at": "2026-11-22T04:24:08.000000Z",
+            "id": 17,
+            "customer": {
+              "id": 21,
+              "name": "G10 Credit Customer mwrc1ahv",
+              "phone": null
+            },
+            "creator": {
+              "id": 1,
+              "name": "Rajesh Sharma",
+              "has_pin": false,
+              "is_locked": false
+            }
+          },
+          "new_balance": "350.00",
+          "allocations": [
+            {
+              "id": 23,
+              "document_type": "invoice",
+              "document_id": 163,
+              "document_number": "C02-INV-1062",
+              "amount": 150
+            }
+          ],
+          "allocated_amount": 150,
+          "unallocated_amount": 100
+        },
+        "A": {
+          "paid_amount": 150,
+          "payment_status": "partially_paid"
+        },
+        "B": {
+          "paid_amount": 0
+        },
+        "allocs": [
+          {
+            "document_type": "invoice",
+            "document_id": 163,
+            "amount": 150
+          },
+          {
+            "document_type": "invoice",
+            "document_id": 146,
+            "amount": 260
+          }
+        ],
+        "bal": 350
+      },
+      "receipt2": {
+        "http": 201,
+        "body": {
+          "success": true,
+          "payment": {
+            "store_id": 4,
+            "customer_id": 21,
+            "amount": "260.00",
+            "payment_mode": "Cash",
+            "notes": "G10 fifo",
+            "payment_date": "2026-11-21T18:30:00.000000Z",
+            "created_by": 1,
+            "updated_at": "2026-11-22T04:24:08.000000Z",
+            "created_at": "2026-11-22T04:24:08.000000Z",
+            "id": 18,
+            "customer": {
+              "id": 21,
+              "name": "G10 Credit Customer mwrc1ahv",
+              "phone": null
+            },
+            "creator": {
+              "id": 1,
+              "name": "Rajesh Sharma",
+              "has_pin": false,
+              "is_locked": false
+            }
+          },
+          "new_balance": "90.00",
+          "allocations": [
+            {
+              "id": 24,
+              "document_type": "invoice",
+              "document_id": 163,
+              "document_number": "C02-INV-1062",
+              "amount": 150
+            },
+            {
+              "id": 25,
+              "document_type": "invoice",
+              "document_id": 164,
+              "document_number": "C02-INV-1063",
+              "amount": 110
+            }
+          ],
+          "allocated_amount": 260,
+          "unallocated_amount": 0
+        },
+        "A": {
+          "paid_amount": 300,
+          "payment_status": "paid"
+        },
+        "B": {
+          "paid_amount": 110,
+          "payment_status": "partially_paid"
+        },
+        "C": {
+          "paid_amount": 0
+        },
+        "bal": 90
+      },
+      "supplier": {
+        "open_http": 200,
+        "open_rows": [
+          {
+            "document_type": "purchase",
+            "document_id": 2,
+            "document_number": "QA-PB-002",
+            "document_date": "2026-11-21",
+            "grand_total": 11200,
+            "paid_amount": 5800,
+            "outstanding": 5400
+          },
+          {
+            "document_type": "purchase",
+            "document_id": 3,
+            "document_number": "QA-PB-003",
+            "document_date": "2026-11-21",
+            "grand_total": 11554,
+            "paid_amount": 0,
+            "outstanding": 11554
+          },
+          {
+            "document_type": "purchase",
+            "document_id": 6,
+            "document_number": "QA-PB-DUP",
+            "document_date": "2026-11-21",
+            "grand_total": 11,
+            "paid_amount": 0,
+            "outstanding": 11
+          }
+        ],
+        "pay": {
+          "http": 201,
+          "body": {
+            "success": true,
+            "payment": {
+              "store_id": 4,
+              "supplier_id": 8,
+              "amount": "400.00",
+              "payment_mode": "Cash",
+              "payment_date": "2026-11-21T18:30:00.000000Z",
+              "created_by": 1,
+              "updated_at": "2026-11-22T04:24:08.000000Z",
+              "created_at": "2026-11-22T04:24:08.000000Z",
+              "id": 4,
+              "supplier": {
+                "id": 8,
+                "name": "QA Pharma Distributors",
+                "phone": "9000000103",
+                "gstin": "32AAACQ1234A1Z1"
+              },
+              "creator": {
+                "id": 1,
+                "name": "Rajesh Sharma",
+                "has_pin": false,
+                "is_locked": false
+              }
+            },
+            "new_balance": "16229.00",
+            "allocations": [
+              {
+                "id": 26,
+                "document_type": "purchase",
+                "document_id": 2,
+                "document_number": "QA-PB-002",
+                "amount": 400
+              }
+            ],
+            "allocated_amount": 400,
+            "unallocated_amount": 0
+          }
+        },
+        "allocs": [
+          {
+            "document_type": "purchase",
+            "document_id": 2,
+            "amount": 400
+          },
+          {
+            "document_type": "purchase",
+            "document_id": 2,
+            "amount": 400
+          }
+        ],
+        "purchase": {
+          "invoice_number": "QA-PB-002",
+          "grand_total": 11200,
+          "paid_amount": 6200
+        }
+      }
+    }
+  }
+}

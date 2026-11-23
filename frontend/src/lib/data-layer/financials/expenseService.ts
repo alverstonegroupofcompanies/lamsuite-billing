@@ -2,6 +2,9 @@ import { sqliteStorage } from "../../db/sqliteStorage";
 import { syncQueueService } from "../../sync/syncQueueService";
 import { storeToday } from "../../dateTimeUtils";
 import { companySettingsService } from "../../settings/companySettingsService";
+import { counterSessionService } from "../../auth/counterSessionService";
+import { storeDeviceService } from "../../auth/storeDeviceService";
+import { cashShiftService } from "../../billing/cashShiftService";
 
 export interface ExpenseRecord {
   id: string;
@@ -12,6 +15,8 @@ export interface ExpenseRecord {
   reference_no?: string;
   notes?: string;
   expense_date: string;
+  /** EXP-01: the drawer that paid, so the shift and day close can net it. */
+  counter_id?: string;
   created_by?: string;
   created_at: number;
 }
@@ -94,13 +99,34 @@ export class ExpenseService {
       reference_no: input.reference_no?.trim() || undefined,
       notes: input.notes?.trim() || undefined,
       expense_date: input.expense_date || storeToday(companySettingsService.getSettings()),
+      counter_id: counterSessionService.state().counterId ?? undefined,
       created_by: input.created_by,
       created_at: now,
     };
 
     await sqliteStorage.insertRecord("expenses", id, record as unknown as Record<string, unknown>);
 
-    // If Cash expense, it automatically reduces Cash Drawer / Day summary
+    // EXP-01: money paid out of a drawer is money that drawer no longer holds.
+    // The store server re-derives the shift tally when it closes the day and
+    // ignores the till's own figures, but a counter working in the dark closes
+    // on these numbers, so the cash expense leaves the open shift here too.
+    if (String(record.payment_mode).toLowerCase().includes("cash")) {
+      try {
+        const profile = await storeDeviceService.getDeviceProfile();
+        const shift = await cashShiftService.getActiveShift(profile?.counter_id || "Counter 01");
+        if (shift) {
+          await cashShiftService.recordCashMovement(
+            shift.id,
+            "cash_out",
+            record.amount,
+            `Expense: ${record.expense_head}`
+          );
+        }
+      } catch (_) {
+        // No open shift to charge: the expense itself still stands.
+      }
+    }
+
     try {
       await syncQueueService.enqueue("expense", id, "create", record);
     } catch (_) {}

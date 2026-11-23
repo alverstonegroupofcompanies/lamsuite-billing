@@ -6,6 +6,7 @@ import {
   type ManageableStaffUser,
 } from "../../lib/auth/staffAuthService";
 import { storeDeviceService } from "../../lib/auth/storeDeviceService";
+import { counterSessionService } from "../../lib/auth/counterSessionService";
 
 const ROLE_OPTIONS = [
   { value: "cashier", label: "Cashier" },
@@ -61,17 +62,15 @@ export function StaffManagementPanel() {
   const [resetPinUser, setResetPinUser] = useState<ManageableStaffUser | null>(null);
   const [newPin, setNewPin] = useState("");
 
-  const currentRole = staffAuthService.getCurrentSession()?.user.role || "";
-  const canView = staffAuthService.hasPermission("users", "view");
-  const canCreate = staffAuthService.hasPermission("users", "create");
-  const canEdit = staffAuthService.hasPermission("users", "edit");
-  const canDelete = staffAuthService.hasPermission("users", "delete");
-  const isSuperAdmin = currentRole === "super_admin";
+  // PRF-001: this counter's document, not a person's role, decides the panel.
+  const authorised = counterSessionService.allowsModule("settings");
+  const canView = authorised;
+  const canCreate = authorised;
+  const canEdit = authorised;
+  const canDelete = authorised;
 
-  const roleOptions = useMemo(
-    () => (isSuperAdmin ? ROLE_OPTIONS : ROLE_OPTIONS.filter((r) => r.value !== "super_admin")),
-    [isSuperAdmin]
-  );
+  // A till never hands out the platform's own top role.
+  const roleOptions = useMemo(() => ROLE_OPTIONS.filter((r) => r.value !== "super_admin"), []);
 
   const flashSuccess = (message: string) => {
     setSuccessMsg(message);
@@ -270,7 +269,7 @@ export function StaffManagementPanel() {
       <div className="rounded-xl border border-slate-200 p-4">
         <div className="text-xs font-bold text-slate-800">Staff &amp; Access</div>
         <p className="mt-1 text-[10px] text-slate-500">
-          Your role does not include user-management access. Ask a store owner or manager to manage staff accounts.
+          This counter's permission profile does not include Settings, so staff accounts cannot be managed here. The store owner sets what this counter may open in Admin Panel → Counters.
         </p>
       </div>
     );

@@ -11,75 +11,32 @@ use Symfony\Component\HttpFoundation\BinaryFileResponse;
 
 class DesktopUpdateController
 {
-    private const CURRENT_APP_VERSION = '2.1.1';
+    private const CURRENT_APP_VERSION = '2.1.2';
     private const DEFAULT_MIN_VERSION = '2.0.21';
 
     /**
      * Get the latest desktop updater manifest (latest.json).
-     * Serves from storage if present, or dynamically synthesizes standard Tauri v1 manifest.
+     * Serves a signed release that is actually present, or 204 when none is published.
      */
-    public function getLatestManifest(Request $request): JsonResponse
+    public function getLatestManifest(Request $request): Response|JsonResponse
     {
-        $manifestPath = storage_path('app/updates/latest.json');
-        if (File::exists($manifestPath)) {
-            $content = json_decode(File::get($manifestPath), true);
-            if ($content && is_array($content)) {
-                return response()->json($this->rewriteManifestUrls($content));
-            }
-        }
+        $manifest = $this->registeredManifest(false);
 
-        // Check fallback host path if mounted
-        $hostPath = '/opt/lamsuite/updates/latest.json';
-        if (File::exists($hostPath)) {
-            $content = json_decode(File::get($hostPath), true);
-            if ($content && is_array($content)) {
-                return response()->json($this->rewriteManifestUrls($content));
-            }
-        }
-
-        // Check public storage updates
-        $publicPath = storage_path('app/public/updates/latest.json');
-        if (File::exists($publicPath)) {
-            $content = json_decode(File::get($publicPath), true);
-            if ($content && is_array($content)) {
-                return response()->json($this->rewriteManifestUrls($content));
-            }
-        }
-
-        // Return synthesized valid manifest for current release
-        return response()->json($this->synthesizeManifest(false));
+        return $manifest
+            ? response()->json($this->rewriteManifestUrls($manifest))
+            : response()->noContent();
     }
 
     /**
      * Get legacy Windows 7/8.1 manifest (latest-legacy-win7.json).
      */
-    public function getLegacyManifest(Request $request): JsonResponse
+    public function getLegacyManifest(Request $request): Response|JsonResponse
     {
-        $manifestPath = storage_path('app/updates/latest-legacy-win7.json');
-        if (File::exists($manifestPath)) {
-            $content = json_decode(File::get($manifestPath), true);
-            if ($content && is_array($content)) {
-                return response()->json($this->rewriteManifestUrls($content));
-            }
-        }
+        $manifest = $this->registeredManifest(true);
 
-        $hostPath = '/opt/lamsuite/updates/latest-legacy-win7.json';
-        if (File::exists($hostPath)) {
-            $content = json_decode(File::get($hostPath), true);
-            if ($content && is_array($content)) {
-                return response()->json($this->rewriteManifestUrls($content));
-            }
-        }
-
-        $publicPath = storage_path('app/public/updates/latest-legacy-win7.json');
-        if (File::exists($publicPath)) {
-            $content = json_decode(File::get($publicPath), true);
-            if ($content && is_array($content)) {
-                return response()->json($this->rewriteManifestUrls($content));
-            }
-        }
-
-        return response()->json($this->synthesizeManifest(true));
+        return $manifest
+            ? response()->json($this->rewriteManifestUrls($manifest))
+            : response()->noContent();
     }
 
     /**
@@ -92,20 +49,13 @@ class DesktopUpdateController
             abort(404, 'Invalid updater asset filename.');
         }
 
-        $candidates = [
-            storage_path("app/updates/{$filename}"),
-            "/opt/lamsuite/updates/{$filename}",
-            storage_path("app/public/updates/{$filename}"),
-        ];
-
-        foreach ($candidates as $filePath) {
-            if (File::exists($filePath)) {
-                return response()->file($filePath, [
-                    'Content-Type' => 'application/octet-stream',
-                    'Content-Disposition' => 'attachment; filename="' . $filename . '"',
-                    'Cache-Control' => 'public, max-age=86400',
-                ]);
-            }
+        $filePath = $this->locateUpdateFile($filename);
+        if ($filePath !== null) {
+            return response()->file($filePath, [
+                'Content-Type' => 'application/octet-stream',
+                'Content-Disposition' => 'attachment; filename="' . $filename . '"',
+                'Cache-Control' => 'public, max-age=86400',
+            ]);
         }
 
         abort(404, "Updater package '{$filename}' is not found on this server.");
@@ -113,34 +63,37 @@ class DesktopUpdateController
 
     /**
      * Dynamic target/version endpoint for Tauri updater.
-     * If client has latest version -> returns 204 No Content.
-     * If an update is available -> returns 200 with update payload.
+     * If the client is current, or no signed package is published, returns 204.
      */
     public function checkDynamicUpdate(string $target, string $current_version): Response|JsonResponse
     {
-        $cleanCurrent = ltrim(trim($current_version), 'v');
-        $latest = $this->getLatestVersion();
+        $isLegacy = str_contains(strtolower($target), 'legacy') || str_contains(strtolower($target), 'win7');
+        $manifest = $this->registeredManifest($isLegacy);
+        if ($manifest === null) {
+            return response()->noContent();
+        }
 
+        $latest = (string) $manifest['version'];
+        $cleanCurrent = ltrim(trim($current_version), 'v');
         if (version_compare($cleanCurrent, $latest, '>=')) {
             // Already up to date: Tauri specification requires HTTP 204
             return response()->noContent();
         }
 
-        $isLegacy = str_contains(strtolower($target), 'legacy') || str_contains(strtolower($target), 'win7');
-        $fileName = $isLegacy
-            ? 'LamSuite-Billing-windows-legacy-x64-setup.nsis.zip'
-            : "LamSuite-Billing_{$latest}_x64-setup.nsis.zip";
+        $manifest = $this->rewriteManifestUrls($manifest);
+        $platformKey = $this->resolvePlatformKey($manifest['platforms'], $target);
+        if ($platformKey === null) {
+            return response()->noContent();
+        }
 
-        $downloadUrl = $this->buildDownloadUrl($fileName);
+        $platform = $manifest['platforms'][$platformKey];
 
         return response()->json([
-            'url' => $downloadUrl,
+            'url' => $platform['url'],
             'version' => $latest,
-            'notes' => "LamSuite Billing update v{$latest}\nIncludes security enhancements, GST rules parity, and updater reliability.",
-            'pub_date' => now()->toIso8601String(),
-            'signature' => $isLegacy
-                ? 'dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRR09ENStxSU9JbDhadnVreTZOck5jamh1OTJTUkZuZFM0VUhzUXRoT1JwRzFrWW52REVyRUFkVmpSRUgvdUdvemYwanJ1YUpDQm91bDFFcmw2eFpodTJCNEUxWkxuTkFvPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzNjU3ODQ4CWZpbGU6TGFtU3VpdGUtQmlsbGluZy1MZWdhY3lfMi4wLjIzX3g2NC1zZXR1cC5uc2lzLnppcAozbG5Uc1QxSkl2TVZrTDdIcU5rNkRJK212K3Z6ZXpvQ2lXTnVVTWtwUVVvTFUyWTAwZTVGOENwMlN2c0RVKzZGME5VQ1dhV3FyL3c0L2tFc0pkS2FDUT09Cg=='
-                : 'dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRR09ENStxSU9JbDhjZlVyMXdZYjRIbUY5dmRsbXlJZW9sL2MyaTlMTTFNNGdjbUpqUkRQa0VzbTFVeXl5dWdxR0FWSytEaUZmeGlVaVlSa0ovOTJlN0tlUWtPUTJmS2dNPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzNjU3MjE3CWZpbGU6TGFtU3VpdGUtQmlsbGluZ18yLjAuMjNfeDY0LXNldHVwLm5zaXMuemlwClBmT1RuZGREK1gvRXgrM0I0UkJET24vb0FpTXNUbVE5VHo2V1FmOTh6aWxjYWlLM2w1ZXVxRmpWSndRZUdsa3RDNnlkRzNnc2VDRDFnejdzSGJCcEFBPT0K',
+            'notes' => (string) ($manifest['notes'] ?? ''),
+            'pub_date' => (string) ($manifest['pub_date'] ?? now()->toIso8601String()),
+            'signature' => $platform['signature'],
         ]);
     }
 
@@ -204,18 +157,15 @@ class DesktopUpdateController
     }
 
     /**
-     * Helper to retrieve currently released latest version.
+     * Helper to retrieve currently released latest version, preferring a
+     * manifest whose signatures and packages are actually present.
      */
     private function getLatestVersion(): string
     {
-        $manifestPath = storage_path('app/updates/latest.json');
-        if (!File::exists($manifestPath)) {
-            $manifestPath = '/opt/lamsuite/updates/latest.json';
-        }
-        if (File::exists($manifestPath)) {
-            $manifest = json_decode(File::get($manifestPath), true);
-            if (!empty($manifest['version'])) {
-                return (string)$manifest['version'];
+        foreach ([false, true] as $legacy) {
+            $manifest = $this->registeredManifest($legacy);
+            if ($manifest && !empty($manifest['version'])) {
+                return (string) $manifest['version'];
             }
         }
 
@@ -224,10 +174,121 @@ class DesktopUpdateController
             ->first();
 
         if ($latest && !empty($latest->value['version'])) {
-            return (string)$latest->value['version'];
+            return (string) $latest->value['version'];
         }
 
         return self::CURRENT_APP_VERSION;
+    }
+
+    /**
+     * Load the first manifest that describes at least one real, signed package.
+     * Platforms whose download is missing or unsigned are dropped; a manifest
+     * with nothing left is treated as not published.
+     */
+    private function registeredManifest(bool $legacy): ?array
+    {
+        foreach ($this->manifestLocations($legacy) as $manifestPath) {
+            if (!File::isFile($manifestPath)) {
+                continue;
+            }
+
+            $manifest = json_decode(File::get($manifestPath), true);
+            if (!is_array($manifest) || !is_string($manifest['version'] ?? null) || $manifest['version'] === '') {
+                continue;
+            }
+            if (empty($manifest['platforms']) || !is_array($manifest['platforms'])) {
+                continue;
+            }
+
+            $platforms = [];
+            foreach ($manifest['platforms'] as $platform => $data) {
+                if (!is_array($data)) {
+                    continue;
+                }
+
+                $signature = $data['signature'] ?? null;
+                $url = $data['url'] ?? null;
+                if (!is_string($signature) || trim($signature) === '' || !is_string($url) || trim($url) === '') {
+                    continue;
+                }
+
+                $filename = basename(parse_url($url, PHP_URL_PATH) ?: $url);
+                if ($filename === '' || $this->locateUpdateFile($filename) === null) {
+                    continue;
+                }
+
+                $platforms[$platform] = $data;
+            }
+
+            if ($platforms === []) {
+                continue;
+            }
+
+            $manifest['platforms'] = $platforms;
+
+            return $manifest;
+        }
+
+        return null;
+    }
+
+    /**
+     * Pick the manifest platform that matches the updater's target string.
+     */
+    private function resolvePlatformKey(array $platforms, string $target): ?string
+    {
+        $normalized = strtolower($target);
+        if (isset($platforms[$target])) {
+            return $target;
+        }
+        if (isset($platforms[$normalized])) {
+            return $normalized;
+        }
+
+        $family = null;
+        foreach (['windows', 'darwin', 'linux'] as $candidate) {
+            if (str_contains($normalized, $candidate) || ($candidate === 'darwin' && str_contains($normalized, 'mac'))) {
+                $family = $candidate;
+                break;
+            }
+        }
+
+        foreach (array_keys($platforms) as $key) {
+            if ($family !== null && str_starts_with(strtolower((string) $key), $family)) {
+                return (string) $key;
+            }
+        }
+
+        return $family === null ? (string) array_key_first($platforms) : null;
+    }
+
+    /**
+     * @return string[]
+     */
+    private function manifestLocations(bool $legacy): array
+    {
+        $name = $legacy ? 'latest-legacy-win7.json' : 'latest.json';
+
+        return [
+            storage_path("app/updates/{$name}"),
+            "/opt/lamsuite/updates/{$name}",
+            storage_path("app/public/updates/{$name}"),
+        ];
+    }
+
+    private function locateUpdateFile(string $filename): ?string
+    {
+        foreach ([
+            storage_path("app/updates/{$filename}"),
+            "/opt/lamsuite/updates/{$filename}",
+            storage_path("app/public/updates/{$filename}"),
+        ] as $filePath) {
+            if (File::isFile($filePath)) {
+                return $filePath;
+            }
+        }
+
+        return null;
     }
 
     /**
@@ -267,46 +328,5 @@ class DesktopUpdateController
         }
 
         return "{$baseUrl}/api/app/update/download/{$filename}";
-    }
-
-    /**
-     * Synthesizes a valid multi-platform manifest with local direct download endpoints.
-     */
-    private function synthesizeManifest(bool $isLegacy): array
-    {
-        $version = $this->getLatestVersion();
-        $date = now()->toIso8601String();
-
-        if ($isLegacy) {
-            $legacyFile = 'LamSuite-Billing-windows-legacy-x64-setup.nsis.zip';
-            return [
-                'version' => $version,
-                'notes' => "LamSuite Billing Legacy Windows 7/8.1 v{$version} Update\nBundled Fixed WebView2 109 Runtime with zero Win8+ API imports.",
-                'pub_date' => $date,
-                'platforms' => [
-                    'windows-x86_64' => [
-                        'signature' => 'dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRR09ENStxSU9JbDhadnVreTZOck5jamh1OTJTUkZuZFM0VUhzUXRoT1JwRzFrWW52REVyRUFkVmpSRUgvdUdvemYwanJ1YUpDQm91bDFFcmw2eFpodTJCNEUxWkxuTkFvPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzNjU3ODQ4CWZpbGU6TGFtU3VpdGUtQmlsbGluZy1MZWdhY3lfMi4wLjIzX3g2NC1zZXR1cC5uc2lzLnppcAozbG5Uc1QxSkl2TVZrTDdIcU5rNkRJK212K3Z6ZXpvQ2lXTnVVTWtwUVVvTFUyWTAwZTVGOENwMlN2c0RVKzZGME5VQ1dhV3FyL3c0L2tFc0pkS2FDUT09Cg==',
-                        'url' => $this->buildDownloadUrl($legacyFile),
-                    ],
-                ],
-            ];
-        }
-
-        $winFile = "LamSuite-Billing_{$version}_x64-setup.nsis.zip";
-        return [
-            'version' => $version,
-            'notes' => "LamSuite Billing v{$version} Update\n- Full offline-first transaction support\n- Automated sync queue with live reconciliation\n- Modernized printing engine with integrated preview",
-            'pub_date' => $date,
-            'platforms' => [
-                'windows-x86_64' => [
-                    'signature' => 'dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRR09ENStxSU9JbDhjZlVyMXdZYjRIbUY5dmRsbXlJZW9sL2MyaTlMTTFNNGdjbUpqUkRQa0VzbTFVeXl5dWdxR0FWSytEaUZmeGlVaVlSa0ovOTJlN0tlUWtPUTJmS2dNPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzNjU3MjE3CWZpbGU6TGFtU3VpdGUtQmlsbGluZ18yLjAuMjNfeDY0LXNldHVwLm5zaXMuemlwClBmT1RuZGREK1gvRXgrM0I0UkJET24vb0FpTXNUbVE5VHo2V1FmOTh6aWxjYWlLM2w1ZXVxRmpWSndRZUdsa3RDNnlkRzNnc2VDRDFnejdzSGJCcEFBPT0K',
-                    'url' => $this->buildDownloadUrl($winFile),
-                ],
-                'windows-x86_64-nsis' => [
-                    'signature' => 'dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRR09ENStxSU9JbDhjZlVyMXdZYjRIbUY5dmRsbXlJZW9sL2MyaTlMTTFNNGdjbUpqUkRQa0VzbTFVeXl5dWdxR0FWSytEaUZmeGlVaVlSa0ovOTJlN0tlUWtPUTJmS2dNPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzNjU3MjE3CWZpbGU6TGFtU3VpdGUtQmlsbGluZ18yLjAuMjNfeDY0LXNldHVwLm5zaXMuemlwClBmT1RuZGREK1gvRXgrM0I0UkJET24vb0FpTXNUbVE5VHo2V1FmOTh6aWxjYWlLM2w1ZXVxRmpWSndRZUdsa3RDNnlkRzNnc2VDRDFnejdzSGJCcEFBPT0K',
-                    'url' => $this->buildDownloadUrl($winFile),
-                ],
-            ],
-        ];
     }
 }

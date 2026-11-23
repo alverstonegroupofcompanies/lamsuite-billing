@@ -1,0 +1,23 @@
+{
+  "disable": {
+    "st": 200,
+    "body": "{\"success\":true,\"store_id\":5,\"is_active\":false,\"message\":\"Store disabled. Connected POS desktop apps will show \\\"Store disabled\\\" upon sync.\"}",
+    "is_active": 0
+  },
+  "blocked_after_s": 0.019,
+  "probes": [
+    403
+  ],
+  "sale_while_suspended": {
+    "st": 403,
+    "body": "{\"success\":false,\"error\":\"STORE_DISABLED\",\"message\":\"Store is currently disabled by Admin. Billing and transactions are prohibited.\"}"
+  },
+  "heartbeat_while_suspended": {
+    "st": 200,
+    "body": "{\"success\":true,\"status\":\"Active\",\"store_id\":\"5\",\"store_active\":false,\"store_version\":7,\"permission_profile_version\":1,\"last_reset_at\":null,\"last_reset_options\":null,\"public_ip\":\"127.0.0.1\",\"last_seen"
+  },
+  "enable": {
+    "st": 200,
+    "is_active": 1
+  }
+}

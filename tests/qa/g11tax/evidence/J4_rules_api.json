@@ -1,0 +1,304 @@
+[
+  {
+    "label": "J4.03 split cash 50 + UPI 40 with ref",
+    "expect": "accept; 2 payment rows 50+40; ref kept",
+    "status": 201,
+    "message": "Invoice created and confirmed authoritatively by server.",
+    "row": {
+      "invoice_number": "C02-INV-1018",
+      "grand_total": 90,
+      "paid_amount": 90,
+      "payment_mode": "Split",
+      "payment_status": "paid",
+      "subtotal": 90,
+      "tax_total": 9.64,
+      "discount_total": 0
+    },
+    "pays": [
+      {
+        "payment_mode": "Cash",
+        "amount": 50,
+        "reference_no": null
+      },
+      {
+        "payment_mode": "UPI",
+        "amount": 40,
+        "reference_no": "UPI-QA-0001"
+      }
+    ],
+    "before": {
+      "stock5": 848,
+      "cust6": 90,
+      "lip": 25
+    },
+    "after": {
+      "stock5": 833,
+      "cust6": 90,
+      "lip": 25
+    }
+  },
+  {
+    "label": "J4.03 UPI without reference",
+    "expect": "refuse (reference required) or flag",
+    "status": 422,
+    "message": "UPI Transaction ID / UTR is required for UPI payments.",
+    "row": null,
+    "pays": [],
+    "before": {
+      "stock5": 833,
+      "cust6": 90,
+      "lip": 25
+    },
+    "after": {
+      "stock5": 833,
+      "cust6": 90,
+      "lip": 25
+    }
+  },
+  {
+    "label": "J4.03 cash short-paid (40 of 90) walk-in",
+    "expect": "refuse: walk-in cannot leave a balance",
+    "status": 422,
+    "message": "Walk-in bills must be settled in full. Add a payment line or select a registered customer for credit.",
+    "row": null,
+    "pays": [],
+    "before": {
+      "stock5": 833,
+      "cust6": 90,
+      "lip": 25
+    },
+    "after": {
+      "stock5": 833,
+      "cust6": 90,
+      "lip": 25
+    }
+  },
+  {
+    "label": "J4.04 credit for walk-in",
+    "expect": "refuse",
+    "status": 422,
+    "message": "Credit sale is not allowed for Walk-in Customers. Please select or create a registered customer.",
+    "row": null,
+    "pays": [],
+    "before": {
+      "stock5": 833,
+      "cust6": 90,
+      "lip": 25
+    },
+    "after": {
+      "stock5": 833,
+      "cust6": 90,
+      "lip": 25
+    }
+  },
+  {
+    "label": "J4.04 credit named customer within limit (500 of 1000)",
+    "expect": "accept; customer balance +90",
+    "status": 201,
+    "message": "Invoice created and confirmed authoritatively by server.",
+    "row": {
+      "invoice_number": "C02-INV-1019",
+      "grand_total": 90,
+      "paid_amount": 0,
+      "payment_mode": "Credit",
+      "payment_status": "unpaid",
+      "subtotal": 90,
+      "tax_total": 9.64,
+      "discount_total": 0
+    },
+    "pays": [
+      {
+        "payment_mode": "Credit",
+        "amount": 90,
+        "reference_no": null
+      }
+    ],
+    "before": {
+      "stock5": 833,
+      "cust6": 90,
+      "lip": 25
+    },
+    "after": {
+      "stock5": 818,
+      "cust6": 180,
+      "lip": 25
+    }
+  },
+  {
+    "label": "J4.04 credit over limit (1080 > 1000)",
+    "expect": "refuse: over credit limit",
+    "status": 422,
+    "message": "Customer 'QA Credit Customer' credit limit of ₹1000 exceeded (New balance would be ₹1260).",
+    "row": null,
+    "pays": [],
+    "before": {
+      "stock5": 818,
+      "cust6": 180,
+      "lip": 25
+    },
+    "after": {
+      "stock5": 818,
+      "cust6": 180,
+      "lip": 25
+    }
+  },
+  {
+    "label": "J4.05 letters in quantity",
+    "expect": "422",
+    "status": 422,
+    "message": "The items.0.qty field must be a number.",
+    "row": null,
+    "pays": [],
+    "before": {
+      "stock5": 818,
+      "cust6": 180,
+      "lip": 25
+    },
+    "after": {
+      "stock5": 818,
+      "cust6": 180,
+      "lip": 25
+    }
+  },
+  {
+    "label": "J4.05 negative quantity",
+    "expect": "422",
+    "status": 422,
+    "message": "The items.0.qty field must be at least 0.",
+    "row": null,
+    "pays": [],
+    "before": {
+      "stock5": 818,
+      "cust6": 180,
+      "lip": 25
+    },
+    "after": {
+      "stock5": 818,
+      "cust6": 180,
+      "lip": 25
+    }
+  },
+  {
+    "label": "J4.05 loose-only quantity (7 tablets = 42.00)",
+    "expect": "accept: 42.00 = 37.50 + 4.50; stock -7",
+    "status": 201,
+    "message": "Invoice created and confirmed authoritatively by server.",
+    "row": {
+      "invoice_number": "C02-INV-1020",
+      "grand_total": 42,
+      "paid_amount": 42,
+      "payment_mode": "Cash",
+      "payment_status": "paid",
+      "subtotal": 42,
+      "tax_total": 4.5,
+      "discount_total": 0
+    },
+    "pays": [
+      {
+        "payment_mode": "Cash",
+        "amount": 42,
+        "reference_no": null
+      }
+    ],
+    "before": {
+      "stock5": 818,
+      "cust6": 180,
+      "lip": 25
+    },
+    "after": {
+      "stock5": 811,
+      "cust6": 180,
+      "lip": 25
+    }
+  },
+  {
+    "label": "J4.05 out-of-stock product (Alprazolam, 0 on hand)",
+    "expect": "refuse, or accept with negative-stock flag + review",
+    "status": 422,
+    "message": "Line 1: batch B1 does not belong to 'QA Alprazolam 0.25 Strip' in this store.",
+    "row": null,
+    "pays": [],
+    "before": {
+      "stock5": 811,
+      "cust6": 180,
+      "lip": 25
+    },
+    "after": {
+      "stock5": 811,
+      "cust6": 180,
+      "lip": 25
+    }
+  },
+  {
+    "label": "J4.05 discount 60% (no approval)",
+    "expect": "refuse/require approval above the store limit",
+    "status": 403,
+    "message": "This counter may discount at most 20% of a bill.",
+    "row": null,
+    "pays": [],
+    "before": {
+      "stock5": 811,
+      "cust6": 180,
+      "lip": 25
+    },
+    "after": {
+      "stock5": 811,
+      "cust6": 180,
+      "lip": 25
+    }
+  },
+  {
+    "label": "J4.x client-understated totals (grand 1.00 for a 90.00 line)",
+    "expect": "server recomputes to 90.00 or refuses",
+    "status": 422,
+    "message": "Walk-in bills must be settled in full. Add a payment line or select a registered customer for credit.",
+    "row": null,
+    "pays": [],
+    "before": {
+      "stock5": 811,
+      "cust6": 180,
+      "lip": 25
+    },
+    "after": {
+      "stock5": 811,
+      "cust6": 180,
+      "lip": 25
+    }
+  },
+  {
+    "label": "J4.x price above MRP (unit 150, MRP 90)",
+    "expect": "refuse (MRP capping)",
+    "status": 422,
+    "message": "'QA Paracet 500 Strip' is billed at Rs 150 against a ceiling of Rs 90.00.",
+    "row": null,
+    "pays": [],
+    "before": {
+      "stock5": 811,
+      "cust6": 180,
+      "lip": 25
+    },
+    "after": {
+      "stock5": 811,
+      "cust6": 180,
+      "lip": 25
+    }
+  },
+  {
+    "label": "J4.x another store's product (QA-CS lipstick id 9) on a QA-PH bill",
+    "expect": "refuse cross-store reference",
+    "status": 422,
+    "message": "Line 1: 'QA Ruby Lipstick' is not a product of this store.",
+    "row": null,
+    "pays": [],
+    "before": {
+      "stock5": 811,
+      "cust6": 180,
+      "lip": 25
+    },
+    "after": {
+      "stock5": 811,
+      "cust6": 180,
+      "lip": 25
+    }
+  }
+]

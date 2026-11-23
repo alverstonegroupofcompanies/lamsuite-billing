@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { deviceSessionService } from "./deviceSessionService";
 import { storeDeviceService } from "../auth/storeDeviceService";
 import { storeRegistryService } from "../auth/storeRegistryService";
-import { staffAuthService } from "../auth/staffAuthService";
+import { counterLockingService } from "../auth/counterLockingService";
 
 describe("deviceSessionService - Centralized Logged-In Device Tracking (Item 2)", () => {
   beforeEach(() => {
@@ -188,28 +188,48 @@ describe("deviceSessionService - Centralized Logged-In Device Tracking (Item 2)"
     expect(fetchSpy.mock.calls[2][0]).toContain("/api/device-sessions/10/revoke");
   });
 
-  it("6. startHeartbeatTimer runs periodic heartbeat and returns clean cancellation", async () => {
+  it("6. startHeartbeatTimer keeps the claimed counter present and stops cleanly", async () => {
     vi.useFakeTimers();
-    vi.spyOn(staffAuthService, "getCurrentSession").mockReturnValue({ user: { id: "1" } } as any);
+    vi.spyOn(storeDeviceService, "getDeviceProfile").mockResolvedValue({
+      device_uuid: "uuid-timer",
+      counter_id: "cntr_07",
+    } as any);
 
     const heartbeatSpy = vi.spyOn(deviceSessionService, "sendHeartbeat").mockResolvedValue(true);
 
     const stop = deviceSessionService.startHeartbeatTimer(5000);
 
-    // Initial immediate invocation
+    // The beat reads the device profile first, so it lands a microtask later.
+    await vi.advanceTimersByTimeAsync(0);
     expect(heartbeatSpy).toHaveBeenCalledTimes(1);
 
     // Fast-forward 10 seconds (2 intervals)
-    vi.advanceTimersByTime(10000);
+    await vi.advanceTimersByTimeAsync(10000);
     expect(heartbeatSpy).toHaveBeenCalledTimes(3);
 
     // Stop timer
     stop();
 
     // Fast-forward more time, should not invoke further
-    vi.advanceTimersByTime(10000);
+    await vi.advanceTimersByTimeAsync(10000);
     expect(heartbeatSpy).toHaveBeenCalledTimes(3);
 
+    vi.useRealTimers();
+  });
+
+  it("6b. an unclaimed terminal sends no heartbeat", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(storeDeviceService, "getDeviceProfile").mockResolvedValue({
+      device_uuid: "uuid-unclaimed",
+    } as any);
+
+    const heartbeatSpy = vi.spyOn(deviceSessionService, "sendHeartbeat").mockResolvedValue(true);
+    const stop = deviceSessionService.startHeartbeatTimer(5000);
+
+    await vi.advanceTimersByTimeAsync(15000);
+    expect(heartbeatSpy).not.toHaveBeenCalled();
+
+    stop();
     vi.useRealTimers();
   });
 
@@ -273,7 +293,7 @@ describe("deviceSessionService - Centralized Logged-In Device Tracking (Item 2)"
     expect(devices).toEqual([]);
   });
 
-  it("9. sendHeartbeat reports the counter and signed-in user identity", async () => {
+  it("9. sendHeartbeat reports the claimed counter and no signed-in person", async () => {
     vi.spyOn(storeDeviceService, "getDeviceProfile").mockResolvedValueOnce({
       device_uuid: "uuid-test-123",
       device_name: "Counter 01",
@@ -281,16 +301,6 @@ describe("deviceSessionService - Centralized Logged-In Device Tracking (Item 2)"
       counter_id: "cntr_07",
       counter_code: "C07",
       store_id: "4",
-    } as any);
-    vi.spyOn(staffAuthService, "getCurrentSession").mockReturnValueOnce({
-      sessionId: "s1",
-      counterId: "cntr_07",
-      counterName: "Front Cashier",
-      counterCode: "C07",
-      user: { id: "42", full_name: "Cashier", role: "cashier" },
-      authenticatedAt: Date.now(),
-      isLocked: false,
-      lastActivityAt: Date.now(),
     } as any);
 
     const fetchSpy = vi.spyOn(global, "fetch").mockResolvedValueOnce({
@@ -304,11 +314,13 @@ describe("deviceSessionService - Centralized Logged-In Device Tracking (Item 2)"
     const body = JSON.parse((fetchSpy.mock.calls[0][1] as RequestInit).body as string);
     expect(body.counter_id).toBe("cntr_07");
     expect(body.counter_code).toBe("C07");
-    expect(body.user_id).toBe("42");
     expect(body.store_id).toBe("4");
+    // SEC-001: nobody signs in at the till, so presence carries no person.
+    expect(body.user_id).toBeUndefined();
+    expect(body.user_role).toBeUndefined();
   });
 
-  it("10. heartbeat 409 force-logout ends the local staff session without wiping the device", async () => {
+  it("10. heartbeat 409 force-logout locks the counter instead of ending a person's session", async () => {
     vi.spyOn(storeDeviceService, "getDeviceProfile").mockResolvedValueOnce({
       device_uuid: "uuid-test-123",
       store_id: "4",
@@ -324,14 +336,14 @@ describe("deviceSessionService - Centralized Logged-In Device Tracking (Item 2)"
         message: "This session was ended: Signed in at another till. Sign in again.",
       }),
     } as Response);
-    const terminateSpy = vi.spyOn(staffAuthService, "handleDeviceSessionTerminated");
-    const lockSpy = vi.spyOn(storeDeviceService, "lockAndResetWorkstation");
+    const lockSpy = vi.spyOn(counterLockingService, "lock").mockReturnValue(undefined);
+    const resetSpy = vi.spyOn(storeDeviceService, "lockAndResetWorkstation");
 
     const ok = await deviceSessionService.sendHeartbeat();
 
     expect(ok).toBe(false);
-    expect(terminateSpy).toHaveBeenCalledWith("Signed in at another till");
-    expect(lockSpy).not.toHaveBeenCalled();
+    expect(lockSpy).toHaveBeenCalledTimes(1);
+    expect(resetSpy).not.toHaveBeenCalled();
   });
 
   it("12. roster prefers the paired numeric store over a local registry key", async () => {
@@ -464,5 +476,47 @@ describe("deviceSessionService - Centralized Logged-In Device Tracking (Item 2)"
 
     expect(ok).toBe(false);
     expect(lockSpy).toHaveBeenCalledWith(true);
+  });
+
+  it("18. heartbeat 401 DEVICE_AUTH_FAILED asks the till to revalidate the claim", async () => {
+    vi.spyOn(storeDeviceService, "getDeviceProfile").mockResolvedValueOnce({
+      device_uuid: "uuid-test-123",
+      store_id: "4",
+    } as any);
+    vi.spyOn(global, "fetch").mockResolvedValueOnce({
+      ok: false,
+      status: 401,
+      json: async () => ({
+        success: false,
+        error: "DEVICE_AUTH_FAILED",
+        message: "Device token is unrecognized or expired.",
+      }),
+    } as Response);
+    const validateSpy = vi
+      .spyOn(storeDeviceService, "validateDeviceSession")
+      .mockResolvedValue({ valid: false, locked: true, reason: "Device token is unrecognized or expired." });
+
+    const ok = await deviceSessionService.sendHeartbeat();
+
+    expect(ok).toBe(false);
+    expect(validateSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("19. heartbeat 5xx is a server fault, not a revocation", async () => {
+    vi.spyOn(storeDeviceService, "getDeviceProfile").mockResolvedValueOnce({
+      device_uuid: "uuid-test-123",
+      store_id: "4",
+    } as any);
+    vi.spyOn(global, "fetch").mockResolvedValueOnce({
+      ok: false,
+      status: 503,
+      json: async () => ({ success: false, message: "Upstream unavailable" }),
+    } as Response);
+    const validateSpy = vi.spyOn(storeDeviceService, "validateDeviceSession");
+
+    const ok = await deviceSessionService.sendHeartbeat();
+
+    expect(ok).toBe(false);
+    expect(validateSpy).not.toHaveBeenCalled();
   });
 });

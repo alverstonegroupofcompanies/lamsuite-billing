@@ -1,5 +1,3 @@
-import { getResolvedApiBaseUrl } from "../../config/env";
-
 export type UserPreferences = Record<string, unknown>;
 
 const STORAGE_PREFIX = "lamsuite_user_prefs_";
@@ -15,109 +13,61 @@ function storage(): Storage | null {
   return null;
 }
 
-function readLocal(userId: string): UserPreferences {
+function readLocal(key: string): UserPreferences {
   try {
-    const raw = storage()?.getItem(`${STORAGE_PREFIX}${userId}`);
-    return raw ? (JSON.parse(raw) as UserPreferences) : (memoryStore.get(userId) ?? {});
+    const raw = storage()?.getItem(`${STORAGE_PREFIX}${key}`);
+    return raw ? (JSON.parse(raw) as UserPreferences) : (memoryStore.get(key) ?? {});
   } catch {
-    return memoryStore.get(userId) ?? {};
+    return memoryStore.get(key) ?? {};
   }
 }
 
-function writeLocal(userId: string, prefs: UserPreferences): void {
-  memoryStore.set(userId, prefs);
+function writeLocal(key: string, prefs: UserPreferences): void {
+  memoryStore.set(key, prefs);
   try {
-    storage()?.setItem(`${STORAGE_PREFIX}${userId}`, JSON.stringify(prefs));
+    storage()?.setItem(`${STORAGE_PREFIX}${key}`, JSON.stringify(prefs));
   } catch {
     // Quota or private mode: the in-memory copy still serves this session.
   }
 }
 
-function authHeaders(): Record<string, string> {
-  let token: string | null = null;
-  try {
-    token = storage()?.getItem("staff_token") ?? null;
-  } catch {
-    token = null;
-  }
-  return {
-    "Content-Type": "application/json",
-    Accept: "application/json",
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
-  };
-}
-
 /**
- * Per-user UI preferences with an optimistic local cache.
- * The server is authoritative across devices; failures never block the counter.
+ * UI preferences, one set per caller.
+ *
+ * B8b: `/api/me/preferences` answers for a person, and nobody signs in at the
+ * till, so what the till remembers is kept on the till and keyed by the caller
+ * that remembers it — a counter today (`cntr_<id>`), a person wherever a person
+ * still signs in. The server stays authoritative for anything a person owns.
  */
 export class UserPreferencesService {
   private cache = new Map<string, UserPreferences>();
-  private inflight = new Map<string, Promise<UserPreferences>>();
 
-  get(userId: string): UserPreferences {
-    if (!userId) return {};
-    const cached = this.cache.get(userId);
+  get(scopeKey: string): UserPreferences {
+    if (!scopeKey) return {};
+    const cached = this.cache.get(scopeKey);
     if (cached) return cached;
-    const local = readLocal(userId);
-    this.cache.set(userId, local);
+    const local = readLocal(scopeKey);
+    this.cache.set(scopeKey, local);
     return local;
   }
 
-  async load(userId: string): Promise<UserPreferences> {
-    if (!userId) return {};
-    const pending = this.inflight.get(userId);
-    if (pending) return pending;
-
-    const request = this.fetchRemote(userId)
-      .then((remote) => {
-        const merged = { ...readLocal(userId), ...remote };
-        this.cache.set(userId, merged);
-        writeLocal(userId, merged);
-        return merged;
-      })
-      .catch(() => this.get(userId))
-      .finally(() => {
-        this.inflight.delete(userId);
-      });
-
-    this.inflight.set(userId, request);
-    return request;
+  async load(scopeKey: string): Promise<UserPreferences> {
+    return this.get(scopeKey);
   }
 
-  async set(userId: string, key: string, value: unknown): Promise<UserPreferences> {
-    return this.setMany(userId, { [key]: value });
+  async set(scopeKey: string, key: string, value: unknown): Promise<UserPreferences> {
+    return this.setMany(scopeKey, { [key]: value });
   }
 
-  async setMany(userId: string, patch: UserPreferences): Promise<UserPreferences> {
-    const next = { ...this.get(userId), ...patch };
-    this.cache.set(userId, next);
-    writeLocal(userId, next);
-    await this.pushRemote(userId, patch).catch(() => false);
+  async setMany(scopeKey: string, patch: UserPreferences): Promise<UserPreferences> {
+    const next = { ...this.get(scopeKey), ...patch };
+    this.cache.set(scopeKey, next);
+    writeLocal(scopeKey, next);
     return next;
   }
 
   clearCache(): void {
     this.cache.clear();
-    this.inflight.clear();
-  }
-
-  private async fetchRemote(userId: string): Promise<UserPreferences> {
-    const res = await fetch(`${getResolvedApiBaseUrl()}/api/me/preferences`, {
-      headers: authHeaders(),
-    });
-    if (!res.ok) throw new Error(`Preferences HTTP ${res.status}`);
-    const body = await res.json();
-    return (body?.preferences ?? {}) as UserPreferences;
-  }
-
-  private async pushRemote(userId: string, patch: UserPreferences): Promise<boolean> {
-    const res = await fetch(`${getResolvedApiBaseUrl()}/api/me/preferences`, {
-      method: "PUT",
-      headers: authHeaders(),
-      body: JSON.stringify({ preferences: patch }),
-    });
-    return res.ok;
   }
 }
 

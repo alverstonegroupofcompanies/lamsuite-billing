@@ -125,8 +125,14 @@ class StoreCatalogCopyService
      * Create a single audited copy used by flows like transfer auto-create.
      * Returns the existing barcode twin if the target store already has one.
      */
-    public function createCopy(Product $source, int $targetStoreId, ?int $userId = null): Product
+    public function createCopy(Product $source, int $targetStoreId, ?int $userId = null, bool $keepBarcode = true): Product
     {
+        if (!$keepBarcode) {
+            // STK-02: the target store's barcode belongs to a different article,
+            // so this copy is created without one (barcodes are unique per store).
+            return Product::create(['barcode' => null] + $this->copyPayload($source, $targetStoreId));
+        }
+
         $existing = $this->targetByBarcode($source->barcode, $targetStoreId);
         if ($existing) {
             return $existing;

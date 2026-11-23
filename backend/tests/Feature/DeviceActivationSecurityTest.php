@@ -3,21 +3,29 @@
 namespace Tests\Feature;
 
 use App\Models\ActivationKey;
-use App\Models\AuditLog;
 use App\Models\Counter;
 use App\Models\Device;
 use App\Models\DeviceActivationAttempt;
 use App\Models\Store;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Illuminate\Support\Str;
 use Tests\TestCase;
 
+/**
+ * CNT-005 / IS2 — activation is not an oracle. Every code that fails answers with
+ * the same words and binds nothing, and the store a code opens is the store written
+ * on the code, never the store the till claims to be joining.
+ *
+ * The legacy /devices/register* paths this file used to exercise are retired by
+ * this release; the replacements are POST /api/counters/claim and the admin
+ * counter endpoints.
+ */
 class DeviceActivationSecurityTest extends TestCase
 {
     use RefreshDatabase;
 
     protected Store $store;
+    protected Counter $counter;
     protected User $owner;
 
     protected function setUp(): void
@@ -29,383 +37,222 @@ class DeviceActivationSecurityTest extends TestCase
             'code' => 'SEC01',
             'state_code' => '32',
             'is_active' => true,
-            'require_device_approval' => false,
         ]);
 
         $this->owner = User::create([
             'name' => 'Store Owner',
             'email' => 'owner@securitytest.com',
             'password' => bcrypt('StrongPassword123!'),
-            'role' => 'store_owner',
+            'role' => 'super_admin',
             'store_id' => $this->store->id,
             'totp_enabled' => false,
             'is_active' => true,
         ]);
+
+        $this->counter = Counter::create([
+            'store_id' => $this->store->id,
+            'counter_code' => 'C01',
+            'counter_name' => 'Main Counter',
+        ]);
     }
 
-    public function test_random_key_is_rejected_and_creates_no_device_or_counter(): void
+    private function claim(string $code, string $deviceUuid = 'dev-uuid-1', array $extra = []): \Illuminate\Testing\TestResponse
     {
-        $initialDevicesCount = Device::count();
-        $initialCountersCount = Counter::count();
+        return $this->postJson('/api/counters/claim', [
+            'code' => $code,
+            'device_uuid' => $deviceUuid,
+        ] + $extra);
+    }
 
-        $response = $this->postJson('/api/devices/register', [
-            'activation_key' => 'RANDOM-INVALID-KEY-12345',
-            'device_uuid' => 'dev_test_random_key_uuid',
-            'device_name' => 'Counter Station Test',
-        ]);
+    private function refusalMessage(): string
+    {
+        return 'That activation code is not valid here. Ask the store owner for a current counter code.';
+    }
 
-        $response->assertStatus(422)
-            ->assertJson(['message' => 'Invalid, expired, or revoked activation key.']);
+    public function test_random_code_is_refused_and_binds_nothing(): void
+    {
+        $this->claim('RANDOM-INVALID-KEY-12345')
+            ->assertStatus(401)
+            ->assertJson(['error' => 'claim_failed', 'message' => $this->refusalMessage()]);
 
-        $this->assertEquals($initialDevicesCount, Device::count());
-        $this->assertEquals($initialCountersCount, Counter::count());
-
-        // Failed attempt recorded in device_activation_attempts
+        $this->assertSame(0, Device::count());
+        $this->assertSame(Counter::STATUS_UNCLAIMED, $this->counter->fresh()->status);
         $this->assertDatabaseHas('device_activation_attempts', [
-            'device_uuid' => 'dev_test_random_key_uuid',
+            'device_uuid' => 'dev-uuid-1',
             'success' => false,
+            'failure_reason' => 'unknown_code',
         ]);
     }
 
-    public function test_malformed_key_is_rejected_without_creating_records(): void
+    public function test_a_malformed_code_is_refused_exactly_like_a_wrong_one(): void
     {
-        $response = $this->postJson('/api/devices/register', [
-            'activation_key' => 'ABC',
-            'device_uuid' => 'dev_test_short_uuid',
-            'device_name' => 'Counter Short',
-        ]);
+        $short = $this->claim('ABC');
+        $long = $this->claim(str_repeat('Z', 120));
 
-        $response->assertStatus(422)
-            ->assertJson(['message' => 'Invalid, expired, or revoked activation key.']);
+        $short->assertStatus(401);
+        $long->assertStatus(401);
 
-        $this->assertDatabaseMissing('devices', ['device_uuid' => 'dev_test_short_uuid']);
+        // A length or shape difference must not be a clue for a guesser.
+        $this->assertSame($this->refusalMessage(), $short->json('message'));
+        $this->assertSame($short->json('message'), $long->json('message'));
     }
 
-    public function test_expired_key_returns_same_generic_error(): void
+    public function test_a_request_without_a_device_identity_is_a_validation_error(): void
     {
-        $keyResult = ActivationKey::generateKey($this->store, [
-            'expires_at' => now()->subDay(),
-        ]);
+        $issued = ActivationKey::generateForCounter($this->counter)['raw_key'];
 
-        $response = $this->postJson('/api/devices/register', [
-            'activation_key' => $keyResult['raw_key'],
-            'device_uuid' => 'dev_test_expired_uuid',
-            'device_name' => 'Counter Expired',
-        ]);
+        $this->postJson('/api/counters/claim', ['code' => $issued])
+            ->assertStatus(422)
+            ->assertJsonValidationErrors(['device_uuid']);
 
-        $response->assertStatus(422)
-            ->assertJson(['message' => 'Invalid, expired, or revoked activation key.']);
-
-        $this->assertDatabaseMissing('devices', ['device_uuid' => 'dev_test_expired_uuid']);
+        $this->assertSame(0, Device::count());
+        $this->assertDatabaseHas('activation_keys', ['consumed_at' => null]);
     }
 
-    public function test_revoked_key_returns_same_generic_error(): void
+    public function test_expired_revoked_and_used_codes_all_refuse_identically(): void
     {
-        $keyResult = ActivationKey::generateKey($this->store);
-        $keyResult['model']->revoke('Security key compromise test');
+        $expired = ActivationKey::generateForCounter($this->counter)['raw_key'];
+        ActivationKey::findByCode($expired)->update(['expires_at' => now()->subMinute()]);
 
-        $response = $this->postJson('/api/devices/register', [
-            'activation_key' => $keyResult['raw_key'],
-            'device_uuid' => 'dev_test_revoked_uuid',
-            'device_name' => 'Counter Revoked',
-        ]);
+        $revoked = ActivationKey::generateForCounter($this->counter);
+        $revoked['model']->revoke('Leaked');
 
-        $response->assertStatus(422)
-            ->assertJson(['message' => 'Invalid, expired, or revoked activation key.']);
+        $used = ActivationKey::generateForCounter($this->counter)['raw_key'];
+        $this->claim($used, 'dev-used-once')->assertOk();
 
-        $this->assertDatabaseMissing('devices', ['device_uuid' => 'dev_test_revoked_uuid']);
-    }
-
-    public function test_key_for_inactive_store_is_rejected(): void
-    {
-        $inactiveStore = Store::create([
-            'name' => 'Inactive Store',
-            'code' => 'INACT',
-            'state_code' => '32',
-            'is_active' => false,
-        ]);
-        $keyResult = ActivationKey::generateKey($inactiveStore);
-
-        $response = $this->postJson('/api/devices/register', [
-            'activation_key' => $keyResult['raw_key'],
-            'device_uuid' => 'dev_test_inactive_store_uuid',
-            'device_name' => 'Counter Inactive Store',
-        ]);
-
-        $response->assertStatus(422)
-            ->assertJson(['message' => 'Invalid, expired, or revoked activation key.']);
-    }
-
-    public function test_reused_single_use_key_is_rejected(): void
-    {
-        $keyResult = ActivationKey::generateKey($this->store, [
-            'is_single_use' => true,
-            'max_devices' => 1,
-        ]);
-
-        // First activation: should succeed
-        $res1 = $this->postJson('/api/devices/register', [
-            'activation_key' => $keyResult['raw_key'],
-            'device_uuid' => 'dev_single_use_1',
-            'device_name' => 'Counter First',
-        ]);
-        $res1->assertStatus(200);
-
-        // Second activation: must be rejected with generic error
-        $res2 = $this->postJson('/api/devices/register', [
-            'activation_key' => $keyResult['raw_key'],
-            'device_uuid' => 'dev_single_use_2',
-            'device_name' => 'Counter Second Attempt',
-        ]);
-        $res2->assertStatus(422)
-            ->assertJson(['message' => 'Invalid, expired, or revoked activation key.']);
-
-        $this->assertDatabaseMissing('devices', ['device_uuid' => 'dev_single_use_2']);
-    }
-
-    public function test_key_past_device_limit_is_rejected(): void
-    {
-        $keyResult = ActivationKey::generateKey($this->store, [
-            'max_devices' => 2,
-        ]);
-
-        // Device 1
-        $this->postJson('/api/devices/register', [
-            'activation_key' => $keyResult['raw_key'],
-            'device_uuid' => 'dev_limit_1',
-            'device_name' => 'Counter 1',
-        ])->assertStatus(200);
-
-        // Device 2
-        $this->postJson('/api/devices/register', [
-            'activation_key' => $keyResult['raw_key'],
-            'device_uuid' => 'dev_limit_2',
-            'device_name' => 'Counter 2',
-        ])->assertStatus(200);
-
-        // Device 3: exceeds limit of 2
-        $res3 = $this->postJson('/api/devices/register', [
-            'activation_key' => $keyResult['raw_key'],
-            'device_uuid' => 'dev_limit_3',
-            'device_name' => 'Counter 3',
-        ]);
-        $res3->assertStatus(422)
-            ->assertJson(['message' => 'Invalid, expired, or revoked activation key.']);
-
-        $this->assertDatabaseMissing('devices', ['device_uuid' => 'dev_limit_3']);
-    }
-
-    public function test_brute_force_attempts_are_rate_limited_and_locked_out_with_owner_alert(): void
-    {
-        $testIp = '198.51.100.42';
-
-        // 5 consecutive failed attempts
-        for ($i = 1; $i <= 5; $i++) {
-            $this->withServerVariables(['REMOTE_ADDR' => $testIp])
-                ->postJson('/api/devices/register', [
-                    'activation_key' => "WRONG-KEY-{$i}",
-                    'device_uuid' => 'dev_bruteforce_target',
-                    'device_name' => 'Bruteforce Attacker',
-                ])->assertStatus(422);
+        $messages = [];
+        foreach (['expired' => $expired, 'revoked' => $revoked['raw_key'], 'used' => $used] as $case => $code) {
+            $response = $this->claim($code, "dev-$case");
+            $response->assertStatus(401)->assertJson(['error' => 'claim_failed']);
+            $this->assertSame($this->refusalMessage(), $response->json('message'), $case);
+            $messages[] = $response->json('message');
         }
 
-        // 6th attempt should be blocked with 429
-        $response = $this->withServerVariables(['REMOTE_ADDR' => $testIp])
-            ->postJson('/api/devices/register', [
-                'activation_key' => 'ANOTHER-WRONG-KEY',
-                'device_uuid' => 'dev_bruteforce_target',
-                'device_name' => 'Bruteforce Attacker',
-            ]);
-
-        $response->assertStatus(429)
-            ->assertJson([
-                'locked' => true,
-            ]);
-
-        // Verify alert logged in AuditLog
-        $this->assertDatabaseHas('audit_logs', [
-            'action' => 'activation_lockout_triggered',
-        ]);
+        $this->assertCount(1, array_unique($messages), 'the refusal must not reveal which rule failed');
+        $this->assertDatabaseHas('device_activation_attempts', ['failure_reason' => 'expired']);
+        $this->assertDatabaseHas('device_activation_attempts', ['failure_reason' => 'revoked']);
+        $this->assertDatabaseHas('device_activation_attempts', ['failure_reason' => 'consumed']);
     }
 
-    public function test_valid_activation_key_registers_device_and_records_tokens(): void
+    public function test_a_code_belonging_to_a_suspended_store_is_refused(): void
     {
-        $keyResult = ActivationKey::generateKey($this->store);
+        $paused = Store::create([
+            'name' => 'Paused Store', 'code' => 'PAU', 'state_code' => '32', 'is_active' => false,
+        ]);
+        $counter = Counter::create(['store_id' => $paused->id, 'counter_code' => 'C01', 'counter_name' => 'Desk']);
+        $code = ActivationKey::generateForCounter($counter)['raw_key'];
 
-        $response = $this->postJson('/api/devices/register', [
-            'activation_key' => $keyResult['raw_key'],
-            'device_uuid' => 'dev_clean_registration_uuid',
-            'device_name' => 'Main Billing Counter 01',
-            'is_hub' => true,
+        $this->claim($code)->assertStatus(401)->assertJson(['message' => $this->refusalMessage()]);
+        $this->assertSame(0, Device::count());
+    }
+
+    public function test_a_shared_store_key_is_not_a_counter_code(): void
+    {
+        // CNT-013 dropped the store-wide key, but a row left over from that world
+        // still has to be refused rather than guessed at.
+        $legacy = 'LAM-SEC01-7F3A9C82B14D6E05-1A4370E8';
+        ActivationKey::create([
+            'store_id' => $this->store->id,
+            'key_hash' => ActivationKey::hashKey($legacy),
+            'key_prefix' => substr($legacy, 0, 14) . '****',
+            'max_devices' => 5,
+            'expires_at' => now()->addYear(),
         ]);
 
-        $response->assertStatus(200)
-            ->assertJson([
-                'success' => true,
-                'status' => 'active',
-                'store_id' => (string)$this->store->id,
-                'counter_name' => 'Main Billing Counter 01',
-            ]);
+        $this->claim($legacy)
+            ->assertStatus(401)
+            ->assertJson(['message' => $this->refusalMessage()]);
+
+        $this->assertSame(0, Device::count());
+        $this->assertDatabaseHas('device_activation_attempts', ['failure_reason' => 'not_counter_code']);
+    }
+
+    public function test_a_code_never_opens_a_counter_in_a_store_it_was_not_minted_for(): void
+    {
+        $other = Store::create(['name' => 'Other', 'code' => 'OTH', 'state_code' => '32', 'is_active' => true]);
+        $code = ActivationKey::generateForCounter($this->counter)['raw_key'];
+
+        $this->claim($code, 'dev-wrong-store', ['store_id' => $other->id])
+            ->assertStatus(401)
+            ->assertJson(['message' => $this->refusalMessage()]);
+
+        // IS2: nothing was created on either side of a refused claim.
+        $this->assertSame(0, Device::count());
+        $this->assertSame(Counter::STATUS_UNCLAIMED, $this->counter->fresh()->status);
+        $this->assertDatabaseHas('device_activation_attempts', ['failure_reason' => 'store_mismatch']);
+    }
+
+    public function test_the_code_is_answered_only_once_and_stored_only_as_a_hash(): void
+    {
+        $issued = ActivationKey::generateForCounter($this->counter);
+        $response = $this->claim($issued['raw_key'])->assertOk();
 
         $token = $response->json('device_token');
         $this->assertNotEmpty($token);
+        $this->assertSame('hash_only', $response->json('token_stored_as'));
 
-        // Verify device in database with hashed token
-        $device = Device::where('device_uuid', 'dev_clean_registration_uuid')->first();
+        $device = Device::firstWhere('device_uuid', 'dev-uuid-1');
         $this->assertNotNull($device);
-        $this->assertEquals(hash('sha256', $token), $device->device_token_hash);
-        $this->assertEquals('activation_key', $device->registered_via);
+        $this->assertNull($device->device_token);
+        $this->assertSame(hash('sha256', $token), $device->device_token_hash);
+        $this->assertSame('counter_code', $device->registered_via);
 
-        // Verify counter also created
-        $this->assertDatabaseHas('counters', [
-            'device_uuid' => 'dev_clean_registration_uuid',
-            'store_id' => $this->store->id,
-            'status' => 'active',
-        ]);
+        $counter = $this->counter->fresh();
+        $this->assertNull($counter->device_token);
+        $this->assertSame(hash('sha256', $token), $counter->device_token_hash);
+        $this->assertStringNotContainsString($issued['raw_key'], json_encode($device->toArray()));
+
+        // CNT-003: the same code cannot open a second workstation.
+        $this->claim($issued['raw_key'], 'dev-second')
+            ->assertStatus(401)
+            ->assertJson(['message' => $this->refusalMessage()]);
+        $this->assertSame(1, Device::count());
     }
 
-    public function test_register_resolves_existing_counter_code_without_constraint_violation(): void
+    public function test_the_validate_endpoint_locks_an_unknown_or_revoked_workstation(): void
     {
-        // Pre-create counter C01 in the store without a device_uuid
-        Counter::create([
-            'store_id' => $this->store->id,
-            'counter_code' => 'C01',
-            'counter_name' => 'Existing Pre-Created Counter',
-            'status' => 'pending_approval',
-        ]);
-
-        $keyResult = ActivationKey::generateKey($this->store);
-
-        // Register a device that will derive 'C01'
-        $response = $this->postJson('/api/devices/register', [
-            'activation_key' => $keyResult['raw_key'],
-            'device_uuid' => 'dev_brand_new_uuid_9876',
-            'device_name' => 'Counter 01',
-            'is_hub' => true,
-        ]);
-
-        $response->assertStatus(200)
-            ->assertJson([
-                'success' => true,
-                'status' => 'active',
-                'counter_code' => 'C01',
-            ]);
-
-        $this->assertDatabaseHas('counters', [
-            'store_id' => $this->store->id,
-            'counter_code' => 'C01',
-            'device_uuid' => 'dev_brand_new_uuid_9876',
-            'status' => 'active',
-        ]);
-    }
-
-    public function test_device_validation_endpoint_locks_unrecognized_or_revoked_device(): void
-    {
-        // 1. Unrecognized token
-        $unrecognizedRes = $this->postJson('/api/devices/validate', [
+        $this->postJson('/api/devices/validate', [
             'device_token' => 'fake_lsd_unrecognized_token_123',
             'device_uuid' => 'fake_uuid',
-        ]);
+        ])->assertStatus(401)->assertJson(['valid' => false, 'action' => 'lock_and_reset']);
 
-        $unrecognizedRes->assertStatus(401)
-            ->assertJson([
-                'valid' => false,
-                'action' => 'lock_and_reset',
-            ]);
+        $issued = ActivationKey::generateForCounter($this->counter);
+        $token = $this->claim($issued['raw_key'])->assertOk()->json('device_token');
 
-        // 2. Legitimate device then revoked
-        $keyResult = ActivationKey::generateKey($this->store);
-        $reg = $this->postJson('/api/devices/register', [
-            'activation_key' => $keyResult['raw_key'],
-            'device_uuid' => 'dev_to_be_revoked',
-            'device_name' => 'Counter To Revoke',
-        ]);
-        $token = $reg->json('device_token');
-
-        // Verify active first
-        $validRes = $this->postJson('/api/devices/validate', [
+        $this->postJson('/api/devices/validate', [
             'device_token' => $token,
-            'device_uuid' => 'dev_to_be_revoked',
+            'device_uuid' => 'dev-uuid-1',
+        ])->assertStatus(200)->assertJson(['valid' => true, 'status' => 'active']);
+
+        Device::firstWhere('device_uuid', 'dev-uuid-1')->update([
+            'status' => 'revoked',
+            'revoke_reason' => 'Stolen terminal',
         ]);
-        $validRes->assertStatus(200)->assertJson(['valid' => true, 'status' => 'active']);
 
-        // Now revoke device
-        $device = Device::where('device_uuid', 'dev_to_be_revoked')->first();
-        $device->update(['status' => 'revoked', 'revoke_reason' => 'Stolen terminal']);
-
-        // Re-validate: should return 403 lock_and_reset
-        $revokedRes = $this->postJson('/api/devices/validate', [
+        $this->postJson('/api/devices/validate', [
             'device_token' => $token,
-            'device_uuid' => 'dev_to_be_revoked',
-        ]);
-        $revokedRes->assertStatus(403)
-            ->assertJson([
-                'valid' => false,
-                'status' => 'revoked',
-                'action' => 'lock_and_reset',
-            ]);
+            'device_uuid' => 'dev-uuid-1',
+        ])->assertStatus(403)->assertJson(['valid' => false, 'status' => 'revoked', 'action' => 'lock_and_reset']);
     }
 
-    public function test_owner_login_requires_valid_credentials_and_proper_authorization(): void
+    public function test_attempt_rows_never_carry_the_code_itself(): void
     {
-        // Bad password
-        $badRes = $this->postJson('/api/devices/register-owner', [
-            'email' => $this->owner->email,
-            'password' => 'WrongPassword',
-            'store_id' => $this->store->id,
-            'device_uuid' => 'dev_owner_test',
-            'device_name' => 'Counter Owner',
-        ]);
-        $badRes->assertStatus(401);
+        $issued = ActivationKey::generateForCounter($this->counter);
+        $raw = $issued['raw_key'];
 
-        // Good credentials without 2FA
-        $goodRes = $this->postJson('/api/devices/register-owner', [
-            'email' => $this->owner->email,
-            'password' => 'StrongPassword123!',
-            'store_id' => $this->store->id,
-            'device_uuid' => 'dev_owner_test',
-            'device_name' => 'Counter Owner',
-        ]);
-        $goodRes->assertStatus(200)
-            ->assertJson([
-                'success' => true,
-                'status' => 'active',
-            ]);
+        $this->claim('LAM-C01-AAAAAAAABBBBBBBB-CCCCCCCCDDDDDDDD');
+        $this->claim($raw)->assertOk();
 
-        $this->assertDatabaseHas('devices', [
-            'device_uuid' => 'dev_owner_test',
-            'registered_via' => 'owner_login',
-            'approved_by' => $this->owner->id,
-        ]);
-    }
+        $attempts = DeviceActivationAttempt::orderBy('id')->get();
+        $this->assertCount(2, $attempts);
 
-    public function test_owner_login_enforces_2fa_and_rejects_demo_totp_code(): void
-    {
-        $this->owner->update([
-            'totp_enabled' => true,
-            'totp_secret' => 'JBSWY3DPEHPK3PXP', // standard test secret
-        ]);
+        foreach ($attempts as $attempt) {
+            $this->assertStringNotContainsString($raw, json_encode($attempt->toArray()));
+            $this->assertLessThanOrEqual(24, strlen((string) $attempt->attempted_key_prefix));
+        }
 
-        // Attempt without TOTP
-        $noTotpRes = $this->postJson('/api/devices/register-owner', [
-            'email' => $this->owner->email,
-            'password' => 'StrongPassword123!',
-            'store_id' => $this->store->id,
-            'device_uuid' => 'dev_owner_2fa',
-            'device_name' => 'Counter Owner 2FA',
-        ]);
-        $noTotpRes->assertStatus(200)->assertJson(['requires_2fa' => true]);
-
-        // Attempt with fake demo code '123456' - MUST BE REJECTED
-        $demoTotpRes = $this->postJson('/api/devices/register-owner', [
-            'email' => $this->owner->email,
-            'password' => 'StrongPassword123!',
-            'store_id' => $this->store->id,
-            'device_uuid' => 'dev_owner_2fa',
-            'device_name' => 'Counter Owner 2FA',
-            'totp_code' => '123456',
-        ]);
-        $demoTotpRes->assertStatus(422)
-            ->assertJson(['message' => 'Invalid two-factor authentication code.']);
+        $this->assertTrue((bool) $attempts->last()->success);
+        $this->assertSame($this->counter->id, (int) $attempts->last()->counter_id);
+        $this->assertSame($this->store->id, (int) $attempts->last()->store_id);
     }
 }

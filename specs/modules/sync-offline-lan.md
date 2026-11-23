@@ -64,6 +64,20 @@ The synchronization engine powers resilient offline-first multi-terminal retail 
   - **When** restoring on a replacement computer,
   - **Then** selecting the backup file validates schema integrity, restores all local tables, and reconnects to cloud sync seamlessly.
 
+### [SYNC-007] Purchase Charge Sync (aggregate payload)
+- **Story:** As a store owner, I want a bill's charges to reach the cloud exactly as the till computed them.
+- **Acceptance Criteria:**
+  - **Given** a purchase bill posted or edited offline with charge lines,
+  - **When** the queue pushes it,
+  - **Then** the charges ride inside the **existing** purchase entity as a `charges[]` array on the same single queue entry — there is no separate `purchase_charge` entity type, so a bill can never sync with its charges missing or orphaned.
+  - **When** the server ingests the payload,
+  - **Then** it upserts child charge rows idempotently keyed on the till's `external_id` within the store (delete-and-recreate for updates, the same convention already used for purchase items), and re-derives tax and allocations with its own engine.
+  - **Then** the server's recomputed figures must equal the till's to the paisa; a difference fails the parity test rather than silently overwriting the till's numbers.
+  - **Given** a delta pull,
+  - **Then** charge heads delivered to a till are that store's rows only (rule `R12`), on the same store-scoped branch as units, and the charge policy arrives inside the store profile payload.
+  - **When** a queued bill is retried after a partial failure,
+  - **Then** landed cost, expense postings, supplier payable and tax reversals are all idempotent — no double allocation, no double expense, no double debit.
+
 ---
 
 ## 3. Sync State Machine

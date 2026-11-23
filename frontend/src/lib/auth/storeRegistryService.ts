@@ -232,45 +232,62 @@ export class StoreRegistryService {
 
   /**
    * Registers a newly paired store and stores its credentials.
-   * Prevents registering the exact same store_id + counter_name twice.
+   * CNT-008: the store owns the slot on this machine, so a store holds one
+   * counter. Re-claiming that counter refreshes its credential in place; a
+   * different counter claimed into the same store is refused, not stacked.
    */
   async registerStore(
     profile: StoreDeviceProfile,
     tokens: { deviceToken: string; refreshToken: string },
     options?: { alias?: string; color_badge?: string }
   ): Promise<RegisteredStoreRecord> {
-    // Duplicate check
-    const existing = this.registry.stores.find(
-      (s) => s.id === profile.store_id && s.counter_name.toLowerCase() === profile.counter_name.toLowerCase()
-    );
+    const existing = this.registry.stores.find((s) => String(s.id) === String(profile.store_id));
     if (existing) {
-      throw new Error(`Store "${profile.store_name}" with "${profile.counter_name}" is already registered on this terminal.`);
+      const sameCounter =
+        String(existing.counter_id) === String(profile.counter_id) ||
+        (existing.counter_name || "").trim().toLowerCase() === (profile.counter_name || "").trim().toLowerCase();
+      if (!sameCounter) {
+        throw new Error(
+          `This workstation already works "${existing.counter_name}" in "${existing.name}". Release that counter before claiming another one here.`
+        );
+      }
     }
 
     const colorPreset = options?.color_badge
       ? STORE_PRESET_COLORS.find((c) => c.badge === options.color_badge) || STORE_PRESET_COLORS[0]
       : STORE_PRESET_COLORS[this.registry.stores.length % STORE_PRESET_COLORS.length];
 
-    const newRecord: RegisteredStoreRecord = {
+    const identity: Partial<RegisteredStoreRecord> = {
       id: profile.store_id,
       name: profile.store_name,
-      alias: options?.alias || profile.store_name.split("(")[0].trim(),
       code: profile.store_code,
-      color: colorPreset.hex,
-      color_badge: colorPreset.badge,
-      db_path: `stores/${profile.store_id}/store.sqlite`,
       counter_id: profile.counter_id,
       counter_name: profile.counter_name,
       counter_code: profile.counter_code,
       is_hub: profile.is_hub,
-      registered_at: profile.registered_at || Date.now(),
-      last_opened_at: Date.now(),
+      is_active: profile.is_active !== false,
+      license_status: profile.license_status || "active",
       last_sync_at: Date.now(),
       pending_sync_count: 0,
       sync_status: "synced",
-      is_active: profile.is_active !== false,
-      license_status: profile.license_status || "active",
     };
+
+    let record: RegisteredStoreRecord;
+    if (existing) {
+      Object.assign(existing, identity);
+      record = existing;
+    } else {
+      record = {
+        ...identity,
+        alias: options?.alias || profile.store_name.split("(")[0].trim(),
+        color: colorPreset.hex,
+        color_badge: colorPreset.badge,
+        db_path: `stores/${profile.store_id}/store.sqlite`,
+        registered_at: profile.registered_at || Date.now(),
+        last_opened_at: Date.now(),
+      } as RegisteredStoreRecord;
+      this.registry.stores.push(record);
+    }
 
     // Save per-store tokens and profile securely
     await invokeCommand("secure_store_set", {
@@ -286,18 +303,92 @@ export class StoreRegistryService {
       value: JSON.stringify(profile),
     }).catch(() => {});
 
-    // Also update legacy keys for backward compatibility
-    await invokeCommand("secure_store_set", { key: "device_token", value: tokens.deviceToken }).catch(() => {});
-    await invokeCommand("secure_store_set", { key: "store_device_profile", value: JSON.stringify(profile) }).catch(() => {});
-
-    this.registry.stores.push(newRecord);
     this.registry.active_store_id = profile.store_id;
     await this.saveRegistry();
 
     // Switch DB connection to target store so initial data writes go to the right store database
-    await sqliteStorage.switchStore(profile.store_id, newRecord.db_path).catch(() => {});
+    await sqliteStorage.switchStore(profile.store_id, record.db_path).catch(() => {});
 
-    return newRecord;
+    // The claim lands in this store's own database and becomes the credential
+    // the till works, never a copy left behind in whichever store was open.
+    await this.applyActiveIdentity(profile.store_id, record);
+
+    return record;
+  }
+
+  /**
+   * CNT-008: the flat `device_token`/`store_device_profile` keys are only ever
+   * a mirror of the store the till is standing in. Switching to a store puts
+   * that store's own credential there, and a store that goes away hands the
+   * mirror to the next one — so no store can bill on another's counter.
+   */
+  private async applyActiveIdentity(storeId: string | null, record?: RegisteredStoreRecord): Promise<void> {
+    if (!storeId) {
+      await invokeCommand("secure_store_delete", { key: "device_token" }).catch(() => {});
+      await invokeCommand("secure_store_delete", { key: "store_device_profile" }).catch(() => {});
+      storeDeviceService.clearProfileCache();
+      return;
+    }
+
+    const id = String(storeId);
+
+    const token = await invokeCommand<string | null>("secure_store_get", {
+      key: `store:${id}:device_token`,
+    }).catch(() => null);
+
+    if (token) {
+      await invokeCommand("secure_store_set", { key: "device_token", value: token }).catch(() => {});
+    } else {
+      // Never leave the previous store's token active for the new store.
+      await invokeCommand("secure_store_delete", { key: "device_token" }).catch(() => {});
+    }
+
+    let profileJson = await invokeCommand<string | null>("secure_store_get", {
+      key: `store:${id}:profile`,
+    }).catch(() => null);
+
+    if (!profileJson && record) {
+      profileJson = JSON.stringify(this.profileFromRecord(record));
+      await invokeCommand("secure_store_set", {
+        key: `store:${id}:profile`,
+        value: profileJson,
+      }).catch(() => {});
+    }
+
+    if (profileJson) {
+      await invokeCommand("secure_store_set", {
+        key: "store_device_profile",
+        value: profileJson,
+      }).catch(() => {});
+      try {
+        storeDeviceService.setProfile(JSON.parse(profileJson));
+      } catch {
+        storeDeviceService.clearProfileCache();
+      }
+    } else {
+      await invokeCommand("secure_store_delete", { key: "store_device_profile" }).catch(() => {});
+      storeDeviceService.clearProfileCache();
+    }
+  }
+
+  private profileFromRecord(target: RegisteredStoreRecord): StoreDeviceProfile {
+    return {
+      device_id: target.counter_id,
+      device_uuid: `dev_${target.id}_${Date.now()}`,
+      device_name: target.counter_name,
+      store_id: target.id,
+      store_name: target.name,
+      store_code: target.code,
+      counter_id: target.counter_id,
+      counter_name: target.counter_name,
+      counter_code: target.counter_code,
+      is_hub: target.is_hub,
+      license_plan: "Retail & Pharmacy Chain Pro",
+      license_status: target.license_status || "active",
+      license_expires_at: "2027-12-31",
+      registered_at: target.registered_at,
+      is_active: target.is_active,
+    };
   }
 
   async updateStoreMeta(
@@ -537,13 +628,14 @@ export class StoreRegistryService {
     if (isCurrentActive && resetInvoices) {
       posCartService.clearCart();
       await companySettingsService
-        .updateSettings({
-          next_invoice_number: 1001,
-          sequences: {
-            ...companySettingsService.getSettings()?.sequences,
-            nextInvoiceNumber: 1001,
-          },
-        })
+        .saveLocalSettings(
+          {
+            next_invoice_number: 1001,
+            sequences: {
+              ...companySettingsService.getSettings()?.sequences,
+              nextInvoiceNumber: 1001,
+            },
+          })
         .catch(() => {});
     } else if (currentActiveId) {
       const activeStore = this.registry.stores.find((s) => String(s.id) === String(currentActiveId));
@@ -588,9 +680,21 @@ export class StoreRegistryService {
       }
     }
 
-    this.registry.stores = this.registry.stores.filter((s) => s.id !== storeId);
-    if (this.registry.active_store_id === storeId) {
+    this.registry.stores = this.registry.stores.filter((s) => String(s.id) !== String(storeId));
+    const wasActive = String(this.registry.active_store_id) === String(storeId);
+    if (wasActive) {
       this.registry.active_store_id = this.registry.stores.length > 0 ? this.registry.stores[0].id : null;
+
+      // CNT-008: releasing the store the till works leaves it standing in the
+      // next store's database and on the next store's credential — never on
+      // the counters of the store it just let go of.
+      const next = this.getActiveStore();
+      if (next) {
+        await sqliteStorage.switchStore(next.id, next.db_path).catch(() => {});
+        await this.applyActiveIdentity(next.id, next);
+      } else {
+        await this.applyActiveIdentity(null);
+      }
     }
     await this.saveRegistry();
   }
@@ -632,67 +736,20 @@ export class StoreRegistryService {
       .catch(() => {});
 
     // 2. Load and set the target store's device profile & tokens in memory
-    const profileJson = await invokeCommand<string | null>("secure_store_get", {
-      key: `store:${idStr}:profile`,
-    }).catch(() => null);
-
-    if (profileJson) {
-      await invokeCommand("secure_store_set", {
-        key: "store_device_profile",
-        value: profileJson,
-      }).catch(() => {});
-      try {
-        storeDeviceService.setProfile(JSON.parse(profileJson));
-      } catch {
-        storeDeviceService.clearProfileCache();
-      }
-    } else {
-      const fallbackProfile: StoreDeviceProfile = {
-        device_id: target.counter_id,
-        device_uuid: `dev_${target.id}_${Date.now()}`,
-        device_name: target.counter_name,
-        store_id: target.id,
-        store_name: target.name,
-        store_code: target.code,
-        counter_id: target.counter_id,
-        counter_name: target.counter_name,
-        counter_code: target.counter_code,
-        is_hub: target.is_hub,
-        license_plan: "Retail & Pharmacy Chain Pro",
-        license_status: target.license_status || "active",
-        license_expires_at: "2027-12-31",
-        registered_at: target.registered_at,
-        is_active: target.is_active,
-      };
-      await invokeCommand("secure_store_set", {
-        key: "store_device_profile",
-        value: JSON.stringify(fallbackProfile),
-      }).catch(() => {});
-      await invokeCommand("secure_store_set", {
-        key: `store:${idStr}:profile`,
-        value: JSON.stringify(fallbackProfile),
-      }).catch(() => {});
-      storeDeviceService.setProfile(fallbackProfile);
-    }
-
-    const token = await invokeCommand<string | null>("secure_store_get", {
-      key: `store:${idStr}:device_token`,
-    }).catch(() => null);
-
-    if (token) {
-      await invokeCommand("secure_store_set", {
-        key: "device_token",
-        value: token,
-      }).catch(() => {});
-    } else {
-      // Never leave the previous store's token active for the new store.
-      await invokeCommand("secure_store_delete", { key: "device_token" }).catch(() => {});
-    }
+    await this.applyActiveIdentity(idStr, target);
 
     // 3. Clear transient singletons & active cart
     posCartService.resetCart();
     printerManagerService.clearCache();
     staffAuthService.logout();
+
+    // IS9: each store keeps the document of the counter claimed for it, so the
+    // surface follows the store. Dynamic import keeps the module graph acyclic.
+    import("./counterSessionService")
+      .then(({ counterSessionService }) =>
+        counterSessionService.hydrate().then(() => counterSessionService.refresh())
+      )
+      .catch(() => {});
 
     // 4. Update last opened timestamp
     target.last_opened_at = Date.now();
@@ -711,8 +768,11 @@ export class StoreRegistryService {
       await companySettingsService.loadSettings();
     }
 
-    // 6. Broadcast device presence heartbeat under new active store
-    if (staffAuthService.getCurrentSession()) {
+    // 6. Broadcast device presence heartbeat under new active store.
+    // B8b: presence belongs to the counter claimed for this store, not to an
+    // operator — nobody signs in at the till any more.
+    const claimedCounter = (await storeDeviceService.getDeviceProfile().catch(() => null))?.counter_id;
+    if (claimedCounter) {
       deviceSessionService.sendHeartbeat({ store_id: idStr }).catch(() => {});
     }
 

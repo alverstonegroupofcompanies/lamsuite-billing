@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
 import { companySettingsService, DEFAULT_SETTINGS } from "./companySettingsService";
 import { getMockDatabase, sqliteStorage } from "../db/sqliteStorage";
 import { staffAuthService } from "../auth/staffAuthService";
+import { reversalPolicy } from "../purchases/chargeReversal";
 
 describe("Store Settings DB Synchronization & Cross-Device Parity", () => {
   const originalFetch = global.fetch;
@@ -9,6 +10,15 @@ describe("Store Settings DB Synchronization & Cross-Device Parity", () => {
   beforeEach(async () => {
     getMockDatabase().reset();
     await sqliteStorage.initDatabase();
+    // The service is a singleton; start every test from the defaults so a
+    // store save's delta (SET-03: changed keys only) is what the test sets.
+    await companySettingsService.saveLocalSettings({
+      tax_mode: DEFAULT_SETTINGS.tax_mode,
+      gst_type: DEFAULT_SETTINGS.gst_type,
+      round_off_enabled: DEFAULT_SETTINGS.round_off_enabled,
+      allow_tax_override_per_bill: DEFAULT_SETTINGS.allow_tax_override_per_bill,
+      gstin: DEFAULT_SETTINGS.gstin,
+    });
   });
 
   afterEach(() => {
@@ -37,7 +47,7 @@ describe("Store Settings DB Synchronization & Cross-Device Parity", () => {
         } as Response;
       });
 
-      const updated = await companySettingsService.updateSettings({
+      const updated = await companySettingsService.saveStoreSettings({
         store_id: "store_main",
         tax_mode: "exclusive",
         purchase_tax_mode: "inclusive",
@@ -79,7 +89,7 @@ describe("Store Settings DB Synchronization & Cross-Device Parity", () => {
     it("enqueues settings into sync_queue when server is offline or unreachable", async () => {
       vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("Network connection offline"));
 
-      await companySettingsService.updateSettings({
+      await companySettingsService.saveStoreSettings({
         store_id: "store_offline_01",
         tax_mode: "exclusive",
         gst_type: "no_tax",
@@ -149,6 +159,32 @@ describe("Store Settings DB Synchronization & Cross-Device Parity", () => {
       expect(sqliteRecord.store_name).toBe("Metro Medicos Central");
       expect(sqliteRecord.tax_mode).toBe("exclusive");
       expect(sqliteRecord.sequences.invoicePrefix).toBe("METRO");
+    });
+
+    it("lands the server's charge return policy on the till as its own (PUR-016)", async () => {
+      // The server keeps the policy inside its `billing` blob; the till must read it back into
+      // the shape `reversalPolicy()` uses, or an offline counter would reverse what a sunk store
+      // has decided to keep.
+      await companySettingsService.updateLocalFromRemote({
+        store_id: "store_chain_01",
+        billing: { purchase_charges: { reverse_on_return: "sunk" } },
+      });
+
+      // CR-C-11: a payload silent about payable membership leaves the till's documented default off.
+      expect(companySettingsService.getSettings().purchase_charges).toEqual({
+        reverse_on_return: "sunk",
+        separately_paid_in_payable: false,
+      });
+      expect(await reversalPolicy()).toBe("sunk");
+
+      // A payload that says nothing about charges leaves the store's own rule alone.
+      await companySettingsService.updateLocalFromRemote({ store_id: "store_chain_01" });
+      expect(await reversalPolicy()).toBe("sunk");
+
+      await companySettingsService.updateLocalFromRemote({
+        settings: { purchase_charges: { reverse_on_return: "proportional" } },
+      });
+      expect(await reversalPolicy()).toBe("proportional");
     });
 
     it("applies store settings from server when staff logs into terminal", async () => {

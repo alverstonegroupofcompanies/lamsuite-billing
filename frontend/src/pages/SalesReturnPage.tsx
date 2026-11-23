@@ -16,7 +16,6 @@ import {
 } from "lucide-react";
 import {
   salesReturnService,
-  returnKey,
   toBaseUnits,
   type SalesReturnRecord,
   type SalesReturnInput,
@@ -25,11 +24,18 @@ import {
   type ReturnCondition,
   type RefundPaymentMode,
 } from "../lib/billing/salesReturnService";
+import {
+  returnKey,
+  reverseCreditsFromOriginal,
+  sumReturnCredits,
+} from "../lib/billing/salesReturnPricing";
 import { useModalEscape } from "../lib/ui/modalEscapeManager";
+import { shortcutDispatcher } from "../lib/keyboard/shortcutDispatcher";
 import { invoiceManagementService, type InvoiceRecord, type InvoiceItemRecord } from "../lib/billing/invoiceManagementService";
 import { printingEngine, type CreditNotePrintData } from "../lib/printing/printingEngine";
 import { companySettingsService } from "../lib/settings/companySettingsService";
 import { partiesStore, type Customer } from "../lib/masters/partiesStore";
+import { formatExpiryDisplay } from "../lib/masters/productsStore";
 import { PrintPreviewModal } from "../components/PrintPreviewModal";
 
 const RETURN_REASONS: { value: ReturnReason; label: string }[] = [
@@ -83,7 +89,19 @@ export const SalesReturnPage: React.FC = () => {
 
   // --- Form modal state ---
   const [isFormOpen, setIsFormOpen] = useState(false);
-  useModalEscape(isFormOpen, () => setIsFormOpen(false));
+  // Escape first dismisses whatever the search found, like any other counter list; only an
+  // Escape with no results behind it closes the return.
+  useModalEscape(isFormOpen, () => {
+    if (invoiceSearchResults.length > 0) {
+      setInvoiceSearchResults([]);
+      return false;
+    }
+    if (customerSearchResults.length > 0) {
+      setCustomerSearchResults([]);
+      return false;
+    }
+    setIsFormOpen(false);
+  });
   const [returnSource, setReturnSource] = useState<"counter" | "customer_debit_note">("counter");
   const [formStep, setFormStep] = useState<"invoice_search" | "line_selection" | "payment">("invoice_search");
 
@@ -100,6 +118,11 @@ export const SalesReturnPage: React.FC = () => {
   const [customerSearchResults, setCustomerSearchResults] = useState<Customer[]>([]);
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
   const [customerInvoicesLoading, setCustomerInvoicesLoading] = useState(false);
+
+  // Which result the arrow keys are on. Zero means the first result is highlighted as soon as it
+  // appears, so Enter picks it without a preceding arrow press.
+  const [activeCustomerIndex, setActiveCustomerIndex] = useState(0);
+  const [activeInvoiceIndex, setActiveInvoiceIndex] = useState(0);
 
   // Step 3: Payment
   const [refundMode, setRefundMode] = useState<RefundPaymentMode>("Cash");
@@ -167,12 +190,40 @@ export const SalesReturnPage: React.FC = () => {
     }
   };
 
+  // F7 is printed on the New Return button, so the list answers it before the global shell
+  // re-navigates the same route. Pressing it again with the return already open hands the caret
+  // back to the invoice search instead of throwing the half-built return away on a reload.
+  useEffect(() => {
+    const uninstall = shortcutDispatcher.install();
+    const unregister = shortcutDispatcher.register({
+      id: "sales-returns-list",
+      scope: "salesReturns",
+      isActive: () => !previewModalState.isOpen,
+      handlers: {
+        newSalesReturn: () => {
+          if (isFormOpen) {
+            invoiceSearchRef.current?.focus();
+            invoiceSearchRef.current?.select();
+          } else {
+            openForm();
+          }
+          return true;
+        },
+      },
+    });
+    return () => {
+      unregister();
+      uninstall();
+    };
+  }, [isFormOpen, previewModalState.isOpen]);
+
   // ── Invoice search ────────────────────────────────────────────────────────────
   // Returns must reach any historical bill, so the search spans all dates
   // instead of inheriting the dashboard's "today" default.
   const handleInvoiceSearch = async (q: string) => {
     setInvoiceSearchQuery(q);
     setSelectedCustomer(null);
+    setActiveInvoiceIndex(0);
     if (q.trim().length < 2) {
       setInvoiceSearchResults([]);
       return;
@@ -187,12 +238,51 @@ export const SalesReturnPage: React.FC = () => {
   const handleCustomerSearch = async (q: string) => {
     setCustomerSearchQuery(q);
     setSelectedCustomer(null);
+    setActiveCustomerIndex(0);
     if (q.trim().length < 2) {
       setCustomerSearchResults([]);
       return;
     }
     const matches = await partiesStore.searchCustomers(q, 8);
     setCustomerSearchResults(matches);
+  };
+
+  const handleInvoiceSearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    const count = invoiceSearchResults.length;
+    if (count === 0) return;
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setActiveInvoiceIndex((i) => Math.min(i + 1, count - 1));
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setActiveInvoiceIndex((i) => Math.max(i - 1, 0));
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      const inv = invoiceSearchResults[activeInvoiceIndex];
+      if (inv) selectInvoice(inv);
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      setInvoiceSearchResults([]);
+    }
+  };
+
+  const handleCustomerSearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    const count = customerSearchResults.length;
+    if (count === 0) return;
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setActiveCustomerIndex((i) => Math.min(i + 1, count - 1));
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setActiveCustomerIndex((i) => Math.max(i - 1, 0));
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      const customer = customerSearchResults[activeCustomerIndex];
+      if (customer) selectCustomer(customer);
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      setCustomerSearchResults([]);
+    }
   };
 
   const selectCustomer = async (customer: Customer) => {
@@ -214,6 +304,7 @@ export const SalesReturnPage: React.FC = () => {
         );
       });
       setInvoiceSearchResults(matches.slice(0, 20));
+      setActiveInvoiceIndex(0);
     } finally {
       setCustomerInvoicesLoading(false);
     }
@@ -295,6 +386,25 @@ export const SalesReturnPage: React.FC = () => {
   const selectedLines = returnLines.filter((l) => l.selected && l.return_qty > 0);
 
   const calcTotals = () => {
+    // A credit note reverses the bill, so preview the share of the money that bill
+    // actually charged. Pricing the return at the selling rate again would add GST
+    // on top of an MRP-inclusive price and drop the line's discount.
+    const credits = reverseCreditsFromOriginal(
+      selectedInvoice,
+      invoiceItems,
+      selectedLines,
+      returnedQtyMap
+    );
+    if (credits) {
+      const reversed = sumReturnCredits(credits);
+      return {
+        subtotal: reversed.subtotal,
+        discountTotal: reversed.discount_total,
+        taxTotal: reversed.tax_total,
+        grandTotal: reversed.grand_total,
+      };
+    }
+
     let subtotal = 0;
     let discountTotal = 0;
     let taxTotal = 0;
@@ -712,18 +822,38 @@ export const SalesReturnPage: React.FC = () => {
                         type="text"
                         value={customerSearchQuery}
                         onChange={(e) => handleCustomerSearch(e.target.value)}
+                        onKeyDown={handleCustomerSearchKeyDown}
                         placeholder="Customer name or mobile number..."
+                        role="combobox"
+                        aria-autocomplete="list"
+                        aria-expanded={customerSearchResults.length > 0}
+                        aria-controls="sales-return-customer-results"
+                        aria-activedescendant={
+                          customerSearchResults[activeCustomerIndex]
+                            ? `sales-return-customer-option-${customerSearchResults[activeCustomerIndex].id}`
+                            : undefined
+                        }
                         className="w-full rounded-lg border border-slate-200 bg-slate-50 pl-9 pr-3 py-2.5 text-xs text-slate-800 placeholder-slate-400 focus:border-rose-400 focus:bg-white focus:outline-none"
                       />
                     </div>
                     {customerSearchResults.length > 0 && (
-                      <div className="absolute top-full left-0 right-0 z-10 mt-1 rounded-lg border border-slate-200 bg-white shadow-lg overflow-hidden">
-                        {customerSearchResults.map((customer) => (
+                      <div
+                        id="sales-return-customer-results"
+                        role="listbox"
+                        className="absolute top-full left-0 right-0 z-10 mt-1 rounded-lg border border-slate-200 bg-white shadow-lg overflow-hidden"
+                      >
+                        {customerSearchResults.map((customer, index) => (
                           <button
                             key={customer.id}
+                            id={`sales-return-customer-option-${customer.id}`}
                             type="button"
+                            role="option"
+                            aria-selected={index === activeCustomerIndex}
+                            onMouseEnter={() => setActiveCustomerIndex(index)}
                             onClick={() => selectCustomer(customer)}
-                            className="flex w-full items-center justify-between px-4 py-2.5 text-left text-xs hover:bg-rose-50"
+                            className={`flex w-full items-center justify-between px-4 py-2.5 text-left text-xs ${
+                              index === activeCustomerIndex ? "bg-rose-50" : "hover:bg-rose-50"
+                            }`}
                           >
                             <span className="font-medium text-slate-800">{customer.name}</span>
                             <span className="font-mono text-slate-500">{customer.phone || "No phone"}</span>
@@ -757,17 +887,38 @@ export const SalesReturnPage: React.FC = () => {
                         type="text"
                         value={invoiceSearchQuery}
                         onChange={(e) => handleInvoiceSearch(e.target.value)}
+                        onKeyDown={handleInvoiceSearchKeyDown}
                         placeholder="e.g. INV-001, Ravi Kumar, 9876543210, 2026-10-29..."
+                        role="combobox"
+                        aria-autocomplete="list"
+                        aria-expanded={invoiceSearchResults.length > 0}
+                        aria-controls="sales-return-invoice-results"
+                        aria-activedescendant={
+                          invoiceSearchResults[activeInvoiceIndex]
+                            ? `sales-return-invoice-option-${invoiceSearchResults[activeInvoiceIndex].id}`
+                            : undefined
+                        }
                         className="w-full rounded-lg border border-slate-200 bg-slate-50 pl-9 pr-3 py-2.5 text-xs text-slate-800 placeholder-slate-400 focus:border-rose-400 focus:bg-white focus:outline-none"
                       />
                     </div>
                     {invoiceSearchResults.length > 0 && (
-                      <div className="absolute top-full left-0 right-0 z-10 mt-1 rounded-lg border border-slate-200 bg-white shadow-lg overflow-hidden">
-                        {invoiceSearchResults.map((inv) => (
+                      <div
+                        id="sales-return-invoice-results"
+                        role="listbox"
+                        className="absolute top-full left-0 right-0 z-10 mt-1 rounded-lg border border-slate-200 bg-white shadow-lg overflow-hidden"
+                      >
+                        {invoiceSearchResults.map((inv, index) => (
                           <button
                             key={inv.id}
+                            id={`sales-return-invoice-option-${inv.id}`}
+                            type="button"
+                            role="option"
+                            aria-selected={index === activeInvoiceIndex}
+                            onMouseEnter={() => setActiveInvoiceIndex(index)}
                             onClick={() => selectInvoice(inv)}
-                            className="flex w-full items-center justify-between px-4 py-2.5 text-left text-xs hover:bg-rose-50"
+                            className={`flex w-full items-center justify-between px-4 py-2.5 text-left text-xs ${
+                              index === activeInvoiceIndex ? "bg-rose-50" : "hover:bg-rose-50"
+                            }`}
                           >
                             <div>
                               <span className="font-mono font-bold text-blue-700">{inv.invoice_number}</span>
@@ -913,7 +1064,7 @@ export const SalesReturnPage: React.FC = () => {
                             <td className="px-3 py-2 text-center font-mono text-slate-700">
                               <div>{line.batch_no || "—"}</div>
                               {line.expiry_date && (
-                                <div className="text-[10px] text-slate-400">Exp: {line.expiry_date}</div>
+                                <div className="text-[10px] text-slate-400">Exp: {formatExpiryDisplay(line.expiry_date)}</div>
                               )}
                             </td>
                             <td className="px-3 py-2 text-center font-mono">{line.sold_qty}</td>

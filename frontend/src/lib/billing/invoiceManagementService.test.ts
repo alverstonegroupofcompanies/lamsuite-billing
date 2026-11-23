@@ -388,7 +388,13 @@ describe("InvoiceManagementService", () => {
     const res = await invoiceManagementService.cancelInvoice(
       "inv_to_cancel",
       "Customer returned medicine unopened",
-      "Pharmacist Dave"
+      "Pharmacist Dave",
+      {
+        id: "appr_cancel_1",
+        token: "grant-token-abc",
+        mode: "manager",
+        approvedByName: "Floor Manager",
+      }
     );
     expect(res.success).toBe(true);
 
@@ -407,6 +413,24 @@ describe("InvoiceManagementService", () => {
     expect(cancelledReport.length).toBe(1);
     expect(cancelledReport[0].invoice_number).toBe("INV-9999");
     expect(cancelledReport[0].cancel_reason).toBe("Customer returned medicine unopened");
+
+    // G12: the queued cancellation carries the approver's grant, not just its id —
+    // the server cannot redeem a cancellation without it.
+    const queued = await sqliteStorage.findAll<{ payload_json: string }>("sync_queue");
+    const cancelItem = queued.find((row) => {
+      try {
+        return JSON.parse(row.payload_json).id === "inv_to_cancel";
+      } catch {
+        return false;
+      }
+    });
+    expect(cancelItem).toBeDefined();
+    expect(JSON.parse(cancelItem!.payload_json)).toMatchObject({
+      status: "cancelled",
+      approval_id: "appr_cancel_1",
+      approval_token: "grant-token-abc",
+      approved_by: "Floor Manager",
+    });
   });
 
   it("enforces invoice locking rules and verifies manager PIN", () => {

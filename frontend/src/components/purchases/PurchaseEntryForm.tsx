@@ -54,6 +54,19 @@ import { ConversionModal } from "../ConversionModal";
 import { BillDiscountModal } from "../BillDiscountModal";
 import { RoundOffModal } from "../RoundOffModal";
 import { SupplierPaymentModal } from "./SupplierPaymentModal";
+import { PurchaseChargesModal } from "./PurchaseChargesModal";
+import { chargeHeadsStore, type ChargeHeadMaster } from "../../lib/masters/chargeHeadsStore";
+import { resolveChargesWith, type ResolvedCharge } from "../../lib/purchases/chargePosting";
+import type { PurchaseChargeRecord } from "../../lib/reports/purchaseChargeRegister";
+import {
+  chargeRowToDraft,
+  draftsToInputs,
+  legacyFreightRow,
+  type ChargeDraftRow,
+} from "../../lib/purchases/chargesGrid";
+import { findShortcut, matchesChord, type ShortcutAction } from "../../lib/keyboard/centralKeyMap";
+import { shortcutDispatcher, type ShortcutHandler } from "../../lib/keyboard/shortcutDispatcher";
+import { registerNavigationGuard } from "../../lib/keyboard/navigationGuard";
 import { useModalEscape } from "../../lib/ui/modalEscapeManager";
 import { purchaseImportService } from "../../lib/purchases/purchaseImportService";
 
@@ -68,6 +81,20 @@ interface PurchaseEntryFormProps {
   } | null;
   editPurchaseId?: string | null;
 }
+
+/**
+ * PUR-017: the rows a saved bill opens its charges section with. Its own posted rows first, so an
+ * edit keeps the ids the bill synced on; a bill keyed before CR-C has none, and its single freight
+ * scalar arrives as the same 0% Freight row the post path would derive from it.
+ */
+const recallChargeRows = (
+  charges: PurchaseChargeRecord[] | undefined,
+  freightCharges: number | undefined
+): ChargeDraftRow[] => {
+  if (charges?.length) return charges.map(chargeRowToDraft);
+  const legacy = legacyFreightRow(freightCharges || 0);
+  return legacy ? [legacy] : [];
+};
 
 export const PurchaseEntryForm: React.FC<PurchaseEntryFormProps> = ({
   onClose,
@@ -229,10 +256,20 @@ export const PurchaseEntryForm: React.FC<PurchaseEntryFormProps> = ({
 
   // Totals & Physical Invoice Verification
   const [supplierInvoiceTotal, setSupplierInvoiceTotal] = useState<number | "">("");
-  const [freightCharges, setFreightCharges] = useState<number>(0);
   const [manualRoundOff, setManualRoundOff] = useState<number | null>(null);
   const [billDiscountType, setBillDiscountType] = useState<"percent" | "amount">("amount");
   const [billDiscountValue, setBillDiscountValue] = useState<number>(0);
+
+  // CR-C / PUR-007: the charges section keyed with Alt+F. One Freight scalar used to carry every
+  // extra cost on a supplier bill; each one is now a row priced by the engine with the goods, and
+  // the bill posts `charges[]` instead of that scalar (PUR-017).
+  const [chargeHeads, setChargeHeads] = useState<ChargeHeadMaster[]>([]);
+  const [chargeRows, setChargeRows] = useState<ChargeDraftRow[]>([]);
+  const [isChargesModalOpen, setIsChargesModalOpen] = useState(false);
+  // The recall of an open bill is what puts its charge rows on the screen, so Alt+F must not raise
+  // an empty grid while that read is still in flight — Apply over it would post the bill without a
+  // rupee of its charges (PUR-017).
+  const [isRecallingBill, setIsRecallingBill] = useState(Boolean(editPurchaseId));
 
   // Cache for last purchase rates to show hints and warnings
   const [lastPurchaseMap, setLastPurchaseMap] = useState<Record<string, any>>({});
@@ -248,7 +285,14 @@ export const PurchaseEntryForm: React.FC<PurchaseEntryFormProps> = ({
   const [isPostSummaryModalOpen, setIsPostSummaryModalOpen] = useState(false);
   const [postValidationSummary, setPostValidationSummary] = useState<PostValidationCheckSummary | null>(null);
   const [isPosting, setIsPosting] = useState(false);
-  const [postSuccessData, setPostSuccessData] = useState<{ id: string; number: string; total: number; supplierName: string } | null>(null);
+  const [postSuccessData, setPostSuccessData] = useState<{
+    id: string;
+    number: string;
+    total: number;
+    supplierName: string;
+    syncState?: "synced" | "pending";
+    syncMessage?: string;
+  } | null>(null);
   const [isBarcodePrintModalOpen, setIsBarcodePrintModalOpen] = useState(false);
   const [isPrintPreviewModalOpen, setIsPrintPreviewModalOpen] = useState(false);
   const [isSupplierPaymentModalOpen, setIsSupplierPaymentModalOpen] = useState(false);
@@ -258,8 +302,22 @@ export const PurchaseEntryForm: React.FC<PurchaseEntryFormProps> = ({
 
   // Initial Load: Document Number & Masters
   useEffect(() => {
-    loadInitialData();
+    setIsRecallingBill(Boolean(editPurchaseId));
+    loadInitialData().finally(() => setIsRecallingBill(false));
   }, [editPurchaseId]);
+
+  // Rule R12: the grid offers this store's own charge heads and no others, so they are read before
+  // Alt+F can be pressed and refreshed each time the section opens.
+  const loadChargeHeads = useCallback(() => {
+    chargeHeadsStore
+      .getAllHeads()
+      .then(setChargeHeads)
+      .catch(() => setChargeHeads([]));
+  }, []);
+
+  useEffect(() => {
+    loadChargeHeads();
+  }, [loadChargeHeads]);
 
   const showNotification = (message: string, type: "success" | "error" | "info" = "info") => {
     setNotification({ message, type });
@@ -280,7 +338,7 @@ export const PurchaseEntryForm: React.FC<PurchaseEntryFormProps> = ({
           setIsInterstate(Boolean(existing.document.is_interstate));
           setRemarks(existing.document.notes || "");
           setManualRoundOff(existing.document.round_off);
-          setFreightCharges(existing.document.freight_charges || 0);
+          setChargeRows(recallChargeRows(existing.charges, existing.document.freight_charges));
           setBillDiscountType(existing.document.bill_discount_type || "amount");
           setBillDiscountValue(existing.document.bill_discount || 0);
 
@@ -422,7 +480,7 @@ export const PurchaseEntryForm: React.FC<PurchaseEntryFormProps> = ({
     const initialRate = cached?.rate || entryDraftProduct.ptr || 0;
     const initialMrp = cached?.mrp || entryDraftProduct.mrp || 0;
     const initialUnitsPerPack = cached?.units_per_pack || entryDraftProduct.units_per_pack || 1;
-    const initialSellRate = cached?.selling_rate || entryDraftProduct.sel_rate || (initialMrp ? initialMrp / initialUnitsPerPack : 0);
+    const initialSellRate = cached?.selling_rate || entryDraftProduct.sel_rate || initialMrp || 0;
     const initialDiscount = cached?.discount_percent || 0;
     const initialGst = cached?.gst_percent ?? entryDraftProduct.gst_percent ?? 12;
 
@@ -472,18 +530,37 @@ export const PurchaseEntryForm: React.FC<PurchaseEntryFormProps> = ({
     }
   }, [entryDraftProduct]);
 
-  // Compute Totals (including draftLine immediately)
-  const computedTotals = useMemo(() => {
-    const allLines = [...lines];
-    if (draftLine && draftLine.product_name) {
-      allLines.push(draftLine);
-    }
+  /**
+   * The grid's rows through the one resolver the post path uses, so the bar, the vendor-total check
+   * and the posted bill can never price a charge differently (PUR-014). A row this store's heads
+   * refuse prices nothing and names itself: the grid would have blocked Apply, so this is a head
+   * changed or switched off between applying and posting, and F12 refuses to post on it.
+   */
+  const pricedCharges = useMemo(() => {
+    const inputs = draftsToInputs(chargeRows, placeOfSupply);
+    if (!inputs.length) return { charges: [] as ResolvedCharge[], problem: null as string | null };
 
-    const totals = purchaseService.calculateDocumentTotals(allLines, isInterstate, {
+    try {
+      return {
+        charges: resolveChargesWith(chargeHeads, inputs, placeOfSupply),
+        problem: null as string | null,
+      };
+    } catch (err) {
+      return {
+        charges: [] as ResolvedCharge[],
+        problem: err instanceof Error ? err.message : String(err),
+      };
+    }
+  }, [chargeRows, chargeHeads, placeOfSupply]);
+
+  // Compute Totals from committed lines only. The entry row is a line being typed; the row
+  // itself shows its value until Enter adds it to the bill (PUR-03).
+  const computedTotals = useMemo(() => {
+    const totals = purchaseService.calculateDocumentTotals(lines, isInterstate, {
       bill_discount_type: billDiscountType,
       bill_discount_value: billDiscountValue,
-      freight_charges: freightCharges,
       round_off: manualRoundOff,
+      charges: pricedCharges.charges,
     });
 
     return {
@@ -493,14 +570,30 @@ export const PurchaseEntryForm: React.FC<PurchaseEntryFormProps> = ({
       cgstTotal: totals.cgstTotal,
       sgstTotal: totals.sgstTotal,
       igstTotal: totals.igstTotal,
-      freightCharges: totals.freightCharges,
       billDiscountAmount: totals.billDiscountAmount,
       roundOff: totals.roundOff,
       grandTotal: totals.grandTotal,
-      itemCount: lines.length + (draftLine && draftLine.product_name ? 1 : 0),
+      itemCount: lines.length,
       totalUnits: totals.totalUnits,
+      // What the engine put into the payable, what it left outside, and the rupees it landed on
+      // stock — the same three figures the grid's footer shows (CR-C-11).
+      chargeTotal: totals.engine.charge_total,
+      separateChargeTotal: totals.engine.separate_charge_total,
+      landedCostAddition: totals.landedCostAddition,
+      expenseChargeTotal: totals.expenseChargeTotal,
+      chargeCount: pricedCharges.charges.length,
+      charges: pricedCharges.charges,
+      // The grid's footer reads the engine's own totals rather than re-pricing anything.
+      engine: totals.engine,
     };
-  }, [lines, draftLine, isInterstate, freightCharges, manualRoundOff, billDiscountType, billDiscountValue]);
+  }, [
+    lines,
+    isInterstate,
+    manualRoundOff,
+    billDiscountType,
+    billDiscountValue,
+    pricedCharges,
+  ]);
 
   // Live difference with physical Supplier Invoice Total
   const invoiceDiff = useMemo(() => {
@@ -712,11 +805,44 @@ export const PurchaseEntryForm: React.FC<PurchaseEntryFormProps> = ({
     setFocusContext("entry_row");
   };
 
+  /**
+   * Alt+F (PUR-007). The heads are re-read on the way in, because a head this store added a moment
+   * ago must be keyable on the next bill without restarting the till.
+   */
+  const toggleChargesSection = useCallback(() => {
+    if (!isChargesModalOpen) {
+      if (isRecallingBill) {
+        showNotification("This bill is still opening — press Alt+F again in a moment.", "info");
+        return;
+      }
+      loadChargeHeads();
+    }
+    setIsChargesModalOpen((open) => !open);
+  }, [isChargesModalOpen, isRecallingBill, loadChargeHeads]);
+
+  /**
+   * What Apply means for the bill: the grid's rows become the document's charges and the freight
+   * scalar they replace stops pricing anything, so the same rupee is never counted twice (PUR-017).
+   */
+  const applyCharges = (rows: ChargeDraftRow[]) => {
+    setChargeRows(rows);
+    setIsChargesModalOpen(false);
+  };
+
   // Global Keyboard Navigation Listener
   useEffect(() => {
     const handleGlobalKeyDown = (e: KeyboardEvent) => {
       const isCmdOrCtrl = e.ctrlKey || e.metaKey;
       const key = e.key.toLowerCase();
+      const chargesChords = findShortcut("toggleCharges", "purchase")?.keys || [];
+      const isToggleCharges = chargesChords.some((chord) => matchesChord(e, chord));
+
+      // PUR-007: with the charges section open it owns every key that moves a caret or a row, so
+      // the bill behind it answers only the chords the spec keeps alive over it — hold, recall,
+      // post — plus Alt+F itself, which closes it again.
+      if (isChargesModalOpen && !(isToggleCharges || e.key === "F8" || e.key === "F9" || e.key === "F12")) {
+        return;
+      }
 
       // ? : Keyboard shortcuts cheatsheet modal
       if (e.key === "?" && !isCmdOrCtrl) {
@@ -858,11 +984,11 @@ export const PurchaseEntryForm: React.FC<PurchaseEntryFormProps> = ({
         return;
       }
 
-      // Alt+F : Focus Freight charges
-      if (e.altKey && key === "f") {
+      // Alt+F : the charges section (PUR-007). The chord comes from the central key map, so the
+      // screen, the cheatsheet and the published key map can never disagree about what opens it.
+      if (isToggleCharges) {
         e.preventDefault();
-        const freightEl = document.getElementById("freight-input-field");
-        freightEl?.focus();
+        toggleChargesSection();
         return;
       }
 
@@ -978,7 +1104,11 @@ export const PurchaseEntryForm: React.FC<PurchaseEntryFormProps> = ({
     selectedSupplier,
     supplierInvoiceNo,
     undoDeleteBuffer,
-    freightCharges,
+    chargeRows,
+    chargeHeads,
+    placeOfSupply,
+    isChargesModalOpen,
+    toggleChargesSection,
     manualRoundOff,
     focusContext,
     isEditingCell,
@@ -986,6 +1116,101 @@ export const PurchaseEntryForm: React.FC<PurchaseEntryFormProps> = ({
     selectedCellCol,
     getNavigableCols,
   ]);
+
+  // The bill's own chords register in the purchase scope. The global shell answers F1/F2/F6/F8/F9
+  // in the capture phase, so the bill has to claim them before that walk starts — otherwise the key
+  // leaves the screen and takes the unsaved lines with it (KB-02).
+  const unconfirmedBill =
+    lines.length > 0 ||
+    Boolean(draftLine?.product_name) ||
+    supplierInvoiceNo.trim().length > 0 ||
+    chargeRows.some((row) => Number(row.amount) > 0);
+
+  const focusEntryRow = () => {
+    setFocusContext("entry_row");
+    entryProductInputRef.current?.focus();
+    entryProductInputRef.current?.select();
+  };
+
+  const leaveBill = () => {
+    if (
+      unconfirmedBill &&
+      !window.confirm("Close purchase bill entry? Any unsaved line items will be lost.")
+    ) {
+      return;
+    }
+    onClose();
+  };
+
+  const startFreshBill = () => {
+    if (
+      unconfirmedBill &&
+      !window.confirm("Start a new purchase bill? Any unsaved line items will be lost.")
+    ) {
+      return;
+    }
+    resetToNewBill();
+  };
+
+  const purchaseShortcutHandlersRef = useRef<Record<string, () => boolean>>({});
+  purchaseShortcutHandlersRef.current = {
+    // PUR-007: over the charges grid these keys stay claimed but inert, so they cannot fall
+    // through to the global shell while the grid owns the screen.
+    purchaseFocusEntry: () => {
+      if (!isChargesModalOpen) focusEntryRow();
+      return true;
+    },
+    newPurchase: () => {
+      if (!isChargesModalOpen) startFreshBill();
+      return true;
+    },
+    findPurchase: () => {
+      if (!isChargesModalOpen) leaveBill();
+      return true;
+    },
+    saveDraft: () => {
+      handleSaveDraft();
+      return true;
+    },
+    recallDraft: () => {
+      setIsDraftsModalOpen(true);
+      return true;
+    },
+    postPurchase: () => {
+      openPostSummary(false);
+      return true;
+    },
+    postPurchasePrint: () => {
+      openPostSummary(true);
+      return true;
+    },
+  };
+
+  useEffect(() => {
+    const handlers: Partial<Record<ShortcutAction, ShortcutHandler>> = {};
+    for (const action of Object.keys(purchaseShortcutHandlersRef.current) as ShortcutAction[]) {
+      handlers[action] = () => purchaseShortcutHandlersRef.current[action]?.() ?? false;
+    }
+    const uninstall = shortcutDispatcher.install();
+    const unregister = shortcutDispatcher.register({
+      id: "purchase-entry",
+      scope: "purchase",
+      priority: 65,
+      handlers,
+    });
+    return () => {
+      unregister();
+      uninstall();
+    };
+  }, []);
+
+  // Every global navigation chord asks this bill before it leaves the screen.
+  useEffect(() => {
+    if (!unconfirmedBill) return;
+    return registerNavigationGuard(() =>
+      window.confirm("Discard the unsaved purchase bill and leave? Any line items will be lost.")
+    );
+  }, [unconfirmedBill]);
 
   // Open Post Summary Modal and run verification checks
   const openPostSummary = (autoPrintLabels = false) => {
@@ -1001,12 +1226,18 @@ export const PurchaseEntryForm: React.FC<PurchaseEntryFormProps> = ({
       return;
     }
 
-    const allLinesToPost = [...lines];
+    // The entry row is a line being typed, not a line on the bill. Posting around it would drop
+    // it silently; posting it without the operator's Enter would put an unconfirmed line on the
+    // bill. Either way the posted total stops matching the screen, so ask (PUR-03).
     if (draftLine && draftLine.product_name) {
-      if (!batchRequired || (draftLine.batch_no.trim() && draftLine.expiry_date.trim())) {
-        allLinesToPost.push(draftLine);
-      }
+      showNotification(
+        `${draftLine.product_name} is still in the entry row. Press Enter to add the line in the entry row, or Esc to clear it.`,
+        "error"
+      );
+      return;
     }
+
+    const allLinesToPost = lines;
 
     if (allLinesToPost.length === 0) {
       showNotification("Cannot post empty purchase bill. Add at least one item [F1].", "error");
@@ -1055,7 +1286,12 @@ export const PurchaseEntryForm: React.FC<PurchaseEntryFormProps> = ({
         nearExpiryBatches.push({ product_name: l.product_name, batch_no: l.batch_no, expiry_date: l.expiry_date });
       }
 
-      const margin = calculateLineMargin(l.purchase_rate, l.selling_rate || 0, l.units_per_pack || 1);
+      const margin = calculateLineMargin(
+        l.purchase_rate,
+        l.selling_rate || 0,
+        (l.gst_percent || 0) + (l.cess_percent || 0),
+        appSettings.tax_mode !== "exclusive"
+      );
       if (margin.isNegative) {
         negativeMarginItems.push({
           product_name: l.product_name,
@@ -1068,6 +1304,13 @@ export const PurchaseEntryForm: React.FC<PurchaseEntryFormProps> = ({
       if (!l.hsn_code || l.hsn_code.trim().length === 0) {
         missingHsnGstItems.push({ product_name: l.product_name });
       }
+    }
+
+    // A row this store's own heads cannot post stops the bill rather than pricing it silently
+    // without its charges (rule R12, PUR-014).
+    if (pricedCharges.problem) {
+      showNotification(pricedCharges.problem, "error");
+      return;
     }
 
     const hasBlockers = expiredBatches.length > 0;
@@ -1087,6 +1330,15 @@ export const PurchaseEntryForm: React.FC<PurchaseEntryFormProps> = ({
       nearExpiryBatches,
       negativeMarginItems,
       missingHsnGstItems,
+      charges: computedTotals.charges.map((charge) => ({
+        head_name: charge.head_name,
+        amount: charge.amount,
+        gst_percent: charge.gst_percent,
+        treatment: charge.treatment || "add_to_cost",
+        paid_separately: Boolean(charge.paid_separately),
+      })),
+      chargeTotal: computedTotals.chargeTotal,
+      separateChargeTotal: computedTotals.separateChargeTotal,
       hasBlockers,
     });
 
@@ -1100,15 +1352,6 @@ export const PurchaseEntryForm: React.FC<PurchaseEntryFormProps> = ({
     try {
       setIsPosting(true);
 
-      const allLinesToPost = [...lines];
-      if (
-        draftLine &&
-        draftLine.product_name &&
-        (!batchRequired || (draftLine.batch_no.trim() && draftLine.expiry_date.trim()))
-      ) {
-        allLinesToPost.push(draftLine);
-      }
-
       const docInput: PurchaseDocumentInput = {
         purchase_number: entryNumber && entryNumber !== "Loading..." && entryNumber !== "PB-NEW" ? entryNumber : undefined,
         supplier_id: selectedSupplier.id,
@@ -1119,9 +1362,11 @@ export const PurchaseEntryForm: React.FC<PurchaseEntryFormProps> = ({
         due_date: dueDate || undefined,
         place_of_supply: placeOfSupply,
         is_interstate: isInterstate,
-        lines: allLinesToPost,
+        lines,
         round_off: computedTotals.roundOff,
-        freight_charges: computedTotals.freightCharges,
+        // PUR-017: the bill posts its charge rows, never the freight scalar they replaced, so the
+        // engine prices each rupee exactly once.
+        charges: draftsToInputs(chargeRows, placeOfSupply),
         bill_discount_type: billDiscountType,
         bill_discount: billDiscountValue,
         notes: remarks.trim() || undefined,
@@ -1142,7 +1387,22 @@ export const PurchaseEntryForm: React.FC<PurchaseEntryFormProps> = ({
           number: result.purchaseNumber,
           total: computedTotals.grandTotal,
           supplierName: selectedSupplier.name,
+          syncState: result.syncState,
+          syncMessage: result.syncMessage,
         });
+
+        // Only a server-accepted bill is reported as posted. A bill still on the queue — or
+        // one the server refused — says so at the counter instead of claiming success (PUR-01).
+        if (result.syncState === "synced") {
+          showNotification(`Purchase bill ${result.purchaseNumber} posted to the server`, "success");
+        } else if (result.syncMessage) {
+          showNotification(
+            `Saved on this till, but the server has not accepted it yet: ${result.syncMessage}`,
+            "error"
+          );
+        } else {
+          showNotification("Saved on this till — it will be posted when the server is reachable", "info");
+        }
       }
     } catch (err) {
       showNotification(err instanceof Error ? err.message : "Failed to post purchase bill", "error");
@@ -1168,6 +1428,10 @@ export const PurchaseEntryForm: React.FC<PurchaseEntryFormProps> = ({
         place_of_supply: placeOfSupply,
         is_interstate: isInterstate,
         lines,
+        round_off: manualRoundOff ?? undefined,
+        bill_discount_type: billDiscountType,
+        bill_discount: billDiscountValue,
+        charges: draftsToInputs(chargeRows, placeOfSupply),
         notes: remarks,
       };
 
@@ -1187,6 +1451,11 @@ export const PurchaseEntryForm: React.FC<PurchaseEntryFormProps> = ({
       if (draft.payload.lines && draft.payload.lines.length > 0) {
         setLines(draft.payload.lines);
       }
+      // A held bill keeps the rows it was keyed with, so recalling it cannot drop a charge.
+      setChargeRows((draft.payload.charges || []).map(chargeRowToDraft));
+      setManualRoundOff(draft.payload.round_off ?? null);
+      if (draft.payload.bill_discount_type) setBillDiscountType(draft.payload.bill_discount_type);
+      setBillDiscountValue(draft.payload.bill_discount || 0);
       if (draft.payload.notes) setRemarks(draft.payload.notes);
       showNotification(`Recalled draft for ${draft.payload.supplier_name}`);
     }
@@ -1204,7 +1473,7 @@ export const PurchaseEntryForm: React.FC<PurchaseEntryFormProps> = ({
     setSearchQuery("");
     setSearchResults([]);
     setSupplierInvoiceTotal("");
-    setFreightCharges(0);
+    setChargeRows([]);
     setManualRoundOff(null);
     setBillDiscountType("amount");
     setBillDiscountValue(0);
@@ -1564,9 +1833,9 @@ export const PurchaseEntryForm: React.FC<PurchaseEntryFormProps> = ({
                 searchInputRef={entryProductInputRef}
                 isDropdownOpen={!isProductDropdownDismissed && (searchResults.length > 0 || showProductQuickAddOption)}
                 onFieldChange={(field, val) => {
-                  if (draftLine) {
-                    setDraftLine({ ...draftLine, [field]: val });
-                  }
+                  // Functional update: one batch pick writes batch_no + expiry + mfg + MRP +
+                  // both rates in a single event, so each field must build on the previous one.
+                  setDraftLine((prev) => (prev ? { ...prev, [field]: val } : prev));
                 }}
                 onCommitDraft={commitEntryRow}
                 onClearDraft={clearDraftLine}
@@ -1703,18 +1972,21 @@ export const PurchaseEntryForm: React.FC<PurchaseEntryFormProps> = ({
               <span className="font-bold font-mono text-[var(--color-text)]">₹ {computedTotals.taxTotal.toFixed(2)}</span>
             </div>
 
-            {/* Freight & Other Charges */}
-            <div className="flex items-center gap-1.5">
-              <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--color-text-muted)]">Freight (Alt+F): </span>
-              <input
-                id="freight-input-field"
-                type="number"
-                step="0.01"
-                value={freightCharges || ""}
-                onChange={(e) => setFreightCharges(parseFloat(e.target.value) || 0)}
-                placeholder="0.00"
-                className="w-16 font-mono text-xs rounded-[6px] border border-[var(--color-border)] bg-[var(--color-surface)] px-1.5 py-0.5 text-right text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none"
-              />
+            {/* Charges (Alt+F) */}
+            <div
+              className="flex items-center gap-1.5"
+              data-charge-total="true"
+              title="Alt+F — key the bill's extra cost lines"
+            >
+              <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--color-text-muted)]">Charges (Alt+F): </span>
+              <span className="font-mono text-xs rounded-[6px] border border-[var(--color-border)] bg-[var(--color-surface)] px-1.5 py-0.5 text-right text-[var(--color-text)]">
+                ₹ {computedTotals.chargeTotal.toFixed(2)}
+              </span>
+              {computedTotals.separateChargeTotal > 0.004 && (
+                <span className="text-[10px] font-mono text-[var(--color-text-muted)]">
+                  +₹{computedTotals.separateChargeTotal.toFixed(2)} out
+                </span>
+              )}
             </div>
 
             {/* Round-off */}
@@ -1918,6 +2190,17 @@ export const PurchaseEntryForm: React.FC<PurchaseEntryFormProps> = ({
         />
       )}
 
+      {/* Supplier bill charges grid (Alt+F, PUR-007) */}
+      <PurchaseChargesModal
+        isOpen={isChargesModalOpen}
+        heads={chargeHeads}
+        rows={chargeRows}
+        placeOfSupply={placeOfSupply}
+        totals={computedTotals.engine}
+        onApply={applyCharges}
+        onClose={() => setIsChargesModalOpen(false)}
+      />
+
       {/* Post Purchase Summary & Verification Modal (F12) */}
       {postValidationSummary && (
         <PurchasePostSummaryModal
@@ -1946,6 +2229,8 @@ export const PurchaseEntryForm: React.FC<PurchaseEntryFormProps> = ({
           onPrintVoucher={() => setIsPrintPreviewModalOpen(true)}
           onPaySupplier={() => setIsSupplierPaymentModalOpen(true)}
           onNewBill={resetToNewBill}
+          syncState={postSuccessData.syncState}
+          syncMessage={postSuccessData.syncMessage}
         />
       )}
 
@@ -1974,17 +2259,19 @@ export const PurchaseEntryForm: React.FC<PurchaseEntryFormProps> = ({
           docType="purchase_bill"
           title={`Purchase Inward Voucher - ${postSuccessData.number}`}
           data={{
-            document: {
-              purchase_number: postSuccessData.number,
-              supplier_name: postSuccessData.supplierName,
-              supplier_invoice_no: supplierInvoiceNo,
-              purchase_date: purchaseDate,
-              grand_total: postSuccessData.total,
-              subtotal: computedTotals.subtotal,
-              tax_total: computedTotals.taxTotal,
-              round_off: computedTotals.roundOff,
-              payment_mode: purchaseType === "cash" ? "Cash" : "Credit",
-            },
+            purchase_number: postSuccessData.number,
+            supplier_name: selectedSupplier?.name || postSuccessData.supplierName,
+            supplier_gstin: selectedSupplier?.gstin,
+            supplier_invoice_no: supplierInvoiceNo,
+            purchase_date: purchaseDate,
+            subtotal: computedTotals.subtotal,
+            tax_total: computedTotals.taxTotal,
+            round_off: computedTotals.roundOff,
+            grand_total: postSuccessData.total,
+            payment_status: purchaseType === "cash" ? "Cash" : "Credit",
+            // CR-C: the voucher names the money the supplier billed besides the goods, because
+            // grand_total above already contains it — without these rows the paper does not foot.
+            charges: computedTotals.engine.charges,
             items: lines,
           }}
         />

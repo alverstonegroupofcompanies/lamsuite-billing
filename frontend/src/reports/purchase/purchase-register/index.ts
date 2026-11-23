@@ -1,6 +1,26 @@
 import type { ReportModule, ReportColumn, ReportFilterDef } from "../../types";
 import { sqliteStorage } from "../../../lib/db/sqliteStorage";
 import type { PurchaseDocumentRecord } from "../../../lib/purchases/purchaseService";
+import {
+  chargeHeadsLabel,
+  indexChargeRegister,
+  type PurchaseChargeRecord,
+  type PurchaseChargeSummary,
+} from "../../../lib/reports/purchaseChargeRegister";
+
+/**
+ * REP-007: the register reads a bill as two blocks — the goods the header calls `subtotal`, and
+ * the charges the supplier billed on top of it. The header tax already carries the charge GST
+ * (PUR-001), so the charge block is taken back out of it rather than added to it, and a bill keyed
+ * before CR-C contributes its freight scalar as one Freight head (PUR-017).
+ */
+const chargeSummary = (row: any): PurchaseChargeSummary | null =>
+  (row?.charge_summary as PurchaseChargeSummary) || null;
+
+const chargeOf = (row: any, pick: (s: PurchaseChargeSummary) => number) => {
+  const summary = chargeSummary(row);
+  return summary ? pick(summary) : 0;
+};
 
 export const purchaseRegisterColumns: ReportColumn<PurchaseDocumentRecord>[] = [
   {
@@ -131,6 +151,100 @@ export const purchaseRegisterColumns: ReportColumn<PurchaseDocumentRecord>[] = [
     totalType: "sum",
   },
   {
+    id: "charge_taxable",
+    header: "Charge Taxable (₹)",
+    accessor: (r) => chargeOf(r, (s) => s.charge_taxable),
+    align: "right",
+    width: 125,
+    format: "currency",
+    isDefaultVisible: false,
+    totalType: "sum",
+  },
+  {
+    id: "charge_tax",
+    header: "Charge Tax (₹)",
+    accessor: (r) => chargeOf(r, (s) => s.charge_tax),
+    align: "right",
+    width: 110,
+    format: "currency",
+    isDefaultVisible: false,
+    totalType: "sum",
+  },
+  {
+    id: "charge_total",
+    header: "Charges (₹)",
+    accessor: (r) => chargeOf(r, (s) => s.charge_total),
+    align: "right",
+    width: 105,
+    format: "currency",
+    isDefaultVisible: true,
+    totalType: "sum",
+    canSort: true,
+  },
+  {
+    id: "charge_add_to_cost",
+    header: "Added To Cost (₹)",
+    accessor: (r) =>
+      chargeOf(r, (s) =>
+        s.by_head
+          .filter((head) => head.in_payable && head.treatment === "add_to_cost")
+          .reduce((sum, head) => sum + head.total, 0)
+      ),
+    align: "right",
+    width: 125,
+    format: "currency",
+    isDefaultVisible: false,
+    totalType: "sum",
+  },
+  {
+    id: "charge_expensed",
+    header: "Expensed (₹)",
+    accessor: (r) =>
+      chargeOf(r, (s) =>
+        s.by_head
+          .filter((head) => head.in_payable && head.treatment === "expense")
+          .reduce((sum, head) => sum + head.total, 0)
+      ),
+    align: "right",
+    width: 110,
+    format: "currency",
+    isDefaultVisible: false,
+    totalType: "sum",
+  },
+  {
+    id: "charge_separately_paid",
+    header: "Paid Separately (₹)",
+    // PUR-013: money already handed to a transporter is the bill's cost but not its payable.
+    accessor: (r) => chargeOf(r, (s) => s.separately_paid.total),
+    align: "right",
+    width: 135,
+    format: "currency",
+    isDefaultVisible: false,
+    totalType: "sum",
+  },
+  {
+    id: "charge_heads",
+    header: "Charge Heads",
+    accessor: (r) => {
+      const summary = chargeSummary(r);
+      return summary && summary.by_head.length ? chargeHeadsLabel(summary.by_head) : "-";
+    },
+    align: "left",
+    width: 240,
+    isDefaultVisible: true,
+  },
+  {
+    id: "landed_value",
+    header: "Landed Value (₹)",
+    // The goods taxable plus what add-to-cost charges spread onto it — the taxable half of payable.
+    accessor: (r) => chargeOf(r, (s) => s.landed_value),
+    align: "right",
+    width: 125,
+    format: "currency",
+    isDefaultVisible: false,
+    totalType: "sum",
+  },
+  {
     id: "grand_total",
     header: "Invoice Value (₹)",
     accessor: (r) => r.grand_total,
@@ -182,16 +296,27 @@ export const purchaseRegisterFilters: ReportFilterDef[] = [
       { label: "Fully Paid", value: "paid" },
     ],
   },
+  {
+    id: "hasCharges",
+    label: "Bill Charges",
+    type: "select",
+    defaultValue: "all",
+    options: [
+      { label: "All Bills", value: "all" },
+      { label: "With Charges", value: "with" },
+      { label: "Without Charges", value: "without" },
+    ],
+  },
 ];
 
 export const purchaseRegisterReport: ReportModule<any, PurchaseDocumentRecord> = {
   id: "purchase-register",
   title: "Purchase Inward Register",
-  description: "Detailed inward inventory tax register with supplier invoices, taxable input credits, and payment statuses.",
+  description: "Inward tax register that shows each supplier bill as two blocks — goods taxable and tax apart from the charges billed on top, by head — plus landed value, payable and payment status.",
   category: "purchase",
   permission: "reports.purchase.view",
   menuVisibilityKey: "reports",
-  keywords: ["purchase", "inward", "supplier bills", "itc", "gstr2", "procurement"],
+  keywords: ["purchase", "inward", "supplier bills", "itc", "gstr2", "procurement", "charges", "landed cost", "freight"],
   defaultSort: { column: "purchase_date", direction: "desc" },
   supportedPrintLayouts: ["a4", "dot-matrix"],
   exportFormats: ["csv", "excel", "pdf"],
@@ -205,10 +330,11 @@ export const purchaseRegisterReport: ReportModule<any, PurchaseDocumentRecord> =
     const startDateStr = String(dates.startDate || "").trim().slice(0, 10);
     const endDateStr = String(dates.endDate || "").trim().slice(0, 10);
 
-    const [allPurchasesDocs, allPurchasesAlt, allPurchaseItems] = await Promise.all([
+    const [allPurchasesDocs, allPurchasesAlt, allPurchaseItems, allCharges] = await Promise.all([
       sqliteStorage.findAll<PurchaseDocumentRecord>("purchase_documents").catch(() => []),
       sqliteStorage.findAll<PurchaseDocumentRecord>("purchases").catch(() => []),
       sqliteStorage.findAll<any>("purchase_items").catch(() => []),
+      sqliteStorage.findAll<PurchaseChargeRecord>("purchase_charges").catch(() => []),
     ]);
 
     const itemsByPurchaseId = new Map<string, string[]>();
@@ -264,6 +390,25 @@ export const purchaseRegisterReport: ReportModule<any, PurchaseDocumentRecord> =
           (p.supplier_name && p.supplier_name.toLowerCase().includes(q)) ||
           (p.supplier_invoice_no && p.supplier_invoice_no.toLowerCase().includes(q))
       );
+    }
+
+    // Charges are read once and grouped, so a register over thousands of bills stays one pass.
+    const chargeIndex = indexChargeRegister(
+      filtered as unknown as Parameters<typeof indexChargeRegister>[0],
+      allCharges,
+      allPurchaseItems
+    );
+    for (const row of filtered) {
+      (row as any).charge_summary = chargeIndex.byBill.get((row as any).id) || null;
+    }
+
+    const chargesFilter = String(params.filters.hasCharges || "all");
+    if (chargesFilter !== "all") {
+      filtered = filtered.filter((p) => {
+        const summary = (p as any).charge_summary as PurchaseChargeSummary | null;
+        const count = summary?.charge_count ?? 0;
+        return chargesFilter === "with" ? count > 0 : count === 0;
+      });
     }
 
     return {

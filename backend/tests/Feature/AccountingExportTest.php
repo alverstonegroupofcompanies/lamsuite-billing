@@ -214,8 +214,10 @@ class AccountingExportTest extends TestCase
         $types = collect($res->json('types'))->keyBy('type');
         $this->assertSame(['tally', 'busy', 'csv'], $types['sales']['formats']);
         $this->assertSame(['csv'], $types['gst-summary']['formats']);
+        // REP-008: the expense register is exportable like any other book.
+        $this->assertSame(['csv'], $types['expenses']['formats']);
         $this->assertTrue($types['party-statement']['requires_party']);
-        $this->assertCount(8, $types);
+        $this->assertCount(9, $types);
     }
 
     public function test_export_parties_endpoint_is_scoped(): void

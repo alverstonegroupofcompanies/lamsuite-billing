@@ -78,6 +78,12 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
         } else if (e.key.toLowerCase() === "b") {
           e.preventDefault();
           navigate("/portal-access");
+        } else if (e.key.toLowerCase() === "k") {
+          e.preventDefault();
+          navigate("/counters");
+        } else if (e.key.toLowerCase() === "n") {
+          e.preventDefault();
+          navigate("/salespeople");
         }
       }
     };

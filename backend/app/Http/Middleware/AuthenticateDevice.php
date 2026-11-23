@@ -41,12 +41,21 @@ class AuthenticateDevice
         $status = $device?->status ?? $counter?->status;
         $store = $device?->store ?? $counter?->store;
 
+        // CNT-011: the counter is the tenant principal, so an administrator who
+        // locks or retires it stops its workstation — even when the device row
+        // still reads "active".
+        $counter = $counter ?? ($device?->counter_id ? Counter::find($device->counter_id) : null);
+
         if (!$store || !$store->is_active) {
             return $this->deny('Store license is suspended or deactivated.', 403);
         }
 
         if (in_array($status, ['revoked', 'locked'], true)) {
             return $this->deny('This workstation has been revoked or locked by the store administrator.', 403);
+        }
+
+        if ($counter && in_array($counter->status, [Counter::STATUS_REVOKED, Counter::STATUS_LOCKED], true)) {
+            return $this->deny('This counter has been locked or retired by the store administrator.', 403);
         }
 
         if ($status === 'pending_approval') {
@@ -70,6 +79,8 @@ class AuthenticateDevice
         $request->attributes->set('device_id', $device?->id);
         $request->attributes->set('device_uuid', $device?->device_uuid ?? $counter?->device_uuid);
         $request->attributes->set('device_store_id', $storeId);
+        // CNT-001: the counter, not the workstation, is the tenant principal.
+        $request->attributes->set('device_counter_id', $counter?->id ?? $device?->counter_id);
         $request->merge(['store_id' => $storeId]);
 
         return $next($request);

@@ -20,6 +20,7 @@ class AdminFeatureController
             ['id' => 'customer_debit_notes', 'name' => 'Customer Debit Notes (B2B)', 'description' => 'Multi-invoice reconciliation & GST credit notes'],
             ['id' => 'purchases', 'name' => 'Purchase Management', 'description' => 'Inward stock bills, supplier invoice entry & ITC'],
             ['id' => 'purchase_returns', 'name' => 'Purchase Returns (Debit Notes)', 'description' => 'Stock debit notes & supplier return notes'],
+            ['id' => 'expenses', 'name' => 'Expenses', 'description' => 'Cash, bank & digital expenses paid out of a counter drawer'],
             ['id' => 'stock', 'name' => 'Stock & Inventory', 'description' => 'Stock ledger, batch view, near-expiry alerts & adjustments'],
             ['id' => 'stock_transfers', 'name' => 'Inter-Store Transfers', 'description' => 'Multi-item branch dispatch, receipt & delivery challans'],
             ['id' => 'reports', 'name' => 'Reports & GST Hub', 'description' => 'GSTR-1, HSN summary, collections, daily sales & doctor reports'],

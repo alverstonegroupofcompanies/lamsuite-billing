@@ -16,6 +16,10 @@ Schedule::command('webhooks:dispatch')
     ->everyMinute()
     ->withoutOverlapping();
 
+Schedule::command('alerts:sweep')
+    ->everyFiveMinutes()
+    ->withoutOverlapping();
+
 Schedule::command('backup:database')
     ->dailyAt(env('BACKUP_SCHEDULE', '02:00'))
     ->withoutOverlapping();

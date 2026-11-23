@@ -10,9 +10,12 @@ use App\Http\Controllers\Api\AdminDeviceController;
 use App\Http\Controllers\Api\AdminFeatureController;
 use App\Http\Controllers\Api\AdminUserController;
 use App\Http\Controllers\Api\AdminMasterController;
+use App\Http\Controllers\Api\AdminSalespersonController;
+use App\Http\Controllers\Api\SalespersonController;
 use App\Http\Controllers\Api\AdminCatalogController;
 use App\Http\Controllers\Api\AdminTransactionController;
 use App\Http\Controllers\Api\AdminDayCloseController;
+use App\Http\Controllers\Api\ApprovalGrantController;
 use App\Http\Controllers\Api\InvoiceApprovalController;
 use App\Http\Controllers\Api\AdminInventoryController;
 use App\Http\Controllers\Api\AdminReportController;
@@ -29,6 +32,7 @@ use App\Http\Controllers\Api\AdminLoyaltyController;
 use App\Http\Controllers\Api\AdminAccountingExportController;
 use App\Http\Controllers\Api\AdminGstWorkingPaperController;
 use App\Http\Controllers\Api\AdminPortalController;
+use App\Http\Controllers\Api\AdminPurchaseChargeController;
 use App\Http\Controllers\Api\PortalController;
 use App\Http\Controllers\Api\PaymentIntentController;
 use App\Http\Controllers\Api\AdminAuditController;
@@ -45,6 +49,15 @@ use App\Http\Controllers\Api\PrintController;
 use App\Http\Controllers\Api\DataExchangeController;
 use App\Http\Controllers\Api\MigrationController;
 use App\Http\Controllers\Api\CounterController;
+use App\Http\Controllers\Api\AdminCounterController;
+use App\Http\Controllers\Api\AdminPermissionProfileTemplateController;
+use App\Http\Controllers\Api\CounterClaimController;
+use App\Http\Controllers\Api\CounterContextController;
+use App\Http\Controllers\Api\CounterSequenceController;
+use App\Http\Controllers\Api\CounterShiftController;
+use App\Http\Controllers\Api\CounterUnlockController;
+use App\Http\Controllers\Api\TillExpenseController;
+use App\Http\Controllers\Api\RetiredRouteController;
 use App\Http\Controllers\Api\DesktopUpdateController;
 use App\Http\Controllers\Api\HeldBillController;
 use App\Http\Controllers\Api\StaffAuthController;
@@ -61,26 +74,56 @@ Route::post('/login', [AdminAuthController::class, 'login']);
 Route::post('/auth/login', [AdminAuthController::class, 'login']);
 Route::post('/auth/forgot-password', [PasswordResetController::class, 'forgot'])->middleware('throttle:6,1');
 Route::post('/auth/reset-password', [PasswordResetController::class, 'reset'])->middleware('throttle:6,1');
-Route::post('/devices/register', [AuthController::class, 'registerDevice']);
-Route::post('/devices/register-owner', [AuthController::class, 'registerDeviceWithOwner']);
+
+// CNT-013 — retired registration paths. A shared store key, an owner password and
+// a pairing code no longer bring a workstation onto a till, so those doors answer
+// with one instruction instead of disappearing into a 404 an old build cannot read.
+Route::any('/devices/register', RetiredRouteController::class);
+Route::any('/devices/register-owner', RetiredRouteController::class);
+Route::any('/counters/enroll', RetiredRouteController::class);
+Route::any('/counters/enrollment-status/{device_uuid}', RetiredRouteController::class);
+Route::any('/counters/approve-pairing', RetiredRouteController::class);
 Route::match(['get', 'post'], '/devices/validate', [AuthController::class, 'validateToken']);
-Route::post('/counters/enroll', [CounterController::class, 'enroll']);
-Route::get('/counters/enrollment-status/{device_uuid}', [CounterController::class, 'checkEnrollmentStatus']);
-Route::post('/counters/approve-pairing', [CounterController::class, 'approvePairing']);
+Route::post('/counters/claim', [CounterClaimController::class, 'claim']);
 Route::get('/counters/{id}/watch', [CounterController::class, 'watch']);
-Route::get('/counters', [CounterController::class, 'index']);
-Route::get('/branches', [AuthController::class, 'branches']);
 Route::get('/license/check', [AuthController::class, 'checkLicense']);
 
 // Staff Terminal Authentication & Offline Hash Cache
 Route::post('/staff/login', [StaffAuthController::class, 'login'])->middleware('throttle:30,1,staff-login');
-Route::get('/sync/pull/deltas', [SyncController::class, 'pullDeltas']);
 
 // Workstation-scoped endpoints: the paired device token decides which store
 // the request may read credentials from or write tenant data to.
-Route::middleware('device.auth')->group(function () {
+Route::middleware(['device.auth', 'counter.profile'])->group(function () {
+    Route::get('/counter/context', [CounterContextController::class, 'show']);
+    // PRF-004: the watermark alone, cheap enough for a till to ask often.
+    Route::get('/counter/profile-version', [CounterContextController::class, 'version']);
+    // CNT-014: the counter's own number series, read and leased by device token.
+    Route::get('/counter/sequences', [CounterSequenceController::class, 'index']);
+    Route::post('/counter/sequences/lease', [CounterSequenceController::class, 'lease']);
+    // PRF-007: this counter's own drawer. The device token says which counter,
+    // the PIN says a person stood at it, and no parameter names either.
+    Route::get('/counter/shift', [CounterShiftController::class, 'show']);
+    Route::post('/counter/shift/open', [CounterShiftController::class, 'open'])->middleware('throttle:20,1,counter-shift');
+    Route::post('/counter/shift/close', [CounterShiftController::class, 'close'])->middleware('throttle:20,1,counter-shift');
+    // EXP-01: money out of this counter's drawer, recorded by the drawer itself.
+    Route::post('/expenses', [TillExpenseController::class, 'store']);
     Route::get('/staff/offline-cache', [StaffAuthController::class, 'offlineCache']);
     Route::post('/staff/admin-unlock', [StaffAuthController::class, 'adminUnlock'])->middleware('throttle:6,1,staff-admin-unlock');
+
+    // A16b: the Staff panel at the till is opened by the counter that owns the
+    // store, not by a person. Same controller the admin panel uses, so the
+    // terminal rules (own branch only, no Super Admin, no multi-branch grant)
+    // are enforced in one place; the audit names the counter.
+    Route::get('/till/staff', [AdminUserController::class, 'index']);
+    Route::post('/till/staff', [AdminUserController::class, 'store']);
+    Route::put('/till/staff/{id}', [AdminUserController::class, 'update']);
+    Route::delete('/till/staff/{id}', [AdminUserController::class, 'destroy']);
+    Route::post('/till/staff/{id}/unlock', [AdminUserController::class, 'unlock']);
+    Route::post('/till/staff/{id}/reset-pin', [AdminUserController::class, 'resetPin']);
+
+    // PRF-006: the counter's own unlock PIN, and the one cache that ships its hash.
+    Route::post('/counter/unlock', [CounterUnlockController::class, 'unlock'])->middleware('throttle:10,1,counter-unlock');
+    Route::get('/credentials/offline-cache', [CounterUnlockController::class, 'offlineCache']);
     Route::post('/sync/push/batch', [SyncController::class, 'pushBatch']);
     Route::post('/sync/push/invoices', [SyncController::class, 'pushInvoices']);
     Route::post('/sync/push/stock-events', [SyncController::class, 'pushStockEvents']);
@@ -93,12 +136,6 @@ Route::middleware('device.auth')->group(function () {
     Route::post('/sync/push/security-audit', [SyncController::class, 'pushSecurityAudit']);
 });
 
-// Central Store Configuration & Sync for all Terminals & Devices
-Route::get('/settings', [AdminSettingController::class, 'index']);
-Route::post('/settings', [AdminSettingController::class, 'update']);
-Route::put('/settings', [AdminSettingController::class, 'update']);
-
-// Centralized Device Session Tracking & Logged-In Devices (Item 2)
 // Customer B2B Portal (bearer portal link issued by an admin)
 Route::middleware('portal.auth')->prefix('portal')->group(function () {
     Route::get('/me', [PortalController::class, 'me']);
@@ -113,59 +150,91 @@ Route::middleware('portal.auth')->prefix('portal')->group(function () {
 
 Route::get('/public-ip', [DeviceSessionController::class, 'publicIp']);
 Route::get('/network/public-ip', [DeviceSessionController::class, 'publicIp']);
-Route::get('/device-sessions', [DeviceSessionController::class, 'index']);
-Route::get('/devices/logged-in', [DeviceSessionController::class, 'index']);
-Route::get('/devices/connected', [DeviceSessionController::class, 'index']);
-Route::post('/device-sessions/heartbeat', [DeviceSessionController::class, 'heartbeat']);
-Route::post('/devices/heartbeat', [DeviceSessionController::class, 'heartbeat']);
-Route::post('/device-sessions/logout', [DeviceSessionController::class, 'logout']);
-Route::post('/devices/logout', [DeviceSessionController::class, 'logout']);
-Route::post('/device-sessions/{id}/rename', [DeviceSessionController::class, 'rename']);
-Route::post('/device-sessions/{id}/lock', [DeviceSessionController::class, 'lock']);
-Route::post('/device-sessions/{id}/unlock', [DeviceSessionController::class, 'unlock']);
-Route::post('/device-sessions/{id}/revoke', [DeviceSessionController::class, 'revoke']);
-Route::post('/device-sessions/{id}/force-logout', [DeviceSessionController::class, 'forceLogout']);
-Route::post('/devices/sessions/{id}/expire', [DeviceSessionController::class, 'expireSession']);
-Route::post('/devices/sessions/{id}/logout', [DeviceSessionController::class, 'expireSession']);
-Route::post('/staff/logout', [StaffAuthController::class, 'logout']);
 
-Route::get('/sync/stream', [SyncController::class, 'streamSSE']);
-Route::post('/invoices/{id}/lock', [SyncController::class, 'lockInvoice']);
-Route::post('/invoices/{id}/unlock', [SyncController::class, 'unlockInvoice']);
-Route::get('/invoices', [InvoiceController::class, 'index']);
-Route::post('/invoices', [InvoiceController::class, 'store']);
-Route::get('/invoices/{id}', [InvoiceController::class, 'show']);
-Route::post('/invoices/{id}/cancel', [InvoiceController::class, 'cancel']);
-Route::post('/invoices/{id}/approvals/verify', [InvoiceApprovalController::class, 'verify']);
+/*
+|--------------------------------------------------------------------------
+| Till routes that used to answer anyone (G1-SEC, QA round 3 SEC-01..03)
+|--------------------------------------------------------------------------
+| Each of these now needs the counter's device token (or a person's token
+| scoped to a store they may reach). The store and the counter come from the
+| token, never from the request; tests/Feature/RouteAuthAllowlistTest keeps a
+| new route from slipping back out of a group.
+*/
+Route::middleware(['counter.auth', 'counter.profile'])->group(function () {
+    // Central store configuration for the till (the panel uses /admin/settings).
+    Route::get('/settings', [AdminSettingController::class, 'index']);
+    Route::post('/settings', [AdminSettingController::class, 'update']);
+    Route::put('/settings', [AdminSettingController::class, 'update']);
 
-// Terminal Customer Lookups & Registration
-Route::get('/customers', [CustomerController::class, 'index']);
-Route::post('/customers', [CustomerController::class, 'store']);
-Route::get('/customers/{id}', [CustomerController::class, 'show']);
+    // Workstation presence and the till's logged-in devices table.
+    Route::get('/device-sessions', [DeviceSessionController::class, 'index']);
+    Route::get('/devices/logged-in', [DeviceSessionController::class, 'index']);
+    Route::get('/devices/connected', [DeviceSessionController::class, 'index']);
+    Route::post('/device-sessions/heartbeat', [DeviceSessionController::class, 'heartbeat']);
+    Route::post('/devices/heartbeat', [DeviceSessionController::class, 'heartbeat']);
+    Route::post('/device-sessions/logout', [DeviceSessionController::class, 'logout']);
+    Route::post('/devices/logout', [DeviceSessionController::class, 'logout']);
+    Route::post('/device-sessions/{id}/rename', [DeviceSessionController::class, 'rename']);
+    Route::post('/device-sessions/{id}/lock', [DeviceSessionController::class, 'lock']);
+    Route::post('/device-sessions/{id}/unlock', [DeviceSessionController::class, 'unlock']);
+    Route::post('/device-sessions/{id}/revoke', [DeviceSessionController::class, 'revoke']);
+    Route::post('/device-sessions/{id}/force-logout', [DeviceSessionController::class, 'forceLogout']);
+    Route::post('/devices/sessions/{id}/expire', [DeviceSessionController::class, 'expireSession']);
+    Route::post('/devices/sessions/{id}/logout', [DeviceSessionController::class, 'expireSession']);
+    Route::post('/staff/logout', [StaffAuthController::class, 'logout']);
 
-// Customer-specific price list resolution for POS terminals
-Route::get('/price-lists/resolve', [AdminPriceListController::class, 'resolve']);
+    // EventSource cannot send headers: the till passes ?device_token= on this one URL.
+    Route::get('/sync/stream', [SyncController::class, 'streamSSE']);
+    Route::get('/sync/pull/deltas', [SyncController::class, 'pullDeltas']);
 
-// Electronic Dispatch & WhatsApp Gateway (OpenWA)
-Route::post('/whatsapp/send-invoice', [WhatsAppController::class, 'sendInvoice']);
-Route::post('/whatsapp/test-connection', [WhatsAppController::class, 'testConnection']);
-Route::get('/whatsapp/sessions', [WhatsAppController::class, 'sessions']);
-Route::get('/whatsapp/config', [WhatsAppController::class, 'getConfig']);
+    Route::post('/invoices/{id}/lock', [SyncController::class, 'lockInvoice']);
+    Route::post('/invoices/{id}/unlock', [SyncController::class, 'unlockInvoice']);
+    Route::get('/invoices', [InvoiceController::class, 'index']);
+    Route::post('/invoices', [InvoiceController::class, 'store']);
+    Route::get('/invoices/{id}', [InvoiceController::class, 'show']);
+    Route::post('/invoices/{id}/cancel', [InvoiceController::class, 'cancel']);
+    Route::post('/invoices/{id}/approvals/verify', [InvoiceApprovalController::class, 'verify']);
 
-// Distributed Live Held Bills across all counters
-Route::get('/held-bills', [HeldBillController::class, 'index']);
-Route::post('/held-bills', [HeldBillController::class, 'store']);
-Route::post('/held-bills/{id}/claim', [HeldBillController::class, 'claim']);
-Route::delete('/held-bills/{id}', [HeldBillController::class, 'destroy']);
+    // APR-003..010: an approver PIN is exchanged here for a single-use grant
+    // bound to the bill the counter is about to save.
+    Route::post('/approvals/grant', [ApprovalGrantController::class, 'grant']);
 
-// Counter series sequence block lease
-Route::post('/counters/{id}/lease-sequence', [CounterController::class, 'leaseSequence']);
+    // GAP-01 / SPR-002: the salespeople this counter may name on a bill.
+    Route::get('/salespeople/eligible', [SalespersonController::class, 'eligible']);
 
-Route::get('/inventory/negative-stock-report', [SyncController::class, 'getNegativeStockReport']);
-Route::post('/counters/{id}/shifts/open', [CounterController::class, 'openShift']);
-Route::post('/counters/{id}/shifts/close', [CounterController::class, 'closeShift']);
-Route::post('/counters/{id}/status', [CounterController::class, 'updateStatus']);
-Route::post('/stores/day-close', [CounterController::class, 'closeStoreDay']);
+    // Customer-specific price list resolution for POS terminals
+    Route::get('/price-lists/resolve', [AdminPriceListController::class, 'resolve']);
+
+    // Electronic Dispatch & WhatsApp Gateway (OpenWA)
+    Route::post('/whatsapp/send-invoice', [WhatsAppController::class, 'sendInvoice']);
+    Route::post('/whatsapp/test-connection', [WhatsAppController::class, 'testConnection']);
+    Route::get('/whatsapp/sessions', [WhatsAppController::class, 'sessions']);
+    Route::get('/whatsapp/config', [WhatsAppController::class, 'getConfig']);
+
+    // Distributed Live Held Bills across all counters
+    Route::get('/held-bills', [HeldBillController::class, 'index']);
+    Route::post('/held-bills', [HeldBillController::class, 'store']);
+    Route::post('/held-bills/{id}/claim', [HeldBillController::class, 'claim']);
+    Route::delete('/held-bills/{id}', [HeldBillController::class, 'destroy']);
+
+    // Sibling branches for the till's store switcher and transfers (was public: listed every store's GSTIN, phone, licences).
+    Route::get('/branches', [AuthController::class, 'branches']);
+
+    // Counters of this store and the legacy series lease (new tills use /counter/sequences/lease).
+    Route::get('/counters', [CounterController::class, 'index']);
+    Route::post('/counters/{id}/lease-sequence', [CounterController::class, 'leaseSequence']);
+    Route::post('/stores/day-close', [CounterController::class, 'closeStoreDay']);
+
+    Route::get('/inventory/negative-stock-report', [SyncController::class, 'getNegativeStockReport']);
+});
+// B9 / PRF-007: a drawer is opened by the counter that holds it or by a person
+// who can see it in the panel — never by an anonymous caller naming a counter
+// id in the URL. A till with a device token uses /api/counter/shift/*.
+Route::middleware(['auth:sanctum', 'ip.allowlist', 'scope.store'])->group(function () {
+    Route::post('/counters/{id}/shifts/open', [CounterController::class, 'openShift'])->middleware('rbac:devices,edit');
+    Route::post('/counters/{id}/shifts/close', [CounterController::class, 'closeShift'])->middleware('rbac:devices,edit');
+});
+Route::any('/counters/{id}/status', RetiredRouteController::class);
 
 // Desktop Tauri Updater Manifest Endpoints
 Route::get('/app/update/latest.json', [DesktopUpdateController::class, 'getLatestManifest']);
@@ -175,15 +244,15 @@ Route::get('/app/update/{target}/{current_version}', [DesktopUpdateController::c
 
 /*
 |--------------------------------------------------------------------------
-| Desktop Client Protected Store Operations (Sanctum Authenticated)
+| Desktop Client Protected Store Operations
 |--------------------------------------------------------------------------
+| A person's bearer token or the counter's device token opens these: the CR
+| makes the counter the tenant principal, so a till with nobody signed in is
+| still authorised for its own store.
 */
-Route::middleware('auth:sanctum')->group(function () {
+Route::middleware(['counter.auth', 'counter.profile'])->group(function () {
     Route::get('/store', [StoreController::class, 'show']);
     Route::put('/store', [StoreController::class, 'update']);
-
-    Route::get('/me/preferences', [UserPreferenceController::class, 'show']);
-    Route::put('/me/preferences', [UserPreferenceController::class, 'update']);
 
     Route::get('/customers', [CustomerController::class, 'index']);
     Route::post('/customers', [CustomerController::class, 'store']);
@@ -232,9 +301,9 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/reports/gstr-1', [ReportController::class, 'gstr1']);
     Route::get('/reports/hsn-summary', [ReportController::class, 'hsnSummary']);
     Route::get('/reports/customer-aging', [ReportController::class, 'customerAging']);
+    Route::get('/reports/expense-register', [ReportController::class, 'expenseRegister']);
     Route::get('/reports/tax-reconciliation', [ReportController::class, 'taxReconciliation']);
     Route::get('/dashboard/metrics', [ReportController::class, 'dashboardMetrics']);
-    Route::post('/staff/change-password', [StaffAuthController::class, 'changePassword']);
 
     // Data Exchange (Universal Import / Export)
     Route::post('/data-exchange/preview', [DataExchangeController::class, 'preview']);
@@ -254,12 +323,25 @@ Route::middleware('auth:sanctum')->group(function () {
 
 /*
 |--------------------------------------------------------------------------
+| Endpoints that only a person can answer for
+|--------------------------------------------------------------------------
+| Whose keyboard shortcuts and whose password are not things a counter owns, so
+| the device token deliberately buys nothing here.
+*/
+Route::middleware('auth:sanctum')->group(function () {
+    Route::get('/me/preferences', [UserPreferenceController::class, 'show']);
+    Route::put('/me/preferences', [UserPreferenceController::class, 'update']);
+    Route::post('/staff/change-password', [StaffAuthController::class, 'changePassword']);
+});
+
+/*
+|--------------------------------------------------------------------------
 | Web Admin Panel API (Sanctum + Tenant Scoping + RBAC + IP Allowlist)
 |--------------------------------------------------------------------------
 */
 // Alias for backwards compatibility / un-prefixed store operations
 Route::middleware(['auth:sanctum', 'ip.allowlist', 'scope.store'])
-    ->post('/stores/{id}/regenerate-key', [AdminStoreController::class, 'regenerateKey'])
+    ->post('/stores/{id}/regenerate-key', RetiredRouteController::class)
     ->middleware('rbac:stores,edit');
 
 Route::middleware(['auth:sanctum', 'ip.allowlist', 'scope.store'])->prefix('admin')->group(function () {
@@ -287,7 +369,7 @@ Route::middleware(['auth:sanctum', 'ip.allowlist', 'scope.store'])->prefix('admi
     Route::get('/stores/{id}', [AdminStoreController::class, 'show'])->middleware('rbac:stores,view');
     Route::put('/stores/{id}', [AdminStoreController::class, 'update'])->middleware('rbac:stores,edit');
     Route::post('/stores/{id}/toggle-status', [AdminStoreController::class, 'toggleStatus'])->middleware('rbac:stores,edit');
-    Route::post('/stores/{id}/regenerate-key', [AdminStoreController::class, 'regenerateKey'])->middleware('rbac:stores,edit');
+    Route::post('/stores/{id}/regenerate-key', RetiredRouteController::class)->middleware('rbac:stores,edit');
     Route::post('/stores/{id}/reset', [AdminStoreController::class, 'resetStore'])->middleware('rbac:stores,delete');
 
     // Module 3: Devices / Counters
@@ -297,6 +379,40 @@ Route::middleware(['auth:sanctum', 'ip.allowlist', 'scope.store'])->prefix('admi
     Route::post('/devices/{id}/status', [AdminDeviceController::class, 'updateStatus'])->middleware('rbac:devices,edit');
     Route::post('/devices/{id}/force-resync', [AdminDeviceController::class, 'forceResync'])->middleware('rbac:devices,edit');
     Route::get('/counters', [CounterController::class, 'index'])->middleware('rbac:devices,view');
+    Route::post('/counters', [AdminCounterController::class, 'store'])->middleware('rbac:devices,create');
+    Route::put('/counters/{id}', [AdminCounterController::class, 'update'])->middleware('rbac:devices,edit');
+    Route::delete('/counters/{id}', [AdminCounterController::class, 'destroy'])->middleware('rbac:devices,delete');
+    Route::post('/counters/{id}/lock', [AdminCounterController::class, 'lock'])->middleware('rbac:devices,edit');
+    Route::post('/counters/{id}/unlock', [AdminCounterController::class, 'unlock'])->middleware('rbac:devices,edit');
+    // PRF-006: an owner sets the counter's unlock PIN; nothing ever reads it back.
+    Route::post('/counters/{id}/unlock-pin/reset', [AdminCounterController::class, 'resetUnlockPin'])->middleware('rbac:devices,edit');
+    // PRF-001: the permission document a counter works inside. Saving it is the
+    // only thing that changes what a till may do.
+    Route::get('/counters/{id}/profile', [AdminCounterController::class, 'profile'])->middleware('rbac:devices,view');
+    Route::put('/counters/{id}/profile', [AdminCounterController::class, 'updateProfile'])->middleware('rbac:devices,edit');
+    // PRF-002: a document an owner hands to more than one counter — from a stored
+    // template or copied off another counter. Both are ordinary profile saves.
+    Route::post('/counters/{id}/profile/template', [AdminCounterController::class, 'applyProfileTemplate'])->middleware('rbac:devices,edit');
+    Route::post('/counters/{id}/profile/copy-from-counter', [AdminCounterController::class, 'copyProfileFromCounter'])->middleware('rbac:devices,edit');
+    // PRF-008: what moved, who moved it and when, read back from the audit trail.
+    Route::get('/counters/{id}/profile/history', [AdminCounterController::class, 'profileHistory'])->middleware('rbac:devices,view');
+    // Q1 (b): offline documents the counter was not holding, accepted and filed
+    // for the owner to review.
+    Route::get('/counters/{id}/profile/exceptions', [AdminCounterController::class, 'profileExceptions'])->middleware('rbac:devices,view');
+    Route::post('/counters/{id}/profile/exceptions/{exceptionId}/review', [AdminCounterController::class, 'reviewProfileException'])->middleware('rbac:devices,edit');
+    // The same register across every counter in the store, newest first — an
+    // owner with several tills reads one backlog instead of four screens.
+    Route::get('/profile-exceptions', [AdminCounterController::class, 'storeProfileExceptions'])->middleware('rbac:devices,view');
+    Route::get('/permission-profiles', [AdminPermissionProfileTemplateController::class, 'index'])->middleware('rbac:devices,view');
+    Route::post('/permission-profiles', [AdminPermissionProfileTemplateController::class, 'store'])->middleware('rbac:devices,create');
+    Route::get('/permission-profiles/{id}', [AdminPermissionProfileTemplateController::class, 'show'])->middleware('rbac:devices,view');
+    Route::put('/permission-profiles/{id}', [AdminPermissionProfileTemplateController::class, 'update'])->middleware('rbac:devices,edit');
+    Route::post('/permission-profiles/{id}/apply', [AdminPermissionProfileTemplateController::class, 'apply'])->middleware('rbac:devices,edit');
+    Route::delete('/permission-profiles/{id}', [AdminPermissionProfileTemplateController::class, 'destroy'])->middleware('rbac:devices,delete');
+    Route::post('/counters/{id}/activation-code', [AdminCounterController::class, 'activationCode'])->middleware('rbac:devices,edit');
+    Route::get('/counters/{id}/activation-codes', [AdminCounterController::class, 'activationCodes'])->middleware('rbac:devices,view');
+    Route::post('/counters/{id}/activation-codes/{code}/revoke', [AdminCounterController::class, 'revokeCode'])->middleware('rbac:devices,edit');
+    Route::post('/counters/{id}/reissue', [AdminCounterController::class, 'reissue'])->middleware('rbac:devices,edit');
     Route::get('/device-sessions', [DeviceSessionController::class, 'index'])->middleware('rbac:devices,view');
     Route::post('/device-sessions/{id}/rename', [DeviceSessionController::class, 'rename'])->middleware('rbac:devices,edit');
     Route::post('/device-sessions/{id}/lock', [DeviceSessionController::class, 'lock'])->middleware('rbac:devices,edit');
@@ -304,7 +420,9 @@ Route::middleware(['auth:sanctum', 'ip.allowlist', 'scope.store'])->prefix('admi
     Route::post('/device-sessions/{id}/revoke', [DeviceSessionController::class, 'revoke'])->middleware('rbac:devices,edit');
     Route::post('/device-sessions/{id}/force-logout', [DeviceSessionController::class, 'forceLogout'])->middleware('rbac:devices,edit');
     Route::get('/inventory/negative-stock', [SyncController::class, 'getNegativeStockReport'])->middleware('rbac:inventory,view');
-    Route::post('/counters/approve-pairing', [CounterController::class, 'approvePairing'])->middleware('rbac:devices,edit');
+    // CNT-013: the owner-side pairing approval is retired too — an owner hands out
+    // a counter activation code, they do not approve a code typed on a till.
+    Route::any('/counters/approve-pairing', RetiredRouteController::class);
     Route::post('/counters/{id}/status', [CounterController::class, 'updateStatus'])->middleware('rbac:devices,edit');
     Route::post('/counters/{id}/settings', [CounterController::class, 'updateSettings'])->middleware('rbac:devices,edit');
     Route::post('/counters/{id}/lease-sequence', [CounterController::class, 'leaseSequence'])->middleware('rbac:devices,edit');
@@ -346,6 +464,7 @@ Route::middleware(['auth:sanctum', 'ip.allowlist', 'scope.store'])->prefix('admi
     Route::get('/lookups', [AdminMasterController::class, 'lookups'])->middleware('rbac:masters,view');
     Route::post('/lookups', [AdminMasterController::class, 'storeLookup'])->middleware('rbac:masters,create');
     Route::post('/lookups/reset-units', [AdminMasterController::class, 'resetUnits'])->middleware('rbac:masters,edit');
+    Route::post('/lookups/reset-charge-heads', [AdminMasterController::class, 'resetChargeHeads'])->middleware('rbac:masters,edit');
     Route::put('/lookups/{id}', [AdminMasterController::class, 'updateLookup'])->middleware('rbac:masters,edit');
     Route::delete('/lookups/{id}', [AdminMasterController::class, 'deleteLookup'])->middleware('rbac:masters,delete');
 
@@ -353,6 +472,12 @@ Route::middleware(['auth:sanctum', 'ip.allowlist', 'scope.store'])->prefix('admi
     Route::post('/parties', [AdminMasterController::class, 'storeParty'])->middleware('rbac:masters,create');
     Route::put('/parties/{id}', [AdminMasterController::class, 'updateParty'])->middleware('rbac:masters,edit');
     Route::delete('/parties/{id}', [AdminMasterController::class, 'deleteParty'])->middleware('rbac:masters,delete');
+
+    // SPR-001..005: the salespeople a bill names (GAP-01).
+    Route::get('/salespeople', [AdminSalespersonController::class, 'index'])->middleware('rbac:masters,view');
+    Route::post('/salespeople', [AdminSalespersonController::class, 'store'])->middleware('rbac:masters,create');
+    Route::put('/salespeople/{id}', [AdminSalespersonController::class, 'update'])->middleware('rbac:masters,edit');
+    Route::delete('/salespeople/{id}', [AdminSalespersonController::class, 'destroy'])->middleware('rbac:masters,delete');
 
     Route::get('/parties/{id}/portal-status', [AdminPortalController::class, 'status'])->middleware('rbac:masters,view')->whereNumber('id');
     Route::post('/parties/{id}/portal-link', [AdminPortalController::class, 'issue'])->middleware('rbac:masters,edit')->whereNumber('id');
@@ -369,6 +494,7 @@ Route::middleware(['auth:sanctum', 'ip.allowlist', 'scope.store'])->prefix('admi
     Route::get('/invoices/{id}/edit-approvals', [InvoiceApprovalController::class, 'index'])->middleware('rbac:transactions,view');
     Route::post('/invoices/{id}/edit-approvals', [InvoiceApprovalController::class, 'issue'])->middleware('rbac:transactions,edit');
     Route::post('/invoices/{id}/edit-approvals/{approvalId}/revoke', [InvoiceApprovalController::class, 'revoke'])->middleware('rbac:transactions,edit');
+    Route::post('/approvals/one-time-pins', [ApprovalGrantController::class, 'issueOneTimePin'])->middleware('rbac:transactions,edit');
 
     Route::get('/returns', [AdminTransactionController::class, 'returns'])->middleware('rbac:transactions,view');
     Route::get('/quotations', [AdminTransactionController::class, 'quotations'])->middleware('rbac:transactions,view');
@@ -378,6 +504,7 @@ Route::middleware(['auth:sanctum', 'ip.allowlist', 'scope.store'])->prefix('admi
     Route::post('/quotations/{id}/convert', [AdminTransactionController::class, 'convertQuotation'])->middleware('rbac:transactions,edit');
 
     Route::get('/purchases', [AdminTransactionController::class, 'purchases'])->middleware('rbac:transactions,view');
+    Route::get('/purchase-charges', [AdminPurchaseChargeController::class, 'index'])->middleware('rbac:transactions,view');
     Route::get('/purchases/{id}', [AdminTransactionController::class, 'showPurchase'])->middleware('rbac:transactions,view');
     Route::get('/purchase-returns', [AdminTransactionController::class, 'purchaseReturns'])->middleware('rbac:transactions,view');
     Route::get('/purchase-orders', [AdminTransactionController::class, 'purchaseOrders'])->middleware('rbac:transactions,view');
@@ -408,6 +535,8 @@ Route::middleware(['auth:sanctum', 'ip.allowlist', 'scope.store'])->prefix('admi
     Route::post('/payments/customer', [AdminTransactionController::class, 'storeCustomerPayment'])->middleware('rbac:transactions,create');
     Route::get('/supplier-payments', [AdminTransactionController::class, 'supplierPayments'])->middleware('rbac:transactions,view');
     Route::post('/supplier-payments', [AdminTransactionController::class, 'storeSupplierPayment'])->middleware('rbac:transactions,create');
+    // PAY-05: what a receipt may be tied to, before the operator records it.
+    Route::get('/outstanding-documents', [AdminTransactionController::class, 'outstandingDocuments'])->middleware('rbac:transactions,view');
 
     Route::get('/customers/{id}/ledger', [AdminTransactionController::class, 'customerLedger'])->middleware('rbac:transactions,view');
     Route::get('/suppliers/{id}/ledger', [AdminTransactionController::class, 'supplierLedger'])->middleware('rbac:transactions,view');
@@ -515,6 +644,7 @@ Route::middleware(['auth:sanctum', 'ip.allowlist', 'scope.store'])->prefix('admi
     Route::delete('/reports/gstr2b/imports/{id}', [AdminGstWorkingPaperController::class, 'destroyGstr2bImport'])->middleware('rbac:reports,edit')->whereNumber('id');
     Route::get('/reports/customer-aging', [AdminReportController::class, 'customerAging'])->middleware('rbac:reports,view');
     Route::get('/reports/pharmacy', [AdminReportController::class, 'pharmacyReport'])->middleware('rbac:reports,view');
+    Route::get('/reports/salesperson', [AdminReportController::class, 'salesperson'])->middleware('rbac:reports,view');
     Route::get('/reports/scheduled', [AdminReportController::class, 'scheduledReports'])->middleware('rbac:reports,view');
     Route::post('/reports/scheduled', [AdminReportController::class, 'storeScheduledReport'])->middleware('rbac:reports,edit');
     Route::put('/reports/scheduled/{id}', [AdminReportController::class, 'updateScheduledReport'])->middleware('rbac:reports,edit');
@@ -527,6 +657,7 @@ Route::middleware(['auth:sanctum', 'ip.allowlist', 'scope.store'])->prefix('admi
     Route::get('/reports/profit', [ReportController::class, 'profit'])->middleware('rbac:reports,view');
     Route::get('/reports/stock-ledger', [ReportController::class, 'stockLedger'])->middleware('rbac:reports,view');
     Route::get('/reports/tax-reconciliation', [ReportController::class, 'taxReconciliation'])->middleware('rbac:reports,view');
+    Route::get('/reports/expense-register', [ReportController::class, 'expenseRegister'])->middleware('rbac:reports,view');
 
     // Module 10: Sync Center
     Route::get('/sync/events', [AdminSyncController::class, 'index'])->middleware('rbac:sync,view');

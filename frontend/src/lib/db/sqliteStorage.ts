@@ -655,6 +655,170 @@ export const MIGRATIONS: Migration[] = [
       CREATE INDEX IF NOT EXISTS idx_stock_adj_doc_status ON stock_adjustment_documents(status);
     `,
   },
+  {
+    version: 9,
+    name: "purchase_bill_charges",
+    sql: `
+      CREATE TABLE IF NOT EXISTS purchase_charges (
+        id TEXT PRIMARY KEY,
+        external_id TEXT NOT NULL UNIQUE,
+        store_id TEXT NOT NULL,
+        purchase_id TEXT NOT NULL REFERENCES purchase_documents(id) ON DELETE CASCADE,
+        seq INTEGER NOT NULL DEFAULT 1,
+        head_code TEXT NOT NULL,
+        head_name TEXT NOT NULL,
+        note TEXT,
+        treatment TEXT NOT NULL DEFAULT 'add_to_cost',
+        spread_method TEXT NOT NULL DEFAULT 'value',
+        spread_basis_used TEXT NOT NULL DEFAULT 'value',
+        itc_eligibility TEXT NOT NULL DEFAULT 'eligible',
+        is_rcm INTEGER NOT NULL DEFAULT 0,
+        paid_separately INTEGER NOT NULL DEFAULT 0,
+        in_payable INTEGER NOT NULL DEFAULT 1,
+        paid_to_label TEXT,
+        place_of_supply TEXT,
+        sac_code TEXT,
+        amount REAL NOT NULL DEFAULT 0,
+        gst_percent REAL NOT NULL DEFAULT 0,
+        taxable_amount REAL NOT NULL DEFAULT 0,
+        cgst_amount REAL NOT NULL DEFAULT 0,
+        sgst_amount REAL NOT NULL DEFAULT 0,
+        igst_amount REAL NOT NULL DEFAULT 0,
+        cess_amount REAL NOT NULL DEFAULT 0,
+        total_amount REAL NOT NULL DEFAULT 0,
+        allocated_amount REAL NOT NULL DEFAULT 0,
+        source TEXT NOT NULL DEFAULT 'manual',
+        expense_id TEXT,
+        reversed_amount REAL NOT NULL DEFAULT 0,
+        created_by TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_purchase_charges_doc ON purchase_charges(purchase_id);
+      CREATE INDEX IF NOT EXISTS idx_purchase_charges_head ON purchase_charges(store_id, head_code);
+
+      CREATE TABLE IF NOT EXISTS purchase_charge_allocations (
+        id TEXT PRIMARY KEY,
+        external_id TEXT NOT NULL UNIQUE,
+        store_id TEXT NOT NULL,
+        purchase_charge_id TEXT NOT NULL REFERENCES purchase_charges(id) ON DELETE CASCADE,
+        purchase_item_id TEXT NOT NULL REFERENCES purchase_items(id) ON DELETE CASCADE,
+        batch_id TEXT,
+        basis_amount REAL NOT NULL DEFAULT 0,
+        basis_share REAL NOT NULL DEFAULT 0,
+        allocated_amount REAL NOT NULL DEFAULT 0,
+        is_remainder_paisa INTEGER NOT NULL DEFAULT 0,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+
+      CREATE UNIQUE INDEX IF NOT EXISTS purchase_charge_alloc_charge_line_unique
+        ON purchase_charge_allocations(purchase_charge_id, purchase_item_id);
+      CREATE INDEX IF NOT EXISTS idx_charge_allocations_line ON purchase_charge_allocations(store_id, purchase_item_id);
+
+      ALTER TABLE purchase_documents ADD COLUMN freight_charges REAL DEFAULT 0;
+      ALTER TABLE purchase_documents ADD COLUMN bill_discount_type TEXT DEFAULT 'amount';
+      ALTER TABLE purchase_documents ADD COLUMN bill_discount REAL DEFAULT 0;
+
+      ALTER TABLE purchase_items ADD COLUMN gross_weight_kg REAL;
+      ALTER TABLE purchase_items ADD COLUMN charge_allocation REAL DEFAULT 0;
+      ALTER TABLE purchase_items ADD COLUMN landed_unit_cost REAL;
+      ALTER TABLE purchase_items ADD COLUMN original_purchase_item_id TEXT;
+
+      ALTER TABLE product_batches ADD COLUMN landed_cost_rate REAL;
+    `,
+  },
+  {
+    version: 10,
+    name: "expense_charge_traceability",
+    sql: `
+      ALTER TABLE expenses ADD COLUMN purchase_id TEXT;
+      ALTER TABLE expenses ADD COLUMN purchase_charge_id TEXT;
+      ALTER TABLE expenses ADD COLUMN gst_percent REAL DEFAULT 0;
+      ALTER TABLE expenses ADD COLUMN cgst_amount REAL DEFAULT 0;
+      ALTER TABLE expenses ADD COLUMN sgst_amount REAL DEFAULT 0;
+      ALTER TABLE expenses ADD COLUMN igst_amount REAL DEFAULT 0;
+      ALTER TABLE expenses ADD COLUMN itc_eligibility TEXT DEFAULT 'eligible';
+      ALTER TABLE expenses ADD COLUMN paid_separately INTEGER DEFAULT 0;
+    `,
+  },
+  {
+    version: 11,
+    name: "purchase_charge_in_payable",
+    sql: `
+      ALTER TABLE purchase_charges ADD COLUMN in_payable INTEGER NOT NULL DEFAULT 1;
+
+      UPDATE purchase_charges SET in_payable = 0 WHERE paid_separately = 1;
+    `,
+  },
+  {
+    version: 12,
+    name: "expense_drawer_attribution",
+    sql: `
+      ALTER TABLE expenses ADD COLUMN counter_id TEXT;
+
+      CREATE INDEX IF NOT EXISTS idx_expenses_counter ON expenses(counter_id, expense_date);
+    `,
+  },
+  {
+    version: 13,
+    name: "tender_applied_and_handed_over",
+    sql: `
+      ALTER TABLE invoice_payments ADD COLUMN tendered_amount REAL;
+
+      ALTER TABLE invoice_payments ADD COLUMN change_amount REAL;
+    `,
+  },
+  {
+    version: 14,
+    name: "salespeople_cache_and_bill_column",
+    sql: `
+      CREATE TABLE IF NOT EXISTS salespeople (
+        id TEXT PRIMARY KEY,
+        store_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        code TEXT,
+        phone TEXT,
+        counter_ids_json TEXT,
+        has_pin INTEGER NOT NULL DEFAULT 0,
+        is_active INTEGER NOT NULL DEFAULT 1,
+        archived_at INTEGER,
+        cache_synced_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_salespeople_store ON salespeople(store_id, name);
+
+      ALTER TABLE invoices ADD COLUMN salesperson_id TEXT;
+
+      ALTER TABLE invoices ADD COLUMN salesperson_name TEXT;
+    `,
+  },
+  {
+    version: 15,
+    name: "pharmacist_confirmation_and_drug_schedule",
+    sql: `
+      ALTER TABLE salespeople ADD COLUMN is_pharmacist INTEGER NOT NULL DEFAULT 0;
+
+      ALTER TABLE salespeople ADD COLUMN reg_no TEXT;
+
+      -- NULL means the device has never been told: the server's answer decides.
+      ALTER TABLE salespeople ADD COLUMN registration_valid INTEGER;
+
+      ALTER TABLE salespeople ADD COLUMN registration_refusal TEXT;
+
+      ALTER TABLE invoices ADD COLUMN pharmacist_id TEXT;
+
+      ALTER TABLE invoices ADD COLUMN pharmacist_name TEXT;
+
+      ALTER TABLE invoices ADD COLUMN pharmacist_reg_no TEXT;
+
+      ALTER TABLE invoices ADD COLUMN pharmacist_confirmed_at INTEGER;
+
+      ALTER TABLE products ADD COLUMN schedule_code TEXT;
+    `,
+  },
 ];
 
 let mockDb: MockSqliteDatabase | null = null;

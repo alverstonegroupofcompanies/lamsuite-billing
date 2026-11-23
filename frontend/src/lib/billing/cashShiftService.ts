@@ -139,8 +139,14 @@ export class CashShiftService {
       if (rawAmt <= 0) continue;
 
       if (normalizedMode === "Cash") {
-        // Physical net cash tendered in drawer after returning change
-        const netCash = Math.max(0, rawAmt - Number(cashChange || 0));
+        // A settled line already names what stayed in the drawer (amount) and
+        // what was handed over (tendered_amount); subtracting the change again
+        // would net it twice. Only a legacy line, whose amount is the whole
+        // tender, has the caller's change taken out here.
+        const netCash =
+          line.tendered_amount !== undefined
+            ? rawAmt
+            : Math.max(0, rawAmt - Number(cashChange || 0));
         shift.payment_totals["Cash"] = (shift.payment_totals["Cash"] || 0) + netCash;
         shift.expected_cash = (shift.expected_cash || shift.opening_cash) + netCash;
       } else {

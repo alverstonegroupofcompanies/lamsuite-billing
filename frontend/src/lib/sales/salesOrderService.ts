@@ -1,5 +1,5 @@
 import { onlineTransactionService } from "../sync/onlineTransactionService";
-import { storeRegistryService } from "../auth/storeRegistryService";
+import { storeDeviceService } from "../auth/storeDeviceService";
 
 export interface SalesOrderLineInput {
   product_id?: string | number | null;
@@ -71,23 +71,15 @@ export function isOpenSalesOrderStatus(status: string): boolean {
   return (OPEN_SALES_ORDER_STATUSES as readonly string[]).includes(status);
 }
 
-function token(): string | null {
-  try {
-    return localStorage.getItem("staff_token");
-  } catch {
-    return null;
-  }
-}
-
-function headers(): Record<string, string> {
-  const storeId = String(storeRegistryService.getActiveStore()?.id || "1");
-  const bearer = token();
+/**
+ * B8b: nobody signs in at the till, so an order is taken by the counter — its
+ * device token is what authorises the call and pins the store.
+ */
+async function headers(): Promise<Record<string, string>> {
   return {
     "Content-Type": "application/json",
     Accept: "application/json",
-    "X-Store-Id": storeId,
-    "Store-Id": storeId,
-    ...(bearer ? { Authorization: `Bearer ${bearer}` } : {}),
+    ...(await storeDeviceService.getDeviceAuthHeaders()),
   };
 }
 
@@ -96,7 +88,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 6000);
   try {
-    const res = await fetch(`${baseUrl}/api${path}`, { ...init, headers: headers(), signal: controller.signal });
+    const res = await fetch(`${baseUrl}/api${path}`, { ...init, headers: await headers(), signal: controller.signal });
     const body = await res.json().catch(() => ({}));
     if (!res.ok) {
       throw new Error(body?.message || `Request failed (${res.status})`);

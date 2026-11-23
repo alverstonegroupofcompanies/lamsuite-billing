@@ -33,14 +33,16 @@ describe("Remote Counter Offline Sync, Concurrent Batch Billing & Security Simul
     });
 
     it("respects leased sequence boundaries and throws if leased block is exhausted offline", async () => {
-      await counterSequenceService.configureSequence(
-        "cntr_home_02",
-        "invoice",
-        "C02-INV",
-        1001,
-        1001,
-        1002 // Range limited to 1001 and 1002
-      );
+      await counterSequenceService.saveLeasedBlock({
+        counter_id: "cntr_home_02",
+        counter_code: "C02",
+        doc_type: "invoice",
+        financial_year: counterSequenceService.getCurrentFinancialYear(),
+        prefix: "C02-INV",
+        range_start: 1001,
+        range_end: 1002, // Range limited to 1001 and 1002
+        next_number: 1001,
+      });
 
       const inv1 = await counterSequenceService.getNextDocumentNumber("cntr_home_02", "C02", "invoice");
       const inv2 = await counterSequenceService.getNextDocumentNumber("cntr_home_02", "C02", "invoice");

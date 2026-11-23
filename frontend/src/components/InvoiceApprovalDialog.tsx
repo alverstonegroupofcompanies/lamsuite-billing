@@ -9,7 +9,7 @@ import {
 } from "../lib/billing/invoiceApprovalService";
 import type { InvoiceRecord } from "../lib/billing/invoiceManagementService";
 import { storeRegistryService } from "../lib/auth/storeRegistryService";
-import { staffAuthService } from "../lib/auth/staffAuthService";
+import { counterSessionService } from "../lib/auth/counterSessionService";
 
 export interface InvoiceApprovalDialogProps {
   isOpen: boolean;
@@ -64,14 +64,17 @@ export const InvoiceApprovalDialog: React.FC<InvoiceApprovalDialogProps> = ({
       return;
     }
 
-    const session = staffAuthService.getCurrentSession();
+    // B8b: the request comes from this counter; the approver is the person whose
+    // PIN or one-time code is entered below.
+    const counterDocument = counterSessionService.state();
     const activeStore = storeRegistryService.getActiveStore();
-    const storeId = String(activeStore?.id || session?.user?.store_id || "");
+    const storeId = String(activeStore?.id || counterDocument.storeId || "");
     if (!storeId) {
       setError("No active store. Select a store before requesting approval.");
       return;
     }
-    const counterCode = activeStore?.counter_code || session?.counterCode || "C01";
+    const counterCode = activeStore?.counter_code || counterDocument.counterCode || "C01";
+    const requestedBy = counterDocument.counterName || counterCode;
 
     setError("");
     setIsSubmitting(true);
@@ -84,7 +87,7 @@ export const InvoiceApprovalDialog: React.FC<InvoiceApprovalDialogProps> = ({
               action,
               identifier,
               secret,
-              requestedBy: session?.user?.full_name || session?.user?.username,
+              requestedBy,
               counterCode,
               reason: reason.trim() || undefined,
             })

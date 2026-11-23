@@ -1,0 +1,232 @@
+{
+  "pin_trivial": {
+    "st": 422,
+    "body": "{\"message\":\"PIN must be 6 numeric digits.\",\"errors\":{\"pin\":[\"PIN must be 6 numeric digits.\"]}}"
+  },
+  "pin_set": {
+    "st": 200,
+    "body": "{\"success\":true,\"pin_set\":true,\"message\":\"The counter unlock PIN is set. It will never be shown again.\",\"counter\":{\"id\":3,\"store_id\":4,\"counter_code\":\"C02\",\"cou"
+  },
+  "pin_leak": {
+    "has_hash": 1,
+    "len": 60
+  },
+  "unlock_wrong": [
+    "403 {\"success\":false,\"error\":\"DEVICE_AUTH_FAILED\",\"message\":\"This workstation has been revoked or locked",
+    "403 {\"success\":false,\"error\":\"DEVICE_AUTH_FAILED\",\"message\":\"This workstation has been revoked or locked",
+    "403 {\"success\":false,\"error\":\"DEVICE_AUTH_FAILED\",\"message\":\"This workstation has been revoked or locked",
+    "403 {\"success\":false,\"error\":\"DEVICE_AUTH_FAILED\",\"message\":\"This workstation has been revoked or locked",
+    "403 {\"success\":false,\"error\":\"DEVICE_AUTH_FAILED\",\"message\":\"This workstation has been revoked or locked",
+    "403 {\"success\":false,\"error\":\"DEVICE_AUTH_FAILED\",\"message\":\"This workstation has been revoked or locked"
+  ],
+  "unlock_right_after_lockout": {
+    "st": 403,
+    "body": "{\"success\":false,\"error\":\"DEVICE_AUTH_FAILED\",\"message\":\"This workstation has been revoked or locked by the store administrator.\"}"
+  },
+  "counter_row": {
+    "unlock_failed_attempts": 0,
+    "unlock_locked_until": null,
+    "status": "active"
+  },
+  "admin_lock": {
+    "st": 200,
+    "body": "{\"success\":true,\"counter\":{\"id\":3,\"store_id\":4,\"counter_code\":\"C02\",\"counter_name\":\"PH Back Till\",\"location_name\":\"Back desk\",\"is_remote\":false,\"is_hub\":false,\""
+  },
+  "call_while_locked": {
+    "st": 403,
+    "body": "{\"success\":false,\"error\":\"DEVICE_AUTH_FAILED\",\"message\":\"This workstation has been revoked or locked by the store administrator.\"}"
+  },
+  "sale_while_locked": {
+    "st": 403,
+    "body": "{\"success\":false,\"error\":\"DEVICE_AUTH_FAILED\",\"message\":\"This workstation has been revoked or locked by the store administrator.\"}"
+  },
+  "admin_unlock": {
+    "st": 200,
+    "body": "{\"success\":true,\"counter\":{\"id\":3,\"store_id\":4,\"counter_code\":\"C02\",\"counter_name\":\"PH Back Till\",\"location_name\":\"Back desk\",\"is_remote\":false,\"is_hub\":false,\""
+  },
+  "call_after_unlock": 403,
+  "shift_open": {
+    "st": 403,
+    "body": "{\"success\":false,\"error\":\"DEVICE_AUTH_FAILED\",\"message\":\"This workstation has been revoked or locked by the store administrator.\"}"
+  },
+  "shift_show": {
+    "st": 403,
+    "body": "{\"success\":false,\"error\":\"DEVICE_AUTH_FAILED\",\"message\":\"This workstation has been revoked or locked by the store administrator.\"}"
+  },
+  "shift_sale_Cash": 403,
+  "shift_sale_UPI": 403,
+  "shift_close": {
+    "st": 403,
+    "body": "{\"success\":false,\"error\":\"DEVICE_AUTH_FAILED\",\"message\":\"This workstation has been revoked or locked by the store administrator.\"}"
+  },
+  "shift_row": [],
+  "cust_receipt": {
+    "st": 403,
+    "body": "{\"success\":false,\"error\":\"DEVICE_AUTH_FAILED\",\"message\":\"This workstation has been revoked or locked by the store administrator.\"}"
+  },
+  "cust_after": {
+    "before": 0,
+    "after": 0,
+    "invoice": {
+      "payment_status": "unpaid",
+      "paid_amount": 0
+    },
+    "rows": [
+      {
+        "id": 1,
+        "store_id": 4,
+        "customer_id": 6,
+        "amount": 90,
+        "payment_mode": "UPI",
+        "reference_no": "UTR-QA-RCPT-1",
+        "notes": "against C02-INV-QA005",
+        "payment_date": "2026-11-21 00:00:00",
+        "created_by": null,
+        "created_at": "2026-11-21 21:54:31",
+        "updated_at": "2026-11-21 21:54:31"
+      }
+    ]
+  },
+  "cust_receipt_cross_store": {
+    "st": 403,
+    "body": "{\"success\":false,\"error\":\"DEVICE_AUTH_FAILED\",\"message\":\"This workstation has been revoked or locked by the store administrator.\"}"
+  },
+  "sup_payment": {
+    "st": 403,
+    "body": "{\"success\":false,\"error\":\"DEVICE_AUTH_FAILED\",\"message\":\"This workstation has been revoked or locked by the store administrator.\"}"
+  },
+  "sup_after": {
+    "party": {
+      "current_balance": 17429
+    },
+    "purchases": [
+      {
+        "invoice_number": "QA-PB-003",
+        "grand_total": 11554,
+        "paid_amount": 0
+      },
+      {
+        "invoice_number": "QA-PB-DUP",
+        "grand_total": 11,
+        "paid_amount": 0
+      },
+      {
+        "invoice_number": "PUR-4-pur_G9V1795310849078",
+        "grand_total": 200,
+        "paid_amount": 0
+      },
+      {
+        "invoice_number": "PUR-4-pur_G9V1795310856597",
+        "grand_total": 200,
+        "paid_amount": 0
+      },
+      {
+        "invoice_number": "PUR-4-pur_G9V1795310868391",
+        "grand_total": 200,
+        "paid_amount": 0
+      },
+      {
+        "invoice_number": "PUR-4-pur_G9V1795310874491",
+        "grand_total": 200,
+        "paid_amount": 0
+      },
+      {
+        "invoice_number": "PUR-4-pur_G9V1795310882599",
+        "grand_total": 200,
+        "paid_amount": 0
+      },
+      {
+        "invoice_number": "PUR-4-pur_G9V1795310902346",
+        "grand_total": 200,
+        "paid_amount": 0
+      },
+      {
+        "invoice_number": "PUR-4-pur_G9V1795310909765",
+        "grand_total": 200,
+        "paid_amount": 0
+      },
+      {
+        "invoice_number": "PR-4-1795278987",
+        "grand_total": 336,
+        "paid_amount": 0
+      },
+      {
+        "invoice_number": "QA-PB-002",
+        "grand_total": 11200,
+        "paid_amount": 0
+      },
+      {
+        "invoice_number": "QA-PB-003",
+        "grand_total": 11554,
+        "paid_amount": 0
+      },
+      {
+        "invoice_number": "QA-PB-DUP",
+        "grand_total": 11,
+        "paid_amount": 0
+      }
+    ],
+    "rows": [
+      {
+        "id": 1,
+        "store_id": 4,
+        "supplier_id": 8,
+        "amount": 5000,
+        "payment_mode": "Bank Transfer",
+        "reference_no": "NEFT-QA-1",
+        "notes": "part of QA-PB-002",
+        "payment_date": "2026-11-21 00:00:00",
+        "created_by": null,
+        "created_at": "2026-11-21 21:54:31",
+        "updated_at": "2026-11-21 21:54:31"
+      }
+    ]
+  },
+  "sup_ledger": {
+    "current_balance": 17429,
+    "tx": [
+      {
+        "type": "Purchase Inward",
+        "doc_number": "QA-PB-002",
+        "doc_date": "2026-11-21",
+        "credit": 11200,
+        "debit": 0,
+        "running_balance": 11200
+      },
+      {
+        "type": "Purchase Inward",
+        "doc_number": "QA-PB-003",
+        "doc_date": "2026-11-21",
+        "credit": 11554,
+        "debit": 0,
+        "running_balance": 22754
+      },
+      {
+        "type": "Debit Note",
+        "doc_number": "PR-4-1795278987",
+        "doc_date": "2026-11-21",
+        "credit": 0,
+        "debit": 336,
+        "running_balance": 22418
+      },
+      {
+        "type": "Purchase Inward",
+        "doc_number": "QA-PB-DUP",
+        "doc_date": "2026-11-21",
+        "credit": 11,
+        "debit": 0,
+        "running_balance": 22429
+      },
+      {
+        "type": "Disbursement",
+        "doc_number": "NEFT-QA-1",
+        "doc_date": "2026-11-21 00:00:00",
+        "credit": 0,
+        "debit": 5000,
+        "payment_mode": "Bank Transfer",
+        "notes": "part of QA-PB-002",
+        "running_balance": 17429
+      }
+    ]
+  }
+}

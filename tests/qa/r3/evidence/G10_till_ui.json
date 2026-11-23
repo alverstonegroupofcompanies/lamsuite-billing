@@ -1,0 +1,187 @@
+{
+  "pay02": {
+    "summary_before": {
+      "total due": "₹ 115.00",
+      "paid so far": "₹ 115.00",
+      "settlement status": "Fully Paid"
+    },
+    "summary_after_type": {
+      "total due": "₹ 115.00",
+      "paid so far": "₹ 115.00",
+      "change due": "₹ 290.00"
+    },
+    "calls": [
+      {
+        "st": 201,
+        "req": "{\"store_id\":\"4\",\"store_code\":\"QA-PH\",\"external_id\":\"ext_1795321356079_605408\",\"idempotency_key\":\"ext_1795321356079_605408\",\"invoice_number\":\"C02-INV-1056\",\"invoice_date\":\"2026-11-22\",\"customer_id\":\"\",\"customer_name\":\"Walk-in Customer\",\"customer_phone\":\"\",\"customer_gstin\":\"\",\"place_of_supply\":\"32-Kerala\",\"payment_mode\":\"Cash\",\"paid_amount\":115,\"payments\":[{\"id\":\"pay_1795321353364_0\",\"mode\":\"Cash\",\"amount\":115,\"status\":\"received\",\"tendered_amount\":405,\"change_amount\":290}],\"counter_id\":\"cntr_3\",\"tax_mode\":\"inclusive\",\"store_state\":\"32\",\"gst_type\":\"regular\",\"is_composition\":false,\"salesperson_id\":\"\",\"salesperson_name\":\"\",\"bill_discount_percent\":0,\"bill_discount_amount\":0,\"manual_round_off\":null,\"subtotal\":102.68,\"discount_total\":0,\"tax_total\":12.32,\"round_off\":0,\"grand_total\":115,\"is_inter_state\":false,\"items\":[{\"product_id\":\"6\",\"product_name\":\"QA Cough Syrup 100ml\",\"batch_id\":\"7\",\"batch_no\":\"CS-A1\",\"expiry_date\":\"2027-06-30\",\"qty\":1,\"loose_qty\":0,\"free_qty\":0,\"free_loose_qty\":0,\"units_per_pack\":1,\"unit_price\":115,\"mrp\":120,\"discount_percent\":0,\"discount_amount\":0,\"gst_percent\":12,\"rate_basis\":\"sel_rate\"}],\"counter_code\":\"C02\"}",
+        "res": "{\"success\":true,\"invoice\":{\"store_id\":4,\"counter_id\":3,\"counter_code\":\"C02\",\"location_name\":\"Back desk\",\"salesperson_id\":null,\"salesperson_name\":null,\"module_key\":\"invoice\",\"invoice_number\":\"C02-INV-1056\",\"invoice_date\":\"2026-11-22\",\"due_date\":null,\"customer_id\":null,\"customer_name\":\"Walk-in Customer\",\"customer_gstin\":null,\"customer_phone\":null,\"place_of_supply\":\"32-Kerala\",\"subtotal\":\"115.00\",\"ta"
+      }
+    ],
+    "bill": {
+      "id": 153,
+      "invoice_number": "C02-INV-1056",
+      "store_id": 4,
+      "grand_total": 115,
+      "paid_amount": 115,
+      "payment_status": "paid",
+      "payment_mode": "Cash"
+    },
+    "lines": [
+      {
+        "payment_mode": "Cash",
+        "amount": 115,
+        "tendered_amount": 405,
+        "change_amount": 290,
+        "reference_no": null
+      }
+    ]
+  },
+  "pay03": {
+    "summary": {
+      "total due": "₹ 115.00",
+      "paid so far": "₹ 10.00",
+      "balance remaining": "₹ 105.00"
+    },
+    "calls": [
+      {
+        "st": 201,
+        "req": "{\"store_id\":\"4\",\"store_code\":\"QA-PH\",\"external_id\":\"ext_1795321374076_b2ab9b\",\"idempotency_key\":\"ext_1795321374076_b2ab9b\",\"invoice_number\":\"C02-INV-1057\",\"invoice_date\":\"2026-11-22\",\"customer_id\":\"\",\"customer_name\":\"Walk-in Customer\",\"customer_phone\":\"\",\"customer_gstin\":\"\",\"place_of_supply\":\"32-Kerala\",\"payment_mode\":\"Cash\",\"paid_amount\":115,\"payments\":[{\"id\":\"pay_1795321371837_0\",\"mode\":\"Cash\",\"amount\":115,\"status\":\"received\",\"tendered_amount\":115,\"change_amount\":0}],\"counter_id\":\"cntr_3\",\"tax_mode\":\"inclusive\",\"store_state\":\"32\",\"gst_type\":\"regular\",\"is_composition\":false,\"salesperson_id\":\"\",\"salesperson_name\":\"\",\"bill_discount_percent\":0,\"bill_discount_amount\":0,\"manual_round_off\":null,\"subtotal\":102.68,\"discount_total\":0,\"tax_total\":12.32,\"round_off\":0,\"grand_total\":115,\"is_inter_state\":false,\"items\":[{\"product_id\":\"6\",\"product_name\":\"QA Cough Syrup 100ml\",\"batch_id\":\"7\",\"batch_no\":\"CS-A1\",\"expiry_date\":\"2027-06-30\",\"qty\":1,\"loose_qty\":0,\"free_qty\":0,\"free_loose_qty\":0,\"units_per_pack\":1,\"unit_price\":115,\"mrp\":120,\"discount_percent\":0,\"discount_amount\":0,\"gst_percent\":12,\"rate_basis\":\"sel_rate\"}],\"counter_code\":\"C02\"}",
+        "res": "{\"success\":true,\"invoice\":{\"store_id\":4,\"counter_id\":3,\"counter_code\":\"C02\",\"location_name\":\"Back desk\",\"salesperson_id\":null,\"salesperson_name\":null,\"module_key\":\"invoice\",\"invoice_number\":\"C02-INV-1057\",\"invoice_date\":\"2026-11-22\",\"due_date\":null,\"customer_id\":null,\"customer_name\":\"Walk-in Customer\",\"customer_gstin\":null,\"customer_phone\":null,\"place_of_supply\":\"32-Kerala\",\"subtotal\":\"115.00\",\"ta"
+      }
+    ],
+    "sent": [
+      {
+        "paid": 115,
+        "payments": [
+          {
+            "id": "pay_1795321371837_0",
+            "mode": "Cash",
+            "amount": 115,
+            "status": "received",
+            "tendered_amount": 115,
+            "change_amount": 0
+          }
+        ]
+      }
+    ],
+    "bills": [
+      {
+        "id": 154,
+        "invoice_number": "C02-INV-1057",
+        "grand_total": 115,
+        "paid_amount": 115,
+        "payment_status": "paid",
+        "customer_name": "Walk-in Customer"
+      }
+    ],
+    "topped_up": true,
+    "screen": []
+  },
+  "profile_setup": {
+    "http": 200,
+    "put": 200
+  },
+  "pay04_hotkey": {
+    "line_state": {
+      "mode": "UPI",
+      "ref_placeholder": "12-digit UTR or txn ID"
+    },
+    "calls": [
+      {
+        "st": 201,
+        "pay": "\"payments\":[{\"id\":\"pay_1795321403040_0\",\"mode\":\"Cash\",\"amount\":450,\"status\":\"received\",\"tendered_amount\":450,\"change_amount\":0}]"
+      }
+    ],
+    "bill": {
+      "id": 155,
+      "invoice_number": "C01-INV-1016",
+      "store_id": 2,
+      "grand_total": 450,
+      "paid_amount": 450,
+      "payment_status": "paid",
+      "payment_mode": "Cash"
+    },
+    "lines": [
+      {
+        "payment_mode": "Cash",
+        "amount": 450,
+        "tendered_amount": 450,
+        "change_amount": 0,
+        "reference_no": null
+      }
+    ]
+  },
+  "pay04": {
+    "due": 450,
+    "mode_state": {
+      "mode": "UPI",
+      "ref_placeholder": "12-digit UTR or txn ID"
+    },
+    "typed": "450.00",
+    "summary": {
+      "total due": "₹ 450.00",
+      "paid so far": "₹ 450.00",
+      "settlement status": "Fully Paid"
+    },
+    "calls": [],
+    "screen": [],
+    "with_ref": {
+      "field": "12-digit UTR or txn ID",
+      "value_in_field": {
+        "placeholder": "12-digit UTR or txn ID",
+        "value": "UTRG10UI77889"
+      },
+      "calls": [
+        {
+          "st": 201,
+          "req": "{\"store_id\":\"2\",\"store_code\":\"STORE-02\",\"external_id\":\"ext_1795321431478_4a744e\",\"idempotency_key\":\"ext_1795321431478_4a744e\",\"invoice_number\":\"C01-INV-1017\",\"invoice_date\":\"2026-11-22\",\"customer_id\":\"\",\"customer_name\":\"Walk-in Customer\",\"customer_phone\":\"\",\"customer_gstin\":\"\",\"place_of_supply\":\"32-Kerala\",\"payment_mode\":\"UPI\",\"paid_amount\":450,\"payments\":[{\"id\":\"pay_1795321420643_0\",\"mode\":\"UPI\",\"amount\":450,\"status\":\"received\",\"reference_no\":\"UTRG10UI77889\",\"reference\":\"UTRG10UI77889\",\"extra_fields\":{},\"tendered_amount\":450,\"change_amount\":0}],\"counter_id\":\"cntr_1\",\"tax_mode\":\"inclusive\",\"store_state\":\"32\",\"gst_type\":\"regular\",\"is_composition\":false,\"salesperson_id\":\"\",\"salesperson_name\":\"\",\"bill_discount_percent\":0,\"bill_discount_amount\":0,\"manual_round_off\":null,\"subtotal\":381.36,\"discount_total\":0,\"tax_total\":68.64,\"round_off\":0,\"grand_total\":450,\"is_inter_state\":false,\"items\":[{\"product_id\":\"4\",\"product_name\":\"Kochi Exclusive Wellness Tonic\",\"batch_id\":\"5\",\"batch_no\":\"BATCH-01\",\"expiry_date\":\"2027-11-21\",\"qty\":1,\"loose_qty\":0,\"free_qty\":0,\"free_loose_qty\":0,\"units_per_pack\":1,\"unit_price\":450,\"mrp\":450,\"discount_percent\":0,\"discount_amount\":0,\"gst_percent\":18,\"rate_basis\":\"sel_rate\"}],\"counter_code\":\"C01\"}",
+          "res": "{\"success\":true,\"invoice\":{\"store_id\":2,\"counter_id\":1,\"counter_code\":\"C01\",\"location_name\":\"Main Shop\",\"salesperson_id\":null,\"salesperson_name\":null,\"module_key\":\"invoice\",\"invoice_number\":\"C01-INV-1017\",\"invoice_date\":\"2026-11-22\",\"due_date\":null,\"customer_id\":null,\"customer_name\":\"Walk-in Customer\",\"customer_gstin\":null,\"customer_phone\":null,\"place_of_supply\":\"32-Kerala\",\"subtotal\":\"450.00\",\"ta"
+        }
+      ],
+      "bill": {
+        "id": 156,
+        "invoice_number": "C01-INV-1017",
+        "grand_total": 450,
+        "paid_amount": 450,
+        "payment_mode": "UPI",
+        "external_id": "ext_1795321431478_4a744e"
+      },
+      "lines": [
+        {
+          "payment_mode": "UPI",
+          "amount": 450,
+          "tendered_amount": 450,
+          "change_amount": 0,
+          "reference_no": "UTRG10UI77889"
+        }
+      ]
+    }
+  },
+  "expense_form": {
+    "headTyped": true,
+    "amountFocused": true,
+    "head": "QA G10 UI mwrbysrm"
+  },
+  "expense": {
+    "has_screen": true,
+    "calls": [],
+    "row": {
+      "id": 16,
+      "expense_number": "EXP-00001",
+      "store_id": 4,
+      "counter_id": "3",
+      "expense_head": "QA G10 UI mwrbysrm",
+      "amount": 60,
+      "payment_mode": "Cash"
+    },
+    "screen": [
+      "Expenses",
+      "Expenses",
+      "Money paid out of this counter. Cash expenses reduce the drawer at shift close.",
+      "Expense recorded and queued for sync.",
+      "Record an expense",
+      "Expense head",
+      "Record expense"
+    ]
+  }
+}

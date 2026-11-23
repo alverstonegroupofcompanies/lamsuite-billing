@@ -17,11 +17,12 @@ class StoreSettingsDbSyncTest extends TestCase
 
     protected Store $store;
     protected User $staffUser;
+    protected User $owner;
 
     protected function setUp(): void
     {
         parent::setUp();
-        $this->withoutMiddleware(\App\Http\Middleware\AuthenticateDevice::class);
+        $this->actAsClaimedCounterOfRequestedStore();
 
         $this->store = Store::create([
             'name' => 'City Health Pharmacy',
@@ -49,6 +50,14 @@ class StoreSettingsDbSyncTest extends TestCase
             'permissions' => ['*'],
             'enabled_menus' => ['pos', 'bills', 'settings'],
         ]);
+
+        $this->owner = User::create([
+            'store_id' => $this->store->id,
+            'name' => 'Store Owner',
+            'email' => 'owner@lamstone.in',
+            'password' => Hash::make('secret123'),
+            'role' => 'store_owner',
+        ]);
     }
 
     public function test_get_settings_returns_store_configuration(): void
@@ -74,7 +83,7 @@ class StoreSettingsDbSyncTest extends TestCase
             'tax_mode' => 'exclusive',
             'purchase_tax_mode' => 'inclusive',
             'gst_type' => 'composition',
-            'gstin' => '32XYZ9999999Z1',
+            'gstin' => '33ABCDE1234F1Z5',
             'state_code' => '33',
             'allow_tax_override_per_bill' => true,
             'default_rate_basis' => 'mrp',
@@ -112,7 +121,7 @@ class StoreSettingsDbSyncTest extends TestCase
         $this->store->refresh();
         $this->assertEquals('exclusive', $this->store->tax_mode);
         $this->assertEquals('composition', $this->store->gst_type);
-        $this->assertEquals('32XYZ9999999Z1', $this->store->gstin);
+        $this->assertEquals('33ABCDE1234F1Z5', $this->store->gstin);
         $this->assertEquals('33', $this->store->state_code);
 
         $companySetting = CompanySetting::where('store_id', $this->store->id)
@@ -135,7 +144,7 @@ class StoreSettingsDbSyncTest extends TestCase
                 'tax_mode' => 'exclusive',
                 'purchase_tax_mode' => 'inclusive',
                 'gst_type' => 'composition',
-                'gstin' => '32XYZ9999999Z1',
+                'gstin' => '33ABCDE1234F1Z5',
                 'state_code' => '33',
                 'allow_tax_override_per_bill' => true,
                 'credit_period_days' => 45,
@@ -145,26 +154,37 @@ class StoreSettingsDbSyncTest extends TestCase
 
     public function test_all_devices_logging_into_same_store_receive_same_settings_via_staff_login(): void
     {
-        // 1. Configure settings in database
+        // 1. Numbering is a panel decision (SET-03), set through the admin API.
+        $adminToken = $this->owner->createToken('settings-owner')->plainTextToken;
+
+        $this->postJson('/api/admin/settings', [
+            'tax_mode' => 'exclusive',
+            'gst_type' => 'regular',
+            'round_off_enabled' => true,
+            'sequences' => [
+                'invoicePrefix' => 'BILL',
+                'nextInvoiceNumber' => 5001,
+            ],
+            'printing' => [
+                'paperSize' => 'thermal_58mm',
+                'footerNote' => 'Custom Store Receipt Note',
+            ],
+            'security' => [
+                'allowMultiCounterRoles' => ['cashier'],
+            ],
+        ], ['Authorization' => "Bearer {$adminToken}"])->assertOk();
+
+        // 2. A device may still save what the counter is allowed to choose.
         $this->withHeader('X-Store-Id', $this->store->id)
             ->postJson('/api/settings', [
-                'tax_mode' => 'exclusive',
-                'gst_type' => 'regular',
-                'round_off_enabled' => true,
-                'sequences' => [
-                    'invoicePrefix' => 'BILL',
-                    'nextInvoiceNumber' => 5001,
-                ],
                 'printing' => [
                     'paperSize' => 'thermal_58mm',
                     'footerNote' => 'Custom Store Receipt Note',
                 ],
-                // Same cashier signs in on two devices: allowed only because the
-                // store explicitly opts this role into multi-counter sessions.
                 'security' => [
                     'allowMultiCounterRoles' => ['cashier'],
                 ],
-            ]);
+            ])->assertOk();
 
         // 2. Terminal 1 logs in
         $terminal1Login = $this->postJson('/api/staff/login', [

@@ -387,4 +387,73 @@ describe("Billing Tender & Held Bills (POS-005, POS-006, Split Payments)", () =>
       expect(synchronized[0].mode).toBe("Cash");
     });
   });
+
+  describe("Tender settlement (PAY-02): what the bill keeps vs what was handed over", () => {
+    it("keeps the bill amount and returns the rest as change when cash overtenders", () => {
+      const settled = billingTenderService.settleTenders(210, [{ mode: "Cash", amount: 500 }]);
+
+      expect(settled.lines).toHaveLength(1);
+      expect(settled.lines[0].amount).toBe(210);
+      expect(settled.lines[0].tendered_amount).toBe(500);
+      expect(settled.lines[0].change_amount).toBe(290);
+      expect(settled.paid).toBe(210);
+      expect(settled.cash).toBe(210);
+      expect(settled.changeDue).toBe(290);
+      expect(settled.balanceDue).toBe(0);
+    });
+
+    it("settling an already settled line changes nothing", () => {
+      const once = billingTenderService.settleTenders(210, [{ mode: "Cash", amount: 500 }]);
+      const twice = billingTenderService.settleTenders(210, once.lines);
+
+      expect(twice.lines[0]).toEqual(once.lines[0]);
+      expect(twice.paid).toBe(once.paid);
+      expect(twice.changeDue).toBe(once.changeDue);
+    });
+
+    it("applies non-cash in full and takes the change from the cash line only", () => {
+      const settled = billingTenderService.settleTenders(210, [
+        { mode: "UPI", amount: 100, reference_no: "UTR123456789012" },
+        { mode: "Cash", amount: 200 },
+      ]);
+
+      expect(settled.lines[0].amount).toBe(100);
+      expect(settled.lines[0].change_amount).toBe(0);
+      expect(settled.lines[1].amount).toBe(110);
+      expect(settled.lines[1].tendered_amount).toBe(200);
+      expect(settled.lines[1].change_amount).toBe(90);
+      expect(settled.paid).toBe(210);
+      expect(settled.digital).toBe(100);
+      expect(settled.cash).toBe(110);
+    });
+
+    it("keeps credit out of the money collected", () => {
+      const settled = billingTenderService.settleTenders(1000, [
+        { mode: "Cash", amount: 400 },
+        { mode: "Credit", amount: 600 },
+      ]);
+
+      expect(settled.paid).toBe(400);
+      expect(settled.credit).toBe(600);
+      expect(settled.balanceDue).toBe(0);
+    });
+
+    it("refuses to hide a non-cash overpayment inside the change", () => {
+      const settled = billingTenderService.settleTenders(500, [
+        { mode: "UPI", amount: 600, reference_no: "UTR123456789012" },
+      ]);
+
+      expect(settled.hasNonCashOverpayment).toBe(true);
+    });
+
+    it("pays the exact paisa on a rounded bill", () => {
+      const settled = billingTenderService.settleTenders(1224.5, [
+        { mode: "Cash", amount: 1300 },
+      ]);
+
+      expect(settled.lines[0].amount).toBe(1224.5);
+      expect(settled.lines[0].change_amount).toBe(75.5);
+      expect(settled.paid).toBe(1224.5);
+    });
+  });
 });

@@ -18,6 +18,7 @@ import {
   type PurchaseDocumentRecord,
   type PurchaseItemRecord,
 } from "../../lib/purchases/purchaseService";
+import { chargeRowsFor, type PurchaseChargeRecord } from "../../lib/reports/purchaseChargeRegister";
 import { BarcodePrintModal } from "./BarcodePrintModal";
 import { SupplierPaymentModal } from "./SupplierPaymentModal";
 import { PrintPreviewModal } from "../PrintPreviewModal";
@@ -43,6 +44,7 @@ export const PurchaseDetailsDrawer: React.FC<PurchaseDetailsDrawerProps> = ({
 
   const [doc, setDoc] = useState<PurchaseDocumentRecord | null>(null);
   const [items, setItems] = useState<PurchaseItemRecord[]>([]);
+  const [charges, setCharges] = useState<PurchaseChargeRecord[]>([]);
   const [isBarcodeOpen, setIsBarcodeOpen] = useState(false);
   const [isPaymentOpen, setIsPaymentOpen] = useState(false);
   const [isPrintOpen, setIsPrintOpen] = useState(false);
@@ -64,6 +66,7 @@ export const PurchaseDetailsDrawer: React.FC<PurchaseDetailsDrawerProps> = ({
     if (res) {
       setDoc(res.document);
       setItems(res.items);
+      setCharges(res.charges);
     }
   };
 
@@ -487,6 +490,18 @@ export const PurchaseDetailsDrawer: React.FC<PurchaseDetailsDrawerProps> = ({
             igst_total: doc.igst_total,
             round_off: doc.round_off,
             grand_total: doc.grand_total,
+            // CR-C: the money the supplier billed besides the goods, in the rows the register also
+            // reads — a bill keyed before CR-C contributes its legacy freight, so the paper foots
+            // against the payable it prints instead of leaving the difference unexplained.
+            charges: chargeRowsFor(doc, charges).map((row) => ({
+              head_code: row.head_code,
+              head_name: row.head_name,
+              taxable_amount: row.taxable,
+              total_tax: row.tax,
+              total_amount: row.total,
+              paid_separately: row.paid_separately,
+              in_payable: row.in_payable,
+            })),
             lines: items.map((it) => ({
               description: it.product_name,
               hsn_code: it.hsn_code,

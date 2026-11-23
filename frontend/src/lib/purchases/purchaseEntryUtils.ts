@@ -140,31 +140,36 @@ export function parseQuantityEntry(
 }
 
 /**
- * Calculates live margin percentage and checks negative margin
+ * Margin of a purchase line. Both rates are for the same sale unit — the pack/strip the
+ * counter sells. The purchase rate (PTR) is always GST-exclusive; the selling rate follows the
+ * store's sales tax mode, so when it is GST-inclusive it is de-grossed before the comparison
+ * (PUR-04).
  */
 export function calculateLineMargin(
   purchaseRate: number,
   sellingRate: number,
-  unitsPerPack = 1
+  taxPercent = 0,
+  sellTaxInclusive = true
 ): {
   marginPercent: number;
   isNegative: boolean;
   effectiveUnitCost: number;
 } {
-  const packs = Math.max(1, unitsPerPack);
-  const effectiveUnitCost = packs > 1 ? purchaseRate / packs : purchaseRate;
+  const cost = Math.max(0, purchaseRate || 0);
+  const taxMultiplier = sellTaxInclusive ? 1 + Math.max(0, taxPercent || 0) / 100 : 1;
+  const exTaxSellingRate = Math.max(0, sellingRate || 0) / taxMultiplier;
 
-  if (sellingRate <= 0 || effectiveUnitCost <= 0) {
-    return { marginPercent: 0, isNegative: false, effectiveUnitCost };
+  if (exTaxSellingRate <= 0 || cost <= 0) {
+    return { marginPercent: 0, isNegative: false, effectiveUnitCost: Math.round(cost * 100) / 100 };
   }
 
-  const margin = Math.round(((sellingRate - effectiveUnitCost) / sellingRate) * 1000) / 10;
-  const isNegative = sellingRate < effectiveUnitCost - 0.01;
+  const margin = Math.round(((exTaxSellingRate - cost) / exTaxSellingRate) * 1000) / 10;
+  const isNegative = exTaxSellingRate < cost - 0.01;
 
   return {
     marginPercent: margin,
     isNegative,
-    effectiveUnitCost: Math.round(effectiveUnitCost * 100) / 100,
+    effectiveUnitCost: Math.round(cost * 100) / 100,
   };
 }
 

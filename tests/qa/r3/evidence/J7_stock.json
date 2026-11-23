@@ -1,0 +1,315 @@
+{
+  "policy": {
+    "st": 200,
+    "body": "{\"success\":true,\"store_id\":4,\"policy\":{\"allow_negative_stock\":false,\"allowed_roles\":[],\"allowed_reasons\":[],\"max_qty_per_line\":null,\"max_value_per_document\":null,\"max_documents_per_day\":3,\"require_notes\":true,\"approval_threshold_value\":null,\"approval_threshold_qty\":100,\"approver_roles\":[\"store_owner"
+  },
+  "adj_minus10_no_notes": {
+    "st": 422,
+    "body": "{\"message\":\"A note or reason is required for stock adjustments at this store. (and 1 more error)\",\"errors\":{\"policy\":[\"A note or reason is required for stock adjustments at this store.\"],\"blocking_rule\":[\"A note or reason is required for stock adjustments at this store.\"]}}",
+    "before": {
+      "bal": 1391,
+      "led": 1391
+    },
+    "after": {
+      "bal": 1391,
+      "led": 1391
+    }
+  },
+  "adj_minus10": {
+    "st": 201,
+    "body": "{\"success\":true,\"duplicate\":false,\"document_id\":\"adj_20261121215258_54c0c4\",\"status\":\"posted\",\"requires_approval\":false,\"lines_count\":1,\"total_qty\":10,\"adjustments_posted\":1,\"message\":\"Stock adjustment posted to the ledger.\"}",
+    "before": {
+      "bal": 1391,
+      "led": 1391
+    },
+    "after": {
+      "bal": 1381,
+      "led": 1381
+    }
+  },
+  "adj_plus120_should_hold": {
+    "st": 201,
+    "body": "{\"success\":true,\"duplicate\":false,\"document_id\":\"adj_20261121215258_51e055\",\"status\":\"pending_approval\",\"requires_approval\":true,\"lines_count\":1,\"total_qty\":120,\"adjustments_posted\":0,\"message\":\"Stock adjustment submitted for manager approval.\"}",
+    "before": {
+      "bal": 1381,
+      "led": 1381
+    },
+    "after": {
+      "bal": 1381,
+      "led": 1381
+    }
+  },
+  "adj_minus5000_negative": {
+    "st": 422,
+    "body": "{\"message\":\"Adjustment would drive \\\"QA Paracet 500 Strip\\\" batch PA-NEW to -3619.000 units; negative stock is blocked. (and 1 more error)\",\"errors\":{\"policy\":[\"Adjustment would drive \\\"QA Paracet 500 Strip\\\" batch PA-NEW to -3619.000 units; negative stock is blocked.\"],\"blocking_rule\":[\"Adjustment would drive \\\"QA Paracet 500 Strip\\\" batch PA-NEW ",
+    "before": {
+      "bal": 1381,
+      "led": 1381
+    },
+    "after": {
+      "bal": 1381,
+      "led": 1381
+    }
+  },
+  "adj_doc4_daily_limit": {
+    "st": 201,
+    "body": "{\"success\":true,\"duplicate\":false,\"document_id\":\"adj_20261121215258_a2a8fc\",\"status\":\"posted\",\"requires_approval\":false,\"lines_count\":1,\"total_qty\":1,\"adjustments_posted\":1,\"message\":\"Stock adjustment posted to the ledger.\"}",
+    "before": {
+      "bal": 1381,
+      "led": 1381
+    },
+    "after": {
+      "bal": 1380,
+      "led": 1380
+    }
+  },
+  "adj_doc5_daily_limit": {
+    "st": 201,
+    "body": "{\"success\":true,\"duplicate\":false,\"document_id\":\"adj_20261121215258_2d5b48\",\"status\":\"posted\",\"requires_approval\":false,\"lines_count\":1,\"total_qty\":1,\"adjustments_posted\":1,\"message\":\"Stock adjustment posted to the ledger.\"}",
+    "before": {
+      "bal": 1380,
+      "led": 1380
+    },
+    "after": {
+      "bal": 1379,
+      "led": 1379
+    }
+  },
+  "docs": [
+    {
+      "id": 8,
+      "document_id": "adj_20261121215258_2d5b48",
+      "store_id": 4,
+      "mode": "adjustment",
+      "reason": null,
+      "notes": "QA 5th doc",
+      "document_date": "2026-11-21",
+      "status": "posted",
+      "requires_approval": 0,
+      "blocking_rule": null,
+      "lines_count": 1,
+      "total_qty": 1,
+      "total_value": 4,
+      "metadata": "{\"source\":\"stock_adjustment\",\"applied_at\":\"2026-11-21T21:52:58+05:30\"}",
+      "created_by": null,
+      "approved_by": null,
+      "approved_at": null,
+      "created_at": "2026-11-21 21:52:58",
+      "updated_at": "2026-11-21 21:52:58"
+    },
+    {
+      "id": 7,
+      "document_id": "adj_20261121215258_a2a8fc",
+      "store_id": 4,
+      "mode": "adjustment",
+      "reason": null,
+      "notes": "QA 4th doc",
+      "document_date": "2026-11-21",
+      "status": "posted",
+      "requires_approval": 0,
+      "blocking_rule": null,
+      "lines_count": 1,
+      "total_qty": 1,
+      "total_value": 4,
+      "metadata": "{\"source\":\"stock_adjustment\",\"applied_at\":\"2026-11-21T21:52:58+05:30\"}",
+      "created_by": null,
+      "approved_by": null,
+      "approved_at": null,
+      "created_at": "2026-11-21 21:52:58",
+      "updated_at": "2026-11-21 21:52:58"
+    },
+    {
+      "id": 6,
+      "document_id": "adj_20261121215258_51e055",
+      "store_id": 4,
+      "mode": "adjustment",
+      "reason": null,
+      "notes": "QA found stock",
+      "document_date": "2026-11-21",
+      "status": "pending_approval",
+      "requires_approval": 1,
+      "blocking_rule": null,
+      "lines_count": 1,
+      "total_qty": 120,
+      "total_value": 480,
+      "metadata": "{\"source\":\"stock_adjustment\"}",
+      "created_by": null,
+      "approved_by": null,
+      "approved_at": null,
+      "created_at": "2026-11-21 21:52:58",
+      "updated_at": "2026-11-21 21:52:58"
+    },
+    {
+      "id": 5,
+      "document_id": "adj_20261121215258_54c0c4",
+      "store_id": 4,
+      "mode": "adjustment",
+      "reason": null,
+      "notes": "QA broken strips",
+      "document_date": "2026-11-21",
+      "status": "posted",
+      "requires_approval": 0,
+      "blocking_rule": null,
+      "lines_count": 1,
+      "total_qty": 10,
+      "total_value": 40,
+      "metadata": "{\"source\":\"stock_adjustment\",\"applied_at\":\"2026-11-21T21:52:58+05:30\"}",
+      "created_by": null,
+      "approved_by": null,
+      "approved_at": null,
+      "created_at": "2026-11-21 21:52:58",
+      "updated_at": "2026-11-21 21:52:58"
+    },
+    {
+      "id": 4,
+      "document_id": "adj_20261121215251_02dbc4",
+      "store_id": 4,
+      "mode": "adjustment",
+      "reason": null,
+      "notes": "QA 5th doc",
+      "document_date": "2026-11-21",
+      "status": "posted",
+      "requires_approval": 0,
+      "blocking_rule": null,
+      "lines_count": 1,
+      "total_qty": 1,
+      "total_value": 4,
+      "metadata": "{\"source\":\"stock_adjustment\",\"applied_at\":\"2026-11-21T21:52:51+05:30\"}",
+      "created_by": null,
+      "approved_by": null,
+      "approved_at": null,
+      "created_at": "2026-11-21 21:52:51",
+      "updated_at": "2026-11-21 21:52:51"
+    },
+    {
+      "id": 3,
+      "document_id": "adj_20261121215251_77ae2e",
+      "store_id": 4,
+      "mode": "adjustment",
+      "reason": null,
+      "notes": "QA 4th doc",
+      "document_date": "2026-11-21",
+      "status": "posted",
+      "requires_approval": 0,
+      "blocking_rule": null,
+      "lines_count": 1,
+      "total_qty": 1,
+      "total_value": 4,
+      "metadata": "{\"source\":\"stock_adjustment\",\"applied_at\":\"2026-11-21T21:52:51+05:30\"}",
+      "created_by": null,
+      "approved_by": null,
+      "approved_at": null,
+      "created_at": "2026-11-21 21:52:51",
+      "updated_at": "2026-11-21 21:52:51"
+    },
+    {
+      "id": 2,
+      "document_id": "adj_20261121215251_bdf4d5",
+      "store_id": 4,
+      "mode": "adjustment",
+      "reason": null,
+      "notes": "QA found stock",
+      "document_date": "2026-11-21",
+      "status": "pending_approval",
+      "requires_approval": 1,
+      "blocking_rule": null,
+      "lines_count": 1,
+      "total_qty": 120,
+      "total_value": 480,
+      "metadata": "{\"source\":\"stock_adjustment\"}",
+      "created_by": null,
+      "approved_by": null,
+      "approved_at": null,
+      "created_at": "2026-11-21 21:52:51",
+      "updated_at": "2026-11-21 21:52:51"
+    },
+    {
+      "id": 1,
+      "document_id": "adj_20261121215251_788a99",
+      "store_id": 4,
+      "mode": "adjustment",
+      "reason": null,
+      "notes": "QA broken strips",
+      "document_date": "2026-11-21",
+      "status": "posted",
+      "requires_approval": 0,
+      "blocking_rule": null,
+      "lines_count": 1,
+      "total_qty": 10,
+      "total_value": 40,
+      "metadata": "{\"source\":\"stock_adjustment\",\"applied_at\":\"2026-11-21T21:52:51+05:30\"}",
+      "created_by": null,
+      "approved_by": null,
+      "approved_at": null,
+      "created_at": "2026-11-21 21:52:51",
+      "updated_at": "2026-11-21 21:52:51"
+    }
+  ],
+  "pending_list": {
+    "st": 200,
+    "body": "{\"current_page\":1,\"data\":[],\"first_page_url\":\"http:\\/\\/127.0.0.1:8000\\/api\\/admin\\/stock-adjustments?page=1\",\"from\":null,\"last_page\":1,\"last_page_url\":\"http:\\/\\/127.0.0.1:8000\\/api\\/admin\\/stock-adjustments?page=1\",\"links\":[{\"url\":null,\"label\":\"&laquo; Previous\",\"active\":false},{\"url\":\"http:\\/\\/127.0.0.1:8000\\/api\\/admin\\/stock-adjustments?page=1\",\"label\":\"1\",\"active\":true},{\"url\":null,\"label\":\"Next &raquo;\",\"active\":false}],\"next_page_url\":null,\"path\":\"http:\\/\\/127.0.0.1:8000\\/api\\/admin\\/stock"
+  },
+  "physical_count": {
+    "st": 201,
+    "body": "{\"success\":true,\"duplicate\":false,\"document_id\":\"adj_20261121215258_886990\",\"status\":\"posted\",\"requires_approval\":false,\"lines_count\":1,\"total_qty\":14,\"adjustments_posted\":1,\"message\":\"Stock adjustment posted to the ledger.\"}",
+    "before": 24,
+    "after": 10,
+    "ledger_sum": 10
+  },
+  "dispatch": {
+    "st": 201,
+    "body": "{\"success\":true,\"transfer_id\":1,\"id\":1,\"transfer_no\":\"TRF-20261121-EOPRK0\",\"status\":\"dispatched\",\"item_count\":1,\"lines\":[{\"id\":1,\"stock_transfer_id\":1,\"product_id\":5,\"batch_no\":\"PA-NEW\",\"qty\":\"30.00\",\"created_at\":\"2026-11-21T16:22:58.000000Z\",\"updated_at\":\"2026-11-21T16:22:58.000000Z\",\"store_id\":4}]}",
+    "ph_before": 1379,
+    "ph_after": 1349
+  },
+  "cs_transfer_list": {
+    "st": 200,
+    "body": "{\"success\":true,\"data\":[{\"id\":1,\"from_store_id\":4,\"to_store_id\":5,\"transfer_number\":\"TRF-20261121-EOPRK0\",\"status\":\"dispatched\",\"notes\":\"QA transfer\",\"created_by\":null,\"approved_by\":null,\"received_at\":null,\"created_at\":\"2026-11-21T16:22:58.000000Z\",\"updated_at\":\"2026-11-21T16:22:58.000000Z\",\"items\":[{\"id\":1,\"stock_transfer_id\":1,\"product_id\":5,\"batch_no\":\"PA-NEW\",\"qty\":\"30.00\",\"created_at\":\"2026-11-21T16:22:58.000000Z\",\"updated_at\":\"2026-11-21T16:22:58.000000Z\",\"store_id\":4,\"product\":{\"id\":5,\"name\":\"QA Paracet 500 Strip\",\"barcode\":\"8909000000011\"}}],\"from_store\":{\"id\":4,\"name\":\"QA Pharma Kochi"
+  },
+  "items": [],
+  "receive": {
+    "st": 404,
+    "body": "{\n    \"message\": \"No query results for model [App\\\\Models\\\\StockTransfer] undefined\",\n    \"exception\": \"Symfony\\\\Component\\\\HttpKernel\\\\Exception\\\\NotFoundHttpException\",\n    \"file\": \"/Users/anshad/.gemini/antigravity/scratch/lamsuite-billing/backend/vendor/laravel/framework/src/Illuminate/Foundation/Exceptions/Handler.php\",\n    \"line\": 636,\n    \"trace\": [\n        {\n            \"file\": \"/Users/anshad/.gemini/antigravity/scratch/lamsuite-billing/backend/vendor/laravel/framework/src/Illuminate/Foundation/Exceptions/Handler.php\",\n            \"line\": 584,\n            \"function\": \"prepareException\",\n            \"class\": \"Illuminate\\\\Foundation\\\\Exceptions\\\\Handler\",\n            \"type\": \"->\"\n     ",
+    "cs_face_before": 0,
+    "cs_face_after": 0,
+    "cs_batches": [
+      {
+        "id": 9,
+        "product_id": 8,
+        "batch_no": "B1",
+        "stock_qty": 0
+      },
+      {
+        "id": 10,
+        "product_id": 9,
+        "batch_no": "LP-01",
+        "stock_qty": 23
+      }
+    ],
+    "cs_products": [
+      {
+        "id": 8,
+        "name": "QA Glow Face Cream 50g",
+        "barcode": "8909000000011",
+        "current_stock": 0
+      },
+      {
+        "id": 9,
+        "name": "QA Ruby Lipstick",
+        "barcode": "8909100000028",
+        "current_stock": -2
+      }
+    ],
+    "transfer": [],
+    "ledger": [
+      {
+        "store_id": 4,
+        "product_id": 5,
+        "batch_id": 11,
+        "event_type": "TRANSFER_OUT",
+        "qty_delta": -30,
+        "reference_type": "STOCK_TRANSFER"
+      }
+    ]
+  }
+}

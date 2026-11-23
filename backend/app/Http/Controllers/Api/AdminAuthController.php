@@ -7,6 +7,7 @@ use App\Models\DeviceSession;
 use App\Models\Store;
 use App\Models\User;
 use App\Models\UserSession;
+use App\Services\Auth\PinPolicy;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
@@ -55,7 +56,7 @@ class AdminAuthController
         }
 
         // Check if account is locked
-        if ($user->locked_until && $user->locked_until->isFuture()) {
+        if (PinPolicy::isLocked($user->locked_until)) {
             $remainingMinutes = now()->diffInMinutes($user->locked_until) + 1;
             return response()->json([
                 'message' => "Account is temporarily locked due to too many failed attempts. Try again in {$remainingMinutes} minute(s).",
@@ -69,22 +70,24 @@ class AdminAuthController
 
         if (!$passwordMatches) {
             $user->increment('failed_login_attempts');
+            $maxAttempts = PinPolicy::attemptsAllowed($user->max_failed_logins);
+            $lockedUntil = PinPolicy::lockoutUntil((int) $user->failed_login_attempts, $maxAttempts);
 
-            if ($user->failed_login_attempts >= $user->max_failed_logins) {
+            if ($lockedUntil !== null) {
                 $user->update([
-                    'locked_until' => now()->addMinutes(15),
+                    'locked_until' => $lockedUntil,
                     'failed_login_attempts' => 0,
                 ]);
 
                 AuditLog::log('account_locked', 'User', (string)$user->id, null, ['reason' => 'max_failed_logins_exceeded'], $user->store_id, $user->id);
 
                 return response()->json([
-                    'message' => 'Account locked for 15 minutes due to multiple consecutive failed login attempts.',
+                    'message' => 'Account locked for ' . PinPolicy::LOCKOUT_MINUTES . ' minutes due to multiple consecutive failed login attempts.',
                     'locked' => true,
                 ], 423);
             }
 
-            $remaining = $user->max_failed_logins - $user->failed_login_attempts;
+            $remaining = PinPolicy::remainingAttempts((int) $user->failed_login_attempts, $maxAttempts);
             return response()->json([
                 'message' => "Invalid credentials. {$remaining} attempt(s) remaining before account lockout.",
             ], 401);
@@ -215,10 +218,15 @@ class AdminAuthController
             'can_view_all_stores' => $user->canViewAllStores(),
             'is_impersonated' => $isImpersonated,
             'impersonated_by' => $impersonator ? $impersonator->name : null,
+            // state_code must ride along: screens that default a GST state — the
+            // party form, place of supply — read it off the active store.
+            // store_type must ride for the same reason: the panel hides the
+            // pharmacy-only screens (drug schedules, pharmacist staff) with it,
+            // and a store that arrives without one is read as a pharmacy.
             'stores' => ($user->isSuperAdmin() || $user->role === 'support')
-                ? Store::all(['id', 'name', 'code', 'is_active', 'license_plan'])
+                ? Store::all(['id', 'name', 'code', 'is_active', 'license_plan', 'state_code', 'store_type'])
                 : (!empty($user->allowed_store_ids)
-                    ? Store::whereIn('id', $user->allowed_store_ids)->get(['id', 'name', 'code', 'is_active', 'license_plan'])
+                    ? Store::whereIn('id', $user->allowed_store_ids)->get(['id', 'name', 'code', 'is_active', 'license_plan', 'state_code', 'store_type'])
                     : ($user->store ? [$user->store] : [])),
         ]);
     }

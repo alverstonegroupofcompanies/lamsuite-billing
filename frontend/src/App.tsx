@@ -13,16 +13,17 @@ import { BillsPage } from "./pages/BillsPage";
 import { SalesReturnPage } from "./pages/SalesReturnPage";
 import { PurchaseReturnPage } from "./pages/PurchaseReturnPage";
 import { CustomerDebitNotePage } from "./pages/CustomerDebitNotePage";
+import { ExpensesPage } from "./pages/ExpensesPage";
 import { InterStoreTransferPage } from "./pages/InterStoreTransferPage";
 import { CounterStatusPage } from "./pages/CounterStatusPage";
 import { StoreSetupPage } from "./pages/StoreSetupPage";
-import { StaffLoginPage } from "./pages/StaffLoginPage";
 import { ImportExportHubPage } from "./pages/ImportExportHubPage";
 import { DataMigrationPage } from "./pages/DataMigrationPage";
 import { companySettingsService } from "./lib/settings/companySettingsService";
 import { initWorkspaceSettings, applyWorkspaceSettings } from "./lib/settings/workspaceThemeService";
 import { storeDeviceService } from "./lib/auth/storeDeviceService";
 import { staffAuthService } from "./lib/auth/staffAuthService";
+import { counterSessionService } from "./lib/auth/counterSessionService";
 import "./lib/ui/modalEscapeManager";
 
 import { StoreGatewayPage } from "./pages/StoreGatewayPage";
@@ -34,6 +35,7 @@ import { Windows7PrereqModal } from "./components/Windows7PrereqModal";
 import { API_BASE_URL } from "./config/env";
 import { cloudDeltaSyncService } from "./lib/sync/cloudDeltaSyncService";
 import { deviceSessionService } from "./lib/devices/deviceSessionService";
+import { syncQueueService } from "./lib/sync/syncQueueService";
 import { productsStore } from "./lib/masters/productsStore";
 import { unitsStore } from "./lib/masters/unitsStore";
 import { ModalStackProvider } from "./lib/modal/CentralModalManager";
@@ -70,12 +72,10 @@ export const App: React.FC = () => {
   const [activeStore, setActiveStore] = useState<RegisteredStoreRecord | null>(null);
   const [showGateway, setShowGateway] = useState<boolean>(false);
   const [isAddingStore, setIsAddingStore] = useState<boolean>(false);
-  const [hasStaffSession, setHasStaffSession] = useState<boolean>(
-    Boolean(staffAuthService.getCurrentSession())
-  );
   const [availableUpdate, setAvailableUpdate] = useState<UpdateInfo | null>(null);
   const [win7Status, setWin7Status] = useState<Windows7PrereqStatus | null>(null);
   const [showWin7Modal, setShowWin7Modal] = useState<boolean>(false);
+  const [unsentBillCount, setUnsentBillCount] = useState<number>(0);
 
   useEffect(() => {
     initWorkspaceSettings();
@@ -138,7 +138,10 @@ export const App: React.FC = () => {
           const updated = await storeRegistryService.loadRegistry();
           setRegisteredStores(updated.stores);
           setActiveStore(storeRegistryService.getActiveStore());
-          productsStore.ensureCatalogPopulated(storeRegistryService.getActiveStore()?.id || "1").catch(() => {});
+          const legacyActiveId = storeRegistryService.getActiveStore()?.id;
+          if (legacyActiveId) {
+            productsStore.ensureCatalogPopulated(String(legacyActiveId)).catch(() => {});
+          }
           unitsStore.seedDefaultsIfEmpty().catch(() => {});
         } else {
           setRegisteredStores([]);
@@ -163,9 +166,25 @@ export const App: React.FC = () => {
             await storeRegistryService.switchActiveStore(currentActive.id, true).catch(() => {});
           }
 
-          const activeStoreId = String(currentActive?.id || "1");
+          // registry.stores is non-empty here, so currentActive is a claimed store;
+          // never fall back to naming store 1.
+          const activeStoreId = String(currentActive.id);
           productsStore.ensureCatalogPopulated(activeStoreId).catch(() => {});
           unitsStore.seedDefaultsIfEmpty().catch(() => {});
+
+          // The catalog pull used to ride on the operator's sign-in. Nobody
+          // signs in at the till, so it rides on opening the store.
+          cloudDeltaSyncService
+            .pullMasterDelta({
+              fetchMasterDeltas: async (wm) => {
+                const res = await fetch(
+                  `${API_BASE_URL}/api/sync/pull/deltas?store_id=${activeStoreId}&since_watermark=${wm}`
+                );
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                return res.json();
+              },
+            })
+            .catch(() => {});
 
           // Fast online verification of store status and remote reset events.
           // Check every registered store so a reset clears the local DB of
@@ -197,6 +216,9 @@ export const App: React.FC = () => {
           });
         }
       }
+      // PRF-001: the counter's own document is in hand before the first screen
+      // draws, so a till never paints a surface the owner closed.
+      await counterSessionService.hydrate().catch(() => {});
       setIsInitializing(false);
     });
 
@@ -215,19 +237,30 @@ export const App: React.FC = () => {
     // Continuous device session presence heartbeat for logged-in devices tracking
     const stopDeviceHeartbeat = deviceSessionService.startHeartbeatTimer(45000);
 
-    const unsubStaff = staffAuthService.onSessionChange((session) => {
-      setHasStaffSession(Boolean(session));
+    // PRF-004: an attached till is inside the surface its owner just saved
+    // within about five seconds, so this poll is on the app's own clock rather
+    // than on the 45-second beat.
+    counterSessionService.startWatermarkWatch();
+
+    const unsubSync = syncQueueService.subscribe((status) => {
+      setUnsentBillCount(status.unsentCount);
     });
 
     const unsubReg = storeRegistryService.onRegistryChange((reg) => {
-      setRegisteredStores(reg.stores);
-      setActiveStore(storeRegistryService.getActiveStore());
+      // SYNC-02: a revoked store is deactivated in the registry. Dropping it
+      // here is what takes the shell away; keeping it selected left a retired
+      // till drawing the POS with its header falling back to "C01".
+      const stores = reg.stores.filter((store) => store.is_active !== false);
+      const selected = storeRegistryService.getActiveStore();
+      setRegisteredStores(stores);
+      setActiveStore(selected && selected.is_active !== false ? selected : null);
     });
 
     return () => {
       clearInterval(heartbeatTimer);
       stopDeviceHeartbeat();
-      unsubStaff();
+      counterSessionService.stopWatermarkWatch();
+      unsubSync();
       unsubReg();
       window.removeEventListener("online", flushAuditOnReconnect);
     };
@@ -244,18 +277,30 @@ export const App: React.FC = () => {
   // If no stores are registered at all, or user clicked "Add Store"
   if (registeredStores.length === 0 || isAddingStore) {
     return (
-      <StoreSetupPage
-        onSetupComplete={async (profile) => {
-          setIsAddingStore(false);
-          const reg = await storeRegistryService.loadRegistry();
-          setRegisteredStores(reg.stores);
-          const active = storeRegistryService.getActiveStore() || reg.stores[reg.stores.length - 1];
-          setActiveStore(active);
-          setShowGateway(false);
-          productsStore.ensureCatalogPopulated(active?.id || profile.store_id).catch(() => {});
-        }}
-        onCancel={registeredStores.length > 0 ? () => setIsAddingStore(false) : undefined}
-      />
+      <>
+        {unsentBillCount > 0 && (
+          <div className="fixed inset-x-0 top-0 z-50 border-b border-amber-300 bg-amber-50 px-4 py-2 text-center text-xs font-semibold text-amber-900">
+            {unsentBillCount} bill{unsentBillCount === 1 ? "" : "s"} saved on this till{" "}
+            {unsentBillCount === 1 ? "is" : "are"} waiting to be sent. They stay on this machine
+            until a counter code is claimed again.
+          </div>
+        )}
+        <StoreSetupPage
+          onSetupComplete={async (profile) => {
+            setIsAddingStore(false);
+            const reg = await storeRegistryService.loadRegistry();
+            setRegisteredStores(reg.stores);
+            const active = storeRegistryService.getActiveStore() || reg.stores[reg.stores.length - 1];
+            setActiveStore(active);
+            setShowGateway(false);
+            // The queue survived the revocation; the fresh claim is what lets it go.
+            syncQueueService.resumeAfterClaim();
+            syncQueueService.processQueue().catch(() => {});
+            productsStore.ensureCatalogPopulated(active?.id || profile.store_id).catch(() => {});
+          }}
+          onCancel={registeredStores.length > 0 ? () => setIsAddingStore(false) : undefined}
+        />
+      </>
     );
   }
 
@@ -273,55 +318,8 @@ export const App: React.FC = () => {
     );
   }
 
-  // Operator PIN/Password Login for Active Store
-  if (!hasStaffSession) {
-    return (
-      <>
-        <StaffLoginPage
-          key={activeStore?.id || "default"}
-          activeStore={activeStore}
-          onLoginSuccess={async () => {
-            setHasStaffSession(true);
-
-            // On first login / sign in, ensure master catalog is pulled and ready for work
-            try {
-              const currentProducts = await productsStore.getAllProducts();
-              const activeProfile = await storeDeviceService.getDeviceProfile();
-
-              // Online cloud sync: check backend server for catalog updates and remote reset/status events
-              const storeId = activeStore?.id || activeProfile?.store_id || "1";
-              await cloudDeltaSyncService.pullMasterDelta({
-                fetchMasterDeltas: async (wm) => {
-                  const res = await fetch(`${API_BASE_URL}/api/sync/pull/deltas?store_id=${storeId}&since_watermark=${wm}`);
-                  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-                  return res.json();
-                },
-              }).catch(() => {});
-            } catch (e) {
-              console.warn("Post-login data pull check deferred:", e);
-            }
-          }}
-          onBackToStores={() => setShowGateway(true)}
-        />
-        {showWin7Modal && win7Status && (
-          <Windows7PrereqModal
-            status={win7Status}
-            onClose={() => setShowWin7Modal(false)}
-            onRefresh={() => {
-              const updated = windows7PrereqService.getCachedStatus();
-              if (updated) {
-                setWin7Status(updated);
-                if (updated.httpsProbePassed && !updated.certStoreIssueDetected) {
-                  setShowWin7Modal(false);
-                }
-              }
-            }}
-          />
-        )}
-      </>
-    );
-  }
-
+  // The claimed counter is the workstation's identity — there is no sign-in
+  // screen between opening a store and drawing the POS.
   return (
     <ModalStackProvider>
       <BrowserRouter>
@@ -344,6 +342,7 @@ export const App: React.FC = () => {
           <Route path="/returns/sales" element={<AccessGate menu="sales_returns"><SalesReturnPage /></AccessGate>} />
           <Route path="/returns/purchases" element={<AccessGate menu="purchase_returns"><PurchaseReturnPage /></AccessGate>} />
           <Route path="/returns/debit-notes" element={<AccessGate menu="customer_debit_notes"><CustomerDebitNotePage /></AccessGate>} />
+          <Route path="/expenses" element={<AccessGate menu="expenses"><ExpensesPage /></AccessGate>} />
           <Route path="/import-export" element={<AccessGate menu="import_export"><ImportExportHubPage /></AccessGate>} />
           <Route path="/migration" element={<AccessGate menu="migration"><DataMigrationPage /></AccessGate>} />
         </Routes>

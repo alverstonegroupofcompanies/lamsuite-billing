@@ -24,6 +24,8 @@ class InvoiceQuantityContractTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
+        // G1-SEC: till routes need a claimed counter; this stands one in for the store each request names.
+        $this->actAsClaimedCounterOfRequestedStore();
 
         $this->store = Store::create([
             'name' => 'Contract Store',

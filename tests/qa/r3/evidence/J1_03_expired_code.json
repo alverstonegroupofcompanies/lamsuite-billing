@@ -1,0 +1,12 @@
+{
+  "expires_at": "2026-11-21T21:59:50+05:30",
+  "st": 401,
+  "body": "{\"success\":false,\"error\":\"claim_failed\",\"message\":\"That activation code is not valid here. Ask the store owner for a current counter code.\"}",
+  "counter": {
+    "status": "unclaimed",
+    "device_uuid": null
+  },
+  "attempt": {
+    "failure_reason": "expired"
+  }
+}

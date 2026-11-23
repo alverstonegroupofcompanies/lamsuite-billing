@@ -18,6 +18,7 @@ import {
   Shield,
   FileText,
   Undo2,
+  ReceiptText,
   ArrowUpFromLine,
   ArrowRightLeft,
   Building2,
@@ -28,8 +29,7 @@ import {
 import { reportRegistry } from "../reports/registry";
 import { useModalEscape } from "../lib/ui/modalEscapeManager";
 import { companySettingsService } from "../lib/settings/companySettingsService";
-import { staffAuthService } from "../lib/auth/staffAuthService";
-import { canAccessMenu } from "../lib/auth/accessControl";
+import { counterSessionService } from "../lib/auth/counterSessionService";
 import { storeRegistryService } from "../lib/auth/storeRegistryService";
 
 interface CommandPaletteProps {
@@ -100,13 +100,13 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose 
     }
   };
 
-  const session = staffAuthService.getCurrentSession();
-  const userRole = session?.user?.role || "cashier";
-  const permissions = session?.user?.permissions || [];
+  // PRF-001/003: this counter's document decides what the palette may offer —
+  // no signed-in person is involved.
   const enabledMenus = companySettingsService.getSettings()?.enabled_menu_items || ["reports"];
-  const isReportsAllowed = enabledMenus.includes("reports") && canAccessMenu(session?.user, "reports");
+  const isReportsAllowed =
+    enabledMenus.includes("reports") && counterSessionService.allowsModule("reports");
   const accessibleReports = isReportsAllowed
-    ? reportRegistry.getAccessibleReports(userRole, enabledMenus, permissions)
+    ? reportRegistry.getAll().filter((r) => counterSessionService.allowsReport(r.id))
     : [];
 
   const registeredStores = storeRegistryService.getStores();
@@ -189,6 +189,14 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose 
       shortcut: "Shift+F7",
       icon: Building2,
       action: () => { navigate("/returns/debit-notes"); onClose(); },
+    },
+    {
+      id: "nav_expenses",
+      category: "Billing & POS",
+      title: "Go to Expenses",
+      subtitle: "Record cash, bank and digital expenses paid from this counter's drawer",
+      icon: ReceiptText,
+      action: () => { navigate("/expenses"); onClose(); },
     },
     {
       id: "nav_purchase_returns",
@@ -375,6 +383,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose 
     nav_stock: "stock",
     nav_inter_store_transfers: "stock_transfers",
     nav_reports: "reports",
+    nav_expenses: "expenses",
     nav_masters: "masters",
     nav_import_export: "import_export",
     action_import_wizard_items: "import_export",
@@ -391,7 +400,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose 
   const visibleCommands = commands.filter((cmd) => {
     const menuId = COMMAND_MENU_GUARDS[cmd.id];
     if (!menuId) return true;
-    return canAccessMenu(session?.user, menuId);
+    return counterSessionService.allowsModule(menuId);
   });
 
   const filtered = visibleCommands.filter((cmd) => {

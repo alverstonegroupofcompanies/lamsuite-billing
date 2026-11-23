@@ -31,6 +31,7 @@ import { stockMovementLedgerReport } from "./inventory/stock-movement-ledger";
 import { purchaseRegisterReport } from "./purchase/purchase-register";
 import { itemWisePurchaseReport } from "./purchase/item-wise-purchase";
 import { purchaseReturnRegisterReport } from "./purchase/purchase-return-register";
+import { expenseRegisterReport } from "./purchase/expense-register";
 
 // 5. Supplier Accounts
 import { supplierAgeingReport } from "./purchase/supplier-ageing";
@@ -71,7 +72,7 @@ export const REPORT_CATEGORIES: ReportCategoryMeta[] = [
   {
     id: "purchase",
     label: "Purchases & Inward",
-    description: "Inward procurement registers, item-wise purchases, and debit notes",
+    description: "Inward procurement registers, item-wise purchases, debit notes, and the expense register",
     iconName: "Truck",
   },
   {
@@ -140,6 +141,7 @@ export class ReportRegistry {
     this.register(purchaseRegisterReport);
     this.register(itemWisePurchaseReport);
     this.register(purchaseReturnRegisterReport);
+    this.register(expenseRegisterReport);
 
     // 5. Supplier
     this.register(supplierAgeingReport);

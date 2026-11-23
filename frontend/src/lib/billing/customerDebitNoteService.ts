@@ -336,13 +336,14 @@ export class CustomerDebitNoteService {
 
     const docNumber = `${prefix}-${nextNum}`;
 
-    await companySettingsService.updateSettings({
-      sequences: {
-        ...settings.sequences,
-        returnPrefix: prefix,
-        nextReturnNumber: nextNum + 1,
-      },
-    });
+    await companySettingsService.saveLocalSettings(
+      {
+        sequences: {
+          ...settings.sequences,
+          returnPrefix: prefix,
+          nextReturnNumber: nextNum + 1,
+        },
+      });
 
     return docNumber;
   }

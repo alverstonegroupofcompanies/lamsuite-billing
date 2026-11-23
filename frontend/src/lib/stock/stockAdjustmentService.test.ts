@@ -180,6 +180,35 @@ describe("Stock adjustment documents (items 27-28)", () => {
     expect(result.errors.some((e) => e.includes("locked"))).toBe(true);
   });
 
+  it("mirrors the counter's daily document and unit allowance", () => {
+    const now = new Date("2026-11-22T10:00:00");
+    const document: StockAdjustmentDocumentInput = { mode: "adjustment", lines: [line({ adjustment_qty: 6 })] };
+    const resolved = [
+      { ...line({ adjustment_qty: 6 }), line_no: 1, system_qty: 100, adjustment_qty: 6, unit_cost: 10, product_name: "Paracetamol" },
+    ];
+
+    const docCapped = validateStockAdjustmentDocument(document, resolved, {}, {
+      policy: policy({ max_documents_per_day: 1 }),
+      now,
+      recentDocuments: [{ total_qty: 2, status: "posted", created_at: now.getTime() }],
+    });
+    expect(docCapped.errors.some((e) => e.includes("Daily stock adjustment limit"))).toBe(true);
+
+    const rejectedIgnored = validateStockAdjustmentDocument(document, resolved, {}, {
+      policy: policy({ max_documents_per_day: 1 }),
+      now,
+      recentDocuments: [{ total_qty: 2, status: "rejected", created_at: now.getTime() }],
+    });
+    expect(rejectedIgnored.errors).toEqual([]);
+
+    const unitsCapped = validateStockAdjustmentDocument(document, resolved, {}, {
+      policy: policy({ max_units_per_day: 10 }),
+      now,
+      recentDocuments: [{ total_qty: 6, status: "posted", created_at: now.getTime() }],
+    });
+    expect(unitsCapped.errors.some((e) => e.toLowerCase().includes("units"))).toBe(true);
+  });
+
   it("posts one stock ledger row per line and updates batch and product stock", async () => {
     const result = await postStockAdjustment(
       {

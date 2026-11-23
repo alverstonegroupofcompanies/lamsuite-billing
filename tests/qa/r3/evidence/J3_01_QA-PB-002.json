@@ -1,0 +1,259 @@
+{
+  "bill": "QA-PB-002",
+  "steps": [
+    {
+      "line": 0,
+      "at": "INPUT:text:Scan barcode or type product name [F1]...=",
+      "seq": [
+        "DIV::purchase-batch-0=",
+        "INPUT:text:MM/YY=",
+        "INPUT:text:Packs=1",
+        "INPUT:number:MRP=90",
+        "INPUT:number:Rate=60",
+        "INPUT:number:Line discount percent=0",
+        "INPUT:number:=12",
+        "INPUT:number:Sell=90",
+        "INPUT:text:Scan barcode or type product name [F1]...="
+      ]
+    },
+    {
+      "line": 1,
+      "at": "INPUT:text:Scan barcode or type product name [F1]...=",
+      "seq": [
+        "DIV::purchase-batch-1=",
+        "INPUT:text:MM/YY=",
+        "INPUT:text:Packs=1",
+        "INPUT:number:MRP=90",
+        "INPUT:number:Rate=60",
+        "INPUT:number:Line discount percent=0",
+        "INPUT:number:=12",
+        "INPUT:number:Sell=90",
+        "INPUT:text:Scan barcode or type product name [F1]...="
+      ]
+    },
+    {
+      "line": 2,
+      "at": "INPUT:text:Scan barcode or type product name [F1]...=",
+      "seq": [
+        "DIV::purchase-batch-2=",
+        "INPUT:text:MM/YY=",
+        "INPUT:text:Packs=1",
+        "INPUT:number:MRP=120",
+        "INPUT:number:Rate=80",
+        "INPUT:number:Line discount percent=0",
+        "INPUT:number:=12",
+        "INPUT:number:Sell=115",
+        "INPUT:text:Scan barcode or type product name [F1]...="
+      ]
+    }
+  ],
+  "pre": {
+    "batches": [
+      {
+        "id": 6,
+        "product_id": 5,
+        "batch_no": "B1",
+        "stock_qty": 0,
+        "purchase_rate": 60,
+        "landed_cost_rate": null
+      },
+      {
+        "id": 7,
+        "product_id": 6,
+        "batch_no": "CS-A1",
+        "stock_qty": 40,
+        "purchase_rate": 80,
+        "landed_cost_rate": null
+      },
+      {
+        "id": 8,
+        "product_id": 7,
+        "batch_no": "B1",
+        "stock_qty": 0,
+        "purchase_rate": 18,
+        "landed_cost_rate": null
+      }
+    ],
+    "supplier": [
+      {
+        "id": 8,
+        "current_balance": 0
+      }
+    ],
+    "ledger_rows": 0
+  },
+  "grid_before_charges": [
+    "₹ 0.00",
+    "₹ 0.00",
+    "₹ 0.00",
+    "BILL NUMBER\tSUPPLIER NAME\tSUPPLIER INV #\tDATE\tTAXABLE\tGST TAX\tGRAND TOTAL\tPAYMENT\tSTATUS\tACTIONS",
+    "₹ 0.00",
+    "GST TAX MODE",
+    "#\tPRODUCT\tBATCH\tEXPIRY (MM/YY)\tQUANTITY\tFREE QTY\tMRP (₹)\tPUR. RATE (₹)\tDISC %/₹\tGST %\tSELLING RATE (₹)\tMARGIN %\tTAXABLE (₹)\tTAX (₹)\tTOTAL (₹)\tACTION",
+    "QA Paracet 500 Strip",
+    "\tPA-NEW\t",
+    "\t100\t0\t₹ 90.00\t₹ 60.00\t—\t12%\t₹ 90.00\t95.6%\t₹ 6000.00\t₹ 720.00\t₹ 6720.00\t",
+    "QA Paracet 500 Strip",
+    "\tPA-OLD\t",
+    "\t50\t0\t₹ 90.00\t₹ 50.00\t—\t12%\t₹ 90.00\t96.3%\t₹ 2500.00\t₹ 300.00\t₹ 2800.00\t",
+    "QA Cough Syrup 100ml",
+    "\t25\t0\t₹ 120.00\t₹ 60.00\t—\t12%\t₹ 115.00\t47.8%\t₹ 1500.00\t₹ 180.00\t₹ 1680.00\t",
+    "\t—\t—\t—\t—\t—\t—\t—\t—\t—\t—\t₹ 0.00\t₹ 0.00\t₹ 0.00\t",
+    "SUBTOTAL: ₹ 10000.00",
+    "GST TAX: ₹ 1200.00",
+    "CHARGES (ALT+F):",
+    "₹ 0.00",
+    "Round: +₹0.00",
+    "NET PAYABLE",
+    "₹ 11200.00"
+  ],
+  "total_check": [
+    "No purchase bills match the selected filters",
+    "VENDOR INV TOTAL (ALT+I)",
+    "✓ Match"
+  ],
+  "post_modal": [
+    "F1",
+    "Product Entry",
+    "Enter",
+    "Next Field / Confirm",
+    "MMYY",
+    "Expiry Mask",
+    "2+5 / 10+2",
+    "Loose / Free Qty",
+    "Ctrl+N",
+    "New Product",
+    "Esc",
+    "Clear Draft",
+    "↑",
+    "Grid Lines",
+    "Alt+F",
+    "Bill Charges",
+    "Alt+I",
+    "Vendor Total",
+    "Alt+R",
+    "Round-off",
+    "F12",
+    "Post Purchase",
+    "Shortcuts",
+    "?",
+    "Post Purchase Inward Bill (F12)",
+    "Review statutory, batch stock & ledger verification checks",
+    "SUPPLIER",
+    "QA Pharma Distributors",
+    "BILL NUMBER",
+    "QA-PB-002",
+    "ITEMS / UNITS",
+    "3 / 2275",
+    "NET PAYABLE",
+    "₹ 11200.00",
+    "Ledger & Inventory Posting Summary:",
+    "• Stock Inward: 2275 smallest units credited to batch inventory and negative stock offset.",
+    "• Supplier Ledger: Credit entry of ₹11200.00 posted to QA Pharma Distributors.",
+    "• Master Rates: Product purchase rates (PTR) and trade pricing updated.",
+    "Esc to Return & Fix",
+    "Confirm & Post Purchase (Enter)"
+  ],
+  "post_calls": [
+    {
+      "m": "POST",
+      "u": "/sync/push/batch",
+      "st": 200,
+      "req": "{\"items\":[{\"id\":\"sync_1795276968351_518c9c\",\"entity_type\":\"purchase\",\"action\":\"create\",\"payload\":{\"id\":\"pb_1795276968349_81ff\",\"purchase_number\":\"C01-PUR-1001\",\"module_key\":\"purchase\",\"supplier_id\":\"8\",\"supplier_name\":\"QA Pharma Distributors\",\"supplier_gstin\":\"32AAACQ1234A1Z1\",\"supplier_invoice_no\":\"QA-PB-002\",\"purchase_date\":\"2026-11-21\",\"place_of_supply\":\"32-State\",\"is_interstate\":0,\"is_rcm\":0,\"itc_eligibility\":\"eligible\",\"subtotal\":10000,\"discount_total\":0,\"bill_discount_type\":\"amount\",\"bill_discount\":0,\"freight_charges\":0,\"tax_total\":1200,\"cgst_total\":600,\"sgst_total\":600,\"igst_total\":0,\"cess_total\":0,\"round_off\":0,\"grand_total\":11200,\"paid_amount\":0,\"payment_status\":\"unpaid\",\"status\":\"received\",\"notes\":\"\",\"sync_state\":\"pending\",\"external_id\":\"pb_1795276968349_81ff\",\"created_at\":1795276968349,\"updated_at\":1795276968349,\"items\":[{\"id\":\"pbi_1795276968350_a9ae\",\"purchase_id\":\"pb_1795276968349_81ff\",\"product_id\":\"5\",\"product_name\":\"QA Paracet 500 Strip\",\"hsn_code\":\"30049099\",\"batch_id\":\"batch_5_PA-NEW\",\"batch_no\":\"PA-NEW\",\"expiry_date\":\"2028-01-31\",\"pack_qty\":100,\"loose_qty\":0,\"gross_weight_kg\":null,\"free_qty\":0,\"free_loose_qty\":0,\"units_per_pack\":15,\"total_units\":1500,\"purchase_rate\":60,\"ptr\":60,\"pts\":0,\"discount_type\":\"percent\",\"discount_percent\":0,\"discount_amount\":0,\"effective_unit_cost\":4,\"taxable_amount\":6000,\"mrp\":90,\"selling_rate\":90,\"gst_percent\":12,\"cgst_amount\":360,\"sgst_amount\":360,\"igst_amount\":0,\"cess_amount\":0,\"tax_amount\":720,\"total_amount\":6720},{\"id\":\"pbi_1795276968350_2fa5\",\"purchase_id\":\"pb_1795276968349_81ff\",\"product_id\":\"5\",\"product_name\":\"QA Paracet 500 Strip\",\"hsn_code\":\"30049099\",\"batch_id\":\"batch_5_PA-OLD\",\"batch_no\":\"PA-OLD\",\"expiry_date\":\"2027-03-31\",\"pack_qty\":50,\"loose_qty\":0,\"gross_weight_kg\":null,\"free_qty\":0,\"free_loose_qty\":0,\"units_per_pack\":15,\"total_units\":750,\"purchase_rate\":50,\"ptr\":60,\"pts\":0,\"discount_type\":\"percent\",\"discount_percent\":0,\"discount_amount\":0,\"effective_unit_cost\":3.33,\"taxable_amount\":2500,\"mrp\":90,\"selling_rate\":90,\"gst_percent\":12,\"cgst_amount\":150,\"sgst_amount\":150,\"igst_amount\":0,\"cess_amount\":0,\"tax_amount\":300,\"total_amount\":2800},{\"id\":\"pbi_1795276968350_5f4e\",\"purchase_id\":\"pb_1795276968349_81ff\",\"product_id\":\"6\",\"product_name\":\"QA Cough Syrup 100ml\",\"hsn_code\":\"30049011\",\"batch_id\":\"batch_6_CS-B2\",\"batch_no\":\"CS-B2\",\"expiry_date\":\"2027-06-30\",\"pack_qty\":25,\"loose_qty\":0,\"gross_weight_kg\":null,\"free_qty\":0,\"free_loose_qty\":0,\"units_per_pack\":1,\"total_units\":25,\"purchase_rate\":60,\"ptr\":80,\"pts\":0,\"discount_type\":\"percent\",\"discount_percent\":0,\"discount_amount\":0,\"effective_unit_cost\":60,\"taxable_amount\":1500,\"mrp\":120,\"selling_rate\":115,\"gst_percent\":12,\"cgst_amount\":90,\"sgst_amount\":90,\"igst_amount\":0,\"cess_amount\":0,\"tax_amount\":180,\"total_amount\":1680}],\"charges\":[],\"idempotency_key\":\"purchase_pb_1795276968349_81ff\",\"client_timestamp\":1795276968351,\"permission_profile_version\":1,\"store_id\":\"4\"}}],\"store_id\":\"4\"}",
+      "res": "{\"success\":true,\"results\":{\"total\":1,\"processed\":1,\"failed\":0,\"errors\":[]},\"renumbered\":[]}"
+    },
+    {
+      "m": "POST",
+      "u": "/counter/sequences/lease",
+      "st": 200,
+      "req": "{\"doc_type\":\"invoice\",\"block_size\":50}",
+      "res": "{\"success\":true,\"counter_id\":2,\"counter_code\":\"C01\",\"doc_type\":\"invoice\",\"prefix\":\"C01-INV\",\"financial_year\":\"2026-27\",\"range_start\":7401,\"range_end\":7450,\"block_size\":50,\"next_number\":7401,\"leased_block\":{\"counter_id\":2,\"counter_code\":\"C01\",\"doc_type\":\"invoice\",\"financial_year\":\"2026-27\",\"prefix\":\"C01-INV\",\"range_start\":7401,\"range_end\":7450,\"block_size\":50,\"next_number\":7401},\"sequences\":{\"counter_id\":2,\"counter_code\":\"C01\",\"financial_year\":\"2026-27\",\"doc_types\":[\"invoice\",\"sales_return\",\"quotation\",\"purchase_bill\",\"receipt\",\"stock_adjustment\",\"stock_transfer\"],\"items\":[{\"counter_id\":2,\"doc_type\":\"invoice\",\"financial_year\":\"2026-27\",\"prefix\":\"C01-INV\",\"next_number\":7451,\"range_start\":7401,\"range_end\":7450},{\"counter_id\":2,\"doc_type\":\"sales_return\",\"financial_year\":\"2026-27\",\"prefix\":\"C01-SR\",\"next_number\":1001,\"range_start\":null,\"range_end\":null},{\"counter_id\":2,\"doc_type\":\"quotation\",\"financial_year\":\"2026-27\",\"prefix\":\"C01-QUO\",\"next_number\":1001,\"range_start\":null,\"range_end\":null},{\"counter_id\":2,\"doc_type\":\"purchase_bill\",\"financial_year\":\"2026-27\",\"prefix\":\"C01-PUR\",\"next_number\":1001,\"range_start\":null,\"range_end\":null},{\"counter_id\":2,\"doc_type\":\"receipt\",\"financial_year\":\"2026-27\",\"prefix\":\"C01-REC\",\"next_number\":1001,\"range_start\":null,\"range_end\":null},{\"counter_id\":2,\"doc_type\":\"stock_adjustment\",\"financial_year\":\"2026-27\",\"prefix\":\"C01-ADJ\",\"next_number\":1001,\"range_start\":null,\"range_end\":null},{\"counter_id\":2,\"doc_type\":\"stock_transfer\",\"financial_year\":\"2026-27\",\"prefix\":\"C01-TRF\",\"next_number\":1001,\"range_start\":null,\"range_end\":null}]},\"message\":\"Numbers 7401-7450 reserved for C01-INV.\"}"
+    }
+  ],
+  "post_screen": [
+    "New Product",
+    "Esc",
+    "Clear Draft",
+    "↑",
+    "Grid Lines",
+    "Alt+F",
+    "Bill Charges",
+    "Alt+I",
+    "Vendor Total",
+    "Alt+R",
+    "Round-off",
+    "F12",
+    "Post Purchase",
+    "Shortcuts",
+    "?",
+    "Purchase Bill Posted!",
+    "C01-PUR-1001",
+    "SUPPLIER",
+    "QA Pharma Distributors",
+    "TOTAL INWARD",
+    "₹ 11200.00",
+    "Batch stock credited & supplier ledger updated. Select next action with hotkey:",
+    "Print Barcode & Shelf Labels",
+    "L",
+    "Print Inward Voucher (A4 / Thermal)",
+    "P",
+    "Pay Supplier Now (Split Tender)",
+    "S",
+    "Start New Purchase Bill",
+    "N"
+  ],
+  "later_calls": [
+    {
+      "m": "POST",
+      "u": "/sync/push/batch",
+      "st": 200
+    },
+    {
+      "m": "POST",
+      "u": "/counter/sequences/lease",
+      "st": 200
+    },
+    {
+      "m": "POST",
+      "u": "/device-sessions/heartbeat",
+      "st": 200
+    },
+    {
+      "m": "POST",
+      "u": "/counter/sequences/lease",
+      "st": 200
+    },
+    {
+      "m": "POST",
+      "u": "/counter/sequences/lease",
+      "st": 200
+    }
+  ],
+  "dups": [
+    {
+      "call": "OPTIONS https://api.lamstonehealthcare.com/api/app/update/latest.json ",
+      "count": 2
+    },
+    {
+      "call": "GET http://127.0.0.1:8000/api/counter/profile-version ",
+      "count": 11
+    },
+    {
+      "call": "GET http://127.0.0.1:8000/api/sync/pull/deltas?store_id=4&since_watermark=0 ",
+      "count": 2
+    },
+    {
+      "call": "OPTIONS http://127.0.0.1:8000/api/license/check?store_id=4 ",
+      "count": 13
+    },
+    {
+      "call": "GET http://127.0.0.1:8000/api/license/check?store_id=4 ",
+      "count": 13
+    },
+    {
+      "call": "POST http://127.0.0.1:8000/api/counter/sequences/lease {\"doc_type\":\"invoice\",\"block_size\":50}",
+      "count": 13
+    }
+  ],
+  "clog": []
+}

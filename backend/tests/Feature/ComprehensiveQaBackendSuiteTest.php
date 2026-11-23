@@ -234,17 +234,22 @@ class ComprehensiveQaBackendSuiteTest extends TestCase
     // ==========================================
     public function test_device_registration_with_activation_key(): void
     {
-        $keyResult = ActivationKey::generateKey($this->storePharma);
+        $counter = Counter::create([
+            'store_id' => $this->storePharma->id,
+            'counter_code' => 'C01',
+            'counter_name' => 'QA Desk Counter 01',
+        ]);
+        $code = ActivationKey::generateForCounter($counter)['raw_key'];
 
-        $regResponse = $this->postJson('/api/devices/register', [
-            'activation_key' => $keyResult['raw_key'],
+        $regResponse = $this->postJson('/api/counters/claim', [
+            'code' => $code,
             'device_name' => 'QA Desk Counter 01',
             'device_uuid' => 'qa_uuid_desk_999',
             'app_version' => '2.0.36',
         ]);
 
         $regResponse->assertStatus(200)
-            ->assertJsonStructure(['device_token', 'store_id', 'store_code']);
+            ->assertJsonStructure(['device_token', 'counter' => ['id', 'counter_code'], 'store' => ['id', 'code']]);
 
         $this->assertDatabaseHas('devices', [
             'store_id' => $this->storePharma->id,
@@ -255,14 +260,13 @@ class ComprehensiveQaBackendSuiteTest extends TestCase
 
     public function test_revoked_device_is_rejected_on_invalid_activation_key(): void
     {
-        $response = $this->postJson('/api/devices/register', [
-            'activation_key' => 'INVALID-KEY-NOT-FOUND-999',
+        $this->postJson('/api/counters/claim', [
+            'code' => 'INVALID-KEY-NOT-FOUND-999',
             'device_uuid' => 'qa_revoked_terminal_123',
             'device_name' => 'Bad Station',
-        ]);
+        ])->assertStatus(401)->assertJson(['error' => 'claim_failed']);
 
-        $response->assertStatus(422)
-            ->assertJson(['message' => 'Invalid, expired, or revoked activation key.']);
+        $this->assertDatabaseMissing('devices', ['device_uuid' => 'qa_revoked_terminal_123']);
     }
 
     // ==========================================
@@ -334,10 +338,12 @@ class ComprehensiveQaBackendSuiteTest extends TestCase
     // ==========================================
     public function test_invoice_creation_records_stock_deduction(): void
     {
+        $counterCode = $this->billingCounter();
         $initialStock = $this->doloBatch->fresh()->stock_qty; // 100
 
         $response = $this->actingAs($this->storeOwner, 'sanctum')
             ->postJson('/api/invoices', [
+                'counter_code' => $counterCode,
                 'store_id' => $this->storePharma->id,
                 'customer_id' => $this->customer->id,
                 'customer_name' => $this->customer->name,
@@ -576,6 +582,7 @@ class ComprehensiveQaBackendSuiteTest extends TestCase
     // ==========================================
     public function test_sync_push_invoice_is_strictly_idempotent(): void
     {
+        $counterCode = $this->billingCounter();
         $externalId = 'uuid-offline-idemp-001';
 
         $payload = [
@@ -598,6 +605,7 @@ class ComprehensiveQaBackendSuiteTest extends TestCase
                 ],
             ],
             'external_id' => $externalId,
+            'counter_code' => $counterCode,
         ];
 
         // First push
@@ -638,5 +646,16 @@ class ComprehensiveQaBackendSuiteTest extends TestCase
 
         // Must return 404 or 405 Method Not Allowed - no delete route exists!
         $this->assertTrue(in_array($response->status(), [404, 405]));
+    }
+
+    /** G1-SEC: a person posting a bill names an existing counter of the store. */
+    private function billingCounter(): string
+    {
+        Counter::firstOrCreate(
+            ['store_id' => $this->storePharma->id, 'counter_code' => 'C01'],
+            ['counter_name' => 'Front Counter']
+        );
+
+        return 'C01';
     }
 }

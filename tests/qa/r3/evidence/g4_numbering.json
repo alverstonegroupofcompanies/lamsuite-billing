@@ -1,0 +1,51 @@
+{
+  "storeId": 9,
+  "counterId": 25,
+  "leases": [
+    {
+      "range": "1001-1050",
+      "next_number": 1001
+    },
+    {
+      "range": "1001-1050",
+      "next_number": 1001
+    },
+    {
+      "range": "1001-1050",
+      "next_number": 1001
+    },
+    {
+      "range": "1001-1050",
+      "next_number": 1001
+    },
+    {
+      "range": "1001-1050",
+      "next_number": 1001
+    }
+  ],
+  "bills": [
+    {
+      "answered": "C01-INV-1001",
+      "filed": "C01-INV-1001"
+    },
+    {
+      "answered": "C01-INV-1002",
+      "filed": "C01-INV-1002"
+    },
+    {
+      "answered": "C01-INV-1003",
+      "filed": "C01-INV-1003"
+    }
+  ],
+  "finalSeries": {
+    "doc_type": "invoice",
+    "next_number": 1103,
+    "range_start": 1101,
+    "range_end": 1105
+  },
+  "countersInStore": [
+    {
+      "counter_code": "C01"
+    }
+  ]
+}

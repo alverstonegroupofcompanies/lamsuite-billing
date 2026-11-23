@@ -5,6 +5,12 @@ namespace App\Http\Controllers\Api;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use App\Models\Party;
+use App\Models\Store;
+use App\Services\Gst\PartyStateResolver;
+use App\Support\GstStateCodes;
+use App\Support\RequestTenant;
+use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 
 class CustomerController
 {
@@ -12,7 +18,7 @@ class CustomerController
     {
         $search = $request->query('search', $request->query('query', ''));
         $limit = (int) $request->query('limit', 25);
-        $storeId = $request->user()?->store_id;
+        $storeId = RequestTenant::storeId($request);
 
         $builder = Party::where('type', 'customer')->where('is_active', true);
 
@@ -43,12 +49,13 @@ class CustomerController
             'gstin' => 'nullable|string|max:15',
             'address' => 'nullable|string|max:500',
             'email' => 'nullable|email|max:255',
-            'state_code' => 'nullable|string|max:10',
+            'state_code' => ['nullable', 'string', Rule::in(GstStateCodes::all())],
             'credit_limit' => 'nullable|numeric|min:0',
             'opening_balance' => 'nullable|numeric',
         ]);
 
-        $storeId = $request->user()?->store_id;
+        $storeId = RequestTenant::requireStoreId($request);
+        $this->assertGstinMatchesState($validated['gstin'] ?? null, $validated['state_code'] ?? null);
 
         // Check duplicate phone if phone is provided
         if (!empty($validated['phone'])) {
@@ -73,7 +80,11 @@ class CustomerController
             'gstin' => isset($validated['gstin']) ? strtoupper($validated['gstin']) : null,
             'address' => $validated['address'] ?? null,
             'email' => $validated['email'] ?? null,
-            'state_code' => $validated['state_code'] ?? '32',
+            'state_code' => app(PartyStateResolver::class)->resolve(
+                $validated['state_code'] ?? null,
+                $validated['gstin'] ?? null,
+                Store::find($storeId)
+            ),
             'credit_limit' => $validated['credit_limit'] ?? 0,
             'opening_balance' => $validated['opening_balance'] ?? 0,
             'current_balance' => $validated['opening_balance'] ?? 0,
@@ -102,7 +113,7 @@ class CustomerController
             'gstin' => 'nullable|string|max:15',
             'address' => 'nullable|string|max:500',
             'email' => 'nullable|email|max:255',
-            'state_code' => 'nullable|string|max:10',
+            'state_code' => ['nullable', 'string', Rule::in(GstStateCodes::all())],
             'credit_limit' => 'nullable|numeric|min:0',
             'is_active' => 'nullable|boolean',
         ]);
@@ -111,7 +122,48 @@ class CustomerController
             $validated['gstin'] = strtoupper($validated['gstin']);
         }
 
+        $gstin = array_key_exists('gstin', $validated) ? $validated['gstin'] : $customer->gstin;
+        $this->assertGstinMatchesState(
+            $gstin,
+            array_key_exists('state_code', $validated) ? $validated['state_code'] : $customer->state_code
+        );
+
+        if (!array_key_exists('state_code', $validated) || $validated['state_code'] === null) {
+            if (GstStateCodes::isValidGstin($gstin)) {
+                $validated['state_code'] = GstStateCodes::fromGstin($gstin);
+            } else {
+                unset($validated['state_code']);
+            }
+        }
+
         $customer->update($validated);
         return response()->json($customer);
+    }
+
+    private function assertGstinMatchesState(?string $gstin, ?string $stateCode): void
+    {
+        $gstin = $gstin === null ? null : trim($gstin);
+        if ($gstin === '') {
+            $gstin = null;
+        }
+
+        if ($gstin !== null && !GstStateCodes::isValidGstin($gstin)) {
+            throw ValidationException::withMessages([
+                'gstin' => 'Enter a valid 15-character GSTIN or leave it blank.',
+            ]);
+        }
+
+        $stateCode = GstStateCodes::normalize($stateCode);
+        if ($stateCode !== null && !GstStateCodes::isValid($stateCode)) {
+            throw ValidationException::withMessages([
+                'state_code' => 'Choose a valid GST state code (01-38 or 97).',
+            ]);
+        }
+
+        if ($gstin !== null && $stateCode !== null && GstStateCodes::fromGstin($gstin) !== $stateCode) {
+            throw ValidationException::withMessages([
+                'state_code' => "State code {$stateCode} does not match the GSTIN's state.",
+            ]);
+        }
     }
 }

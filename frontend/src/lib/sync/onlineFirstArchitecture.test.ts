@@ -165,7 +165,7 @@ describe("LamSuite Billing Online-First Architecture & Resilient Offline Fallbac
     expect(cachedBatch?.stock_qty).toBe(9);
   });
 
-  it("3. Leased block exhaustion while offline: safely falls back to TEMP series and auto-maps on reconnect", async () => {
+  it("3. Leased block exhaustion while offline: refuses the bill instead of inventing a number", async () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("Network Down")));
 
     // Sequence where next_number exceeds range_end
@@ -196,31 +196,16 @@ describe("LamSuite Billing Online-First Architecture & Resilient Offline Fallbac
     };
 
     const res = await onlineTransactionService.submitAuthoritativeInvoice(payload);
-    expect(res.success).toBe(true);
-    expect(res.isTempNumber).toBe(true);
-    expect(res.invoice.invoice_number).toContain("TEMP-C01-");
+    expect(res.success).toBe(false);
+    expect(res.isOnline).toBe(false);
+    expect(res.invoice).toBeNull();
+    expect(res.error).toMatch(/connect it to the store server/i);
 
-    // Now internet returns: Server accepts the TEMP bill and maps it to a canonical number
-    (onlineTransactionService as any).connectionState = "online";
-    const mockReconnectionFetch = vi.fn().mockResolvedValue({
-      ok: true,
-      status: 201,
-      json: () =>
-        Promise.resolve({
-          success: true,
-          invoice: {
-            id: 1050,
-            invoice_number: "C01-INV-1006",
-            external_id: "tx_exhausted_block",
-          },
-          temp_mapped_from: res.invoice.invoice_number,
-        }),
-    });
-    vi.stubGlobal("fetch", mockReconnectionFetch);
-
-    const reconnected = await onlineTransactionService.submitAuthoritativeInvoice(payload);
-    expect(reconnected.success).toBe(true);
-    expect(reconnected.tempMappedFrom).toBe(res.invoice.invoice_number);
+    // The refused bill must not leave a WAL row, a local invoice, or a queued item.
+    expect(await sqliteStorage.findById("offline_durable_queue", "tx_exhausted_block")).toBeNull();
+    const localInvoices = await sqliteStorage.findAll<any>("invoices");
+    expect(localInvoices.some((row) => row.external_id === "tx_exhausted_block")).toBe(false);
+    expect(await onlineTransactionService.getPendingQueueCount()).toBe(0);
   });
 
   it("4. Full-day offline billing simulation: multiple bills queued and synced in order", async () => {
@@ -253,9 +238,11 @@ describe("LamSuite Billing Online-First Architecture & Resilient Offline Fallbac
 
     // Reconnect and process queue via mock client
     let processedCount = 0;
+    const pushedNumbers: string[] = [];
     const mockApiClient: SyncApiClient = {
       async pushBatch(items) {
         processedCount += items.length;
+        pushedNumbers.push(...items.map((item) => String((item.payload as any)?.invoice_number ?? "")));
         return {
           success: true,
           results: { total: items.length, processed: items.length, failed: 0 },
@@ -266,6 +253,15 @@ describe("LamSuite Billing Online-First Architecture & Resilient Offline Fallbac
     const syncRes = await syncQueueService.processQueue(mockApiClient);
     expect(syncRes.processed).toBe(5);
     expect(processedCount).toBe(5);
+    // The server must receive the bills in the order the till saved them, with
+    // the numbers the counter issued — not re-ordered by retry timing.
+    expect(pushedNumbers).toEqual([
+      "C01-INV-1001",
+      "C01-INV-1002",
+      "C01-INV-1003",
+      "C01-INV-1004",
+      "C01-INV-1005",
+    ]);
 
     const pendingAfter = await onlineTransactionService.getPendingQueueCount();
     expect(pendingAfter).toBe(0);
@@ -348,5 +344,52 @@ describe("LamSuite Billing Online-First Architecture & Resilient Offline Fallbac
     expect(batch).not.toBeNull();
     // Cache read must complete in under 50ms (well within the 300ms SLA)
     expect(duration).toBeLessThan(50);
+  });
+
+  it("8. Offline bill with a ₹500 note on a ₹210 bill keeps ₹210 and returns the rest (PAY-02)", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("Offline")));
+
+    const fy = counterSequenceService.getCurrentFinancialYear();
+    await sqliteStorage.insertRecord("counter_sequences", `C01_invoice_${fy}`, {
+      id: `C01_invoice_${fy}`,
+      counter_id: "C01",
+      doc_type: "invoice",
+      financial_year: fy,
+      prefix: "C01-INV",
+      range_start: 2001,
+      range_end: 2050,
+      next_number: 2001,
+    });
+
+    const res = await onlineTransactionService.submitAuthoritativeInvoice({
+      external_id: "tx_change_offline",
+      counter_code: "C01",
+      customer_name: "Walk-in Customer",
+      payment_mode: "Cash",
+      payments: [{ mode: "Cash", amount: 500 }],
+      items: [
+        {
+          product_id: "prod_pcm",
+          batch_id: "batch_pcm_01",
+          qty: 1,
+          unit_price: 210,
+        },
+      ],
+    });
+    expect(res.success).toBe(true);
+
+    const stored = await sqliteStorage.findById<any>("invoices", res.invoice!.id);
+    const payments = (await sqliteStorage.findAll<any>("invoice_payments")).filter(
+      (row) => row.invoice_id === res.invoice!.id
+    );
+
+    // The bill collected what it was worth, not the note the customer handed over.
+    expect(stored.grand_total).toBe(210);
+    expect(stored.paid_amount).toBe(210);
+    expect(stored.payment_status).toBe("paid");
+    expect(payments).toHaveLength(1);
+    expect(payments[0].amount).toBe(210);
+    expect(payments[0].tendered_amount).toBe(500);
+    expect(payments[0].change_amount).toBe(290);
   });
 });

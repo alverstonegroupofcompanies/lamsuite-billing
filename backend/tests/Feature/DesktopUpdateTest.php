@@ -2,138 +2,187 @@
 
 namespace Tests\Feature;
 
-use App\Models\User;
-use App\Models\Store;
-use App\Models\DeviceSession;
-use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\File;
 use Tests\TestCase;
 
 class DesktopUpdateTest extends TestCase
 {
-    use RefreshDatabase;
-
-    public function test_it_serves_latest_manifest(): void
+    private function updatesDir(): string
     {
-        $response = $this->getJson('/api/app/update/latest.json');
+        $dir = storage_path('app/updates');
+        if (! File::isDirectory($dir)) {
+            File::makeDirectory($dir, 0755, true);
+        }
 
-        $response->assertStatus(200)
-            ->assertJsonStructure([
-                'version',
-                'notes',
-                'pub_date',
-                'platforms' => [
-                    'windows-x86_64' => ['signature', 'url'],
+        return $dir;
+    }
+
+    /**
+     * @return array{0: array, 1: string}
+     */
+    private function registerRelease(string $version = '2.0.99'): array
+    {
+        $dir = $this->updatesDir();
+        $zip = "LamSuite-Billing_{$version}_x64-setup.nsis.zip";
+        $signature = base64_encode("untrusted comment: fixture signature\nFIXTURE-SIGNATURE-{$version}");
+
+        $manifest = [
+            'version' => $version,
+            'notes' => 'fixture notes',
+            'pub_date' => '2026-01-01T00:00:00+00:00',
+            'platforms' => [
+                'windows-x86_64' => [
+                    'signature' => $signature,
+                    'url' => "https://updates.example.test/download/{$zip}",
                 ],
-            ]);
+            ],
+        ];
+
+        File::put("{$dir}/latest.json", json_encode($manifest));
+        File::put("{$dir}/{$zip}", 'DUMMY_ZIP_CONTENT');
+
+        return [$manifest, $zip];
     }
 
-    public function test_it_serves_legacy_windows_manifest(): void
+    private function forgetRelease(?string $zip = null): void
     {
-        $response = $this->getJson('/api/app/update/latest-legacy-win7.json');
+        $dir = $this->updatesDir();
+        File::delete("{$dir}/latest.json");
+        File::delete("{$dir}/latest-legacy-win7.json");
+        if ($zip) {
+            File::delete("{$dir}/{$zip}");
+        }
+    }
 
-        $response->assertStatus(200)
-            ->assertJsonStructure([
-                'version',
-                'notes',
-                'pub_date',
-                'platforms' => [
-                    'windows-x86_64' => ['signature', 'url'],
+    public function test_manifest_returns_204_when_no_signed_artefact_is_registered(): void
+    {
+        $this->forgetRelease();
+
+        $this->getJson('/api/app/update/latest.json')
+            ->assertStatus(204)
+            ->assertContent('');
+    }
+
+    public function test_legacy_manifest_returns_204_when_no_signed_artefact_is_registered(): void
+    {
+        $this->forgetRelease();
+
+        $this->getJson('/api/app/update/latest-legacy-win7.json')
+            ->assertStatus(204)
+            ->assertContent('');
+    }
+
+    public function test_dynamic_update_returns_204_when_no_signed_artefact_is_registered(): void
+    {
+        $this->forgetRelease();
+
+        $this->getJson('/api/app/update/windows-x86_64/2.0.27')
+            ->assertStatus(204)
+            ->assertContent('');
+    }
+
+    public function test_manifest_is_not_served_when_its_package_is_missing(): void
+    {
+        $dir = $this->updatesDir();
+        File::put("{$dir}/latest.json", json_encode([
+            'version' => '2.1.1',
+            'notes' => 'phantom release',
+            'pub_date' => '2026-01-01T00:00:00+00:00',
+            'platforms' => [
+                'windows-x86_64' => [
+                    'signature' => base64_encode('untrusted comment: phantom'),
+                    'url' => 'https://updates.example.test/download/LamSuite-Billing_2.1.1_x64-setup.nsis.zip',
                 ],
-            ]);
+            ],
+        ]));
+
+        try {
+            $this->getJson('/api/app/update/latest.json')
+                ->assertStatus(204)
+                ->assertContent('');
+
+            $this->getJson('/api/app/update/windows-x86_64/2.1.0')
+                ->assertStatus(204)
+                ->assertContent('');
+        } finally {
+            $this->forgetRelease();
+        }
     }
 
-    public function test_dynamic_update_returns_204_when_up_to_date(): void
+    public function test_manifest_and_dynamic_update_serve_a_registered_signed_package(): void
     {
-        $response = $this->getJson('/api/app/update/windows-x86_64/2.1.1');
+        [$manifest, $zip] = $this->registerRelease('2.0.99');
 
-        $response->assertStatus(204);
+        try {
+            $this->getJson('/api/app/update/latest.json')
+                ->assertStatus(200)
+                ->assertJsonPath('version', '2.0.99')
+                ->assertJsonPath('platforms.windows-x86_64.signature', $manifest['platforms']['windows-x86_64']['signature'])
+                ->assertJsonPath(
+                    'platforms.windows-x86_64.url',
+                    url("/api/app/update/download/{$zip}")
+                );
+
+            $this->getJson('/api/app/update/windows-x86_64/2.0.27')
+                ->assertStatus(200)
+                ->assertJsonPath('version', '2.0.99')
+                ->assertJsonPath('signature', $manifest['platforms']['windows-x86_64']['signature'])
+                ->assertJsonPath('url', url("/api/app/update/download/{$zip}"));
+
+            $this->getJson('/api/app/update/windows-x86_64/2.0.99')
+                ->assertStatus(204);
+        } finally {
+            $this->forgetRelease($zip);
+        }
     }
 
-    public function test_dynamic_update_returns_200_with_package_when_older(): void
+    public function test_dynamic_update_omits_platforms_whose_package_is_missing(): void
     {
-        $response = $this->getJson('/api/app/update/windows-x86_64/2.0.27');
+        $dir = $this->updatesDir();
+        $zip = 'LamSuite-Billing_2.0.98_x64-setup.nsis.zip';
+        File::put("{$dir}/latest.json", json_encode([
+            'version' => '2.0.98',
+            'notes' => 'partial release',
+            'pub_date' => '2026-01-01T00:00:00+00:00',
+            'platforms' => [
+                'windows-x86_64' => [
+                    'signature' => base64_encode('untrusted comment: windows'),
+                    'url' => "https://updates.example.test/download/{$zip}",
+                ],
+                'darwin-aarch64' => [
+                    'signature' => base64_encode('untrusted comment: darwin'),
+                    'url' => 'https://updates.example.test/download/LamSuite-Billing_2.0.98_aarch64.app.tar.gz',
+                ],
+            ],
+        ]));
 
-        $response->assertStatus(200)
-            ->assertJsonStructure([
-                'url',
-                'version',
-                'notes',
-                'pub_date',
-                'signature',
-            ]);
+        try {
+            File::put("{$dir}/{$zip}", 'DUMMY_ZIP_CONTENT');
+
+            $this->getJson('/api/app/update/latest.json')
+                ->assertStatus(200)
+                ->assertJsonMissingPath('platforms.darwin-aarch64')
+                ->assertJsonPath('platforms.windows-x86_64.signature', base64_encode('untrusted comment: windows'));
+
+            $this->getJson('/api/app/update/darwin-aarch64/2.0.27')
+                ->assertStatus(204);
+        } finally {
+            $this->forgetRelease($zip);
+        }
     }
 
     public function test_it_downloads_updater_binary_file(): void
     {
-        $fakeDir = storage_path('app/updates');
-        if (!\Illuminate\Support\Facades\File::exists($fakeDir)) {
-            \Illuminate\Support\Facades\File::makeDirectory($fakeDir, 0755, true);
-        }
+        $fakeDir = $this->updatesDir();
         $fakeFile = "{$fakeDir}/LamSuite-Billing_2.0.35_x64-setup.nsis.zip";
-        \Illuminate\Support\Facades\File::put($fakeFile, "DUMMY_ZIP_CONTENT");
+        File::put($fakeFile, "DUMMY_ZIP_CONTENT");
 
         try {
             $response = $this->get('/api/app/update/download/LamSuite-Billing_2.0.35_x64-setup.nsis.zip');
             $response->assertStatus(200);
             $response->assertHeader('Content-Type', 'application/octet-stream');
         } finally {
-            \Illuminate\Support\Facades\File::delete($fakeFile);
+            File::delete($fakeFile);
         }
-    }
-
-    public function test_admin_can_get_and_set_min_required_desktop_version(): void
-    {
-        $store = Store::create([
-            'name' => 'Main Test Store',
-            'code' => 'TEST01',
-            'state_code' => '32',
-            'store_type' => 'Pharmacy',
-            'is_active' => true,
-        ]);
-
-        $admin = User::create([
-            'name' => 'Admin User',
-            'email' => 'admin@test.com',
-            'password' => bcrypt('password123'),
-            'role' => 'super_admin',
-            'store_id' => $store->id,
-            'is_admin' => true,
-        ]);
-
-        $this->actingAs($admin, 'sanctum');
-
-        // Get initial min version
-        $resGet = $this->getJson('/api/admin/settings/min-app-version');
-        $resGet->assertStatus(200)
-            ->assertJsonPath('min_version', '2.0.21');
-
-        // Set min version to 2.0.22
-        $resPost = $this->postJson('/api/admin/settings/min-app-version', [
-            'min_version' => '2.0.22',
-        ]);
-        $resPost->assertStatus(200)
-            ->assertJsonPath('min_version', '2.0.22');
-
-        // Verify device session flags out-of-date device
-        DeviceSession::create([
-            'store_id' => $store->id,
-            'session_id' => 'sess_001',
-            'device_uuid' => 'dev_001',
-            'device_name' => 'Counter 1 POS',
-            'counter_name' => 'Front Desk',
-            'user_id' => $admin->id,
-            'user_role' => 'Admin',
-            'ip_address' => '192.168.1.50',
-            'app_version' => '2.0.21', // Older than 2.0.22
-            'unsynced_items_count' => 0,
-            'is_active' => true,
-            'login_time' => now(),
-            'last_active_at' => now(),
-        ]);
-
-        $resDevices = $this->getJson('/api/device-sessions?store_id=' . $store->id);
-        $resDevices->assertStatus(200)
-            ->assertJsonPath('devices.0.is_out_of_date', true)
-            ->assertJsonPath('out_of_date_count', 1);
     }
 }

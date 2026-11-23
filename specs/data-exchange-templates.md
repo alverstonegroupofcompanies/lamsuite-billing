@@ -15,7 +15,7 @@ The LamSuite Data Exchange module provides a unified, offline-first, pluggable d
 
 ---
 
-## 2. Pluggable Entity Definitions (22 Entities)
+## 2. Pluggable Entity Definitions (24 Entities)
 
 ### 2.1 Catalog & Inventory
 
@@ -144,7 +144,14 @@ The LamSuite Data Exchange module provides a unified, offline-first, pluggable d
 - **Storage Table:** `expense_heads`
 - **Fields:** `head_name` (Req), `category` (`DIRECT` or `INDIRECT`), `code`, `tax_deductible`
 
-#### 4. Party Opening Balances (`customer_opening_balances`, `supplier_opening_balances`)
+#### 4. Charge Heads (`charge_heads`)
+- **Storage Table:** `master_lookups` (`type = 'charge_head'`, `store_id NOT NULL` — rule `R12`)
+- **Scope:** import targets one store; export is store-filtered (`R10`). Never shared between stores, so a template row is meaningless without a store context.
+- **Duplicate Keys:** Composite `[store_id, code]`
+- **Post-Import Hook:** Seeds the store's default set (`Freight`, `Packing`, `Loading/Unloading`, `Insurance`, `Other`) when the store has none.
+- **Fields:** `code` (Req), `name` (Req), `sac_code`, `default_treatment` (`add_to_cost` or `expense`), `default_spread_method` (`value`, `quantity` or `weight`), `default_itc_eligibility` (`eligible`, `ineligible`, `blocked`, `partial`), `allowed_sign` (`positive`, `negative`, `both`), `is_active`
+
+#### 5. Party Opening Balances (`customer_opening_balances`, `supplier_opening_balances`)
 - **Storage Table:** `party_ledgers` / `customers` / `suppliers`
 - **Post-Import Hook:** Automatically posts an `OPENING_BALANCE` ledger entry and updates party `current_balance`.
 - **Fields:** `party_name` (Req), `phone_or_gstin`, `balance_amount` (Req), `balance_type` (`DR` or `CR`, Req), `as_of_date` (`DD-MM-YYYY`)
@@ -163,6 +170,17 @@ The LamSuite Data Exchange module provides a unified, offline-first, pluggable d
 - **Storage Table:** `purchases`
 - **Duplicate Keys:** Composite `[supplier_name, invoice_number]`
 - **Fields:** `supplier_name` (Req), `supplier_gstin`, `invoice_number` (Req), `invoice_date` (Req), `taxable_amount`, `cgst_amount`, `sgst_amount`, `igst_amount`, `total_amount` (Req), `payment_status`
+- **CR-C charge columns (import):** `charge_head` (code from this store's `charge_heads`, or one of the seeded names), `charge_amount` (signed, `Rs.`), `charge_gst_percent`, `charge_treatment` (`add_to_cost` / `expense`), `charge_spread_method` (`value` / `quantity` / `weight`), `charge_itc_eligibility`, `charge_is_rcm`, `charge_paid_separately`, `charge_paid_to`, `charge_note`. A purchase row carrying only the legacy `freight` column imports as a single `Freight` charge line (`PUR-017`).
+- **CR-C charge columns (export):** one extra block after the item columns — charge head, taxable, CGST, SGST, IGST, cess, total, treatment, spread basis used, allocated amount, ITC flag, RCM flag, paid-separately flag, payable-membership flag (`In Payable`, CR-C-11), paid-to, note — plus `billed_cost` vs `landed_cost` per item line (`REP-007`). The export writes the membership stored with the row, so a file re-generated after a policy change still matches the bill that printed.
+- **Validation:** imported charges are recomputed by the shared engine; `total_amount` must equal items + supplier-borne charges + their tax + round-off, else the row is highlighted as an integrity failure rather than silently corrected.
+- **Where each half runs:** `GET /data-exchange/templates/purchases` and `GET /data-exchange/export/purchases` are live server-side, store-filtered like every other export (`R10`). Importing a document is not one of them: `POST /data-exchange/commit` is catalog-only (items and parties), so a purchases sheet is imported by the till's transactional importer, which is the code path that owns the tax engine, landed cost and the expense posting. The charge columns above are the contract that importer keys on.
+
+#### 2a. Purchase Charges (`purchase_charges`)
+- **Storage Table:** `purchase_charges` (+ child `purchase_charge_allocations`)
+- **Duplicate Keys:** Composite `[store_id, external_id]`
+- **Fields:** `purchase_reference` (Req — supplier invoice no or `purchase_number`), `charge_head` (Req), `amount` (Req, signed), `gst_percent` (Req), `treatment` (Req), `spread_method` (Req), `itc_eligibility` (Req), `is_rcm`, `paid_separately`, `paid_to`, `note`
+- **Post-Import Hook:** Re-derives tax, allocations and landed cost for the parent bill through the same code path a till sync uses — an imported charge is not a report-only row.
+- **Store posting policy applies to these rows too:** the sign and cap checks (`allow_negative_charges`, `max_percent_of_goods`) run on the server inside that same code path, so an offline sheet or till bill that breaks them is refused when it syncs — negative amount as `charges.<n>.amount`, over-cap as `charges` — and no part of the bill is written. The till does not hold these two keys, so it cannot pre-validate them.
 
 #### 3. Sales Returns (`sales_returns`) & Purchase Returns (`purchase_returns`)
 - **Duplicate Keys:** `return_number`
@@ -210,6 +228,12 @@ The LamSuite Data Exchange module provides a unified, offline-first, pluggable d
 - `Selling Rate <= MRP`: Ensures retail compliance with Indian Maximum Retail Price regulations.
 - `PTR <= MRP`: Price to Retailer must not exceed MRP.
 - `Units per Pack > 0`: Unit conversion factor cannot be zero or negative.
+- `Σ charge allocations == charge taxable amount + its non-creditable tax` **to the paisa**; no line may receive a
+  share larger than the whole charge (CR-C `PUR-010`).
+- `Bill payable == items + charges billed into the payable + their tax + round-off`; a charge left outside the
+  payable — a separately-paid one under the default policy — is excluded (CR-C `PUR-013`). Which side a row is on is
+  read from its stored `in_payable`, never re-derived from the store's setting today (CR-C-11 `PUR-016`).
+- A `charge_head` referenced by posted charges cannot be deleted or re-homed without reassignment (CR-C `R12`).
 
 ---
 

@@ -147,10 +147,14 @@ class AdminDeviceController
     public function purgeRogueDevice(string $id): JsonResponse
     {
         $device = Device::findOrFail($id);
-        \App\Models\Counter::where('device_uuid', $device->device_uuid)->update([
-            'status' => 'revoked',
-            'revoke_reason' => 'Purged during security audit: unverified activation',
-        ]);
+        // CNT-008: the same machine can work a counter in another store, so a
+        // purge releases only this store's counter.
+        \App\Models\Counter::where('store_id', $device->store_id)
+            ->where('device_uuid', $device->device_uuid)
+            ->update([
+                'status' => 'revoked',
+                'revoke_reason' => 'Purged during security audit: unverified activation',
+            ]);
         $device->delete();
 
         AuditLog::log('purge_rogue_device', 'Device', (string)$id, null, ['device_uuid' => $device->device_uuid], $device->store_id);

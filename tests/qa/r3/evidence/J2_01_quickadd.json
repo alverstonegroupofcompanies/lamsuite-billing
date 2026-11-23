@@ -1,0 +1,32 @@
+{
+  "suggestions": [],
+  "modal_inputs": [],
+  "prefilled": false,
+  "filled": {
+    "mrp": false,
+    "sell": false,
+    "hsn": false,
+    "gst": false,
+    "barcode": false
+  },
+  "calls": [
+    {
+      "m": "POST",
+      "u": "/counter/sequences/lease",
+      "st": 200,
+      "res": "{\"success\":true,\"counter_id\":2,\"counter_code\":\"C01\",\"doc_type\":\"invoice\",\"prefix\":\"C01-INV\",\"financial_year\":\"2026-27\",\"range_start\":12451,\"range_end\":12500,\"block_size\":50,\"next_number\":12451,\"leased_block\":{\"counter_id\":2,\"counter_code\":\"C01\",\"doc_type\":\"invoice\",\"financial_year\":\"2026-27\",\"prefix"
+    },
+    {
+      "m": "POST",
+      "u": "/counter/sequences/lease",
+      "st": 200,
+      "res": "{\"success\":true,\"counter_id\":2,\"counter_code\":\"C01\",\"doc_type\":\"invoice\",\"prefix\":\"C01-INV\",\"financial_year\":\"2026-27\",\"range_start\":12501,\"range_end\":12550,\"block_size\":50,\"next_number\":12501,\"leased_block\":{\"counter_id\":2,\"counter_code\":\"C01\",\"doc_type\":\"invoice\",\"financial_year\":\"2026-27\",\"prefix"
+    }
+  ],
+  "server": [],
+  "second_counter_sees_after_s": null,
+  "admin": {
+    "in_store4": false,
+    "in_store5": false
+  }
+}

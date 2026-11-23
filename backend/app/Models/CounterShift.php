@@ -12,17 +12,25 @@ class CounterShift extends Model
         'counter_id',
         'opened_by_user_id',
         'closed_by_user_id',
+        // PRF-007: which credential moved the drawer, since a till has no person.
+        'opened_via',
+        'closed_via',
         'opening_float',
         'cash_sales',
         'digital_sales',
         'cash_refunds',
+        'cash_in',
         'cash_drops',
         'closing_cash_actual',
+        'expected_cash',
         'closing_discrepancy',
         'status',
         'opened_at',
         'closed_at',
         'notes',
+        'reconciliation_json',
+        // The till's own id for the shift, so a replayed push updates rather than duplicates.
+        'external_id',
     ];
 
     protected $casts = [
@@ -30,11 +38,14 @@ class CounterShift extends Model
         'cash_sales' => 'decimal:2',
         'digital_sales' => 'decimal:2',
         'cash_refunds' => 'decimal:2',
+        'cash_in' => 'decimal:2',
         'cash_drops' => 'decimal:2',
         'closing_cash_actual' => 'decimal:2',
+        'expected_cash' => 'decimal:2',
         'closing_discrepancy' => 'decimal:2',
         'opened_at' => 'datetime',
         'closed_at' => 'datetime',
+        'reconciliation_json' => 'array',
     ];
 
     public function counter(): BelongsTo

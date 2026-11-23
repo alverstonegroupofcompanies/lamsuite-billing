@@ -23,8 +23,7 @@ import {
 import { reportRegistry, REPORT_CATEGORIES } from "../registry";
 import type { ReportModule, ReportCategory } from "../types";
 import { ReportViewContainer } from "./ReportViewContainer";
-import { staffAuthService } from "../../lib/auth/staffAuthService";
-import type { PermissionSet } from "../../lib/auth/accessControl";
+import { counterSessionService, type CounterSessionState } from "../../lib/auth/counterSessionService";
 import { companySettingsService } from "../../lib/settings/companySettingsService";
 
 export const ReportsHub: React.FC = () => {
@@ -35,9 +34,10 @@ export const ReportsHub: React.FC = () => {
   const [selectedCategory, setSelectedCategory] = useState<ReportCategory | "all">("all");
   const [searchQuery, setSearchQuery] = useState("");
 
-  // Role and Menu settings (least privilege until the session loads)
-  const [userRole, setUserRole] = useState<string>("cashier");
-  const [permissions, setPermissions] = useState<PermissionSet>([]);
+  // Counter permission document and store menu configuration
+  const [counterDocument, setCounterDocument] = useState<CounterSessionState>(() =>
+    counterSessionService.state()
+  );
   const [enabledMenus, setEnabledMenus] = useState<string[]>(["reports"]);
 
   // Open tabs
@@ -63,17 +63,10 @@ export const ReportsHub: React.FC = () => {
     }
   });
 
-  // Load user role, permissions & store menu configuration
+  // Load the counter's document & store menu configuration
   useEffect(() => {
-    const applySession = () => {
-      const session = staffAuthService.getCurrentSession();
-      if (session?.user?.role) {
-        setUserRole(session.user.role);
-        setPermissions(session.user.permissions || []);
-      }
-    };
-    applySession();
-    const unsubscribe = staffAuthService.onSessionChange(applySession);
+    setCounterDocument(counterSessionService.state());
+    const unsubscribe = counterSessionService.subscribe(setCounterDocument);
 
     companySettingsService.loadSettings().then((cfg) => {
       if (cfg?.enabled_menu_items) {
@@ -92,10 +85,15 @@ export const ReportsHub: React.FC = () => {
     }
   }, [searchParams]);
 
-  // Compute accessible reports
+  // Compute accessible reports: the store's shelf, narrowed by this counter's document
   const accessibleReports = useMemo(() => {
-    return reportRegistry.getAccessibleReports(userRole, enabledMenus, permissions);
-  }, [userRole, enabledMenus, permissions]);
+    if (!counterSessionService.allowsModule("reports")) return [];
+    return reportRegistry.getAll().filter(
+      (r) =>
+        (enabledMenus.includes("reports") || enabledMenus.includes(r.menuVisibilityKey)) &&
+        counterSessionService.allowsReport(r.id)
+    );
+  }, [enabledMenus, counterDocument]);
 
   // Filter reports by category and search
   const displayedReports = useMemo(() => {
@@ -137,7 +135,9 @@ export const ReportsHub: React.FC = () => {
     // Verify permission
     const isAllowed = accessibleReports.some((r) => r.id === reportId);
     if (!isAllowed) {
-      alert(`Access Restricted: Report '${report.title}' is not permitted for role '${userRole}' or is disabled in store settings.`);
+      const counterLabel =
+        counterDocument.counterName || counterDocument.counterCode || "This counter";
+      alert(`Access Restricted: ${counterLabel} is not allowed to open '${report.title}'. The store owner sets this in Admin Panel → Counters.`);
       return;
     }
 
@@ -184,9 +184,10 @@ export const ReportsHub: React.FC = () => {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [activeTabId, openTabIds]);
 
+  // A restored tab the counter's document does not allow falls back to the directory.
   const activeReport = useMemo(() => {
-    return reportRegistry.get(activeTabId);
-  }, [activeTabId]);
+    return accessibleReports.find((r) => r.id === activeTabId);
+  }, [accessibleReports, activeTabId]);
 
   const getCategoryIcon = (catId: string) => {
     switch (catId) {
@@ -279,11 +280,16 @@ export const ReportsHub: React.FC = () => {
           })}
         </div>
 
-        {/* Security / RBAC Badge */}
+        {/* Counter permission-document badge */}
         <div className="p-3 border-t border-border-main bg-canvas flex items-center justify-between text-[11px] text-text-muted">
           <div className="flex items-center gap-1.5">
             <Shield className="w-3.5 h-3.5 text-accent" />
-            <span>Role: <strong className="text-text-main uppercase font-semibold">{userRole}</strong></span>
+            <span>
+              Counter:{" "}
+              <strong className="text-text-main font-semibold">
+                {counterDocument.counterName || counterDocument.counterCode || "Unclaimed"}
+              </strong>
+            </span>
           </div>
           <span className="text-[10px] text-accent bg-accent-soft px-2 py-0.5 rounded-full border border-accent/20 font-semibold">
             Zero Drift
@@ -298,7 +304,7 @@ export const ReportsHub: React.FC = () => {
           <div className="flex items-center gap-1 overflow-x-auto flex-1 no-scrollbar">
             {openTabIds.map((tabId) => {
               const rep = reportRegistry.get(tabId);
-              if (!rep) return null;
+              if (!rep || !accessibleReports.some((r) => r.id === tabId)) return null;
               const isActive = activeTabId === tabId;
 
               return (
@@ -350,7 +356,7 @@ export const ReportsHub: React.FC = () => {
             </span>
             {favorites.slice(0, 3).map((fId) => {
               const rep = reportRegistry.get(fId);
-              if (!rep) return null;
+              if (!rep || !accessibleReports.some((r) => r.id === fId)) return null;
               return (
                 <button
                   key={fId}

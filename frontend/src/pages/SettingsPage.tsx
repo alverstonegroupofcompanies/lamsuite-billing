@@ -52,6 +52,7 @@ import {
 } from "lucide-react";
 import {
   companySettingsService,
+  SettingsConflictError,
   type CompanySettings,
   type StoreUpiAccount,
   type UpiSettingsConfig,
@@ -80,6 +81,7 @@ import {
 import { sqliteStorage } from "../lib/db/sqliteStorage";
 import { productsStore } from "../lib/masters/productsStore";
 import { partiesStore } from "../lib/masters/partiesStore";
+import { GST_STATE_NAMES, stateCodeOf } from "../lib/gst/stateCodes";
 
 import { applyWorkspaceSettings } from "../lib/settings/workspaceThemeService";
 import { autoUpdateService, type UpdateInfo } from "../lib/settings/autoUpdateService";
@@ -365,7 +367,7 @@ export const SettingsPage: React.FC = () => {
         .map((s) => s.trim())
         .filter((s) => s.length > 0);
 
-      const updated = await companySettingsService.updateSettings({
+      const updated = await companySettingsService.saveStoreSettings({
         ...settings,
         drug_license_numbers: licenses,
       });
@@ -376,7 +378,16 @@ export const SettingsPage: React.FC = () => {
       }
       showNotification("Configuration updated and saved to database successfully!");
     } catch (err) {
-      showNotification("Failed to save settings", "error");
+      if (err instanceof SettingsConflictError) {
+        // SET-03: the store's settings were reloaded from the server; show them
+        // so the user re-applies their change on top of the newer values.
+        const fresh = companySettingsService.getSettings();
+        setSettings(fresh);
+        setDrugLicenseInput((fresh.drug_license_numbers || []).join(", "));
+        showNotification(err.message, "error");
+        return;
+      }
+      showNotification(err instanceof Error && err.message ? err.message : "Failed to save settings", "error");
     }
   };
 
@@ -1145,22 +1156,39 @@ export const SettingsPage: React.FC = () => {
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-[11px] font-semibold uppercase text-slate-600">GSTIN (15 Digits)</label>
+                  <label htmlFor="settings-gstin" className="block text-[11px] font-semibold uppercase text-slate-600">GSTIN (15 Digits)</label>
                   <input
+                    id="settings-gstin"
                     type="text"
+                    maxLength={15}
                     value={settings.gstin || ""}
                     onChange={(e) => setSettings({ ...settings, gstin: e.target.value.toUpperCase() })}
+                    onBlur={() => {
+                      const code = stateCodeOf(settings.gstin);
+                      if (code && code !== settings.state_code) {
+                        setSettings({ ...settings, state_code: code });
+                      }
+                    }}
                     className="mt-1 w-full rounded border border-slate-300 p-2 text-xs font-mono uppercase focus:border-blue-500 focus:outline-none"
                   />
                 </div>
                 <div>
-                  <label className="block text-[11px] font-semibold uppercase text-slate-600">State Code</label>
-                  <input
-                    type="text"
-                    value={settings.state_code}
+                  <label htmlFor="settings-state-code" className="block text-[11px] font-semibold uppercase text-slate-600">State Code</label>
+                  <select
+                    id="settings-state-code"
+                    value={stateCodeOf(settings.state_code) ?? ""}
                     onChange={(e) => setSettings({ ...settings, state_code: e.target.value })}
-                    className="mt-1 w-full rounded border border-slate-300 p-2 text-xs font-mono focus:border-blue-500 focus:outline-none"
-                  />
+                    className="mt-1 w-full rounded border border-slate-300 p-2 text-xs focus:border-blue-500 focus:outline-none"
+                  >
+                    <option value="" disabled>
+                      Select GST state
+                    </option>
+                    {Object.entries(GST_STATE_NAMES).map(([code, name]) => (
+                      <option key={code} value={code}>
+                        {code} - {name}
+                      </option>
+                    ))}
+                  </select>
                 </div>
               </div>
 

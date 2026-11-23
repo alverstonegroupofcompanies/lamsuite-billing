@@ -303,4 +303,51 @@ class PosStaffCrudStorePinTest extends TestCase
         $res->assertStatus(200);
         $this->assertCount(2, $this->localStaff->fresh()->allowed_store_ids);
     }
+
+    /**
+     * APR-001 / Q6: an approver is a flagged person, not a role. The panel
+     * decides the flag; the counter that shares this route may not — it can
+     * manage its staff without minting someone who can overrule its ceiling.
+     */
+    public function test_only_the_panel_flags_who_may_approve(): void
+    {
+        $created = $this->withHeaders($this->panel())->postJson('/api/admin/users', [
+            'name' => 'Floor Approver',
+            'email' => 'approver@pin.test',
+            'username' => 'pin_approver',
+            'password' => 'password123',
+            'pin' => '864213',
+            'role' => 'manager',
+            'is_approver' => true,
+        ]);
+
+        $created->assertStatus(201);
+        $this->assertTrue((bool) $created->json('is_approver'));
+        $this->assertTrue((bool) User::where('email', 'approver@pin.test')->value('is_approver'));
+
+        // The guard caches the principal it resolved for the first call in a
+        // test, so each request has to be authenticated as itself again.
+        $this->app['auth']->forgetGuards();
+
+        $target = User::where('email', 'approver@pin.test')->firstOrFail();
+        $this->withHeaders($this->panel())->putJson("/api/admin/users/{$target->id}", [
+            'is_approver' => false,
+        ])->assertStatus(200);
+        $this->assertFalse((bool) $target->fresh()->is_approver);
+
+        $this->app['auth']->forgetGuards();
+
+        // The terminal's create ignores the flag instead of honouring it.
+        $terminalMade = $this->withHeaders($this->terminal())->postJson('/api/admin/users', [
+            'name' => 'Counter Approver',
+            'email' => 'counter-approver@pin.test',
+            'username' => 'pin_counter_approver',
+            'password' => 'password123',
+            'role' => 'manager',
+            'is_approver' => true,
+        ]);
+
+        $terminalMade->assertStatus(201);
+        $this->assertFalse((bool) $terminalMade->json('is_approver'));
+    }
 }

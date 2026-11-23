@@ -18,7 +18,7 @@ class SecurityAuditSyncTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        $this->withoutMiddleware(\App\Http\Middleware\AuthenticateDevice::class);
+        $this->actAsClaimedCounterOfRequestedStore();
 
         $this->store = Store::create([
             'name' => 'Audit Store',

@@ -11,6 +11,9 @@ use App\Models\ProductBatch;
 use App\Models\StockLedgerEntry;
 use App\Models\Store;
 use App\Models\StoreDayClose;
+use App\Services\Reports\ExpenseRegisterService;
+use App\Services\Reports\OutwardSalesService;
+use App\Support\Money;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use App\Services\StoreClock;
@@ -53,6 +56,18 @@ class ReportController
     }
 
     /**
+     * The same scope as `resolveStoreId`, as the list some reports filter with `whereIn`.
+     *
+     * @return array<int>|null  null means every store the caller is allowed to see
+     */
+    protected function resolveStoreIds(Request $request): ?array
+    {
+        $storeId = $this->resolveStoreId($request);
+
+        return $storeId === null ? null : [$storeId];
+    }
+
+    /**
      * Daily collection summary breakdown by tender.
      */
     public function dailyCollection(Request $request): JsonResponse
@@ -62,74 +77,25 @@ class ReportController
         $endDate = $request->query('end_date', date('Y-m-d'));
         $counterId = $request->query('counter_id');
 
-        $query = Invoice::whereDate('invoice_date', '>=', $startDate)
-            ->whereDate('invoice_date', '<=', $endDate)
-            ->where('status', '!=', 'cancelled');
-
-        if ($storeId) {
-            $query->where('store_id', $storeId);
-        }
-
-        if (!empty($counterId)) {
-            $query->where('counter_id', $counterId);
-        }
-
-        $invoices = $query->with('payments')->get();
-
-        $grossSales = (float)$invoices->where('module_key', 'invoice')->sum('grand_total');
-        $returns = (float)$invoices->where('module_key', 'credit_note')->sum('grand_total');
-        $netSales = $grossSales - $returns;
-
-        $cashTender = 0.0;
-        $upiTender = 0.0;
-        $cardTender = 0.0;
-        $bankTender = 0.0;
-        $creditTender = 0.0;
-        $otherTender = 0.0;
-
-        foreach ($invoices as $inv) {
-            $isReturn = $inv->module_key === 'credit_note';
-            $sign = $isReturn ? -1 : 1;
-
-            if ($inv->payments && $inv->payments->isNotEmpty()) {
-                foreach ($inv->payments as $p) {
-                    if ($p->status === 'refunded' || $p->status === 'bounced') continue;
-                    $m = strtolower(trim($p->payment_mode ?? ''));
-                    $amt = (float)$p->amount * $sign;
-                    if (str_contains($m, 'cash')) $cashTender += $amt;
-                    elseif (str_contains($m, 'upi')) $upiTender += $amt;
-                    elseif (str_contains($m, 'card')) $cardTender += $amt;
-                    elseif (str_contains($m, 'bank') || str_contains($m, 'neft') || str_contains($m, 'imps')) $bankTender += $amt;
-                    elseif (str_contains($m, 'credit') || str_contains($m, 'udhari')) $creditTender += $amt;
-                    else $otherTender += $amt;
-                }
-            } else {
-                $m = strtolower(trim($inv->payment_mode ?: 'cash'));
-                $amt = (float)$inv->grand_total * $sign;
-                if (str_contains($m, 'cash')) $cashTender += $amt;
-                elseif (str_contains($m, 'upi')) $upiTender += $amt;
-                elseif (str_contains($m, 'card')) $cardTender += $amt;
-                elseif (str_contains($m, 'bank') || str_contains($m, 'neft') || str_contains($m, 'imps')) $bankTender += $amt;
-                elseif (str_contains($m, 'credit') || str_contains($m, 'udhari')) $creditTender += $amt;
-                else $otherTender += $amt;
-            }
-        }
+        $service = OutwardSalesService::forWindow($storeId, $startDate, $endDate, $counterId);
+        $gst = $service->gst();
+        $tenders = $service->tenders();
 
         return response()->json([
             'date_range' => ['start_date' => $startDate, 'end_date' => $endDate],
-            'total_invoices_count' => $invoices->where('module_key', 'invoice')->count(),
-            'gross_sales' => round($grossSales, 2),
-            'total_returns' => round($returns, 2),
-            'net_sales' => round($netSales, 2),
-            'total_taxable' => round((float)$invoices->sum('subtotal'), 2),
-            'total_tax' => round((float)$invoices->sum('tax_total'), 2),
+            'total_invoices_count' => $service->billsCount(),
+            'gross_sales' => $service->grossSales(),
+            'total_returns' => $service->totalReturns(),
+            'net_sales' => $service->netSales(),
+            'total_taxable' => $gst['taxable_value'],
+            'total_tax' => $gst['tax_amount'],
             'by_tender' => [
-                'Cash' => round($cashTender, 2),
-                'UPI' => round($upiTender, 2),
-                'Card' => round($cardTender, 2),
-                'Bank Transfer' => round($bankTender, 2),
-                'Credit' => round($creditTender, 2),
-                'Other' => round($otherTender, 2),
+                'Cash' => $tenders['cash'],
+                'UPI' => $tenders['upi'],
+                'Card' => $tenders['card'],
+                'Bank Transfer' => $tenders['bank_transfer'],
+                'Credit' => $tenders['credit'],
+                'Other' => $tenders['other'],
             ],
         ]);
     }
@@ -212,38 +178,12 @@ class ReportController
             ->first();
         $openingCash = $prevClose ? (float)$prevClose->net_cash_in_hand : 0.0;
 
-        // 2. Invoices & tender collections on that date
-        $invoices = Invoice::with('payments')
-            ->whereDate('invoice_date', $date)
-            ->where('status', '!=', 'cancelled')
-            ->when($storeId, fn($q) => $q->where('store_id', $storeId))
-            ->get();
-
-        $cashSales = 0.0;
-        $upiCollections = 0.0;
-        $cardCollections = 0.0;
-
-        foreach ($invoices as $inv) {
-            $isReturn = in_array($inv->module_key, ['credit_note', 'sales_return']);
-            $sign = $isReturn ? -1 : 1;
-
-            if ($inv->payments && $inv->payments->isNotEmpty()) {
-                foreach ($inv->payments as $p) {
-                    if ($p->status === 'refunded' || $p->status === 'bounced') continue;
-                    $m = strtolower(trim($p->payment_mode ?? ''));
-                    $amt = (float)$p->amount * $sign;
-                    if (str_contains($m, 'cash')) $cashSales += $amt;
-                    elseif (str_contains($m, 'upi')) $upiCollections += $amt;
-                    elseif (str_contains($m, 'card')) $cardCollections += $amt;
-                }
-            } else {
-                $m = strtolower(trim($inv->payment_mode ?: 'cash'));
-                $amt = (float)$inv->grand_total * $sign;
-                if (str_contains($m, 'cash')) $cashSales += $amt;
-                elseif (str_contains($m, 'upi')) $upiCollections += $amt;
-                elseif (str_contains($m, 'card')) $cardCollections += $amt;
-            }
-        }
+        // 2. Invoices & tender collections on that date, counting only the
+        // amount applied to each bill (a note's change never entered the till).
+        $tenders = OutwardSalesService::forWindow($storeId, $date, $date)->tenders();
+        $cashSales = $tenders['cash'];
+        $upiCollections = $tenders['upi'];
+        $cardCollections = $tenders['card'];
 
         // 3. Expenses on that date
         $expensesQuery = Expense::whereDate('expense_date', $date)
@@ -277,6 +217,30 @@ class ReportController
     }
 
     /**
+     * REP-008 — the Expense Register: every manual expense plus every expense-treated charge
+     * on a supplier bill, with the tax columns and ITC flag that decide how each was booked.
+     */
+    public function expenseRegister(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'start_date' => 'nullable|date',
+            'end_date' => 'nullable|date',
+            'head' => 'nullable|string|max:100',
+            'source' => 'nullable|in:all,manual,purchase_charge',
+        ]);
+
+        return response()->json(
+            (new ExpenseRegisterService())->register([
+                'from' => $validated['start_date'] ?? null,
+                'to' => $validated['end_date'] ?? null,
+                'store_ids' => $this->resolveStoreIds($request),
+                'head' => $validated['head'] ?? null,
+                'source' => $validated['source'] ?? ExpenseRegisterService::SOURCE_ALL,
+            ])
+        );
+    }
+
+    /**
      * Store daily closing summary.
      */
     public function dailySummary(Request $request): JsonResponse
@@ -284,44 +248,15 @@ class ReportController
         $storeId = $this->resolveStoreId($request);
         $date = $request->query('date', date('Y-m-d'));
 
-        $invoices = Invoice::with('payments')
-            ->whereDate('invoice_date', $date)
-            ->where('status', '!=', 'cancelled')
-            ->when($storeId, fn($q) => $q->where('store_id', $storeId))
-            ->get();
-
-        $grossSales = (float)$invoices->where('module_key', 'invoice')->sum('grand_total');
-        $returns = (float)$invoices->where('module_key', 'credit_note')->sum('grand_total');
-        $totalSales = $grossSales - $returns;
-
-        $cash = 0.0;
-        $upi = 0.0;
-        $card = 0.0;
-        $credit = 0.0;
-
-        foreach ($invoices as $inv) {
-            $isReturn = in_array($inv->module_key, ['credit_note', 'sales_return']);
-            $sign = $isReturn ? -1 : 1;
-
-            if ($inv->payments && $inv->payments->isNotEmpty()) {
-                foreach ($inv->payments as $p) {
-                    if ($p->status === 'refunded' || $p->status === 'bounced') continue;
-                    $m = strtolower(trim($p->payment_mode ?? ''));
-                    $amt = (float)$p->amount * $sign;
-                    if (str_contains($m, 'cash')) $cash += $amt;
-                    elseif (str_contains($m, 'upi')) $upi += $amt;
-                    elseif (str_contains($m, 'card')) $card += $amt;
-                    elseif (str_contains($m, 'credit') || str_contains($m, 'udhari')) $credit += $amt;
-                }
-            } else {
-                $m = strtolower(trim($inv->payment_mode ?: 'cash'));
-                $amt = (float)$inv->grand_total * $sign;
-                if (str_contains($m, 'cash')) $cash += $amt;
-                elseif (str_contains($m, 'upi')) $upi += $amt;
-                elseif (str_contains($m, 'card')) $card += $amt;
-                elseif (str_contains($m, 'credit') || str_contains($m, 'udhari')) $credit += $amt;
-            }
-        }
+        $service = OutwardSalesService::forWindow($storeId, $date, $date);
+        $tenders = $service->tenders();
+        $grossSales = $service->grossSales();
+        $returns = $service->totalReturns();
+        $totalSales = $service->netSales();
+        $cash = $tenders['cash'];
+        $upi = $tenders['upi'];
+        $card = $tenders['card'];
+        $credit = $tenders['credit'];
 
         $lowStockCount = Product::where('is_active', true)
             ->whereColumn('current_stock', '<=', 'reorder_level')
@@ -336,14 +271,14 @@ class ReportController
 
         return response()->json([
             'date' => $date,
-            'total_sales' => round($totalSales, 2),
-            'gross_sales' => round($grossSales, 2),
-            'returns' => round($returns, 2),
-            'invoice_count' => $invoices->where('module_key', 'invoice')->count(),
-            'cash_collection' => round($cash, 2),
-            'upi_collection' => round($upi, 2),
-            'card_collection' => round($card, 2),
-            'credit_collection' => round($credit, 2),
+            'total_sales' => $totalSales,
+            'gross_sales' => $grossSales,
+            'returns' => $returns,
+            'invoice_count' => $service->billsCount(),
+            'cash_collection' => $cash,
+            'upi_collection' => $upi,
+            'card_collection' => $card,
+            'credit_collection' => $credit,
             'low_stock_count' => $lowStockCount,
             'near_expiry_count' => $nearExpiryCount,
         ]);
@@ -366,6 +301,11 @@ class ReportController
             ->when($storeId, fn($q) => $q->where('store_id', $storeId))
             ->get();
 
+        // REP-009: a charge taken into cost has to be in the margin too, otherwise the two
+        // treatments of the same rupee stop being comparable.
+        $batchRates = $this->batchCostRates($storeId);
+        $usedLandedCost = false;
+
         $totalRevenue = 0.0;
         $totalCogs = 0.0;
         $breakdown = [];
@@ -378,8 +318,20 @@ class ReportController
                 $qty = (float)$item->qty * $sign;
                 $rev = (float)$item->total_amount * $sign;
 
-                // Purchase cost basis: purchase_rate > ptr > fallback selling rate * 0.75
-                $costPerUnit = (float)($item->purchase_rate ?? $item->product?->ptr ?? ($item->unit_price * 0.75));
+                // Cost basis: the batch's landed rate when a charge moved it, otherwise the
+                // rate this report has always booked the line at.
+                $batchKey = $item->product_id . '|' . trim((string) ($item->batch_no ?? ''));
+                $landed = $batchRates['landed'][$batchKey] ?? null;
+
+                if ($landed !== null && $landed > 0) {
+                    $costPerUnit = $landed;
+                    $usedLandedCost = true;
+                } else {
+                    $costPerUnit = (float)($item->purchase_rate ?? $item->product?->ptr ?? ($item->unit_price * 0.75));
+                }
+
+                // PUR-011 keeps the supplier rate untouched, so it can still be shown beside it.
+                $bookedPerUnit = $batchRates['booked'][$batchKey] ?? $costPerUnit;
                 $cogs = $qty * $costPerUnit;
 
                 $totalRevenue += $rev;
@@ -398,6 +350,8 @@ class ReportController
                         'cogs' => 0.0,
                         'gross_profit' => 0.0,
                         'qty' => 0,
+                        'landed_cost' => 0.0,
+                        'booked_cost' => 0.0,
                     ];
                 }
 
@@ -405,11 +359,20 @@ class ReportController
                 $breakdown[$key]['cogs'] += $cogs;
                 $breakdown[$key]['qty'] += $qty;
                 $breakdown[$key]['gross_profit'] += ($rev - $cogs);
+                $breakdown[$key]['landed_cost'] += $qty * $costPerUnit;
+                $breakdown[$key]['booked_cost'] += $qty * $bookedPerUnit;
             }
         }
 
         $grossProfit = $totalRevenue - $totalCogs;
         $grossMarginPercent = $totalRevenue > 0 ? round(($grossProfit / $totalRevenue) * 100, 2) : 0.0;
+
+        $chargeExpenses = (new ExpenseRegisterService())->register([
+            'from' => substr($startDate, 0, 10),
+            'to' => substr($endDate, 0, 10),
+            'store_ids' => $storeId === null ? null : [$storeId],
+            'source' => ExpenseRegisterService::SOURCE_CHARGE,
+        ])['totals']['postings'];
 
         return response()->json([
             'date_range' => ['start_date' => $startDate, 'end_date' => $endDate],
@@ -417,19 +380,58 @@ class ReportController
             'total_cogs' => round($totalCogs, 2),
             'gross_profit' => round($grossProfit, 2),
             'gross_margin_percent' => $grossMarginPercent,
+            'cost_basis' => $usedLandedCost ? 'landed_cost' : 'purchase_rate',
+            'expense_charge_postings' => round($chargeExpenses, 2),
             'breakdown' => array_values(array_map(function ($b) {
                 $rev = (float)$b['revenue'];
                 $gp = (float)$b['gross_profit'];
+                $qty = (float)$b['qty'];
                 return [
                     'group_key' => $b['group_key'],
-                    'qty' => round($b['qty'], 2),
+                    'qty' => round($qty, 2),
                     'revenue' => round($rev, 2),
                     'cogs' => round((float)$b['cogs'], 2),
                     'gross_profit' => round($gp, 2),
                     'margin_percent' => $rev > 0 ? round(($gp / $rev) * 100, 2) : 0.0,
+                    'cost_per_unit' => $qty != 0 ? round($b['landed_cost'] / $qty, 4) : 0.0,
+                    'supplier_cost_per_unit' => $qty != 0 ? round($b['booked_cost'] / $qty, 4) : 0.0,
                 ];
             }, $breakdown)),
         ]);
+    }
+
+    /**
+     * Unit rates keyed by `product|batch`.
+     *
+     * `landed` is what the batch really cost once an add-to-cost charge joined it (PUR-011);
+     * `booked` is the supplier rate the receipt was booked at, which the charge never rewrites.
+     * A batch with no landed rate stays out of the first map, so the sale keeps the rate this
+     * report has always costed it at.
+     *
+     * @return array{landed: array<string, float>, booked: array<string, float>}
+     */
+    private function batchCostRates(?int $storeId): array
+    {
+        $batches = ProductBatch::query()
+            ->where(fn($q) => $q->whereNotNull('landed_cost_rate')->orWhere('purchase_rate', '>', 0))
+            ->when($storeId, fn($q) => $q->where('store_id', $storeId))
+            ->get(['product_id', 'batch_no', 'landed_cost_rate', 'purchase_rate']);
+
+        $landed = [];
+        $booked = [];
+
+        foreach ($batches as $batch) {
+            $key = $batch->product_id . '|' . trim((string) $batch->batch_no);
+
+            if ($batch->landed_cost_rate !== null) {
+                $landed[$key] = round((float) $batch->landed_cost_rate, 4);
+            }
+            if ((float) $batch->purchase_rate > 0) {
+                $booked[$key] = round((float) $batch->purchase_rate, 4);
+            }
+        }
+
+        return ['landed' => $landed, 'booked' => $booked];
     }
 
     /**
@@ -631,14 +633,17 @@ class ReportController
 
         // GSTR-1 must not lose the bills whose invoice_date is a bare date: this column is TEXT
         // and holds both shapes, so the window is compared on the date part.
-        $invoicesQuery = Invoice::with('items')
+        $invoicesQuery = Invoice::with(['items', 'payments'])
             ->whereDate('invoice_date', '>=', substr($startDate, 0, 10))
             ->whereDate('invoice_date', '<=', substr($endDate, 0, 10))
-            ->where('status', '!=', 'cancelled');
+            ->where('status', '!=', 'cancelled')
+            ->orderBy('invoice_date')
+            ->orderBy('id');
         if ($storeId) {
             $invoicesQuery->where('store_id', $storeId);
         }
         $invoices = $invoicesQuery->get();
+        $service = OutwardSalesService::fromInvoices($invoices);
 
         $table4B2b = [];
         $table5B2cLarge = [];
@@ -646,10 +651,14 @@ class ReportController
         $table9CreditNotes = [];
 
         foreach ($invoices as $inv) {
+            $isReturn = OutwardSalesService::isReturn($inv);
+            if (! $isReturn && ! OutwardSalesService::isSale($inv)) {
+                continue;
+            }
+
             $hasGstin = !empty($inv->customer_gstin) && strlen(trim($inv->customer_gstin)) === 15;
-            $isReturn = in_array($inv->module_key, ['credit_note', 'sales_return']);
             $targetState = !empty($inv->customer_gstin) ? substr(trim($inv->customer_gstin), 0, 2) : ($inv->place_of_supply ?? $storeState);
-            $taxable = (float) ($inv->taxable_subtotal ?? $inv->subtotal);
+            $taxable = $service->taxableBase($inv);
 
             if ($isReturn) {
                 $table9CreditNotes[] = [
@@ -657,12 +666,12 @@ class ReportController
                     'note_date' => $inv->invoice_date->format('Y-m-d'),
                     'customer_name' => $inv->customer_name,
                     'customer_gstin' => $inv->customer_gstin ?? '-',
-                    'note_value' => (float) $inv->grand_total,
+                    'note_value' => Money::round2($inv->grand_total),
                     'taxable_value' => $taxable,
-                    'cgst_amount' => (float) ($inv->cgst_total ?? 0),
-                    'sgst_amount' => (float) ($inv->sgst_total ?? 0),
-                    'igst_amount' => (float) ($inv->igst_total ?? 0),
-                    'cess_amount' => (float) ($inv->cess_total ?? 0),
+                    'cgst_amount' => Money::round2($inv->cgst_total),
+                    'sgst_amount' => Money::round2($inv->sgst_total),
+                    'igst_amount' => Money::round2($inv->igst_total),
+                    'cess_amount' => Money::round2($inv->cess_total),
                 ];
                 continue;
             }
@@ -673,54 +682,54 @@ class ReportController
                     'customer_name' => $inv->customer_name,
                     'invoice_number' => $inv->invoice_number,
                     'invoice_date' => $inv->invoice_date->format('Y-m-d'),
-                    'invoice_value' => (float) $inv->grand_total,
+                    'invoice_value' => Money::round2($inv->grand_total),
                     'place_of_supply' => $targetState,
                     'taxable_value' => $taxable,
-                    'cgst_amount' => (float) ($inv->cgst_total ?? 0),
-                    'sgst_amount' => (float) ($inv->sgst_total ?? 0),
-                    'igst_amount' => (float) ($inv->igst_total ?? 0),
-                    'cess_amount' => (float) ($inv->cess_total ?? 0),
+                    'cgst_amount' => Money::round2($inv->cgst_total),
+                    'sgst_amount' => Money::round2($inv->sgst_total),
+                    'igst_amount' => Money::round2($inv->igst_total),
+                    'cess_amount' => Money::round2($inv->cess_total),
                 ];
             } elseif ($targetState !== $storeState && $inv->grand_total > 250000) {
                 $table5B2cLarge[] = [
                     'invoice_number' => $inv->invoice_number,
                     'invoice_date' => $inv->invoice_date->format('Y-m-d'),
-                    'invoice_value' => (float) $inv->grand_total,
+                    'invoice_value' => Money::round2($inv->grand_total),
                     'place_of_supply' => $targetState,
                     'taxable_value' => $taxable,
-                    'igst_amount' => (float) ($inv->igst_total ?? $inv->tax_total ?? 0),
-                    'cess_amount' => (float) ($inv->cess_total ?? 0),
+                    'igst_amount' => Money::round2($inv->igst_total ?? $inv->tax_total),
+                    'cess_amount' => Money::round2($inv->cess_total),
                 ];
             } else {
                 if (!isset($table7B2cMap[$targetState])) {
                     $table7B2cMap[$targetState] = [
                         'place_of_supply' => $targetState,
-                        'taxable_value' => 0.0,
-                        'cgst_amount' => 0.0,
-                        'sgst_amount' => 0.0,
-                        'igst_amount' => 0.0,
-                        'cess_amount' => 0.0,
-                        'tax_amount' => 0.0,
+                        'taxable_value' => 0,
+                        'cgst_amount' => 0,
+                        'sgst_amount' => 0,
+                        'igst_amount' => 0,
+                        'cess_amount' => 0,
+                        'tax_amount' => 0,
                     ];
                 }
-                $table7B2cMap[$targetState]['taxable_value'] += $taxable;
-                $table7B2cMap[$targetState]['cgst_amount'] += (float) ($inv->cgst_total ?? 0);
-                $table7B2cMap[$targetState]['sgst_amount'] += (float) ($inv->sgst_total ?? 0);
-                $table7B2cMap[$targetState]['igst_amount'] += (float) ($inv->igst_total ?? 0);
-                $table7B2cMap[$targetState]['cess_amount'] += (float) ($inv->cess_total ?? 0);
-                $table7B2cMap[$targetState]['tax_amount'] += (float) ($inv->tax_total ?? 0);
+                $table7B2cMap[$targetState]['taxable_value'] += Money::paise($taxable);
+                $table7B2cMap[$targetState]['cgst_amount'] += Money::paise($inv->cgst_total);
+                $table7B2cMap[$targetState]['sgst_amount'] += Money::paise($inv->sgst_total);
+                $table7B2cMap[$targetState]['igst_amount'] += Money::paise($inv->igst_total);
+                $table7B2cMap[$targetState]['cess_amount'] += Money::paise($inv->cess_total);
+                $table7B2cMap[$targetState]['tax_amount'] += Money::paise($inv->tax_total);
             }
         }
 
         $table7B2cSmall = array_values(array_map(function ($row) {
             return [
                 'place_of_supply' => $row['place_of_supply'],
-                'taxable_value' => round($row['taxable_value'], 2),
-                'cgst_amount' => round($row['cgst_amount'], 2),
-                'sgst_amount' => round($row['sgst_amount'], 2),
-                'igst_amount' => round($row['igst_amount'], 2),
-                'cess_amount' => round($row['cess_amount'], 2),
-                'tax_amount' => round($row['tax_amount'], 2),
+                'taxable_value' => Money::toFloat($row['taxable_value']),
+                'cgst_amount' => Money::toFloat($row['cgst_amount']),
+                'sgst_amount' => Money::toFloat($row['sgst_amount']),
+                'igst_amount' => Money::toFloat($row['igst_amount']),
+                'cess_amount' => Money::toFloat($row['cess_amount']),
+                'tax_amount' => Money::toFloat($row['tax_amount']),
             ];
         }, $table7B2cMap));
 
@@ -748,58 +757,23 @@ class ReportController
         $startDate = $request->query('start_date', $storeToday);
         $endDate = $request->query('end_date', $storeToday);
 
-        $query = Invoice::whereDate('invoice_date', '>=', $startDate)
-            ->whereDate('invoice_date', '<=', $endDate)
-            ->where('status', '!=', 'cancelled');
-        if ($storeId) {
-            $query->where('store_id', $storeId);
-        }
+        $service = OutwardSalesService::forWindow($storeId, $startDate, $endDate);
+        $gst = $service->gst();
+        $tenders = $service->tenders();
 
-        $invoices = $query->with(['payments', 'items'])->get();
+        $grossSales = $service->grossSales();
+        $totalReturns = $service->totalReturns();
+        $netSales = $service->netSales();
+        $billsCount = $service->billsCount();
+        $avgTicket = $billsCount > 0 ? Money::round2($grossSales / $billsCount) : 0.0;
 
-        $returnModuleKeys = ['credit_note', 'sales_return'];
-        $isReturnInvoice = fn ($inv) => in_array($inv->module_key, $returnModuleKeys, true);
-
-        $grossSales = (float)$invoices->filter(fn ($inv) => !$isReturnInvoice($inv))->sum('grand_total');
-        $totalReturns = (float)$invoices->filter($isReturnInvoice)->sum('grand_total');
-        $netSales = $grossSales - $totalReturns;
-
-        $billsCount = $invoices->filter(fn ($inv) => !$isReturnInvoice($inv))->count();
-        $avgTicket = $billsCount > 0 ? round($grossSales / $billsCount, 2) : 0.0;
-
-        $tenders = [
-            'cash' => 0.0,
-            'upi' => 0.0,
-            'card' => 0.0,
-            'bank_transfer' => 0.0,
-            'credit' => 0.0,
-            'other' => 0.0,
-        ];
-
-        foreach ($invoices as $inv) {
-            $sign = $isReturnInvoice($inv) ? -1 : 1;
-
-            if ($inv->payments && $inv->payments->isNotEmpty()) {
-                foreach ($inv->payments as $p) {
-                    if (in_array($p->status, ['refunded', 'bounced'], true)) {
-                        continue;
-                    }
-                    $category = $this->normalizeTenderMode($p->payment_mode);
-                    $tenders[$category] += (float)$p->amount * $sign;
-                }
-            } else {
-                $category = $this->normalizeTenderMode($inv->payment_mode);
-                $tenders[$category] += (float)$inv->grand_total * $sign;
-            }
-        }
-
-        $digitalTotal = $tenders['upi'] + $tenders['card'] + $tenders['bank_transfer'];
-        $totalCollected = array_sum($tenders);
+        $digitalTotal = Money::sum([$tenders['upi'], $tenders['card'], $tenders['bank_transfer']]);
+        $totalCollected = Money::sum(array_values($tenders));
         $digitalPercent = $totalCollected > 0 ? round(($digitalTotal / $totalCollected) * 100, 1) : 0.0;
 
-        $slabMap = [];
+        $slabs = [];
         foreach ([0, 5, 12, 18, 28] as $rate) {
-            $slabMap[$rate] = [
+            $slabs[$rate] = [
                 'rate' => $rate,
                 'taxable_value' => 0.0,
                 'cgst_amount' => 0.0,
@@ -808,140 +782,49 @@ class ReportController
                 'total_tax' => 0.0,
             ];
         }
-        $addSlab = function (int $rate, float $taxable, float $cgst, float $sgst, float $igst) use (&$slabMap) {
-            if (!isset($slabMap[$rate])) {
-                $slabMap[$rate] = [
-                    'rate' => $rate,
-                    'taxable_value' => 0.0,
-                    'cgst_amount' => 0.0,
-                    'sgst_amount' => 0.0,
-                    'igst_amount' => 0.0,
-                    'total_tax' => 0.0,
-                ];
-            }
-            $slabMap[$rate]['taxable_value'] += $taxable;
-            $slabMap[$rate]['cgst_amount'] += $cgst;
-            $slabMap[$rate]['sgst_amount'] += $sgst;
-            $slabMap[$rate]['igst_amount'] += $igst;
-            $slabMap[$rate]['total_tax'] += $cgst + $sgst + $igst;
-        };
-
-        $totalTaxable = 0.0;
-        $totalCgst = 0.0;
-        $totalSgst = 0.0;
-        $totalIgst = 0.0;
-        $totalRoundOff = 0.0;
-
-        foreach ($invoices as $inv) {
-            $sign = $isReturnInvoice($inv) ? -1 : 1;
-            $totalRoundOff += (float)($inv->round_off ?? 0);
-
-            $items = $inv->items;
-            if ($items && $items->isNotEmpty()) {
-                foreach ($items as $it) {
-                    $cgst = (float)($it->cgst_amount ?? 0) * $sign;
-                    $sgst = (float)($it->sgst_amount ?? 0) * $sign;
-                    $igst = (float)($it->igst_amount ?? 0) * $sign;
-                    $lineTotal = (float)($it->total_amount ?? 0) * $sign;
-                    $taxable = $it->taxable_amount !== null
-                        ? (float)$it->taxable_amount * $sign
-                        : $lineTotal - $cgst - $sgst - $igst;
-
-                    $totalTaxable += $taxable;
-                    $totalCgst += $cgst;
-                    $totalSgst += $sgst;
-                    $totalIgst += $igst;
-
-                    $addSlab((int)round((float)($it->gst_percent ?? 0)), $taxable, $cgst, $sgst, $igst);
-                }
-                continue;
-            }
-
-            // Header-only invoices have no item rows. Derive the slab from the
-            // header so the GST quick view is never empty for them.
-            $headerTax = (float)($inv->tax_total ?? 0) * $sign;
-            $cgst = (float)($inv->cgst_total ?? 0) * $sign;
-            $sgst = (float)($inv->sgst_total ?? 0) * $sign;
-            $igst = (float)($inv->igst_total ?? 0) * $sign;
-            if (abs($cgst + $sgst + $igst) < 0.001 && abs($headerTax) > 0.001) {
-                // Older rows only kept tax_total; split it the way GST does.
-                $cgst = $headerTax / 2;
-                $sgst = $headerTax / 2;
-            }
-            $taxTotal = abs($cgst + $sgst + $igst) > 0.001 ? $cgst + $sgst + $igst : $headerTax;
-            $base = $inv->taxable_subtotal !== null
-                ? (float)$inv->taxable_subtotal * $sign
-                : ((float)($inv->grand_total ?? 0) - $headerTax) * $sign;
-            if (abs($base) < 0.001) {
-                $base = (float)($inv->grand_total ?? 0) * $sign;
-            }
-            $rate = abs($base) > 0.001 ? (int)round((abs($taxTotal) / abs($base)) * 100) : 0;
-
-            $totalTaxable += $base;
-            $totalCgst += $cgst;
-            $totalSgst += $sgst;
-            $totalIgst += $igst;
-            $addSlab($rate, $base, $cgst, $sgst, $igst);
+        foreach ($gst['slabs'] as $row) {
+            $slabs[(int) $row['rate']] = [
+                'rate' => (int) $row['rate'],
+                'taxable_value' => $row['taxable_value'],
+                'cgst_amount' => $row['cgst_amount'],
+                'sgst_amount' => $row['sgst_amount'],
+                'igst_amount' => $row['igst_amount'],
+                'total_tax' => $row['total_tax'],
+            ];
         }
+        ksort($slabs);
 
-        $totalTaxAccrued = $totalCgst + $totalSgst + $totalIgst;
-
-        ksort($slabMap);
+        $totalTaxAccrued = Money::sum([$gst['cgst_amount'], $gst['sgst_amount'], $gst['igst_amount']]);
 
         return response()->json([
             'date_range' => ['start_date' => $startDate, 'end_date' => $endDate],
             'timezone' => StoreClock::timezone($store),
-            'net_sales' => round($netSales, 2),
-            'gross_sales' => round($grossSales, 2),
-            'total_returns' => round($totalReturns, 2),
+            'net_sales' => $netSales,
+            'gross_sales' => $grossSales,
+            'total_returns' => $totalReturns,
             'bills_count' => $billsCount,
             'average_ticket' => $avgTicket,
             'payments' => [
-                'cash' => round(max(0, $tenders['cash']), 2),
-                'upi' => round(max(0, $tenders['upi']), 2),
-                'card' => round(max(0, $tenders['card']), 2),
-                'bank_transfer' => round(max(0, $tenders['bank_transfer']), 2),
-                'credit' => round(max(0, $tenders['credit']), 2),
-                'other' => round(max(0, $tenders['other']), 2),
-                'digital_total' => round($digitalTotal, 2),
+                'cash' => Money::round2(max(0, $tenders['cash'])),
+                'upi' => Money::round2(max(0, $tenders['upi'])),
+                'card' => Money::round2(max(0, $tenders['card'])),
+                'bank_transfer' => Money::round2(max(0, $tenders['bank_transfer'])),
+                'credit' => Money::round2(max(0, $tenders['credit'])),
+                'other' => Money::round2(max(0, $tenders['other'])),
+                'digital_total' => $digitalTotal,
                 'digital_percent' => $digitalPercent,
-                'total_collected' => round($totalCollected, 2),
+                'total_collected' => $totalCollected,
             ],
             'gst' => [
-                'slabs' => array_values($slabMap),
-                'total_taxable' => round($totalTaxable, 2),
-                'total_cgst' => round($totalCgst, 2),
-                'total_sgst' => round($totalSgst, 2),
-                'total_igst' => round($totalIgst, 2),
-                'total_round_off' => round($totalRoundOff, 2),
-                'total_tax_accrued' => round($totalTaxAccrued, 2),
+                'slabs' => array_values($slabs),
+                'total_taxable' => $gst['taxable_value'],
+                'total_cgst' => $gst['cgst_amount'],
+                'total_sgst' => $gst['sgst_amount'],
+                'total_igst' => $gst['igst_amount'],
+                'total_round_off' => $service->roundOff(),
+                'total_tax_accrued' => $totalTaxAccrued,
             ],
         ]);
-    }
-
-    /** Map a stored payment mode onto the shared tender buckets. */
-    protected function normalizeTenderMode(?string $mode): string
-    {
-        $m = strtolower(trim((string)$mode));
-        if ($m === '') {
-            return 'other';
-        }
-        if (str_contains($m, 'cash')) {
-            return 'cash';
-        }
-        if (str_contains($m, 'upi') || str_contains($m, 'gpay') || str_contains($m, 'phonepe') || str_contains($m, 'paytm') || str_contains($m, 'qr')) {
-            return 'upi';
-        }
-        if (str_contains($m, 'card') || str_contains($m, 'visa') || str_contains($m, 'pos') || str_contains($m, 'debit')) {
-            return 'card';
-        }
-        if (str_contains($m, 'bank') || str_contains($m, 'neft') || str_contains($m, 'rtgs') || str_contains($m, 'imps') || str_contains($m, 'transfer')) {
-            return 'bank_transfer';
-        }
-        if (str_contains($m, 'credit') || str_contains($m, 'udhari') || str_contains($m, 'due') || str_contains($m, 'ledger')) {
-            return 'credit';
-        }
-        return 'other';
     }
 
     /**

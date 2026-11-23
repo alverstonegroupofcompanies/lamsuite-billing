@@ -63,7 +63,7 @@ describe("Multi-Store Workspace & Registry", () => {
     expect(migratedToken).toBe("jwt_legacy_token_999");
   });
 
-  it("2. Prevents duplicate registration of the same store and counter", async () => {
+  it("2. Keeps one counter per store and refreshes it on a re-claim", async () => {
     const profile: StoreDeviceProfile = {
       device_id: "cntr_main_01",
       device_uuid: "uuid_1",
@@ -87,13 +87,29 @@ describe("Multi-Store Workspace & Registry", () => {
       refreshToken: "ref_1",
     });
 
-    // Attempt registering same store + counter again
+    const { invokeCommand } = await import("../ipc/ipcBridge");
+
+    // CNT-008: re-claiming the same counter renews its credential in place
+    // instead of stacking a second record for one store.
+    await storeRegistryService.registerStore(profile, {
+      deviceToken: "tok_dup",
+      refreshToken: "ref_dup",
+    });
+
+    expect(storeRegistryService.getStores().length).toBe(1);
+    expect(await invokeCommand<string>("secure_store_get", { key: "store:store_main:device_token" })).toBe("tok_dup");
+    expect(await invokeCommand<string>("secure_store_get", { key: "device_token" })).toBe("tok_dup");
+
+    // A different counter in the same store is refused, naming the one held.
     await expect(
-      storeRegistryService.registerStore(profile, {
-        deviceToken: "tok_dup",
-        refreshToken: "ref_dup",
-      })
-    ).rejects.toThrow(/already registered on this terminal/);
+      storeRegistryService.registerStore(
+        { ...profile, counter_id: "cntr_main_02", counter_name: "Counter 02", counter_code: "C02" },
+        { deviceToken: "tok_other", refreshToken: "ref_other" }
+      )
+    ).rejects.toThrow(/already works "Counter 01"/);
+
+    expect(storeRegistryService.getStores().length).toBe(1);
+    expect(await invokeCommand<string>("secure_store_get", { key: "device_token" })).toBe("tok_dup");
   });
 
   it("3. Guarantees complete data isolation when billing across stores in turn", async () => {

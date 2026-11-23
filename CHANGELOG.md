@@ -1,5 +1,539 @@
 # Changelog
 
+# Changelog
+
+## 2.1.2 — 2026-11-23
+
+Store reset now really resets the till. QA'ing a reset of Test Store (store 4) showed the Masters
+screen refilling to **Products 1514 / Batches 1525 / Parties 62** — none of them the store's own:
+they were Store 1's rows, pulled by requests that carried no store context, plus 50 demo products
+the catalogue bootstrap seeded over a deliberate reset.
+
+### Server
+
+1. **A delta pull without a store is refused, not guessed** — `GET /api/sync/pull/deltas` no longer
+   falls back to the first store in the database; with no `X-Store-Id` / `Store-Id` header, no
+   `store_id` and no authenticated user's store it answers an empty delta carrying
+   `error: STORE_CONTEXT_REQUIRED`. Products, batches, parties and lookups delivered by the route
+   are scoped to the resolved store, and the payload carries `last_reset_options` so a till can
+   tell a deliberate reset from an empty catalogue.
+
+### POS (till)
+
+2. **One apply-once path for remote resets** — `storeRegistryService.applyRemoteResetOnce()` is now
+   the only place a remote reset is applied: boot license check, device heartbeat, health check,
+   delta pull and the SSE stream. It records both the reset timestamp and the sync-event id, so the
+   server's replay of the last five events on reconnect cannot wipe the till a second time, and a
+   marker written by one path is honoured by every other.
+3. **Every master pull names its store** — the SSE stream, the delta pull, the catalogue bootstrap
+   and the party bootstrap send the active store id (query parameter plus `X-Store-Id`/`Store-Id`),
+   so a till can no longer load another branch's products, batches or parties into its local
+   SQLite.
+4. **No demo catalogue over a reset** — when the server reports `reset_products`, `ensureCatalogReady`
+   marks the store `catalog_wiped_<id>` and returns `deliberately_empty` instead of seeding the 50
+   test products and batches.
+5. **Pulled masters are not re-pushed** — `partiesStore.upsertParty(party, enqueueSync)` skips the
+   sync queue for server-pulled rows, which previously queued another branch's parties and pushed
+   them back to the server.
+
+### Tests
+
+6. `Sync` and `AdminStoreReset` suites (28 tests) lock the store-context guard, the scoped delta
+   payload and reset-option delivery; the POS `storeResetAndDisable`, `remoteCounterSync` and
+   `onlineFirstArchitecture` suites (18 tests) cover apply-once semantics and the scoped pulls.
+
+## 2.1.2 — G5-COUNTER (activation lockout, counter monitoring)
+
+Round-3 defects `ACT-01` and `CNT-01` ([fix-list](test-reports/fix-list.md) §12).
+
+1. **Wrong codes lock the till that typed them, not the shop (ACT-01)** — the activation lockout
+   counts failures per workstation (`device_uuid`, 5 in 15 minutes) instead of per IP, so a valid
+   code on another till behind the same router still claims. A network-wide lock remains only as a
+   ceiling of 30 failures in 15 minutes from one address (a caller rotating device ids). The 429
+   carries `scope: "device" | "network"` and says which; the owner gets one alert per locked
+   workstation (or network) per window, naming it.
+2. **The counter list says what each counter has been doing (CNT-01)** — `GET /api/admin/counters`
+   adds `last_bill_at`, `last_bill_number`, `last_salesperson_*` (from the salesperson stamped on
+   the counter's latest bill, GAP-01), `last_operator_*` (the signed-in user, reported apart),
+   `last_activity_at`, `unsynced_items_count`, `offline_since` and `offline_periods` (last 24 h).
+   Offline periods come from a new presence history written by the till heartbeat
+   (`2026_11_22_130001_create_counter_presence_spans_table.php`); there is no history before this
+   release, so older gaps are not shown. The admin Counters card shows the bill number, who is
+   signed in and the day's offline periods.
+
+## 2.1.2 — G7-ENV (updater feed, update manifest, error traces)
+
+Round-3 defects `UPD-01`, `UPD-02` and `SEC-06` ([fix-list](test-reports/fix-list.md) §14).
+
+1. **A till only talks to the server it is configured against (UPD-01)** — the update feed is
+   `<configured server>/api/app/update/latest.json` (or `latest-legacy-win7.json`); the
+   hard-coded production and GitHub feeds are gone, and `tauri.conf.json` ships with no updater
+   endpoints. The desktop build checks and installs through new `updater_check` /
+   `updater_install` commands that take the configured feed; packages are still verified against
+   the bundled public key. Before a counter is claimed the health monitor probes `/up` instead of
+   `license/check?store_id=1`, and the third-party IP echo (`api.ipify.org`) fallback is removed.
+   A LAN or test-server till now updates from that server only.
+2. **No update without a signed package that exists (UPD-02)** — the backend no longer
+   synthesizes a manifest with a hard-coded signature (it belonged to the 2.0.23 package).
+   Update endpoints return 204 unless a published `latest*.json` names a signed package present
+   on the server; platforms missing either are dropped. The deploy health check accepts 200 or
+   204 from the manifest. A till may still show a cached "update available" from before; the next
+   check replaces it.
+3. **API errors never carry traces (SEC-06)** — `api/*` JSON errors drop `exception`, `file`,
+   `line` and `trace` even with debug on; staging compose and `backend/.env.example` default
+   `APP_DEBUG=false`, and the API container refuses to start in production/staging with debug on.
+
+## 2.1.2 — G15-GAPS (three features the QA round said were missing)
+
+The round-3 defects said the same thing three times: a screen accepted the entry, the server
+never checked it, and the document went through anyway — a 100% discount needed no one's
+agreement, no bill recorded who sold it, and a Schedule H1 pack sold with nobody qualified in
+the room. The defects are
+[test-reports/fix-list.md](test-reports/fix-list.md) §15 (`GAP-03`, `GAP-01`, `GAP-02`),
+planned as Waves C–E and delivered here as three slices, each with its failing test first.
+
+1. **An approval is a credential, not a tick box (GAP-03)** — `ApprovalService::issue` mints a
+   single-use opaque grant (5 minutes, `invoice_approvals` keeps only its hash) and
+   `InvoiceApprovalService::settle` redeems it inside the transaction that writes the document,
+   so a save that fails leaves the grant usable and a save that succeeds can never be replayed.
+   `CounterProfilePolicy` is re-run on `POST /api/invoices`, the sync ingest and the document
+   saves, so a client that skips the prompt is refused server-side rather than trusted. New
+   counters get a 20% ceiling with a grant required above 10%; price changes above 10% need the
+   same grant. The till asks the approver for their own PIN, then for the one-time PIN
+   (`InvoiceApprovalDialog`).
+2. **Who sold it, on the bill (GAP-01)** — a per-store `salespeople` master
+   (`2026_11_22_160001_create_salespeople_table.php`), a `salesperson_on_bill` setting with
+   `off` / `optional` / `required` modes (`SalespersonBillRule`), and
+   `SalespersonAttribution::resolve`, which stamps the name the owner chose — not a name a client
+   invented — on the invoice, return and cancellation. New stores start on `required`; an upgraded
+   store stays on `optional` until it actually has staff, so no existing till stops mid-shift. The
+   panel gets a Salespeople page and a salesperson panel in the sales report; the till has a
+   keyboard shortcut for the field.
+3. **A restricted drug needs a pharmacist (GAP-02)** — each pharmacy keeps its own drug-schedule
+   list as `master_lookups` rows of type `drug_schedule` (`App\Support\DrugSchedule`,
+   `restricted` and `prescription_required` as the only marks), and a product carries
+   `drug_schedule_id` plus the `schedule_code` the server stamped from it
+   (`2026_11_22_170001_add_drug_schedule_to_products_table.php`). Staff have a registration number
+   and a validity window (`2026_11_22_180001_add_pharmacist_fields_to_salespeople_table.php`), and
+   `PharmacistGate` refuses a bill, return or cancellation containing a restricted line unless a
+   pharmacist whose registration is live confirms it with their own PIN —
+   `pharmacist_confirmations` then names the pharmacist, the registration and each restricted line
+   (`PharmacistRule`, `RestrictedDrugResolver`). The till prompts at the moment of the save
+   (`PharmacistConfirmationDialog`), and the pharmacy report's H1 register is built from those
+   rows instead of from a schedule code a product once had.
+4. **A pharmacist's PIN is never kept anywhere** — it is judged against `salespeople.pin_hash`
+   and then dropped: not in `pharmacist_confirmations`, not in `audit_logs` (which record the
+   name and registration, not the number), not in the till's offline queue, and not in the till's
+   own schema, where the v15 migration is asserted to add no `pin` column.
+5. **The pharmacy-only screens are held by the server, not by the screen** — a store that sells no
+   medicines gets no schedule list, no product field, no pharmacist fields and no register.
+   Verification found this leaking: `/api/admin/me` left `store_type` out of the store rows it
+   hands the panel, so every `isPharmacy` check —
+   [MastersPage.tsx:64](admin-panel/src/pages/MastersPage.tsx#L64),
+   [SalespeoplePage.tsx:108](admin-panel/src/pages/SalespeoplePage.tsx#L108),
+   [TransactionsPage.tsx:153](admin-panel/src/pages/TransactionsPage.tsx#L153),
+   [ReportsPage.tsx:211](admin-panel/src/pages/ReportsPage.tsx#L211) — read a kirana as a chemist
+   and showed its owner the drug screens. `AdminAuthController::me` now returns the column, and
+   `PharmacyOnlyLeakTest` asserts a `kirana_general` row arrives typed as one.
+6. **What was already written** — nothing is marked automatically: which pack is Schedule H1 is the
+   owner's decision, taken in the panel, and bills already sold keep what was on them.
+   `php artisan counters:tighten-approval-defaults` reports first and writes only with `--apply`,
+   and moves only the exact legacy signature (100% discount with no grant), so an owner who
+   deliberately chose a ceiling is left alone.
+7. **Deliberately not in this slice** — offline verification against a cached pharmacist hash,
+   wrong-PIN lockout and its alert, and admin pages for pharmacist records and expiry warnings
+   (E7, E8, E10); the `SPR-*` staff-journey items deferred from GAP-01.
+
+## 2.1.2 — G10-PAYMENTS (the money a bill actually took)
+
+Six defects around one idea: what a bill records as paid. A ₹500 note came off a ₹210 bill as
+₹500 of takings, a walk-in bill could go out half paid, a receipt moved a balance without
+touching the invoice it paid, shift close crashed and otherwise trusted the till's own figures,
+the till had no expense screen at all, and UPI was accepted with nothing to trace it to. The
+defects are [test-reports/fix-list.md](test-reports/fix-list.md) §3 (`PAY-02`, `PAY-03`,
+`PAY-05`, `SHF-01`, `EXP-01`, `PAY-04`).
+
+1. **A tender is settled, not stored (PAY-02)** — `backend/app/Services/Payments/TenderSettlementService.php`
+   is now what a payment line *means*: a non-cash line applies in full, a cash line applies only
+   what the bill still owes and the rest is recorded as change. `invoice_payments` carries
+   `tendered_amount`, `change_amount` and `reference_no`
+   (`2026_11_22_100001_add_tender_columns_to_invoice_payments_table.php`), and `invoices.paid_amount`
+   is the sum of what was applied. Both ingest paths use it — `POST /api/invoices` and the till's
+   `sync/push/invoices` — so an over-collection cannot arrive online or offline. The till has the
+   same arithmetic as its own twin, `settleTenders()` in `frontend/src/lib/billing/billingTenderService.ts`,
+   so the payload and the printed bill agree: ₹500 on a ₹210 bill is now row `amount 210,
+   tendered 500, change 290` and `paid_amount 210`. Before this the cash book counted ₹290 of
+   change as collected, on every bill that gave change.
+2. **A walk-in bill has to settle (PAY-03)** — an unsettled balance for a walk-in customer is
+   refused with `Walk-in bills must be settled in full. Add a payment line or select a registered
+   customer for credit.` (HTTP 422) instead of writing a `partially_paid` bill whose ₹50 is owed by
+   nobody. Credit is still refused on its own terms; this is the other half of the same rule.
+3. **A receipt settles the bills it names (PAY-05)** — `PaymentAllocationService` +
+   `payment_allocations` (`2026_11_22_100002_create_payment_allocations_table.php`). A customer
+   receipt (`POST /api/admin/payments/customer`) and a supplier payment
+   (`POST /api/admin/supplier-payments`) accept `allocations[]`; without them they clear the oldest
+   open documents by FIFO. Either way the document's `paid_amount` and status move, and the party
+   balance moves **once** for the receipt rather than once per allocation. The panel gets
+   `admin-panel/src/components/transactions/AllocationPicker.tsx` inside the receipt modal and the
+   supplier payout form: the open bills, their outstanding amounts, and a tick box per bill, with
+   "Fill oldest first" and an explicit line that unchecked boxes mean the server decides.
+   `GET /api/admin/outstanding-documents` feeds it.
+4. **A digital tender carries its reference (PAY-04)** — `backend/app/Support/Payments/PaymentModePolicy.php`
+   defaults UPI, Card, Cheque and Gift Voucher to `referenceRequirement: required`. A store that has
+   already saved its own `payments` setting keeps its choice — the new default applies to stores
+   that never picked one, and does not silently overwrite a configured counter. The till blocks the
+   save before it posts and the server refuses the line if a client sends it anyway.
+   - **A bill rung up offline is booked and flagged, not refused.** The walk-in, credit-limit and
+     reference rules refuse a live `POST /api/invoices`. Through `sync/push` they no longer drop
+     the bill: its goods and money already moved, and an owner who turns on "reference required"
+     while a till is offline would otherwise leave that till's earlier UPI bills stuck in the
+     queue forever. Such a bill is stored as it happened, and the owner gets an
+     `offline_payment_policy` notification plus an `offline_bill_policy_exception` audit entry
+     (`OperationalAlertService::offlinePaymentPolicyException`). Arithmetic that cannot be true
+     (change on a non-cash tender, non-cash above the bill, credit to a walk-in) is still refused
+     on both paths.
+5. **Shifts open, close and count on the server's numbers (SHF-01)** — `CounterShiftService::openShift()`
+   and `closeShift()` no longer read an `opened_at` key nobody passed (the 500 `Undefined array key
+   opened_at`), and stamp the timestamps themselves. Close now derives cash from the counter's own
+   documents through `serverTally()`, windowed by that shift's `opened_at → closing instant` instead
+   of a fixed number of days, and stores both sides in `reconciliation_json`
+   (`authority: server`, `drawer`, `server`, `ignored_client_totals`, `matches_server`). The till's
+   `cash_sales` / `digital_sales` / `cash_expenses` are recorded but never decide the expected cash:
+   a close that sent zeros still reports the ₹200 of cash sales, ₹300 of UPI and ₹90 of expenses the
+   counter actually did.
+6. **Expenses at the counter (EXP-01)** — `POST /api/expenses` (`TillExpenseController`) books an
+   expense against the counter that sent it, numbered `EXP-00001` per store
+   (`2026_11_22_100003_add_counter_id_to_expenses_table.php`), idempotent on a replayed offline
+   queue entry, and held to the same reference policy as a tender. The till screen is
+   `frontend/src/pages/ExpensesPage.tsx` on `/expenses`, gated behind the `expenses` counter-profile
+   module, and its cash expenses are the figure the shift reconciliation deducts from the drawer.
+   - **A reused till number no longer overwrites another expense.** A till numbers its
+     expenses from its own local row count, so a second till, or one whose local book was reset,
+     sends an `EXP-0000N` the server already holds for a *different* expense. The replay key is now
+     the till's own document id (`expenses.external_id`,
+     `2026_11_22_200001_add_external_id_to_expenses_table.php`). The printed number is kept when it
+     is free and re-minted when it is taken. `App\Services\Expenses\ExpenseIngest` is the one path
+     for `POST /api/expenses` and the sync queue. A till too old to send its id is still replay-safe:
+     the same number with the same head, amount and date is one expense, and anything else is a new row.
+7. **A cancelled bill frees the receipt that paid it (PAY-05)**: both cancel paths (the shared
+   `InvoiceCancellationService` and the panel's `cancelInvoice`) call
+   `PaymentAllocationService::releaseForDocument()`. The allocation rows go, a
+   `payment_allocation_released` audit entry records what was freed, and
+   `payments:allocate-outstanding` can apply the money to the party's next open bill.
+8. **Existing damage, repaired by hand** — `php artisan invoices:reconcile-tenders` and
+   `php artisan payments:allocate-outstanding` report first and write only with `--apply`; both are
+   safe to re-run. On the QA database the dry run found ₹335.00 of change booked as cash collected
+   on 31 bills, and ₹5,090 of receipts and payouts that had been taken but never tied to a bill
+   (₹90 customer receipt, ₹5,000 supplier payment). Already-closed shifts keep the totals they were
+   signed off with; the corrected tenders are what the next close and the server tally read.
+
+## 2.1.2 — G4-NUMBERING (document number series)
+
+A brand-new counter showed `C01-INV-1351`, and consecutive bills came out as 8301, 8651, 8751…
+The till was leasing a fresh block of 50 numbers every few seconds and the online bill route filed
+whatever number the till sent. The defects are [test-reports/fix-list.md](test-reports/fix-list.md)
+§9 (`NUM-01`, `NUM-02`).
+
+1. **The till finds its own block (NUM-01)** — `onlineTransactionService` looked the lease up under
+   `Number("cntr_2")`, i.e. `NaN`, so it never found one and asked for another on every health tick.
+   It now uses the server counter id (`counterSequenceKey`), asks only when the block is spent, and
+   allows one lease request at a time. The offline path uses the same id, so an offline bill takes a
+   leased number instead of a `TEMP-` one.
+2. **A lease is repeatable (NUM-01)** — `CounterSequenceService::lease` returns the block the counter
+   still holds instead of opening the next one. The till reports how far it got (`used_through`), and
+   a report past the block it was given cannot push the series forward. Both lease routes
+   (`/counter/sequences/lease`, `/counters/{id}/lease-sequence`) share this.
+3. **The counter, not the request, decides the number (NUM-02)** — `POST /api/invoices` files a
+   number through `numberLiveDocument`: a number from this counter's series that has not been used yet
+   is kept, and anything else is replaced with the counter's next number. That covers a stale number,
+   one already filed, or another counter's number. The till prints, notifies and steps its series from
+   the number the server returned. If that differs from the preview, the cashier is told
+   (`DocumentNumberBadge`).
+4. **What was already written** — printed bills keep their numbers; nothing is renumbered or rewound.
+   `php artisan billing:audit-g4-numbering [--store=] [--out=file.csv]` is a read-only survey of the
+   gaps, duplicate numbers and run-ahead each series was left with.
+
+## 2.1.2 — G3-PURCHASE-SYNC (purchase posting on the server)
+
+Four Critical defects with one shared root: a purchase could be **saved and still not be real**.
+The server had two write paths that did different things, nothing refused a supplier bill filed
+twice, and a return pushed by a till was kept as a header and answered `processed`. The defects
+are [test-reports/fix-list.md](test-reports/fix-list.md) §4 (`PUR-01`, `PUR-05`, `PUR-06`, `PUR-07`).
+
+1. **One posting path for every purchase (PUR-05)** — `backend/app/Services/Purchase/PurchasePostingService.php`
+   is now what a purchase document *becomes*: `postInward`, `postReturn` and `reverse` create or
+   top up the batch, write the `stock_ledger_entries` row, keep `products.current_stock` equal to
+   the sum of its batches, and move the supplier's `current_balance` through
+   `SupplierBalanceService` — all inside the bill's own transaction. The till's sync push,
+   `POST /api/purchases` and a goods receipt against a purchase order all end there, so a bill
+   keyed on the server and a bill pushed from a till put the same tablets on the same shelf. The
+   service also owns the one quantity definition everything else in the group depended on:
+   `purchase_items.qty` is billed **packs**, base units are `(packs + free) × units_per_pack +
+   loose + free loose`, and a return line is unit-denominated (`units_per_pack` 1). Before this,
+   `POST /api/purchases` answered `201` for a ₹11,554 bill that created no batch, no ledger row
+   and left the supplier at ₹0.
+2. **A charge is judged against its own bill's place of supply (PUR-01)** —
+   `PurchaseChargeService::resolveForStore()` normalises the document's place of supply with the
+   same `cleanPos()` it already applied to each charge row, and both callers
+   (`SyncController::upsertSinglePurchase()`, `PurchaseController::store()`) hand it the header
+   value. A till that writes `32-Kerala` on the bill and `32` on the freight used to be refused
+   on every push with "A charge is taxed by the place of supply of its supplier bill, not its
+   own" — the comparison was a printed label against a state code, so it could never match.
+3. **The till reports what the server answered (PUR-01, second half)** —
+   `purchaseService.recordInwardPurchaseBill()` and `updatePurchaseBill()` now return `syncState`
+   (`synced` / `pending`) and, when the server has refused, `syncMessage`; the entry screen says
+   *"Purchase bill PB-9 posted to the server"*, *"Saved on this till, but the server has not
+   accepted it yet: …"* or *"Saved on this till — it will be posted when the server is reachable"*
+   instead of claiming a posting nobody accepted. The bill is still saved locally, so the
+   post-summary modal, the voucher and the hotkeys are unchanged — what changed is that an
+   unaccepted bill is no longer announced as posted. `syncQueueService.processQueue()` settles a
+   batch push **item by item** from `results.processed_ids` and `results.errors[].id` rather than
+   marking the whole queue synced because HTTP 200 came back, so a refused document stays
+   `failed` with the server's own error and a backoff retry, and only the documents the server
+   actually took are stamped as synced.
+4. **One supplier bill, once (PUR-06)** — `assertUniqueBill()` refuses a second non-cancelled
+   document carrying the same (store, module, supplier, bill number) on both write paths, naming
+   the bill it collides with (`"Supplier bill QA-PB-003 from … is already recorded as …"`), and
+   the refusal lands before anything is written — no batch, no ledger row, no payable.
+   `purchases.bill_key` holds that identity under a unique index
+   (`2026_11_22_120001_add_purchase_identity_and_unique_bill`) and `purchases.external_id` holds
+   the till's own document id, so a replay of the same id is idempotent while a retry that picks
+   a new id but the same supplier number is **failed**, not filed twice. An inward bill is
+   identified by the supplier's number; a debit note is identified by its **own** note number, so
+   several partial returns against one bill are not mistaken for a duplicate of each other.
+5. **A return moves stock, money and ITC (PUR-07)** — a return or debit note pushed by a till
+   posts through the same service *with its lines*: the goods go back to the batch they came
+   from, the supplier's payable drops by the returned money, and
+   `GstWorkingPaperService::gstr9()` now nets a return's tax **out** of the ITC block instead of
+   treating it as more money claimed. Returning more than the batch holds is refused with the
+   on-hand figure in the message ("Only 20 units of … are on hand; 40 cannot go back to the
+   supplier") and leaves the store exactly as it was; a second return past what the first left is
+   refused the same way. The header-only `PR-4-<timestamp>` rows that overwrote each other on a
+   replay are gone.
+6. **What the existing bad data says, and how it is put right** — the QA database still holds the
+   damage: two bills filed under one supplier number, and purchases saved with no stock movement
+   at all. `php artisan purchases:dedupe-bills` (dry run unless `--apply`) lists each duplicate
+   group, keeps the earliest row, cancels the rest and takes back only the stock a cancelled row
+   can *prove* it moved; `php artisan purchases:repair-postings` posts exactly the documents that
+   have no stock-ledger evidence and then rebuilds every supplier balance from the documents
+   themselves. Both are safe to re-run, and the migration refuses to install the unique index
+   while duplicates exist, telling the operator to run the dedupe first instead of failing on an
+   index with a MySQL error code. Run against the QA data: `dedupe-bills` finds nothing left to
+   merge (the two offenders were already cancelled), and `repair-postings` reports purchases #3
+   (₹11,554.00 over 3 lines) and #6 (₹11.00 over 1 line) as having no stock movement. Applied to
+   a **copy** of that database it wrote the missing `PURCHASE_RECEIPT` rows, made
+   `products.current_stock` equal the sum of the batches again (35,268 = 35,268 and 58 = 58), and
+   settled supplier #4 from ₹74,500.00 to the ₹27,440.00 its documents and payments add up to.
+7. **Tests** — `backend/tests/Feature/PurchasePostingGuardsTest.php` (8 tests, 55 assertions)
+   drives the real surfaces: a charged push whose header says `32-Kerala` and whose freight says
+   `32`; a server-entered bill whose batch, ledger row and payable are read back; a second
+   identical `POST /api/purchases` refused with the row count staying at 1 and stock unchanged; a
+   replayed push failed by queue id rather than duplicated; an over-return refused with nothing
+   moved; a valid return taking stock back and crediting the supplier; a second return past what
+   was left refused; and the debit note's −₹24.00 effect on the working paper's ITC.
+   `PurchaseChargeReversalTest` had pinned the old over-return behaviour and now proves the new
+   one (80 units accepted, a further 40 refused, 20 left to claim). The purchase, supplier-ledger
+   and GST suites together are `OK (207 tests, 3300 assertions)`. Frontend:
+   `syncQueueService.test.ts` (12 tests) covers the item-by-item settlement and `tsc --noEmit` is
+   clean.
+8. **Not driven live:** the Tauri till was not operated for this group. The three post-result
+   toasts, the offline queue retry and the keyboard path from `F12` to a server-accepted bill are
+   covered by the unit/DOM suites and by the backend feature tests over real HTTP, not by a
+   cashier at a counter, and the admin panel's purchase screens were not re-walked. The shared QA
+   database was left exactly as found — the repair was applied only to a copy — so the two
+   stock-less purchases are still there for the next QA run, and `--apply` against production
+   stays the owner's decision.
+
+## 2.1.2 — Counter-only POS (CR 2026-11-19, B8 + A16)
+
+The till no longer signs anybody in. A claimed counter is the account that works at the
+counter: it authorises the till's own calls, it is what the idle lock locks and the PIN opens,
+and no credential of any person is kept on the machine. Verification for every item below is
+recorded in [specs/traceability.md](specs/traceability.md) §"Counter-only POS (Part 2)", and the
+decisions behind it in [specs/cr/2026-11-19-counter-only-pos/](specs/cr/2026-11-19-counter-only-pos/).
+
+1. **The counter authorises the till's routes (A16a)** — `/store`, `/customers`, `/products`,
+   `/purchases`, `/sales-orders`, `/loyalty/*`, `/coupons/*`, `/stock/*`, `/reports/*` and
+   `/data-exchange/*` now open for the workstation's device token through
+   `AuthenticateCounterOrUser`, always scoped to the store that token was issued for. A header
+   or body field naming another store is refused rather than followed, an old local registry key
+   (`store_main`) never moves the tenant, a locked counter loses the routes with it, and a
+   Super Admin who names no store is refused instead of being pointed at whichever store sorts
+   first. A person's preferences and password stay person-only.
+   `backend/tests/Feature/CounterAuthorisesPosRoutesTest.php` (11 tests).
+2. **Staff management is counter-authorised too (A16b)** — the till's Staff panel called
+   `/api/admin/users*`, which answers only for a person, so with no sign-in it was a dead
+   screen. Six counter-authorised twins now sit under `device.auth`
+   (`GET/POST /api/till/staff`, `PUT/DELETE /api/till/staff/{id}`,
+   `…/unlock`, `…/reset-pin`) on the same `AdminUserController`, which has been made safe with
+   nobody authenticated: the branch comes from the device token, a counter cannot create or
+   promote a Super Admin or grant multi-branch access, another branch's accounts are unreachable
+   for every verb, and the audit records `counter:C01 (Front Counter)` instead of an email with
+   no person id on the row. The admin panel's own routes are unchanged, and a bearer token with
+   no device token is refused at the till URIs.
+   `backend/tests/Feature/TillStaffManagementTest.php` (10 tests).
+3. **No sign-in screen at the POS (B8b, `SEC-001` retired)** — `StaffLoginPage`,
+   `AccountSwitcherModal` and the switch-account keyboard chord are gone; the nav, reports,
+   command palette, access gates, staff panel, product delete, stock adjustment, invoices,
+   shifts and the presence heartbeat all key off the counter's own document. Presence belongs
+   to the claimed counter, and a 409 from the heartbeat locks the counter rather than ending a
+   person's session. `frontend/src/signinRetired.test.ts` (9 tests) is the guard that keeps them
+   retired.
+4. **No credential in browser storage (B8b)** — the staff bearer token and the cached-credentials
+   record (which held PIN and password hashes) are written by nothing and read by nothing, and
+   whatever an older build left behind is erased on boot and at logout. The six services that
+   used to attach that token now attach the counter's device token; the till's own preferences
+   stay on the till, keyed to the counter, because the server keeps that route person-only. The
+   constitution scan that used to pin one tolerated token writer now pins the list as **empty**,
+   so a new one fails the build. `PinSecrecyScanTest` (9 tests, 71 assertions),
+   `userPreferencesService.dom.test.ts` (5 tests, deliberately rewritten as local-only),
+   `deviceSessionService.test.ts` (17 tests).
+5. **Still open:** the dead sign-in machinery inside `staffAuthService` has no production caller
+   and is booked for deletion with its four suites rewritten, not dropped; and
+   `/api/till/staff` does not yet consult the counter's permission document — narrowing the
+   profile hides the tab but does not refuse the call, which is B2/B3's fail-closed
+   `counter.profile` middleware.
+
+## 2.1.2 — CR-C "Supplier bill charges" (CR-C-11 included)
+
+Supplier bill charges: freight, loading, insurance, turnover and similar money on a purchase bill
+is now a set of first-class charge lines instead of one freight number on the header. Requirements
+are in [specs/modules/purchase-management.md](specs/modules/purchase-management.md) §2A
+(`PUR-007`…`PUR-017`); CR-C-11 extends the payable policy to separately-paid charges.
+
+**Delivered:** the whole change request — server, tax engines, sync ingest, reports/exports,
+settings, the till's charges library, modal, purchase-screen mount and printing, the admin panel
+screens, and the four-way paisa reconciliation gate. Live verification is recorded in item 12; the
+till's own screens have not been driven in a browser in this round (see what it says was not
+covered).
+
+### Server
+
+1. **Charge rows with their own heads** — `purchase_charges` and `purchase_charge_allocations` hold
+   each line's taxable amount, GST rate, treatment (add to item cost / book as expense), spread
+   method (value / quantity / weight), ITC eligibility, RCM flag and paid-separately flag. Heads are
+   a store-scoped `charge_head` master (Freight, Packing, Loading/Unloading, Insurance, Other —
+   seeded at store creation or on first read, resettable through
+   `POST /api/admin/lookups/reset-charge-heads`), each carrying its SAC code plus default rate
+   treatment, spread, ITC eligibility and allowed sign, and a head referenced by posted charges
+   cannot be deleted until those charges are reassigned. Constitution rule **R12** makes a charge
+   reference a cross-store insert, not a controller check.
+2. **Charge stage in the tax engine** — `backend/app/Services/Tax/TaxEngine.php` totals charges,
+   splits each into taxable / CGST / SGST / IGST / cess and spreads an add-to-cost charge (its
+   taxable amount plus any tax that can never be claimed back) over the bill lines by value,
+   quantity (free units included) or weight, falling back to value with a surfaced notice when any
+   line lacks a weight — a mixed basis is forbidden. Largest-remainder keeps every share in whole
+   paise and leftover paisa go to the largest fractions, ties broken by grid order; negative
+   charges spread as signed reductions.
+3. **Landed cost, expense register and payable from one bill** — postings write
+   `product_batches.landed_cost_rate` while keeping `purchase_rate` intact, book the expense-side
+   charges (ex-tax, non-creditable tax added) linked to the bill, and put supplier-borne charges —
+   both treatments — inside what the supplier is owed. `specs/gst_tax_test_vectors.json` case `TC11`
+   pins the ₹11,554 worked example.
+4. **Returns, edits and cancellations reverse charges** — `PurchaseChargeReversalService` reverses
+   spread, stock cost, expense postings, payable and tax in one transaction, per line and
+   proportionally (or fully sunk, whichever way the store's `reverse_on_return` policy points), and
+   re-posts on edit. A debit note inherits the charge rows it returns, so a retry cannot
+   double-reverse.
+5. **Old bills still read as charges** — a bill keyed before CR-C carries one freight scalar, so
+   `PurchaseChargeService::legacyFreight()` presents it as a single Freight charge row through the
+   same head master (`source: legacy_freight`, 0% GST so a legacy amount is never re-taxed or
+   restated). Registers, exports and the payable take the charges path for old and new bills alike
+   (`PUR-017`).
+6. **Payable membership policy (CR-C-11)** — `billing.purchase_charges.separately_paid_in_payable`
+   (default off) decides whether money paid to a courier or insurer also counts as money owed to the
+   supplier. The answer is **stored per charge row** (`purchase_charges.in_payable`) and backfilled
+   on migration, so flipping the policy later cannot restate a bill that has already printed. A
+   reversal line carries the original row's stored value, and a client-pushed `in_payable` is never
+   trusted — the server derives it from its own settings read. `paid_separately` still decides the
+   payment column, expense attribution and GSTR-2B side; registers, Tally/Busy payment vouchers and
+   the `In Payable` export column all read membership from the row. Vector `TC21`/`TC22` pin both
+   policies on the same bill: payable ₹1,120.00 off vs ₹1,396.50 on, with landed cost, expense
+   postings and creditable ITC identical.
+
+### Reports, exports and the till
+
+7. **Charge-aware statutory output** — the purchase register splits items vs charges, the new
+   expense-register report (`GET /api/admin/reports/expense-register` for the console,
+   `GET /api/reports/expense-register` for a till) lists every posted charge with its head, ITC
+   eligibility and payment side, margin is computed on landed cost, ITC summaries split creditable
+   by charge eligibility, RCM charges are flagged for review, and Tally/Busy/CSV/gst-export columns
+   carry the charge fields. The till's own report modules mirror the same splits offline.
+8. **Till charges library and modal** — `frontend/src/lib/purchases/chargesGrid.ts` (row state,
+   spread basis, the legacy-freight ghost row), `chargePosting.ts` and `chargeReversal.ts` form a
+   pure keyboard engine in the pattern of the stock-adjustment grid, and
+   `frontend/src/components/purchases/PurchaseChargesModal.tsx` renders it: type-to-filter head
+   picker, cycling selects for treatment / spread / ITC, per-line weight column, signed
+   adjustments, inline totals bar and post-summary checks — the tests walk it with no pointer
+   event. `Alt+F` is rebound from "focus the Freight field" to `toggleCharges` in the central key
+   map, and `specs/keyboard-shortcuts.json` + `docs/KEYBOARD_SHORTCUTS.md` publish it; the grid's
+   plain keys are routed only while the grid is open, and `PurchaseEntryForm.tsx` mounts it under
+   `Alt+F` so a bill can be keyed end to end without a pointer. Purchase documents print the charge
+   block (`PRN-007`): each head with taxable, GST and total, in-payable rows inside the footings and
+   separately-paid rows as a marked memo below the grand total, on A4 and both dot-matrix widths.
+   The mirror engine in `frontend/src/lib/tax-engine/taxEngine.ts` stays in
+   agreement with PHP on all 22 vectors, and the footer names the two facts apart when a charge is
+   both paid separately and billed into the payable.
+
+### Tests
+
+9. Engine parity across both harnesses — `backend/tests/Unit/TaxEngineTest.php` and
+   `frontend/src/lib/tax-engine/taxEngine.test.ts` over vectors `TC11`–`TC22`. Backend features:
+   `PurchaseChargeSchemaTest`, `PurchaseChargePostingTest`, `PurchaseChargePayablePolicyTest`,
+   `PurchaseChargeReversalTest`, `PurchaseChargeSeparatePaymentTest`, `PurchaseChargeReportsTest`,
+   `SyncPurchaseChargesIngestTest`, `AccountingExportChargesTest`, `PurchaseEntryParityTest` and
+   the `Constitution/ChargeHeadStoreScopeTest` rule. Till: `chargesGrid`, `chargePosting`,
+   `chargeReversal`, `payablePolicy`, `purchaseChargeRegister`, `expenseRegister`, `chargeItc`,
+   `companySettingsService`, `sqliteStorage` and `PurchaseChargesModal` tests, plus the release gate
+   `PurchaseChargeReconciliationTest`.
+
+### The owner's screens and the release gate
+
+10. **Charge heads, policies and the charges register in the panel** — Masters has a **Charge Heads**
+    tab listing each head's treatment / spread / ITC / allowed-sign defaults with create, edit,
+    **Reset to Defaults** and a delete that refuses while posted charges reference the head (it names
+    the bills and amounts, offers the store's own heads as the replacement and moves the references in
+    one audited step). Settings has the **Supplier bill charges** block: reversal treatment, the cap
+    as a percent of goods value, `separately_paid_in_payable` and `allow_negative_charges`. A new
+    **Bill Charges** tab in Transactions reads `GET /api/admin/purchase-charges` — every charge line
+    in a filtered date range, head, bill, supplier, treatment, amount / GST / total and the
+    **Payable** side taken from the stored row, with a footing and a CSV export.
+11. **Two policy keys the engine now enforces** — `allow_negative_charges` and
+    `max_percent_of_goods` are checked at posting inside the bill's own transaction, before any
+    charge row is written, on both write paths. A refusal names the money: `charges.<n>.amount` for a
+    sign the store disallows, `charges` for a bill whose charges exceed the cap, quoting the
+    allowance it broke. A blank cap saves as `null`, and `null` or `0` both mean no cap. An offline
+    till commits locally and the bill is refused when the link returns — never half-written.
+12. **Four-way paisa reconciliation gate** — `PurchaseChargeReconciliationTest` proves stock cost,
+    the supplier ledger, the expense register and tax close to the paisa for posted, edited,
+    returned and cancelled bills, in both charge treatments, including the ₹11,554 worked example.
+    It reads four independently written artefacts rather than repeating the engine's arithmetic, and
+    one control removes a single paisa from a spread row to prove the gate fails when it should. The
+    gate found and fixed one defect: an expense-treated charge's notional per-line shares were
+    reaching the landed-cost reducer, so returning a line could drop a batch ₹157.33 below the
+    supplier's own rate (`PUR-012`, `PUR-015`) — reversal maps now keep charge totals apart from the
+    money that actually landed on a goods line, in PHP and in the till's mirror.
+
+### Live verification on the dev stack (2026-11-20)
+
+13. Driven through the real admin panel against the local server, with the database read back after
+    each step: a charge head created with all four defaults, `Reset to Defaults` removing an
+    unreferenced head, the `409` delete guard opening "Reassign bills before deleting" over three
+    posted bills at ₹278.48 each and moving them to Insurance with the money untouched; the Settings
+    block saving a 5% cap, a cleared cap as `null` and both payable switches; `POST /api/purchases`
+    then refusing an over-cap bill at `charges` ("…allows ₹400.00") and a negative line at
+    `charges.0.amount`; two identical bills posted either side of the payable switch keeping their
+    own stored answer (₹15,283.00 with the courier ₹590.00 outside, ₹15,873.00 with it inside);
+    freight landing a batch at ₹90.00 while the supplier's ₹80.00 rate stayed visible; the Bill
+    Charges tab filtering on the stored payable side and footing ₹0.00 in-payable against ₹590.00;
+    and the expense register, GSTR-3B charge block (`reconciles: true`, ₹590.00 creditable against
+    ₹127.44 blocked) and Tally vouchers splitting the separately-paid courier into its own payment.
+    **Not driven live:** the till's own screens — the `Alt+F` charges grid, offline posting, sync
+    ingest of a pushed bill and purchase printing. They are covered by their dom/unit suites
+    (`PurchaseEntryCharges.dom.test.tsx`, `PurchaseChargesModal.test.tsx`,
+    `SyncPurchaseChargesIngestTest`, `purchaseChargesPrint.test.ts`), and the current entry screen
+    now opens behind a counter activation code, which belongs to a different change request.
+
 ## 2.1.1 — 2026-11-19
 
 Units join store scope (R11): **the shared-units carve-out is reversed — every store owns its

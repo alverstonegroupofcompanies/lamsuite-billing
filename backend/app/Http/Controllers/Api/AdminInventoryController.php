@@ -177,12 +177,20 @@ class AdminInventoryController
     {
         $transfer = StockTransfer::with('items')->findOrFail($id);
 
+        // Only the receiving store may receive (an all-stores admin scope has no store).
+        $callerStoreId = \App\Support\RequestTenant::storeId($request);
+        if ($callerStoreId !== null && $callerStoreId !== (int) $transfer->to_store_id) {
+            return response()->json(['message' => 'Transfer not found.'], 404);
+        }
+
         $instructions = [];
         foreach ((array) ($request->input('lines') ?? $request->input('items') ?? []) as $line) {
             if (is_array($line) && isset($line['item_id'])) {
                 $instructions[] = [
                     'item_id' => $line['item_id'],
                     'dest_product_id' => $line['dest_product_id'] ?? null,
+                    'received_qty' => $line['received_qty'] ?? null,
+                    'shortage_reason' => $line['shortage_reason'] ?? null,
                 ];
             }
         }
@@ -194,6 +202,8 @@ class AdminInventoryController
                 $instructions,
                 $request->boolean('auto_create')
             );
+        } catch (\App\Exceptions\TransferMappingRequired $e) {
+            return $e->render($request);
         } catch (\Illuminate\Validation\ValidationException $e) {
             return response()->json(['message' => $e->getMessage(), 'errors' => $e->errors()], 422);
         }

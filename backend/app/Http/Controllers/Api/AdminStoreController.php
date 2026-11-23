@@ -21,12 +21,18 @@ use App\Models\StockLedgerEntry;
 use App\Models\SupplierPayment;
 use App\Models\SyncEvent;
 use App\Models\Store;
+use App\Support\GstStateCodes;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 
 class AdminStoreController
 {
+    /** Uppercase letters and digits in hyphen-separated groups (SET-01); 20 characters at most. */
+    private const STORE_CODE_PATTERN = '/^[A-Z0-9]+(-[A-Z0-9]+)*$/';
+
     /**
      * List stores (server-side paginated, searchable, sortable, exportable).
      */
@@ -77,13 +83,15 @@ class AdminStoreController
      */
     public function store(Request $request): JsonResponse
     {
+        $this->normalizeStoreCode($request);
+
         $validated = $request->validate([
             'name' => 'required|string|max:255',
-            'code' => 'required|string|max:50|unique:stores,code',
+            'code' => ['required', 'string', 'max:20', 'regex:' . self::STORE_CODE_PATTERN, 'unique:stores,code'],
             'phone' => 'nullable|string|max:20',
             'email' => 'nullable|email|max:100',
             'address' => 'nullable|string',
-            'state_code' => 'required|string|max:10',
+            'state_code' => ['required', 'string', Rule::in(GstStateCodes::all())],
             'gstin' => 'nullable|string|max:20',
             'drug_license_numbers' => 'nullable|array',
             'fssai_no' => 'nullable|string|max:50',
@@ -98,6 +106,8 @@ class AdminStoreController
             'feature_flags' => 'nullable|array',
         ]);
 
+        $this->assertGstinMatchesState($validated['gstin'] ?? null, $validated['state_code']);
+
         $defaultMenus = ['pos', 'bills', 'purchases', 'stock', 'reports', 'masters', 'settings'];
         $validated['enabled_menu_items'] = $validated['enabled_menu_items'] ?? $defaultMenus;
         $validated['is_active'] = true;
@@ -105,41 +115,12 @@ class AdminStoreController
 
         $store = Store::create($validated);
         app(\App\Services\Masters\UnitDefaultsService::class)->seedDefaultsForStore($store->id);
-        $keyResult = \App\Models\ActivationKey::generateKey($store, ['created_by' => auth()->id()]);
-        $store->activation_key = $keyResult['raw_key']; // Temporary attribute for presentation to creator
+        app(\App\Services\Masters\ChargeHeadDefaultsService::class)->seedDefaultsForStore($store->id);
 
-        AuditLog::log('create_store', 'Store', (string)$store->id, null, array_merge($store->toArray(), ['activation_key' => $keyResult['model']->key_prefix]), $store->id);
+        // CNT-013: a new store is not issued a key. Codes are minted per counter.
+        AuditLog::log('create_store', 'Store', (string)$store->id, null, $store->toArray(), $store->id);
 
         return response()->json($store, 201);
-    }
-
-    /**
-     * Regenerate store activation key.
-     */
-    public function regenerateKey(string $id): JsonResponse
-    {
-        $store = Store::findOrFail($id);
-
-        // Revoke existing active keys
-        \App\Models\ActivationKey::where('store_id', $store->id)
-            ->where('is_revoked', false)
-            ->update([
-                'is_revoked' => true,
-                'revoked_at' => now(),
-                'revoke_reason' => 'Superseded by new activation key',
-            ]);
-
-        $keyResult = \App\Models\ActivationKey::generateKey($store, ['created_by' => auth()->id()]);
-        $newKey = $keyResult['raw_key'];
-
-        AuditLog::log('regenerate_activation_key', 'Store', (string)$store->id, null, ['key_prefix' => $keyResult['model']->key_prefix], $store->id);
-
-        return response()->json([
-            'success' => true,
-            'activation_key' => $newKey,
-            'key_prefix' => $keyResult['model']->key_prefix,
-            'message' => "Activation key regenerated successfully for store '{$store->name}'.",
-        ]);
     }
 
     /**
@@ -167,13 +148,15 @@ class AdminStoreController
             ], 409);
         }
 
+        $this->normalizeStoreCode($request, $store->code);
+
         $validated = $request->validate([
             'name' => 'sometimes|required|string|max:255',
-            'code' => 'sometimes|required|string|max:50|unique:stores,code,' . $store->id,
+            'code' => ['sometimes', 'required', 'string', 'max:20', 'regex:' . self::STORE_CODE_PATTERN, Rule::unique('stores', 'code')->ignore($store->id)],
             'phone' => 'nullable|string|max:20',
             'email' => 'nullable|email|max:100',
             'address' => 'nullable|string',
-            'state_code' => 'sometimes|required|string|max:10',
+            'state_code' => ['sometimes', 'required', 'string', Rule::in(GstStateCodes::all())],
             'gstin' => 'nullable|string|max:20',
             'drug_license_numbers' => 'nullable|array',
             'fssai_no' => 'nullable|string|max:50',
@@ -187,6 +170,11 @@ class AdminStoreController
             'enabled_menu_items' => 'nullable|array',
             'feature_flags' => 'nullable|array',
         ]);
+
+        $this->assertGstinMatchesState(
+            array_key_exists('gstin', $validated) ? $validated['gstin'] : $store->gstin,
+            array_key_exists('state_code', $validated) ? $validated['state_code'] : $store->state_code,
+        );
 
         $oldValues = $store->toArray();
         $validated['version'] = $store->version + 1;
@@ -402,6 +390,61 @@ class AdminStoreController
         } catch (\Throwable $e) {
             DB::rollBack();
             return response()->json(['message' => 'Failed to reset store: ' . $e->getMessage()], 500);
+        }
+    }
+
+    /**
+     * SET-01: trims and uppercases the store code before validation. On an
+     * update, a code sent back unchanged is dropped, so a store saved under an
+     * older, looser rule can still be edited; only a new code must meet the rule.
+     */
+    private function normalizeStoreCode(Request $request, ?string $currentCode = null): void
+    {
+        if (!$request->has('code') || !is_string($request->input('code'))) {
+            return;
+        }
+
+        $raw = trim($request->input('code'));
+
+        if ($currentCode !== null && $raw === $currentCode) {
+            $request->offsetUnset('code');
+            return;
+        }
+
+        $request->merge(['code' => strtoupper($raw)]);
+    }
+
+    /**
+     * A store's state decides CGST+SGST vs IGST, so it must be a real GST code
+     * and must agree with the GSTIN's own prefix.
+     */
+    private function assertGstinMatchesState(?string $gstin, ?string $stateCode): void
+    {
+        $gstin = $gstin === null ? null : trim($gstin);
+        if ($gstin === '') {
+            $gstin = null;
+        }
+
+        if ($gstin !== null && !GstStateCodes::isValidGstin($gstin)) {
+            throw ValidationException::withMessages([
+                'gstin' => 'Enter a valid 15-character GSTIN or leave it blank.',
+            ]);
+        }
+
+        $stateCode = GstStateCodes::normalize($stateCode);
+        if ($stateCode !== null && !GstStateCodes::isValid($stateCode)) {
+            throw ValidationException::withMessages([
+                'state_code' => 'Choose a valid GST state code (01-38 or 97).',
+            ]);
+        }
+
+        if ($gstin !== null && $stateCode !== null) {
+            $prefix = GstStateCodes::fromGstin($gstin);
+            if ($prefix !== null && $prefix !== $stateCode) {
+                throw ValidationException::withMessages([
+                    'state_code' => "State code {$stateCode} does not match the GSTIN's state ({$prefix}).",
+                ]);
+            }
         }
     }
 }

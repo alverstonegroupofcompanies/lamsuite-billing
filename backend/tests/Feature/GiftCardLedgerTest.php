@@ -203,7 +203,19 @@ class GiftCardLedgerTest extends TestCase
         $invoiceId = $response->json('invoice.id');
         $this->assertSame(90.0, (float) GiftCard::find($card['id'])->balance);
 
-        $this->postJson("/api/invoices/{$invoiceId}/cancel", ['reason' => 'QA refund check'])
+        // G12: a till cancellation now carries the approver's grant.
+        $token = $this->grantCancellationToken(Invoice::findOrFail($invoiceId), [
+            'action' => 'cancel',
+            'mode' => 'manager',
+            'identifier' => 'admin@gcp.test',
+            'secret' => 'password123',
+            'requested_by_user_id' => $this->admin->id,
+        ]);
+
+        $this->postJson("/api/invoices/{$invoiceId}/cancel", [
+            'reason' => 'QA refund check',
+            'approval_token' => $token,
+        ])
             ->assertStatus(200)
             ->assertJson(['success' => true]);
 

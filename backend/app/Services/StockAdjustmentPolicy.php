@@ -3,8 +3,10 @@
 namespace App\Services;
 
 use App\Models\CompanySetting;
+use App\Models\Counter;
 use App\Models\StockAdjustmentDocument;
 use App\Models\User;
+use Illuminate\Database\Eloquent\Builder;
 
 /**
  * Single source of truth for per-store stock adjustment restrictions.
@@ -24,6 +26,7 @@ class StockAdjustmentPolicy
         'max_qty_per_line' => null,
         'max_value_per_document' => null,
         'max_documents_per_day' => null,
+        'max_units_per_day' => null,
         'require_notes' => false,
         'approval_threshold_value' => null,
         'approval_threshold_qty' => null,
@@ -108,7 +111,8 @@ class StockAdjustmentPolicy
         array $lines,
         string $mode,
         ?string $notes,
-        ?string $documentDate = null
+        ?string $documentDate = null,
+        ?Counter $counter = null
     ): array {
         $policy = $this->forStore($storeId);
         $errors = [];
@@ -173,16 +177,25 @@ class StockAdjustmentPolicy
         }
 
         $maxPerDay = $policy['max_documents_per_day'] ?? null;
-        if ($maxPerDay !== null && $maxPerDay !== '' && $user) {
-            $todayCount = StockAdjustmentDocument::where('store_id', $storeId)
-                ->where('created_by', $user->id)
-                ->whereDate('created_at', now()->toDateString())
-                ->count();
+        if ($maxPerDay !== null && $maxPerDay !== '') {
+            $todayCount = $this->principalDocumentsToday($storeId, $user, $counter)->count();
             if ($todayCount >= (int) $maxPerDay) {
                 $block(sprintf(
                     'Daily stock adjustment limit reached (%d of %d documents today).',
                     $todayCount,
                     (int) $maxPerDay
+                ));
+            }
+        }
+
+        $maxUnitsPerDay = $policy['max_units_per_day'] ?? null;
+        if ($maxUnitsPerDay !== null && $maxUnitsPerDay !== '') {
+            $todayUnits = (float) $this->principalDocumentsToday($storeId, $user, $counter)->sum('total_qty');
+            if ($todayUnits + $totalQty > (float) $maxUnitsPerDay) {
+                $block(sprintf(
+                    'Daily stock adjustment units would reach %s of the %s-unit daily limit.',
+                    rtrim(rtrim(number_format($todayUnits + $totalQty, 3, '.', ''), '0'), '.'),
+                    rtrim(rtrim(number_format((float) $maxUnitsPerDay, 3, '.', ''), '0'), '.')
                 ));
             }
         }
@@ -238,6 +251,28 @@ class StockAdjustmentPolicy
             'blocker' => $blocker,
             'policy' => $policy,
         ];
+    }
+
+    /**
+     * The documents a principal posted today. At a till the principal is the
+     * counter; elsewhere it is the signed-in person. Rejected documents never
+     * count against the allowance.
+     */
+    private function principalDocumentsToday(int $storeId, ?User $user, ?Counter $counter): Builder
+    {
+        return StockAdjustmentDocument::query()
+            ->where('store_id', $storeId)
+            ->where('status', '!=', 'rejected')
+            ->whereDate('created_at', now()->toDateString())
+            ->when(
+                $counter !== null,
+                fn (Builder $query) => $query->where('counter_id', $counter->id),
+                fn (Builder $query) => $user !== null
+                    ? $query->where('created_by', $user->id)
+                    // Neither a person nor a counter: the store's anonymous allowance,
+                    // never an unlimited one.
+                    : $query->whereNull('created_by')->whereNull('counter_id')
+            );
     }
 
     public function canApprove(?User $user, int $storeId): bool

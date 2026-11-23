@@ -37,7 +37,8 @@ class GstWorkingPaperService
             'notes' => [
                 'Outward supplies include POS invoices and exclude cancelled documents; credit notes reduce the liability.',
                 'ITC is computed from received purchase bills. Reverse-charge and ineligible purchases are excluded from available ITC.',
-                'Documents without usable line tax values (e.g. synced POS bills) are grouped under "Header only" using header tax totals.',
+                'Charge GST on a supplier bill joins the same rate slab only where that charge is creditable: a blocked, ineligible or partial head is reported as non-creditable and a reverse-charge one is listed under RCM review for a person to check (REP-009).',
+                'Documents without usable line tax values (e.g. synced POS bills) are grouped under "Header only" using header tax totals, which already include the supplier-borne charge tax (PUR-001) and are therefore never added twice.',
                 'This is a working paper prepared from books, not a filed return. Reconcile with the GST portal before filing.',
             ],
         ];
@@ -114,6 +115,8 @@ class GstWorkingPaperService
                 'total_itc' => $itc['total_itc'],
                 'ineligible_itc' => $itc['ineligible_itc'],
                 'reverse_charge_tax' => $itc['rcm_tax'],
+                'charges' => $itc['charges'],
+                'rcm_review' => $itc['rcm_review'],
             ],
             'reconciliation' => [
                 'gstr1_turnover' => $netTurnover,
@@ -221,8 +224,13 @@ class GstWorkingPaperService
 
     private function itcSummary(?array $storeIds, string $from, string $to): array
     {
-        $purchases = Purchase::with('items')
-            ->where('module_key', 'purchase')
+        // A purchase return is input tax going back out: it cancels the credit its inward bill
+        // claimed, so it must reduce ITC rather than disappear from the paper (PUR-07).
+        $purchases = Purchase::with(['items', 'charges'])
+            ->where(fn ($q) => $q
+                ->whereIn('module_key', ['purchase', 'purchase_return', 'debit_note'])
+                ->orWhereNull('module_key')
+                ->orWhere('module_key', ''))
             ->where('status', '!=', 'cancelled')
             ->whereBetween('invoice_date', [$from, $to])
             ->when($storeIds, fn ($q) => $q->whereIn('store_id', $storeIds))
@@ -233,7 +241,15 @@ class GstWorkingPaperService
         $rcmTaxable = 0.0;
         $rcmTax = 0.0;
 
+        $chargeHeads = [];
+        $rcmRows = [];
+        $chargeTotals = ['taxable' => 0.0, 'tax' => 0.0, 'creditable' => 0.0, 'blocked' => 0.0, 'rcm' => 0.0];
+
         foreach ($purchases as $purchase) {
+            $module = strtolower(trim((string) ($purchase->module_key ?? '')));
+            $returning = in_array($module, ['purchase_return', 'debit_note'], true);
+            $sign = $returning ? -1 : 1;
+
             $isRcm = (bool) $purchase->is_rcm;
             $ineligible = ($purchase->itc_eligibility ?? 'eligible') === 'ineligible';
 
@@ -241,20 +257,29 @@ class GstWorkingPaperService
                 $tax = (float) $purchase->cgst_total + (float) $purchase->sgst_total
                     + (float) $purchase->igst_total + (float) $purchase->cess_total;
 
+                // A whole-bill RCM or ineligible document already carries its charge tax in these
+                // header columns, so the charges belong to the same bucket as the goods.
+                $chargeTaxable = $purchase->charges
+                    ->where('paid_separately', false)
+                    ->sum(fn ($charge) => (float) $charge->taxable_amount);
+
                 if ($isRcm) {
-                    $rcmTaxable += (float) $purchase->subtotal;
-                    $rcmTax += $tax;
+                    $rcmTaxable += $sign * ((float) $purchase->subtotal + $chargeTaxable);
+                    $rcmTax += $sign * $tax;
                 } else {
-                    $ineligibleItc += $tax;
+                    $ineligibleItc += $sign * $tax;
                 }
+
+                $this->tallyChargeHeads($chargeHeads, $chargeTotals, $purchase->charges, $sign);
 
                 continue;
             }
 
             $lines = [];
             $itemTaxable = $purchase->items->sum(fn ($item) => (float) ($item->taxable_amount ?? 0));
+            $fromItems = $purchase->items->isNotEmpty() && $itemTaxable > 0;
 
-            if ($purchase->items->isNotEmpty() && $itemTaxable > 0) {
+            if ($fromItems) {
                 foreach ($purchase->items as $item) {
                     $tax = (float) ($item->tax_amount ?? 0);
                     $igst = (float) ($item->igst_amount ?? 0);
@@ -285,7 +310,72 @@ class GstWorkingPaperService
             }
 
             foreach ($lines as [$rate, $taxable, $cgst, $sgst, $igst, $cess]) {
-                $this->accumulateLine($buckets, $rate, 1, $taxable, $cgst, $sgst, $igst, $cess);
+                $this->accumulateLine($buckets, $rate, $sign, $taxable, $cgst, $sgst, $igst, $cess);
+            }
+
+            foreach ($purchase->charges as $charge) {
+                [$taxable, $cgst, $sgst, $igst, $cess, $tax, $creditable] = $this->chargeSplit($charge);
+
+                $chargeTotals['taxable'] += $sign * $taxable;
+                $chargeTotals['tax'] += $sign * $tax;
+                $key = $this->chargeHeadKey($charge);
+                $chargeHeads[$key] = $this->addChargeHead(
+                    $chargeHeads[$key] ?? null, $charge,
+                    $sign * $taxable, $sign * $cgst, $sign * $sgst, $sign * $igst, $sign * $cess, $sign * $tax
+                );
+
+                if ($charge->is_rcm) {
+                    $chargeTotals['rcm'] += $sign * $tax;
+                    $rcmTaxable += $sign * ($charge->paid_separately ? 0.0 : $taxable);
+                    $rcmTax += $sign * $tax;
+                    $rcmRows[] = [
+                        'purchase_id' => (int) $charge->purchase_id,
+                        'invoice_number' => (string) $purchase->invoice_number,
+                        'invoice_date' => optional($purchase->invoice_date)->toDateString(),
+                        'supplier_name' => (string) $purchase->supplier_name,
+                        'supplier_gstin' => $purchase->supplier_gstin,
+                        'head_code' => (string) $charge->head_code,
+                        'head_name' => (string) $charge->head_name,
+                        'sac_code' => $charge->sac_code,
+                        'place_of_supply' => $charge->place_of_supply ?? $purchase->place_of_supply,
+                        'taxable_amount' => $sign * $taxable,
+                        'self_paid_tax' => $sign * $tax,
+                        'paid_separately' => (bool) $charge->paid_separately,
+                        'note' => $charge->note,
+                    ];
+
+                    // Read from the header, this tax also sat in the creditable figure (PUR-001).
+                    // A reverse-charge rupee is one the store pays itself, so it belongs in the
+                    // review section and never in ordinary input tax.
+                    if (!$fromItems && !$charge->paid_separately) {
+                        $this->accumulateLine($buckets, null, -$sign, 0.0, $cgst, $sgst, $igst, $cess);
+                    }
+
+                    continue;
+                }
+
+                if (!$creditable) {
+                    $chargeTotals['blocked'] += $sign * $tax;
+                    $ineligibleItc += $sign * $tax;
+
+                    // Reading the bill from its header put this tax into the creditable figure
+                    // already (PUR-001), so it has to be taken back out.
+                    if (!$fromItems && !$charge->paid_separately) {
+                        $this->accumulateLine($buckets, null, -$sign, 0.0, $cgst, $sgst, $igst, $cess);
+                    }
+
+                    continue;
+                }
+
+                $chargeTotals['creditable'] += $sign * $tax;
+
+                // Item rows are goods-only, so a creditable charge adds its own line. A header-only
+                // document already counts the supplier-borne part, and only the separately-paid tax
+                // - which never reached the header - is still missing.
+                if ($fromItems || $charge->paid_separately) {
+                    $this->accumulateLine($buckets, (float) $charge->gst_percent, $sign,
+                        $taxable, $cgst, $sgst, $igst, $cess);
+                }
             }
         }
 
@@ -302,7 +392,115 @@ class GstWorkingPaperService
             'ineligible_itc' => round($ineligibleItc, 2),
             'rcm_taxable' => round($rcmTaxable, 2),
             'rcm_tax' => round($rcmTax, 2),
+            // REP-009: what the charges themselves contributed, and what has to be reviewed.
+            'charges' => [
+                'total_taxable' => round($chargeTotals['taxable'], 2),
+                'total_tax' => round($chargeTotals['tax'], 2),
+                'creditable_tax' => round($chargeTotals['creditable'], 2),
+                'non_creditable_tax' => round($chargeTotals['blocked'], 2),
+                'rcm_tax' => round($chargeTotals['rcm'], 2),
+                'reconciles' => abs(
+                    $chargeTotals['creditable'] + $chargeTotals['blocked'] + $chargeTotals['rcm']
+                    - $chargeTotals['tax']
+                ) < 0.005,
+                'by_head' => $this->finalizeChargeHeads($chargeHeads),
+            ],
+            'rcm_review' => [
+                'rows' => $rcmRows,
+                'total_taxable' => round(array_sum(array_column($rcmRows, 'taxable_amount')), 2),
+                'total_tax' => round(array_sum(array_column($rcmRows, 'self_paid_tax')), 2),
+            ],
         ];
+    }
+
+    /**
+     * @return array{0: float, 1: float, 2: float, 3: float, 4: float, 5: float, 6: bool}
+     */
+    private function chargeSplit($charge): array
+    {
+        $taxable = round((float) $charge->taxable_amount, 2);
+        $cgst = round((float) $charge->cgst_amount, 2);
+        $sgst = round((float) $charge->sgst_amount, 2);
+        $igst = round((float) $charge->igst_amount, 2);
+        $cess = round((float) $charge->cess_amount, 2);
+
+        return [$taxable, $cgst, $sgst, $igst, $cess, round($cgst + $sgst + $igst + $cess, 2),
+            $charge->itc_eligibility === 'eligible'];
+    }
+
+    private function chargeHeadKey($charge): string
+    {
+        return implode('|', [
+            (string) $charge->head_code,
+            (string) $charge->itc_eligibility,
+            $charge->is_rcm ? 'rcm' : 'normal',
+            $charge->paid_separately ? 'sep' : 'bill',
+        ]);
+    }
+
+    /**
+     * @param  array<string, mixed>|null  $row
+     * @return array<string, mixed>
+     */
+    private function addChargeHead(?array $row, $charge, float $taxable, float $cgst, float $sgst,
+        float $igst, float $cess, float $tax): array
+    {
+        $creditable = $charge->itc_eligibility === 'eligible' && !$charge->is_rcm;
+
+        return [
+            'head_code' => (string) $charge->head_code,
+            'head_name' => (string) $charge->head_name,
+            'sac_code' => $charge->sac_code,
+            'itc_eligibility' => (string) $charge->itc_eligibility,
+            'is_rcm' => (bool) $charge->is_rcm,
+            'paid_separately' => (bool) $charge->paid_separately,
+            'taxable' => round(($row['taxable'] ?? 0) + $taxable, 2),
+            'cgst' => round(($row['cgst'] ?? 0) + $cgst, 2),
+            'sgst' => round(($row['sgst'] ?? 0) + $sgst, 2),
+            'igst' => round(($row['igst'] ?? 0) + $igst, 2),
+            'cess' => round(($row['cess'] ?? 0) + $cess, 2),
+            'tax' => round(($row['tax'] ?? 0) + $tax, 2),
+            'creditable_tax' => round(($row['creditable_tax'] ?? 0) + ($creditable ? $tax : 0), 2),
+            'rows' => (int) ($row['rows'] ?? 0) + 1,
+        ];
+    }
+
+    /**
+     * Charges of a document that is ineligible or reverse-charge as a whole still count towards
+     * the audit block; they simply never become creditable input tax.
+     */
+    private function tallyChargeHeads(array &$chargeHeads, array &$chargeTotals, $charges, float $sign = 1.0): void
+    {
+        foreach ($charges as $charge) {
+            [$taxable, $cgst, $sgst, $igst, $cess, $tax] = $this->chargeSplit($charge);
+
+            $chargeTotals['taxable'] += $sign * $taxable;
+            $chargeTotals['tax'] += $sign * $tax;
+
+            if ($charge->is_rcm) {
+                $chargeTotals['rcm'] += $sign * $tax;
+            } else {
+                $chargeTotals['blocked'] += $sign * $tax;
+            }
+
+            $key = $this->chargeHeadKey($charge);
+            $chargeHeads[$key] = $this->addChargeHead(
+                $chargeHeads[$key] ?? null, $charge,
+                $sign * $taxable, $sign * $cgst, $sign * $sgst, $sign * $igst, $sign * $cess, $sign * $tax
+            );
+        }
+    }
+
+    /**
+     * @param  array<string, array<string, mixed>>  $chargeHeads
+     * @return array<int, array<string, mixed>>
+     */
+    private function finalizeChargeHeads(array $chargeHeads): array
+    {
+        usort($chargeHeads, fn (array $a, array $b) => [$a['head_code'], $a['itc_eligibility']]
+            <=> [$b['head_code'], $b['itc_eligibility']]);
+
+        return array_values($chargeHeads);
     }
 
     /**

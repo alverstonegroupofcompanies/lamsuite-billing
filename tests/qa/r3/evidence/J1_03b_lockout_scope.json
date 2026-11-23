@@ -1,0 +1,59 @@
+{
+  "devices": {
+    "locked": "qa-lockout-a-1795309723937",
+    "spared": "qa-lockout-b-1795309723937"
+  },
+  "counter": {
+    "id": 7,
+    "code": "Q724066"
+  },
+  "five_failures": [
+    {
+      "st": 401,
+      "error": "claim_failed"
+    },
+    {
+      "st": 401,
+      "error": "claim_failed"
+    },
+    {
+      "st": 401,
+      "error": "claim_failed"
+    },
+    {
+      "st": 401,
+      "error": "claim_failed"
+    },
+    {
+      "st": 401,
+      "error": "claim_failed"
+    }
+  ],
+  "locked_device": {
+    "st": 429,
+    "error": "claim_locked",
+    "token": false
+  },
+  "spared_device": {
+    "st": 200,
+    "token": true
+  },
+  "counter_after": {
+    "id": 7,
+    "status": "active",
+    "device_uuid": "qa-lockout-b-1795309723937"
+  },
+  "attempt_rows": [
+    {
+      "device_uuid": "qa-lockout-b-1795309723937",
+      "ip_address": "127.0.0.1",
+      "failure_reason": null,
+      "success": 1
+    }
+  ],
+  "verdict": {
+    "locked_device_refused": true,
+    "second_device_claimed": true,
+    "counter_bound_to_b": true
+  }
+}

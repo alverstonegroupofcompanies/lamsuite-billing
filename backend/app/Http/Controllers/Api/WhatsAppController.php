@@ -51,6 +51,14 @@ class WhatsAppController extends Controller
     /**
      * Clean phone number into international WhatsApp JID (<phone>@c.us)
      */
+    /** G1-SEC: the store whose gateway is used is the authenticated tenant's. */
+    private static function tenantStore(Request $request): ?string
+    {
+        $storeId = \App\Support\RequestTenant::requireStoreId($request);
+
+        return (string) $storeId;
+    }
+
     public static function formatChatId(string $phone): string
     {
         $clean = preg_replace('/\D/', '', $phone);
@@ -80,7 +88,7 @@ class WhatsAppController extends Controller
         ]);
 
         $config = $this->resolveConfig(
-            $validated['store_id'] ?? null,
+            self::tenantStore($request),
             $validated['api_url'] ?? null,
             $validated['api_key'] ?? null,
             $validated['session_id'] ?? null
@@ -200,7 +208,7 @@ class WhatsAppController extends Controller
         ]);
 
         $config = $this->resolveConfig(
-            $validated['store_id'] ?? null,
+            self::tenantStore($request),
             $validated['api_url'] ?? null,
             $validated['api_key'] ?? null
         );
@@ -260,7 +268,7 @@ class WhatsAppController extends Controller
         ]);
 
         $config = $this->resolveConfig(
-            $validated['store_id'] ?? null,
+            self::tenantStore($request),
             $validated['api_url'] ?? null,
             $validated['api_key'] ?? null
         );
@@ -339,7 +347,7 @@ class WhatsAppController extends Controller
      */
     public function getConfig(Request $request): JsonResponse
     {
-        $config = $this->resolveConfig($request->query('store_id'));
+        $config = $this->resolveConfig(self::tenantStore($request));
         return response()->json([
             'success' => true,
             'enabled' => $config['enabled'],

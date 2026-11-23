@@ -1,7 +1,14 @@
 import React from "react";
 import { Keyboard, HelpCircle } from "lucide-react";
+import { shortcutLabel } from "../../lib/keyboard/centralKeyMap";
 
-export type PurchaseFocusContext = "header" | "entry_row" | "grid" | "cell_edit" | "modal";
+export type PurchaseFocusContext =
+  | "header"
+  | "entry_row"
+  | "grid"
+  | "cell_edit"
+  | "charges"
+  | "modal";
 
 interface PurchaseShortcutHintBarProps {
   context: PurchaseFocusContext;
@@ -61,7 +68,7 @@ export const PurchaseShortcutHintBar: React.FC<PurchaseShortcutHintBarProps> = (
         { key: "Ctrl+N", label: "New Product" },
         { key: "Esc", label: "Clear Draft" },
         { key: "↑", label: "Grid Lines" },
-        { key: "Alt+F", label: "Freight" },
+        { key: "Alt+F", label: "Bill Charges" },
         { key: "Alt+I", label: "Vendor Total" },
         { key: "Alt+R", label: "Round-off" },
         { key: "F12", label: "Post Purchase", highlight: true, onClick: onPost },
@@ -81,6 +88,24 @@ export const PurchaseShortcutHintBar: React.FC<PurchaseShortcutHintBarProps> = (
         { key: "Ctrl+F2", label: "Bill Disc" },
         { key: "Alt+R", label: "Round-off" },
         { key: "F12", label: "Post Purchase", highlight: true, onClick: onPost },
+      ];
+      break;
+
+    case "charges":
+      hints = [
+        { key: "↑↓←→", label: "Move Cell" },
+        {
+          key: shortcutLabel("chargeCycleCell", "modal"),
+          label: "Cycle Preset",
+          highlight: true,
+        },
+        { key: "Shift+Space", label: "Cycle Back" },
+        { key: shortcutLabel("chargeEditCell", "modal"), label: "Type Amount" },
+        { key: shortcutLabel("chargeAddRow", "modal"), label: "Add Charge" },
+        { key: shortcutLabel("chargeDeleteRow", "modal"), label: "Delete Charge" },
+        { key: shortcutLabel("chargeUndoDelete", "modal"), label: "Undo Delete" },
+        { key: shortcutLabel("chargeApply", "modal"), label: "Apply To Bill", highlight: true },
+        { key: "Esc", label: "Close Grid" },
       ];
       break;
 

@@ -8,7 +8,7 @@ export class PublicIpService {
 
   /**
    * Determine the current device's public WAN IP address.
-   * Tries central backend endpoint first, then falls back to public STUN/IP echo services.
+   * Asks only the configured backend; never a third-party IP echo service.
    */
   async getPublicIp(forceRefresh = false): Promise<string | null> {
     if (typeof process !== "undefined" && process.env?.NODE_ENV === "test") {
@@ -49,26 +49,8 @@ export class PublicIpService {
         // Backend offline or unreachable
       }
 
-      // 2. Fallback to public HTTPS IP echo service (ipify)
-      if (typeof window !== "undefined" && navigator.onLine) {
-        try {
-          const ctrl = new AbortController();
-          const timeout = setTimeout(() => ctrl.abort(), 3000);
-          const res = await fetch("https://api.ipify.org?format=json", {
-            signal: ctrl.signal,
-          });
-          clearTimeout(timeout);
-
-          if (res.ok) {
-            const data = await res.json();
-            if (data?.ip) {
-              this.cachedIp = String(data.ip).trim();
-              this.lastFetchedAt = now;
-              return this.cachedIp;
-            }
-          }
-        } catch (_) {}
-      }
+      // UPD-01: no third-party IP echo. A till only talks to the server it is
+      // configured against; on a LAN or test server the address stays unknown.
 
       return this.cachedIp;
     } finally {

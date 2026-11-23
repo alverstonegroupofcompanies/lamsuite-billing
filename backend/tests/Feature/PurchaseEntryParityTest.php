@@ -26,7 +26,7 @@ class PurchaseEntryParityTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        $this->withoutMiddleware(\App\Http\Middleware\AuthenticateDevice::class);
+        $this->actAsClaimedCounterOfRequestedStore();
 
         $this->pharmacy = Store::create([
             'name' => 'Parity Pharmacy',
@@ -74,13 +74,20 @@ class PurchaseEntryParityTest extends TestCase
 
     private function retailStore(): Store
     {
-        return Store::create([
+        $retail = Store::create([
             'name' => 'Parity Retail',
             'code' => 'PRT01',
             'store_type' => 'retail',
             'state_code' => '32',
             'is_active' => true,
         ]);
+
+        // G1-SEC: naming a store is refused unless the person may reach it, so
+        // the owner is granted the second branch as a real owner would be.
+        $this->owner->update(['allowed_store_ids' => [$this->pharmacy->id, $retail->id]]);
+        Sanctum::actingAs($this->owner->fresh());
+
+        return $retail;
     }
 
     public function test_pharmacy_requires_batch_and_expiry(): void

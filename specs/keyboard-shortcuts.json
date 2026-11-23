@@ -1,7 +1,7 @@
 {
   "name": "LamSuite Billing keyboard shortcuts",
   "version": "2.1.1",
-  "updated": "2026-11-14",
+  "updated": "2026-11-22",
   "rule": "A screen scope always wins over the global scope. Two bindings in the same scope are a conflict and fail CI.",
   "scopePriority": [
     "modal",
@@ -10,13 +10,14 @@
     "pos",
     "bills",
     "purchase",
+    "salesReturns",
     "stock",
     "login",
     "global"
   ],
   "counts": {
-    "total": 71,
-    "advertised": 70,
+    "total": 83,
+    "advertised": 82,
     "conflicts": 0
   },
   "shortcuts": [
@@ -47,16 +48,6 @@
       "group": "Global",
       "keys": [
         "Ctrl+K"
-      ],
-      "hidden": false
-    },
-    {
-      "action": "accountSwitcher",
-      "label": "Switch Account",
-      "scope": "global",
-      "group": "Global",
-      "keys": [
-        "F12"
       ],
       "hidden": false
     },
@@ -291,6 +282,16 @@
       "hidden": false
     },
     {
+      "action": "focusSalesperson",
+      "label": "Salesperson",
+      "scope": "pos",
+      "group": "Billing",
+      "keys": [
+        "Alt+S"
+      ],
+      "hidden": false
+    },
+    {
       "action": "focusMobile",
       "label": "Customer Mobile",
       "scope": "pos",
@@ -502,6 +503,16 @@
       "hidden": false
     },
     {
+      "action": "purchaseFocusEntry",
+      "label": "Entry Row",
+      "scope": "purchase",
+      "group": "Purchase",
+      "keys": [
+        "F1"
+      ],
+      "hidden": false
+    },
+    {
       "action": "focusSupplier",
       "label": "Supplier",
       "scope": "purchase",
@@ -542,8 +553,8 @@
       "hidden": false
     },
     {
-      "action": "focusFreight",
-      "label": "Freight",
+      "action": "toggleCharges",
+      "label": "Bill Charges",
       "scope": "purchase",
       "group": "Purchase",
       "keys": [
@@ -597,7 +608,8 @@
       "scope": "purchase",
       "group": "Purchase",
       "keys": [
-        "Ctrl+Shift+N"
+        "Ctrl+Shift+N",
+        "F2"
       ],
       "hidden": false
     },
@@ -648,6 +660,16 @@
       "group": "Purchase",
       "keys": [
         "Shift+F12"
+      ],
+      "hidden": false
+    },
+    {
+      "action": "newSalesReturn",
+      "label": "New Sales Return",
+      "scope": "salesReturns",
+      "group": "Sales Returns",
+      "keys": [
+        "F7"
       ],
       "hidden": false
     },
@@ -730,16 +752,111 @@
         "Esc"
       ],
       "hidden": true
+    },
+    {
+      "action": "chargeAddRow",
+      "label": "Add Charge Row",
+      "scope": "modal",
+      "group": "Charges",
+      "keys": [
+        "Insert"
+      ],
+      "hidden": false
+    },
+    {
+      "action": "chargeDeleteRow",
+      "label": "Delete Charge Row",
+      "scope": "modal",
+      "group": "Charges",
+      "keys": [
+        "Delete"
+      ],
+      "hidden": false
+    },
+    {
+      "action": "chargeUndoDelete",
+      "label": "Undo Charge Row Delete",
+      "scope": "modal",
+      "group": "Charges",
+      "keys": [
+        "Ctrl+Z"
+      ],
+      "hidden": false
+    },
+    {
+      "action": "chargeMoveUp",
+      "label": "Previous Charge Row",
+      "scope": "modal",
+      "group": "Charges",
+      "keys": [
+        "Up"
+      ],
+      "hidden": false
+    },
+    {
+      "action": "chargeMoveDown",
+      "label": "Next Charge Row",
+      "scope": "modal",
+      "group": "Charges",
+      "keys": [
+        "Down"
+      ],
+      "hidden": false
+    },
+    {
+      "action": "chargeMoveLeft",
+      "label": "Previous Charge Column",
+      "scope": "modal",
+      "group": "Charges",
+      "keys": [
+        "Left"
+      ],
+      "hidden": false
+    },
+    {
+      "action": "chargeMoveRight",
+      "label": "Next Charge Column",
+      "scope": "modal",
+      "group": "Charges",
+      "keys": [
+        "Right"
+      ],
+      "hidden": false
+    },
+    {
+      "action": "chargeCycleCell",
+      "label": "Cycle Charge Preset",
+      "scope": "modal",
+      "group": "Charges",
+      "keys": [
+        "Space",
+        "Shift+Space"
+      ],
+      "hidden": false
+    },
+    {
+      "action": "chargeEditCell",
+      "label": "Edit Charge Amount",
+      "scope": "modal",
+      "group": "Charges",
+      "keys": [
+        "Enter"
+      ],
+      "hidden": false
+    },
+    {
+      "action": "chargeApply",
+      "label": "Apply Charges To Bill",
+      "scope": "modal",
+      "group": "Charges",
+      "keys": [
+        "Ctrl+Enter"
+      ],
+      "hidden": false
     }
   ],
   "conflicts": [],
   "overrides": [
-    {
-      "chord": "F12",
-      "global": "accountSwitcher",
-      "screen": "checkout",
-      "screenScope": "pos"
-    },
     {
       "chord": "F1",
       "global": "navPos",
@@ -751,6 +868,18 @@
       "global": "navStock",
       "screen": "rateEdit",
       "screenScope": "pos"
+    },
+    {
+      "chord": "F1",
+      "global": "navPos",
+      "screen": "purchaseFocusEntry",
+      "screenScope": "purchase"
+    },
+    {
+      "chord": "F2",
+      "global": "navPurchases",
+      "screen": "newPurchase",
+      "screenScope": "purchase"
     },
     {
       "chord": "F6",
@@ -771,10 +900,10 @@
       "screenScope": "purchase"
     },
     {
-      "chord": "F12",
-      "global": "accountSwitcher",
-      "screen": "postPurchase",
-      "screenScope": "purchase"
+      "chord": "F7",
+      "global": "navSalesReturns",
+      "screen": "newSalesReturn",
+      "screenScope": "salesReturns"
     }
   ]
 }

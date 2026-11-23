@@ -36,33 +36,44 @@ class MultiCounterDeviceTest extends TestCase
         ]);
     }
 
-    public function test_device_registration_returns_tokens_and_counter_metadata(): void
+    public function test_claiming_a_counter_returns_the_token_and_its_profile(): void
     {
-        $keyResult = \App\Models\ActivationKey::generateKey($this->store);
+        $counter = \App\Models\Counter::create([
+            'store_id' => $this->store->id,
+            'counter_code' => 'C02',
+            'counter_name' => 'Counter 02 Station',
+            'location_name' => 'First Floor',
+        ]);
+        $code = \App\Models\ActivationKey::generateForCounter($counter)['raw_key'];
 
-        $response = $this->postJson('/api/devices/register', [
-            'activation_key' => $keyResult['raw_key'],
+        $response = $this->postJson('/api/counters/claim', [
+            'code' => $code,
             'device_uuid' => 'hw_test_mac_12345',
             'device_name' => 'Counter 02 Station',
-            'store_id' => 'store_main',
-            'is_hub' => false,
         ]);
 
         $response->assertStatus(200)
             ->assertJson([
                 'success' => true,
-                'status' => 'active',
-                'counter_name' => 'Counter 02 Station',
-                'is_hub' => false,
+                'token_stored_as' => 'hash_only',
+                'counter' => [
+                    'counter_code' => 'C02',
+                    'counter_name' => 'Counter 02 Station',
+                    'location_name' => 'First Floor',
+                ],
+                'store' => ['code' => 'MAIN'],
             ]);
 
         $this->assertNotEmpty($response->json('device_token'));
-        $this->assertNotEmpty($response->json('refresh_token'));
-        $this->assertNotEmpty($response->json('counter_id'));
+        $this->assertNotEmpty($response->json('counter.id'));
+        $this->assertArrayNotHasKey('refresh_token', (array) $response->json());
     }
 
     public function test_branches_endpoint_returns_store_options(): void
     {
+        // G1-SEC: the branch list is for a claimed counter of the company, not anyone.
+        $this->actAsClaimedCounterOfRequestedStore();
+
         $response = $this->getJson('/api/branches');
 
         $response->assertStatus(200)

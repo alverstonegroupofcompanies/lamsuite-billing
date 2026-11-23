@@ -12,28 +12,8 @@ class HeldBillController
 {
     private function resolveStoreId(Request $request): int
     {
-        $candidate = $request->header('X-Store-Id') ?: $request->header('Store-Id');
-        if (!$candidate) {
-            $candidate = $request->input('store_id') ?: $request->query('store_id');
-        }
-        if (!$candidate && $request->user()) {
-            $candidate = $request->user()->store_id;
-        }
-
-        if ($candidate !== null && $candidate !== '') {
-            if (is_numeric($candidate)) {
-                $store = Store::find((int)$candidate);
-                if ($store) return $store->id;
-            }
-            $store = Store::where('code', $candidate)
-                ->orWhere('id', $candidate)
-                ->orWhere('name', $candidate)
-                ->first();
-            if ($store) return $store->id;
-        }
-
-        $first = Store::first();
-        return $first ? $first->id : 1;
+        // G1-SEC: the authenticated counter's store, or the person's checked scope.
+        return \App\Support\RequestTenant::requireStoreId($request);
     }
 
     public function index(Request $request): JsonResponse

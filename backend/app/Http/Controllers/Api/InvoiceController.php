@@ -6,7 +6,6 @@ use App\Exceptions\BusinessRuleException;
 use App\Models\AuditLog;
 use App\Models\CompanySetting;
 use App\Models\Counter;
-use App\Models\CounterSequence;
 use App\Models\CounterShift;
 use App\Models\FinancialYear;
 use App\Models\GstLockPeriod;
@@ -16,45 +15,73 @@ use App\Models\InvoicePayment;
 use App\Models\Party;
 use App\Models\Product;
 use App\Models\ProductBatch;
+use App\Services\Sales\PharmacistGate;
+use App\Services\Sales\SalespersonAttribution;
 use App\Models\StockLedgerEntry;
 use App\Models\Store;
 use App\Models\SyncEvent;
+use App\Services\Gst\PartyStateResolver;
+use App\Support\RestrictedDrugResolver;
+use App\Services\Alerts\OperationalAlertService;
+use App\Services\Tax\MrpCeiling;
 use App\Services\Tax\TaxEngine;
 use App\Services\Compliance\ComplianceService;
 use App\Services\Webhook\WebhookOutboxService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
+use App\Support\RequestTenant;
 
 class InvoiceController
 {
-    private function resolveStoreId(Request $request, array $payload = []): int
+    /**
+     * G1-SEC: the store comes from the authenticated counter or the person's
+     * checked store scope (RequestTenant), never from the payload, a header the
+     * middleware did not vouch for, or "the first store".
+     */
+    private function resolveStoreId(Request $request): int
     {
-        $candidate = $payload['store_id'] ?? $payload['store_code'] ?? null;
-        if (!$candidate) {
-            $candidate = $request->header('X-Store-Id') ?: $request->header('Store-Id');
-        }
-        if (!$candidate) {
-            $candidate = $request->query('store_id');
-        }
-        if (!$candidate && $request->user()) {
-            $candidate = $request->user()->store_id;
-        }
+        return RequestTenant::requireStoreId($request);
+    }
 
-        if ($candidate !== null && $candidate !== '') {
-            if (is_numeric($candidate)) {
-                $store = Store::find((int)$candidate);
-                if ($store) return $store->id;
+    /**
+     * G1-SEC / SEC-05: the counter a bill belongs to. A counter's token names
+     * itself; a person (owner/manager on a till route) must name a counter that
+     * exists in their store. A payload can never invent or move to another one.
+     */
+    private function resolveBillingCounter(Request $request, int $storeId, ?string $counterCode): Counter
+    {
+        $tokenCounterId = RequestTenant::counterId($request);
+        if ($tokenCounterId !== null) {
+            $counter = Counter::where('store_id', $storeId)->find($tokenCounterId);
+            if (!$counter) {
+                throw ValidationException::withMessages(['counter' => 'This workstation is not on a counter of this store.']);
             }
-            $store = Store::where('code', $candidate)
-                ->orWhere('id', $candidate)
-                ->orWhere('name', $candidate)
-                ->first();
-            if ($store) return $store->id;
+
+            return $counter;
         }
 
-        $first = Store::first();
-        return $first ? $first->id : 1;
+        $code = strtoupper(trim((string) $counterCode));
+        $counter = $code === '' ? null : Counter::where('store_id', $storeId)->where('counter_code', $code)->first();
+        if (!$counter) {
+            throw ValidationException::withMessages(['counter_code' => 'Name an existing counter of this store for this bill.']);
+        }
+
+        return $counter;
+    }
+
+    /** G1-SEC: an invoice is only ever found inside the caller's store. */
+    private function findStoreInvoice(Request $request, string $id, array $with = []): Invoice
+    {
+        $storeId = $this->resolveStoreId($request);
+
+        return Invoice::with($with)
+            ->where('store_id', $storeId)
+            ->where(function ($q) use ($id) {
+                $q->where('id', $id)->orWhere('invoice_number', $id);
+            })
+            ->firstOrFail();
     }
 
     private function calculateFinancialYear(\DateTimeInterface|string $date = 'now'): string
@@ -156,7 +183,7 @@ class InvoiceController
      */
     public function store(Request $request): JsonResponse
     {
-        $storeId = $this->resolveStoreId($request, $request->all());
+        $storeId = $this->resolveStoreId($request);
         $store = Store::find($storeId);
         if ($store && !$store->is_active) {
             return response()->json([
@@ -184,6 +211,8 @@ class InvoiceController
             'payments' => 'nullable|array',
             'payments.*.mode' => 'nullable|string|max:40',
             'payments.*.amount' => 'required_with:payments|numeric|min:0',
+            'payments.*.tendered_amount' => 'nullable|numeric|min:0',
+            'payments.*.change_amount' => 'nullable|numeric|min:0',
             'payments.*.reference_no' => 'nullable|string|max:100',
             'payments.*.status' => 'nullable|string|max:30',
             'payments.*.extra_fields' => 'nullable|array',
@@ -218,6 +247,24 @@ class InvoiceController
             'items.*.discount_percent' => 'nullable|numeric|min:0',
             'items.*.discount_amount' => 'nullable|numeric|min:0',
             'items.*.gst_percent' => 'nullable|numeric|min:0',
+            // Which documented rate the line was billed on (sel_rate, mrp, ptr,
+            // pts, loose_rate…). The server stores it so an offline review can
+            // tell a PTR sale from a retyped price.
+            'items.*.rate_basis' => 'nullable|string|max:20',
+            // Accepted so the master catalog keeps whatever the till printed, but
+            // never the ceiling a line is measured against — that is the MRP on file.
+            'items.*.mrp' => 'nullable|numeric|min:0',
+            // APR-003..010: the grant that settles what the profile deferred.
+            'approval_token' => 'nullable|string|max:128',
+            'approval_reason' => 'nullable|string|max:1000',
+            // GAP-01 / SPR-010: the person the bill credits. Resolved against
+            // the store and the counter rather than validated as a bare id.
+            'salesperson_id' => 'nullable',
+            'salesperson_name' => 'nullable|string|max:191',
+            // GAP-02 / PHR-004: who vouched for a restricted line. The PIN is
+            // judged by the pharmacist's own hash, not by a rule applied here.
+            'pharmacist_id' => 'nullable',
+            'pharmacist_pin' => 'nullable|string|max:64',
         ]);
 
         $externalId = $validated['idempotency_key'] ?? $validated['external_id'] ?? null;
@@ -307,15 +354,22 @@ class InvoiceController
                     ->first();
             }
 
-            // If customer has a real name or valid phone, automatically create in DB
-            if (!$party && (!$isWalkIn || (!empty($cleanPhone) && strlen(preg_replace('/\D/', '', $cleanPhone)) >= 10))) {
+            // MST-02: a phone number is a deliberate identity; a bare typed name
+            // is not. Create a master only when the caller supplied a real phone.
+            $phoneDigits = $cleanPhone ? strlen(preg_replace('/\D/', '', $cleanPhone)) : 0;
+            if (!$party && $phoneDigits >= 10) {
+                $partyGstin = !empty($validated['customer_gstin']) ? strtoupper(trim($validated['customer_gstin'])) : null;
                 $party = Party::create([
                     'store_id' => $storeId,
                     'type' => 'customer',
                     'name' => !$isWalkIn ? $cleanName : ("Customer " . substr(preg_replace('/\D/', '', $cleanPhone), -4)),
                     'phone' => $cleanPhone,
-                    'gstin' => !empty($validated['customer_gstin']) ? strtoupper(trim($validated['customer_gstin'])) : null,
-                    'state_code' => $validated['state_code'] ?? '32',
+                    'gstin' => $partyGstin,
+                    'state_code' => app(PartyStateResolver::class)->resolve(
+                        $validated['state_code'] ?? null,
+                        $partyGstin,
+                        Store::find($storeId)
+                    ),
                     'credit_limit' => 0,
                     'opening_balance' => 0,
                     'current_balance' => 0,
@@ -338,94 +392,85 @@ class InvoiceController
             ->first();
         $allowNegativeStock = $storeSetting ? (bool)($storeSetting->value['allow_negative_stock'] ?? true) : true;
 
+        // PRF-003: the counter's profile is a ceiling over the store's own
+        // switch, so a till whose profile forbids selling beyond stock cannot
+        // do it even in a store that allows negative stock.
+        $profile = \App\Http\Middleware\AuthenticateCounterProfile::profile($request);
+        $sellBeyondStock = $profile === null
+            || app(\App\Services\Counter\CounterProfilePolicy::class)->sellBeyondStockAllowed($profile);
+        $allowNegativeStock = $allowNegativeStock && $sellBeyondStock;
+
+        $billingCounter = $this->resolveBillingCounter($request, $storeId, $validated['counter_code'] ?? null);
+
+        // GAP-01 / SPR-002, 006: who sold this bill, answered exactly the way
+        // an offline upload answers it.
+        $salesperson = SalespersonAttribution::resolve(
+            $storeId,
+            $billingCounter->id,
+            $validated['salesperson_id'] ?? null,
+            $validated['salesperson_name'] ?? null
+        );
+
+        // PRF-003/Q9: the profile's threshold answers arrived with the request.
+        // A grant is redeemed inside the transaction that writes the bill, so a
+        // failed save leaves it usable and a saved bill cannot replay it.
+        $requiredApprovals = (array) $request->attributes->get('counter_approvals_required', []);
+        $approvalToken = $validated['approval_token'] ?? null;
+
+        // GAP-02 / PHR-004: a line the owner's schedule list marks restricted is
+        // written only over a registered pharmacist's own PIN. The till's prompt
+        // is a courtesy; this answer is the rule, and it is the same one the
+        // offline upload is measured with.
+        $restrictedItems = RestrictedDrugResolver::forLines((int) $storeId, (array) ($validated['items'] ?? []));
+        $pharmacist = PharmacistGate::require(
+            (int) $storeId,
+            (int) $billingCounter->id,
+            $restrictedItems,
+            $validated['pharmacist_id'] ?? null,
+            $validated['pharmacist_pin'] ?? null
+        );
+
         // 5. Execute Atomic Creation Transaction
         try {
             $result = DB::transaction(function () use (
                 $request,
+                $billingCounter,
                 $storeId,
                 $validated,
                 $externalId,
                 $invoiceDate,
                 $party,
-                $allowNegativeStock
+                $allowNegativeStock,
+                $sellBeyondStock,
+                $salesperson,
+                $requiredApprovals,
+                $approvalToken,
+                $pharmacist,
+                $restrictedItems
             ) {
-                $counterCode = strtoupper($validated['counter_code'] ?? 'C01');
+                // G1-SEC / SEC-05: resolved from the token before the transaction.
+                $counter = $billingCounter;
+                $counterCode = $counter->counter_code;
+                $counterId = $counter->id;
                 $fy = $this->calculateFinancialYear($invoiceDate);
 
-                // Counter lookup
-                $counter = Counter::where('store_id', $storeId)
-                    ->where('counter_code', $counterCode)
-                    ->first();
-                if (!$counter) {
-                    $counter = Counter::firstOrCreate(
-                        ['store_id' => $storeId, 'counter_code' => $counterCode],
-                        ['counter_name' => 'Counter ' . $counterCode, 'is_hub' => false]
-                    );
-                }
-                $counterId = $counter ? $counter->id : 1;
-
-                // Document Numbering
+                // Document Numbering — the counter issues the number at save,
+                // so the number the cashier saw and the number in the book are
+                // one and the same. A temporary marker never becomes a book
+                // number; a number on this counter's own series that it has not
+                // already given out is kept as the number it was shown under.
                 $clientInvoiceNumber = $validated['invoice_number'] ?? null;
-                $isOfflineTemp = !empty($validated['is_offline_temp']) || ($clientInvoiceNumber && str_starts_with($clientInvoiceNumber, 'TEMP-'));
-
-                $finalInvoiceNumber = '';
                 $tempMappedFrom = null;
 
-                if ($isOfflineTemp && $clientInvoiceNumber) {
-                    // Temporary emergency series: map to official next sequence
+                if (!empty($validated['is_offline_temp']) || ($clientInvoiceNumber && str_starts_with($clientInvoiceNumber, 'TEMP-'))) {
                     $tempMappedFrom = $clientInvoiceNumber;
-                    $sequence = CounterSequence::where('counter_id', $counterId ?? 1)
-                        ->where('doc_type', 'invoice')
-                        ->where('financial_year', $fy)
-                        ->lockForUpdate()
-                        ->first();
-
-                    if (!$sequence) {
-                        $prefix = "{$counterCode}-INV";
-                        $seqVal = 1001;
-                        CounterSequence::create([
-                            'store_id' => $storeId,
-                            'counter_id' => $counterId ?? 1,
-                            'doc_type' => 'invoice',
-                            'financial_year' => $fy,
-                            'prefix' => $prefix,
-                            'next_number' => 1002,
-                        ]);
-                        $finalInvoiceNumber = "{$prefix}-{$seqVal}";
-                    } else {
-                        $seqVal = $sequence->next_number;
-                        $sequence->increment('next_number');
-                        $finalInvoiceNumber = "{$sequence->prefix}-{$seqVal}";
-                    }
-                } elseif ($clientInvoiceNumber && !str_starts_with($clientInvoiceNumber, 'TEMP-')) {
-                    // Pre-leased number provided by counter or direct assignment
-                    $finalInvoiceNumber = $clientInvoiceNumber;
-                } else {
-                    // Online Authoritative numbering: Lock sequence row atomically
-                    $sequence = CounterSequence::where('counter_id', $counterId ?? 1)
-                        ->where('doc_type', 'invoice')
-                        ->where('financial_year', $fy)
-                        ->lockForUpdate()
-                        ->first();
-
-                    if (!$sequence) {
-                        $prefix = "{$counterCode}-INV";
-                        $seqVal = 1001;
-                        CounterSequence::create([
-                            'store_id' => $storeId,
-                            'counter_id' => $counterId ?? 1,
-                            'doc_type' => 'invoice',
-                            'financial_year' => $fy,
-                            'prefix' => $prefix,
-                            'next_number' => 1002,
-                        ]);
-                        $finalInvoiceNumber = "{$prefix}-{$seqVal}";
-                    } else {
-                        $seqVal = $sequence->next_number;
-                        $sequence->increment('next_number');
-                        $finalInvoiceNumber = "{$sequence->prefix}-{$seqVal}";
-                    }
+                    $clientInvoiceNumber = null;
                 }
+
+                $numbering = app(\App\Services\CounterSequenceService::class)
+                    ->numberLiveDocument($counter, 'invoice', $clientInvoiceNumber, $fy);
+
+                $finalInvoiceNumber = $numbering['number'];
 
                 // Process Line Items & Deduct Stock Atomically
                 $calculatedSubtotal = 0.0;
@@ -434,6 +479,8 @@ class InvoiceController
                 $processedItems = [];
                 $affectedBatchStockUpdates = [];
                 $hasNegativeStockDeduction = false;
+                // TAX-02: the ceiling is the store's to switch off; it applies unless it says otherwise.
+                $mrpCappingEnforced = MrpCeiling::enforcedFor(Store::find($storeId));
 
                 foreach ($validated['items'] as $lineIndex => $item) {
                     $lineNumber = $lineIndex + 1;
@@ -449,14 +496,14 @@ class InvoiceController
                     }
 
                     if (!$product) {
-                        // Master catalog fallback if product was registered under main store
-                        $product = is_numeric($productId)
-                            ? Product::find($productId)
-                            : Product::where('external_id', $productId)->first();
-                    }
-
-                    if (!$product && !empty($item['product_name'])) {
-                        $product = Product::where('name', $item['product_name'])->first();
+                        // G1-SEC / SEC-04: a product of another store is a refused
+                        // reference, never a "master catalog" fallback.
+                        $foreign = is_numeric($productId)
+                            ? Product::whereKey($productId)->where('store_id', '!=', $storeId)->exists()
+                            : Product::where('external_id', $productId)->where('store_id', '!=', $storeId)->exists();
+                        if ($foreign) {
+                            throw new \DomainException("Line {$lineNumber}: '" . ($item['product_name'] ?? $productId) . "' is not a product of this store.");
+                        }
                     }
 
                     if (!$product) {
@@ -520,11 +567,21 @@ class InvoiceController
                     }
 
                     // Batch Resolution with Row-Level Lock
+                    // G1-SEC / SEC-04: every batch lookup is held to this store and
+                    // this line's product; a batch id from elsewhere is refused.
                     $batch = null;
-                    if (!empty($item['batch_id']) && is_numeric($item['batch_id'])) {
-                        $batch = ProductBatch::where('id', $item['batch_id'])->lockForUpdate()->first();
-                    } elseif (!empty($item['batch_id'])) {
-                        $batch = ProductBatch::where('external_id', $item['batch_id'])->lockForUpdate()->first();
+                    if (!empty($item['batch_id'])) {
+                        $byId = is_numeric($item['batch_id'])
+                            ? ProductBatch::whereKey($item['batch_id'])
+                            : ProductBatch::where('external_id', $item['batch_id']);
+                        $batch = (clone $byId)
+                            ->where('store_id', $storeId)
+                            ->where('product_id', $product->id)
+                            ->lockForUpdate()
+                            ->first();
+                        if (!$batch && $byId->exists()) {
+                            throw new \DomainException("Line {$lineNumber}: batch " . ($item['batch_no'] ?? $item['batch_id']) . " does not belong to '{$product->name}' in this store.");
+                        }
                     }
 
                     if (!$batch && !empty($item['batch_no'])) {
@@ -533,21 +590,14 @@ class InvoiceController
                             ->where('batch_no', $item['batch_no'])
                             ->lockForUpdate()
                             ->first();
-
-                        if (!$batch) {
-                            $batch = ProductBatch::where('product_id', $product->id)
-                                ->where('batch_no', $item['batch_no'])
-                                ->lockForUpdate()
-                                ->first();
-                        }
                     }
 
                     if (!$batch) {
-                        // Fallback to first batch or master batch
+                        // Fallback to this store's first batch of the product.
                         $batch = ProductBatch::where('store_id', $storeId)
                             ->where('product_id', $product->id)
                             ->lockForUpdate()
-                            ->first() ?: ProductBatch::where('product_id', $product->id)->lockForUpdate()->first();
+                            ->first();
                     }
 
                     if (!$batch) {
@@ -562,6 +612,24 @@ class InvoiceController
                         ]);
                     }
 
+                    // G11-TAX / TAX-02: nothing may be charged above the printed MRP. The
+                    // masters set the ceiling — the batch's own, the product's when the
+                    // batch carries none — so a rate typed over it is refused before any
+                    // stock moves. A payload's `mrp` is never the limit.
+                    $mrpCap = MrpCeiling::rateCap($product, $batch, $item, $unitsPerPack);
+                    if ($mrpCappingEnforced && MrpCeiling::isBreach((float) $item['unit_price'], $mrpCap)) {
+                        throw new BusinessRuleException(
+                            'MRP_EXCEEDED',
+                            "'{$product->name}' is billed at Rs {$item['unit_price']} against a ceiling of Rs " . number_format((float) $mrpCap, 2) . '.',
+                            'mrp_ceiling',
+                            $lineNumber,
+                            'unit_price',
+                            strtolower((string) ($item['rate_basis'] ?? '')) === 'loose_rate'
+                                ? 'A loose rate cannot pass the pack MRP divided by the units in the pack.'
+                                : 'Reduce the rate to the MRP, or correct the MRP on the batch.'
+                        );
+                    }
+
                     // Check Stock Availability
                     $currentBatchStock = (float)$batch->stock_qty;
                     if ($currentBatchStock < $totalBaseUnits && !$allowNegativeStock) {
@@ -571,7 +639,9 @@ class InvoiceController
                             'stock_available',
                             $lineNumber,
                             'batch_id',
-                            "Available: {$currentBatchStock}, requested: {$totalBaseUnits}. Reduce the quantity or pick another batch."
+                            $sellBeyondStock
+                                ? "Available: {$currentBatchStock}, requested: {$totalBaseUnits}. Reduce the quantity or pick another batch."
+                                : "Available: {$currentBatchStock}, requested: {$totalBaseUnits}. This counter's profile does not allow selling beyond stock."
                         );
                     }
 
@@ -623,6 +693,10 @@ class InvoiceController
                 $taxPolicy = app(\App\Services\Tax\StoreTaxPolicy::class)->forStore($storeId);
                 $storeGstType = $taxPolicy['gst_type'];
 
+                // The buyer, not the till's header, decides where the sale is supplied.
+                $placeOfSupply = app(\App\Services\Tax\PlaceOfSupply::class)
+                    ->forDocument($storeModel, $party, $party?->gstin ?? ($validated['customer_gstin'] ?? null));
+
                 $effectiveGstType = ($taxPolicy['allow_override'] && !empty($validated['gst_type'])) ? $validated['gst_type'] : $storeGstType;
                 $effectiveTaxMode = ($taxPolicy['allow_override'] && !empty($validated['tax_mode'])) ? $validated['tax_mode'] : $taxPolicy['tax_mode'];
                 $isComposition = in_array($effectiveGstType, ['composition', 'no_tax', 'unregistered'], true);
@@ -653,7 +727,7 @@ class InvoiceController
                 $taxDoc = TaxEngine::calculateDocumentTaxes([
                     'store_state' => $storeStateCode,
                     'customer_gstin' => $party ? $party->gstin : ($validated['customer_gstin'] ?? null),
-                    'place_of_supply' => $validated['place_of_supply'] ?? ($party ? $party->state_code : $storeStateCode),
+                    'place_of_supply' => $placeOfSupply['code'],
                     'default_tax_mode' => $effectiveTaxMode,
                     'gst_type' => $effectiveGstType,
                     'is_composition' => $isComposition,
@@ -673,110 +747,26 @@ class InvoiceController
                 $roundOff = $taxDoc['round_off'];
                 $grandTotal = $taxDoc['grand_total'];
 
-                // Safety net: server-level check rejecting save if totals do not equal sum of lines
-                if (isset($validated['grand_total']) && $validated['grand_total'] !== null) {
-                    $clientGrandTotal = (float)$validated['grand_total'];
-                    if (abs($clientGrandTotal - $grandTotal) > 0.05) {
-                        throw new \Exception("Invoice integrity check failed: Request grand total ({$clientGrandTotal}) does not match line item total ({$grandTotal})");
-                    }
-                }
+                // Resolve Payment Lines and Credit. The settlement service owns
+                // the tender/applied split, the change, the walk-in rule and the
+                // store's reference policy — the invoice must not recompute it.
+                $settlement = app(\App\Services\Payments\TenderSettlementService::class)->settle(
+                    (float) $grandTotal,
+                    $validated['payments'] ?? null,
+                    $validated['paid_amount'] ?? null,
+                    $validated['payment_mode'] ?? null,
+                    $party,
+                    (int) $storeId
+                );
 
-                // Resolve Payment Lines and Credit
-                $rawPayments = $validated['payments'] ?? null;
-                $paymentLines = [];
-                $creditPortion = 0.0;
-                $cashPortion = 0.0;
-                $digitalPortion = 0.0;
-                $giftCardPortion = 0.0;
-                $totalPaid = 0.0;
-
-                if (!empty($rawPayments) && is_array($rawPayments)) {
-                    foreach ($rawPayments as $p) {
-                        $pMode = ucfirst(trim($p['mode'] ?? 'Cash'));
-                        $pAmt = (float)($p['amount'] ?? 0);
-                        if ($pAmt <= 0) continue;
-
-                        $upperMode = strtoupper($pMode);
-                        $isGiftCard = in_array($upperMode, ['GIFT CARD', 'GIFT VOUCHER', 'GIFT_VOUCHER', 'GIFT_CARD', 'GIFTCARD'], true);
-                        $extraFields = is_array($p['extra_fields'] ?? null) ? $p['extra_fields'] : [];
-                        if ($isGiftCard && empty($extraFields['gift_card_code'])) {
-                            $candidateCode = $extraFields['card_code'] ?? $p['reference_no'] ?? null;
-                            if (!empty($candidateCode)) {
-                                $extraFields['gift_card_code'] = (string) $candidateCode;
-                            }
-                        }
-
-                        $paymentLines[] = [
-                            'mode' => $pMode,
-                            'amount' => $pAmt,
-                            'reference_no' => $p['reference_no'] ?? null,
-                            'status' => $p['status'] ?? 'received',
-                            'extra_fields' => $extraFields ?: null,
-                            'notes' => $p['notes'] ?? null,
-                            'is_gift_card' => $isGiftCard,
-                        ];
-
-                        if ($upperMode === 'CREDIT' || $upperMode === 'UDHARI') {
-                            $creditPortion += $pAmt;
-                        } else {
-                            $totalPaid += $pAmt;
-                            if ($upperMode === 'CASH') {
-                                $cashPortion += $pAmt;
-                            } elseif ($isGiftCard) {
-                                $giftCardPortion += $pAmt;
-                            } else {
-                                $digitalPortion += $pAmt;
-                            }
-                        }
-                    }
-                } else {
-                    // Legacy single mode fallback
-                    $legacyMode = ucfirst(trim($validated['payment_mode'] ?? 'Cash'));
-                    $legacyPaid = isset($validated['paid_amount']) ? (float)$validated['paid_amount'] : $grandTotal;
-                    $paymentLines[] = [
-                        'mode' => $legacyMode,
-                        'amount' => $legacyPaid,
-                        'reference_no' => null,
-                        'status' => 'received',
-                        'extra_fields' => null,
-                        'notes' => null,
-                    ];
-                    if (strtoupper($legacyMode) === 'CREDIT') {
-                        $creditPortion = $grandTotal;
-                    } else {
-                        $totalPaid = $legacyPaid;
-                        if (strtoupper($legacyMode) === 'CASH') {
-                            $cashPortion = $legacyPaid;
-                        } else {
-                            $digitalPortion = $legacyPaid;
-                        }
-                    }
-                }
-
-                // Credit (Udhari) Rules Enforcement:
-                if ($creditPortion > 0.001) {
-                    if (!$party || strtolower($party->name) === 'walk-in customer') {
-                        throw new \DomainException("Credit sale is not allowed for Walk-in Customers. Please select or create a registered customer.");
-                    }
-                    if ((float)$party->credit_limit > 0) {
-                        $newBalance = (float)$party->current_balance + $creditPortion;
-                        if ($newBalance > (float)$party->credit_limit) {
-                            throw new \DomainException("Customer '{$party->name}' credit limit of ₹{$party->credit_limit} exceeded (New balance would be ₹{$newBalance}).");
-                        }
-                    }
-                }
-
-                // Determine primary payment mode & status
-                $primaryPaymentMode = count($paymentLines) > 1
-                    ? 'Split'
-                    : ($paymentLines[0]['mode'] ?? ($validated['payment_mode'] ?? 'Cash'));
-
-                $paymentStatus = 'paid';
-                if ($creditPortion >= ($grandTotal - 0.01)) {
-                    $paymentStatus = 'unpaid';
-                } elseif ($creditPortion > 0.001 || $totalPaid < ($grandTotal - 0.01)) {
-                    $paymentStatus = 'partially_paid';
-                }
+                $paymentLines = $settlement['lines'];
+                $creditPortion = $settlement['credit'];
+                $cashPortion = $settlement['cash'];
+                $digitalPortion = $settlement['digital'];
+                $giftCardPortion = $settlement['gift_card'];
+                $totalPaid = $settlement['paid'];
+                $primaryPaymentMode = $settlement['primary_mode'];
+                $paymentStatus = $settlement['payment_status'];
 
                 // Create Invoice Record
                 $invoice = Invoice::create([
@@ -784,6 +774,16 @@ class InvoiceController
                     'counter_id' => $counterId,
                     'counter_code' => $counterCode,
                     'location_name' => $validated['location_name'] ?? ($counter ? $counter->location_name : 'Shop Floor'),
+                    // SPR-010: the id is the person; the name is what they were
+                    // called the day this bill was printed.
+                    'salesperson_id' => $salesperson['salesperson_id'] ?? null,
+                    'salesperson_name' => $salesperson['salesperson_name'] ?? null,
+                    // PHR-005: the registration as it read at the moment the
+                    // pharmacist vouched, not a live reference to their row.
+                    'pharmacist_id' => $pharmacist['pharmacist_id'] ?? null,
+                    'pharmacist_name' => $pharmacist['pharmacist_name'] ?? null,
+                    'pharmacist_reg_no' => $pharmacist['pharmacist_reg_no'] ?? null,
+                    'pharmacist_confirmed_at' => $pharmacist['pharmacist_confirmed_at'] ?? null,
                     'module_key' => 'invoice',
                     'invoice_number' => $finalInvoiceNumber,
                     'invoice_date' => $invoiceDate,
@@ -792,7 +792,7 @@ class InvoiceController
                     'customer_name' => $party ? $party->name : ($validated['customer_name'] ?? 'Walk-in Customer'),
                     'customer_gstin' => $party ? $party->gstin : ($validated['customer_gstin'] ?? null),
                     'customer_phone' => !empty($validated['customer_phone']) ? $validated['customer_phone'] : ($party ? $party->phone : null),
-                    'place_of_supply' => $validated['place_of_supply'] ?? ($party ? $party->state_code : '32-Kerala'),
+                    'place_of_supply' => $placeOfSupply['label'],
                     'subtotal' => $calculatedSubtotal,
                     'taxable_subtotal' => $taxableSubtotal,
                     'discount_total' => $totalDiscount,
@@ -815,6 +815,34 @@ class InvoiceController
                     'synced_at' => now(),
                 ]);
 
+                // APR-003..010: settle what the profile deferred. A ceiling was
+                // already refused by the gate; this redeems the grant for the
+                // thresholds, exactly once, or rolls the bill back.
+                app(\App\Services\Counter\ApprovalService::class)->settle(
+                    $requiredApprovals,
+                    $approvalToken,
+                    (int) $storeId,
+                    $counterId !== null ? (int) $counterId : null,
+                    \App\Services\Counter\ApprovalService::DOCUMENT_INVOICE,
+                    $externalId,
+                    (int) $invoice->id
+                );
+
+                // PHR-004, Q1: the confirmation is written with the document it
+                // released, so a save that never happened leaves no pharmacist
+                // standing behind a bill.
+                if ($pharmacist !== null) {
+                    PharmacistGate::record(
+                        (int) $storeId,
+                        $counterId !== null ? (int) $counterId : null,
+                        PharmacistGate::DOCUMENT_SALE,
+                        (string) $invoice->id,
+                        (string) $invoice->invoice_number,
+                        $pharmacist,
+                        $restrictedItems
+                    );
+                }
+
                 // Insert Items & Stock Ledger Entries
                 foreach ($taxDoc['lines'] as $cIdx => $cItem) {
                     $pItem = $processedItems[$cIdx];
@@ -831,6 +859,7 @@ class InvoiceController
                         'units_per_pack' => $cItem['units_per_pack'],
                         'unit_price' => $cItem['unit_price'],
                         'mrp' => $pItem['mrp'],
+                        'rate_basis' => $pItem['rate_basis'],
                         'discount_percent' => $pItem['discount_percent'],
                         'discount_amount' => $cItem['line_discount'],
                         'allocated_discount' => $cItem['allocated_bill_discount'],
@@ -889,6 +918,8 @@ class InvoiceController
                         'counter_code' => $counterCode,
                         'payment_mode' => $pLine['mode'],
                         'amount' => $pLine['amount'],
+                        'tendered_amount' => $pLine['tendered_amount'],
+                        'change_amount' => $pLine['change_amount'],
                         'reference_no' => $pLine['reference_no'],
                         'status' => $pLine['status'],
                         'extra_fields' => $pLine['extra_fields'],
@@ -901,6 +932,12 @@ class InvoiceController
                 if ($creditPortion > 0 && $party) {
                     $party->increment('current_balance', $creditPortion);
                 }
+
+                // AUD-02: a sale that leaves a shelf negative or gives away most of the
+                // line's value is the owner's business whether or not the drawer is open.
+                $alerts = app(OperationalAlertService::class);
+                $alerts->negativeStockOnInvoice($invoice, $storeId);
+                $alerts->largeDiscountOnInvoice($invoice, $storeId);
 
                 // Update active Counter Shift if open: physical cash vs digital sales
                 if ($counterId) {
@@ -1014,12 +1051,9 @@ class InvoiceController
         }
     }
 
-    public function show(string $id): JsonResponse
+    public function show(Request $request, string $id): JsonResponse
     {
-        $invoice = Invoice::with(['items', 'payments', 'customer'])
-            ->where('id', $id)
-            ->orWhere('invoice_number', $id)
-            ->firstOrFail();
+        $invoice = $this->findStoreInvoice($request, $id, ['items', 'payments', 'customer']);
         app(ComplianceService::class)->decorate($invoice);
 
         return response()->json($invoice);
@@ -1033,7 +1067,9 @@ class InvoiceController
      */
     public function cancel(Request $request, string $id): JsonResponse
     {
-        $invoice = Invoice::with('items')->findOrFail($id);
+        $invoice = Invoice::with('items')
+            ->where('store_id', $this->resolveStoreId($request))
+            ->findOrFail($id);
 
         if ($invoice->status === 'cancelled') {
             return response()->json([
@@ -1043,16 +1079,50 @@ class InvoiceController
             ]);
         }
 
-        $reason = $request->input('reason', 'Cancelled by operator');
+        $validated = $request->validate([
+            'reason' => 'nullable|string|max:1000',
+            'approval_token' => 'nullable|string|max:191',
+            'pharmacist_id' => 'nullable',
+            'pharmacist_pin' => 'nullable|string|max:64',
+        ]);
 
-        app(\App\Services\DayClose\StoreDayCloseService::class)
-            ->assertDayOpen((int) $invoice->store_id, $invoice->invoice_date?->toDateString());
+        $reason = $validated['reason'] ?? 'Cancelled by operator';
 
+        // PHR-004: taking a restricted bill off the book takes the pharmacist's
+        // registration with it. The bill keeps the stamp it was sold under —
+        // only the confirmation of the void is written here.
+        $restrictedItems = RestrictedDrugResolver::forInvoice($invoice);
+        $pharmacist = PharmacistGate::require(
+            (int) $invoice->store_id,
+            $invoice->counter_id !== null ? (int) $invoice->counter_id : null,
+            $restrictedItems,
+            $validated['pharmacist_id'] ?? null,
+            $validated['pharmacist_pin'] ?? null,
+            'cancellation',
+            $invoice
+        );
+
+        // G12: the day guard and the approver's grant are both enforced inside the
+        // cancellation service so the offline sync path cannot bypass them.
         app(\App\Services\Sales\InvoiceCancellationService::class)->cancel(
             $invoice,
             $reason,
-            $request->user()?->id
+            $request->user()?->id,
+            $validated['approval_token'] ?? null
         );
+
+        if ($pharmacist !== null) {
+            PharmacistGate::record(
+                (int) $invoice->store_id,
+                $invoice->counter_id !== null ? (int) $invoice->counter_id : null,
+                PharmacistGate::DOCUMENT_CANCEL,
+                (string) $invoice->id,
+                (string) $invoice->invoice_number,
+                $pharmacist,
+                $restrictedItems,
+                $reason
+            );
+        }
 
         return response()->json([
             'success' => true,

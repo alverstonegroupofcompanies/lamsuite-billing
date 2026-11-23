@@ -3,16 +3,21 @@
 namespace App\Http\Controllers\Api;
 
 use App\Models\CompanySetting;
+use App\Models\AuditLog;
+use App\Models\Party;
+use App\Models\Product;
 use App\Models\Purchase;
 use App\Models\PurchaseItem;
-use App\Models\Product;
-use App\Models\ProductBatch;
 use App\Models\Store;
+use App\Services\Purchase\PurchaseChargeService;
+use App\Services\Purchase\PurchasePostingService;
 use App\Services\Tax\TaxEngine;
 use App\Services\Webhook\WebhookOutboxService;
+use App\Support\RequestTenant;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
 
 class PurchaseController
 {
@@ -35,7 +40,9 @@ class PurchaseController
 
     public function store(Request $request): JsonResponse
     {
-        $storeId = $request->input('store_id') ?? $request->header('X-Store-Id', 1);
+        // The bill is written to the store the caller is authorised for, never to whichever
+        // store id the body happens to carry (G1-SEC).
+        $storeId = RequestTenant::requireStoreId($request);
         $store = Store::find($storeId);
         $batchRequiredSetting = CompanySetting::where('store_id', $storeId)
             ->where('key', 'batch_required')
@@ -54,6 +61,7 @@ class PurchaseController
             'subtotal' => 'nullable|numeric',
             'tax_total' => 'nullable|numeric',
             'freight_charges' => 'nullable|numeric|min:0',
+            'place_of_supply' => 'nullable|string|max:20',
             'bill_discount_type' => 'nullable|in:percent,amount',
             'bill_discount' => 'nullable|numeric|min:0',
             'round_off' => 'nullable|numeric',
@@ -61,6 +69,23 @@ class PurchaseController
             'is_interstate' => 'nullable|boolean',
             'is_rcm' => 'nullable|boolean',
             'itc_eligibility' => 'nullable|string',
+            'charges' => 'nullable|array',
+            'charges.*.external_id' => 'nullable|string|max:64',
+            'charges.*.seq' => 'nullable|integer|min:1',
+            'charges.*.head_code' => 'required|string|max:40',
+            'charges.*.head_name' => 'nullable|string|max:100',
+            'charges.*.note' => 'nullable|string|max:1000',
+            'charges.*.amount' => 'required|numeric',
+            'charges.*.gst_percent' => 'required|numeric|min:0|max:100',
+            'charges.*.cess_percent' => 'nullable|numeric|min:0|max:100',
+            'charges.*.treatment' => 'nullable|in:add_to_cost,expense',
+            'charges.*.spread_method' => 'nullable|in:value,quantity,weight',
+            'charges.*.itc_eligibility' => 'nullable|in:eligible,ineligible,blocked,partial',
+            'charges.*.is_rcm' => 'nullable|boolean',
+            'charges.*.paid_separately' => 'nullable|boolean',
+            'charges.*.paid_to_label' => 'nullable|string|max:120',
+            'charges.*.place_of_supply' => 'nullable|string|max:10',
+            'charges.*.sac_code' => 'nullable|string|max:20',
             'lines' => 'required|array|min:1',
             'lines.*.product_id' => 'nullable',
             'lines.*.product_name' => 'required|string',
@@ -69,6 +94,7 @@ class PurchaseController
             'lines.*.mfg_date' => 'nullable|date',
             'lines.*.expiry_date' => $batchRequired ? 'required|string' : 'nullable|string',
             'lines.*.pack_qty' => 'nullable|numeric|min:0',
+            'lines.*.gross_weight_kg' => 'nullable|numeric|min:0',
             'lines.*.loose_qty' => 'nullable|numeric|min:0',
             'lines.*.free_qty' => 'nullable|numeric|min:0',
             'lines.*.free_loose_qty' => 'nullable|numeric|min:0',
@@ -88,58 +114,63 @@ class PurchaseController
             'lines.*.total_amount' => 'nullable|numeric',
         ]);
 
+        $this->assertBelongsToStore((int) $storeId, $validated);
+
         $storeStateCode = $store ? ($store->state_code ?: '32') : '32';
+        $chargeService = app(PurchaseChargeService::class);
+        $posting = app(PurchasePostingService::class);
 
-        $purchase = DB::transaction(function () use ($validated, $storeId, $storeStateCode) {
-            $engineLines = [];
-            foreach ($validated['lines'] as $idx => $line) {
-                $packQty = (float)($line['pack_qty'] ?? $line['qty'] ?? 1);
-                $looseQty = (float)($line['loose_qty'] ?? 0);
-                $freeQty = (float)($line['free_qty'] ?? 0);
-                $freeLooseQty = (float)($line['free_loose_qty'] ?? 0);
-                $upp = (int)($line['units_per_pack'] ?? 1);
-                $discountType = $line['discount_type'] ?? 'percent';
+        $purchase = DB::transaction(function () use ($validated, $storeId, $storeStateCode, $chargeService, $posting, $request) {
+            $engineLines = $chargeService->engineLines($validated['lines']);
 
-                $engineLines[] = [
-                    'line_id' => (string)$idx,
-                    'product_id' => (string)($line['product_id'] ?? ''),
-                    'product_name' => $line['product_name'],
-                    'hsn_code' => $line['hsn_code'] ?? null,
-                    'qty' => $packQty,
-                    'loose_qty' => $looseQty,
-                    'free_qty' => $freeQty,
-                    'free_loose_qty' => $freeLooseQty,
-                    'units_per_pack' => $upp,
-                    'unit_price' => (float)$line['purchase_rate'],
-                    'mrp' => (float)($line['mrp'] ?? 0),
-                    'rate_basis' => 'ptr', // Purchase rate is statutory tax-exclusive
-                    'discount_percent' => $discountType === 'percent' ? (float)($line['discount_percent'] ?? 0) : 0,
-                    'discount_amount' => $discountType === 'amount' ? (float)($line['discount_amount'] ?? 0) : 0,
-                    'gst_percent' => (float)($line['gst_percent'] ?? 0),
-                    'cess_percent' => (float)($line['cess_percent'] ?? 0),
-                    'is_tax_inclusive' => false,
-                ];
-            }
+            $freightCharges = round((float)($validated['freight_charges'] ?? 0), 2);
+
+            // A charge is only as good as the head it belongs to, and a head belongs to exactly
+            // one store (R12) — so this is checked before a single row of the bill is written.
+            $documentPos = $validated['place_of_supply'] ?? null;
+            $engineCharges = !empty($validated['charges'])
+                ? $chargeService->resolveForStore((int)$storeId, $validated['charges'], $documentPos)
+                // Legacy freight is a 0%-GST add-to-cost charge, so the engine — not this
+                // controller — decides round-off and the per-line landed cost (PUR-017).
+                : $chargeService->legacyFreight((int)$storeId, $freightCharges, $documentPos);
+
+            $manualRoundOff = isset($validated['round_off'])
+                ? round((float)$validated['round_off'], 2)
+                : null;
 
             $calcResult = TaxEngine::calculateDocumentTaxes([
                 'store_state' => $storeStateCode,
                 'customer_gstin' => $validated['supplier_gstin'] ?? null,
-                'place_of_supply' => !empty($validated['is_interstate']) ? 'XX' : $storeStateCode,
+                // 'XX' was never a state code. An inter-state bill is decided by the supplier
+                // GSTIN first, then by the 2-digit place of supply sent with the bill.
+                'place_of_supply' => $validated['place_of_supply'] ?? null,
                 'default_tax_mode' => 'exclusive',
                 'lines' => $engineLines,
                 'bill_discount' => [
                     'type' => $validated['bill_discount_type'] ?? 'amount',
                     'value' => (float)($validated['bill_discount'] ?? 0),
                 ],
-                'auto_round_off' => false,
+                'charges' => $engineCharges,
+                'separately_paid_in_payable' => $chargeService->separatelyPaidInPayable((int)$storeId),
+                'auto_round_off' => $manualRoundOff === null,
+                'manual_round_off' => $manualRoundOff,
             ]);
 
-            $freightCharges = round((float)($validated['freight_charges'] ?? 0), 2);
-            $netBeforeRound = round((float)$calcResult['net_before_round'] + $freightCharges, 2);
-            $roundOff = isset($validated['round_off'])
-                ? round((float)$validated['round_off'], 2)
-                : round(round($netBeforeRound) - $netBeforeRound, 2);
-            $grandTotal = max(0, round($netBeforeRound + $roundOff, 2));
+            $chargeService->assertStaysPayable($calcResult);
+
+            $netBeforeRound = (float)$calcResult['net_before_round'];
+            $roundOff = (float)$calcResult['round_off'];
+            $grandTotal = (float)$calcResult['grand_total'];
+
+            // One supplier cannot file the same bill number twice. Checked before any row is
+            // written, so a duplicate leaves the store untouched (PUR-06).
+            $posting->assertUniqueBill(
+                (int) $storeId,
+                'purchase',
+                isset($validated['supplier_id']) ? (int) $validated['supplier_id'] : null,
+                $validated['supplier_name'],
+                $validated['invoice_number'],
+            );
 
             $purchase = Purchase::create([
                 'store_id' => $storeId,
@@ -147,6 +178,7 @@ class PurchaseController
                 'supplier_name' => $validated['supplier_name'],
                 'supplier_gstin' => $validated['supplier_gstin'] ?? null,
                 'invoice_number' => $validated['invoice_number'],
+                'supplier_invoice_no' => $validated['invoice_number'],
                 'invoice_date' => $validated['invoice_date'],
                 'subtotal' => $calcResult['gross_subtotal'],
                 'tax_total' => $calcResult['total_tax'],
@@ -161,15 +193,18 @@ class PurchaseController
                 'bill_discount_type' => $validated['bill_discount_type'] ?? 'amount',
                 // Persist the operator-entered value (percent or amount) so edit screens can round-trip it.
                 'bill_discount' => (float)($validated['bill_discount'] ?? 0),
+                // PUR-009: remember whose state decided intra vs inter for this bill's charges.
+                'place_of_supply' => $calcResult['place_of_supply'],
                 'round_off' => $roundOff,
                 'grand_total' => $grandTotal,
                 'paid_amount' => 0,
                 'status' => 'received',
             ]);
 
+            $itemIdsByLine = [];
             foreach ($calcResult['lines'] as $idx => $cLine) {
                 $rawLine = $validated['lines'][$idx];
-                PurchaseItem::create([
+                $item = PurchaseItem::create([
                     'purchase_id' => $purchase->id,
                     'product_id' => $rawLine['product_id'] ?? null,
                     'product_name' => $rawLine['product_name'],
@@ -180,10 +215,13 @@ class PurchaseController
                     'selling_rate' => $rawLine['selling_rate'] ?? null,
                     'pack_qty' => $cLine['qty'],
                     'loose_qty' => $cLine['loose_qty'],
+                    'gross_weight_kg' => $rawLine['gross_weight_kg'] ?? null,
                     'free_qty' => $cLine['free_qty'],
                     'free_loose_qty' => $rawLine['free_loose_qty'] ?? 0,
                     'units_per_pack' => $cLine['units_per_pack'],
-                    'qty' => $cLine['billed_units'],
+                    // qty is billed PACKS everywhere else in the book; storing units here made the
+                    // server stock five times the shelf for a five-a-pack line (PUR-05).
+                    'qty' => $cLine['qty'],
                     'purchase_rate' => $cLine['unit_price'],
                     'ptr' => $rawLine['ptr'] ?? $cLine['unit_price'],
                     'pts' => $rawLine['pts'] ?? null,
@@ -202,7 +240,44 @@ class PurchaseController
                     'tax_amount' => $cLine['total_tax'],
                     'total_amount' => $cLine['total_amount'],
                 ]);
+
+                $itemIdsByLine[(string) ($cLine['line_id'] ?? $idx)] = $item->id;
             }
+
+            // A bill entered on the server is the same debt as one pushed by a till: the shelf,
+            // the stock ledger and the supplier's balance all move through the one posting path.
+            // Stock comes first so the batch exists when the charge spread writes landed cost.
+            $posting->postInward(
+                $purchase,
+                [],
+                PurchaseItem::where('purchase_id', $purchase->id)->get(),
+                0.0,
+                null,
+                null,
+                $request->user()?->id
+            );
+
+            // Money that is not goods still has to be stored: charge rows, their paisa-exact
+            // spread across these item lines, the landed cost, and any expense register entry.
+            $chargeService->post($purchase, $engineCharges, $engineLines, $calcResult, $itemIdsByLine, $request->user()?->id);
+
+            // The bill's identity in the book, for the unique index and the supplier ledger.
+            $posting->stampBillKey($purchase);
+
+            AuditLog::log(
+                'purchase_posted',
+                'Purchase',
+                (string) $purchase->id,
+                null,
+                [
+                    'status' => $purchase->status,
+                    'grand_total' => (float) $purchase->grand_total,
+                    'document_number' => $purchase->document_number,
+                    'supplier_invoice_no' => $purchase->supplier_invoice_no,
+                ],
+                (int) $storeId,
+                $request->user()?->id
+            );
 
             return $purchase;
         });
@@ -224,13 +299,46 @@ class PurchaseController
 
         return response()->json([
             'success' => true,
-            'purchase' => $purchase->load('items'),
+            'purchase' => $purchase->load(['items', 'charges.allocations']),
         ], 201);
+    }
+
+    /**
+     * A bill posts stock onto its products and a payable onto its supplier, so both must be
+     * this store's own. A foreign id is refused by name before anything is written, rather
+     * than reaching the store-scope trigger as a 500 or crediting another branch's party.
+     */
+    private function assertBelongsToStore(int $storeId, array $validated): void
+    {
+        $errors = [];
+
+        if (!empty($validated['supplier_id'])
+            && !Party::where('store_id', $storeId)->whereKey((int) $validated['supplier_id'])->exists()) {
+            $errors['supplier_id'] = ['This supplier does not belong to this store.'];
+        }
+
+        foreach ($validated['lines'] as $idx => $line) {
+            $productId = $line['product_id'] ?? null;
+            if ($productId === null || $productId === '') {
+                continue;
+            }
+
+            if (!is_numeric($productId)
+                || !Product::where('store_id', $storeId)->whereKey((int) $productId)->exists()) {
+                $errors["lines.{$idx}.product_id"] = [
+                    'Product "' . ($line['product_name'] ?? $productId) . '" does not belong to this store.',
+                ];
+            }
+        }
+
+        if ($errors !== []) {
+            throw ValidationException::withMessages($errors);
+        }
     }
 
     public function show(string $id): JsonResponse
     {
-        $purchase = Purchase::with('items')->findOrFail($id);
+        $purchase = Purchase::with(['items', 'charges.allocations'])->findOrFail($id);
         return response()->json(['data' => $purchase]);
     }
 }

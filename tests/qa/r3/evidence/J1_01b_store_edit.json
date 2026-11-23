@@ -1,0 +1,91 @@
+{
+  "steps": [
+    {
+      "f": {
+        "id": 4,
+        "name": "QA Pharma Kochi",
+        "code": "QA-PH",
+        "st": "32"
+      },
+      "got": {
+        "opened": "ok",
+        "code": "QA-PH",
+        "st": "32"
+      },
+      "calls": [
+        {
+          "m": "OPTIONS",
+          "u": "http://127.0.0.1:8000/api/admin/stores/4",
+          "st": 204,
+          "req": null,
+          "res": "<unreadable>"
+        },
+        {
+          "m": "PUT",
+          "u": "http://127.0.0.1:8000/api/admin/stores/4",
+          "st": 200,
+          "req": "{\"id\":4,\"name\":\"QA Pharma Kochi\",\"code\":\"QA-PH\",\"phone\":null,\"email\":null,\"address\":\"QA Lane 1, Kochi 682001\",\"state_code\":\"32\",\"gstin\":\"32ABCDE1234F1Z5\",\"drug_license_numbers\":null,\"fssai_no\":null,\"tax_mode\":\"inclusive\",\"invoice_prefix\":\"INV\",\"is_active\":true,\"license_plan\":\"Professional Store\",\"license_expires_at\":null,\"enabled_menu_items\":[\"pos\",\"bills\",\"purchases\",\"stock\",\"reports\",\"masters\",\"settings\"],\"feature_flags\":null,\"version\":3,\"created_at\":\"2026-11-21T15:20:06.000000Z\",\"updated_at\":\"2026-11-21T15:21:56.000000Z\",\"wipe_on_revocation\":false,\"store_type\":\"pharmacy\",\"gst_type\":\"regular\",\"timezone\":\"Asia/Kolkata\",\"allow_negative_stock\":false}",
+          "res": "{\"id\":4,\"name\":\"QA Pharma Kochi\",\"code\":\"QA-PH\",\"phone\":null,\"email\":null,\"address\":\"QA Lane 1, Kochi 682001\",\"state_code\":\"32\",\"gstin\":\"32ABCDE1234F1Z5\",\"drug_license_numbers\":null,\"fssai_no\":null,\"tax_mode\":\"inclusive\",\"invoice_prefix\":\"INV\",\"is_active\":true,\"license_plan\":\"Professional Store\",\"license_expires_at\":null,\"enabled_menu_items\":[\"pos\",\"bills\",\"purchases\",\"stock\",\"reports\",\"masters\",\""
+        }
+      ],
+      "row": [
+        {
+          "id": 4,
+          "code": "QA-PH",
+          "state_code": "32",
+          "gstin": "32ABCDE1234F1Z5",
+          "store_type": "pharmacy",
+          "tax_mode": "inclusive",
+          "version": 4
+        }
+      ]
+    },
+    {
+      "f": {
+        "id": 5,
+        "name": "QA Glow Cosmetics",
+        "code": "QA-CS",
+        "st": "29"
+      },
+      "got": {
+        "opened": "ok",
+        "code": "QA-CS",
+        "st": "29"
+      },
+      "calls": [
+        {
+          "m": "OPTIONS",
+          "u": "http://127.0.0.1:8000/api/admin/stores/5",
+          "st": 204,
+          "req": null,
+          "res": "<unreadable>"
+        },
+        {
+          "m": "PUT",
+          "u": "http://127.0.0.1:8000/api/admin/stores/5",
+          "st": 200,
+          "req": "{\"id\":5,\"name\":\"QA Glow Cosmetics\",\"code\":\"QA-CS\",\"phone\":null,\"email\":null,\"address\":\"QA Road 2, Bengaluru 560001\",\"state_code\":\"29\",\"gstin\":\"29ABCDE1234F1Z5\",\"drug_license_numbers\":null,\"fssai_no\":null,\"tax_mode\":\"exclusive\",\"invoice_prefix\":\"INV\",\"is_active\":true,\"license_plan\":\"Professional Store\",\"license_expires_at\":null,\"enabled_menu_items\":[\"pos\",\"bills\",\"purchases\",\"stock\",\"reports\",\"masters\",\"settings\"],\"feature_flags\":null,\"version\":3,\"created_at\":\"2026-11-21T15:20:15.000000Z\",\"updated_at\":\"2026-11-21T15:22:03.000000Z\",\"wipe_on_revocation\":false,\"store_type\":\"cosmetics\",\"gst_type\":\"regular\",\"timezone\":\"Asia/Kolkata\",\"allow_negative_stock\":false}",
+          "res": "{\"id\":5,\"name\":\"QA Glow Cosmetics\",\"code\":\"QA-CS\",\"phone\":null,\"email\":null,\"address\":\"QA Road 2, Bengaluru 560001\",\"state_code\":\"29\",\"gstin\":\"29ABCDE1234F1Z5\",\"drug_license_numbers\":null,\"fssai_no\":null,\"tax_mode\":\"exclusive\",\"invoice_prefix\":\"INV\",\"is_active\":true,\"license_plan\":\"Professional Store\",\"license_expires_at\":null,\"enabled_menu_items\":[\"pos\",\"bills\",\"purchases\",\"stock\",\"reports\",\"mast"
+        }
+      ],
+      "row": [
+        {
+          "id": 5,
+          "code": "QA-CS",
+          "state_code": "29",
+          "gstin": "29ABCDE1234F1Z5",
+          "store_type": "cosmetics",
+          "tax_mode": "exclusive",
+          "version": 4
+        }
+      ]
+    }
+  ],
+  "rowButtons": [
+    [
+      "Edit store parameters",
+      "Disable Store (Triggers store disabled screen on POS)",
+      "Remote Reset (Granular data purge with module selection)"
+    ]
+  ]
+}

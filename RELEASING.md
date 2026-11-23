@@ -120,6 +120,7 @@ node scripts/check-release-versions.cjs 2.0.13
 ```
 If versions disagree, update:
 - `frontend/package.json`: `"version": "2.0.13"`
+- `admin-panel/package.json`: `"version": "2.0.13"` (rendered in the admin sidebar footer)
 - `frontend/src-tauri/Cargo.toml`: `version = "2.0.13"`
 - `frontend/src-tauri/tauri.conf.json`: `"package": { "version": "2.0.13" }`
 - `frontend/src-tauri/tauri.legacy.conf.json`: `"package": { "version": "2.0.13" }`

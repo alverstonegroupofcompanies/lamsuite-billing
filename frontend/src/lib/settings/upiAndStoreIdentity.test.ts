@@ -27,7 +27,7 @@ describe("Phase 4: Store Identity & UPI Settings Verification", () => {
 
   describe("Store Identity Dynamic Loading (Item 5)", () => {
     it("serves configured store header without hardcoded fallbacks", async () => {
-      await companySettingsService.updateSettings({
+      await companySettingsService.saveLocalSettings({
         store_name: "Apex Electronics & Gadgets",
         display_name: "Apex Store #1",
         address: "77 Brigade Road, Bangalore, Karnataka - 560001",
@@ -56,7 +56,7 @@ describe("Phase 4: Store Identity & UPI Settings Verification", () => {
 
   describe("Multi-Account UPI Resolution & Counter Overrides (Item 10)", () => {
     it("resolves default UPI ID and counter-specific overrides", async () => {
-      await companySettingsService.updateSettings({
+      await companySettingsService.saveLocalSettings({
         store_name: "City Supermarket",
         payments: {
           modes: [],
@@ -109,7 +109,7 @@ describe("Phase 4: Store Identity & UPI Settings Verification", () => {
     });
 
     it("returns null when UPI is disabled", async () => {
-      await companySettingsService.updateSettings({
+      await companySettingsService.saveLocalSettings({
         payments: {
           modes: [],
           enableDynamicUpiQr: false,

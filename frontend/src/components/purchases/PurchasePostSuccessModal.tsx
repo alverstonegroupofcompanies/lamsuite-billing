@@ -22,6 +22,10 @@ interface PurchasePostSuccessModalProps {
   onPrintVoucher: () => void;
   onPaySupplier: () => void;
   onNewBill: () => void;
+  /** Whether the server has accepted the bill. Omitted is read as not yet accepted (PUR-01). */
+  syncState?: "synced" | "pending";
+  /** The server's reason when it refused the bill. */
+  syncMessage?: string;
 }
 
 export const PurchasePostSuccessModal: React.FC<PurchasePostSuccessModalProps> = ({
@@ -36,6 +40,8 @@ export const PurchasePostSuccessModal: React.FC<PurchasePostSuccessModalProps> =
   onPrintVoucher,
   onPaySupplier,
   onNewBill,
+  syncState,
+  syncMessage,
 }) => {
   useModalEscape(isOpen, onClose);
 
@@ -82,7 +88,9 @@ export const PurchasePostSuccessModal: React.FC<PurchasePostSuccessModalProps> =
               <CheckCircle className="h-5 w-5" />
             </div>
             <div>
-              <h3 className="text-sm font-bold text-[var(--color-text)]">Purchase Bill Posted!</h3>
+              <h3 className="text-sm font-bold text-[var(--color-text)]">
+                {syncState === "synced" ? "Purchase Bill Posted!" : "Purchase Bill Saved on This Till"}
+              </h3>
               <p className="text-xs font-mono font-semibold text-[var(--color-accent)]">{purchaseNumber}</p>
             </div>
           </div>
@@ -108,9 +116,23 @@ export const PurchasePostSuccessModal: React.FC<PurchasePostSuccessModalProps> =
             </div>
           </div>
 
-          <p className="text-[11px] text-[var(--color-text-muted)] text-center">
-            Batch stock credited &amp; supplier ledger updated. Select next action with hotkey:
-          </p>
+          {syncState === "synced" ? (
+            <p className="text-[11px] text-[var(--color-text-muted)] text-center" data-testid="purchase-sync-state">
+              Posted to the server: batch stock credited &amp; supplier ledger updated. Select next action with hotkey:
+            </p>
+          ) : syncMessage ? (
+            <p
+              role="alert"
+              data-testid="purchase-sync-state"
+              className="text-[11px] text-center rounded-[8px] border border-[var(--color-danger-border)] bg-[var(--color-danger-bg)] text-[var(--color-danger-text)] p-2"
+            >
+              Saved on this till only. The server refused this bill: {syncMessage}. It stays in the sync queue until it is corrected.
+            </p>
+          ) : (
+            <p className="text-[11px] text-[var(--color-text-muted)] text-center" data-testid="purchase-sync-state">
+              Saved on this till. It will be posted to the server when the connection is back. Select next action with hotkey:
+            </p>
+          )}
 
           {/* Action options */}
           <div className="grid grid-cols-1 gap-2 pt-1">

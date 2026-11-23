@@ -1,0 +1,37 @@
+{
+  "offline_bill_screen": [
+    "Offline Mode",
+    "C02-INV-1052"
+  ],
+  "counter_after_reissue": {
+    "status": "unclaimed",
+    "device_uuid": null,
+    "current_device_id": null
+  },
+  "screen_after_reconnect": [
+    "LamSuite Billing",
+    "v2.1.1",
+    "Retail & Pharmacy POS",
+    "QA Glow Cosmetics",
+    "QA-CS",
+    "ID:5",
+    "Ctrl+Alt+S",
+    "Search actions, modules, or tools...",
+    "Ctrl+K",
+    "ML",
+    "Counter",
+    "C01"
+  ],
+  "locked": false,
+  "offline_bill_synced": 0,
+  "calls": [
+    "GET /counter/profile-version 403",
+    "GET /counter/profile-version 403",
+    "OPTIONS /device-sessions/heartbeat 204",
+    "POST /device-sessions/heartbeat 403",
+    "GET /counter/profile-version 401",
+    "POST /sync/push/batch 401",
+    "GET /counter/profile-version 401",
+    "GET /counter/profile-version 401"
+  ]
+}

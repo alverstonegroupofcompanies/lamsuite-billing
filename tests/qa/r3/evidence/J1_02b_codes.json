@@ -1,0 +1,142 @@
+{
+  "issued": [
+    {
+      "store": "QA-PH",
+      "nm": "PH Front Till",
+      "click": "ok",
+      "posts": [
+        {
+          "u": "http://127.0.0.1:8000/api/admin/counters/2/activation-code",
+          "st": 200,
+          "res": "{\"success\":true,\"code\":\"LAM-C01-61424F06A2BAB273-1F30878E0956E92A\",\"activation_key_id\":5,\"key_prefix\":\"LAM-C01-61424F****\",\"expires_at\":\"2026-11-22T20:58:02+05:30\",\"qr_payload\":{\"v\":1,\"kind\":\"lam_suite_counter_claim\",\"code\":\"LAM-C01-61424F06A2BAB273-1F30878E0956E92A\",\"store_id\":4,\"counter_id\":2},\"message\":\"Show or send this code once. It cannot be retrieved again.\"}"
+        }
+      ],
+      "code_on_screen": true,
+      "expiry_text": "Expires 22-11-2026 20:58:02"
+    },
+    {
+      "store": "QA-PH",
+      "nm": "PH Back Till",
+      "click": "ok",
+      "posts": [
+        {
+          "u": "http://127.0.0.1:8000/api/admin/counters/3/activation-code",
+          "st": 200,
+          "res": "{\"success\":true,\"code\":\"LAM-C02-34E8D31873CE7299-DAD0BB41D9D0EC21\",\"activation_key_id\":6,\"key_prefix\":\"LAM-C02-34E8D3****\",\"expires_at\":\"2026-11-22T20:58:06+05:30\",\"qr_payload\":{\"v\":1,\"kind\":\"lam_suite_counter_claim\",\"code\":\"LAM-C02-34E8D31873CE7299-DAD0BB41D9D0EC21\",\"store_id\":4,\"counter_id\":3},\"message\":\"Show or send this code once. It cannot be retrieved again.\"}"
+        }
+      ],
+      "code_on_screen": true,
+      "expiry_text": "Expires 22-11-2026 20:58:06"
+    },
+    {
+      "store": "QA-CS",
+      "nm": "CS Front Till",
+      "click": "ok",
+      "posts": [
+        {
+          "u": "http://127.0.0.1:8000/api/admin/counters/4/activation-code",
+          "st": 200,
+          "res": "{\"success\":true,\"code\":\"LAM-C01-40E33873AC2F9F54-B358A5AD2D0EB6E4\",\"activation_key_id\":7,\"key_prefix\":\"LAM-C01-40E338****\",\"expires_at\":\"2026-11-22T20:58:15+05:30\",\"qr_payload\":{\"v\":1,\"kind\":\"lam_suite_counter_claim\",\"code\":\"LAM-C01-40E33873AC2F9F54-B358A5AD2D0EB6E4\",\"store_id\":5,\"counter_id\":4},\"message\":\"Show or send this code once. It cannot be retrieved again.\"}"
+        }
+      ],
+      "code_on_screen": true,
+      "expiry_text": "Expires 22-11-2026 20:58:15"
+    },
+    {
+      "store": "QA-CS",
+      "nm": "CS Back Till",
+      "click": "ok",
+      "posts": [
+        {
+          "u": "http://127.0.0.1:8000/api/admin/counters/5/activation-code",
+          "st": 200,
+          "res": "{\"success\":true,\"code\":\"LAM-C02-1E64934F96A123D8-C6EDE206464C60F5\",\"activation_key_id\":8,\"key_prefix\":\"LAM-C02-1E6493****\",\"expires_at\":\"2026-11-22T20:58:18+05:30\",\"qr_payload\":{\"v\":1,\"kind\":\"lam_suite_counter_claim\",\"code\":\"LAM-C02-1E64934F96A123D8-C6EDE206464C60F5\",\"store_id\":5,\"counter_id\":5},\"message\":\"Show or send this code once. It cannot be retrieved again.\"}"
+        }
+      ],
+      "code_on_screen": true,
+      "expiry_text": "Expires 22-11-2026 20:58:18"
+    }
+  ],
+  "db": [
+    {
+      "id": 1,
+      "store_id": 4,
+      "counter_id": 3,
+      "key_prefix": "LAM-C02-72E32C****",
+      "is_single_use": 1,
+      "expires_at": "2026-11-22 20:56:39",
+      "is_revoked": 1,
+      "consumed_at": null
+    },
+    {
+      "id": 2,
+      "store_id": 4,
+      "counter_id": 3,
+      "key_prefix": "LAM-C02-B645DB****",
+      "is_single_use": 1,
+      "expires_at": "2026-11-22 20:56:43",
+      "is_revoked": 1,
+      "consumed_at": null
+    },
+    {
+      "id": 3,
+      "store_id": 4,
+      "counter_id": 3,
+      "key_prefix": "LAM-C02-3B087F****",
+      "is_single_use": 1,
+      "expires_at": "2026-11-22 20:56:53",
+      "is_revoked": 1,
+      "consumed_at": null
+    },
+    {
+      "id": 4,
+      "store_id": 4,
+      "counter_id": 3,
+      "key_prefix": "LAM-C02-06F68A****",
+      "is_single_use": 1,
+      "expires_at": "2026-11-22 20:56:57",
+      "is_revoked": 1,
+      "consumed_at": null
+    },
+    {
+      "id": 5,
+      "store_id": 4,
+      "counter_id": 2,
+      "key_prefix": "LAM-C01-61424F****",
+      "is_single_use": 1,
+      "expires_at": "2026-11-22 20:58:02",
+      "is_revoked": 0,
+      "consumed_at": null
+    },
+    {
+      "id": 6,
+      "store_id": 4,
+      "counter_id": 3,
+      "key_prefix": "LAM-C02-34E8D3****",
+      "is_single_use": 1,
+      "expires_at": "2026-11-22 20:58:06",
+      "is_revoked": 0,
+      "consumed_at": null
+    },
+    {
+      "id": 7,
+      "store_id": 5,
+      "counter_id": 4,
+      "key_prefix": "LAM-C01-40E338****",
+      "is_single_use": 1,
+      "expires_at": "2026-11-22 20:58:15",
+      "is_revoked": 0,
+      "consumed_at": null
+    },
+    {
+      "id": 8,
+      "store_id": 5,
+      "counter_id": 5,
+      "key_prefix": "LAM-C02-1E6493****",
+      "is_single_use": 1,
+      "expires_at": "2026-11-22 20:58:18",
+      "is_revoked": 0,
+      "consumed_at": null
+    }
+  ]
+}

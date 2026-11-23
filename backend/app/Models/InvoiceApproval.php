@@ -10,7 +10,12 @@ class InvoiceApproval extends Model
     protected $fillable = [
         'store_id',
         'invoice_id',
+        'counter_id',
         'action',
+        'actions',
+        'document_type',
+        'document_external_id',
+        'rule_snapshot',
         'mode',
         'status',
         'requested_by_user_id',
@@ -23,12 +28,16 @@ class InvoiceApproval extends Model
         'reason',
         'expires_at',
         'used_at',
+        'consumed_at',
         'meta',
     ];
 
     protected $casts = [
         'expires_at' => 'datetime',
         'used_at' => 'datetime',
+        'consumed_at' => 'datetime',
+        'actions' => 'array',
+        'rule_snapshot' => 'array',
         'meta' => 'array',
     ];
 

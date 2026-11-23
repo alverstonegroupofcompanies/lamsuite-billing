@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class PurchaseItem extends Model
 {
@@ -42,6 +43,10 @@ class PurchaseItem extends Model
         'cess_amount',
         'tax_amount',
         'total_amount',
+        'gross_weight_kg',
+        'charge_allocation',
+        'landed_unit_cost',
+        'original_purchase_item_id',
     ];
 
     protected $casts = [
@@ -71,6 +76,9 @@ class PurchaseItem extends Model
         'cess_amount' => 'decimal:2',
         'tax_amount' => 'decimal:2',
         'total_amount' => 'decimal:2',
+        'gross_weight_kg' => 'decimal:3',
+        'charge_allocation' => 'decimal:2',
+        'landed_unit_cost' => 'decimal:4',
     ];
 
     public function purchase(): BelongsTo
@@ -81,5 +89,19 @@ class PurchaseItem extends Model
     public function product(): BelongsTo
     {
         return $this->belongsTo(Product::class);
+    }
+
+    /**
+     * The bill line a return line was raised against, so a reversal can find the
+     * charges that line absorbed (PUR-015).
+     */
+    public function originalItem(): BelongsTo
+    {
+        return $this->belongsTo(PurchaseItem::class, 'original_purchase_item_id');
+    }
+
+    public function chargeAllocations(): HasMany
+    {
+        return $this->hasMany(PurchaseChargeAllocation::class, 'purchase_item_id');
     }
 }

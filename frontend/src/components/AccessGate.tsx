@@ -1,7 +1,9 @@
 import React, { useEffect, useState } from "react";
 import { ShieldAlert } from "lucide-react";
-import { staffAuthService, type StaffUser } from "../lib/auth/staffAuthService";
-import { canAccessMenu } from "../lib/auth/accessControl";
+import {
+  counterSessionService,
+  type CounterSessionState,
+} from "../lib/auth/counterSessionService";
 
 interface AccessGateProps {
   menu: string;
@@ -9,31 +11,34 @@ interface AccessGateProps {
 }
 
 /**
- * Blocks a route when the signed-in staff member lacks the module permission
- * that the menu item maps to. Renders an explicit refusal instead of a silent
- * redirect so the operator knows why the screen is unavailable.
+ * PRF-001: the counter's permission document decides what this till opens.
+ *
+ * There is no signed-in person to ask, so a route refuses when the document
+ * this counter carries leaves its module out — and says who can change it. A
+ * till holding no document defers to the store's own menu ceiling rather than
+ * inventing a surface of its own.
  */
 export const AccessGate: React.FC<AccessGateProps> = ({ menu, children }) => {
-  const [user, setUser] = useState<StaffUser | null>(
-    () => staffAuthService.getCurrentSession()?.user || null
-  );
+  const [session, setSession] = useState<CounterSessionState>(() => counterSessionService.state());
 
   useEffect(() => {
-    setUser(staffAuthService.getCurrentSession()?.user || null);
-    return staffAuthService.onSessionChange((session) => {
-      setUser(session?.user || null);
-    });
+    setSession(counterSessionService.state());
+    return counterSessionService.subscribe(setSession);
   }, []);
 
-  if (user && !canAccessMenu(user, menu)) {
+  const granted = counterSessionService.allowsModule(menu);
+
+  if (!granted) {
+    const counterLabel = session.counterName || session.counterCode || "This counter";
+
     return (
       <div className="flex h-full min-h-[60vh] items-center justify-center p-6">
         <div className="max-w-md w-full rounded-2xl border border-amber-300 bg-amber-50 p-6 text-center space-y-3">
           <ShieldAlert className="mx-auto h-10 w-10 text-amber-600" />
           <h2 className="text-base font-bold text-amber-900">Access restricted</h2>
           <p className="text-xs text-amber-800">
-            Your role ({user.role.replace(/_/g, " ")}) does not include permission for this module.
-            Ask a store owner or manager to grant access in Admin Panel → Users &amp; Roles.
+            {counterLabel} is not allowed to open this screen. The store owner sets what this
+            counter may open in Admin Panel → Counters.
           </p>
         </div>
       </div>

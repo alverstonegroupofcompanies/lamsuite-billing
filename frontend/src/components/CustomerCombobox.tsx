@@ -20,6 +20,8 @@ import {
   isValidGstin,
   normalizeIndianPhone,
 } from "../lib/masters/partiesStore";
+import { companySettingsService } from "../lib/settings/companySettingsService";
+import { stateCodeOf } from "../lib/gst/stateCodes";
 import { useModalEscape } from "../lib/ui/modalEscapeManager";
 
 export interface CustomerComboboxSelection {
@@ -109,6 +111,8 @@ export const CustomerCombobox: React.FC<CustomerComboboxProps> = ({
 
   const listRef = useRef<HTMLDivElement | null>(null);
   const isMouseDownInsideRef = useRef(false);
+  /** The term the currently rendered searchResults belong to. */
+  const resolvedTermRef = useRef<string | null>(null);
 
   // Synchronize internal input value when external value changes
   useEffect(() => {
@@ -144,21 +148,27 @@ export const CustomerCombobox: React.FC<CustomerComboboxProps> = ({
   useEffect(() => {
     let active = true;
     setIsSearching(true);
+    const term = searchTerm.trim();
 
     const timer = setTimeout(async () => {
       try {
-        if (!searchTerm.trim()) {
+        if (!term) {
           const recent = await partiesStore.getRecentOrFrequentCustomers(12);
           if (active) {
             setSearchResults(recent);
+            resolvedTermRef.current = "";
             setHighlightedIndex(0);
             setIsSearching(false);
           }
         } else {
-          const matches = await partiesStore.searchCustomers(searchTerm.trim(), 20);
+          const matches = await partiesStore.searchCustomers(term, 20);
           if (active) {
             setSearchResults(matches);
-            setHighlightedIndex(0);
+            resolvedTermRef.current = term;
+            // Typed queries start on the first real match (or the free-text
+            // option when nothing matched) — never on the walk-in row, which
+            // used to swallow Enter and create a duplicate party.
+            setHighlightedIndex(1);
             setIsSearching(false);
           }
         }
@@ -233,7 +243,7 @@ export const CustomerCombobox: React.FC<CustomerComboboxProps> = ({
     if (!isOpen || !listRef.current) return;
     const activeEl = listRef.current.querySelector(`[data-index="${highlightedIndex}"]`) as HTMLElement | null;
     if (activeEl) {
-      activeEl.scrollIntoView({ block: "nearest" });
+      activeEl.scrollIntoView?.({ block: "nearest" });
     }
   }, [highlightedIndex, isOpen]);
 
@@ -321,7 +331,7 @@ export const CustomerCombobox: React.FC<CustomerComboboxProps> = ({
       }
       case "Enter": {
         e.preventDefault();
-        commitHighlightedSelection();
+        void commitEnterSelection();
         break;
       }
       case "Tab": {
@@ -338,12 +348,33 @@ export const CustomerCombobox: React.FC<CustomerComboboxProps> = ({
     }
   };
 
-  const commitHighlightedSelection = () => {
-    if (showFreeTextOptions && highlightedIndex === 0) {
-      selectFreeTextWalkIn(searchTerm);
-      return;
+  /**
+   * Enter must act on the text as it is now, not on results from the previous
+   * keystroke. While the debounce is still pending we run the search and take
+   * the first match immediately; only a genuinely unmatched name becomes a
+   * free-text/walk-in selection.
+   */
+  const commitEnterSelection = async () => {
+    const term = searchTerm.trim();
+    if (term && resolvedTermRef.current !== term) {
+      try {
+        const matches = await partiesStore.searchCustomers(term, 20);
+        resolvedTermRef.current = term;
+        setSearchResults(matches);
+        if (matches.length > 0) {
+          selectCustomer(matches[0]);
+        } else {
+          selectFreeTextWalkIn(term);
+        }
+        return;
+      } catch {
+        // Fall through and act on the current results.
+      }
     }
+    commitHighlightedSelection();
+  };
 
+  const commitHighlightedSelection = () => {
     if (highlightedIndex === 0) {
       selectWalkIn();
       return;
@@ -393,11 +424,17 @@ export const CustomerCombobox: React.FC<CustomerComboboxProps> = ({
 
     try {
       setIsSavingQuickAdd(true);
+      const cleanGstin = quickAddGstin.trim() ? quickAddGstin.trim().toUpperCase() : undefined;
+      const stateCode =
+        stateCodeOf(cleanGstin) ??
+        stateCodeOf(companySettingsService.getSettings().state_code) ??
+        "32";
       const created = await partiesStore.quickCreateCustomer({
         name,
         phone: quickAddPhone.trim() || undefined,
-        gstin: quickAddGstin.trim() ? quickAddGstin.trim().toUpperCase() : undefined,
+        gstin: cleanGstin,
         address: quickAddAddress.trim() || undefined,
+        state_code: stateCode,
         credit_limit: quickAddCreditLimit ? parseFloat(quickAddCreditLimit) : undefined,
         default_discount_percent: quickAddDiscount ? parseFloat(quickAddDiscount) : undefined,
       });

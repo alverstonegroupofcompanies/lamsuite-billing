@@ -19,16 +19,38 @@ use App\Models\Store;
 use App\Models\User;
 use Illuminate\Console\Command;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
 use PDO;
 
 class SyncActualDataCommand extends Command
 {
-    protected $signature = 'data:sync-actual';
-    protected $description = 'Sync actual master catalog and transactions into backend database';
+    protected $signature = 'data:sync-actual
+        {--source= : Path to the legacy desktop sqlite (required; there is no default path)}
+        {--dry-run : Import inside a transaction and roll it back at the end}';
+    protected $description = 'Import a legacy desktop catalogue/transactions into the backend (explicit opt-in, idempotent, never in production)';
 
     public function handle(): int
     {
+        // SET-02: this pulls rows from a local desktop database, so it must
+        // never run on a production server and never guess where the file is.
+        if (app()->environment('production')) {
+            $this->error('data:sync-actual is a development import and refuses to run in production.');
+            return self::FAILURE;
+        }
+
+        $source = (string) ($this->option('source') ?? '');
+        if ($source === '') {
+            $this->error('Pass --source=<path to the desktop sqlite>; there is no default path.');
+            return self::FAILURE;
+        }
+        if (!file_exists($source)) {
+            $this->error("Source database not found at {$source}.");
+            return self::FAILURE;
+        }
+
         $this->info('Starting sync of actual master data into backend database...');
+
+        DB::beginTransaction();
 
         $store1 = Store::firstOrCreate(
             ['code' => 'STORE-01'],
@@ -88,18 +110,9 @@ class SyncActualDataCommand extends Command
         $adminUser = User::first();
 
         // 1. Path to desktop database
-        $desktopPath = base_path('../lamsuite_desktop.sqlite');
-        if (!file_exists($desktopPath)) {
-            $desktopPath = dirname(base_path()) . '/lamsuite_desktop.sqlite';
-        }
-
-        $desktopDb = null;
-        if (file_exists($desktopPath)) {
-            $this->info("Found desktop database at: {$desktopPath}");
-            $desktopDb = new PDO("sqlite:{$desktopPath}");
-        } else {
-            $this->warn("Desktop database not found at {$desktopPath}, generating standard 50-item catalog.");
-        }
+        $desktopPath = $source;
+        $this->info("Reading desktop database at: {$desktopPath}");
+        $desktopDb = new PDO("sqlite:{$desktopPath}");
 
         // 2. Sync Products & Batches
         $productMap = []; // external_id => Product
@@ -119,12 +132,18 @@ class SyncActualDataCommand extends Command
                 $currentStock = (float)($p['current_stock'] ?? 100);
                 $reorderLevel = (float)($p['reorder_level'] ?? 25);
 
+                // SET-02: match on the same key the unique index enforces. A
+                // name-keyed row that writes a desktop barcode is how a second
+                // run collided with itself.
+                $desktopBarcode = trim((string) ($p['barcode'] ?? ''));
+                $match = $desktopBarcode !== ''
+                    ? ['store_id' => $store1->id, 'barcode' => $desktopBarcode]
+                    : ['store_id' => $store1->id, 'external_id' => $p['id'] ?? $row['id']];
+
                 $product = Product::updateOrCreate(
+                    $match,
                     [
-                        'store_id' => $store1->id,
                         'name' => $p['name'],
-                    ],
-                    [
                         'barcode' => $barcode,
                         'print_name' => $p['print_name'] ?? $p['name'],
                         'generic_name' => $p['generic_name'] ?? null,
@@ -623,7 +642,14 @@ class SyncActualDataCommand extends Command
         // 8. Audit Log
         AuditLog::log('sync_actual_data', 'System', 'all', null, ['status' => 'completed', 'total_products' => Product::count()], $store1->id, $adminUser ? $adminUser->id : 1);
 
-        $this->info('Successfully populated actual live enterprise data into backend database!');
+        if ($this->option('dry-run')) {
+            DB::rollBack();
+            $this->info('Dry run: all writes rolled back.');
+        } else {
+            DB::commit();
+            $this->info('Successfully populated actual live enterprise data into backend database!');
+        }
+
         return Command::SUCCESS;
     }
 }

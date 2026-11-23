@@ -1,0 +1,51 @@
+{
+  "over": {
+    "st": 200,
+    "body": "{\"success\":true,\"results\":{\"total\":1,\"processed\":1,\"failed\":0,\"errors\":[]},\"renumbered\":[]}",
+    "before": {
+      "old": 435,
+      "new": 1349,
+      "supplier": -5000,
+      "returns": 0
+    },
+    "after": {
+      "old": 435,
+      "new": 1349,
+      "supplier": -5000,
+      "returns": 1
+    }
+  },
+  "valid": {
+    "st": 200,
+    "body": "{\"success\":true,\"results\":{\"total\":1,\"processed\":1,\"failed\":0,\"errors\":[]},\"renumbered\":[]}",
+    "before": {
+      "old": 435,
+      "new": 1349,
+      "supplier": -5000,
+      "returns": 1
+    },
+    "after": {
+      "old": 435,
+      "new": 1349,
+      "supplier": -5000,
+      "returns": 1
+    },
+    "row": [],
+    "ledger": []
+  },
+  "replay": {
+    "st": 200,
+    "before": {
+      "old": 435,
+      "new": 1349,
+      "supplier": -5000,
+      "returns": 1
+    },
+    "after": {
+      "old": 435,
+      "new": 1349,
+      "supplier": -5000,
+      "returns": 1
+    }
+  }
+}

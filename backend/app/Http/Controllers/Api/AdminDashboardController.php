@@ -4,12 +4,13 @@ namespace App\Http\Controllers\Api;
 
 use App\Models\Device;
 use App\Models\Invoice;
-use App\Models\Party;
 use App\Models\Product;
 use App\Models\ProductBatch;
 use App\Models\Purchase;
 use App\Models\Store;
 use App\Models\SyncEvent;
+use App\Services\Reports\OutwardSalesService;
+use App\Support\Money;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
@@ -23,10 +24,6 @@ class AdminDashboardController
         $storeId = $request->get('active_store_id');
 
         // Multi-tenant store scoping query builder
-        $invoiceScope = Invoice::where('status', '!=', 'cancelled');
-        $purchaseScope = Purchase::where('status', '!=', 'cancelled')
-            ->whereNotIn('module_key', ['purchase_order', 'order']);
-        $partyScope = Party::query();
         $productScope = Product::where('is_active', true);
         $batchScope = ProductBatch::where('stock_qty', '>', 0);
         $deviceScope = Device::query();
@@ -34,9 +31,6 @@ class AdminDashboardController
         $storesScope = Store::query();
 
         if ($storeId) {
-            $invoiceScope->where('store_id', $storeId);
-            $purchaseScope->where('store_id', $storeId);
-            $partyScope->where('store_id', $storeId);
             $productScope->where('store_id', $storeId);
             $batchScope->where('store_id', $storeId);
             $deviceScope->where('store_id', $storeId);
@@ -59,39 +53,66 @@ class AdminDashboardController
         $startOfWeek = $now->copy()->startOfWeek()->toDateString();
         $startOfMonth = $now->copy()->startOfMonth()->toDateString();
 
-        // 1. Sales metrics
-        $todaySales = (clone $invoiceScope)->whereDate('invoice_date', $today)->sum('grand_total');
-        $todayInvoicesCount = (clone $invoiceScope)->whereDate('invoice_date', $today)->count();
+        // 1. Sales metrics — read through the same outward-sales service as the
+        // store reports, so the tiles are net of credit notes and returns and
+        // count only sale bills (never the return documents themselves).
+        $scopeStoreId = $storeId ? (int) $storeId : null;
+        $todaySales = OutwardSalesService::forWindow($scopeStoreId, $today, $today);
+        $weekSales = OutwardSalesService::forWindow($scopeStoreId, $startOfWeek, $today);
+        $monthSales = OutwardSalesService::forWindow($scopeStoreId, $startOfMonth, $today);
 
-        $weekSales = (clone $invoiceScope)->whereDate('invoice_date', '>=', $startOfWeek)->sum('grand_total');
-        $weekInvoicesCount = (clone $invoiceScope)->whereDate('invoice_date', '>=', $startOfWeek)->count();
+        // 2. Purchases metrics — a supplier bill counts once even when sync
+        // delivered it twice, and purchase returns reduce the spend.
+        $purchaseTotals = $this->purchaseTotals($storeId, $today, [
+            'today' => $today,
+            'week' => $startOfWeek,
+            'month' => $startOfMonth,
+        ]);
 
-        $monthSales = (clone $invoiceScope)->whereDate('invoice_date', '>=', $startOfMonth)->sum('grand_total');
-        $monthInvoicesCount = (clone $invoiceScope)->whereDate('invoice_date', '>=', $startOfMonth)->count();
+        // 3. Customer outstanding receivables — derived from open documents so
+        // the tile works for stores that never kept Party balances.
+        $openInvoiceQuery = Invoice::query()
+            ->where('status', '!=', 'cancelled')
+            ->when($storeId, fn ($q) => $q->where('store_id', $storeId));
 
-        // 2. Purchases metrics
-        $todayPurchases = (clone $purchaseScope)->whereDate('invoice_date', $today)->sum('grand_total');
-        $weekPurchases = (clone $purchaseScope)->whereDate('invoice_date', '>=', $startOfWeek)->sum('grand_total');
-        $monthPurchases = (clone $purchaseScope)->whereDate('invoice_date', '>=', $startOfMonth)->sum('grand_total');
-
-        // 3. Customer outstanding receivables
-        $outstandingReceivables = (clone $partyScope)->where('type', 'customer')->sum('current_balance');
+        $openBalances = Money::paise(
+            (clone $openInvoiceQuery)
+                ->whereIn('module_key', ['invoice', 'pos'])
+                ->sum(DB::raw('CASE WHEN grand_total > paid_amount THEN grand_total - paid_amount ELSE 0 END'))
+        );
+        $documentCredits = Money::paise(
+            (clone $openInvoiceQuery)
+                ->whereIn('module_key', ['credit_note', 'sales_return'])
+                ->sum('grand_total')
+        );
+        $outstandingReceivables = Money::toFloat(max(0, $openBalances - $documentCredits));
 
         // 4. Low stock & Near expiry
         $lowStockCount = (clone $productScope)->whereColumn('current_stock', '<=', 'reorder_level')->count();
         $nearExpiryThreshold = $now->copy()->addDays(60)->toDateString();
         $nearExpiryCount = (clone $batchScope)->whereDate('expiry_date', '<=', $nearExpiryThreshold)->count();
 
-        // 5. Top 5 selling items
+        // 5. Top 5 selling items — return lines subtract, so a returned item is
+        // never ranked (or summed) as if it were a fresh sale.
+        $returnSign = "CASE WHEN invoices.module_key IN ('credit_note', 'sales_return') THEN -1 ELSE 1 END";
         $topItems = DB::table('invoice_items')
             ->join('invoices', 'invoice_items.invoice_id', '=', 'invoices.id')
             ->when($storeId, fn($q) => $q->where('invoices.store_id', $storeId))
             ->where('invoices.status', '!=', 'cancelled')
-            ->select('invoice_items.product_name', DB::raw('SUM(invoice_items.qty) as total_qty'), DB::raw('SUM(invoice_items.total_amount) as total_revenue'))
+            ->select(
+                'invoice_items.product_name',
+                DB::raw("SUM(invoice_items.qty * ({$returnSign})) as total_qty"),
+                DB::raw("SUM(invoice_items.total_amount * ({$returnSign})) as total_revenue")
+            )
             ->groupBy('invoice_items.product_name')
             ->orderByDesc('total_revenue')
             ->limit(5)
-            ->get();
+            ->get()
+            ->map(fn ($row) => [
+                'product_name' => $row->product_name,
+                'total_qty' => round((float) $row->total_qty, 4),
+                'total_revenue' => Money::round2($row->total_revenue),
+            ]);
 
         // 6. Store-wise comparison
         $storeComparison = Store::withCount(['invoices', 'devices'])
@@ -128,17 +149,17 @@ class AdminDashboardController
         return response()->json([
             'timezone' => $timezone,
             'sales' => [
-                'today' => ['amount' => round($todaySales, 2), 'count' => $todayInvoicesCount],
-                'week' => ['amount' => round($weekSales, 2), 'count' => $weekInvoicesCount],
-                'month' => ['amount' => round($monthSales, 2), 'count' => $monthInvoicesCount],
+                'today' => ['amount' => $todaySales->netSales(), 'count' => $todaySales->billsCount()],
+                'week' => ['amount' => $weekSales->netSales(), 'count' => $weekSales->billsCount()],
+                'month' => ['amount' => $monthSales->netSales(), 'count' => $monthSales->billsCount()],
             ],
             'purchases' => [
-                'today' => round($todayPurchases, 2),
-                'week' => round($weekPurchases, 2),
-                'month' => round($monthPurchases, 2),
+                'today' => $purchaseTotals['today'],
+                'week' => $purchaseTotals['week'],
+                'month' => $purchaseTotals['month'],
             ],
             'receivables' => [
-                'total_outstanding' => round($outstandingReceivables, 2),
+                'total_outstanding' => $outstandingReceivables,
             ],
             'alerts' => [
                 'low_stock_count' => $lowStockCount,
@@ -156,5 +177,67 @@ class AdminDashboardController
                 'status' => $failedSyncCount > 0 ? 'degraded' : 'healthy',
             ],
         ]);
+    }
+
+    /**
+     * Supplier spend per window, counting a synced duplicate once per
+     * (store, supplier, invoice number) and netting purchase returns.
+     *
+     * @param  array<string, string>  $windows  label => inclusive start date
+     * @return array<string, float>
+     */
+    private function purchaseTotals(mixed $storeId, string $endDate, array $windows): array
+    {
+        $rows = Purchase::query()
+            ->where('status', '!=', 'cancelled')
+            ->whereNotIn('module_key', ['purchase_order', 'order'])
+            ->whereDate('invoice_date', '>=', min(array_values($windows)))
+            ->whereDate('invoice_date', '<=', $endDate)
+            ->when($storeId, fn ($q) => $q->where('store_id', $storeId))
+            ->get(['id', 'store_id', 'supplier_id', 'invoice_number', 'module_key', 'grand_total', 'invoice_date']);
+
+        $seen = [];
+        $bills = [];
+        $returns = [];
+
+        foreach ($rows as $row) {
+            $date = substr((string) $row->invoice_date, 0, 10);
+            $paise = Money::paise($row->grand_total);
+
+            if (in_array($row->module_key, ['purchase_return', 'debit_note'], true)) {
+                $returns[] = ['date' => $date, 'paise' => $paise];
+                continue;
+            }
+
+            $number = trim((string) $row->invoice_number);
+            $identity = $number !== ''
+                ? ($row->store_id ?? 0) . '|' . ($row->supplier_id ?? 0) . '|' . strtolower($number)
+                : 'id|' . $row->id;
+
+            if (isset($seen[$identity])) {
+                continue;
+            }
+            $seen[$identity] = true;
+            $bills[] = ['date' => $date, 'paise' => $paise];
+        }
+
+        $totals = [];
+        foreach ($windows as $label => $start) {
+            $start = substr((string) $start, 0, 10);
+            $paise = 0;
+            foreach ($bills as $bill) {
+                if ($bill['date'] >= $start) {
+                    $paise += $bill['paise'];
+                }
+            }
+            foreach ($returns as $return) {
+                if ($return['date'] >= $start) {
+                    $paise -= $return['paise'];
+                }
+            }
+            $totals[$label] = Money::toFloat($paise);
+        }
+
+        return $totals;
     }
 }

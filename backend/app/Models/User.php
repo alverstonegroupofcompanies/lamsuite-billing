@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Services\Auth\PinPolicy;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
@@ -32,6 +33,7 @@ class User extends Authenticatable
         'max_failed_logins',
         'failed_login_attempts',
         'locked_until',
+        'is_approver',
         'ip_allowlist',
     ];
 
@@ -51,6 +53,7 @@ class User extends Authenticatable
         'allowed_store_ids' => 'array',
         'totp_enabled' => 'boolean',
         'is_biometric_enabled' => 'boolean',
+        'is_approver' => 'boolean',
         'locked_until' => 'datetime',
     ];
 
@@ -60,29 +63,12 @@ class User extends Authenticatable
     ];
 
     /**
-     * Enforce strict PIN policy:
-     * - Must be 4 to 6 numeric digits
-     * - Cannot be all repeated digits (e.g. 1111, 2222, 0000)
-     * - Cannot be trivial sequential patterns (e.g. 1234, 4321, 12345, 54321)
+     * The staff/user quick-PIN domain of the shared policy (PRF-006). Kept as a
+     * model entry point because the admin panel and CLI both validate here.
      */
     public static function validatePinPolicy(string $pin): ?string
     {
-        if (!preg_match('/^\d{4,6}$/', $pin)) {
-            return 'PIN must be between 4 and 6 numeric digits.';
-        }
-
-        // Check all repeated digits
-        if (preg_match('/^(.)\1+$/', $pin)) {
-            return 'PIN cannot consist of repeated digits (e.g. 1111).';
-        }
-
-        // Check trivial sequential patterns
-        $trivialPatterns = ['1234', '4321', '0123', '3210', '12345', '54321', '123456', '654321'];
-        if (in_array($pin, $trivialPatterns, true)) {
-            return 'Trivial sequential PINs are not allowed for security reasons.';
-        }
-
-        return null; // Valid
+        return PinPolicy::validate($pin, PinPolicy::DOMAIN_STAFF);
     }
 
     public function getHasPinAttribute(): bool
@@ -92,7 +78,7 @@ class User extends Authenticatable
 
     public function getIsLockedAttribute(): bool
     {
-        return !empty($this->locked_until) && $this->locked_until->isFuture();
+        return PinPolicy::isLocked($this->locked_until);
     }
 
     public function store(): BelongsTo

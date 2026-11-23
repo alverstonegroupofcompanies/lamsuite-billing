@@ -360,7 +360,18 @@ export const PurchaseReturnPage: React.FC = () => {
       };
 
       const result = await purchaseReturnService.createPurchaseReturn(input);
-      showToast(`Debit Note ${result.returnNumber} created — ₹${result.grandTotal.toFixed(2)} debit`, "success");
+      if (result.syncState === "synced") {
+        showToast(`Debit Note ${result.returnNumber} posted — ₹${result.grandTotal.toFixed(2)} debit`, "success");
+      } else if (result.syncMessage) {
+        showToast(
+          `Debit Note ${result.returnNumber} saved on this till; the server has not accepted it yet: ${result.syncMessage}`,
+          "error"
+        );
+      } else {
+        showToast(
+          `Debit Note ${result.returnNumber} saved on this till — it will post when the server is reachable`
+        );
+      }
       setIsFormOpen(false);
       loadList();
 

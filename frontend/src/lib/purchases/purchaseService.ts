@@ -3,10 +3,45 @@ import { productsStore, type ProductBatch, type ProductItem } from "../masters/p
 import { supplierLedgerService } from "./supplierLedgerService";
 import { purchaseOrderService } from "./purchaseOrderService";
 import { companySettingsService } from "../settings/companySettingsService";
+import { counterSequenceService } from "../auth/counterSequenceService";
 import { round2 } from "../billing/billingCalculations";
 import { getIndianFinancialYear } from "../billing/salesReturnService";
 import { syncQueueService } from "../sync/syncQueueService";
-import { calculateDocumentTaxes, cleanStateCode } from "../tax-engine/taxEngine";
+import { calculateDocumentTaxes, cleanStateCode, type TaxEngineDocumentTotals } from "../tax-engine/taxEngine";
+import {
+  chargePayload,
+  engineLines,
+  legacyFreightCharge,
+  postCharges,
+  resolveCharges,
+  type PurchaseChargeInput,
+  type ResolvedCharge,
+} from "./chargePosting";
+import { recordReversals, reverseOnCancel } from "./chargeReversal";
+import { calculateLineMargin } from "./purchaseEntryUtils";
+import type { PurchaseChargeRecord } from "../reports/purchaseChargeRegister";
+
+/** Document totals the purchase screens read. `engine` is the same pass in full detail. */
+export interface PurchaseDocumentTotals {
+  subtotal: number;
+  discountTotal: number;
+  billDiscountAmount: number;
+  taxTotal: number;
+  cgstTotal: number;
+  sgstTotal: number;
+  igstTotal: number;
+  cessTotal: number;
+  freightCharges: number;
+  roundOff: number;
+  grandTotal: number;
+  totalUnits: number;
+  taxableSubtotal: number;
+  chargeTotal: number;
+  chargeTaxTotal: number;
+  landedCostAddition: number;
+  expenseChargeTotal: number;
+  engine: TaxEngineDocumentTotals;
+}
 
 export interface PurchaseLineItemInput {
   product_id: string;
@@ -33,6 +68,8 @@ export interface PurchaseLineItemInput {
   gst_percent: number;
   cess_percent?: number;
   shelf_location?: string;
+  /** CR-C D1: chargeable weight entered on the line so a weight-spread charge needs no master data. */
+  gross_weight_kg?: number;
 }
 
 export interface PurchaseLineCalculation {
@@ -66,6 +103,8 @@ export interface PurchaseDocumentInput {
   is_rcm?: boolean;
   itc_eligibility?: "eligible" | "ineligible" | "blocked";
   lines: PurchaseLineItemInput[];
+  /** CR-C: the charges section of the purchase screen (Alt+F). Posted with the bill. */
+  charges?: PurchaseChargeInput[];
   round_off?: number;
   freight_charges?: number;
   bill_discount_type?: "percent" | "amount";
@@ -147,6 +186,10 @@ export interface PurchaseItemRecord {
   cess_amount: number;
   tax_amount: number;
   total_amount: number;
+  /** CR-C: the weight this line was received at, its share of the bill's charges, and the cost per unit after them. */
+  gross_weight_kg?: number | null;
+  charge_allocation?: number;
+  landed_unit_cost?: number | null;
 }
 
 export class PurchaseService {
@@ -154,6 +197,11 @@ export class PurchaseService {
    * Previews sequential purchase bill number from settings without advancing sequence
    */
   async previewNextPurchaseNumber(): Promise<string> {
+    // CNT-014: a till that is on a counter inwards its bills on that counter's
+    // own series; the store-wide settings series is only for tills with no counter.
+    const counterNumber = counterSequenceService.previewForActive("purchase_bill");
+    if (counterNumber) return counterNumber;
+
     const settings = await companySettingsService.loadSettings();
     let prefix = settings.sequences?.purchasePrefix || "PUR";
     prefix = prefix.replace(/-+$/, "");
@@ -178,6 +226,9 @@ export class PurchaseService {
    * Generates sequential purchase bill number following sequences in settings
    */
   async generateNextPurchaseNumber(): Promise<string> {
+    const counterNumber = await counterSequenceService.numberFromActiveCounter("purchase_bill", true);
+    if (counterNumber) return counterNumber;
+
     const settings = await companySettingsService.loadSettings();
     let prefix = settings.sequences?.purchasePrefix || "PUR";
     prefix = prefix.replace(/-+$/, "");
@@ -197,13 +248,14 @@ export class PurchaseService {
 
     const docNumber = `${prefix}-${nextNum}`;
 
-    await companySettingsService.updateSettings({
-      sequences: {
-        ...settings.sequences,
-        purchasePrefix: prefix,
-        nextPurchaseNumber: nextNum + 1,
-      },
-    });
+    await companySettingsService.saveLocalSettings(
+      {
+        sequences: {
+          ...settings.sequences,
+          purchasePrefix: prefix,
+          nextPurchaseNumber: nextNum + 1,
+        },
+      });
 
     return docNumber;
   }
@@ -216,13 +268,14 @@ export class PurchaseService {
     const settings = await companySettingsService.loadSettings();
     const currNext = settings.sequences?.nextPurchaseNumber || 201;
     if (lastNum >= currNext) {
-      await companySettingsService.updateSettings({
-        sequences: {
-          ...settings.sequences,
-          purchasePrefix: settings.sequences?.purchasePrefix || "PUR",
-          nextPurchaseNumber: lastNum + 1,
-        },
-      });
+      await companySettingsService.saveLocalSettings(
+        {
+          sequences: {
+            ...settings.sequences,
+            purchasePrefix: settings.sequences?.purchasePrefix || "PUR",
+            nextPurchaseNumber: lastNum + 1,
+          },
+        });
     }
   }
 
@@ -290,11 +343,12 @@ export class PurchaseService {
     });
 
     const c = doc.lines[0];
-    const sellRate = line.selling_rate || (line.mrp ? line.mrp / unitsPerPack : 0);
-    let marginPercent = 0;
-    if (sellRate > 0) {
-      marginPercent = round2(((sellRate - c.effective_unit_cost!) / sellRate) * 100);
-    }
+    const marginPercent = calculateLineMargin(
+      line.purchase_rate,
+      line.selling_rate || line.mrp || 0,
+      (line.gst_percent || 0) + (line.cess_percent || 0),
+      settings.tax_mode !== "exclusive"
+    ).marginPercent;
 
     return {
       billed_units: c.billed_units,
@@ -315,9 +369,52 @@ export class PurchaseService {
   }
 
   /**
-   * Calculates document-level totals (line discounts, bill discount, freight,
-   * round-off) in one statutory pass so the purchase entry screen and the
-   * posting service always agree.
+   * The one statutory pass: the shared engine prices the lines, the bill discount and this
+   * bill's charges together, so the totals bar, the supplier-invoice check and the posted
+   * document cannot disagree (CR-C). Legacy freight no longer joins after the engine — it
+   * enters as a 0% Freight charge, so its round-off and spread stay the engine's (PUR-017).
+   */
+  calculateDocumentEngine(
+    lines: PurchaseLineItemInput[],
+    opts: {
+      isInterstate?: boolean;
+      bill_discount_type?: "percent" | "amount";
+      bill_discount_value?: number;
+      round_off?: number | null;
+      charges?: ResolvedCharge[];
+    } = {}
+  ): TaxEngineDocumentTotals {
+    const settings = companySettingsService.getSettings();
+    const storeState = settings.state_code || "32";
+    const defaultTaxMode = settings.purchase_tax_mode || "exclusive";
+    const isInterstate = Boolean(opts.isInterstate);
+
+    return calculateDocumentTaxes({
+      store_state: storeState,
+      place_of_supply: isInterstate
+        ? cleanStateCode(storeState) === "32"
+          ? "29-Karnataka"
+          : "32-Kerala"
+        : storeState,
+      default_tax_mode: defaultTaxMode,
+      lines: engineLines(lines, { taxInclusive: defaultTaxMode === "inclusive" }),
+      bill_discount: {
+        type: opts.bill_discount_type || "amount",
+        value: Math.max(0, opts.bill_discount_value || 0),
+      },
+      charges: opts.charges || [],
+      // CR-C-11 / PUR-016: the store decides whether a separately-paid charge is money the
+      // supplier is owed. The answer each bill got is stored on its charge rows, so a later
+      // policy change cannot restate a bill that has already been printed.
+      separately_paid_in_payable: Boolean(settings.purchase_charges?.separately_paid_in_payable),
+      auto_round_off: opts.round_off == null,
+      manual_round_off: opts.round_off ?? null,
+    });
+  }
+
+  /**
+   * Document totals for the screens that only need numbers. A bill with charges takes every
+   * figure from the engine; one without keeps the pre-CR-C arithmetic, legacy freight included.
    */
   calculateDocumentTotals(
     lines: PurchaseLineItemInput[],
@@ -327,61 +424,26 @@ export class PurchaseService {
       bill_discount_value?: number;
       freight_charges?: number;
       round_off?: number | null;
+      charges?: ResolvedCharge[];
     } = {}
-  ): {
-    subtotal: number;
-    discountTotal: number;
-    billDiscountAmount: number;
-    taxTotal: number;
-    cgstTotal: number;
-    sgstTotal: number;
-    igstTotal: number;
-    cessTotal: number;
-    freightCharges: number;
-    roundOff: number;
-    grandTotal: number;
-    totalUnits: number;
-    taxableSubtotal: number;
-  } {
-    const settings = companySettingsService.getSettings();
-    const storeState = settings.state_code || "32";
-    const defaultTaxMode = settings.purchase_tax_mode || "exclusive";
-
-    const engineLines = lines.map((line) => {
-      const discountType = line.discount_type;
-      return {
-        qty: Math.max(0, line.pack_qty ?? line.qty ?? 0),
-        loose_qty: Math.max(0, line.loose_qty || 0),
-        free_qty: Math.max(0, line.free_qty || 0),
-        free_loose_qty: Math.max(0, line.free_loose_qty || 0),
-        units_per_pack: Math.max(1, line.units_per_pack || 1),
-        unit_price: line.purchase_rate,
-        mrp: line.mrp,
-        hsn_code: line.hsn_code,
-        rate_basis: "ptr" as const,
-        discount_percent: discountType === "amount" ? 0 : line.discount_percent,
-        discount_amount: discountType === "percent" ? 0 : line.discount_amount,
-        gst_percent: line.gst_percent,
-        cess_percent: line.cess_percent,
-        is_tax_inclusive: defaultTaxMode === "inclusive",
-      };
+  ): PurchaseDocumentTotals {
+    const doc = this.calculateDocumentEngine(lines, {
+      isInterstate,
+      bill_discount_type: opts.bill_discount_type,
+      bill_discount_value: opts.bill_discount_value,
+      round_off: opts.round_off,
+      charges: opts.charges,
     });
 
-    const doc = calculateDocumentTaxes({
-      store_state: storeState,
-      place_of_supply: isInterstate ? (cleanStateCode(storeState) === "32" ? "29-Karnataka" : "32-Kerala") : storeState,
-      default_tax_mode: defaultTaxMode,
-      lines: engineLines,
-      bill_discount: {
-        type: opts.bill_discount_type || "amount",
-        value: Math.max(0, opts.bill_discount_value || 0),
-      },
-      auto_round_off: false,
-    });
-
+    const hasCharges = Boolean(opts.charges?.length);
     const freight = round2(opts.freight_charges || 0);
-    const netBeforeRound = round2(doc.net_before_round + freight);
-    const roundOff = opts.round_off != null ? round2(opts.round_off) : round2(Math.round(netBeforeRound) - netBeforeRound);
+    const netBeforeRound = round2(doc.net_before_round + (hasCharges ? 0 : freight));
+    const roundOff =
+      opts.round_off != null
+        ? round2(opts.round_off)
+        : hasCharges
+          ? round2(doc.round_off)
+          : round2(Math.round(netBeforeRound) - netBeforeRound);
     const grandTotal = Math.max(0, round2(netBeforeRound + roundOff));
     const totalUnits = lines.reduce((sum, line) => {
       const upp = Math.max(1, line.units_per_pack || 1);
@@ -404,6 +466,11 @@ export class PurchaseService {
       grandTotal,
       totalUnits,
       taxableSubtotal: doc.taxable_subtotal,
+      chargeTotal: round2(doc.charge_taxable_total),
+      chargeTaxTotal: round2(doc.charge_tax_total),
+      landedCostAddition: round2(doc.landed_cost_addition),
+      expenseChargeTotal: round2(doc.expense_charge_total),
+      engine: doc,
     };
   }
 
@@ -414,6 +481,9 @@ export class PurchaseService {
     success: boolean;
     purchaseId: string;
     purchaseNumber: string;
+    /** Whether the server has actually taken the bill yet (PUR-01/05). */
+    syncState?: "synced" | "pending";
+    syncMessage?: string;
   }> {
     if (!doc.supplier_name?.trim() || !doc.supplier_invoice_no?.trim()) {
       throw new Error("Supplier name and supplier invoice number are required");
@@ -422,14 +492,34 @@ export class PurchaseService {
       throw new Error("Cannot save purchase bill with no items");
     }
 
+    // Resolved before a single row moves: a charge against a head this store does not have,
+    // or one that would drive the payable below zero, must refuse the whole bill instead of
+    // leaving half of it posted (rule R12, PUR-014).
+    const docCharges = doc.charges?.length
+      ? await resolveCharges(doc.charges, doc.place_of_supply ?? null)
+      : await legacyFreightCharge(doc.freight_charges || 0, doc.place_of_supply ?? null);
+
+    const isInterstate = Boolean(doc.is_interstate);
+    const docTotals = this.calculateDocumentTotals(doc.lines, isInterstate, {
+      bill_discount_type: doc.bill_discount_type,
+      bill_discount_value: doc.bill_discount,
+      freight_charges: doc.freight_charges,
+      round_off: doc.round_off,
+      charges: docCharges,
+    });
+
+    // The grand total is clamped at zero for display, so the unclamped figure is what the
+    // till checks — the same rule the server applies before it writes a purchase.
+    if (docCharges.length && round2(docTotals.engine.net_before_round + docTotals.roundOff) < 0) {
+      throw new Error("The charges on this bill would take the payable below zero.");
+    }
+
     const purchaseId = `pb_${Date.now()}_${Math.random().toString(16).slice(2, 6)}`;
     const now = Date.now();
     const purchaseNumber = doc.purchase_number || (await this.generateNextPurchaseNumber());
     if (doc.purchase_number) {
       await this.syncNextPurchaseSequence(purchaseNumber);
     }
-
-    const isInterstate = Boolean(doc.is_interstate);
     const itemRecords: PurchaseItemRecord[] = [];
     const receivedMap: Record<string, number> = {};
 
@@ -459,7 +549,7 @@ export class PurchaseService {
         stock_qty: updatedStock,
         mrp: line.mrp,
         purchase_rate: line.purchase_rate,
-        selling_rate: line.selling_rate || (line.mrp ? round2(line.mrp / unitsPerPack) : undefined),
+        selling_rate: line.selling_rate || line.mrp || undefined,
         rack_location: line.shelf_location,
       });
 
@@ -479,7 +569,7 @@ export class PurchaseService {
           barcode: line.product_id,
           hsn_sac_code: line.hsn_code,
           mrp: line.mrp || 0,
-          sel_rate: line.selling_rate || (line.mrp ? round2(line.mrp / unitsPerPack) : line.purchase_rate),
+          sel_rate: line.selling_rate || line.mrp || line.purchase_rate,
           ptr: line.purchase_rate,
           gst_percent: line.gst_percent,
           units_per_pack: unitsPerPack,
@@ -518,6 +608,7 @@ export class PurchaseService {
         expiry_date: line.expiry_date,
         pack_qty: line.pack_qty ?? line.qty ?? 1,
         loose_qty: line.loose_qty || 0,
+        gross_weight_kg: line.gross_weight_kg ?? null,
         free_qty: line.free_qty || 0,
         free_loose_qty: line.free_loose_qty || 0,
         units_per_pack: unitsPerPack,
@@ -545,13 +636,6 @@ export class PurchaseService {
       await sqliteStorage.insertRecord("purchase_items", itemId, itemRow as unknown as Record<string, unknown>);
       itemRecords.push(itemRow);
     }
-
-    const docTotals = this.calculateDocumentTotals(doc.lines, isInterstate, {
-      bill_discount_type: doc.bill_discount_type,
-      bill_discount_value: doc.bill_discount,
-      freight_charges: doc.freight_charges,
-      round_off: doc.round_off,
-    });
 
     const purchaseRow: PurchaseDocumentRecord = {
       id: purchaseId,
@@ -608,13 +692,44 @@ export class PurchaseService {
       await purchaseOrderService.updateReceivedQty(doc.po_id, receivedMap);
     }
 
-    // 8. Enqueue for cloud sync
-    await syncQueueService.enqueue("purchase", purchaseId, "create", {
-      ...purchaseRow,
-      items: itemRecords,
+    // 8. Charge rows, their spread onto these lines and the landed cost they create.
+    await postCharges({
+      purchaseId,
+      invoiceNumber: doc.supplier_invoice_no,
+      charges: docCharges,
+      result: docTotals.engine,
+      purchaseLines: doc.lines,
+      itemIdsByLine: Object.fromEntries(doc.lines.map((_, idx) => [String(idx), itemRecords[idx]?.id])),
     });
 
-    return { success: true, purchaseId, purchaseNumber };
+    // 9. Enqueue for cloud sync — the charge lines ride inside the bill, because the server
+    //    re-prices them there and needs the same lines the till priced offline (SYNC-007).
+    const queueId = await syncQueueService.enqueue("purchase", purchaseId, "create", {
+      ...purchaseRow,
+      items: itemRecords,
+      charges: chargePayload(docCharges),
+    });
+
+    // A bill is only "posted" once the server has taken it. While the line is up we wait for
+    // its answer, so a rejected charge or a duplicate supplier bill is reported at the counter
+    // instead of a success the owner never actually had (PUR-01/06). Offline, the local bill
+    // stands and the queue carries it when the link returns.
+    if (syncQueueService.isOnline()) {
+      const ack = await syncQueueService.syncSingleItem(queueId);
+      if (ack.success) {
+        return { success: true, purchaseId, purchaseNumber, syncState: "synced" };
+      }
+
+      return {
+        success: true,
+        purchaseId,
+        purchaseNumber,
+        syncState: "pending",
+        syncMessage: ack.error,
+      };
+    }
+
+    return { success: true, purchaseId, purchaseNumber, syncState: "pending" };
   }
 
   /**
@@ -678,24 +793,38 @@ export class PurchaseService {
       notes: `Purchase cancellation: ${reason}`,
     });
 
-    // 4. Update status to cancelled
+    // 4. PUR-015: the goods went back, so the charges they were carrying go back too — each
+    //    charge reads as fully reversed, the expense rows it booked are withdrawn and the batch
+    //    is valued at the supplier's own rate again. The postings stay so the bill can still be
+    //    reconciled paisa for paisa against them.
+    await reverseOnCancel(purchaseId);
+
+    // 5. Update status to cancelled
     doc.status = "cancelled";
     doc.cancel_reason = reason;
     doc.updated_at = now;
     await sqliteStorage.insertRecord("purchase_documents", purchaseId, doc as unknown as Record<string, unknown>);
 
-    // 5. Enqueue sync
+    // 6. Enqueue sync
     await syncQueueService.enqueue("purchase", purchaseId, "update", doc);
 
     return { success: true };
   }
 
   /**
-   * Fetch purchase bill by ID with its line items
+   * Fetch purchase bill by ID with its line items and its charge lines.
+   *
+   * The charges come back with the bill because the purchase screen edits them as one document:
+   * a bill keyed before CR-C has no rows, and its freight scalar is the caller's to present
+   * (PUR-017) — this read never invents a charge row for it.
    */
   async getPurchaseBillById(
     purchaseId: string
-  ): Promise<{ document: PurchaseDocumentRecord; items: PurchaseItemRecord[] } | null> {
+  ): Promise<{
+    document: PurchaseDocumentRecord;
+    items: PurchaseItemRecord[];
+    charges: PurchaseChargeRecord[];
+  } | null> {
     const doc = await sqliteStorage.findById<PurchaseDocumentRecord>("purchase_documents", purchaseId);
     if (!doc) return null;
 
@@ -767,7 +896,14 @@ export class PurchaseService {
       }
     }
 
-    return { document: doc, items };
+    const chargeRows = await sqliteStorage
+      .findAll<PurchaseChargeRecord>("purchase_charges")
+      .catch(() => [] as PurchaseChargeRecord[]);
+    const charges = chargeRows
+      .filter((row) => String(row.purchase_id) === purchaseId)
+      .sort((a, b) => (a.seq || 0) - (b.seq || 0));
+
+    return { document: doc, items, charges };
   }
 
   /**
@@ -842,7 +978,13 @@ export class PurchaseService {
     purchaseId: string,
     doc: PurchaseDocumentInput,
     reason = "Purchase bill revised"
-  ): Promise<{ success: boolean; purchaseId: string; purchaseNumber: string }> {
+  ): Promise<{
+    success: boolean;
+    purchaseId: string;
+    purchaseNumber: string;
+    syncState?: "synced" | "pending";
+    syncMessage?: string;
+  }> {
     const originalDoc = await sqliteStorage.findById<PurchaseDocumentRecord>("purchase_documents", purchaseId);
     if (!originalDoc) throw new Error("Purchase bill not found");
     if (originalDoc.status === "cancelled") throw new Error("Cannot edit a cancelled purchase bill");
@@ -861,6 +1003,23 @@ export class PurchaseService {
     const allItems = await sqliteStorage.findAll<PurchaseItemRecord>("purchase_items");
     const originalItems = allItems.filter((i) => i.purchase_id === purchaseId);
     const now = Date.now();
+
+    // Same rule as the inward path: this store's heads are checked before the edit writes anything.
+    const docCharges = doc.charges?.length
+      ? await resolveCharges(doc.charges, doc.place_of_supply ?? null)
+      : await legacyFreightCharge(doc.freight_charges || 0, doc.place_of_supply ?? null);
+
+    const docTotals = this.calculateDocumentTotals(doc.lines, Boolean(doc.is_interstate), {
+      bill_discount_type: doc.bill_discount_type,
+      bill_discount_value: doc.bill_discount,
+      freight_charges: doc.freight_charges,
+      round_off: doc.round_off,
+      charges: docCharges,
+    });
+
+    if (docCharges.length && round2(docTotals.engine.net_before_round + docTotals.roundOff) < 0) {
+      throw new Error("The charges on this bill would take the payable below zero.");
+    }
 
     // 1. REVERSE ORIGINAL ITEMS
     for (const item of originalItems) {
@@ -930,7 +1089,7 @@ export class PurchaseService {
         stock_qty: updatedStock,
         mrp: line.mrp,
         purchase_rate: line.purchase_rate,
-        selling_rate: line.selling_rate || (line.mrp ? round2(line.mrp / unitsPerPack) : undefined),
+        selling_rate: line.selling_rate || line.mrp || undefined,
         rack_location: line.shelf_location,
       });
 
@@ -971,6 +1130,7 @@ export class PurchaseService {
         expiry_date: line.expiry_date,
         pack_qty: line.pack_qty ?? line.qty ?? 1,
         loose_qty: line.loose_qty || 0,
+        gross_weight_kg: line.gross_weight_kg ?? null,
         free_qty: line.free_qty || 0,
         free_loose_qty: line.free_loose_qty || 0,
         units_per_pack: unitsPerPack,
@@ -998,13 +1158,6 @@ export class PurchaseService {
       await sqliteStorage.insertRecord("purchase_items", itemId, itemRow as unknown as Record<string, unknown>);
       newItemRecords.push(itemRow);
     }
-
-    const docTotals = this.calculateDocumentTotals(doc.lines, isInterstate, {
-      bill_discount_type: doc.bill_discount_type,
-      bill_discount_value: doc.bill_discount,
-      freight_charges: doc.freight_charges,
-      round_off: doc.round_off,
-    });
 
     // 4. UPDATE PURCHASE DOCUMENT RECORD
     const updatedDocRow: PurchaseDocumentRecord = {
@@ -1055,13 +1208,55 @@ export class PurchaseService {
       await purchaseOrderService.updateReceivedQty(doc.po_id, receivedMap);
     }
 
-    // 7. ENQUEUE FOR SYNC
-    await syncQueueService.enqueue("purchase", purchaseId, "update", {
-      ...updatedDocRow,
-      items: newItemRecords,
+    // 7. Re-post the charge lines: rows, spread, landed cost and expense entries. Anything
+    //    this edit no longer carries is deleted, so an edit cannot leave orphan money.
+    await postCharges({
+      purchaseId,
+      invoiceNumber: doc.supplier_invoice_no,
+      charges: docCharges,
+      result: docTotals.engine,
+      purchaseLines: doc.lines,
+      itemIdsByLine: Object.fromEntries(doc.lines.map((_, idx) => [String(idx), newItemRecords[idx]?.id])),
     });
 
-    return { success: true, purchaseId, purchaseNumber: originalDoc.purchase_number };
+    // 8. A re-post writes `reversed_amount: 0`, so the debit notes already filed against this
+    //    bill have to be read back into the new rows — otherwise an edit quietly gives the
+    //    supplier money it never returned (PUR-015).
+    await recordReversals(purchaseId);
+
+    // 9. ENQUEUE FOR SYNC
+    const queueId = await syncQueueService.enqueue("purchase", purchaseId, "update", {
+      ...updatedDocRow,
+      items: newItemRecords,
+      charges: chargePayload(docCharges),
+    });
+
+    if (syncQueueService.isOnline()) {
+      const ack = await syncQueueService.syncSingleItem(queueId);
+      if (ack.success) {
+        return {
+          success: true,
+          purchaseId,
+          purchaseNumber: originalDoc.purchase_number,
+          syncState: "synced",
+        };
+      }
+
+      return {
+        success: true,
+        purchaseId,
+        purchaseNumber: originalDoc.purchase_number,
+        syncState: "pending",
+        syncMessage: ack.error,
+      };
+    }
+
+    return {
+      success: true,
+      purchaseId,
+      purchaseNumber: originalDoc.purchase_number,
+      syncState: "pending",
+    };
   }
 }
 

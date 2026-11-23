@@ -7,6 +7,7 @@ use App\Models\AuditLog;
 use App\Models\Invoice;
 use App\Models\InvoiceApproval;
 use App\Models\User;
+use App\Services\Auth\PinPolicy;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
@@ -34,7 +35,7 @@ class InvoiceApprovalController extends Controller
      */
     public function verify(Request $request, string $id): JsonResponse
     {
-        $invoice = $this->findInvoice($id);
+        $invoice = $this->findInvoice($request, $id);
         if (!$invoice) {
             return response()->json(['success' => false, 'error' => 'Invoice not found.'], 404);
         }
@@ -47,6 +48,7 @@ class InvoiceApprovalController extends Controller
             'pin' => 'nullable|string|min:6|max:6',
             'user_id' => 'nullable',
             'requested_by' => 'nullable|string|max:191',
+            'requested_by_user_id' => 'nullable',
             'counter_code' => 'nullable|string|max:40',
             'reason' => 'nullable|string|max:1000',
         ]);
@@ -57,6 +59,15 @@ class InvoiceApprovalController extends Controller
                 'code' => 'INVOICE_CANCELLED',
                 'error' => 'Cancelled invoices cannot be edited.',
             ], 422);
+        }
+
+        // G12: do not hand out a cancellation grant for a day that will refuse it.
+        if ($validated['action'] === 'cancel') {
+            app(\App\Services\DayClose\StoreDayCloseService::class)->assertDayNotClosed(
+                (int) $invoice->store_id,
+                $invoice->invoice_date?->toDateString(),
+                'invoice_cancel_approval'
+            );
         }
 
         if ($validated['mode'] === 'manager') {
@@ -79,7 +90,7 @@ class InvoiceApprovalController extends Controller
             ], 403);
         }
 
-        $invoice = $this->findInvoice($id);
+        $invoice = $this->findInvoice($request, $id);
         if (!$invoice) {
             return response()->json(['success' => false, 'error' => 'Invoice not found.'], 404);
         }
@@ -90,6 +101,14 @@ class InvoiceApprovalController extends Controller
             'minutes' => 'nullable|integer|min:1|max:60',
             'reason' => 'nullable|string|max:1000',
         ]);
+
+        if ($validated['action'] === 'cancel') {
+            app(\App\Services\DayClose\StoreDayCloseService::class)->assertDayNotClosed(
+                (int) $invoice->store_id,
+                $invoice->invoice_date?->toDateString(),
+                'invoice_cancel_approval_issue'
+            );
+        }
 
         $target = User::where('id', $validated['user_id'])
             ->where('store_id', $invoice->store_id)
@@ -141,7 +160,7 @@ class InvoiceApprovalController extends Controller
 
     public function index(Request $request, string $id): JsonResponse
     {
-        $invoice = $this->findInvoice($id);
+        $invoice = $this->findInvoice($request, $id);
         if (!$invoice) {
             return response()->json(['success' => false, 'error' => 'Invoice not found.'], 404);
         }
@@ -157,7 +176,7 @@ class InvoiceApprovalController extends Controller
 
     public function revoke(Request $request, string $id, string $approvalId): JsonResponse
     {
-        $invoice = $this->findInvoice($id);
+        $invoice = $this->findInvoice($request, $id);
         if (!$invoice) {
             return response()->json(['success' => false, 'error' => 'Invoice not found.'], 404);
         }
@@ -210,7 +229,7 @@ class InvoiceApprovalController extends Controller
             ], 422);
         }
 
-        if ($manager->locked_until && $manager->locked_until->isFuture()) {
+        if (PinPolicy::isLocked($manager->locked_until)) {
             return response()->json([
                 'success' => false,
                 'code' => 'APPROVER_LOCKED',
@@ -225,9 +244,12 @@ class InvoiceApprovalController extends Controller
 
         if (!$passwordOk && !$pinOk) {
             $manager->increment('failed_login_attempts');
-            $max = (int)($manager->max_failed_logins ?? 5);
-            if ($manager->failed_login_attempts >= $max) {
-                $manager->update(['locked_until' => now()->addMinutes(15), 'failed_login_attempts' => 0]);
+            $lockedUntil = PinPolicy::lockoutUntil(
+                (int) $manager->failed_login_attempts,
+                PinPolicy::attemptsAllowed($manager->max_failed_logins)
+            );
+            if ($lockedUntil !== null) {
+                $manager->update(['locked_until' => $lockedUntil, 'failed_login_attempts' => 0]);
             }
             $this->auditFailure($request, $invoice, $data, 'invalid_manager_credentials');
             return response()->json([
@@ -255,7 +277,7 @@ class InvoiceApprovalController extends Controller
             'action' => $data['action'],
             'mode' => 'manager',
             'status' => 'used',
-            'requested_by_user_id' => $data['user_id'] ?? null,
+            'requested_by_user_id' => $this->requestingUserId($invoice, $data),
             'requested_by_name' => $data['requested_by'] ?? null,
             'requested_by_counter' => $data['counter_code'] ?? null,
             'approved_by_user_id' => $manager->id,
@@ -384,10 +406,33 @@ class InvoiceApprovalController extends Controller
         ];
     }
 
-    private function findInvoice(string $id): ?Invoice
+    /**
+     * The staff member who asked for the grant, when the till names one. Only an
+     * id belonging to this invoice's store is accepted, so a grant cannot point
+     * the audit trail at somebody else's tenant.
+     */
+    private function requestingUserId(Invoice $invoice, array $data): ?int
     {
-        return Invoice::where('id', $id)
-            ->orWhere('invoice_number', $id)
+        $candidate = $data['requested_by_user_id'] ?? $data['user_id'] ?? null;
+
+        if (!is_numeric($candidate)) {
+            return null;
+        }
+
+        $id = User::where('id', (int) $candidate)
+            ->where('store_id', $invoice->store_id)
+            ->value('id');
+
+        return $id === null ? null : (int) $id;
+    }
+
+    private function findInvoice(Request $request, string $id): ?Invoice
+    {
+        // G1-SEC: approvals are verified and issued only inside the caller's store.
+        $storeId = \App\Support\RequestTenant::requireStoreId($request);
+
+        return Invoice::where('store_id', $storeId)
+            ->where(fn ($q) => $q->where('id', $id)->orWhere('invoice_number', $id))
             ->first();
     }
 }

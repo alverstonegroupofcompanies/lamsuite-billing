@@ -10,7 +10,7 @@ describe("Company Settings, Sequences & Menu Visibility (CFG-001, CFG-002)", () 
 
   describe("CFG-001: Store Profile & Sequential Invoice Numbers", () => {
     it("generates sequential formatted invoice numbers and persists next sequence", async () => {
-      await companySettingsService.updateSettings({
+      await companySettingsService.saveLocalSettings({
         invoice_prefix: "LS",
         next_invoice_number: 50,
       });
@@ -26,7 +26,7 @@ describe("Company Settings, Sequences & Menu Visibility (CFG-001, CFG-002)", () 
     });
 
     it("updates store statutory headers and drug licenses", async () => {
-      await companySettingsService.updateSettings({
+      await companySettingsService.saveLocalSettings({
         store_name: "Apex Super Specialty Pharmacy",
         drug_license_numbers: ["KL-PLK-20B-9988", "KL-PLK-21B-9989"],
         fssai_no: "10019041000888",
@@ -51,7 +51,7 @@ describe("Company Settings, Sequences & Menu Visibility (CFG-001, CFG-002)", () 
     });
 
     it("persists workspace defaultLandingPage setting", async () => {
-      await companySettingsService.updateSettings({
+      await companySettingsService.saveLocalSettings({
         workspace: {
           ...DEFAULT_SETTINGS.workspace,
           defaultLandingPage: "pos",
@@ -65,7 +65,7 @@ describe("Company Settings, Sequences & Menu Visibility (CFG-001, CFG-002)", () 
     it("persists the store-owner default bills period", async () => {
       expect(DEFAULT_SETTINGS.workspace.billsDefaultPeriod).toBe("today");
 
-      await companySettingsService.updateSettings({
+      await companySettingsService.saveLocalSettings({
         workspace: {
           ...DEFAULT_SETTINGS.workspace,
           billsDefaultPeriod: "last7days",
@@ -124,7 +124,7 @@ describe("Company Settings, Sequences & Menu Visibility (CFG-001, CFG-002)", () 
 
   describe("Purchase columns (items 24, 26)", () => {
     it("keeps newly added columns available when a saved layout predates them", async () => {
-      await companySettingsService.updateSettings({
+      await companySettingsService.saveLocalSettings({
         purchase_columns: [
           { id: "product_name", label: "Product", visible: true, width: 220, order: 0 },
           { id: "qty", label: "Qty", visible: true, width: 70, order: 1 },
@@ -144,6 +144,37 @@ describe("Company Settings, Sequences & Menu Visibility (CFG-001, CFG-002)", () 
       const discount = columns.find((c) => c.id === "discount");
       expect(discount?.label).toContain("%");
       expect(discount?.visible).toBe(true);
+    });
+  });
+
+  describe("Purchase charge payable policy (PUR-016, CFG-003)", () => {
+    const remoteWith = (separatelyPaidInPayable: unknown) => ({
+      purchase_charges: { separately_paid_in_payable: separatelyPaidInPayable },
+    });
+
+    it("turns the payable inclusion on for the spellings a settings payload can carry", async () => {
+      for (const value of [true, 1, "1", "true"]) {
+        const settings = await companySettingsService.updateLocalFromRemote(remoteWith(value));
+        expect(settings.purchase_charges.separately_paid_in_payable, JSON.stringify(value)).toBe(true);
+      }
+    });
+
+    it("keeps every other spelling off, so a stray value cannot silently reprice a bill", async () => {
+      for (const value of [false, 0, "0", "", "maybe", null]) {
+        const settings = await companySettingsService.updateLocalFromRemote(remoteWith(value));
+        expect(settings.purchase_charges.separately_paid_in_payable, JSON.stringify(value)).toBe(false);
+      }
+    });
+
+    it("leaves the till's own answer alone when a remote form has never shown the switch", async () => {
+      await companySettingsService.updateLocalFromRemote(remoteWith(true));
+
+      const kept = await companySettingsService.updateLocalFromRemote({
+        billing: { purchase_charges: { reverse_on_return: "sunk" } },
+      });
+
+      expect(kept.purchase_charges.separately_paid_in_payable).toBe(true);
+      expect(kept.purchase_charges.reverse_on_return).toBe("sunk");
     });
   });
 });

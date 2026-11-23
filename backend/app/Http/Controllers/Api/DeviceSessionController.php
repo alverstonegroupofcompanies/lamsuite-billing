@@ -9,6 +9,8 @@ use App\Models\Device;
 use App\Models\DeviceSession;
 use App\Models\Store;
 use App\Models\UserSession;
+use App\Services\Counter\CounterPresenceService;
+use App\Support\RequestTenant;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Laravel\Sanctum\PersonalAccessToken;
@@ -20,27 +22,10 @@ class DeviceSessionController
      */
     public function index(Request $request): JsonResponse
     {
-        $requestedStore = $request->query('store_id') ?? $request->header('X-Store-Id');
-        $isAllStores = strtolower(trim((string)$requestedStore)) === 'all';
+        // G1-SEC: "all stores" is only what ScopeStore granted a person with
+        // access to every store; otherwise the roster is the tenant's own store.
+        $isAllStores = $request->attributes->get('store_scope_all') === true;
         $storeId = $isAllStores ? null : $this->resolveStoreId($request);
-
-        // Paired workstations often carry a local registry key ("store_main")
-        // that never matches a server store. Fall back to the store the
-        // presenting device token was issued for instead of reporting an empty
-        // roster for a store the device demonstrably belongs to.
-        if (!$isAllStores && $storeId === null) {
-            $storeId = $this->resolveStoreIdFromDeviceToken($request);
-        }
-
-        // A named store that does not exist must never fall back to another
-        // store; that would leak another branch's device roster.
-        if (!$isAllStores && $requestedStore !== null && trim((string)$requestedStore) !== '' && $storeId === null) {
-            return response()->json([
-                'success' => false,
-                'error' => 'STORE_NOT_FOUND',
-                'message' => "Unknown store '{$requestedStore}'.",
-            ], 404);
-        }
 
         if (!$isAllStores && $storeId === null) {
             return response()->json([
@@ -252,14 +237,9 @@ class DeviceSessionController
         $ip = $reportedIpv4 ?: $request->ip();
         $publicIp = DeviceSession::resolvePublicIp($request, $validated['public_ip'] ?? null);
 
+        // G1-SEC: the heartbeat lands in the authenticated tenant's store only.
         $requestedStore = $validated['store_id'] ?? $request->header('X-Store-Id');
-        $targetStoreId = $requestedStore !== null && trim((string)$requestedStore) !== ''
-            ? $this->resolveStoreValue($requestedStore)
-            : $this->resolveStoreId($request);
-
-        if ($targetStoreId === null) {
-            $targetStoreId = $this->resolveStoreIdFromDeviceToken($request);
-        }
+        $targetStoreId = $this->resolveStoreId($request);
 
         if ($requestedStore !== null && trim((string)$requestedStore) !== '' && $targetStoreId === null) {
             return response()->json([
@@ -349,6 +329,12 @@ class DeviceSessionController
                 $publicIp,
                 $reportedIpv4
             );
+
+            // The first beat of a workstation is also a login, and it carries
+            // the same backlog the recurring beat does (CNT-01).
+            if (isset($validated['unsynced_items_count'])) {
+                $session->update(['unsynced_items_count' => max(0, (int) $validated['unsynced_items_count'])]);
+            }
         }
 
         $store = Store::find($session->store_id);
@@ -357,12 +343,24 @@ class DeviceSessionController
             ->latest('id')
             ->first();
 
+        // CNT-01: a heartbeat is the only moment the store hears from a counter,
+        // so it is what the counter's presence history is built from.
+        if ($counter) {
+            app(CounterPresenceService::class)->beat($counter);
+        }
+
         return response()->json([
             'success' => true,
             'status' => $session->computeStatus(),
             'store_id' => (string)$session->store_id,
             'store_active' => $store ? (bool)$store->is_active : true,
             'store_version' => $store ? (int)$store->version : 1,
+            // PRF-004: the watermark the till compares against the document it
+            // is working inside. A heartbeat that answers with a different one
+            // is the attached counter's notice that its surface just changed.
+            'permission_profile_version' => $counter
+                ? (int) ($counter->permission_profile_version ?? \App\Support\Counter\CounterProfile::VERSION)
+                : null,
             'last_reset_at' => $lastReset ? $lastReset->created_at->toIso8601String() : null,
             'last_reset_options' => $lastReset ? ($lastReset->new_values['options'] ?? null) : null,
             'public_ip' => $session->public_ip,
@@ -389,7 +387,12 @@ class DeviceSessionController
         }
 
         if (!$counter) {
-            $counter = Counter::where('device_uuid', $deviceUuid)->first();
+            // CNT-008: one machine can sit on a counter in several stores, so a
+            // heartbeat naming only the machine must resolve within the store it
+            // is beating for — never whichever counter the lookup reached first.
+            $counter = Counter::where('device_uuid', $deviceUuid)
+                ->when($storeId, fn ($query) => $query->where('store_id', $storeId))
+                ->first();
         }
 
         return $counter;
@@ -400,7 +403,7 @@ class DeviceSessionController
      */
     public function rename(Request $request, string $id): JsonResponse
     {
-        $session = DeviceSession::findOrFail($id);
+        $session = $this->findStoreSession($request, $id);
         $validated = $request->validate([
             'counter_name' => 'nullable|string|max:100',
             'device_name' => 'nullable|string|max:100',
@@ -477,7 +480,7 @@ class DeviceSessionController
      */
     public function lock(Request $request, string $id): JsonResponse
     {
-        $session = DeviceSession::findOrFail($id);
+        $session = $this->findStoreSession($request, $id);
         $session->update([
             'status' => 'locked',
         ]);
@@ -504,7 +507,7 @@ class DeviceSessionController
      */
     public function unlock(Request $request, string $id): JsonResponse
     {
-        $session = DeviceSession::findOrFail($id);
+        $session = $this->findStoreSession($request, $id);
         $session->update([
             'status' => 'active',
             'last_active_at' => now(),
@@ -532,7 +535,7 @@ class DeviceSessionController
      */
     public function revoke(Request $request, string $id): JsonResponse
     {
-        $session = DeviceSession::findOrFail($id);
+        $session = $this->findStoreSession($request, $id);
         $session->update([
             'status' => 'revoked',
             'is_active' => false,
@@ -569,7 +572,7 @@ class DeviceSessionController
      */
     public function forceLogout(Request $request, string $id): JsonResponse
     {
-        $session = DeviceSession::findOrFail($id);
+        $session = $this->findStoreSession($request, $id);
         $reason = $request->input('reason', 'Force-logged out by administrator');
         $session->update([
             'is_active' => false,
@@ -630,6 +633,14 @@ class DeviceSessionController
             return response()->json(['message' => 'device_uuid or session_id is required.'], 422);
         }
 
+        // G1-SEC: only a session of the caller's own store can be ended here.
+        $inStore = DeviceSession::where('store_id', RequestTenant::requireStoreId($request))
+            ->where(fn ($q) => $q->where('device_uuid', $identifier)->orWhere('session_id', $identifier))
+            ->exists();
+        if (!$inStore) {
+            return response()->json(['success' => false, 'message' => 'No such session in this store.'], 404);
+        }
+
         DeviceSession::recordLogout($identifier);
 
         return response()->json([
@@ -646,21 +657,14 @@ class DeviceSessionController
      */
     protected function resolveStoreId(Request $request): ?int
     {
-        $storeParam = $request->header('X-Store-Id')
-            ?: $request->query('store_id')
-            ?: $request->input('store_id');
+        // G1-SEC: the authenticated tenant only (device token or ScopeStore).
+        return RequestTenant::storeId($request);
+    }
 
-        if ($storeParam !== null && $storeParam !== '') {
-            return $this->resolveStoreValue($storeParam);
-        }
-
-        if ($user = $request->user()) {
-            if ($user->store_id) {
-                return (int)$user->store_id;
-            }
-        }
-
-        return null;
+    /** G1-SEC: a workstation session is only ever acted on inside the caller's store. */
+    protected function findStoreSession(Request $request, string $id): DeviceSession
+    {
+        return DeviceSession::where('store_id', RequestTenant::requireStoreId($request))->findOrFail($id);
     }
 
     /**

@@ -1,0 +1,64 @@
+{
+  "start": {
+    "id": 13,
+    "stock_qty": 6
+  },
+  "results": [
+    {
+      "st": 500,
+      "body": "{\"success\":false,\"error\":\"Server transaction failure: SQLSTATE[HY000]: General error: 5 database is locked (Connection: sqlite, SQL: update \\\"product_batches\\\" set \\\"stock_qty\\\" = 0, \\\"updated_at\\\" = "
+    },
+    {
+      "st": 201,
+      "body": "{\"success\":true,\"invoice\":{\"store_id\":4,\"counter_id\":3,\"counter_code\":\"C02\",\"location_name\":\"Back desk\",\"module_key\":\"invoice\",\"invoice_number\":\"C02-INV-RACE\",\"invoice_date\":\"2026-11-21\",\"due_date\":nu"
+    }
+  ],
+  "end": {
+    "batch": {
+      "stock_qty": 0
+    },
+    "ledger_sum": 0,
+    "negatives": [
+      {
+        "event_type": "SALE",
+        "qty_delta": -6,
+        "is_reconciled_negative": 0,
+        "balance_after": 0
+      },
+      {
+        "event_type": "SALE",
+        "qty_delta": -2,
+        "is_reconciled_negative": 0,
+        "balance_after": 6
+      },
+      {
+        "event_type": "SALE",
+        "qty_delta": -1,
+        "is_reconciled_negative": 0,
+        "balance_after": 8
+      }
+    ]
+  },
+  "counter_list": [
+    {
+      "code": "C01",
+      "status": "active",
+      "last_seen_at": "2026-11-21T16:29:37.000000Z",
+      "last_bill_at": null,
+      "last_salesperson": null,
+      "unsynced": null,
+      "offline_periods": null,
+      "device": "QA API till PH C01"
+    },
+    {
+      "code": "C02",
+      "status": "active",
+      "last_seen_at": "2026-11-21T16:03:59.000000Z",
+      "last_bill_at": null,
+      "last_salesperson": null,
+      "unsynced": null,
+      "offline_periods": null,
+      "device": "QA API till"
+    }
+  ]
+}

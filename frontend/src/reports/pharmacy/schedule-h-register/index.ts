@@ -2,17 +2,50 @@ import type { ReportModule, ReportColumn, ReportFilterDef } from "../../types";
 import { sqliteStorage } from "../../../lib/db/sqliteStorage";
 import type { InvoiceRecord, InvoiceItemRecord } from "../../../lib/billing/invoiceManagementService";
 
+/**
+ * GAP-02 / PHR-007 — what the till writes into the prescription register.
+ *
+ * A scheduled line is one the shelf itself marks: the stamped `schedule_code`
+ * the server sent, or the `schedule_type` a shelf cached before the stamp
+ * existed. An ordinary pack never joins the book, a return is written as its
+ * own entry with the quantity running backwards, and a line nobody vouched for
+ * stays visible with the pharmacist column blank rather than being dropped.
+ */
+
+/** The schedules a drug inspector reads as prescription-only. */
+const PRESCRIPTION_SCHEDULES = ["H", "H1", "X"];
+
+const RETURN_MODULES = ["credit_note", "sales_return"];
+
+function scheduleOf(product: { schedule_code?: string | null; schedule_type?: string | null }): string {
+  const stamped = String(product.schedule_code || "").trim().toUpperCase();
+  if (stamped) {
+    return PRESCRIPTION_SCHEDULES.includes(stamped) ? stamped : "";
+  }
+
+  const legacy = String(product.schedule_type || "").trim().toUpperCase();
+
+  return PRESCRIPTION_SCHEDULES.includes(legacy) ? legacy : "";
+}
+
 export interface ScheduleHRow {
   invoice_id: string;
   invoice_date: string;
   invoice_number: string;
+  is_return: boolean;
   doctor_name: string;
   doctor_reg_no: string;
   patient_name: string;
   product_name: string;
+  schedule_code: string;
   batch_no: string;
   expiry_date: string;
   qty: number;
+  total_amount: number;
+  pharmacist_name: string;
+  pharmacist_reg_no: string;
+  pharmacist_confirmed_at: number;
+  unconfirmed: boolean;
 }
 
 export const scheduleHColumns: ReportColumn<ScheduleHRow>[] = [
@@ -68,6 +101,16 @@ export const scheduleHColumns: ReportColumn<ScheduleHRow>[] = [
     canHide: false,
   },
   {
+    id: "schedule_code",
+    header: "Schedule",
+    accessor: (r) => r.schedule_code,
+    align: "center",
+    width: 90,
+    format: "badge",
+    badgeStyle: (val) => (val === "H1" ? "danger" : "warning"),
+    isDefaultVisible: true,
+  },
+  {
     id: "batch_no",
     header: "Batch No",
     accessor: (r) => r.batch_no || "-",
@@ -93,6 +136,42 @@ export const scheduleHColumns: ReportColumn<ScheduleHRow>[] = [
     isDefaultVisible: true,
     totalType: "sum",
   },
+  {
+    id: "total_amount",
+    header: "Value",
+    accessor: (r) => r.total_amount,
+    align: "right",
+    width: 110,
+    format: "currency",
+    isDefaultVisible: true,
+    totalType: "sum",
+  },
+  {
+    id: "pharmacist_name",
+    header: "Pharmacist",
+    accessor: (r) => r.pharmacist_name,
+    align: "left",
+    width: 170,
+    isDefaultVisible: true,
+  },
+  {
+    id: "pharmacist_reg_no",
+    header: "Registration No",
+    accessor: (r) => r.pharmacist_reg_no,
+    align: "center",
+    width: 150,
+    isDefaultVisible: true,
+  },
+  {
+    id: "unconfirmed",
+    header: "Confirmed",
+    accessor: (r) => (r.unconfirmed ? "No" : "Yes"),
+    align: "center",
+    width: 100,
+    format: "badge",
+    badgeStyle: (_val, r) => (r.unconfirmed ? "danger" : "success"),
+    isDefaultVisible: true,
+  },
 ];
 
 const today = new Date().toISOString().slice(0, 10);
@@ -111,7 +190,7 @@ export const scheduleHFilters: ReportFilterDef[] = [
 export const scheduleHReport: ReportModule<any, ScheduleHRow> = {
   id: "schedule-h-register",
   title: "Schedule H & H1 Prescription Register",
-  description: "Statutory drug control register recording doctor prescriptions, medical registration numbers, and patient details.",
+  description: "Statutory drug control register: every scheduled pack dispensed, with the batch, the prescribing doctor and patient, and the pharmacist who confirmed the bill.",
   category: "pharmacy",
   permission: "reports.pharmacy.view",
   menuVisibilityKey: "reports",
@@ -129,6 +208,14 @@ export const scheduleHReport: ReportModule<any, ScheduleHRow> = {
     const allInvoices = await sqliteStorage.findAll<InvoiceRecord>("invoices");
     const allItems = await sqliteStorage.findAll<InvoiceItemRecord>("invoice_items");
 
+    const scheduledByProduct = new Map<string, string>();
+    for (const product of await sqliteStorage.findAll<any>("products")) {
+      const code = scheduleOf(product);
+      if (code) {
+        scheduledByProduct.set(String(product.id), code);
+      }
+    }
+
     const itemsByInvoice = new Map<string, InvoiceItemRecord[]>();
     for (const item of allItems) {
       if (!itemsByInvoice.has(item.invoice_id)) {
@@ -144,22 +231,38 @@ export const scheduleHReport: ReportModule<any, ScheduleHRow> = {
         inv.invoice_date <= dates.endDate
     );
 
+    filtered.sort((a, b) => a.invoice_date.localeCompare(b.invoice_date) || a.invoice_number.localeCompare(b.invoice_number));
+
     const rows: ScheduleHRow[] = [];
 
     for (const inv of filtered) {
-      const items = itemsByInvoice.get(inv.id) || [];
-      for (const item of items) {
+      const isReturn = RETURN_MODULES.includes(String(inv.module_key));
+      const sign = isReturn ? -1 : 1;
+
+      for (const item of itemsByInvoice.get(inv.id) || []) {
+        const code = scheduledByProduct.get(String(item.product_id));
+        if (!code) continue;
+
+        const confirmedBy = String(inv.pharmacist_name || "").trim() || String(inv.pharmacist_id || "").trim();
+
         rows.push({
           invoice_id: inv.id,
           invoice_date: inv.invoice_date,
           invoice_number: inv.invoice_number,
+          is_return: isReturn,
           doctor_name: inv.doctor_name || "-",
           doctor_reg_no: inv.doctor_reg_no || "-",
           patient_name: inv.patient_name || inv.customer_name || "-",
           product_name: item.product_name,
+          schedule_code: code,
           batch_no: item.batch_no || "-",
           expiry_date: item.expiry_date || "-",
-          qty: (Number(item.qty) || 0) + (Number(item.loose_qty) || 0),
+          qty: ((Number(item.qty) || 0) + (Number(item.loose_qty) || 0)) * sign,
+          total_amount: (Number(item.total_amount) || 0) * sign,
+          pharmacist_name: String(inv.pharmacist_name || ""),
+          pharmacist_reg_no: String(inv.pharmacist_reg_no || ""),
+          pharmacist_confirmed_at: Number(inv.pharmacist_confirmed_at) || 0,
+          unconfirmed: confirmedBy === "",
         });
       }
     }
@@ -171,7 +274,9 @@ export const scheduleHReport: ReportModule<any, ScheduleHRow> = {
           r.doctor_name.toLowerCase().includes(q) ||
           r.patient_name.toLowerCase().includes(q) ||
           r.product_name.toLowerCase().includes(q) ||
-          r.invoice_number.toLowerCase().includes(q)
+          r.invoice_number.toLowerCase().includes(q) ||
+          r.pharmacist_name.toLowerCase().includes(q) ||
+          r.pharmacist_reg_no.toLowerCase().includes(q)
       );
       return {
         rows: searchFiltered,

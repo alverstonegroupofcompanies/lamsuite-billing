@@ -130,13 +130,6 @@ class AdminDayCloseController
 
     public function reopen(Request $request): JsonResponse
     {
-        if (! $request->user()?->isSuperAdmin()) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Only a super administrator can reopen a reconciled day.',
-            ], 403);
-        }
-
         $storeId = $this->resolveStoreId($request);
         if (! $storeId) {
             return $this->storeRequired();
@@ -156,17 +149,30 @@ class AdminDayCloseController
             return response()->json(['success' => false, 'message' => 'No day close found for that date.'], 404);
         }
 
+        // G12: a closed day now blocks cancellations, so whoever may close it (the
+        // route's transactions-edit permission) may also undo that. Only a counted,
+        // reconciled day still needs a super administrator.
+        if ($close->status === 'reconciled' && ! $request->user()?->isSuperAdmin()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Only a super administrator can reopen a reconciled day.',
+            ], 403);
+        }
+
+        $previousStatus = $close->status;
+
         $close = $this->service->reopen($close, $validated['reason'] ?? null);
 
         AuditLog::log('reopen_store_day', 'StoreDayClose', (string) $close->id, null, [
             'close_date' => $close->close_date?->toDateString(),
+            'from_status' => $previousStatus,
             'reason' => $validated['reason'] ?? null,
         ], $storeId);
 
         return response()->json([
             'success' => true,
             'day_close' => $this->service->summary($storeId, $close->close_date->toDateString()),
-            'message' => 'Day reopened. Backdated bills are allowed again until the next reconciliation.',
+            'message' => 'Day reopened. Cancellations and backdated bills are allowed again until the day is closed again.',
         ]);
     }
 

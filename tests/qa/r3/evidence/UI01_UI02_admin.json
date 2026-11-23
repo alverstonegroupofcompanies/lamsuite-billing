@@ -1,0 +1,40 @@
+{
+  "url": "http://localhost:5174",
+  "login": {
+    "url": "http://localhost:5174/login",
+    "placeholders": [
+      "you@company.com",
+      "••••••••••••"
+    ],
+    "text_alverstone": false,
+    "pass": true
+  },
+  "sidebar": {
+    "version_lines": [
+      "v2.1.1"
+    ],
+    "stale_v2": false,
+    "pass": true
+  },
+  "state_code": {
+    "opened": true,
+    "modal": true,
+    "focused": {
+      "ok": true,
+      "tag": "INPUT",
+      "type": "text",
+      "label": "State Code (GST) *"
+    },
+    "cleared": "",
+    "typed": "29",
+    "pass": true
+  },
+  "console_errors": [
+    {
+      "type": "error",
+      "text": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    }
+  ],
+  "page_errors": [],
+  "pass": true
+}

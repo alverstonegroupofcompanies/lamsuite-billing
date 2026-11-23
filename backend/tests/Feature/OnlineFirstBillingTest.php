@@ -27,6 +27,8 @@ class OnlineFirstBillingTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
+        // G1-SEC: till routes need a claimed counter; this stands one in for the store each request names.
+        $this->actAsClaimedCounterOfRequestedStore();
 
         $this->store = Store::create([
             'name' => 'Online Supermarket',
@@ -182,6 +184,9 @@ class OnlineFirstBillingTest extends TestCase
             'counter_code' => 'C01',
             'customer_name' => 'Alice',
             'payment_mode' => 'UPI',
+            'payments' => [
+                ['mode' => 'UPI', 'amount' => 18.00, 'reference_no' => 'UTR123456789'],
+            ],
             'items' => [
                 [
                     'product_id' => $this->product->id,
@@ -280,11 +285,15 @@ class OnlineFirstBillingTest extends TestCase
                     'range_start' => 1001,
                     'range_end' => 1050,
                     'block_size' => 50,
+                    'next_number' => 1001,
                 ],
             ]);
 
-        // CounterSequence next_number should now be 1051
-        $this->assertEquals(1051, $this->counter->sequences()->first()->next_number);
+        // A lease reserves the numbers; it does not spend them. The series stays
+        // on 1001 until a bill actually takes it.
+        $this->assertEquals(1001, $this->counter->sequences()
+            ->where('doc_type', 'invoice')
+            ->value('next_number'));
     }
 
     public function test_held_bills_lifecycle_and_cross_counter_sync(): void
@@ -397,7 +406,10 @@ class OnlineFirstBillingTest extends TestCase
         $this->assertEquals(-1, $this->batch->fresh()->stock_qty);
 
         // Check negative stock report
-        $reportRes = $this->withHeader('X-Store-Id', $this->store->id)
+        // G1-SEC: the owner reads the negative-stock report (counters have no
+        // permission declared for it), scoped to the owner's store.
+        $owner = \App\Models\User::create(['store_id' => $this->store->id, 'name' => 'Owner', 'email' => 'owner@online-first.test', 'password' => bcrypt('password123'), 'role' => 'store_owner']);
+        $reportRes = $this->actingAs($owner, 'sanctum')
             ->getJson('/api/inventory/negative-stock-report');
         $reportRes->assertStatus(200);
         $this->assertGreaterThanOrEqual(1, $reportRes->json('negative_batches_count'));

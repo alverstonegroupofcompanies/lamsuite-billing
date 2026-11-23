@@ -1,0 +1,3246 @@
+{
+  "cases": [
+    {
+      "label": "wrong (one char off)",
+      "code_prefix": "LAM-C01-581E",
+      "claim": [
+        {
+          "st": 204,
+          "res": "<unreadable>"
+        },
+        {
+          "st": 401,
+          "res": "{\"success\":false,\"error\":\"claim_failed\",\"message\":\"That activation code is not valid here. Ask the store owner for a current counter code.\"}"
+        }
+      ],
+      "ui_message": null,
+      "still_on_activation": true,
+      "before": {
+        "counter": {
+          "id": 2,
+          "status": "unclaimed",
+          "device_uuid": null,
+          "current_device_id": null,
+          "device_name": "Mac (Chrome)",
+          "approved_at": null
+        },
+        "keys": [
+          {
+            "id": 5,
+            "is_revoked": 1,
+            "consumed_at": null,
+            "consumed_device_uuid": null
+          },
+          {
+            "id": 10,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:00:54",
+            "consumed_device_uuid": "dev_1795275038165_648d54"
+          },
+          {
+            "id": 11,
+            "is_revoked": 1,
+            "consumed_at": null,
+            "consumed_device_uuid": null
+          },
+          {
+            "id": 12,
+            "is_revoked": 1,
+            "consumed_at": null,
+            "consumed_device_uuid": null
+          },
+          {
+            "id": 13,
+            "is_revoked": 1,
+            "consumed_at": null,
+            "consumed_device_uuid": null
+          },
+          {
+            "id": 14,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:16:12",
+            "consumed_device_uuid": "dev_1795275972639_180a2e"
+          },
+          {
+            "id": 15,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:16:38",
+            "consumed_device_uuid": "dev_1795275998363_6a3ce8"
+          },
+          {
+            "id": 16,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:17:15",
+            "consumed_device_uuid": "dev_1795276035354_29f3ff"
+          },
+          {
+            "id": 17,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:18:18",
+            "consumed_device_uuid": "dev_1795276098236_4fa322"
+          },
+          {
+            "id": 18,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:19:15",
+            "consumed_device_uuid": "dev_1795276155867_0ab8f1"
+          },
+          {
+            "id": 19,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:20:06",
+            "consumed_device_uuid": "dev_1795276206692_de5518"
+          },
+          {
+            "id": 20,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:21:20",
+            "consumed_device_uuid": "dev_1795276280758_7b36e8"
+          },
+          {
+            "id": 21,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:22:41",
+            "consumed_device_uuid": "dev_1795276361451_c39268"
+          },
+          {
+            "id": 22,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:24:18",
+            "consumed_device_uuid": "dev_1795276458252_b839fb"
+          },
+          {
+            "id": 23,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:24:50",
+            "consumed_device_uuid": "dev_1795276490507_9ffd86"
+          },
+          {
+            "id": 24,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:27:11",
+            "consumed_device_uuid": "dev_1795276631065_c694fe"
+          },
+          {
+            "id": 25,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:28:10",
+            "consumed_device_uuid": "dev_1795276690880_9eba3a"
+          },
+          {
+            "id": 26,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:28:48",
+            "consumed_device_uuid": "dev_1795276728962_38adbe"
+          },
+          {
+            "id": 27,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:31:20",
+            "consumed_device_uuid": "dev_1795276880257_1d59f1"
+          },
+          {
+            "id": 28,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:32:09",
+            "consumed_device_uuid": "dev_1795276929318_393465"
+          },
+          {
+            "id": 30,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:34:52",
+            "consumed_device_uuid": "dev_1795277092882_0fe77b"
+          },
+          {
+            "id": 31,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:35:16",
+            "consumed_device_uuid": "dev_1795277116659_29345d"
+          },
+          {
+            "id": 32,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:36:00",
+            "consumed_device_uuid": "dev_1795277160594_26e162"
+          },
+          {
+            "id": 33,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:36:44",
+            "consumed_device_uuid": "dev_1795277204497_36f749"
+          },
+          {
+            "id": 34,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:38:08",
+            "consumed_device_uuid": "dev_1795277288676_de8d3a"
+          },
+          {
+            "id": 36,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:42:11",
+            "consumed_device_uuid": "dev_1795277531448_aae526"
+          },
+          {
+            "id": 37,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:42:39",
+            "consumed_device_uuid": "dev_1795277559132_1bc737"
+          },
+          {
+            "id": 38,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:43:24",
+            "consumed_device_uuid": "dev_1795277604199_f76696"
+          },
+          {
+            "id": 39,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:44:05",
+            "consumed_device_uuid": "dev_1795277645691_5a9327"
+          },
+          {
+            "id": 40,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:45:27",
+            "consumed_device_uuid": "dev_1795277727111_2259de"
+          },
+          {
+            "id": 41,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:47:05",
+            "consumed_device_uuid": "dev_1795277825741_58f4cf"
+          },
+          {
+            "id": 43,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:59:37",
+            "consumed_device_uuid": "qa-api-till-ph-c01"
+          },
+          {
+            "id": 46,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 22:02:01",
+            "consumed_device_uuid": "dev_1795278721488_2404a6"
+          },
+          {
+            "id": 47,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 22:02:45",
+            "consumed_device_uuid": "dev_1795278765664_9ebdb6"
+          },
+          {
+            "id": 48,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 22:04:06",
+            "consumed_device_uuid": "dev_1795278846022_3c8251"
+          },
+          {
+            "id": 49,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 22:05:24",
+            "consumed_device_uuid": "dev_1795278924479_f4a190"
+          },
+          {
+            "id": 52,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-22 06:28:13",
+            "consumed_device_uuid": "dev_1795309093489_e5f839"
+          },
+          {
+            "id": 53,
+            "is_revoked": 0,
+            "consumed_at": null,
+            "consumed_device_uuid": null
+          }
+        ],
+        "attempts": 45
+      },
+      "after": {
+        "counter": {
+          "id": 2,
+          "status": "unclaimed",
+          "device_uuid": null,
+          "current_device_id": null,
+          "device_name": "Mac (Chrome)",
+          "approved_at": null
+        },
+        "keys": [
+          {
+            "id": 5,
+            "is_revoked": 1,
+            "consumed_at": null,
+            "consumed_device_uuid": null
+          },
+          {
+            "id": 10,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:00:54",
+            "consumed_device_uuid": "dev_1795275038165_648d54"
+          },
+          {
+            "id": 11,
+            "is_revoked": 1,
+            "consumed_at": null,
+            "consumed_device_uuid": null
+          },
+          {
+            "id": 12,
+            "is_revoked": 1,
+            "consumed_at": null,
+            "consumed_device_uuid": null
+          },
+          {
+            "id": 13,
+            "is_revoked": 1,
+            "consumed_at": null,
+            "consumed_device_uuid": null
+          },
+          {
+            "id": 14,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:16:12",
+            "consumed_device_uuid": "dev_1795275972639_180a2e"
+          },
+          {
+            "id": 15,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:16:38",
+            "consumed_device_uuid": "dev_1795275998363_6a3ce8"
+          },
+          {
+            "id": 16,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:17:15",
+            "consumed_device_uuid": "dev_1795276035354_29f3ff"
+          },
+          {
+            "id": 17,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:18:18",
+            "consumed_device_uuid": "dev_1795276098236_4fa322"
+          },
+          {
+            "id": 18,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:19:15",
+            "consumed_device_uuid": "dev_1795276155867_0ab8f1"
+          },
+          {
+            "id": 19,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:20:06",
+            "consumed_device_uuid": "dev_1795276206692_de5518"
+          },
+          {
+            "id": 20,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:21:20",
+            "consumed_device_uuid": "dev_1795276280758_7b36e8"
+          },
+          {
+            "id": 21,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:22:41",
+            "consumed_device_uuid": "dev_1795276361451_c39268"
+          },
+          {
+            "id": 22,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:24:18",
+            "consumed_device_uuid": "dev_1795276458252_b839fb"
+          },
+          {
+            "id": 23,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:24:50",
+            "consumed_device_uuid": "dev_1795276490507_9ffd86"
+          },
+          {
+            "id": 24,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:27:11",
+            "consumed_device_uuid": "dev_1795276631065_c694fe"
+          },
+          {
+            "id": 25,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:28:10",
+            "consumed_device_uuid": "dev_1795276690880_9eba3a"
+          },
+          {
+            "id": 26,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:28:48",
+            "consumed_device_uuid": "dev_1795276728962_38adbe"
+          },
+          {
+            "id": 27,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:31:20",
+            "consumed_device_uuid": "dev_1795276880257_1d59f1"
+          },
+          {
+            "id": 28,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:32:09",
+            "consumed_device_uuid": "dev_1795276929318_393465"
+          },
+          {
+            "id": 30,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:34:52",
+            "consumed_device_uuid": "dev_1795277092882_0fe77b"
+          },
+          {
+            "id": 31,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:35:16",
+            "consumed_device_uuid": "dev_1795277116659_29345d"
+          },
+          {
+            "id": 32,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:36:00",
+            "consumed_device_uuid": "dev_1795277160594_26e162"
+          },
+          {
+            "id": 33,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:36:44",
+            "consumed_device_uuid": "dev_1795277204497_36f749"
+          },
+          {
+            "id": 34,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:38:08",
+            "consumed_device_uuid": "dev_1795277288676_de8d3a"
+          },
+          {
+            "id": 36,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:42:11",
+            "consumed_device_uuid": "dev_1795277531448_aae526"
+          },
+          {
+            "id": 37,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:42:39",
+            "consumed_device_uuid": "dev_1795277559132_1bc737"
+          },
+          {
+            "id": 38,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:43:24",
+            "consumed_device_uuid": "dev_1795277604199_f76696"
+          },
+          {
+            "id": 39,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:44:05",
+            "consumed_device_uuid": "dev_1795277645691_5a9327"
+          },
+          {
+            "id": 40,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:45:27",
+            "consumed_device_uuid": "dev_1795277727111_2259de"
+          },
+          {
+            "id": 41,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:47:05",
+            "consumed_device_uuid": "dev_1795277825741_58f4cf"
+          },
+          {
+            "id": 43,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:59:37",
+            "consumed_device_uuid": "qa-api-till-ph-c01"
+          },
+          {
+            "id": 46,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 22:02:01",
+            "consumed_device_uuid": "dev_1795278721488_2404a6"
+          },
+          {
+            "id": 47,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 22:02:45",
+            "consumed_device_uuid": "dev_1795278765664_9ebdb6"
+          },
+          {
+            "id": 48,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 22:04:06",
+            "consumed_device_uuid": "dev_1795278846022_3c8251"
+          },
+          {
+            "id": 49,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 22:05:24",
+            "consumed_device_uuid": "dev_1795278924479_f4a190"
+          },
+          {
+            "id": 52,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-22 06:28:13",
+            "consumed_device_uuid": "dev_1795309093489_e5f839"
+          },
+          {
+            "id": 53,
+            "is_revoked": 0,
+            "consumed_at": null,
+            "consumed_device_uuid": null
+          }
+        ],
+        "attempts": 46
+      }
+    },
+    {
+      "label": "random",
+      "code_prefix": "LAM-C01-0123",
+      "claim": [
+        {
+          "st": 401,
+          "res": "{\"success\":false,\"error\":\"claim_failed\",\"message\":\"That activation code is not valid here. Ask the store owner for a current counter code.\"}"
+        }
+      ],
+      "ui_message": null,
+      "still_on_activation": true,
+      "before": {
+        "counter": {
+          "id": 2,
+          "status": "unclaimed",
+          "device_uuid": null,
+          "current_device_id": null,
+          "device_name": "Mac (Chrome)",
+          "approved_at": null
+        },
+        "keys": [
+          {
+            "id": 5,
+            "is_revoked": 1,
+            "consumed_at": null,
+            "consumed_device_uuid": null
+          },
+          {
+            "id": 10,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:00:54",
+            "consumed_device_uuid": "dev_1795275038165_648d54"
+          },
+          {
+            "id": 11,
+            "is_revoked": 1,
+            "consumed_at": null,
+            "consumed_device_uuid": null
+          },
+          {
+            "id": 12,
+            "is_revoked": 1,
+            "consumed_at": null,
+            "consumed_device_uuid": null
+          },
+          {
+            "id": 13,
+            "is_revoked": 1,
+            "consumed_at": null,
+            "consumed_device_uuid": null
+          },
+          {
+            "id": 14,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:16:12",
+            "consumed_device_uuid": "dev_1795275972639_180a2e"
+          },
+          {
+            "id": 15,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:16:38",
+            "consumed_device_uuid": "dev_1795275998363_6a3ce8"
+          },
+          {
+            "id": 16,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:17:15",
+            "consumed_device_uuid": "dev_1795276035354_29f3ff"
+          },
+          {
+            "id": 17,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:18:18",
+            "consumed_device_uuid": "dev_1795276098236_4fa322"
+          },
+          {
+            "id": 18,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:19:15",
+            "consumed_device_uuid": "dev_1795276155867_0ab8f1"
+          },
+          {
+            "id": 19,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:20:06",
+            "consumed_device_uuid": "dev_1795276206692_de5518"
+          },
+          {
+            "id": 20,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:21:20",
+            "consumed_device_uuid": "dev_1795276280758_7b36e8"
+          },
+          {
+            "id": 21,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:22:41",
+            "consumed_device_uuid": "dev_1795276361451_c39268"
+          },
+          {
+            "id": 22,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:24:18",
+            "consumed_device_uuid": "dev_1795276458252_b839fb"
+          },
+          {
+            "id": 23,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:24:50",
+            "consumed_device_uuid": "dev_1795276490507_9ffd86"
+          },
+          {
+            "id": 24,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:27:11",
+            "consumed_device_uuid": "dev_1795276631065_c694fe"
+          },
+          {
+            "id": 25,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:28:10",
+            "consumed_device_uuid": "dev_1795276690880_9eba3a"
+          },
+          {
+            "id": 26,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:28:48",
+            "consumed_device_uuid": "dev_1795276728962_38adbe"
+          },
+          {
+            "id": 27,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:31:20",
+            "consumed_device_uuid": "dev_1795276880257_1d59f1"
+          },
+          {
+            "id": 28,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:32:09",
+            "consumed_device_uuid": "dev_1795276929318_393465"
+          },
+          {
+            "id": 30,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:34:52",
+            "consumed_device_uuid": "dev_1795277092882_0fe77b"
+          },
+          {
+            "id": 31,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:35:16",
+            "consumed_device_uuid": "dev_1795277116659_29345d"
+          },
+          {
+            "id": 32,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:36:00",
+            "consumed_device_uuid": "dev_1795277160594_26e162"
+          },
+          {
+            "id": 33,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:36:44",
+            "consumed_device_uuid": "dev_1795277204497_36f749"
+          },
+          {
+            "id": 34,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:38:08",
+            "consumed_device_uuid": "dev_1795277288676_de8d3a"
+          },
+          {
+            "id": 36,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:42:11",
+            "consumed_device_uuid": "dev_1795277531448_aae526"
+          },
+          {
+            "id": 37,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:42:39",
+            "consumed_device_uuid": "dev_1795277559132_1bc737"
+          },
+          {
+            "id": 38,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:43:24",
+            "consumed_device_uuid": "dev_1795277604199_f76696"
+          },
+          {
+            "id": 39,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:44:05",
+            "consumed_device_uuid": "dev_1795277645691_5a9327"
+          },
+          {
+            "id": 40,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:45:27",
+            "consumed_device_uuid": "dev_1795277727111_2259de"
+          },
+          {
+            "id": 41,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:47:05",
+            "consumed_device_uuid": "dev_1795277825741_58f4cf"
+          },
+          {
+            "id": 43,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:59:37",
+            "consumed_device_uuid": "qa-api-till-ph-c01"
+          },
+          {
+            "id": 46,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 22:02:01",
+            "consumed_device_uuid": "dev_1795278721488_2404a6"
+          },
+          {
+            "id": 47,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 22:02:45",
+            "consumed_device_uuid": "dev_1795278765664_9ebdb6"
+          },
+          {
+            "id": 48,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 22:04:06",
+            "consumed_device_uuid": "dev_1795278846022_3c8251"
+          },
+          {
+            "id": 49,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 22:05:24",
+            "consumed_device_uuid": "dev_1795278924479_f4a190"
+          },
+          {
+            "id": 52,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-22 06:28:13",
+            "consumed_device_uuid": "dev_1795309093489_e5f839"
+          },
+          {
+            "id": 53,
+            "is_revoked": 0,
+            "consumed_at": null,
+            "consumed_device_uuid": null
+          }
+        ],
+        "attempts": 46
+      },
+      "after": {
+        "counter": {
+          "id": 2,
+          "status": "unclaimed",
+          "device_uuid": null,
+          "current_device_id": null,
+          "device_name": "Mac (Chrome)",
+          "approved_at": null
+        },
+        "keys": [
+          {
+            "id": 5,
+            "is_revoked": 1,
+            "consumed_at": null,
+            "consumed_device_uuid": null
+          },
+          {
+            "id": 10,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:00:54",
+            "consumed_device_uuid": "dev_1795275038165_648d54"
+          },
+          {
+            "id": 11,
+            "is_revoked": 1,
+            "consumed_at": null,
+            "consumed_device_uuid": null
+          },
+          {
+            "id": 12,
+            "is_revoked": 1,
+            "consumed_at": null,
+            "consumed_device_uuid": null
+          },
+          {
+            "id": 13,
+            "is_revoked": 1,
+            "consumed_at": null,
+            "consumed_device_uuid": null
+          },
+          {
+            "id": 14,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:16:12",
+            "consumed_device_uuid": "dev_1795275972639_180a2e"
+          },
+          {
+            "id": 15,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:16:38",
+            "consumed_device_uuid": "dev_1795275998363_6a3ce8"
+          },
+          {
+            "id": 16,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:17:15",
+            "consumed_device_uuid": "dev_1795276035354_29f3ff"
+          },
+          {
+            "id": 17,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:18:18",
+            "consumed_device_uuid": "dev_1795276098236_4fa322"
+          },
+          {
+            "id": 18,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:19:15",
+            "consumed_device_uuid": "dev_1795276155867_0ab8f1"
+          },
+          {
+            "id": 19,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:20:06",
+            "consumed_device_uuid": "dev_1795276206692_de5518"
+          },
+          {
+            "id": 20,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:21:20",
+            "consumed_device_uuid": "dev_1795276280758_7b36e8"
+          },
+          {
+            "id": 21,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:22:41",
+            "consumed_device_uuid": "dev_1795276361451_c39268"
+          },
+          {
+            "id": 22,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:24:18",
+            "consumed_device_uuid": "dev_1795276458252_b839fb"
+          },
+          {
+            "id": 23,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:24:50",
+            "consumed_device_uuid": "dev_1795276490507_9ffd86"
+          },
+          {
+            "id": 24,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:27:11",
+            "consumed_device_uuid": "dev_1795276631065_c694fe"
+          },
+          {
+            "id": 25,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:28:10",
+            "consumed_device_uuid": "dev_1795276690880_9eba3a"
+          },
+          {
+            "id": 26,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:28:48",
+            "consumed_device_uuid": "dev_1795276728962_38adbe"
+          },
+          {
+            "id": 27,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:31:20",
+            "consumed_device_uuid": "dev_1795276880257_1d59f1"
+          },
+          {
+            "id": 28,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:32:09",
+            "consumed_device_uuid": "dev_1795276929318_393465"
+          },
+          {
+            "id": 30,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:34:52",
+            "consumed_device_uuid": "dev_1795277092882_0fe77b"
+          },
+          {
+            "id": 31,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:35:16",
+            "consumed_device_uuid": "dev_1795277116659_29345d"
+          },
+          {
+            "id": 32,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:36:00",
+            "consumed_device_uuid": "dev_1795277160594_26e162"
+          },
+          {
+            "id": 33,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:36:44",
+            "consumed_device_uuid": "dev_1795277204497_36f749"
+          },
+          {
+            "id": 34,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:38:08",
+            "consumed_device_uuid": "dev_1795277288676_de8d3a"
+          },
+          {
+            "id": 36,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:42:11",
+            "consumed_device_uuid": "dev_1795277531448_aae526"
+          },
+          {
+            "id": 37,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:42:39",
+            "consumed_device_uuid": "dev_1795277559132_1bc737"
+          },
+          {
+            "id": 38,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:43:24",
+            "consumed_device_uuid": "dev_1795277604199_f76696"
+          },
+          {
+            "id": 39,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:44:05",
+            "consumed_device_uuid": "dev_1795277645691_5a9327"
+          },
+          {
+            "id": 40,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:45:27",
+            "consumed_device_uuid": "dev_1795277727111_2259de"
+          },
+          {
+            "id": 41,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:47:05",
+            "consumed_device_uuid": "dev_1795277825741_58f4cf"
+          },
+          {
+            "id": 43,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:59:37",
+            "consumed_device_uuid": "qa-api-till-ph-c01"
+          },
+          {
+            "id": 46,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 22:02:01",
+            "consumed_device_uuid": "dev_1795278721488_2404a6"
+          },
+          {
+            "id": 47,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 22:02:45",
+            "consumed_device_uuid": "dev_1795278765664_9ebdb6"
+          },
+          {
+            "id": 48,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 22:04:06",
+            "consumed_device_uuid": "dev_1795278846022_3c8251"
+          },
+          {
+            "id": 49,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 22:05:24",
+            "consumed_device_uuid": "dev_1795278924479_f4a190"
+          },
+          {
+            "id": 52,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-22 06:28:13",
+            "consumed_device_uuid": "dev_1795309093489_e5f839"
+          },
+          {
+            "id": 53,
+            "is_revoked": 0,
+            "consumed_at": null,
+            "consumed_device_uuid": null
+          }
+        ],
+        "attempts": 47
+      }
+    },
+    {
+      "label": "garbage text",
+      "code_prefix": "hello world",
+      "claim": [
+        {
+          "st": 401,
+          "res": "{\"success\":false,\"error\":\"claim_failed\",\"message\":\"That activation code is not valid here. Ask the store owner for a current counter code.\"}"
+        }
+      ],
+      "ui_message": null,
+      "still_on_activation": true,
+      "before": {
+        "counter": {
+          "id": 2,
+          "status": "unclaimed",
+          "device_uuid": null,
+          "current_device_id": null,
+          "device_name": "Mac (Chrome)",
+          "approved_at": null
+        },
+        "keys": [
+          {
+            "id": 5,
+            "is_revoked": 1,
+            "consumed_at": null,
+            "consumed_device_uuid": null
+          },
+          {
+            "id": 10,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:00:54",
+            "consumed_device_uuid": "dev_1795275038165_648d54"
+          },
+          {
+            "id": 11,
+            "is_revoked": 1,
+            "consumed_at": null,
+            "consumed_device_uuid": null
+          },
+          {
+            "id": 12,
+            "is_revoked": 1,
+            "consumed_at": null,
+            "consumed_device_uuid": null
+          },
+          {
+            "id": 13,
+            "is_revoked": 1,
+            "consumed_at": null,
+            "consumed_device_uuid": null
+          },
+          {
+            "id": 14,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:16:12",
+            "consumed_device_uuid": "dev_1795275972639_180a2e"
+          },
+          {
+            "id": 15,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:16:38",
+            "consumed_device_uuid": "dev_1795275998363_6a3ce8"
+          },
+          {
+            "id": 16,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:17:15",
+            "consumed_device_uuid": "dev_1795276035354_29f3ff"
+          },
+          {
+            "id": 17,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:18:18",
+            "consumed_device_uuid": "dev_1795276098236_4fa322"
+          },
+          {
+            "id": 18,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:19:15",
+            "consumed_device_uuid": "dev_1795276155867_0ab8f1"
+          },
+          {
+            "id": 19,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:20:06",
+            "consumed_device_uuid": "dev_1795276206692_de5518"
+          },
+          {
+            "id": 20,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:21:20",
+            "consumed_device_uuid": "dev_1795276280758_7b36e8"
+          },
+          {
+            "id": 21,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:22:41",
+            "consumed_device_uuid": "dev_1795276361451_c39268"
+          },
+          {
+            "id": 22,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:24:18",
+            "consumed_device_uuid": "dev_1795276458252_b839fb"
+          },
+          {
+            "id": 23,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:24:50",
+            "consumed_device_uuid": "dev_1795276490507_9ffd86"
+          },
+          {
+            "id": 24,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:27:11",
+            "consumed_device_uuid": "dev_1795276631065_c694fe"
+          },
+          {
+            "id": 25,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:28:10",
+            "consumed_device_uuid": "dev_1795276690880_9eba3a"
+          },
+          {
+            "id": 26,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:28:48",
+            "consumed_device_uuid": "dev_1795276728962_38adbe"
+          },
+          {
+            "id": 27,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:31:20",
+            "consumed_device_uuid": "dev_1795276880257_1d59f1"
+          },
+          {
+            "id": 28,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:32:09",
+            "consumed_device_uuid": "dev_1795276929318_393465"
+          },
+          {
+            "id": 30,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:34:52",
+            "consumed_device_uuid": "dev_1795277092882_0fe77b"
+          },
+          {
+            "id": 31,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:35:16",
+            "consumed_device_uuid": "dev_1795277116659_29345d"
+          },
+          {
+            "id": 32,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:36:00",
+            "consumed_device_uuid": "dev_1795277160594_26e162"
+          },
+          {
+            "id": 33,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:36:44",
+            "consumed_device_uuid": "dev_1795277204497_36f749"
+          },
+          {
+            "id": 34,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:38:08",
+            "consumed_device_uuid": "dev_1795277288676_de8d3a"
+          },
+          {
+            "id": 36,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:42:11",
+            "consumed_device_uuid": "dev_1795277531448_aae526"
+          },
+          {
+            "id": 37,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:42:39",
+            "consumed_device_uuid": "dev_1795277559132_1bc737"
+          },
+          {
+            "id": 38,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:43:24",
+            "consumed_device_uuid": "dev_1795277604199_f76696"
+          },
+          {
+            "id": 39,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:44:05",
+            "consumed_device_uuid": "dev_1795277645691_5a9327"
+          },
+          {
+            "id": 40,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:45:27",
+            "consumed_device_uuid": "dev_1795277727111_2259de"
+          },
+          {
+            "id": 41,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:47:05",
+            "consumed_device_uuid": "dev_1795277825741_58f4cf"
+          },
+          {
+            "id": 43,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:59:37",
+            "consumed_device_uuid": "qa-api-till-ph-c01"
+          },
+          {
+            "id": 46,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 22:02:01",
+            "consumed_device_uuid": "dev_1795278721488_2404a6"
+          },
+          {
+            "id": 47,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 22:02:45",
+            "consumed_device_uuid": "dev_1795278765664_9ebdb6"
+          },
+          {
+            "id": 48,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 22:04:06",
+            "consumed_device_uuid": "dev_1795278846022_3c8251"
+          },
+          {
+            "id": 49,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 22:05:24",
+            "consumed_device_uuid": "dev_1795278924479_f4a190"
+          },
+          {
+            "id": 52,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-22 06:28:13",
+            "consumed_device_uuid": "dev_1795309093489_e5f839"
+          },
+          {
+            "id": 53,
+            "is_revoked": 0,
+            "consumed_at": null,
+            "consumed_device_uuid": null
+          }
+        ],
+        "attempts": 47
+      },
+      "after": {
+        "counter": {
+          "id": 2,
+          "status": "unclaimed",
+          "device_uuid": null,
+          "current_device_id": null,
+          "device_name": "Mac (Chrome)",
+          "approved_at": null
+        },
+        "keys": [
+          {
+            "id": 5,
+            "is_revoked": 1,
+            "consumed_at": null,
+            "consumed_device_uuid": null
+          },
+          {
+            "id": 10,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:00:54",
+            "consumed_device_uuid": "dev_1795275038165_648d54"
+          },
+          {
+            "id": 11,
+            "is_revoked": 1,
+            "consumed_at": null,
+            "consumed_device_uuid": null
+          },
+          {
+            "id": 12,
+            "is_revoked": 1,
+            "consumed_at": null,
+            "consumed_device_uuid": null
+          },
+          {
+            "id": 13,
+            "is_revoked": 1,
+            "consumed_at": null,
+            "consumed_device_uuid": null
+          },
+          {
+            "id": 14,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:16:12",
+            "consumed_device_uuid": "dev_1795275972639_180a2e"
+          },
+          {
+            "id": 15,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:16:38",
+            "consumed_device_uuid": "dev_1795275998363_6a3ce8"
+          },
+          {
+            "id": 16,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:17:15",
+            "consumed_device_uuid": "dev_1795276035354_29f3ff"
+          },
+          {
+            "id": 17,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:18:18",
+            "consumed_device_uuid": "dev_1795276098236_4fa322"
+          },
+          {
+            "id": 18,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:19:15",
+            "consumed_device_uuid": "dev_1795276155867_0ab8f1"
+          },
+          {
+            "id": 19,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:20:06",
+            "consumed_device_uuid": "dev_1795276206692_de5518"
+          },
+          {
+            "id": 20,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:21:20",
+            "consumed_device_uuid": "dev_1795276280758_7b36e8"
+          },
+          {
+            "id": 21,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:22:41",
+            "consumed_device_uuid": "dev_1795276361451_c39268"
+          },
+          {
+            "id": 22,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:24:18",
+            "consumed_device_uuid": "dev_1795276458252_b839fb"
+          },
+          {
+            "id": 23,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:24:50",
+            "consumed_device_uuid": "dev_1795276490507_9ffd86"
+          },
+          {
+            "id": 24,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:27:11",
+            "consumed_device_uuid": "dev_1795276631065_c694fe"
+          },
+          {
+            "id": 25,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:28:10",
+            "consumed_device_uuid": "dev_1795276690880_9eba3a"
+          },
+          {
+            "id": 26,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:28:48",
+            "consumed_device_uuid": "dev_1795276728962_38adbe"
+          },
+          {
+            "id": 27,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:31:20",
+            "consumed_device_uuid": "dev_1795276880257_1d59f1"
+          },
+          {
+            "id": 28,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:32:09",
+            "consumed_device_uuid": "dev_1795276929318_393465"
+          },
+          {
+            "id": 30,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:34:52",
+            "consumed_device_uuid": "dev_1795277092882_0fe77b"
+          },
+          {
+            "id": 31,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:35:16",
+            "consumed_device_uuid": "dev_1795277116659_29345d"
+          },
+          {
+            "id": 32,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:36:00",
+            "consumed_device_uuid": "dev_1795277160594_26e162"
+          },
+          {
+            "id": 33,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:36:44",
+            "consumed_device_uuid": "dev_1795277204497_36f749"
+          },
+          {
+            "id": 34,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:38:08",
+            "consumed_device_uuid": "dev_1795277288676_de8d3a"
+          },
+          {
+            "id": 36,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:42:11",
+            "consumed_device_uuid": "dev_1795277531448_aae526"
+          },
+          {
+            "id": 37,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:42:39",
+            "consumed_device_uuid": "dev_1795277559132_1bc737"
+          },
+          {
+            "id": 38,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:43:24",
+            "consumed_device_uuid": "dev_1795277604199_f76696"
+          },
+          {
+            "id": 39,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:44:05",
+            "consumed_device_uuid": "dev_1795277645691_5a9327"
+          },
+          {
+            "id": 40,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:45:27",
+            "consumed_device_uuid": "dev_1795277727111_2259de"
+          },
+          {
+            "id": 41,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:47:05",
+            "consumed_device_uuid": "dev_1795277825741_58f4cf"
+          },
+          {
+            "id": 43,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:59:37",
+            "consumed_device_uuid": "qa-api-till-ph-c01"
+          },
+          {
+            "id": 46,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 22:02:01",
+            "consumed_device_uuid": "dev_1795278721488_2404a6"
+          },
+          {
+            "id": 47,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 22:02:45",
+            "consumed_device_uuid": "dev_1795278765664_9ebdb6"
+          },
+          {
+            "id": 48,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 22:04:06",
+            "consumed_device_uuid": "dev_1795278846022_3c8251"
+          },
+          {
+            "id": 49,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 22:05:24",
+            "consumed_device_uuid": "dev_1795278924479_f4a190"
+          },
+          {
+            "id": 52,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-22 06:28:13",
+            "consumed_device_uuid": "dev_1795309093489_e5f839"
+          },
+          {
+            "id": 53,
+            "is_revoked": 0,
+            "consumed_at": null,
+            "consumed_device_uuid": null
+          }
+        ],
+        "attempts": 48
+      }
+    },
+    {
+      "label": "revoked (superseded) code",
+      "code_prefix": "LAM-C02-72E3",
+      "claim": [
+        {
+          "st": 401,
+          "res": "{\"success\":false,\"error\":\"claim_failed\",\"message\":\"That activation code is not valid here. Ask the store owner for a current counter code.\"}"
+        }
+      ],
+      "ui_message": null,
+      "still_on_activation": true,
+      "before": {
+        "counter": {
+          "id": 2,
+          "status": "unclaimed",
+          "device_uuid": null,
+          "current_device_id": null,
+          "device_name": "Mac (Chrome)",
+          "approved_at": null
+        },
+        "keys": [
+          {
+            "id": 5,
+            "is_revoked": 1,
+            "consumed_at": null,
+            "consumed_device_uuid": null
+          },
+          {
+            "id": 10,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:00:54",
+            "consumed_device_uuid": "dev_1795275038165_648d54"
+          },
+          {
+            "id": 11,
+            "is_revoked": 1,
+            "consumed_at": null,
+            "consumed_device_uuid": null
+          },
+          {
+            "id": 12,
+            "is_revoked": 1,
+            "consumed_at": null,
+            "consumed_device_uuid": null
+          },
+          {
+            "id": 13,
+            "is_revoked": 1,
+            "consumed_at": null,
+            "consumed_device_uuid": null
+          },
+          {
+            "id": 14,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:16:12",
+            "consumed_device_uuid": "dev_1795275972639_180a2e"
+          },
+          {
+            "id": 15,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:16:38",
+            "consumed_device_uuid": "dev_1795275998363_6a3ce8"
+          },
+          {
+            "id": 16,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:17:15",
+            "consumed_device_uuid": "dev_1795276035354_29f3ff"
+          },
+          {
+            "id": 17,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:18:18",
+            "consumed_device_uuid": "dev_1795276098236_4fa322"
+          },
+          {
+            "id": 18,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:19:15",
+            "consumed_device_uuid": "dev_1795276155867_0ab8f1"
+          },
+          {
+            "id": 19,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:20:06",
+            "consumed_device_uuid": "dev_1795276206692_de5518"
+          },
+          {
+            "id": 20,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:21:20",
+            "consumed_device_uuid": "dev_1795276280758_7b36e8"
+          },
+          {
+            "id": 21,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:22:41",
+            "consumed_device_uuid": "dev_1795276361451_c39268"
+          },
+          {
+            "id": 22,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:24:18",
+            "consumed_device_uuid": "dev_1795276458252_b839fb"
+          },
+          {
+            "id": 23,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:24:50",
+            "consumed_device_uuid": "dev_1795276490507_9ffd86"
+          },
+          {
+            "id": 24,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:27:11",
+            "consumed_device_uuid": "dev_1795276631065_c694fe"
+          },
+          {
+            "id": 25,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:28:10",
+            "consumed_device_uuid": "dev_1795276690880_9eba3a"
+          },
+          {
+            "id": 26,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:28:48",
+            "consumed_device_uuid": "dev_1795276728962_38adbe"
+          },
+          {
+            "id": 27,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:31:20",
+            "consumed_device_uuid": "dev_1795276880257_1d59f1"
+          },
+          {
+            "id": 28,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:32:09",
+            "consumed_device_uuid": "dev_1795276929318_393465"
+          },
+          {
+            "id": 30,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:34:52",
+            "consumed_device_uuid": "dev_1795277092882_0fe77b"
+          },
+          {
+            "id": 31,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:35:16",
+            "consumed_device_uuid": "dev_1795277116659_29345d"
+          },
+          {
+            "id": 32,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:36:00",
+            "consumed_device_uuid": "dev_1795277160594_26e162"
+          },
+          {
+            "id": 33,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:36:44",
+            "consumed_device_uuid": "dev_1795277204497_36f749"
+          },
+          {
+            "id": 34,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:38:08",
+            "consumed_device_uuid": "dev_1795277288676_de8d3a"
+          },
+          {
+            "id": 36,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:42:11",
+            "consumed_device_uuid": "dev_1795277531448_aae526"
+          },
+          {
+            "id": 37,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:42:39",
+            "consumed_device_uuid": "dev_1795277559132_1bc737"
+          },
+          {
+            "id": 38,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:43:24",
+            "consumed_device_uuid": "dev_1795277604199_f76696"
+          },
+          {
+            "id": 39,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:44:05",
+            "consumed_device_uuid": "dev_1795277645691_5a9327"
+          },
+          {
+            "id": 40,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:45:27",
+            "consumed_device_uuid": "dev_1795277727111_2259de"
+          },
+          {
+            "id": 41,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:47:05",
+            "consumed_device_uuid": "dev_1795277825741_58f4cf"
+          },
+          {
+            "id": 43,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:59:37",
+            "consumed_device_uuid": "qa-api-till-ph-c01"
+          },
+          {
+            "id": 46,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 22:02:01",
+            "consumed_device_uuid": "dev_1795278721488_2404a6"
+          },
+          {
+            "id": 47,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 22:02:45",
+            "consumed_device_uuid": "dev_1795278765664_9ebdb6"
+          },
+          {
+            "id": 48,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 22:04:06",
+            "consumed_device_uuid": "dev_1795278846022_3c8251"
+          },
+          {
+            "id": 49,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 22:05:24",
+            "consumed_device_uuid": "dev_1795278924479_f4a190"
+          },
+          {
+            "id": 52,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-22 06:28:13",
+            "consumed_device_uuid": "dev_1795309093489_e5f839"
+          },
+          {
+            "id": 53,
+            "is_revoked": 0,
+            "consumed_at": null,
+            "consumed_device_uuid": null
+          }
+        ],
+        "attempts": 48
+      },
+      "after": {
+        "counter": {
+          "id": 2,
+          "status": "unclaimed",
+          "device_uuid": null,
+          "current_device_id": null,
+          "device_name": "Mac (Chrome)",
+          "approved_at": null
+        },
+        "keys": [
+          {
+            "id": 5,
+            "is_revoked": 1,
+            "consumed_at": null,
+            "consumed_device_uuid": null
+          },
+          {
+            "id": 10,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:00:54",
+            "consumed_device_uuid": "dev_1795275038165_648d54"
+          },
+          {
+            "id": 11,
+            "is_revoked": 1,
+            "consumed_at": null,
+            "consumed_device_uuid": null
+          },
+          {
+            "id": 12,
+            "is_revoked": 1,
+            "consumed_at": null,
+            "consumed_device_uuid": null
+          },
+          {
+            "id": 13,
+            "is_revoked": 1,
+            "consumed_at": null,
+            "consumed_device_uuid": null
+          },
+          {
+            "id": 14,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:16:12",
+            "consumed_device_uuid": "dev_1795275972639_180a2e"
+          },
+          {
+            "id": 15,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:16:38",
+            "consumed_device_uuid": "dev_1795275998363_6a3ce8"
+          },
+          {
+            "id": 16,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:17:15",
+            "consumed_device_uuid": "dev_1795276035354_29f3ff"
+          },
+          {
+            "id": 17,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:18:18",
+            "consumed_device_uuid": "dev_1795276098236_4fa322"
+          },
+          {
+            "id": 18,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:19:15",
+            "consumed_device_uuid": "dev_1795276155867_0ab8f1"
+          },
+          {
+            "id": 19,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:20:06",
+            "consumed_device_uuid": "dev_1795276206692_de5518"
+          },
+          {
+            "id": 20,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:21:20",
+            "consumed_device_uuid": "dev_1795276280758_7b36e8"
+          },
+          {
+            "id": 21,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:22:41",
+            "consumed_device_uuid": "dev_1795276361451_c39268"
+          },
+          {
+            "id": 22,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:24:18",
+            "consumed_device_uuid": "dev_1795276458252_b839fb"
+          },
+          {
+            "id": 23,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:24:50",
+            "consumed_device_uuid": "dev_1795276490507_9ffd86"
+          },
+          {
+            "id": 24,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:27:11",
+            "consumed_device_uuid": "dev_1795276631065_c694fe"
+          },
+          {
+            "id": 25,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:28:10",
+            "consumed_device_uuid": "dev_1795276690880_9eba3a"
+          },
+          {
+            "id": 26,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:28:48",
+            "consumed_device_uuid": "dev_1795276728962_38adbe"
+          },
+          {
+            "id": 27,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:31:20",
+            "consumed_device_uuid": "dev_1795276880257_1d59f1"
+          },
+          {
+            "id": 28,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:32:09",
+            "consumed_device_uuid": "dev_1795276929318_393465"
+          },
+          {
+            "id": 30,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:34:52",
+            "consumed_device_uuid": "dev_1795277092882_0fe77b"
+          },
+          {
+            "id": 31,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:35:16",
+            "consumed_device_uuid": "dev_1795277116659_29345d"
+          },
+          {
+            "id": 32,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:36:00",
+            "consumed_device_uuid": "dev_1795277160594_26e162"
+          },
+          {
+            "id": 33,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:36:44",
+            "consumed_device_uuid": "dev_1795277204497_36f749"
+          },
+          {
+            "id": 34,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:38:08",
+            "consumed_device_uuid": "dev_1795277288676_de8d3a"
+          },
+          {
+            "id": 36,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:42:11",
+            "consumed_device_uuid": "dev_1795277531448_aae526"
+          },
+          {
+            "id": 37,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:42:39",
+            "consumed_device_uuid": "dev_1795277559132_1bc737"
+          },
+          {
+            "id": 38,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:43:24",
+            "consumed_device_uuid": "dev_1795277604199_f76696"
+          },
+          {
+            "id": 39,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:44:05",
+            "consumed_device_uuid": "dev_1795277645691_5a9327"
+          },
+          {
+            "id": 40,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:45:27",
+            "consumed_device_uuid": "dev_1795277727111_2259de"
+          },
+          {
+            "id": 41,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:47:05",
+            "consumed_device_uuid": "dev_1795277825741_58f4cf"
+          },
+          {
+            "id": 43,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 21:59:37",
+            "consumed_device_uuid": "qa-api-till-ph-c01"
+          },
+          {
+            "id": 46,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 22:02:01",
+            "consumed_device_uuid": "dev_1795278721488_2404a6"
+          },
+          {
+            "id": 47,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 22:02:45",
+            "consumed_device_uuid": "dev_1795278765664_9ebdb6"
+          },
+          {
+            "id": 48,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 22:04:06",
+            "consumed_device_uuid": "dev_1795278846022_3c8251"
+          },
+          {
+            "id": 49,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-21 22:05:24",
+            "consumed_device_uuid": "dev_1795278924479_f4a190"
+          },
+          {
+            "id": 52,
+            "is_revoked": 0,
+            "consumed_at": "2026-11-22 06:28:13",
+            "consumed_device_uuid": "dev_1795309093489_e5f839"
+          },
+          {
+            "id": 53,
+            "is_revoked": 0,
+            "consumed_at": null,
+            "consumed_device_uuid": null
+          }
+        ],
+        "attempts": 49
+      }
+    }
+  ],
+  "first_screen_ok": true,
+  "right": {
+    "claim": [
+      {
+        "st": 200,
+        "res": "{\"success\":true,\"device_token\":\"lsd_4RjdbcgCEHiySuBEAaqY2GF6F015p7yr2m0V7tN1\",\"token_stored_as\":\"hash_only\",\"sequences\":{\"counter_id\":2,\"counter_code\":\"C01\",\"financial_year\":\"2026-27\",\"doc_types\":[\"invoice\",\"sales_return\",\"quotation\",\"purchase_bill\",\"receipt\",\"stock_adjustment\",\"stock_transfer\"],\"items\":[{\"counter_id\":2,\"doc_type\":\"invoice\",\"financial_year\":\"2026-27\",\"prefix\":\"C01-INV\",\"next_number\":13001,\"range_start\":12951,\"range_end\":13000},{\"counter_id\":2,\"doc_type\":\"sales_return\",\"financial"
+      }
+    ],
+    "shell_head": "LamSuite Billing\nv2.1.1\n\nRetail & Pharmacy POS\n\nQA Pharma Kochi\nQA-PH\nID:4\nCtrl+Alt+S\nSearch actions, modules, or tools...\nCtrl+K\nML\nPH Front Till\nC01\nLive Synced\n06:37:35\nPOS Billing\nSales & Bills\nPurchases\nInventory\nReports\nMasters\nImport / Export\nData Migration\nSettings\nStore Dashboard\nSQLITE OFFLINE ENGINE\n\nLive counter sales, payment tenders, statutory GST, and inventory metrics.\n\nAll data in sync\nToday\nYesterday\nThis Week\nThis Month\nCustom\nRefresh\nNew Sale (F1)\nInward (F2)\nTODAY NET SALES\n\n₹ 0.00\n\nNo previous data\nBILLS ISSUED\n\n0\n\nAverage ticket ₹ 0.00\n\nDIGITAL / CASH SPLIT\n\n₹ 0 / ₹ 0\n\n0",
+    "before": {
+      "counter": {
+        "id": 2,
+        "status": "unclaimed",
+        "device_uuid": null,
+        "current_device_id": null,
+        "device_name": "Mac (Chrome)",
+        "approved_at": null
+      },
+      "keys": [
+        {
+          "id": 5,
+          "is_revoked": 1,
+          "consumed_at": null,
+          "consumed_device_uuid": null
+        },
+        {
+          "id": 10,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 21:00:54",
+          "consumed_device_uuid": "dev_1795275038165_648d54"
+        },
+        {
+          "id": 11,
+          "is_revoked": 1,
+          "consumed_at": null,
+          "consumed_device_uuid": null
+        },
+        {
+          "id": 12,
+          "is_revoked": 1,
+          "consumed_at": null,
+          "consumed_device_uuid": null
+        },
+        {
+          "id": 13,
+          "is_revoked": 1,
+          "consumed_at": null,
+          "consumed_device_uuid": null
+        },
+        {
+          "id": 14,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 21:16:12",
+          "consumed_device_uuid": "dev_1795275972639_180a2e"
+        },
+        {
+          "id": 15,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 21:16:38",
+          "consumed_device_uuid": "dev_1795275998363_6a3ce8"
+        },
+        {
+          "id": 16,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 21:17:15",
+          "consumed_device_uuid": "dev_1795276035354_29f3ff"
+        },
+        {
+          "id": 17,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 21:18:18",
+          "consumed_device_uuid": "dev_1795276098236_4fa322"
+        },
+        {
+          "id": 18,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 21:19:15",
+          "consumed_device_uuid": "dev_1795276155867_0ab8f1"
+        },
+        {
+          "id": 19,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 21:20:06",
+          "consumed_device_uuid": "dev_1795276206692_de5518"
+        },
+        {
+          "id": 20,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 21:21:20",
+          "consumed_device_uuid": "dev_1795276280758_7b36e8"
+        },
+        {
+          "id": 21,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 21:22:41",
+          "consumed_device_uuid": "dev_1795276361451_c39268"
+        },
+        {
+          "id": 22,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 21:24:18",
+          "consumed_device_uuid": "dev_1795276458252_b839fb"
+        },
+        {
+          "id": 23,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 21:24:50",
+          "consumed_device_uuid": "dev_1795276490507_9ffd86"
+        },
+        {
+          "id": 24,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 21:27:11",
+          "consumed_device_uuid": "dev_1795276631065_c694fe"
+        },
+        {
+          "id": 25,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 21:28:10",
+          "consumed_device_uuid": "dev_1795276690880_9eba3a"
+        },
+        {
+          "id": 26,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 21:28:48",
+          "consumed_device_uuid": "dev_1795276728962_38adbe"
+        },
+        {
+          "id": 27,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 21:31:20",
+          "consumed_device_uuid": "dev_1795276880257_1d59f1"
+        },
+        {
+          "id": 28,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 21:32:09",
+          "consumed_device_uuid": "dev_1795276929318_393465"
+        },
+        {
+          "id": 30,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 21:34:52",
+          "consumed_device_uuid": "dev_1795277092882_0fe77b"
+        },
+        {
+          "id": 31,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 21:35:16",
+          "consumed_device_uuid": "dev_1795277116659_29345d"
+        },
+        {
+          "id": 32,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 21:36:00",
+          "consumed_device_uuid": "dev_1795277160594_26e162"
+        },
+        {
+          "id": 33,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 21:36:44",
+          "consumed_device_uuid": "dev_1795277204497_36f749"
+        },
+        {
+          "id": 34,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 21:38:08",
+          "consumed_device_uuid": "dev_1795277288676_de8d3a"
+        },
+        {
+          "id": 36,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 21:42:11",
+          "consumed_device_uuid": "dev_1795277531448_aae526"
+        },
+        {
+          "id": 37,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 21:42:39",
+          "consumed_device_uuid": "dev_1795277559132_1bc737"
+        },
+        {
+          "id": 38,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 21:43:24",
+          "consumed_device_uuid": "dev_1795277604199_f76696"
+        },
+        {
+          "id": 39,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 21:44:05",
+          "consumed_device_uuid": "dev_1795277645691_5a9327"
+        },
+        {
+          "id": 40,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 21:45:27",
+          "consumed_device_uuid": "dev_1795277727111_2259de"
+        },
+        {
+          "id": 41,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 21:47:05",
+          "consumed_device_uuid": "dev_1795277825741_58f4cf"
+        },
+        {
+          "id": 43,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 21:59:37",
+          "consumed_device_uuid": "qa-api-till-ph-c01"
+        },
+        {
+          "id": 46,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 22:02:01",
+          "consumed_device_uuid": "dev_1795278721488_2404a6"
+        },
+        {
+          "id": 47,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 22:02:45",
+          "consumed_device_uuid": "dev_1795278765664_9ebdb6"
+        },
+        {
+          "id": 48,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 22:04:06",
+          "consumed_device_uuid": "dev_1795278846022_3c8251"
+        },
+        {
+          "id": 49,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 22:05:24",
+          "consumed_device_uuid": "dev_1795278924479_f4a190"
+        },
+        {
+          "id": 52,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-22 06:28:13",
+          "consumed_device_uuid": "dev_1795309093489_e5f839"
+        },
+        {
+          "id": 53,
+          "is_revoked": 0,
+          "consumed_at": null,
+          "consumed_device_uuid": null
+        }
+      ],
+      "attempts": 49
+    },
+    "after": {
+      "counter": {
+        "id": 2,
+        "status": "active",
+        "device_uuid": "dev_1795309631650_69864a",
+        "current_device_id": 44,
+        "device_name": "Mac (Chrome)",
+        "approved_at": "2026-11-22 06:37:28"
+      },
+      "keys": [
+        {
+          "id": 5,
+          "is_revoked": 1,
+          "consumed_at": null,
+          "consumed_device_uuid": null
+        },
+        {
+          "id": 10,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 21:00:54",
+          "consumed_device_uuid": "dev_1795275038165_648d54"
+        },
+        {
+          "id": 11,
+          "is_revoked": 1,
+          "consumed_at": null,
+          "consumed_device_uuid": null
+        },
+        {
+          "id": 12,
+          "is_revoked": 1,
+          "consumed_at": null,
+          "consumed_device_uuid": null
+        },
+        {
+          "id": 13,
+          "is_revoked": 1,
+          "consumed_at": null,
+          "consumed_device_uuid": null
+        },
+        {
+          "id": 14,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 21:16:12",
+          "consumed_device_uuid": "dev_1795275972639_180a2e"
+        },
+        {
+          "id": 15,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 21:16:38",
+          "consumed_device_uuid": "dev_1795275998363_6a3ce8"
+        },
+        {
+          "id": 16,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 21:17:15",
+          "consumed_device_uuid": "dev_1795276035354_29f3ff"
+        },
+        {
+          "id": 17,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 21:18:18",
+          "consumed_device_uuid": "dev_1795276098236_4fa322"
+        },
+        {
+          "id": 18,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 21:19:15",
+          "consumed_device_uuid": "dev_1795276155867_0ab8f1"
+        },
+        {
+          "id": 19,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 21:20:06",
+          "consumed_device_uuid": "dev_1795276206692_de5518"
+        },
+        {
+          "id": 20,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 21:21:20",
+          "consumed_device_uuid": "dev_1795276280758_7b36e8"
+        },
+        {
+          "id": 21,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 21:22:41",
+          "consumed_device_uuid": "dev_1795276361451_c39268"
+        },
+        {
+          "id": 22,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 21:24:18",
+          "consumed_device_uuid": "dev_1795276458252_b839fb"
+        },
+        {
+          "id": 23,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 21:24:50",
+          "consumed_device_uuid": "dev_1795276490507_9ffd86"
+        },
+        {
+          "id": 24,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 21:27:11",
+          "consumed_device_uuid": "dev_1795276631065_c694fe"
+        },
+        {
+          "id": 25,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 21:28:10",
+          "consumed_device_uuid": "dev_1795276690880_9eba3a"
+        },
+        {
+          "id": 26,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 21:28:48",
+          "consumed_device_uuid": "dev_1795276728962_38adbe"
+        },
+        {
+          "id": 27,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 21:31:20",
+          "consumed_device_uuid": "dev_1795276880257_1d59f1"
+        },
+        {
+          "id": 28,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 21:32:09",
+          "consumed_device_uuid": "dev_1795276929318_393465"
+        },
+        {
+          "id": 30,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 21:34:52",
+          "consumed_device_uuid": "dev_1795277092882_0fe77b"
+        },
+        {
+          "id": 31,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 21:35:16",
+          "consumed_device_uuid": "dev_1795277116659_29345d"
+        },
+        {
+          "id": 32,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 21:36:00",
+          "consumed_device_uuid": "dev_1795277160594_26e162"
+        },
+        {
+          "id": 33,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 21:36:44",
+          "consumed_device_uuid": "dev_1795277204497_36f749"
+        },
+        {
+          "id": 34,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 21:38:08",
+          "consumed_device_uuid": "dev_1795277288676_de8d3a"
+        },
+        {
+          "id": 36,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 21:42:11",
+          "consumed_device_uuid": "dev_1795277531448_aae526"
+        },
+        {
+          "id": 37,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 21:42:39",
+          "consumed_device_uuid": "dev_1795277559132_1bc737"
+        },
+        {
+          "id": 38,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 21:43:24",
+          "consumed_device_uuid": "dev_1795277604199_f76696"
+        },
+        {
+          "id": 39,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 21:44:05",
+          "consumed_device_uuid": "dev_1795277645691_5a9327"
+        },
+        {
+          "id": 40,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 21:45:27",
+          "consumed_device_uuid": "dev_1795277727111_2259de"
+        },
+        {
+          "id": 41,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 21:47:05",
+          "consumed_device_uuid": "dev_1795277825741_58f4cf"
+        },
+        {
+          "id": 43,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 21:59:37",
+          "consumed_device_uuid": "qa-api-till-ph-c01"
+        },
+        {
+          "id": 46,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 22:02:01",
+          "consumed_device_uuid": "dev_1795278721488_2404a6"
+        },
+        {
+          "id": 47,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 22:02:45",
+          "consumed_device_uuid": "dev_1795278765664_9ebdb6"
+        },
+        {
+          "id": 48,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 22:04:06",
+          "consumed_device_uuid": "dev_1795278846022_3c8251"
+        },
+        {
+          "id": 49,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 22:05:24",
+          "consumed_device_uuid": "dev_1795278924479_f4a190"
+        },
+        {
+          "id": 52,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-22 06:28:13",
+          "consumed_device_uuid": "dev_1795309093489_e5f839"
+        },
+        {
+          "id": 53,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-22 06:37:28",
+          "consumed_device_uuid": "dev_1795309631650_69864a"
+        }
+      ],
+      "attempts": 50
+    },
+    "token_present": true,
+    "context": {
+      "st": 200,
+      "body": "{\"success\":true,\"counter\":{\"id\":2,\"counter_code\":\"C01\",\"counter_name\":\"PH Front Till\",\"location_name\":\"Front desk\",\"is_remote\":false,\"is_digital_only\":false,\"printer_profile\":{\"type\":\"thermal_80mm\",\"auto_print\":true,\"copies\":1},\"receipt_customization\":null,\"status\":\"active\",\"is_locked\":false},\"store\":{\"id\":4,\"name\":\"QA Pharma Kochi\",\"code\":\"QA-PH\",\"is_pharmacy\":true},\"profile\":{\"permissions\":{\"ver"
+    },
+    "loads": [
+      "OPTIONS /counter/context 204",
+      "GET /counter/context 200",
+      "OPTIONS /sync/pull/deltas?store_id=4&since_watermark=0 204",
+      "GET /sync/pull/deltas?store_id=4&since_watermark=0 200",
+      "GET /sync/pull/deltas?store_id=4&since_watermark=0 200",
+      "GET /counter/context 200"
+    ]
+  },
+  "reuse_second_device": {
+    "claim": [
+      {
+        "st": 204,
+        "res": "<unreadable>"
+      },
+      {
+        "st": 401,
+        "res": "{\"success\":false,\"error\":\"claim_failed\",\"message\":\"That activation code is not valid here. Ask the store owner for a current counter code.\"}"
+      }
+    ],
+    "ui_message": null,
+    "still_on_activation": true,
+    "after": {
+      "counter": {
+        "id": 2,
+        "status": "active",
+        "device_uuid": "dev_1795309631650_69864a",
+        "current_device_id": 44,
+        "device_name": "Mac (Chrome)",
+        "approved_at": "2026-11-22 06:37:28"
+      },
+      "keys": [
+        {
+          "id": 5,
+          "is_revoked": 1,
+          "consumed_at": null,
+          "consumed_device_uuid": null
+        },
+        {
+          "id": 10,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 21:00:54",
+          "consumed_device_uuid": "dev_1795275038165_648d54"
+        },
+        {
+          "id": 11,
+          "is_revoked": 1,
+          "consumed_at": null,
+          "consumed_device_uuid": null
+        },
+        {
+          "id": 12,
+          "is_revoked": 1,
+          "consumed_at": null,
+          "consumed_device_uuid": null
+        },
+        {
+          "id": 13,
+          "is_revoked": 1,
+          "consumed_at": null,
+          "consumed_device_uuid": null
+        },
+        {
+          "id": 14,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 21:16:12",
+          "consumed_device_uuid": "dev_1795275972639_180a2e"
+        },
+        {
+          "id": 15,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 21:16:38",
+          "consumed_device_uuid": "dev_1795275998363_6a3ce8"
+        },
+        {
+          "id": 16,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 21:17:15",
+          "consumed_device_uuid": "dev_1795276035354_29f3ff"
+        },
+        {
+          "id": 17,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 21:18:18",
+          "consumed_device_uuid": "dev_1795276098236_4fa322"
+        },
+        {
+          "id": 18,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 21:19:15",
+          "consumed_device_uuid": "dev_1795276155867_0ab8f1"
+        },
+        {
+          "id": 19,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 21:20:06",
+          "consumed_device_uuid": "dev_1795276206692_de5518"
+        },
+        {
+          "id": 20,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 21:21:20",
+          "consumed_device_uuid": "dev_1795276280758_7b36e8"
+        },
+        {
+          "id": 21,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 21:22:41",
+          "consumed_device_uuid": "dev_1795276361451_c39268"
+        },
+        {
+          "id": 22,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 21:24:18",
+          "consumed_device_uuid": "dev_1795276458252_b839fb"
+        },
+        {
+          "id": 23,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 21:24:50",
+          "consumed_device_uuid": "dev_1795276490507_9ffd86"
+        },
+        {
+          "id": 24,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 21:27:11",
+          "consumed_device_uuid": "dev_1795276631065_c694fe"
+        },
+        {
+          "id": 25,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 21:28:10",
+          "consumed_device_uuid": "dev_1795276690880_9eba3a"
+        },
+        {
+          "id": 26,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 21:28:48",
+          "consumed_device_uuid": "dev_1795276728962_38adbe"
+        },
+        {
+          "id": 27,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 21:31:20",
+          "consumed_device_uuid": "dev_1795276880257_1d59f1"
+        },
+        {
+          "id": 28,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 21:32:09",
+          "consumed_device_uuid": "dev_1795276929318_393465"
+        },
+        {
+          "id": 30,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 21:34:52",
+          "consumed_device_uuid": "dev_1795277092882_0fe77b"
+        },
+        {
+          "id": 31,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 21:35:16",
+          "consumed_device_uuid": "dev_1795277116659_29345d"
+        },
+        {
+          "id": 32,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 21:36:00",
+          "consumed_device_uuid": "dev_1795277160594_26e162"
+        },
+        {
+          "id": 33,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 21:36:44",
+          "consumed_device_uuid": "dev_1795277204497_36f749"
+        },
+        {
+          "id": 34,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 21:38:08",
+          "consumed_device_uuid": "dev_1795277288676_de8d3a"
+        },
+        {
+          "id": 36,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 21:42:11",
+          "consumed_device_uuid": "dev_1795277531448_aae526"
+        },
+        {
+          "id": 37,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 21:42:39",
+          "consumed_device_uuid": "dev_1795277559132_1bc737"
+        },
+        {
+          "id": 38,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 21:43:24",
+          "consumed_device_uuid": "dev_1795277604199_f76696"
+        },
+        {
+          "id": 39,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 21:44:05",
+          "consumed_device_uuid": "dev_1795277645691_5a9327"
+        },
+        {
+          "id": 40,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 21:45:27",
+          "consumed_device_uuid": "dev_1795277727111_2259de"
+        },
+        {
+          "id": 41,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 21:47:05",
+          "consumed_device_uuid": "dev_1795277825741_58f4cf"
+        },
+        {
+          "id": 43,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 21:59:37",
+          "consumed_device_uuid": "qa-api-till-ph-c01"
+        },
+        {
+          "id": 46,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 22:02:01",
+          "consumed_device_uuid": "dev_1795278721488_2404a6"
+        },
+        {
+          "id": 47,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 22:02:45",
+          "consumed_device_uuid": "dev_1795278765664_9ebdb6"
+        },
+        {
+          "id": 48,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 22:04:06",
+          "consumed_device_uuid": "dev_1795278846022_3c8251"
+        },
+        {
+          "id": 49,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 22:05:24",
+          "consumed_device_uuid": "dev_1795278924479_f4a190"
+        },
+        {
+          "id": 52,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-22 06:28:13",
+          "consumed_device_uuid": "dev_1795309093489_e5f839"
+        },
+        {
+          "id": 53,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-22 06:37:28",
+          "consumed_device_uuid": "dev_1795309631650_69864a"
+        }
+      ],
+      "attempts": 51
+    }
+  },
+  "a_still_works_after_B": 200,
+  "reissue": {
+    "a_ctx_after_issue_only": 403,
+    "b_claim": [
+      200
+    ],
+    "a_ctx_after_b_claim": {
+      "st": 403,
+      "body": "{\"success\":false,\"error\":\"DEVICE_AUTH_FAILED\",\"message\":\"This workstation has been revoked or locked by the store administrator.\"}"
+    },
+    "a_screen_head": "",
+    "counter": {
+      "counter": {
+        "id": 2,
+        "status": "active",
+        "device_uuid": "dev_1795309665233_1a2a80",
+        "current_device_id": 45,
+        "device_name": "Mac (Chrome)",
+        "approved_at": "2026-11-22 06:37:49"
+      },
+      "keys": [
+        {
+          "id": 5,
+          "is_revoked": 1,
+          "consumed_at": null,
+          "consumed_device_uuid": null
+        },
+        {
+          "id": 10,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 21:00:54",
+          "consumed_device_uuid": "dev_1795275038165_648d54"
+        },
+        {
+          "id": 11,
+          "is_revoked": 1,
+          "consumed_at": null,
+          "consumed_device_uuid": null
+        },
+        {
+          "id": 12,
+          "is_revoked": 1,
+          "consumed_at": null,
+          "consumed_device_uuid": null
+        },
+        {
+          "id": 13,
+          "is_revoked": 1,
+          "consumed_at": null,
+          "consumed_device_uuid": null
+        },
+        {
+          "id": 14,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 21:16:12",
+          "consumed_device_uuid": "dev_1795275972639_180a2e"
+        },
+        {
+          "id": 15,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 21:16:38",
+          "consumed_device_uuid": "dev_1795275998363_6a3ce8"
+        },
+        {
+          "id": 16,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 21:17:15",
+          "consumed_device_uuid": "dev_1795276035354_29f3ff"
+        },
+        {
+          "id": 17,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 21:18:18",
+          "consumed_device_uuid": "dev_1795276098236_4fa322"
+        },
+        {
+          "id": 18,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 21:19:15",
+          "consumed_device_uuid": "dev_1795276155867_0ab8f1"
+        },
+        {
+          "id": 19,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 21:20:06",
+          "consumed_device_uuid": "dev_1795276206692_de5518"
+        },
+        {
+          "id": 20,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 21:21:20",
+          "consumed_device_uuid": "dev_1795276280758_7b36e8"
+        },
+        {
+          "id": 21,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 21:22:41",
+          "consumed_device_uuid": "dev_1795276361451_c39268"
+        },
+        {
+          "id": 22,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 21:24:18",
+          "consumed_device_uuid": "dev_1795276458252_b839fb"
+        },
+        {
+          "id": 23,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 21:24:50",
+          "consumed_device_uuid": "dev_1795276490507_9ffd86"
+        },
+        {
+          "id": 24,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 21:27:11",
+          "consumed_device_uuid": "dev_1795276631065_c694fe"
+        },
+        {
+          "id": 25,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 21:28:10",
+          "consumed_device_uuid": "dev_1795276690880_9eba3a"
+        },
+        {
+          "id": 26,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 21:28:48",
+          "consumed_device_uuid": "dev_1795276728962_38adbe"
+        },
+        {
+          "id": 27,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 21:31:20",
+          "consumed_device_uuid": "dev_1795276880257_1d59f1"
+        },
+        {
+          "id": 28,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 21:32:09",
+          "consumed_device_uuid": "dev_1795276929318_393465"
+        },
+        {
+          "id": 30,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 21:34:52",
+          "consumed_device_uuid": "dev_1795277092882_0fe77b"
+        },
+        {
+          "id": 31,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 21:35:16",
+          "consumed_device_uuid": "dev_1795277116659_29345d"
+        },
+        {
+          "id": 32,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 21:36:00",
+          "consumed_device_uuid": "dev_1795277160594_26e162"
+        },
+        {
+          "id": 33,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 21:36:44",
+          "consumed_device_uuid": "dev_1795277204497_36f749"
+        },
+        {
+          "id": 34,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 21:38:08",
+          "consumed_device_uuid": "dev_1795277288676_de8d3a"
+        },
+        {
+          "id": 36,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 21:42:11",
+          "consumed_device_uuid": "dev_1795277531448_aae526"
+        },
+        {
+          "id": 37,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 21:42:39",
+          "consumed_device_uuid": "dev_1795277559132_1bc737"
+        },
+        {
+          "id": 38,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 21:43:24",
+          "consumed_device_uuid": "dev_1795277604199_f76696"
+        },
+        {
+          "id": 39,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 21:44:05",
+          "consumed_device_uuid": "dev_1795277645691_5a9327"
+        },
+        {
+          "id": 40,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 21:45:27",
+          "consumed_device_uuid": "dev_1795277727111_2259de"
+        },
+        {
+          "id": 41,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 21:47:05",
+          "consumed_device_uuid": "dev_1795277825741_58f4cf"
+        },
+        {
+          "id": 43,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 21:59:37",
+          "consumed_device_uuid": "qa-api-till-ph-c01"
+        },
+        {
+          "id": 46,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 22:02:01",
+          "consumed_device_uuid": "dev_1795278721488_2404a6"
+        },
+        {
+          "id": 47,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 22:02:45",
+          "consumed_device_uuid": "dev_1795278765664_9ebdb6"
+        },
+        {
+          "id": 48,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 22:04:06",
+          "consumed_device_uuid": "dev_1795278846022_3c8251"
+        },
+        {
+          "id": 49,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-21 22:05:24",
+          "consumed_device_uuid": "dev_1795278924479_f4a190"
+        },
+        {
+          "id": 52,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-22 06:28:13",
+          "consumed_device_uuid": "dev_1795309093489_e5f839"
+        },
+        {
+          "id": 53,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-22 06:37:28",
+          "consumed_device_uuid": "dev_1795309631650_69864a"
+        },
+        {
+          "id": 54,
+          "is_revoked": 0,
+          "consumed_at": "2026-11-22 06:37:49",
+          "consumed_device_uuid": "dev_1795309665233_1a2a80"
+        }
+      ],
+      "attempts": 52
+    }
+  },
+  "attempt_rows": [
+    {
+      "id": 52,
+      "ip_address": "127.0.0.1",
+      "device_uuid": "dev_1795309665233_1a2a80",
+      "device_name": "Mac (Chrome)",
+      "attempted_key_prefix": "LAM-C01-BA",
+      "store_id": 4,
+      "success": 1,
+      "failure_reason": null,
+      "created_at": "2026-11-22 06:37:49",
+      "updated_at": "2026-11-22 06:37:49",
+      "counter_id": 2,
+      "activation_key_id": 54
+    },
+    {
+      "id": 51,
+      "ip_address": "127.0.0.1",
+      "device_uuid": "dev_1795309665233_1a2a80",
+      "device_name": "Mac (Chrome)",
+      "attempted_key_prefix": "LAM-C01-58",
+      "store_id": 4,
+      "success": 0,
+      "failure_reason": "consumed",
+      "created_at": "2026-11-22 06:37:45",
+      "updated_at": "2026-11-22 06:37:45",
+      "counter_id": 2,
+      "activation_key_id": 53
+    },
+    {
+      "id": 50,
+      "ip_address": "127.0.0.1",
+      "device_uuid": "dev_1795309631650_69864a",
+      "device_name": "Mac (Chrome)",
+      "attempted_key_prefix": "LAM-C01-58",
+      "store_id": 4,
+      "success": 1,
+      "failure_reason": null,
+      "created_at": "2026-11-22 06:37:28",
+      "updated_at": "2026-11-22 06:37:28",
+      "counter_id": 2,
+      "activation_key_id": 53
+    },
+    {
+      "id": 49,
+      "ip_address": "127.0.0.1",
+      "device_uuid": "dev_1795309631650_69864a",
+      "device_name": "Mac (Chrome)",
+      "attempted_key_prefix": "LAM-C02-72",
+      "store_id": 4,
+      "success": 0,
+      "failure_reason": "revoked",
+      "created_at": "2026-11-22 06:37:24",
+      "updated_at": "2026-11-22 06:37:24",
+      "counter_id": 3,
+      "activation_key_id": 1
+    },
+    {
+      "id": 48,
+      "ip_address": "127.0.0.1",
+      "device_uuid": "dev_1795309631650_69864a",
+      "device_name": "Mac (Chrome)",
+      "attempted_key_prefix": "HELLOWORLD",
+      "store_id": null,
+      "success": 0,
+      "failure_reason": "unknown_code",
+      "created_at": "2026-11-22 06:37:20",
+      "updated_at": "2026-11-22 06:37:20",
+      "counter_id": null,
+      "activation_key_id": null
+    },
+    {
+      "id": 47,
+      "ip_address": "127.0.0.1",
+      "device_uuid": "dev_1795309631650_69864a",
+      "device_name": "Mac (Chrome)",
+      "attempted_key_prefix": "LAM-C01-01",
+      "store_id": null,
+      "success": 0,
+      "failure_reason": "unknown_code",
+      "created_at": "2026-11-22 06:37:16",
+      "updated_at": "2026-11-22 06:37:16",
+      "counter_id": null,
+      "activation_key_id": null
+    },
+    {
+      "id": 46,
+      "ip_address": "127.0.0.1",
+      "device_uuid": "dev_1795309631650_69864a",
+      "device_name": "Mac (Chrome)",
+      "attempted_key_prefix": "LAM-C01-58",
+      "store_id": null,
+      "success": 0,
+      "failure_reason": "unknown_code",
+      "created_at": "2026-11-22 06:37:11",
+      "updated_at": "2026-11-22 06:37:11",
+      "counter_id": null,
+      "activation_key_id": null
+    },
+    {
+      "id": 45,
+      "ip_address": "127.0.0.1",
+      "device_uuid": "dev_1795309093489_e5f839",
+      "device_name": "Mac (Chrome)",
+      "attempted_key_prefix": "LAM-C01-76",
+      "store_id": 4,
+      "success": 1,
+      "failure_reason": null,
+      "created_at": "2026-11-22 06:28:13",
+      "updated_at": "2026-11-22 06:28:13",
+      "counter_id": 2,
+      "activation_key_id": 52
+    },
+    {
+      "id": 44,
+      "ip_address": "127.0.0.1",
+      "device_uuid": "qa-g1sec-1795303228909",
+      "device_name": "QA G1 recheck",
+      "attempted_key_prefix": "LAM-C02-5B",
+      "store_id": 4,
+      "success": 1,
+      "failure_reason": null,
+      "created_at": "2026-11-22 04:50:28",
+      "updated_at": "2026-11-22 04:50:28",
+      "counter_id": 3,
+      "activation_key_id": 51
+    },
+    {
+      "id": 43,
+      "ip_address": "127.0.0.1",
+      "device_uuid": "qa-expiry-probe-dev",
+      "device_name": "QA expiry probe",
+      "attempted_key_prefix": "LAM-C03-70",
+      "store_id": 5,
+      "success": 0,
+      "failure_reason": "expired",
+      "created_at": "2026-11-21 22:09:41",
+      "updated_at": "2026-11-21 22:09:41",
+      "counter_id": 6,
+      "activation_key_id": 9
+    }
+  ],
+  "audit": [
+    {
+      "id": 211,
+      "store_id": 4,
+      "action": "counter_claimed",
+      "entity_type": "Counter",
+      "entity_id": "2",
+      "nv": "{\"counter_code\":\"C01\",\"store_id\":4,\"device_uuid\":\"dev_1795309665233_1a2a80\",\"device_name\":\"Mac (Chrome)\"}"
+    },
+    {
+      "id": 209,
+      "store_id": 4,
+      "action": "counter_claimed",
+      "entity_type": "Counter",
+      "entity_id": "2",
+      "nv": "{\"counter_code\":\"C01\",\"store_id\":4,\"device_uuid\":\"dev_1795309631650_69864a\",\"device_name\":\"Mac (Chrome)\"}"
+    },
+    {
+      "id": 205,
+      "store_id": 4,
+      "action": "counter_claimed",
+      "entity_type": "Counter",
+      "entity_id": "2",
+      "nv": "{\"counter_code\":\"C01\",\"store_id\":4,\"device_uuid\":\"dev_1795309093489_e5f839\",\"device_name\":\"Mac (Chrome)\"}"
+    },
+    {
+      "id": 192,
+      "store_id": 5,
+      "action": "counter_activation_code_issued",
+      "entity_type": "ActivationKey",
+      "entity_id": "50",
+      "nv": "{\"counter_id\":5,\"label\":null,\"key_prefix\":\"LAM-C02-E6E27F****\",\"expires_at\":\"2026-11-22T22:08:29+05:30\"}"
+    },
+    {
+      "id": 155,
+      "store_id": 5,
+      "action": "counter_activation_code_issued",
+      "entity_type": "ActivationKey",
+      "entity_id": "42",
+      "nv": "{\"counter_id\":5,\"label\":null,\"key_prefix\":\"LAM-C02-93D067****\",\"expires_at\":\"2026-11-22T21:52:58+05:30\"}"
+    },
+    {
+      "id": 105,
+      "store_id": 5,
+      "action": "counter_activation_code_issued",
+      "entity_type": "ActivationKey",
+      "entity_id": "35",
+      "nv": "{\"counter_id\":4,\"label\":null,\"key_prefix\":\"LAM-C01-697002****\",\"expires_at\":\"2026-11-22T21:41:26+05:30\"}"
+    },
+    {
+      "id": 82,
+      "store_id": 4,
+      "action": "counter_activation_code_issued",
+      "entity_type": "ActivationKey",
+      "entity_id": "29",
+      "nv": "{\"counter_id\":3,\"label\":null,\"key_prefix\":\"LAM-C02-A11A5E****\",\"expires_at\":\"2026-11-22T21:33:59+05:30\"}"
+    },
+    {
+      "id": 66,
+      "store_id": 4,
+      "action": "counter_activation_code_issued",
+      "entity_type": "ActivationKey",
+      "entity_id": "14",
+      "nv": "{\"counter_id\":2,\"label\":null,\"key_prefix\":\"LAM-C01-B0D052****\",\"expires_at\":\"2026-11-22T21:16:12+05:30\"}"
+    },
+    {
+      "id": 65,
+      "store_id": 4,
+      "action": "counter_activation_code_issued",
+      "entity_type": "ActivationKey",
+      "entity_id": "13",
+      "nv": "{\"counter_id\":2,\"label\":null,\"key_prefix\":\"LAM-C01-B426DF****\",\"expires_at\":\"2026-11-22T21:14:50+05:30\"}"
+    },
+    {
+      "id": 47,
+      "store_id": 4,
+      "action": "counter_activation_code_issued",
+      "entity_type": "ActivationKey",
+      "entity_id": "12",
+      "nv": "{\"counter_id\":2,\"label\":null,\"key_prefix\":\"LAM-C01-404F4E****\",\"expires_at\":\"2026-11-22T21:02:05+05:30\"}"
+    },
+    {
+      "id": 46,
+      "store_id": 4,
+      "action": "counter_claim_lockout_triggered",
+      "entity_type": "Counter",
+      "entity_id": "3",
+      "nv": "{\"ip_address\":\"127.0.0.1\",\"device_uuid\":\"dev_1795275092741_5e7772\",\"recent_failures\":5,\"locked_minutes\":15}"
+    },
+    {
+      "id": 44,
+      "store_id": 4,
+      "action": "counter_activation_code_issued",
+      "entity_type": "ActivationKey",
+      "entity_id": "10",
+      "nv": "{\"counter_id\":2,\"label\":null,\"key_prefix\":\"LAM-C01-0035D0****\",\"expires_at\":\"2026-11-22T21:00:37+05:30\"}"
+    }
+  ],
+  "blocked_external": [
+    "https://api.ipify.org/?format=json"
+  ]
+}

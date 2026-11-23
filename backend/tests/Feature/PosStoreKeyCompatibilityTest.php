@@ -265,7 +265,9 @@ class PosStoreKeyCompatibilityTest extends TestCase
 
     public function test_numeric_store_id_is_left_unchanged(): void
     {
-        $res = $this->getJson('/api/settings?store_id=' . $this->otherStore->id);
+        // G1-SEC: settings are read by that store's own counter.
+        $res = $this->withHeaders(['X-Device-Token' => $this->otherDeviceToken])
+            ->getJson('/api/settings?store_id=' . $this->otherStore->id);
 
         $res->assertStatus(200);
         $this->assertSame((string) $this->otherStore->id, $res->json('store_id'));

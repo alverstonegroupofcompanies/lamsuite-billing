@@ -3,12 +3,15 @@ import { Link, useLocation } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { useI18n } from "../i18n/I18nContext";
 import { TranslationKey } from "../i18n/dictionaries";
+import { version } from "../../package.json";
 import {
   LayoutDashboard,
   Store,
   Cpu,
+  ListChecks,
   ToggleLeft,
   Users,
+  Users2,
   Database,
   Receipt,
   Boxes,
@@ -84,6 +87,14 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen = false, onClose }) => 
           visible: hasPermission("devices", "view"),
         },
         {
+          id: "counters",
+          nameKey: "nav.counters",
+          path: "/counters",
+          icon: ListChecks,
+          shortcut: "Alt+K",
+          visible: hasPermission("devices", "view"),
+        },
+        {
           id: "features",
           nameKey: "nav.features",
           path: "/features",
@@ -104,6 +115,14 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen = false, onClose }) => 
           icon: Users,
           shortcut: "Alt+5",
           visible: hasPermission("users", "view"),
+        },
+        {
+          id: "salespeople",
+          nameKey: "nav.salespeople",
+          path: "/salespeople",
+          icon: Users2,
+          shortcut: "Alt+N",
+          visible: hasPermission("masters", "view"),
         },
       ],
     },
@@ -350,7 +369,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen = false, onClose }) => 
             <span className="truncate max-w-[120px]">{user?.email}</span>
           </div>
           <span className="bg-slate-800 px-2 py-0.5 rounded text-[10px] font-mono text-slate-300">
-            v2.0
+            v{version}
           </span>
         </div>
       </aside>

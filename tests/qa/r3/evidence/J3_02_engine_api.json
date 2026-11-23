@@ -1,0 +1,221 @@
+{
+  "claim": {
+    "st": 200,
+    "keys": [
+      "success",
+      "device_token",
+      "token_stored_as",
+      "sequences",
+      "counter",
+      "store",
+      "offline",
+      "profile",
+      "server_time",
+      "message"
+    ]
+  },
+  "post": {
+    "st": 201,
+    "body": "{\"success\":true,\"purchase\":{\"store_id\":4,\"supplier_id\":8,\"supplier_name\":\"QA Pharma Distributors\",\"supplier_gstin\":\"32AAACQ1234A1Z1\",\"invoice_number\":\"QA-PB-003\",\"invoice_date\":\"2026-11-21\",\"subtotal\":\"10000.00\",\"tax_total\":\"1254.00\",\"cgst_total\":\"627.00\",\"sgst_total\":\"627.00\",\"igst_total\":\"0.00\",\"cess_total\":\"0.00\",\"is_interstate\":false,\"is_rcm\":false,\"itc_eligibility\":\"eligible\",\"freight_charges\":\"0.00\",\"bill_discount_type\":\"amount\",\"bill_discount\":\"0.00\",\"place_of_supply\":\"32\",\"round_off\":\"0.00\",\"grand_total\":\"11554.00\",\"paid_amount\":\"0.00\",\"status\":\"received\",\"updated_at\":\"2026-11-21T16:03:59.000000Z\",\"created_at\":\"2026-11-21T16:03:59.000000Z\",\"id\":3,\"items\":[{\"id\":4,\"purchase_id\":3,\"product_id\":5,\"product_name\":\"QA Paracet 500 Strip\",\"batch_no\":\"PA-CHG\",\"expiry_date\":\"2028-06-29T18:30:00.000000Z\",\"qty\":\"1500.00\",\"purchase_rate\":\"60.00\",\"mrp\":\"90.00\",\"gst_percent\":\"12.00\",\"tax_amount\":\"720.00\",\"total_amount\":\"6720.00\",\"created_at\":\"2026-11-21T16:03:59.000000Z\",\"updated_at\":\"2026-11-21T16:03:59.000000Z\",\"taxable_amount\":\"6000.00\",\"cgst_amount\":\"360.00\",\"sgst_amount\":\"360.00\",\"igst_amount\":\"0.00\",\"cess_amount\":\"0.00\",\"pack_qty\":\"100.00\",\"loose_qty\":\"0.00\",\"free_qty\":\"0.00\",\"units_per_pack\":15,\"discount_percent\":\"0.00\",\"discount_amount\":\"0.00\",\"effective_unit_cost\":\"4.08\",\"hsn_code\":\"30049099\",\"mfg_date\":null,\"selling_rate\":\"90.00\",\"free_loose_qty\":\"0.00\",\"discount_type\":\"percent\",\"ptr\":\"60.00\",\"pts\":null,\"ptss\":null,\"received_qty\":\"0.00\",\"gross_weight_kg\":null,\"charge_allocation\":\"120.00\",\"landed_unit_cost\":\"4.0800\",\"original_purchase_item_id\":null},{\"id\":5,\"purchase_id\":3,\"product_id\":5,\"product_name\":\"QA Paracet 500 Strip\",\"batch_no\":\"PA-CHG2\",\"expiry_date\":\"2028-06-29T18:30:00.000000Z\",\"qty\":\"750.00\",\"purchase_rate\":\"50.00\",\"mrp\":\"90.00\",\"gst_percent\":\"12.00\",\"tax_amount\":\"300.00\",\"total_amount\":\"2800.00\",\"created_at\":\"2026-11-21T16:03:59.000000Z\",\"updated_at\":\"2026-11-21T16:03:59.000000Z\",\"taxable_amount\":\"2500.00\",\"cgst_amount\":\"150.00\",\"sgst_amount\":\"150.00\",\"igst_amount\":\"0.00\",\"cess_amount\":\"0.00\",\"pack_qty\":\"50.00\",\"loose_qty\":\"0.00\",\"free_qty\":\"0.00\",\"units_per_pack\":15,\"discount_percent\":\"0.00\",\"discount_amount\":\"0.00\",\"effective_unit_cost\":\"3.40\",\"hsn_code\":\"30049099\",\"mfg_date\":null,\"selling_rate\":\"90.00\",\"free_loose_qty\":\"0.00\",\"discount_type\":\"percent\",\"ptr\":\"50.00\",\"pts\":null,\"ptss\":null,\"received_qty\":\"0.00\",\"gross_weight_kg\":null,\"charge_allocation\":\"50.00\",\"landed_unit_cost\":\"3.4000\",\"original_purchase_item_id\":null},{\"id\":6,\"purchase_"
+  },
+  "db": {
+    "purchase": [
+      {
+        "id": 3,
+        "invoice_number": "QA-PB-003",
+        "subtotal": 10000,
+        "tax_total": 1254,
+        "cgst_total": 627,
+        "sgst_total": 627,
+        "grand_total": 11554,
+        "paid_amount": 0,
+        "status": "received"
+      }
+    ],
+    "items": [
+      {
+        "batch_no": "PA-CHG",
+        "qty": 1500,
+        "purchase_rate": 60,
+        "taxable_amount": 6000,
+        "tax_amount": 720,
+        "total_amount": 6720,
+        "landed_unit_cost": 4.08,
+        "charge_allocation": 120
+      },
+      {
+        "batch_no": "PA-CHG2",
+        "qty": 750,
+        "purchase_rate": 50,
+        "taxable_amount": 2500,
+        "tax_amount": 300,
+        "total_amount": 2800,
+        "landed_unit_cost": 3.4,
+        "charge_allocation": 50
+      },
+      {
+        "batch_no": "CS-CHG",
+        "qty": 25,
+        "purchase_rate": 60,
+        "taxable_amount": 1500,
+        "tax_amount": 180,
+        "total_amount": 1680,
+        "landed_unit_cost": 61.2,
+        "charge_allocation": 30
+      }
+    ],
+    "charges": [
+      {
+        "id": 1,
+        "store_id": 4,
+        "purchase_id": 3,
+        "external_id": "pur-3-1",
+        "seq": 1,
+        "head_code": "FREIGHT",
+        "head_name": "Freight",
+        "note": null,
+        "treatment": "add_to_cost",
+        "spread_method": "value",
+        "spread_basis_used": "value",
+        "itc_eligibility": "eligible",
+        "is_rcm": 0,
+        "paid_separately": 0,
+        "paid_to_label": null,
+        "place_of_supply": "32",
+        "sac_code": "996731",
+        "amount": 200,
+        "gst_percent": 18,
+        "taxable_amount": 200,
+        "cgst_amount": 18,
+        "sgst_amount": 18,
+        "igst_amount": 0,
+        "cess_amount": 0,
+        "total_amount": 236,
+        "allocated_amount": 200,
+        "source": "manual",
+        "expense_id": null,
+        "reversed_amount": 0,
+        "created_by": null,
+        "created_at": "2026-11-21 21:33:59",
+        "updated_at": "2026-11-21 21:33:59",
+        "in_payable": 1
+      },
+      {
+        "id": 2,
+        "store_id": 4,
+        "purchase_id": 3,
+        "external_id": "pur-3-2",
+        "seq": 2,
+        "head_code": "PACKING",
+        "head_name": "Packing",
+        "note": null,
+        "treatment": "expense",
+        "spread_method": "value",
+        "spread_basis_used": "none",
+        "itc_eligibility": "eligible",
+        "is_rcm": 0,
+        "paid_separately": 0,
+        "paid_to_label": null,
+        "place_of_supply": "32",
+        "sac_code": null,
+        "amount": 100,
+        "gst_percent": 18,
+        "taxable_amount": 100,
+        "cgst_amount": 9,
+        "sgst_amount": 9,
+        "igst_amount": 0,
+        "cess_amount": 0,
+        "total_amount": 118,
+        "allocated_amount": 0,
+        "source": "manual",
+        "expense_id": 1,
+        "reversed_amount": 0,
+        "created_by": null,
+        "created_at": "2026-11-21 21:33:59",
+        "updated_at": "2026-11-21 21:33:59",
+        "in_payable": 1
+      }
+    ],
+    "allocations": [
+      {
+        "id": 1,
+        "store_id": 4,
+        "purchase_charge_id": 1,
+        "purchase_item_id": 4,
+        "batch_id": null,
+        "basis_amount": 6000,
+        "basis_share": 0.6,
+        "allocated_amount": 120,
+        "is_remainder_paisa": 0,
+        "created_at": "2026-11-21 21:33:59",
+        "updated_at": "2026-11-21 21:33:59"
+      },
+      {
+        "id": 2,
+        "store_id": 4,
+        "purchase_charge_id": 1,
+        "purchase_item_id": 5,
+        "batch_id": null,
+        "basis_amount": 2500,
+        "basis_share": 0.25,
+        "allocated_amount": 50,
+        "is_remainder_paisa": 0,
+        "created_at": "2026-11-21 21:33:59",
+        "updated_at": "2026-11-21 21:33:59"
+      },
+      {
+        "id": 3,
+        "store_id": 4,
+        "purchase_charge_id": 1,
+        "purchase_item_id": 6,
+        "batch_id": null,
+        "basis_amount": 1500,
+        "basis_share": 0.15,
+        "allocated_amount": 30,
+        "is_remainder_paisa": 0,
+        "created_at": "2026-11-21 21:33:59",
+        "updated_at": "2026-11-21 21:33:59"
+      }
+    ],
+    "batches": [],
+    "expenses": [
+      {
+        "id": 1,
+        "store_id": 4,
+        "expense_head": "Packing",
+        "amount": 100,
+        "payment_mode": "On Account",
+        "reference_no": "QA-PB-003",
+        "notes": "Booked from charge Packing on bill QA-PB-003",
+        "expense_date": "2026-11-21 00:00:00",
+        "created_by": null,
+        "created_at": "2026-11-21 21:33:59",
+        "updated_at": "2026-11-21 21:33:59",
+        "expense_number": "EXP-PC-3-2",
+        "purchase_id": 3,
+        "purchase_charge_id": 2,
+        "gst_percent": 18,
+        "cgst_amount": 9,
+        "sgst_amount": 9,
+        "igst_amount": 0,
+        "itc_eligibility": "eligible",
+        "paid_separately": 0
+      }
+    ],
+    "supplier_balance": {
+      "current_balance": 0
+    },
+    "ledger": []
+  },
+  "duplicate": {
+    "st": 201,
+    "body": "{\"success\":true,\"purchase\":{\"store_id\":4,\"supplier_id\":8,\"supplier_name\":\"QA Pharma Distributors\",\"supplier_gstin\":\"32AAACQ1234A1Z1\",\"invoice_number\":\"QA-PB-003\",\"invoice_date\":\"2026-11-21\",\"subtotal\":\"10000.00\",\"tax_total\":\"1254.00\",\"cgst_total\":\"627.00\",\"sgst_total\":\"627.00\",\"igst_total\":\"0.00\",\"cess_total\":\"0.00\",\"is_interstate\":false,\"is_rcm\":false,\"itc_eligibility\":\"eligible\",\"freight_charges",
+    "count": 2
+  },
+  "before": {
+    "supplier": {
+      "current_balance": 0
+    },
+    "expenses": 0
+  }
+}

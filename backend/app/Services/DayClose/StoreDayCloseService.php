@@ -3,6 +3,7 @@
 namespace App\Services\DayClose;
 
 use App\Exceptions\BusinessRuleException;
+use App\Models\AuditLog;
 use App\Models\Counter;
 use App\Models\CounterShift;
 use App\Models\Expense;
@@ -282,7 +283,10 @@ class StoreDayCloseService
     public function reopen(StoreDayClose $close, ?string $reason = null): StoreDayClose
     {
         $close->fill([
-            'status' => 'closed',
+            // Reopening must actually un-close the day: since G12 a closed day
+            // blocks cancellation, so writing 'closed' here would leave the
+            // reopened day silently locked for the thing it was reopened for.
+            'status' => 'open',
             'locked_at' => null,
             'reconciliation_notes' => trim(($close->reconciliation_notes ?? '') . ($reason ? " | Reopened: {$reason}" : ' | Reopened')),
         ]);
@@ -299,19 +303,13 @@ class StoreDayCloseService
 
         $day = Carbon::parse($date)->toDateString();
 
-        $locked = StoreDayClose::query()
-            ->where('store_id', $storeId)
-            ->whereDate('close_date', $day)
-            ->where('status', 'reconciled')
-            ->exists();
+        $locked = $this->lockedDay($storeId, $day, ['reconciled']);
 
         if (! $locked) {
             return;
         }
 
-        $request = request();
-        $user = $request->user();
-        if ($user?->isSuperAdmin() && $request->boolean('override_day_close_lock')) {
+        if ($this->overrideRequested($locked, 'invoice_write')) {
             return;
         }
 
@@ -323,6 +321,89 @@ class StoreDayCloseService
             'invoice_date',
             'Ask a super administrator to reopen the day from Admin > Day Close if this is a genuine backdated entry.'
         );
+    }
+
+    /**
+     * A closed day still accepts new bills (a till may sync what it rang before
+     * the close), but it must not accept a cancellation: that reverses money and
+     * stock out of a day the owner has already counted.
+     */
+    public function assertDayNotClosed(int $storeId, ?string $date, string $context = 'cancellation'): void
+    {
+        if (static::$lockBypass > 0 || ! $date) {
+            return;
+        }
+
+        $day = Carbon::parse($date)->toDateString();
+
+        $locked = $this->lockedDay($storeId, $day, ['closed', 'reconciled']);
+
+        if (! $locked) {
+            return;
+        }
+
+        if ($this->overrideRequested($locked, $context)) {
+            return;
+        }
+
+        throw new BusinessRuleException(
+            'DAY_CLOSED_LOCKED',
+            "Day {$day} is {$locked->status}. Cancellations and bill changes are blocked for this date.",
+            'day_close',
+            null,
+            'invoice_date',
+            'Reopen the day from Admin > Day Close before changing a bill dated to it (a reconciled day needs a super administrator).',
+            409
+        );
+    }
+
+    /**
+     * @param  list<string>  $statuses
+     */
+    private function lockedDay(int $storeId, string $day, array $statuses): ?StoreDayClose
+    {
+        return StoreDayClose::query()
+            ->where('store_id', $storeId)
+            ->whereDate('close_date', $day)
+            ->whereIn('status', $statuses)
+            ->first();
+    }
+
+    /**
+     * The one deliberate way past a day lock, and it leaves a trace. Rubbish in
+     * the audit trail beats a silent bypass.
+     */
+    private function overrideRequested(StoreDayClose $close, string $context): bool
+    {
+        $request = request();
+        $user = $request->user();
+
+        if (! $user?->isSuperAdmin() || ! $request->boolean('override_day_close_lock')) {
+            return false;
+        }
+
+        // G12: an override without a stated reason is not an audited override.
+        $reason = trim((string) $request->input('override_reason', ''));
+        if ($reason === '') {
+            throw new BusinessRuleException(
+                'DAY_CLOSE_OVERRIDE_REASON_REQUIRED',
+                'Overriding a closed day needs a reason.',
+                'day_close',
+                null,
+                'override_reason',
+                'Send override_reason explaining why this closed day must change.',
+                422
+            );
+        }
+
+        AuditLog::log('day_close_lock_overridden', 'StoreDayClose', (string) $close->id, null, [
+            'close_date' => $close->close_date?->toDateString(),
+            'status' => $close->status,
+            'context' => $context,
+            'reason' => mb_substr($reason, 0, 500),
+        ], $close->store_id, $user->id);
+
+        return true;
     }
 
     private function counterBreakdown(int $storeId, $sales, $returns, $payments): array

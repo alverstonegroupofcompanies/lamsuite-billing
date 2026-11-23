@@ -1,0 +1,409 @@
+[
+  {
+    "label": "J4.03 split cash 50 + UPI 40 with ref",
+    "expect": "accept; 2 payment rows 50+40; ref kept",
+    "status": 201,
+    "message": "Invoice created and confirmed authoritatively by server.",
+    "row": {
+      "invoice_number": "C02-INV-QA001",
+      "grand_total": 90,
+      "paid_amount": 90,
+      "payment_mode": "Split",
+      "payment_status": "paid",
+      "subtotal": 90,
+      "tax_total": 9.64,
+      "discount_total": 0
+    },
+    "pays": [
+      {
+        "payment_mode": "Cash",
+        "amount": 50,
+        "reference_no": null
+      },
+      {
+        "payment_mode": "UPI",
+        "amount": 40,
+        "reference_no": "UPI-QA-0001"
+      }
+    ],
+    "before": {
+      "stock5": 2005,
+      "cust6": 0,
+      "lip": 25
+    },
+    "after": {
+      "stock5": 1990,
+      "cust6": 0,
+      "lip": 25
+    }
+  },
+  {
+    "label": "J4.03 UPI without reference",
+    "expect": "refuse (reference required) or flag",
+    "status": 201,
+    "message": "Invoice created and confirmed authoritatively by server.",
+    "row": {
+      "invoice_number": "C02-INV-QA002",
+      "grand_total": 90,
+      "paid_amount": 90,
+      "payment_mode": "UPI",
+      "payment_status": "paid",
+      "subtotal": 90,
+      "tax_total": 9.64,
+      "discount_total": 0
+    },
+    "pays": [
+      {
+        "payment_mode": "UPI",
+        "amount": 90,
+        "reference_no": null
+      }
+    ],
+    "before": {
+      "stock5": 1990,
+      "cust6": 0,
+      "lip": 25
+    },
+    "after": {
+      "stock5": 1975,
+      "cust6": 0,
+      "lip": 25
+    }
+  },
+  {
+    "label": "J4.03 cash short-paid (40 of 90) walk-in",
+    "expect": "refuse: walk-in cannot leave a balance",
+    "status": 201,
+    "message": "Invoice created and confirmed authoritatively by server.",
+    "row": {
+      "invoice_number": "C02-INV-QA003",
+      "grand_total": 90,
+      "paid_amount": 40,
+      "payment_mode": "Cash",
+      "payment_status": "partially_paid",
+      "subtotal": 90,
+      "tax_total": 9.64,
+      "discount_total": 0
+    },
+    "pays": [
+      {
+        "payment_mode": "Cash",
+        "amount": 40,
+        "reference_no": null
+      }
+    ],
+    "before": {
+      "stock5": 1975,
+      "cust6": 0,
+      "lip": 25
+    },
+    "after": {
+      "stock5": 1960,
+      "cust6": 0,
+      "lip": 25
+    }
+  },
+  {
+    "label": "J4.04 credit for walk-in",
+    "expect": "refuse",
+    "status": 422,
+    "message": "Credit sale is not allowed for Walk-in Customers. Please select or create a registered customer.",
+    "row": null,
+    "pays": [],
+    "before": {
+      "stock5": 1960,
+      "cust6": 0,
+      "lip": 25
+    },
+    "after": {
+      "stock5": 1960,
+      "cust6": 0,
+      "lip": 25
+    }
+  },
+  {
+    "label": "J4.04 credit named customer within limit (500 of 1000)",
+    "expect": "accept; customer balance +90",
+    "status": 201,
+    "message": "Invoice created and confirmed authoritatively by server.",
+    "row": {
+      "invoice_number": "C02-INV-QA005",
+      "grand_total": 90,
+      "paid_amount": 0,
+      "payment_mode": "Credit",
+      "payment_status": "unpaid",
+      "subtotal": 90,
+      "tax_total": 9.64,
+      "discount_total": 0
+    },
+    "pays": [
+      {
+        "payment_mode": "Credit",
+        "amount": 90,
+        "reference_no": null
+      }
+    ],
+    "before": {
+      "stock5": 1960,
+      "cust6": 0,
+      "lip": 25
+    },
+    "after": {
+      "stock5": 1945,
+      "cust6": 90,
+      "lip": 25
+    }
+  },
+  {
+    "label": "J4.04 credit over limit (1080 > 1000)",
+    "expect": "refuse: over credit limit",
+    "status": 422,
+    "message": "Customer 'QA Credit Customer' credit limit of ₹1000.00 exceeded (New balance would be ₹1170).",
+    "row": null,
+    "pays": [],
+    "before": {
+      "stock5": 1945,
+      "cust6": 90,
+      "lip": 25
+    },
+    "after": {
+      "stock5": 1945,
+      "cust6": 90,
+      "lip": 25
+    }
+  },
+  {
+    "label": "J4.05 letters in quantity",
+    "expect": "422",
+    "status": 422,
+    "message": "The items.0.qty field must be a number.",
+    "row": null,
+    "pays": [],
+    "before": {
+      "stock5": 1945,
+      "cust6": 90,
+      "lip": 25
+    },
+    "after": {
+      "stock5": 1945,
+      "cust6": 90,
+      "lip": 25
+    }
+  },
+  {
+    "label": "J4.05 negative quantity",
+    "expect": "422",
+    "status": 422,
+    "message": "The items.0.qty field must be at least 0.",
+    "row": null,
+    "pays": [],
+    "before": {
+      "stock5": 1945,
+      "cust6": 90,
+      "lip": 25
+    },
+    "after": {
+      "stock5": 1945,
+      "cust6": 90,
+      "lip": 25
+    }
+  },
+  {
+    "label": "J4.05 loose-only quantity (7 tablets = 42.00)",
+    "expect": "accept: 42.00 = 37.50 + 4.50; stock -7",
+    "status": 201,
+    "message": "Invoice created and confirmed authoritatively by server.",
+    "row": {
+      "invoice_number": "C02-INV-QA009",
+      "grand_total": 42,
+      "paid_amount": 42,
+      "payment_mode": "Cash",
+      "payment_status": "paid",
+      "subtotal": 42,
+      "tax_total": 4.5,
+      "discount_total": 0
+    },
+    "pays": [
+      {
+        "payment_mode": "Cash",
+        "amount": 42,
+        "reference_no": null
+      }
+    ],
+    "before": {
+      "stock5": 1945,
+      "cust6": 90,
+      "lip": 25
+    },
+    "after": {
+      "stock5": 1938,
+      "cust6": 90,
+      "lip": 25
+    }
+  },
+  {
+    "label": "J4.05 out-of-stock product (Alprazolam, 0 on hand)",
+    "expect": "refuse, or accept with negative-stock flag + review",
+    "status": 201,
+    "message": "Invoice created and confirmed authoritatively by server.",
+    "row": {
+      "invoice_number": "C02-INV-QA010",
+      "grand_total": 30,
+      "paid_amount": 30,
+      "payment_mode": "Cash",
+      "payment_status": "paid",
+      "subtotal": 30,
+      "tax_total": 3.21,
+      "discount_total": 0
+    },
+    "pays": [
+      {
+        "payment_mode": "Cash",
+        "amount": 30,
+        "reference_no": null
+      }
+    ],
+    "before": {
+      "stock5": 1938,
+      "cust6": 90,
+      "lip": 25
+    },
+    "after": {
+      "stock5": 1938,
+      "cust6": 90,
+      "lip": 25
+    }
+  },
+  {
+    "label": "J4.05 discount 60% (no approval)",
+    "expect": "refuse/require approval above the store limit",
+    "status": 201,
+    "message": "Invoice created and confirmed authoritatively by server.",
+    "row": {
+      "invoice_number": "C02-INV-QA011",
+      "grand_total": 0,
+      "paid_amount": 36,
+      "payment_mode": "Cash",
+      "payment_status": "unpaid",
+      "subtotal": 90,
+      "tax_total": 0,
+      "discount_total": 90
+    },
+    "pays": [
+      {
+        "payment_mode": "Cash",
+        "amount": 36,
+        "reference_no": null
+      }
+    ],
+    "before": {
+      "stock5": 1938,
+      "cust6": 90,
+      "lip": 25
+    },
+    "after": {
+      "stock5": 1923,
+      "cust6": 90,
+      "lip": 25
+    }
+  },
+  {
+    "label": "J4.x client-understated totals (grand 1.00 for a 90.00 line)",
+    "expect": "server recomputes to 90.00 or refuses",
+    "status": 201,
+    "message": "Invoice created and confirmed authoritatively by server.",
+    "row": {
+      "invoice_number": "C02-INV-QA012",
+      "grand_total": 90,
+      "paid_amount": 1,
+      "payment_mode": "Cash",
+      "payment_status": "partially_paid",
+      "subtotal": 90,
+      "tax_total": 9.64,
+      "discount_total": 0
+    },
+    "pays": [
+      {
+        "payment_mode": "Cash",
+        "amount": 1,
+        "reference_no": null
+      }
+    ],
+    "before": {
+      "stock5": 1923,
+      "cust6": 90,
+      "lip": 25
+    },
+    "after": {
+      "stock5": 1908,
+      "cust6": 90,
+      "lip": 25
+    }
+  },
+  {
+    "label": "J4.x price above MRP (unit 150, MRP 90)",
+    "expect": "refuse (MRP capping)",
+    "status": 201,
+    "message": "Invoice created and confirmed authoritatively by server.",
+    "row": {
+      "invoice_number": "C02-INV-QA013",
+      "grand_total": 150,
+      "paid_amount": 150,
+      "payment_mode": "Cash",
+      "payment_status": "paid",
+      "subtotal": 150,
+      "tax_total": 16.07,
+      "discount_total": 0
+    },
+    "pays": [
+      {
+        "payment_mode": "Cash",
+        "amount": 150,
+        "reference_no": null
+      }
+    ],
+    "before": {
+      "stock5": 1908,
+      "cust6": 90,
+      "lip": 25
+    },
+    "after": {
+      "stock5": 1893,
+      "cust6": 90,
+      "lip": 25
+    }
+  },
+  {
+    "label": "J4.x another store's product (QA-CS lipstick id 9) on a QA-PH bill",
+    "expect": "refuse cross-store reference",
+    "status": 201,
+    "message": "Invoice created and confirmed authoritatively by server.",
+    "row": {
+      "invoice_number": "C02-INV-QA014",
+      "grand_total": 90,
+      "paid_amount": 90,
+      "payment_mode": "Cash",
+      "payment_status": "paid",
+      "subtotal": 90,
+      "tax_total": 9.64,
+      "discount_total": 0
+    },
+    "pays": [
+      {
+        "payment_mode": "Cash",
+        "amount": 90,
+        "reference_no": null
+      }
+    ],
+    "before": {
+      "stock5": 1893,
+      "cust6": 90,
+      "lip": 25
+    },
+    "after": {
+      "stock5": 1893,
+      "cust6": 90,
+      "lip": 24
+    }
+  }
+]

@@ -1,0 +1,240 @@
+[
+  {
+    "method": "GET",
+    "url": "/invoices",
+    "status": 200,
+    "leak": true,
+    "sample": "{\"current_page\":1,\"data\":[{\"id\":2,\"store_id\":1,\"counter_id\":null,\"user_id\":null,\"module_key\":\"invoice\",\"invoice_number\":\"INV-PKD-1002\",\"invoice_date\":\"2026-11-20\",\"due_date\":null,\"customer_id\":3,\"customer_name\":\"Lotus Specialty Clinic & Nur"
+  },
+  {
+    "method": "GET",
+    "url": "/invoices/1",
+    "status": 200,
+    "leak": true,
+    "sample": "{\"id\":1,\"store_id\":1,\"counter_id\":null,\"user_id\":null,\"module_key\":\"invoice\",\"invoice_number\":\"INV-PKD-1001\",\"invoice_date\":\"2026-11-21\",\"due_date\":null,\"customer_id\":1,\"customer_name\":\"Walk-in Retail Customer\",\"customer_gstin\":null,\"place_"
+  },
+  {
+    "method": "GET",
+    "url": "/customers",
+    "status": 401,
+    "leak": false,
+    "sample": "{\"success\":false,\"error\":\"DEVICE_AUTH_FAILED\",\"message\":\"Device authentication token is required.\"}"
+  },
+  {
+    "method": "GET",
+    "url": "/customers/1",
+    "status": 401,
+    "leak": false,
+    "sample": "{\"success\":false,\"error\":\"DEVICE_AUTH_FAILED\",\"message\":\"Device authentication token is required.\"}"
+  },
+  {
+    "method": "GET",
+    "url": "/held-bills",
+    "status": 200,
+    "leak": true,
+    "sample": "{\"success\":true,\"held_bills\":[]}"
+  },
+  {
+    "method": "GET",
+    "url": "/settings",
+    "status": 200,
+    "leak": true,
+    "sample": "{\"store_id\":\"1\",\"store_name\":\"LamStone Healthcare Center\",\"display_name\":\"LamStone Healthcare Center\",\"phone\":\"+91 484 2901234\",\"email\":\"support@lamstone.in\",\"address\":\"Main Healthcare Complex, Kerala - 682001\",\"state_code\":\"32\",\"gstin\":\"32"
+  },
+  {
+    "method": "GET",
+    "url": "/sync/pull/deltas",
+    "status": 200,
+    "leak": true,
+    "sample": "{\"watermark\":1795274216855,\"store_id\":null,\"is_active\":true,\"store_version\":1,\"last_reset_at\":null,\"last_reset_options\":null,\"sync_events\":[],\"products\":[],\"batches\":[],\"parties\":[],\"lookups\":[],\"settings\":null,\"error\":\"STORE_CONTEXT_REQUIR"
+  },
+  {
+    "method": "GET",
+    "url": "/device-sessions",
+    "status": 422,
+    "leak": false,
+    "sample": "{\"success\":false,\"error\":\"STORE_REQUIRED\",\"message\":\"store_id is required to list device sessions.\"}"
+  },
+  {
+    "method": "GET",
+    "url": "/devices/connected",
+    "status": 422,
+    "leak": false,
+    "sample": "{\"success\":false,\"error\":\"STORE_REQUIRED\",\"message\":\"store_id is required to list device sessions.\"}"
+  },
+  {
+    "method": "GET",
+    "url": "/counters",
+    "status": 200,
+    "leak": true,
+    "sample": "{\"success\":true,\"counters\":[]}"
+  },
+  {
+    "method": "GET",
+    "url": "/counters/1/watch",
+    "status": 404,
+    "leak": false,
+    "sample": "{\"error\":\"Counter not found\"}"
+  },
+  {
+    "method": "GET",
+    "url": "/branches",
+    "status": 200,
+    "leak": true,
+    "sample": "{\"data\":[{\"id\":\"1\",\"name\":\"LamStone Healthcare Center\",\"code\":\"STORE-01\",\"phone\":\"+91 484 2901234\",\"email\":\"support@lamstone.in\",\"address\":\"Main Healthcare Complex, Kerala - 682001\",\"city\":\"Main Healthcare Complex\",\"state_code\":\"32\",\"gstin\""
+  },
+  {
+    "method": "GET",
+    "url": "/inventory/negative-stock-report",
+    "status": 200,
+    "leak": true,
+    "sample": "{\"success\":true,\"negative_batches_count\":0,\"negative_batches\":[],\"audit_entries\":[]}"
+  },
+  {
+    "method": "GET",
+    "url": "/whatsapp/config",
+    "status": 200,
+    "leak": true,
+    "sample": "{\"success\":true,\"enabled\":false,\"api_url\":\"https:\\/\\/wa-api.alverstone.in\",\"session_id\":\"default\",\"has_api_key\":false,\"send_pdf\":true}"
+  },
+  {
+    "method": "GET",
+    "url": "/whatsapp/sessions",
+    "status": 422,
+    "leak": false,
+    "sample": "{\"success\":false,\"sessions\":[],\"error\":\"API key is required to fetch OpenWA sessions.\"}"
+  },
+  {
+    "method": "GET",
+    "url": "/price-lists/resolve?product_id=1",
+    "status": 200,
+    "leak": true,
+    "sample": "{\"success\":true,\"list\":null,\"items\":[]}"
+  },
+  {
+    "method": "GET",
+    "url": "/license/check",
+    "status": 200,
+    "leak": true,
+    "sample": "{\"valid\":true,\"status\":\"active\",\"license_plan\":\"Enterprise Retail & Pharmacy Chain\",\"license_expires_at\":\"2027-12-31T23:59:59Z\",\"features\":[\"pos\",\"purchases\",\"stock\",\"reports\",\"multi_counter\",\"lan_sync\"]}"
+  },
+  {
+    "method": "GET",
+    "url": "/store",
+    "status": 401,
+    "leak": false,
+    "sample": "{\"success\":false,\"error\":\"DEVICE_AUTH_FAILED\",\"message\":\"Device authentication token is required.\"}"
+  },
+  {
+    "method": "GET",
+    "url": "/products",
+    "status": 401,
+    "leak": false,
+    "sample": "{\"success\":false,\"error\":\"DEVICE_AUTH_FAILED\",\"message\":\"Device authentication token is required.\"}"
+  },
+  {
+    "method": "GET",
+    "url": "/reports/daily-summary",
+    "status": 401,
+    "leak": false,
+    "sample": "{\"success\":false,\"error\":\"DEVICE_AUTH_FAILED\",\"message\":\"Device authentication token is required.\"}"
+  },
+  {
+    "method": "POST",
+    "url": "/invoices",
+    "status": 422,
+    "leak": false,
+    "sample": "{\"message\":\"The items field is required.\",\"errors\":{\"items\":[\"The items field is required.\"]}}"
+  },
+  {
+    "method": "POST",
+    "url": "/customers",
+    "status": 401,
+    "leak": false,
+    "sample": "{\"success\":false,\"error\":\"DEVICE_AUTH_FAILED\",\"message\":\"Device authentication token is required.\"}"
+  },
+  {
+    "method": "POST",
+    "url": "/held-bills",
+    "status": 422,
+    "leak": false,
+    "sample": "{\"message\":\"The items count field is required. (and 2 more errors)\",\"errors\":{\"items_count\":[\"The items count field is required.\"],\"grand_total\":[\"The grand total field is required.\"],\"cart_payload\":[\"The cart payload field is required.\"]}}"
+  },
+  {
+    "method": "POST",
+    "url": "/counters/1/lease-sequence",
+    "status": 404,
+    "leak": false,
+    "sample": "{\"success\":false,\"error\":\"counter_not_found\",\"message\":\"No counter 1 in this store.\"}"
+  },
+  {
+    "method": "POST",
+    "url": "/stores/day-close",
+    "status": 422,
+    "leak": false,
+    "sample": "{\"success\":false,\"error\":\"STORE_REQUIRED\",\"message\":\"A store is required to close the day.\"}"
+  },
+  {
+    "method": "POST",
+    "url": "/device-sessions/1/unlock",
+    "status": 200,
+    "leak": true,
+    "sample": "{\"success\":true,\"message\":\"Workstation 'Admin Console' unlocked.\",\"status\":\"Active\"}"
+  },
+  {
+    "method": "POST",
+    "url": "/device-sessions/1/rename",
+    "status": 422,
+    "leak": false,
+    "sample": "{\"message\":\"No names provided to update.\"}"
+  },
+  {
+    "method": "POST",
+    "url": "/invoices/1/cancel",
+    "status": 200,
+    "leak": true,
+    "sample": "{\"success\":true,\"status\":\"cancelled\",\"message\":\"Invoice #INV-PKD-1001 cancelled and batch stock restored.\"}"
+  },
+  {
+    "method": "POST",
+    "url": "/invoices/1/lock",
+    "status": 200,
+    "leak": true,
+    "sample": "{\"success\":true,\"message\":\"Invoice lock acquired by counter C01.\",\"locked_until\":\"2026-11-21T15:21:57.071352Z\"}"
+  },
+  {
+    "method": "POST",
+    "url": "/invoices/1/approvals/verify",
+    "status": 422,
+    "leak": false,
+    "sample": "{\"message\":\"The action field is required. (and 1 more error)\",\"errors\":{\"action\":[\"The action field is required.\"],\"mode\":[\"The mode field is required.\"]}}"
+  },
+  {
+    "method": "POST",
+    "url": "/settings",
+    "status": 200,
+    "leak": true,
+    "sample": "{\"success\":true,\"message\":\"Store settings saved successfully.\",\"settings\":{\"store_id\":\"1\",\"store_name\":\"LamStone Healthcare Center\",\"display_name\":\"LamStone Healthcare Center\",\"phone\":\"+91 484 2901234\",\"email\":\"support@lamstone.in\",\"address"
+  },
+  {
+    "method": "POST",
+    "url": "/whatsapp/send-invoice",
+    "status": 422,
+    "leak": false,
+    "sample": "{\"message\":\"The phone field is required.\",\"errors\":{\"phone\":[\"The phone field is required.\"]}}"
+  },
+  {
+    "method": "POST",
+    "url": "/staff/logout",
+    "status": 200,
+    "leak": true,
+    "sample": "{\"success\":true,\"message\":\"Logged out successfully.\"}"
+  },
+  {
+    "method": "POST",
+    "url": "/device-sessions/heartbeat",
+    "status": 422,
+    "leak": false,
+    "sample": "{\"message\":\"The device uuid field is required.\",\"errors\":{\"device_uuid\":[\"The device uuid field is required.\"]}}"
+  }
+]

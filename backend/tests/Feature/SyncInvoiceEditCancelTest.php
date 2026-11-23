@@ -4,11 +4,13 @@ namespace Tests\Feature;
 
 use App\Models\Counter;
 use App\Models\Invoice;
+use App\Models\InvoiceApproval;
 use App\Models\InvoiceItem;
 use App\Models\InvoicePayment;
 use App\Models\Product;
 use App\Models\ProductBatch;
 use App\Models\Store;
+use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -23,11 +25,12 @@ class SyncInvoiceEditCancelTest extends TestCase
     private Store $store;
     private Product $product;
     private ProductBatch $batch;
+    private User $manager;
 
     protected function setUp(): void
     {
         parent::setUp();
-        $this->withoutMiddleware(\App\Http\Middleware\AuthenticateDevice::class);
+        $this->actAsClaimedCounterOfRequestedStore();
 
         $this->store = Store::create([
             'name' => 'Sync Edit Store',
@@ -44,6 +47,15 @@ class SyncInvoiceEditCancelTest extends TestCase
             'counter_name' => 'Counter 01',
             'status' => 'active',
             'device_uuid' => 'uuid_sync_edit_c01',
+        ]);
+
+        $this->manager = User::create([
+            'name' => 'Sync Manager',
+            'email' => 'manager@syncedit.test',
+            'username' => 'syncmgr',
+            'password' => bcrypt('manager-pass'),
+            'role' => 'manager',
+            'store_id' => $this->store->id,
         ]);
 
         $this->product = Product::create([
@@ -96,6 +108,18 @@ class SyncInvoiceEditCancelTest extends TestCase
         $response->assertStatus(201);
 
         return Invoice::with(['items', 'payments'])->findOrFail($response->json('invoice.id'));
+    }
+
+    /** G12: the till can only cancel a queued bill while it holds an approver's grant. */
+    private function grantCancel(Invoice $invoice): string
+    {
+        return $this->grantCancellationToken($invoice, [
+            'action' => 'cancel',
+            'mode' => 'manager',
+            'identifier' => 'syncmgr',
+            'secret' => 'manager-pass',
+            'counter_code' => 'C01',
+        ]);
     }
 
     private function pushBatch(array $payload): \Illuminate\Testing\TestResponse
@@ -202,6 +226,7 @@ class SyncInvoiceEditCancelTest extends TestCase
             'store_id' => $this->store->id,
             'status' => 'cancelled',
             'cancel_reason' => 'Cancelled at the till',
+            'approval_token' => $this->grantCancel($invoice),
         ])->assertStatus(200);
 
         $this->assertEqualsWithDelta(50.0, (float) $boxBatch->fresh()->stock_qty, 0.001);
@@ -221,6 +246,7 @@ class SyncInvoiceEditCancelTest extends TestCase
             'store_id' => $this->store->id,
             'status' => 'cancelled',
             'cancel_reason' => 'Wrong customer, cancelled at the till while offline',
+            'approval_token' => $this->grantCancel($invoice),
         ])->assertStatus(200)->assertJson(['success' => true]);
 
         $invoice->refresh()->load(['items', 'payments']);
@@ -249,13 +275,87 @@ class SyncInvoiceEditCancelTest extends TestCase
             'store_id' => $this->store->id,
             'status' => 'cancelled',
             'cancel_reason' => 'cancelled twice over a flaky link',
+            'approval_token' => $this->grantCancel($invoice),
         ];
 
         $this->pushBatch($payload)->assertStatus(200);
+        // The retry finds the bill already cancelled, so it neither re-cancels
+        // nor needs (or spends) a second grant.
         $this->pushBatch($payload)->assertStatus(200);
 
         $this->assertSame(100.0, (float) $this->batch->fresh()->stock_qty);
         $this->assertSame(1, InvoicePayment::where('invoice_id', $invoice->id)->count());
+        $this->assertSame(1, InvoiceApproval::where('invoice_id', $invoice->id)->count());
+    }
+
+    public function test_sync_cancel_without_a_grant_is_refused(): void
+    {
+        $invoice = $this->postLiveInvoice();
+        $statusBefore = $invoice->status;
+
+        $this->pushBatch([
+            'external_id' => $invoice->external_id,
+            'invoice_number' => $invoice->invoice_number,
+            'store_id' => $this->store->id,
+            'status' => 'cancelled',
+            'cancel_reason' => 'No grant held by the till',
+        ])->assertStatus(200)
+            ->assertJsonPath('success', false)
+            ->assertJsonPath('results.failed', 1);
+
+        $this->assertSame($statusBefore, $invoice->fresh()->status);
+        $this->assertSame(99.0, (float) $this->batch->fresh()->stock_qty);
+
+        // G12: the owner sees the refused cancellation in the sync centre.
+        $this->assertDatabaseHas('sync_events', [
+            'entity_type' => 'invoice',
+            'entity_id' => (string) $invoice->id,
+            'status' => 'conflict',
+        ]);
+    }
+
+    public function test_sync_cancel_on_a_closed_day_is_refused(): void
+    {
+        $invoice = $this->postLiveInvoice();
+        $statusBefore = $invoice->status;
+        $token = $this->grantCancel($invoice);
+
+        app(\App\Services\DayClose\StoreDayCloseService::class)
+            ->close($this->store->id, $invoice->invoice_date->toDateString());
+
+        $this->pushBatch([
+            'external_id' => $invoice->external_id,
+            'invoice_number' => $invoice->invoice_number,
+            'store_id' => $this->store->id,
+            'status' => 'cancelled',
+            'cancel_reason' => 'Queued after the day closed',
+            'approval_token' => $token,
+        ])->assertStatus(200)
+            ->assertJsonPath('success', false)
+            ->assertJsonPath('results.failed', 1);
+
+        $this->assertSame($statusBefore, $invoice->fresh()->status);
+        $this->assertNull(InvoiceApproval::firstOrFail()->consumed_at);
+    }
+
+    public function test_revision_that_moves_money_on_a_closed_day_is_refused(): void
+    {
+        $invoice = $this->postLiveInvoice();
+
+        app(\App\Services\DayClose\StoreDayCloseService::class)
+            ->close($this->store->id, $invoice->invoice_date->toDateString());
+
+        $this->pushBatch($this->revisionPayload($invoice))
+            ->assertStatus(200)
+            ->assertJsonPath('success', false)
+            ->assertJsonPath('results.failed', 1);
+
+        $this->assertEqualsWithDelta(200.00, (float) $invoice->fresh()->grand_total, 0.01);
+        $this->assertDatabaseHas('sync_events', [
+            'entity_type' => 'invoice',
+            'entity_id' => (string) $invoice->id,
+            'status' => 'conflict',
+        ]);
     }
 
     public function test_revise_sync_rewrites_lines_and_tenders_to_the_new_total(): void
@@ -335,7 +435,8 @@ class SyncInvoiceEditCancelTest extends TestCase
     {
         $staleHeader = $this->revisionPayload($this->postLiveInvoice());
 
-        // Same lines, but a header left behind from the pre-edit bill.
+        // Same lines, but a header left behind from the pre-edit bill. The tender lines
+        // follow the counter screen, so the walk-in bill is settled in full.
         $payload = array_merge($staleHeader, [
             'external_id' => 'ext_sync_edit_stale_header',
             'invoice_number' => 'INV-STALE-HEADER',
@@ -345,7 +446,7 @@ class SyncInvoiceEditCancelTest extends TestCase
             'sgst_total' => 5.35,
             'grand_total' => 100.00,
             'paid_amount' => 100.00,
-            'payments' => [['mode' => 'Cash', 'amount' => 100.00]],
+            'payments' => [['mode' => 'Cash', 'amount' => 200.00]],
             'items' => [[
                 'product_id' => $this->product->id,
                 'product_name' => 'Sync Edit Tablet',
@@ -372,6 +473,10 @@ class SyncInvoiceEditCancelTest extends TestCase
         $this->assertEqualsWithDelta(200.00, (float) $invoice->grand_total, 0.01);
         $this->assertEqualsWithDelta(178.57, (float) $invoice->taxable_subtotal, 0.01);
         $this->assertEqualsWithDelta(21.43, (float) $invoice->tax_total, 0.01);
+
+        // The tenders, not the stale header, are what the counter collected.
+        $this->assertEqualsWithDelta(200.00, (float) $invoice->paid_amount, 0.01);
+        $this->assertEqualsWithDelta(200.00, (float) $invoice->payments->sum('amount'), 0.01);
 
         // Header and lines agree, and the contradiction is visible to the Sync Center.
         $this->assertEqualsWithDelta((float) $invoice->taxable_subtotal, $invoice->items->sum('taxable_amount'), 0.01);

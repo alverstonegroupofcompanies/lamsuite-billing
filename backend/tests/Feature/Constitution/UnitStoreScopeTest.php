@@ -26,6 +26,8 @@ class UnitStoreScopeTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
+        // G1-SEC: till routes need a claimed counter; this stands one in for the store each request names.
+        $this->actAsClaimedCounterOfRequestedStore();
 
         // Created via the model, so controller-path unit seeding is not triggered.
         $this->storeA = Store::create(['name' => 'Store A', 'code' => 'SA', 'state_code' => '32', 'is_active' => true]);

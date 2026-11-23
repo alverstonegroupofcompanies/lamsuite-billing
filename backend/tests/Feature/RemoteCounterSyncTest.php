@@ -22,7 +22,7 @@ class RemoteCounterSyncTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        $this->withoutMiddleware(\App\Http\Middleware\AuthenticateDevice::class);
+        $this->actAsClaimedCounterOfRequestedStore();
 
         $this->store = Store::create([
             'name' => 'LamStone Main Pharmacy',
@@ -40,40 +40,45 @@ class RemoteCounterSyncTest extends TestCase
         ]);
     }
 
-    public function test_remote_counter_enrollment_and_approval_workflow(): void
+    /**
+     * CNT-002 / CNT-003 / CNT-014: the owner pre-creates a home counter, issues it
+     * a code, and the number series exists once that code has been claimed.
+     */
+    public function test_a_remote_counter_is_created_by_the_owner_and_claimed_by_the_till(): void
     {
-        // 1. Device submits enrollment request
-        $enrollResponse = $this->postJson('/api/counters/enroll', [
-            'store_id' => $this->store->id,
-            'device_uuid' => 'dev_remote_home_9988',
-            'counter_name' => "Owner's Home Station",
-            'counter_code' => 'C03',
-            'location_name' => 'Owner Residence',
-            'is_remote' => true,
-            'is_digital_only' => true,
-        ]);
+        $create = $this->actingAs($this->admin, 'sanctum')
+            ->withHeaders(['X-Store-Id' => (string) $this->store->id])
+            ->postJson('/api/admin/counters', [
+                'counter_name' => "Owner's Home Station",
+                'counter_code' => 'c03',
+                'location_name' => 'Owner Residence',
+                'is_remote' => true,
+                'is_digital_only' => true,
+            ])
+            ->assertCreated();
 
-        $enrollResponse->assertStatus(201);
-        $enrollResponse->assertJson(['status' => 'pending_approval']);
-        $counterId = $enrollResponse->json('counter.id');
-
+        $counterId = $create->json('counter.id');
         $counter = Counter::find($counterId);
-        $this->assertEquals('pending_approval', $counter->status);
+        $this->assertSame(Counter::STATUS_UNCLAIMED, $counter->status);
         $this->assertTrue($counter->is_remote);
         $this->assertTrue($counter->is_digital_only);
 
-        // 2. Owner approves device in Admin Panel
-        $approveResponse = $this->actingAs($this->admin)->postJson("/api/admin/counters/{$counterId}/status", [
-            'status' => 'active',
-            'location_name' => 'Owner Residence, Suite 4',
-        ]);
+        $code = $this->actingAs($this->admin, 'sanctum')
+            ->withHeaders(['X-Store-Id' => (string) $this->store->id])
+            ->postJson("/api/admin/counters/{$counterId}/activation-code")
+            ->assertStatus(200)
+            ->json('code');
 
-        $approveResponse->assertStatus(200);
-        $approveResponse->assertJson(['success' => true]);
+        $this->postJson('/api/counters/claim', [
+            'code' => $code,
+            'device_uuid' => 'dev_remote_home_9988',
+            'device_name' => "Owner's Home Station",
+        ])->assertStatus(200);
 
         $counter->refresh();
-        $this->assertEquals('active', $counter->status);
-        $this->assertCount(3, $counter->sequences); // Auto-initialized invoice, return, receipt sequences
+        $this->assertSame(Counter::STATUS_ACTIVE, $counter->status);
+        $this->assertSame('dev_remote_home_9988', $counter->device_uuid);
+        $this->assertCount(7, $counter->sequences); // every series CNT-014 gives a counter
     }
 
     public function test_offline_concurrent_billing_merges_stock_deltas_and_flags_negative(): void
@@ -157,7 +162,9 @@ class RemoteCounterSyncTest extends TestCase
         $this->assertEquals('C02', $negativeEntry->counter_code);
 
         // Check negative stock report endpoint
-        $reportRes = $this->getJson('/api/inventory/negative-stock-report');
+        // G1-SEC: the owner reads the negative-stock report (counters have no
+        // permission declared for it), scoped to the owner's store.
+        $reportRes = $this->actingAs($this->admin, 'sanctum')->getJson('/api/inventory/negative-stock-report');
         $reportRes->assertStatus(200);
         $reportRes->assertJsonFragment(['batch_no' => 'PCM-BATCH-1']);
         $this->assertGreaterThanOrEqual(1, $reportRes->json('negative_batches_count'));

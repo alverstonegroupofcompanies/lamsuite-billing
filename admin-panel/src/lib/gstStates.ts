@@ -1,0 +1,73 @@
+/**
+ * GST place-of-supply codes, mirrored from backend/app/Support/GstStateCodes.php.
+ *
+ * A store's or party's state decides CGST+SGST versus IGST, so these fields are
+ * selects over this list rather than free text — "3232" is not a state.
+ */
+export const GST_STATE_NAMES: Record<string, string> = {
+  "01": "Jammu and Kashmir",
+  "02": "Himachal Pradesh",
+  "03": "Punjab",
+  "04": "Chandigarh",
+  "05": "Uttarakhand",
+  "06": "Haryana",
+  "07": "Delhi",
+  "08": "Rajasthan",
+  "09": "Uttar Pradesh",
+  "10": "Bihar",
+  "11": "Sikkim",
+  "12": "Arunachal Pradesh",
+  "13": "Nagaland",
+  "14": "Manipur",
+  "15": "Mizoram",
+  "16": "Tripura",
+  "17": "Meghalaya",
+  "18": "Assam",
+  "19": "West Bengal",
+  "20": "Jharkhand",
+  "21": "Odisha",
+  "22": "Chhattisgarh",
+  "23": "Madhya Pradesh",
+  "24": "Gujarat",
+  "26": "Dadra and Nagar Haveli and Daman and Diu",
+  "27": "Maharashtra",
+  "29": "Karnataka",
+  "30": "Goa",
+  "31": "Lakshadweep",
+  "32": "Kerala",
+  "33": "Tamil Nadu",
+  "34": "Puducherry",
+  "35": "Andaman and Nicobar Islands",
+  "36": "Telangana",
+  "37": "Andhra Pradesh",
+  "38": "Ladakh",
+  "97": "Other Territory",
+};
+
+export const GST_STATE_OPTIONS: { code: string; label: string }[] = Object.entries(
+  GST_STATE_NAMES
+).map(([code, name]) => ({ code, label: `${code} - ${name}` }));
+
+const GSTIN_PATTERN = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/;
+
+export function isGstin(value?: string | null): boolean {
+  return GSTIN_PATTERN.test(String(value ?? "").trim().toUpperCase());
+}
+
+/** The two-digit state a GSTIN declares, or null when it is not a GSTIN. */
+export function stateCodeFromGstin(value?: string | null): string | null {
+  const clean = String(value ?? "").trim().toUpperCase();
+  if (!isGstin(clean)) return null;
+  return GST_STATE_NAMES[clean.slice(0, 2)] ? clean.slice(0, 2) : null;
+}
+
+/** Only a bare two-digit code counts; "3232" is not a state. */
+export function isStateCode(value?: string | null): boolean {
+  return Boolean(value && GST_STATE_NAMES[String(value).trim()]);
+}
+
+/** "29" -> "29 - Karnataka"; unknown codes fall back to the default. */
+export function stateLabel(value?: string | null, fallbackCode = "32"): string {
+  const code = GST_STATE_NAMES[String(value ?? "").trim()] ? String(value).trim() : fallbackCode;
+  return `${code} - ${GST_STATE_NAMES[code]}`;
+}

@@ -1,0 +1,43 @@
+{
+  "create": [],
+  "codes": [],
+  "db": [
+    {
+      "id": 2,
+      "store_id": 4,
+      "counter_code": "C01",
+      "counter_name": "PH Front Till",
+      "location_name": "Front desk",
+      "status": "unclaimed",
+      "device_uuid": null
+    },
+    {
+      "id": 3,
+      "store_id": 4,
+      "counter_code": "C02",
+      "counter_name": "PH Back Till",
+      "location_name": "Back desk",
+      "status": "unclaimed",
+      "device_uuid": null
+    },
+    {
+      "id": 4,
+      "store_id": 5,
+      "counter_code": "C01",
+      "counter_name": "CS Front Till",
+      "location_name": "Entrance",
+      "status": "unclaimed",
+      "device_uuid": null
+    },
+    {
+      "id": 5,
+      "store_id": 5,
+      "counter_code": "C02",
+      "counter_name": "CS Back Till",
+      "location_name": "Makeup bar",
+      "status": "unclaimed",
+      "device_uuid": null
+    }
+  ],
+  "codes_db": []
+}

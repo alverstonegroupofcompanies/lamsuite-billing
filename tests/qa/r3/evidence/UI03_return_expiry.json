@@ -1,0 +1,19 @@
+{
+  "invoice_id": "40",
+  "api_expiry": "2028-01-30T18:30:00.000000Z",
+  "row": {
+    "cells": [
+      "",
+      "QA Paracet 500 Strip",
+      "PA-NEW Exp: 01/28",
+      "30",
+      "30",
+      "",
+      "Customer Return Damaged Expired Wrong Item Other",
+      "Restock to Inventory Quarantine Shelf (Hold) Damaged / Discard"
+    ],
+    "exp_cell": "PA-NEW Exp: 01/28",
+    "raw_utc": false,
+    "mm_yy": true
+  }
+}

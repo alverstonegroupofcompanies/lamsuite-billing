@@ -17,17 +17,10 @@ class AdminPriceListController
 {
     private function resolveStore(Request $request): ?Store
     {
-        $candidate = $request->attributes->get('active_store_id')
-            ?? $request->get('active_store_id')
-            ?? $request->header('X-Store-Id')
-            ?? $request->input('store_id')
-            ?? ($request->user() ? $request->user()->store_id : null);
+        // G1-SEC: the authenticated tenant only; never "the first store".
+        $storeId = \App\Support\RequestTenant::storeId($request);
 
-        if ($candidate !== null && $candidate !== '' && $candidate !== 'all') {
-            return Store::find((int) $candidate);
-        }
-
-        return Store::query()->orderBy('id')->first();
+        return $storeId === null ? null : Store::find($storeId);
     }
 
     private function present(PriceList $list, bool $withItems = false): array

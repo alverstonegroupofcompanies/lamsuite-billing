@@ -30,6 +30,7 @@ class Device extends Model
     ];
 
     protected $hidden = [
+        'device_token',
         'device_token_hash',
     ];
 

@@ -40,6 +40,19 @@ jobs:
           cd backend
           ./vendor/bin/phpunit
 
+      # SET-02: a fresh install must seed from fake demo data alone, on an empty
+      # database, without reaching for any local desktop import.
+      - name: Fresh Install Seed (migrate:fresh --seed on empty sqlite)
+        env:
+          APP_ENV: testing
+          APP_KEY: base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+          DB_CONNECTION: sqlite
+          DB_DATABASE: ${{ runner.temp }}/fresh-seed.sqlite
+        run: |
+          cd backend
+          rm -f "$DB_DATABASE" && touch "$DB_DATABASE"
+          php artisan migrate:fresh --seed --force --no-interaction
+
       - name: Setup Node.js 22
         uses: actions/setup-node@v4
         with:
@@ -346,7 +359,7 @@ jobs:
               if [ "$API_HEALTH" = "200" ] &&
                 [ "$PANEL_HEALTH" = "200" ] &&
                 [ "$MCP_HEALTH" = "200" ] &&
-                [ "$UPDATE_HEALTH" = "200" ]; then
+                { [ "$UPDATE_HEALTH" = "200" ] || [ "$UPDATE_HEALTH" = "204" ]; }; then
                 echo "All health checks passed (including updater manifest endpoint)."
                 trap - ERR
                 echo "sha-$COMMIT_SHA" > .current_deploy_tag

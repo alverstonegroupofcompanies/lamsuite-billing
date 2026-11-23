@@ -7,6 +7,7 @@ use App\Models\Counter;
 use App\Models\CounterShift;
 use App\Models\Expense;
 use App\Models\Invoice;
+use App\Models\InvoiceApproval;
 use App\Models\InvoicePayment;
 use App\Models\Store;
 use App\Models\StoreDayClose;
@@ -29,6 +30,8 @@ class DayCloseTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
+        // G12: cancellation is a till route, so these tests speak as a claimed counter.
+        $this->actAsClaimedCounterOfRequestedStore();
 
         $this->store = Store::create([
             'name' => 'Apex Healthcare',
@@ -128,6 +131,19 @@ class DayCloseTest extends TestCase
         ], $overrides));
     }
 
+    /** G12: the manager's own credentials mint the grant the till presents. */
+    private function grantCancel(Invoice $invoice): string
+    {
+        return $this->grantCancellationToken($invoice, [
+            'action' => 'cancel',
+            'mode' => 'manager',
+            'identifier' => 'manager@apex.in',
+            'secret' => 'password123',
+            'requested_by_user_id' => $this->manager->id,
+            'counter_code' => 'C-01',
+        ]);
+    }
+
     public function test_summary_computes_tender_and_cash_math(): void
     {
         $this->seedTradingDay();
@@ -208,6 +224,107 @@ class DayCloseTest extends TestCase
         $this->assertNotNull($invoice->id);
     }
 
+    public function test_closed_day_blocks_cancellation_until_the_day_is_reopened(): void
+    {
+        $invoice = $this->makeInvoice(['grand_total' => 25]);
+        $token = $this->grantCancel($invoice);
+
+        $service = app(StoreDayCloseService::class);
+        $service->close($this->store->id, $this->day);
+
+        $this->postJson("/api/invoices/{$invoice->id}/cancel", [
+            'reason' => 'Customer changed mind',
+            'approval_token' => $token,
+        ])->assertStatus(409)->assertJson(['code' => 'DAY_CLOSED_LOCKED']);
+
+        $this->assertSame('completed', $invoice->fresh()->status);
+        // A refused cancellation must not spend the grant it was handed.
+        $this->assertNull(InvoiceApproval::firstOrFail()->consumed_at);
+
+        $close = StoreDayClose::where('store_id', $this->store->id)->firstOrFail();
+        $service->reopen($close, 'Late cancellation');
+
+        $this->assertSame('open', $close->fresh()->status);
+
+        $this->postJson("/api/invoices/{$invoice->id}/cancel", [
+            'reason' => 'Customer changed mind',
+            'approval_token' => $token,
+        ])->assertOk();
+
+        $this->assertSame('cancelled', $invoice->fresh()->status);
+        $this->assertNotNull(InvoiceApproval::firstOrFail()->consumed_at);
+    }
+
+    public function test_reconciled_day_blocks_cancellation(): void
+    {
+        $invoice = $this->makeInvoice(['grand_total' => 25]);
+        $token = $this->grantCancel($invoice);
+
+        $service = app(StoreDayCloseService::class);
+        $close = $service->close($this->store->id, $this->day);
+        $service->reconcile($close, 0);
+
+        $this->postJson("/api/invoices/{$invoice->id}/cancel", [
+            'reason' => 'After reconciliation',
+            'approval_token' => $token,
+        ])->assertStatus(409)->assertJson(['code' => 'DAY_CLOSED_LOCKED']);
+
+        $this->assertSame('completed', $invoice->fresh()->status);
+    }
+
+    public function test_super_admin_override_cancels_on_a_closed_day_and_is_audited(): void
+    {
+        $invoice = $this->makeInvoice(['grand_total' => 25]);
+        $token = $this->grantCancel($invoice);
+
+        app(StoreDayCloseService::class)->close($this->store->id, $this->day);
+
+        $this->actingAs($this->superAdmin, 'sanctum')
+            ->postJson("/api/invoices/{$invoice->id}/cancel", [
+                'reason' => 'Owner correction',
+                'approval_token' => $token,
+                'override_day_close_lock' => true,
+                'override_reason' => 'Bill keyed against the wrong customer',
+            ])->assertOk();
+
+        $this->assertSame('cancelled', $invoice->fresh()->status);
+        $this->assertDatabaseHas('audit_logs', [
+            'action' => 'day_close_lock_overridden',
+            'entity_type' => 'StoreDayClose',
+            'user_id' => $this->superAdmin->id,
+        ]);
+    }
+
+    public function test_override_without_a_reason_is_refused(): void
+    {
+        $invoice = $this->makeInvoice(['grand_total' => 25]);
+        $token = $this->grantCancel($invoice);
+
+        app(StoreDayCloseService::class)->close($this->store->id, $this->day);
+
+        $this->actingAs($this->superAdmin, 'sanctum')
+            ->postJson("/api/invoices/{$invoice->id}/cancel", [
+                'reason' => 'Owner correction',
+                'approval_token' => $token,
+                'override_day_close_lock' => true,
+            ])->assertStatus(422)->assertJson(['code' => 'DAY_CLOSE_OVERRIDE_REASON_REQUIRED']);
+
+        $this->assertSame('completed', $invoice->fresh()->status);
+        $this->assertNull(InvoiceApproval::firstOrFail()->consumed_at);
+    }
+
+    public function test_a_closed_day_can_be_reopened_without_super_admin(): void
+    {
+        app(StoreDayCloseService::class)->close($this->store->id, $this->day);
+
+        $this->actingAs($this->manager, 'sanctum')
+            ->postJson('/api/admin/day-close/reopen', ['close_date' => $this->day, 'reason' => 'Closed too early'])
+            ->assertOk()
+            ->assertJsonPath('day_close.saved.status', 'open');
+
+        $this->assertDatabaseHas('audit_logs', ['action' => 'reopen_store_day']);
+    }
+
     public function test_super_admin_override_bypasses_lock(): void
     {
         $service = app(StoreDayCloseService::class);
@@ -215,7 +332,7 @@ class DayCloseTest extends TestCase
         $service->reconcile($close, 0);
 
         $admin = $this->superAdmin;
-        $this->app->instance('request', Request::create('/api/invoices', 'POST', ['override_day_close_lock' => true]));
+        $this->app->instance('request', Request::create('/api/invoices', 'POST', ['override_day_close_lock' => true, 'override_reason' => 'Late supplier bill']));
         // setUserResolver must run on the container-bound instance: binding clears it.
         $this->app->make('request')->setUserResolver(static fn () => $admin);
 
@@ -223,7 +340,12 @@ class DayCloseTest extends TestCase
         $this->assertTrue($this->app->make('request')->boolean('override_day_close_lock'));
         $service->assertDayOpen($this->store->id, $this->day);
 
-        $this->assertTrue(true);
+        // G12: the bypass is no longer silent.
+        $this->assertDatabaseHas('audit_logs', [
+            'action' => 'day_close_lock_overridden',
+            'entity_type' => 'StoreDayClose',
+            'user_id' => $this->superAdmin->id,
+        ]);
     }
 
     public function test_reopen_requires_super_admin(): void
@@ -239,7 +361,7 @@ class DayCloseTest extends TestCase
         $this->actingAs($this->superAdmin, 'sanctum')
             ->postJson('/api/admin/day-close/reopen', ['close_date' => $this->day, 'reason' => 'Late bill'])
             ->assertOk()
-            ->assertJsonPath('day_close.saved.status', 'closed');
+            ->assertJsonPath('day_close.saved.status', 'open');
 
         $this->assertNull($close->fresh()->locked_at);
     }

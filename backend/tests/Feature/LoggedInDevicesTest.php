@@ -20,6 +20,8 @@ class LoggedInDevicesTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
+        // G1-SEC: till routes need a claimed counter; this stands one in for the store each request names.
+        $this->actAsClaimedCounterOfRequestedStore();
 
         $this->store = Store::create([
             'name' => 'LamSuite Central Store',
@@ -38,6 +40,21 @@ class LoggedInDevicesTest extends TestCase
             'role' => 'store_owner',
             'is_active' => true,
         ]);
+    }
+
+    /**
+     * G1-SEC: rename/lock/unlock/revoke/force-logout are the owner's actions on a
+     * workstation (no counter permission covers them), so they are made with the
+     * owner's token; everything else in this file is a counter's own call.
+     */
+    private function asOwner(callable $call): mixed
+    {
+        \Laravel\Sanctum\Sanctum::actingAs($this->adminUser);
+        try {
+            return $call();
+        } finally {
+            $this->app['auth']->forgetGuards();
+        }
     }
 
     /**
@@ -219,28 +236,28 @@ class LoggedInDevicesTest extends TestCase
         );
 
         // Rename
-        $renameRes = $this->postJson("/api/device-sessions/{$session->id}/rename", [
+        $renameRes = $this->asOwner(fn () => $this->postJson("/api/device-sessions/{$session->id}/rename", [
             'device_name' => 'Renamed PC',
             'counter_name' => 'Fast Counter',
-        ]);
+        ]));
         $renameRes->assertStatus(200);
         $this->assertEquals('Renamed PC', $session->fresh()->device_name);
         $this->assertEquals('Fast Counter', $session->fresh()->counter_name);
 
         // Lock
-        $lockRes = $this->postJson("/api/device-sessions/{$session->id}/lock");
+        $lockRes = $this->asOwner(fn () => $this->postJson("/api/device-sessions/{$session->id}/lock"));
         $lockRes->assertStatus(200);
         $this->assertEquals('Locked', $session->fresh()->computeStatus());
 
         // Unlock
-        $unlockRes = $this->postJson("/api/device-sessions/{$session->id}/unlock");
+        $unlockRes = $this->asOwner(fn () => $this->postJson("/api/device-sessions/{$session->id}/unlock"));
         $unlockRes->assertStatus(200);
         $this->assertEquals('Active', $session->fresh()->computeStatus());
 
         // Revoke
-        $revokeRes = $this->postJson("/api/device-sessions/{$session->id}/revoke", [
+        $revokeRes = $this->asOwner(fn () => $this->postJson("/api/device-sessions/{$session->id}/revoke", [
             'reason' => 'Terminated',
-        ]);
+        ]));
         $revokeRes->assertStatus(200);
         $this->assertEquals('Revoked', $session->fresh()->computeStatus());
         $this->assertFalse($session->fresh()->is_active);
@@ -344,7 +361,11 @@ class LoggedInDevicesTest extends TestCase
         DeviceSession::recordLogin($this->store->id, 'dev_s1', 'Counter S1', null, 'C01', 'C01');
         DeviceSession::recordLogin($store2->id, 'dev_s2', 'Counter S2', null, 'C01', 'C01');
 
-        $resAll = $this->getJson('/api/device-sessions?store_id=all');
+        // G1-SEC: "all stores" is the panel's read-only scope for someone who may see every store.
+        $headOffice = User::create(['name' => 'Head Office', 'email' => 'ho@lamsuite.internal', 'password' => bcrypt('password123'), 'role' => 'super_admin', 'store_id' => null]);
+        \Laravel\Sanctum\Sanctum::actingAs($headOffice);
+        $resAll = $this->getJson('/api/admin/device-sessions', ['X-Store-Scope' => 'all']);
+        $this->app['auth']->forgetGuards();
         $resAll->assertStatus(200);
         $devices = collect($resAll->json('devices'));
         $this->assertNotNull($devices->firstWhere('device_uuid', 'dev_s1'));
@@ -466,9 +487,9 @@ class LoggedInDevicesTest extends TestCase
             'C09'
         );
 
-        $this->postJson("/api/device-sessions/{$session->id}/force-logout", [
+        $this->asOwner(fn () => $this->postJson("/api/device-sessions/{$session->id}/force-logout", [
             'reason' => 'Signed in at another till',
-        ])->assertStatus(200);
+        ]))->assertStatus(200);
 
         $res = $this->postJson('/api/device-sessions/heartbeat', [
             'device_uuid' => 'uuid_force_logout',
@@ -502,9 +523,9 @@ class LoggedInDevicesTest extends TestCase
             'C10'
         );
 
-        $this->postJson("/api/device-sessions/{$session->id}/revoke", [
+        $this->asOwner(fn () => $this->postJson("/api/device-sessions/{$session->id}/revoke", [
             'reason' => 'Lost device',
-        ])->assertStatus(200);
+        ]))->assertStatus(200);
 
         $res = $this->postJson('/api/device-sessions/heartbeat', [
             'device_uuid' => 'uuid_revoked_beat',
@@ -572,12 +593,21 @@ class LoggedInDevicesTest extends TestCase
 
         DeviceSession::recordLogin($store2->id, 'uuid_other_branch', 'Counter X', null, 'CX', 'CX');
 
-        $notFound = $this->getJson('/api/device-sessions?store_id=999999');
-        $notFound->assertStatus(404);
-        $notFound->assertJson(['error' => 'STORE_NOT_FOUND']);
-        $this->assertEmpty($notFound->json('devices'));
+        // An id that is no store at all is normalised to the caller's own store
+        // (NormalizeStoreContext, for old till builds) — never to another branch.
+        $unknown = $this->asOwner(fn () => $this->getJson('/api/admin/device-sessions', ['X-Store-Id' => '999999']))
+            ->assertStatus(200);
+        $this->assertNull(collect($unknown->json('devices'))->firstWhere('device_uuid', 'uuid_other_branch'));
 
-        $missing = $this->getJson('/api/device-sessions');
+        // G1-SEC: naming another existing store the caller cannot reach is refused, never followed.
+        $this->asOwner(fn () => $this->getJson('/api/admin/device-sessions', ['X-Store-Id' => (string) $store2->id]))
+            ->assertStatus(403);
+
+        // Someone bound to no store who names none gets no guessed store.
+        $headless = User::create(['name' => 'No Store', 'email' => 'nostore@lamsuite.internal', 'password' => bcrypt('password123'), 'role' => 'super_admin', 'store_id' => null]);
+        \Laravel\Sanctum\Sanctum::actingAs($headless);
+        $missing = $this->getJson('/api/admin/device-sessions');
+        $this->app['auth']->forgetGuards();
         $missing->assertStatus(422);
         $missing->assertJson(['error' => 'STORE_REQUIRED']);
 

@@ -1,0 +1,376 @@
+{
+  "created": [
+    {
+      "p": {
+        "store": "QA-PH",
+        "name": "QA Cough Syrup 100ml",
+        "barcode": "8909000000028",
+        "hsn": "30049011",
+        "unit": "Bottle",
+        "mrp": "120",
+        "sell": "115",
+        "ptr": "80",
+        "gst": "12",
+        "upp": "1",
+        "stock": "40",
+        "batch": "CS-A1",
+        "exp": "2027-06-30"
+      },
+      "vals": {
+        "name": "QA Cough Syrup 100ml",
+        "barcode": "8909000000028",
+        "hsn": "30049011",
+        "unit": "Bottle",
+        "mrp": "120",
+        "sell": "115",
+        "ptr": "80",
+        "gst": "12",
+        "upp": "1",
+        "stock": "40",
+        "batch": "CS-A1",
+        "exp": "2027-06-30"
+      },
+      "calls": [
+        {
+          "m": "POST",
+          "u": "/admin/products",
+          "st": 201,
+          "req": "{\"name\":\"QA Cough Syrup 100ml\",\"barcode\":\"8909000000028\",\"hsn_sac_code\":\"30049011\",\"mrp\":120,\"sel_rate\":115,\"ptr\":80,\"pts\":0,\"gst_percent\":12,\"units_per_pack\":1,\"reorder_level\":10,\"current_stock\":0,\"is_active\":true,\"unit_id\":\"Bottle\",\"store_id\":4,\"initial_batch\":{\"batch_no\":\"CS-A1\",\"expiry_date\":\"2027-06-30\",\"stock_qty\":40}}",
+          "res": "{\"store_id\":4,\"name\":\"QA Cough Syrup 100ml\",\"barcode\":\"8909000000028\",\"hsn_sac_code\":\"30049011\",\"unit_id\":\"Bottle\",\"mrp\":\"120.00\",\"sel_rate\":\"115.00\",\"ptr\":\"80.00\",\"pts\":\"0.00\",\"gst_percent\":\"12.00\",\"units_per_pack\":1,\"reorder_level\":\"10.00\",\"current_stock\":\"0.00\",\"version\":1,\"is_active\":true,\"updated_at\":\"2026-11-21T15:35:45.000000Z\",\"created_at\":\"2026-11-21T15:35:45.000000Z\",\"id\":6,\"batches\":[{\"id\":7,\"store_id\":4,\"product_id\":6,\"batch_no\":\"CS-A1\",\"mfg_date\":null,\"expiry_date\":\"2027-06-30\",\"sto"
+        }
+      ],
+      "msg": "Duplicates",
+      "db": [
+        {
+          "id": 6,
+          "store_id": 4,
+          "name": "QA Cough Syrup 100ml",
+          "barcode": "8909000000028",
+          "hsn_sac_code": "30049011",
+          "gst_percent": 12,
+          "mrp": 120,
+          "sel_rate": 115,
+          "ptr": 80,
+          "units_per_pack": 1,
+          "unit_id": "Bottle",
+          "current_stock": 0,
+          "version": 1
+        }
+      ],
+      "batches": [
+        {
+          "id": 7,
+          "store_id": 4,
+          "batch_no": "CS-A1",
+          "expiry_date": "2027-06-30",
+          "stock_qty": 40,
+          "purchase_rate": 80,
+          "mrp": 120
+        }
+      ]
+    },
+    {
+      "p": {
+        "store": "QA-PH",
+        "name": "QA Alprazolam 0.25 Strip",
+        "barcode": "8909000000035",
+        "hsn": "30049099",
+        "unit": "Strip",
+        "mrp": "30",
+        "sell": "30",
+        "ptr": "18",
+        "gst": "12",
+        "upp": "10",
+        "stock": "0"
+      },
+      "vals": {
+        "name": "QA Alprazolam 0.25 Strip",
+        "barcode": "8909000000035",
+        "hsn": "30049099",
+        "unit": "Strip",
+        "mrp": "30",
+        "sell": "30",
+        "ptr": "18",
+        "gst": "12",
+        "upp": "10",
+        "stock": "0"
+      },
+      "calls": [
+        {
+          "m": "POST",
+          "u": "/admin/products",
+          "st": 201,
+          "req": "{\"name\":\"QA Alprazolam 0.25 Strip\",\"barcode\":\"8909000000035\",\"hsn_sac_code\":\"30049099\",\"mrp\":30,\"sel_rate\":30,\"ptr\":18,\"pts\":0,\"gst_percent\":12,\"units_per_pack\":10,\"reorder_level\":10,\"current_stock\":0,\"is_active\":true,\"unit_id\":\"Strip\",\"store_id\":4,\"initial_batch\":{\"batch_no\":\"B1\",\"expiry_date\":\"2027-11-21\",\"stock_qty\":0}}",
+          "res": "{\"store_id\":4,\"name\":\"QA Alprazolam 0.25 Strip\",\"barcode\":\"8909000000035\",\"hsn_sac_code\":\"30049099\",\"unit_id\":\"Strip\",\"mrp\":\"30.00\",\"sel_rate\":\"30.00\",\"ptr\":\"18.00\",\"pts\":\"0.00\",\"gst_percent\":\"12.00\",\"units_per_pack\":10,\"reorder_level\":\"10.00\",\"current_stock\":\"0.00\",\"version\":1,\"is_active\":true,\"updated_at\":\"2026-11-21T15:35:56.000000Z\",\"created_at\":\"2026-11-21T15:35:56.000000Z\",\"id\":7,\"batches\":[{\"id\":8,\"store_id\":4,\"product_id\":7,\"batch_no\":\"B1\",\"mfg_date\":null,\"expiry_date\":\"2027-11-21\",\"stoc"
+        }
+      ],
+      "msg": "Duplicates",
+      "db": [
+        {
+          "id": 7,
+          "store_id": 4,
+          "name": "QA Alprazolam 0.25 Strip",
+          "barcode": "8909000000035",
+          "hsn_sac_code": "30049099",
+          "gst_percent": 12,
+          "mrp": 30,
+          "sel_rate": 30,
+          "ptr": 18,
+          "units_per_pack": 10,
+          "unit_id": "Strip",
+          "current_stock": 0,
+          "version": 1
+        }
+      ],
+      "batches": [
+        {
+          "id": 8,
+          "store_id": 4,
+          "batch_no": "B1",
+          "expiry_date": "2027-11-21",
+          "stock_qty": 0,
+          "purchase_rate": 18,
+          "mrp": 30
+        }
+      ]
+    },
+    {
+      "p": {
+        "store": "QA-CS",
+        "name": "QA Glow Face Cream 50g",
+        "barcode": "8909000000011",
+        "hsn": "33049910",
+        "unit": "Jar",
+        "mrp": "295",
+        "sell": "250",
+        "ptr": "150",
+        "gst": "18",
+        "upp": "1",
+        "stock": "0"
+      },
+      "vals": {
+        "name": "QA Glow Face Cream 50g",
+        "barcode": "8909000000011",
+        "hsn": "33049910",
+        "unit": "Jar",
+        "mrp": "295",
+        "sell": "250",
+        "ptr": "150",
+        "gst": "18",
+        "upp": "1",
+        "stock": "0"
+      },
+      "calls": [
+        {
+          "m": "POST",
+          "u": "/admin/products",
+          "st": 201,
+          "req": "{\"name\":\"QA Glow Face Cream 50g\",\"barcode\":\"8909000000011\",\"hsn_sac_code\":\"33049910\",\"mrp\":295,\"sel_rate\":250,\"ptr\":150,\"pts\":0,\"gst_percent\":18,\"units_per_pack\":1,\"reorder_level\":10,\"current_stock\":0,\"is_active\":true,\"unit_id\":\"Jar\",\"store_id\":5,\"initial_batch\":{\"batch_no\":\"B1\",\"expiry_date\":\"2027-11-21\",\"stock_qty\":0}}",
+          "res": "{\"store_id\":5,\"name\":\"QA Glow Face Cream 50g\",\"barcode\":\"8909000000011\",\"hsn_sac_code\":\"33049910\",\"unit_id\":\"Jar\",\"mrp\":\"295.00\",\"sel_rate\":\"250.00\",\"ptr\":\"150.00\",\"pts\":\"0.00\",\"gst_percent\":\"18.00\",\"units_per_pack\":1,\"reorder_level\":\"10.00\",\"current_stock\":\"0.00\",\"version\":1,\"is_active\":true,\"updated_at\":\"2026-11-21T15:36:06.000000Z\",\"created_at\":\"2026-11-21T15:36:06.000000Z\",\"id\":8,\"batches\":[{\"id\":9,\"store_id\":5,\"product_id\":8,\"batch_no\":\"B1\",\"mfg_date\":null,\"expiry_date\":\"2027-11-21\",\"stock_"
+        }
+      ],
+      "msg": "Duplicates",
+      "db": [
+        {
+          "id": 8,
+          "store_id": 5,
+          "name": "QA Glow Face Cream 50g",
+          "barcode": "8909000000011",
+          "hsn_sac_code": "33049910",
+          "gst_percent": 18,
+          "mrp": 295,
+          "sel_rate": 250,
+          "ptr": 150,
+          "units_per_pack": 1,
+          "unit_id": "Jar",
+          "current_stock": 0,
+          "version": 1
+        }
+      ],
+      "batches": [
+        {
+          "id": 9,
+          "store_id": 5,
+          "batch_no": "B1",
+          "expiry_date": "2027-11-21",
+          "stock_qty": 0,
+          "purchase_rate": 150,
+          "mrp": 295
+        }
+      ]
+    },
+    {
+      "p": {
+        "store": "QA-CS",
+        "name": "QA Ruby Lipstick",
+        "barcode": "8909100000028",
+        "hsn": "33041000",
+        "unit": "Piece",
+        "mrp": "450",
+        "sell": "400",
+        "ptr": "220",
+        "gst": "18",
+        "upp": "1",
+        "stock": "25",
+        "batch": "LP-01",
+        "exp": "2028-12-31"
+      },
+      "vals": {
+        "name": "QA Ruby Lipstick",
+        "barcode": "8909100000028",
+        "hsn": "33041000",
+        "unit": "Piece",
+        "mrp": "450",
+        "sell": "400",
+        "ptr": "220",
+        "gst": "18",
+        "upp": "1",
+        "stock": "25",
+        "batch": "LP-01",
+        "exp": "2028-12-31"
+      },
+      "calls": [
+        {
+          "m": "POST",
+          "u": "/admin/products",
+          "st": 201,
+          "req": "{\"name\":\"QA Ruby Lipstick\",\"barcode\":\"8909100000028\",\"hsn_sac_code\":\"33041000\",\"mrp\":450,\"sel_rate\":400,\"ptr\":220,\"pts\":0,\"gst_percent\":18,\"units_per_pack\":1,\"reorder_level\":10,\"current_stock\":0,\"is_active\":true,\"unit_id\":\"Piece\",\"store_id\":5,\"initial_batch\":{\"batch_no\":\"LP-01\",\"expiry_date\":\"2028-12-31\",\"stock_qty\":25}}",
+          "res": "{\"store_id\":5,\"name\":\"QA Ruby Lipstick\",\"barcode\":\"8909100000028\",\"hsn_sac_code\":\"33041000\",\"unit_id\":\"Piece\",\"mrp\":\"450.00\",\"sel_rate\":\"400.00\",\"ptr\":\"220.00\",\"pts\":\"0.00\",\"gst_percent\":\"18.00\",\"units_per_pack\":1,\"reorder_level\":\"10.00\",\"current_stock\":\"0.00\",\"version\":1,\"is_active\":true,\"updated_at\":\"2026-11-21T15:36:17.000000Z\",\"created_at\":\"2026-11-21T15:36:17.000000Z\",\"id\":9,\"batches\":[{\"id\":10,\"store_id\":5,\"product_id\":9,\"batch_no\":\"LP-01\",\"mfg_date\":null,\"expiry_date\":\"2028-12-31\",\"stock_"
+        }
+      ],
+      "msg": "Duplicates",
+      "db": [
+        {
+          "id": 9,
+          "store_id": 5,
+          "name": "QA Ruby Lipstick",
+          "barcode": "8909100000028",
+          "hsn_sac_code": "33041000",
+          "gst_percent": 18,
+          "mrp": 450,
+          "sel_rate": 400,
+          "ptr": 220,
+          "units_per_pack": 1,
+          "unit_id": "Piece",
+          "current_stock": 0,
+          "version": 1
+        }
+      ],
+      "batches": [
+        {
+          "id": 10,
+          "store_id": 5,
+          "batch_no": "LP-01",
+          "expiry_date": "2028-12-31",
+          "stock_qty": 25,
+          "purchase_rate": 220,
+          "mrp": 450
+        }
+      ]
+    },
+    {
+      "p": {
+        "store": "QA-PH",
+        "name": "QA Duplicate Barcode Probe",
+        "barcode": "8909000000028",
+        "hsn": "30049099",
+        "unit": "Bottle",
+        "mrp": "10",
+        "sell": "10",
+        "ptr": "5",
+        "gst": "12",
+        "upp": "1",
+        "stock": "0",
+        "expectRefusal": true
+      },
+      "vals": {
+        "name": "QA Duplicate Barcode Probe",
+        "barcode": "8909000000028",
+        "hsn": "30049099",
+        "unit": "Bottle",
+        "mrp": "10",
+        "sell": "10",
+        "ptr": "5",
+        "gst": "12",
+        "upp": "1",
+        "stock": "0"
+      },
+      "calls": [
+        {
+          "m": "POST",
+          "u": "/admin/products",
+          "st": 422,
+          "req": "{\"name\":\"QA Duplicate Barcode Probe\",\"barcode\":\"8909000000028\",\"hsn_sac_code\":\"30049099\",\"mrp\":10,\"sel_rate\":10,\"ptr\":5,\"pts\":0,\"gst_percent\":12,\"units_per_pack\":1,\"reorder_level\":10,\"current_stock\":0,\"is_active\":true,\"unit_id\":\"Bottle\",\"store_id\":4,\"initial_batch\":{\"batch_no\":\"B1\",\"expiry_date\":\"2027-11-21\",\"stock_qty\":0}}",
+          "res": "{\"message\":\"Barcode 8909000000028 is already used by \\\"QA Cough Syrup 100ml\\\" in this store.\",\"errors\":{\"barcode\":[\"Barcode 8909000000028 is already used by \\\"QA Cough Syrup 100ml\\\" in this store.\"]},\"existing_product\":\"QA Cough Syrup 100ml\"}"
+        }
+      ],
+      "msg": "Barcode 8909000000028 is already used by \"QA Cough Syrup 100ml\" in this store.",
+      "db": [],
+      "batches": []
+    }
+  ],
+  "list_QA-PH": [
+    {
+      "name": "QA Paracet 500 Strip",
+      "store": "QA-PH",
+      "shown": true
+    },
+    {
+      "name": "QA Cough Syrup 100ml",
+      "store": "QA-PH",
+      "shown": true
+    },
+    {
+      "name": "QA Alprazolam 0.25 Strip",
+      "store": "QA-PH",
+      "shown": true
+    },
+    {
+      "name": "QA Glow Face Cream 50g",
+      "store": "QA-CS",
+      "shown": false
+    },
+    {
+      "name": "QA Ruby Lipstick",
+      "store": "QA-CS",
+      "shown": false
+    },
+    {
+      "name": "QA Duplicate Barcode Probe",
+      "store": "QA-PH",
+      "shown": false
+    }
+  ],
+  "list_QA-CS": [
+    {
+      "name": "QA Paracet 500 Strip",
+      "store": "QA-PH",
+      "shown": false
+    },
+    {
+      "name": "QA Cough Syrup 100ml",
+      "store": "QA-PH",
+      "shown": false
+    },
+    {
+      "name": "QA Alprazolam 0.25 Strip",
+      "store": "QA-PH",
+      "shown": false
+    },
+    {
+      "name": "QA Glow Face Cream 50g",
+      "store": "QA-CS",
+      "shown": true
+    },
+    {
+      "name": "QA Ruby Lipstick",
+      "store": "QA-CS",
+      "shown": true
+    },
+    {
+      "name": "QA Duplicate Barcode Probe",
+      "store": "QA-PH",
+      "shown": false
+    }
+  ]
+}

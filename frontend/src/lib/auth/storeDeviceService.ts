@@ -4,9 +4,15 @@ import { sqliteStorage } from "../db/sqliteStorage";
 import { companySettingsService } from "../settings/companySettingsService";
 import { staffCryptoService } from "./staffCryptoService";
 import { validatePassword, validatePin } from "./credentialPolicy";
-import { INITIAL_BRANCH_STORES, type BranchStore } from "../masters/storeService";
+import { detectDeviceFriendlyName, getOrCreateClientDeviceUuid } from "./clientDeviceIdentifier";
 import { productsStore } from "../masters/productsStore";
 import { partiesStore } from "../masters/partiesStore";
+import { counterSequenceService } from "./counterSequenceService";
+import {
+  GRACE_EXPIRED_MESSAGE,
+  counterGraceService,
+  type GraceArm,
+} from "./counterGraceService";
 import {
   API_BASE_URL,
   DEFAULT_LAN_PORT,
@@ -22,6 +28,8 @@ export interface StoreDeviceProfile {
   store_name: string;
   store_code: string;
   counter_id: string;
+  /** The id the store server knows this counter by — its number series key. */
+  server_counter_id?: number;
   counter_name: string;
   counter_code: string;
   location_name?: string;
@@ -51,6 +59,61 @@ export interface FirstAdminInput {
   username: string;
   password: string;
   pin: string;
+}
+
+/**
+ * The key this till's number series are filed under.
+ *
+ * A claim writes the counter's server id as `server_counter_id`; older profiles
+ * only carry the local `cntr_<n>` id. Reading `counter_id` with `Number()` made
+ * the till key its series by NaN, so the POS and the heartbeat held two cursors.
+ * Every reader goes through this one function now.
+ */
+export function counterSequenceKey(
+  profile:
+    | Pick<StoreDeviceProfile, "server_counter_id" | "counter_id" | "counter_code">
+    | null
+    | undefined,
+  fallbackCode?: string | null
+): number | string {
+  const server = Number(profile?.server_counter_id);
+  if (Number.isFinite(server) && server > 0) return server;
+
+  const local = String(profile?.counter_id ?? "").trim();
+  const fromLocalId = /^cntr_(\d+)$/i.exec(local)?.[1];
+  if (fromLocalId && Number(fromLocalId) > 0) return Number(fromLocalId);
+  if (/^\d+$/.test(local) && Number(local) > 0) return Number(local);
+  if (local) return local;
+
+  return String(profile?.counter_code || fallbackCode || "C01").toUpperCase();
+}
+
+/**
+ * CNT-006 / CNT-013: a till is handed either a typed code or the QR the admin
+ * panel prints. The QR carries store and counter ids, and only the code is
+ * ever sent back — the server reads the tenancy off the code (IS2).
+ */
+export function extractClaimCode(input: string): string {
+  const raw = String(input ?? "").trim();
+
+  if (!raw) {
+    throw new Error("Enter the counter activation code from the store owner.");
+  }
+
+  if (raw.startsWith("{")) {
+    let payload: any = null;
+    try {
+      payload = JSON.parse(raw);
+    } catch (_) {
+      payload = null;
+    }
+    if (payload?.kind === "lam_suite_counter_claim" && String(payload.code ?? "").trim()) {
+      return String(payload.code).trim().toUpperCase();
+    }
+    throw new Error("That QR is not a LamSuite counter activation code.");
+  }
+
+  return raw.toUpperCase();
 }
 
 export class StoreDeviceService {
@@ -109,6 +172,8 @@ export class StoreDeviceService {
     if (storedJson) {
       try {
         this.activeProfile = JSON.parse(storedJson) as StoreDeviceProfile;
+        await this.knownCounterSeries();
+        await this.knownGraceWindow();
         return this.activeProfile;
       } catch (e) {
         console.warn("Failed to parse device profile from secure store:", e);
@@ -127,6 +192,7 @@ export class StoreDeviceService {
         store_name: c.store_name || "LamStone Pharmacy & Retail",
         store_code: c.store_code || "STORE-01",
         counter_id: c.id,
+        server_counter_id: Number(c.server_counter_id ?? String(c.id).replace(/^cntr_/i, "")) || undefined,
         counter_name: c.counter_name,
         counter_code: c.counter_code || "C01",
         is_hub: Boolean(c.is_hub),
@@ -136,80 +202,109 @@ export class StoreDeviceService {
         registered_at: c.created_at,
         is_active: c.status === "active",
       };
+      await this.knownCounterSeries();
+      await this.knownGraceWindow();
       return this.activeProfile;
     }
 
     return null;
   }
 
-  async fetchBranchesForOwner(
-    _email?: string,
-    _password?: string
-  ): Promise<BranchStore[]> {
-    const candidateUrls = getCandidateApiUrls();
-    for (const targetUrl of candidateUrls) {
-      try {
-        const res = await fetch(`${targetUrl}/api/branches`, {
-          headers: { Accept: "application/json" },
-        });
-        if (res.ok) {
-          const body = await res.json();
-          if (body.data && Array.isArray(body.data) && body.data.length > 0) {
-            return body.data.map((b: any) => ({
-              id: String(b.id),
-              name: b.name,
-              code: b.code,
-              city: b.city || "Palakkad",
-              state_code: b.state_code || "32",
-              gstin: b.gstin || "",
-              is_main: Boolean(b.is_main),
-              is_active: Boolean(b.is_active),
-            }));
-          }
-        }
-      } catch {
-        // try next candidate
-      }
-    }
-    return [];
+  /**
+   * CNT-014: read the counter's own number series into the till, so the POS can
+   * show a number before it can await the server. A till that holds none asks
+   * the server what this counter is up to rather than starting at 1001 again.
+   */
+  private async knownCounterSeries(): Promise<void> {
+    const profile = this.activeProfile;
+    if (!profile) return;
+
+    // A profile that names no counter has no series to read; asking the store
+    // server would name a counter this till is not on.
+    const key = counterSequenceKey(profile, profile.counter_code);
+    if (typeof key !== "number") return;
+    if (counterSequenceService.hasSeries(key)) return;
+
+    await counterSequenceService.hydrate(key, profile.counter_code || "C01");
+    if (counterSequenceService.hasSeries(key)) return;
+
+    const token = await this.getDeviceToken();
+    const storeId = String(profile.store_id || "");
+
+    await counterSequenceService
+      .pull({
+        baseUrl: API_BASE_URL,
+        token,
+        storeId: /^\d+$/.test(storeId) ? storeId : undefined,
+      })
+      .catch(() => null);
   }
 
-  async registerWithActivationKey(
-    activationKey: string,
-    counterName: string,
-    isHub = false,
+  /** CNT-011: the counter whose offline window this till is honouring. */
+  private graceKey(): string | null {
+    const profile = this.activeProfile;
+    if (!profile) return null;
+
+    const key = profile.server_counter_id ?? profile.counter_id ?? profile.device_id;
+    return key === undefined || key === null || String(key) === "" ? null : String(key);
+  }
+
+  /**
+   * CNT-011: a window the till was granted earlier keeps closing across
+   * restarts, so boot reads the stored deadline back instead of letting the
+   * machine pretend it has never been offline.
+   */
+  private async knownGraceWindow(): Promise<void> {
+    const key = this.graceKey();
+    if (!key) return;
+
+    await counterGraceService.hydrate(key).catch(() => null);
+  }
+
+  /** CNT-011: a clean handshake renews the window; a refusal renews nothing. */
+  private async renewGraceWindow(answer: GraceArm | null | undefined): Promise<void> {
+    const key = this.graceKey();
+    if (!key) return;
+
+    counterGraceService.use(key);
+    await counterGraceService.arm(key, answer).catch(() => null);
+  }
+
+  /**
+   * CNT-006: the only registration path a counter computer runs. The code is
+   * the whole credential — no owner login, no store key, no local naming of
+   * the counter. Everything about the tenancy comes back from the server.
+   */
+  async claimCounter(
+    input: string,
     onProgress?: (step: string, percent: number) => void
   ): Promise<StoreDeviceProfile> {
-    if (!activationKey || activationKey.trim().length < 6) {
-      throw new Error("Invalid Store Activation Key. Must be at least 6 characters.");
-    }
+    const code = extractClaimCode(input);
+    const deviceUuid = getOrCreateClientDeviceUuid();
+    const deviceName = detectDeviceFriendlyName();
 
-    onProgress?.("Validating activation key against cloud backend...", 20);
-    const deviceUuid = `dev_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`;
-    const counterCode = counterName.replace(/[^0-9]/g, "")
-      ? `C${counterName.replace(/[^0-9]/g, "").padStart(2, "0")}`
-      : "C01";
-    const counterId = `cntr_${Date.now()}_${counterCode.toLowerCase()}`;
+    onProgress?.("Checking the counter code with the store server...", 20);
 
     const candidateUrls = getCandidateApiUrls();
     let response: Response | null = null;
     let successfulUrl = candidateUrls[0];
-    let lastErrorMessage = "";
+    let unreachable = "";
 
     for (let i = 0; i < candidateUrls.length; i++) {
       const targetUrl = candidateUrls[i];
       try {
         if (candidateUrls.length > 1 && i > 0) {
-          onProgress?.(`Validating against alternative server (${targetUrl})...`, 25);
+          onProgress?.(`Trying the alternative server (${targetUrl})...`, 25);
         }
-        const res = await fetch(`${targetUrl}/api/devices/register`, {
+
+        const res = await fetch(`${targetUrl}/api/counters/claim`, {
           method: "POST",
           headers: { "Content-Type": "application/json", Accept: "application/json" },
           body: JSON.stringify({
-            activation_key: activationKey.trim(),
+            code,
             device_uuid: deviceUuid,
-            device_name: counterName,
-            is_hub: isHub,
+            device_name: deviceName,
+            app_version: APP_VERSION,
           }),
         });
 
@@ -217,20 +312,26 @@ export class StoreDeviceService {
           response = res;
           successfulUrl = targetUrl;
           break;
-        } else {
-          const errBody = await res.json().catch(() => ({}));
-          lastErrorMessage = errBody.message || `Activation rejected by server (HTTP ${res.status})`;
         }
-      } catch (networkErr: any) {
-        lastErrorMessage = "Cannot reach server. Online verification is required to activate this workstation.";
-        if (i === 0 && candidateUrls.length > 1) {
-          throw new Error("Cannot reach server. Online verification is required to activate this workstation.");
+
+        const refused = await res.json().catch(() => ({}));
+        // CNT-005: every refusal is one sentence, so a wrong code teaches
+        // nothing about which half of it was wrong.
+        throw new Error(
+          refused.message ||
+            "That activation code is not valid here. Ask the store owner for a current counter code."
+        );
+      } catch (err: any) {
+        if (err instanceof TypeError) {
+          unreachable = "Cannot reach the store server. A counter code needs one online activation.";
+          continue;
         }
+        throw err;
       }
     }
 
-    if (!response || !response.ok) {
-      throw new Error(lastErrorMessage || "Invalid, expired, or revoked activation key.");
+    if (!response) {
+      throw new Error(unreachable || "Cannot reach the store server. A counter code needs one online activation.");
     }
 
     if (successfulUrl !== API_BASE_URL) {
@@ -238,183 +339,66 @@ export class StoreDeviceService {
     }
 
     const data = await response.json();
-    if (!data.success || !data.store_id || !data.device_token) {
-      throw new Error("Invalid server activation response: missing authorization credentials.");
+    if (!data.success || !data.device_token || !data.counter || !data.store) {
+      throw new Error("The server answered without a counter identity. Ask the owner to re-issue the code.");
     }
 
+    const counter = data.counter;
+    const store = data.store;
+    const counterId = `cntr_${counter.id}`;
+
     const storeProfile: StoreDeviceProfile = {
-      device_id: data.device_id || counterId,
+      device_id: counterId,
       device_uuid: deviceUuid,
-      device_name: counterName,
-      store_id: String(data.store_id),
-      store_name: data.store_name || "Store",
-      store_code: data.store_code || "STORE",
-      counter_id: data.counter_id || counterId,
-      counter_name: counterName,
-      counter_code: data.counter_code || counterCode,
-      is_hub: isHub,
-      license_plan: data.license_plan || "Enterprise Retail & Pharmacy Chain",
-      license_status: data.license_status || "active",
+      device_name: deviceName,
+      store_id: String(store.id),
+      store_name: store.name,
+      store_code: store.code,
+      counter_id: counterId,
+      server_counter_id: Number(counter.id),
+      counter_name: counter.counter_name,
+      counter_code: counter.counter_code,
+      location_name: counter.location_name || undefined,
+      is_remote: Boolean(counter.is_remote),
+      is_hub: false,
+      is_digital_only: Boolean(counter.is_digital_only),
+      printer_profile: counter.printer_profile || undefined,
+      receipt_customization: counter.receipt_customization || undefined,
+      license_plan: data.license_plan || "Retail & Pharmacy Chain Pro",
+      license_status: "active",
       license_expires_at: data.license_expires_at || "2027-12-31",
       registered_at: Date.now(),
-      is_active: data.status === "active",
-      admin_staff_present: Boolean(data.admin_staff_present),
+      is_active: true,
     };
 
-    const deviceToken = data.device_token;
-    const refreshToken = data.refresh_token || `ref_${Date.now()}`;
+    onProgress?.("Sealing the workstation token in the OS credential store...", 55);
 
-    onProgress?.("Storing workstation device token & credentials securely...", 50);
-    await invokeCommand("secure_store_set", { key: "device_token", value: deviceToken });
-    await invokeCommand("secure_store_set", { key: "refresh_token", value: refreshToken });
-    await invokeCommand("secure_store_set", {
-      key: "store_device_profile",
-      value: JSON.stringify(storeProfile),
-    });
-
-    onProgress?.("Writing counter configuration...", 75);
-    await sqliteStorage.insertRecord("store_counters", counterId, {
-      id: counterId,
-      store_id: storeProfile.store_id,
-      counter_name: counterName,
-      counter_code: counterCode,
-      device_uuid: deviceUuid,
-      is_hub: isHub ? 1 : 0,
-      ip_address: "127.0.0.1",
-      port: 8089,
-      app_version: APP_VERSION,
-      status: storeProfile.is_active ? "active" : "pending_approval",
-      pending_queue_count: 0,
-      last_sync_at: Date.now(),
-      created_at: Date.now(),
+    // CNT-008: the store record decides which local database and which
+    // credential mirror this machine works, so it lands before any counter
+    // data does. A claim that cannot be recorded is refused here, plainly,
+    // rather than half-written into whichever store was last open.
+    const { storeRegistryService } = await import("./storeRegistryService");
+    await storeRegistryService.registerStore(storeProfile, {
+      deviceToken: data.device_token,
+      refreshToken: "",
     });
 
     this.activeProfile = storeProfile;
 
-    // Register in multi-store registry
-    try {
-      const { storeRegistryService } = await import("./storeRegistryService");
-      await storeRegistryService.registerStore(storeProfile, { deviceToken, refreshToken });
-    } catch (e) {
-      console.warn("Registry registration notice:", e);
-    }
-
-    onProgress?.("Store activation and device registration complete!", 100);
-    return storeProfile;
-  }
-
-  async registerWithOwnerCredentials(
-    email: string,
-    password: string,
-    selectedStoreId: string,
-    counterName: string,
-    isHub = false,
-    totpCode?: string,
-    onProgress?: (step: string, percent: number) => void
-  ): Promise<StoreDeviceProfile> {
-    if (!email || !password) {
-      throw new Error("Email and password are required");
-    }
-
-    onProgress?.("Authenticating store owner account with cloud backend...", 20);
-    const deviceUuid = `dev_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`;
-
-    const candidateUrls = getCandidateApiUrls();
-    let response: Response | null = null;
-    let successfulUrl = candidateUrls[0];
-    let lastErrorMessage = "";
-
-    for (let i = 0; i < candidateUrls.length; i++) {
-      const targetUrl = candidateUrls[i];
-      try {
-        if (candidateUrls.length > 1 && i > 0) {
-          onProgress?.(`Authenticating against alternative server (${targetUrl})...`, 25);
-        }
-        const res = await fetch(`${targetUrl}/api/devices/register-owner`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Accept: "application/json" },
-          body: JSON.stringify({
-            email: email.trim(),
-            password,
-            store_id: selectedStoreId,
-            device_uuid: deviceUuid,
-            device_name: counterName,
-            totp_code: totpCode,
-            is_hub: isHub,
-          }),
-        });
-
-        if (res.ok) {
-          response = res;
-          successfulUrl = targetUrl;
-          break;
-        } else {
-          const err = await res.json().catch(() => ({}));
-          lastErrorMessage = err.message || `Owner registration rejected (${res.status})`;
-        }
-      } catch (networkErr: any) {
-        lastErrorMessage = networkErr?.message || "Cannot reach server.";
-      }
-    }
-
-    if (!response || !response.ok) {
-      throw new Error(lastErrorMessage || "Cannot reach server. Online verification is required for Owner activation.");
-    }
-
-    if (successfulUrl !== API_BASE_URL) {
-      setApiBaseUrl(successfulUrl);
-    }
-
-    const data = await response.json();
-    if (data.requires_2fa) {
-      const err: any = new Error(data.message || "2FA TOTP code required");
-      err.requires_2fa = true;
-      throw err;
-    }
-
-    if (!data.success || !data.device_token) {
-      throw new Error("Invalid server response during owner enrollment");
-    }
-
-    const counterId = data.counter_id || `cntr_${Date.now()}`;
-    const storeProfile: StoreDeviceProfile = {
-      device_id: data.device_id || counterId,
-      device_uuid: deviceUuid,
-      device_name: counterName,
-      store_id: String(data.store_id),
-      store_name: data.store_name,
-      store_code: data.store_code,
-      counter_id: counterId,
-      counter_name: counterName,
-      counter_code: data.counter_code || "C01",
-      is_hub: isHub,
-      license_plan: data.license_plan || "Enterprise Retail & Pharmacy Chain",
-      license_status: data.license_status || "active",
-      license_expires_at: data.license_expires_at || "2027-12-31",
-      registered_at: Date.now(),
-      is_active: data.status === "active",
-      admin_staff_present: Boolean(data.admin_staff_present),
-    };
-
-    const deviceToken = data.device_token;
-    const refreshToken = data.refresh_token || `ref_${Date.now()}`;
-
-    await invokeCommand("secure_store_set", { key: "device_token", value: deviceToken });
-    await invokeCommand("secure_store_set", { key: "refresh_token", value: refreshToken });
-    await invokeCommand("secure_store_set", {
-      key: "store_device_profile",
-      value: JSON.stringify(storeProfile),
-    });
-
+    onProgress?.("Writing the counter configuration...", 75);
     await sqliteStorage.insertRecord("store_counters", counterId, {
       id: counterId,
+      server_counter_id: counter.id,
       store_id: storeProfile.store_id,
-      counter_name: counterName,
+      store_name: storeProfile.store_name,
+      store_code: storeProfile.store_code,
+      counter_name: storeProfile.counter_name,
       counter_code: storeProfile.counter_code,
       device_uuid: deviceUuid,
-      is_hub: isHub ? 1 : 0,
+      registered_via: "counter_code",
+      is_hub: 0,
       ip_address: "127.0.0.1",
-      port: 8089,
+      port: DEFAULT_LAN_PORT,
       app_version: APP_VERSION,
       status: "active",
       pending_queue_count: 0,
@@ -422,23 +406,31 @@ export class StoreDeviceService {
       created_at: Date.now(),
     });
 
-    this.activeProfile = storeProfile;
-
-    try {
-      const { storeRegistryService } = await import("./storeRegistryService");
-      await storeRegistryService.registerStore(storeProfile, { deviceToken, refreshToken });
-    } catch (e) {
-      console.warn("Registry registration notice:", e);
+    // CNT-014: the counter's number series comes with the claim, so the till
+    // bills from the same series the server is holding.
+    if (data.sequences?.items?.length) {
+      try {
+        await counterSequenceService.primeFromManifest(data.sequences);
+      } catch (e) {
+        console.warn("Counter series notice:", e);
+      }
+    } else {
+      // A claim answered without the series still leaves the till on the
+      // counter's count, not on a series it invented.
+      await this.knownCounterSeries();
     }
 
-    try {
-      const { companySettingsService } = await import("../settings/companySettingsService");
-      await companySettingsService.fetchRemoteSettings(storeProfile.store_id);
-    } catch (e) {
-      console.warn("Owner settings sync notice:", e);
-    }
+    // CNT-011: the claim is the first watermark. The window the owner set for
+    // this counter runs from here, so an offline till is not left to guess.
+    await this.renewGraceWindow(data);
 
-    onProgress?.("Owner enrollment completed!", 100);
+    // PRF-001: the document this till works inside arrives with the claim, so
+    // the very first screen it draws is already the owner's surface. Read
+    // lazily: the session service takes its headers from this module.
+    const { counterSessionService } = await import("./counterSessionService");
+    await counterSessionService.applyContext(data).catch((e) => console.warn("Counter profile notice:", e));
+
+    onProgress?.(`Counter "${storeProfile.counter_name}" is live.`, 100);
     return storeProfile;
   }
 
@@ -506,9 +498,21 @@ export class StoreDeviceService {
         return { valid: false, locked: false, reason: body.message };
       }
 
+      // CNT-011: a clean handshake is a renewal — the window starts again from
+      // the moment the server agreed to.
+      await this.renewGraceWindow(body);
+
       return { valid: true };
     } catch (networkErr) {
-      // Offline fallback: already verified device can continue locally
+      // Offline fallback: a counter still inside the window the store server
+      // granted keeps working locally. Once that window closes the till stops,
+      // and stops on its own clock — a spent grace is not a revocation, so the
+      // claim it needs to reconnect with is left intact.
+      const state = counterGraceService.state(this.graceKey() ?? counterGraceService.activeCounterKey());
+      if (state.reason === "grace_expired") {
+        return { valid: false, locked: true, reason: GRACE_EXPIRED_MESSAGE };
+      }
+
       return { valid: true, locked: false };
     }
   }
@@ -517,6 +521,16 @@ export class StoreDeviceService {
     this.activeProfile = null;
     this.isAccessRevoked = true;
     this.revocationReason = "Device token revoked by server";
+    counterSequenceService.clearActiveCounter();
+    await counterGraceService.clear();
+    // IS9: a counter that is no longer this machine's takes its cached unlock
+    // credential and its owner's idle minutes with it. Read lazily so the
+    // counterLocking <-> storeDevice module graph stays acyclic.
+    const { counterLockingService } = await import("./counterLockingService");
+    await counterLockingService.clear();
+    // IS9: the permission document goes with the counter it was read for.
+    const { counterSessionService } = await import("./counterSessionService");
+    await counterSessionService.clear();
 
     await invokeCommand("secure_store_delete", { key: "device_token" });
     await invokeCommand("secure_store_delete", { key: "refresh_token" });
@@ -650,6 +664,18 @@ export class StoreDeviceService {
     // Clear operational tables
     await sqliteStorage.clearTable("store_counters");
     await sqliteStorage.clearTable("counter_sequences");
+    counterSequenceService.clearActiveCounter();
+    await counterGraceService.clear();
+    // The counter's idle minutes and its cached unlock credential are wiped with
+    // the rest of the store. Forgetting the counter first makes the purge cover
+    // both cache tables, not only the row of the counter being wiped.
+    const { counterLockingService } = await import("./counterLockingService");
+    counterLockingService.unload();
+    await counterLockingService.clear();
+    // IS9: a reset leaves no counter's permission document behind in this store.
+    const { counterSessionService } = await import("./counterSessionService");
+    counterSessionService.unload();
+    await counterSessionService.clear();
     await sqliteStorage.clearTable("counter_sessions");
     await sqliteStorage.clearTable("document_locks");
     await sqliteStorage.clearTable("distributed_held_bills");
@@ -657,215 +683,6 @@ export class StoreDeviceService {
 
     this.activeProfile = null;
     this.isAccessRevoked = false;
-  }
-
-  async enrollRemoteCounter(
-    baseUrl: string,
-    counterName: string,
-    counterCode: string,
-    storeId: string | number = 1,
-    locationName = "Owner Residence",
-    isDigitalOnly = false,
-    existingDeviceUuid?: string
-  ): Promise<{
-    success: boolean;
-    status: string;
-    counter?: any;
-    pairing_code?: string;
-    device_token?: string;
-    device_uuid: string;
-    message: string;
-  }> {
-    const deviceUuid = existingDeviceUuid || `dev_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`;
-
-    try {
-      const res = await fetch(`${baseUrl}/api/counters/enroll`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Accept: "application/json" },
-        body: JSON.stringify({
-          store_id: storeId,
-          device_uuid: deviceUuid,
-          counter_name: counterName,
-          counter_code: counterCode,
-          location_name: locationName,
-          is_remote: true,
-          is_digital_only: isDigitalOnly,
-        }),
-      });
-
-      const data = await res.json();
-      if (res.ok && data.success) {
-        const counter = data.counter;
-        return {
-          success: true,
-          status: counter.status,
-          counter,
-          pairing_code: data.pairing_code || counter.pairing_code,
-          device_token: data.device_token,
-          device_uuid: deviceUuid,
-          message: data.message,
-        };
-      }
-      return {
-        success: false,
-        status: "error",
-        device_uuid: deviceUuid,
-        message: data.error || data.message || "Enrollment failed",
-      };
-    } catch (err: any) {
-      return {
-        success: false,
-        status: "error",
-        device_uuid: deviceUuid,
-        message: err?.message || "Failed to reach enrollment endpoint",
-      };
-    }
-  }
-
-  async pollEnrollmentStatus(
-    baseUrl: string,
-    deviceUuid: string
-  ): Promise<{
-    success: boolean;
-    status: "active" | "pending_approval" | "revoked" | "not_found";
-    device_token?: string;
-    pairing_code?: string;
-    counter?: any;
-    store_name?: string;
-    store_code?: string;
-    store_id?: string;
-    counter_name?: string;
-    counter_code?: string;
-  }> {
-    try {
-      const res = await fetch(`${baseUrl}/api/counters/enrollment-status/${deviceUuid}`, {
-        headers: { Accept: "application/json" },
-      });
-      if (res.ok) {
-        const data = await res.json();
-        return {
-          success: true,
-          status: data.status,
-          device_token: data.device_token,
-          pairing_code: data.pairing_code,
-          counter: data,
-          store_name: data.store_name,
-          store_code: data.store_code,
-          store_id: String(data.store_id),
-          counter_name: data.counter_name,
-          counter_code: data.counter_code,
-        };
-      }
-      return { success: false, status: "not_found" };
-    } catch {
-      return { success: false, status: "not_found" };
-    }
-  }
-
-  async finalizeDeviceActivation(
-    baseUrl: string,
-    profileData: {
-      store_id: string;
-      store_name: string;
-      store_code: string;
-      counter_id: string;
-      counter_name: string;
-      counter_code: string;
-      device_uuid: string;
-      device_token: string;
-      is_hub?: boolean;
-    },
-    onProgress?: (step: string, percent: number) => void
-  ): Promise<StoreDeviceProfile> {
-    onProgress?.("Storing device authorization token in OS secure vault...", 20);
-    await invokeCommand("secure_store_set", { key: "device_token", value: profileData.device_token });
-    await invokeCommand("secure_store_set", {
-      key: `store:${profileData.store_id}:device_token`,
-      value: profileData.device_token,
-    });
-
-    onProgress?.("Configuring local store partition...", 40);
-    const profile: StoreDeviceProfile = {
-      device_id: profileData.counter_id,
-      device_uuid: profileData.device_uuid,
-      device_name: profileData.counter_name,
-      store_id: profileData.store_id,
-      store_name: profileData.store_name,
-      store_code: profileData.store_code,
-      counter_id: profileData.counter_id,
-      counter_name: profileData.counter_name,
-      counter_code: profileData.counter_code,
-      is_hub: Boolean(profileData.is_hub),
-      license_plan: "Enterprise Retail & Pharmacy Chain Pro",
-      license_status: "active",
-      license_expires_at: "2027-12-31",
-      registered_at: Date.now(),
-      is_active: true,
-    };
-
-    await invokeCommand("secure_store_set", {
-      key: "store_device_profile",
-      value: JSON.stringify(profile),
-    });
-    await invokeCommand("secure_store_set", {
-      key: `store:${profileData.store_id}:profile`,
-      value: JSON.stringify(profile),
-    });
-
-    onProgress?.("Synchronizing offline staff credentials and salted hashes...", 70);
-    try {
-      const cacheRes = await fetch(`${baseUrl}/api/staff/offline-cache?store_id=${profileData.store_id}`, {
-        headers: { "X-Device-Token": profileData.device_token, Accept: "application/json" },
-      });
-      if (cacheRes.ok) {
-        const cacheData = await cacheRes.json();
-        if (Array.isArray(cacheData.staff)) {
-          for (const s of cacheData.staff) {
-            await sqliteStorage.insertRecord("staff_users", s.id, {
-              id: s.id,
-              store_id: profileData.store_id,
-              username: s.username,
-              full_name: s.full_name,
-              role: s.role,
-              password_hash: s.password_hash,
-              pin_hash: s.pin_hash,
-              is_active: 1,
-              must_change_password: s.must_change_password ? 1 : 0,
-              biometric_registered: s.biometric_registered ? 1 : 0,
-              failed_attempts: 0,
-              locked_until: s.locked_until,
-              permissions_json: JSON.stringify(s.permissions || ["*"]),
-              enabled_menus_json: JSON.stringify(s.enabled_menus || ["pos", "bills"]),
-              updated_at: Date.now(),
-            });
-          }
-        }
-      }
-    } catch (e) {
-      console.warn("Offline staff cache sync notice:", e);
-    }
-
-    onProgress?.("Registering store in multi-store registry...", 90);
-    this.activeProfile = profile;
-    try {
-      const { storeRegistryService } = await import("./storeRegistryService");
-      await storeRegistryService.registerStore(profile, {
-        deviceToken: profileData.device_token,
-        refreshToken: `ref_${Date.now()}`,
-      });
-    } catch (e) {
-      console.warn("Registry registration notice:", e);
-    }
-
-    try {
-      const { companySettingsService } = await import("../settings/companySettingsService");
-      await companySettingsService.fetchRemoteSettings(profileData.store_id);
-    } catch (e) {
-      console.warn("Remote settings sync notice:", e);
-    }
-
-    onProgress?.("Workstation ready!", 100);
-    return profile;
   }
 
   async checkLiveStatus(baseUrl: string, counterId: string): Promise<{ isCounterActive: boolean; isStoreActive: boolean; status: string }> {

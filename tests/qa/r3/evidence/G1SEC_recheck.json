@@ -1,0 +1,24 @@
+{
+  "cross_store": {
+    "st": 422,
+    "body": "{\"success\":false,\"error\":\"Line 1: 'QA Ruby Lipstick' is not a product of this store.\"}",
+    "lip": [
+      20,
+      20
+    ]
+  },
+  "attribution": {
+    "st": 201,
+    "counter_id": 3,
+    "counter_code": "C02",
+    "counters_created": 0
+  },
+  "locked": {
+    "st": 403,
+    "body": "{\"success\":false,\"error\":\"DEVICE_AUTH_FAILED\",\"message\":\"This counter has been locked or retired by the store administrator.\"}"
+  },
+  "anon_cancel": 401,
+  "cross_store_read": 404,
+  "cross_store_cancel": 404,
+  "foreign_status_after": "issued"
+}

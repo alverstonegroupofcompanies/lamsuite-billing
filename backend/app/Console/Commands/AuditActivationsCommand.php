@@ -2,17 +2,15 @@
 
 namespace App\Console\Commands;
 
-use App\Models\ActivationKey;
 use App\Models\AuditLog;
 use App\Models\Counter;
 use App\Models\Device;
 use App\Models\DeviceActivationAttempt;
-use App\Models\Store;
 use Illuminate\Console\Command;
 
 class AuditActivationsCommand extends Command
 {
-    protected $signature = 'lamsuite:audit-activations {--purge : Revoke and purge any unverified/rogue devices} {--rotate-keys : Invalidate and rotate all active activation keys}';
+    protected $signature = 'lamsuite:audit-activations {--purge : Revoke and purge any unverified/rogue devices}';
     protected $description = 'Audit devices registered through activation endpoint, report unverified devices, and optionally purge them';
 
     public function handle(): int
@@ -91,11 +89,14 @@ class AuditActivationsCommand extends Command
                 foreach ($rogueDevices as $rogue) {
                     $d = Device::find($rogue['id']);
                     if ($d) {
-                        // Also delete or revoke corresponding counter
-                        Counter::where('device_uuid', $d->device_uuid)->update([
-                            'status' => 'revoked',
-                            'revoke_reason' => 'Purged during security audit: unverified activation',
-                        ]);
+                        // Also delete or revoke corresponding counter, in the
+                        // store this device row belongs to (CNT-008).
+                        Counter::where('store_id', $d->store_id)
+                            ->where('device_uuid', $d->device_uuid)
+                            ->update([
+                                'status' => 'revoked',
+                                'revoke_reason' => 'Purged during security audit: unverified activation',
+                            ]);
                         $d->delete();
                         $this->line("Purged device ID {$rogue['id']} ({$rogue['device_uuid']})");
                     }
@@ -127,24 +128,8 @@ class AuditActivationsCommand extends Command
             $this->comment("No activation attempts recorded yet.");
         }
 
-        // 3. Rotate keys if requested
-        if ($this->option('rotate-keys')) {
-            $this->newLine();
-            $this->warn("Rotating all store activation keys...");
-            $stores = Store::all();
-            foreach ($stores as $store) {
-                // Invalidate old keys
-                ActivationKey::where('store_id', $store->id)->update([
-                    'is_revoked' => true,
-                    'revoked_at' => now(),
-                    'revoke_reason' => 'Security key rotation following vulnerability patch',
-                ]);
-
-                $res = ActivationKey::generateKey($store);
-                $this->info("Store '{$store->name}' [{$store->code}] New Key: {$res['raw_key']}");
-            }
-            $this->info("All activation keys rotated with high entropy hashes.");
-        }
+        // 3. CNT-013 retired the store-wide key, so there is nothing left to rotate
+        // here: an owner revokes a counter and re-issues its code instead.
 
         return 0;
     }

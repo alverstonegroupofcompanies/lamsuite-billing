@@ -6,7 +6,7 @@ import {
   type StockAdjustmentPolicyConfig,
 } from "../settings/companySettingsService";
 import { syncQueueService } from "../sync/syncQueueService";
-import { staffAuthService } from "../auth/staffAuthService";
+import { storeDeviceService } from "../auth/storeDeviceService";
 
 export type StockAdjustmentMode = "adjustment" | "physical_count";
 
@@ -58,6 +58,17 @@ export interface StockAdjustmentValidation {
   totalQty: number;
   totalValue: number;
   requiresApproval: boolean;
+}
+
+/**
+ * ADJ-01: an already-posted adjustment document, as the daily allowance needs
+ * to see it. The till reads these from its own local ledger, so the limit is
+ * measured per counter device exactly as the server measures it.
+ */
+export interface StockAdjustmentRecentDocument {
+  total_qty?: number | string | null;
+  status?: string | null;
+  created_at?: number | string | null;
 }
 
 export interface StockAdjustmentPostResult {
@@ -146,14 +157,26 @@ export function resolveStockAdjustmentLines(
   return { lines, lineErrors };
 }
 
+function localDayKey(value: Date): string {
+  return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}`;
+}
+
 export function validateStockAdjustmentDocument(
   document: StockAdjustmentDocumentInput,
   resolvedLines: ResolvedStockAdjustmentLine[],
   initialLineErrors: Record<number, string[]> = {},
-  options: { policy?: StockAdjustmentPolicyConfig; role?: string | null; now?: Date } = {}
+  options: {
+    policy?: StockAdjustmentPolicyConfig;
+    role?: string | null;
+    now?: Date;
+    recentDocuments?: StockAdjustmentRecentDocument[];
+  } = {}
 ): StockAdjustmentValidation {
   const policy = options.policy || getStockAdjustmentPolicy();
-  const role = normalizeStockAdjustmentRole(options.role ?? staffAuthService.getCurrentSession()?.user?.role);
+  // A people-policy can only judge a person. At the till nobody signs in, so the
+  // gate applies when a caller names the role it is acting as; the counter's own
+  // document and the store server decide the rest.
+  const role = normalizeStockAdjustmentRole(options.role ?? null);
   const errors: string[] = [];
   const lineErrors: Record<number, string[]> = { ...initialLineErrors };
   const pushLine = (lineNo: number, message: string) => {
@@ -165,7 +188,7 @@ export function validateStockAdjustmentDocument(
   }
 
   const allowedRoles = (policy.allowed_roles || []).map(normalizeStockAdjustmentRole).filter(Boolean);
-  if (allowedRoles.length > 0 && role !== "super_admin" && !allowedRoles.includes(role)) {
+  if (role && allowedRoles.length > 0 && role !== "super_admin" && !allowedRoles.includes(role)) {
     errors.push(
       `Your role (${role || "unknown"}) cannot post stock adjustments. Allowed roles: ${allowedRoles.join(", ")}.`
     );
@@ -224,6 +247,29 @@ export function validateStockAdjustmentDocument(
     );
   }
 
+  const todayKey = localDayKey(options.now || new Date());
+  const todaysDocuments = (options.recentDocuments || []).filter((doc) => {
+    if (String(doc.status || "posted") === "rejected") return false;
+    if (doc.created_at === null || doc.created_at === undefined || doc.created_at === "") return false;
+    const created = new Date(doc.created_at);
+    return !Number.isNaN(created.getTime()) && localDayKey(created) === todayKey;
+  });
+
+  if (policy.max_documents_per_day !== null && todaysDocuments.length >= policy.max_documents_per_day) {
+    errors.push(
+      `Daily stock adjustment limit reached (${todaysDocuments.length} of ${policy.max_documents_per_day} documents today).`
+    );
+  }
+
+  if (policy.max_units_per_day !== null) {
+    const todayUnits = todaysDocuments.reduce((sum, doc) => sum + Math.abs(Number(doc.total_qty || 0)), 0);
+    if (todayUnits + totalQty > policy.max_units_per_day) {
+      errors.push(
+        `Daily stock adjustment units would reach ${Number((todayUnits + totalQty).toFixed(3))} of the ${policy.max_units_per_day}-unit daily limit.`
+      );
+    }
+  }
+
   const documentDate = String(document.document_date || new Date().toISOString().slice(0, 10)).slice(0, 10);
   if (policy.locked_before_date && documentDate <= String(policy.locked_before_date).slice(0, 10)) {
     errors.push(`Stock adjustments on or before ${policy.locked_before_date} are locked by the store policy.`);
@@ -263,11 +309,14 @@ export async function postStockAdjustment(
     role?: string | null;
     now?: Date;
     documentId?: string;
+    recentDocuments?: StockAdjustmentRecentDocument[];
   } = {}
 ): Promise<StockAdjustmentPostResult> {
-  const [batches, products] = await Promise.all([
+  const [batches, products, deviceProfile, adjustmentDocuments] = await Promise.all([
     sqliteStorage.findAll<ProductBatch>("product_batches"),
     productsStore.getAllProducts(),
+    storeDeviceService.getDeviceProfile(),
+    sqliteStorage.findAll<StockAdjustmentRecentDocument>("stock_adjustment_documents"),
   ]);
   const productMap: Record<string, ProductItem> = {};
   for (const product of products) {
@@ -279,6 +328,7 @@ export async function postStockAdjustment(
     policy: options.policy,
     role: options.role,
     now: options.now,
+    recentDocuments: options.recentDocuments ?? adjustmentDocuments,
   });
 
   if (validation.errors.length > 0 || Object.keys(validation.lineErrors).length > 0) {
@@ -367,9 +417,10 @@ export async function postStockAdjustment(
     record: {
       id: `audit_${documentId}`,
       event_type: status === "posted" ? "STOCK_ADJUSTMENT_POSTED" : "STOCK_ADJUSTMENT_SUBMITTED",
-      user_id: staffAuthService.getCurrentSession()?.user?.id || null,
-      user_name: staffAuthService.getCurrentSession()?.user?.full_name || null,
-      counter_id: null,
+      // B8b: the counter posted this — no person signs in at the till.
+      user_id: null,
+      user_name: null,
+      counter_id: deviceProfile?.counter_id || null,
       details: JSON.stringify({
         document_id: documentId,
         mode: document.mode,

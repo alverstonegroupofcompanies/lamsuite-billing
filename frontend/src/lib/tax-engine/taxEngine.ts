@@ -3,7 +3,8 @@
  * 
  * Rules:
  * - Integer paise arithmetic to eliminate floating-point drift.
- * - Strict order of operations: line gross -> line discount -> proportional bill discount allocation -> taxable value -> tax.
+ * - Strict order of operations: line gross -> line discount -> proportional bill discount allocation -> taxable
+ *   value -> tax -> supplier bill charges (per-charge tax + add-to-cost spread) -> round-off.
  * - CGST + SGST for intra-state, IGST for inter-state, separate Central Cess.
  * - Section 170 whole-rupee round-off.
  * - Guarantees sum of lines == document totals to the exact paisa.
@@ -14,6 +15,16 @@ export type CompanyTaxMode = "inclusive" | "exclusive";
 export type GstType = "regular" | "composition" | "no_tax" | "unregistered";
 
 export type RateBasis = "sel_rate" | "mrp" | "ptr" | "pts" | "ptss" | "loose_rate" | "cost_price";
+
+export type ChargeTreatment = "add_to_cost" | "expense";
+
+export type ChargeSpreadMethod = "value" | "quantity" | "weight";
+
+export type ChargeItcEligibility = "eligible" | "blocked" | "ineligible" | "partial";
+
+export type SpreadBasis = "value" | "quantity" | "weight" | "none";
+
+export type ChargeSpreadFallback = "missing_weight";
 
 export interface TaxEngineLineInput {
   line_id?: string;
@@ -33,7 +44,77 @@ export interface TaxEngineLineInput {
   discount_amount?: number;
   gst_percent: number;
   cess_percent?: number;
+  /** Total chargeable weight entered for this line at purchase (CR-C D1). */
+  gross_weight_kg?: number | string | null;
   is_tax_inclusive?: boolean;
+}
+
+export interface TaxEngineChargeInput {
+  charge_id?: string;
+  head_code?: string;
+  head_name?: string;
+  sac_code?: string;
+  note?: string | null;
+  amount: number;
+  gst_percent: number;
+  gst_rate?: number;
+  cess_percent?: number;
+  cess_rate?: number;
+  treatment?: ChargeTreatment;
+  spread_method?: ChargeSpreadMethod;
+  itc_eligibility?: ChargeItcEligibility;
+  is_rcm?: boolean;
+  paid_separately?: boolean;
+  /**
+   * CR-C-11: the payable membership a posted charge was billed under. Only a reversal supplies
+   * it — it inherits the original line's stored answer — so a policy flip cannot make a debit
+   * note credit money the bill it returns never billed. Client payloads never reach this field.
+   */
+  in_payable?: boolean;
+  paid_to_label?: string | null;
+}
+
+export interface TaxEngineChargeAllocation {
+  line_id?: string;
+  product_id?: string;
+  product_name?: string;
+  allocated_amount: number;
+  is_remainder_paisa: boolean;
+}
+
+export interface TaxEngineCalculatedCharge {
+  charge_id?: string;
+  head_code?: string;
+  head_name?: string;
+  sac_code?: string | null;
+  note?: string | null;
+  amount: number;
+  treatment: ChargeTreatment;
+  spread_method: ChargeSpreadMethod;
+  spread_basis_used: SpreadBasis;
+  spread_fallback_reason: ChargeSpreadFallback | null;
+  lines_without_weight: string[];
+  gst_rate: number;
+  cgst_rate: number;
+  sgst_rate: number;
+  igst_rate: number;
+  cess_rate: number;
+  taxable_amount: number;
+  cgst_amount: number;
+  sgst_amount: number;
+  igst_amount: number;
+  cess_amount: number;
+  total_tax: number;
+  total_amount: number;
+  itc_eligibility: ChargeItcEligibility;
+  creditable_tax: number;
+  non_creditable_tax: number;
+  is_rcm: boolean;
+  paid_separately: boolean;
+  paid_to_label: string | null;
+  in_payable: boolean;
+  expense_posting: number;
+  allocations: TaxEngineChargeAllocation[];
 }
 
 export interface TaxEngineDocumentInput {
@@ -45,6 +126,12 @@ export interface TaxEngineDocumentInput {
   gst_type?: GstType;
   lines: TaxEngineLineInput[];
   bill_discount?: { type: "percent" | "amount"; value: number };
+  charges?: TaxEngineChargeInput[];
+  /**
+   * CR-C-11 / PUR-016: this store bills a separately-paid charge into what the supplier is owed.
+   * Off by default, so a charge paid to someone other than the supplier stays out of the payable.
+   */
+  separately_paid_in_payable?: boolean;
   auto_round_off?: boolean;
   manual_round_off?: number | null;
   rounding_mode?: "per_line" | "per_invoice";
@@ -82,6 +169,9 @@ export interface TaxEngineCalculatedLine {
   total_tax: number;
   total_amount: number;
   effective_unit_cost?: number;
+  charge_allocation?: number;
+  landed_amount?: number;
+  landed_unit_cost?: number;
 }
 
 export interface TaxHsnSummaryItem {
@@ -113,6 +203,17 @@ export interface TaxEngineDocumentTotals {
   net_before_round: number;
   round_off: number;
   grand_total: number;
+  charge_taxable_total: number;
+  charge_tax_total: number;
+  charge_total: number;
+  separate_charge_taxable_total: number;
+  separate_charge_tax_total: number;
+  separate_charge_total: number;
+  landed_cost_addition: number;
+  expense_charge_total: number;
+  creditable_input_tax_total: number;
+  non_creditable_tax_total: number;
+  reconciliation_identity_delta: number;
   is_inter_state: boolean;
   store_state: string;
   place_of_supply: string;
@@ -120,6 +221,7 @@ export interface TaxEngineDocumentTotals {
   gst_type: GstType;
   document_title: "Tax Invoice" | "Bill of Supply";
   lines: TaxEngineCalculatedLine[];
+  charges: TaxEngineCalculatedCharge[];
   hsn_summary: TaxHsnSummaryItem[];
 }
 
@@ -153,6 +255,68 @@ export function isGstInclusive(
   if (rateBasis === "mrp") return true;
   if (rateBasis === "ptr" || rateBasis === "pts" || rateBasis === "ptss") return false;
   return defaultTaxMode === "inclusive";
+}
+
+/**
+ * Rounds half away from zero. Math.round() sends .5 toward +infinity, so both engine
+ * tiers must route signed rounding through this rule to stay paisa-identical.
+ */
+export function roundSigned(value: number): number {
+  return value < 0 ? -Math.round(-value) : Math.round(value);
+}
+
+/** The CGST half of a signed GST amount; the caller takes the residue as SGST. */
+export function halfUpSigned(paise: number): number {
+  return paise < 0 ? -Math.round(-paise / 2) : Math.round(paise / 2);
+}
+
+/**
+ * Largest-remainder paisa split: exact quotients first, then each leftover paisa to the
+ * line with the largest fractional part, ties broken by grid order.
+ */
+export function allocateByBasis(
+  amountAbsPaise: number,
+  basis: number[]
+): { allocations: number[]; recipients: boolean[] } {
+  const count = basis.length;
+  const allocations: number[] = new Array(count).fill(0);
+  const recipients: boolean[] = new Array(count).fill(false);
+
+  if (count === 0 || amountAbsPaise === 0) {
+    return { allocations, recipients };
+  }
+
+  const totalBasis = basis.reduce((s, b) => s + b, 0);
+  if (totalBasis <= 0) {
+    // A degenerate basis (every line worth 0) still has to place the whole amount,
+    // otherwise Sum(allocations) != charge value and the identity breaks.
+    allocations[0] = amountAbsPaise;
+    recipients[0] = true;
+    return { allocations, recipients };
+  }
+
+  const fractions: number[] = [];
+  let distributed = 0;
+  for (let i = 0; i < count; i++) {
+    const exact = (amountAbsPaise * Number(basis[i])) / totalBasis;
+    const quotient = Math.floor(exact);
+    allocations[i] = quotient;
+    fractions[i] = exact - quotient;
+    distributed += quotient;
+  }
+
+  let remainder = amountAbsPaise - distributed;
+  const order = allocations.map((_, i) => i);
+  order.sort((a, b) => (fractions[a] === fractions[b] ? a - b : fractions[b] - fractions[a]));
+
+  for (const index of order) {
+    if (remainder <= 0) break;
+    allocations[index] += 1;
+    recipients[index] = true;
+    remainder -= 1;
+  }
+
+  return { allocations, recipients };
 }
 
 /**
@@ -221,15 +385,22 @@ export function calculateDocumentTaxes(input: TaxEngineDocumentInput): TaxEngine
       grossPaise = packGrossPaise + looseGrossPaise;
     }
 
+    // A line's discount is described by a percent, an amount, or — the defect this
+    // guards — both. A till that sends a percent plus the amount it produced is
+    // naming one discount twice, so it must come off once; a purchase line carries
+    // a trade percent *and* a separate scheme amount, and dropping either would
+    // bill the line above what the supplier charged. The paisa tell them apart: an
+    // echo of the percent equals it, a second discount does not.
     let lineDiscPaise = 0;
     if (grossPaise > 0) {
-      const pctDiscPaise = Number(line.discount_percent) > 0
-        ? Math.round((grossPaise * Number(line.discount_percent)) / 100)
-        : 0;
-      const flatDiscPaise = Number(line.discount_amount) > 0
-        ? toPaise(Number(line.discount_amount))
-        : 0;
-      lineDiscPaise = Math.min(grossPaise, pctDiscPaise + flatDiscPaise);
+      const pct = Math.min(100, Math.max(0, Number(line.discount_percent) || 0));
+      const flat = Math.max(0, Number(line.discount_amount) || 0);
+      const pctPaise = pct > 0 ? Math.min(grossPaise, Math.round((grossPaise * pct) / 100)) : 0;
+      const flatPaise = flat > 0 ? Math.min(grossPaise, toPaise(flat)) : 0;
+      lineDiscPaise =
+        pctPaise > 0 && flatPaise > 0 && Math.abs(pctPaise - flatPaise) <= 1
+          ? pctPaise
+          : Math.min(grossPaise, pctPaise + flatPaise);
     }
 
     const lineNetBasePaise = Math.max(0, grossPaise - lineDiscPaise);
@@ -292,6 +463,8 @@ export function calculateDocumentTaxes(input: TaxEngineDocumentInput): TaxEngine
 
   // 3. Calculate Taxable Amount, Taxes, and Line Totals
   const calculatedLines: TaxEngineCalculatedLine[] = [];
+  const lineTaxablePaiseList: number[] = [];
+  const lineTotalUnitsList: number[] = [];
   let taxableSubtotalPaise = 0;
   let cgstTotalPaise = 0;
   let sgstTotalPaise = 0;
@@ -367,6 +540,8 @@ export function calculateDocumentTaxes(input: TaxEngineDocumentInput): TaxEngine
     const lineTotalPaise = taxablePaise + totalTaxPaise;
 
     taxableSubtotalPaise += taxablePaise;
+    lineTaxablePaiseList.push(taxablePaise);
+    lineTotalUnitsList.push(pl.totalUnits);
     cgstTotalPaise += cgstPaise;
     sgstTotalPaise += sgstPaise;
     igstTotalPaise += igstPaise;
@@ -429,9 +604,227 @@ export function calculateDocumentTaxes(input: TaxEngineDocumentInput): TaxEngine
     });
   }
 
-  // 4. Document Level Rounding (Section 170)
+  // 4. Purchase charges (CR-C): each charge is taxed by this same engine, then an
+  //    add-to-cost charge is spread across this bill's item lines in whole paisa.
+  const goodsTotalTaxPaise = cgstTotalPaise + sgstTotalPaise + igstTotalPaise + cessTotalPaise;
+  const chargeCount = preLines.length;
+  const lineChargeAllocPaise: number[] = new Array(chargeCount).fill(0);
+  const calculatedCharges: TaxEngineCalculatedCharge[] = [];
+  const chargeSacMap = new Map<string, {
+    hsn: string;
+    rate: number;
+    cessRate: number;
+    taxablePaise: number;
+    cgstPaise: number;
+    sgstPaise: number;
+    igstPaise: number;
+    cessPaise: number;
+  }>();
+
+  let chargeTaxablePayablePaise = 0;
+  let chargeTaxPayablePaise = 0;
+  let chargeTotalPayablePaise = 0;
+  let separateChargeTaxablePaise = 0;
+  let separateChargeTaxPaise = 0;
+  let separateChargeTotalPaise = 0;
+  let landedCostAdditionPaise = 0;
+  let expenseChargeTotalPaise = 0;
+  let chargeCreditableTaxPaise = 0;
+  let chargeNonCreditableTaxPaise = 0;
+
+  // A separately-paid charge is normally outside what the supplier is owed. A store may instead
+  // bill it into the payable — its supplier's printed bill includes it — and then it joins the
+  // goods money exactly like any other charge (CR-C-11).
+  const separatelyPaidInPayable = Boolean(input.separately_paid_in_payable);
+
+  for (const charge of input.charges || []) {
+    const taxablePaise = toPaise(charge.amount);
+    const sign = taxablePaise < 0 ? -1 : 1;
+    const gstPercent = isComposition ? 0 : Math.max(0, Number(charge.gst_percent ?? charge.gst_rate) || 0);
+    const cessPercent = isComposition ? 0 : Math.max(0, Number(charge.cess_percent ?? charge.cess_rate) || 0);
+
+    const gstPaise = gstPercent > 0 ? sign * roundSigned((Math.abs(taxablePaise) * gstPercent) / 100) : 0;
+    const cessPaise = cessPercent > 0 ? sign * roundSigned((Math.abs(taxablePaise) * cessPercent) / 100) : 0;
+
+    let cgstRate = 0;
+    let cgstPaise = 0;
+    let sgstRate = 0;
+    let sgstPaise = 0;
+    let igstRate = 0;
+    let igstPaise = 0;
+
+    if (isInterState) {
+      igstRate = gstPercent;
+      igstPaise = gstPaise;
+    } else {
+      cgstRate = gstPercent / 2;
+      sgstRate = gstPercent / 2;
+      cgstPaise = halfUpSigned(gstPaise);
+      sgstPaise = gstPaise - cgstPaise;
+    }
+
+    const totalTaxPaise = cgstPaise + sgstPaise + igstPaise + cessPaise;
+    const totalAmountPaise = taxablePaise + totalTaxPaise;
+
+    const treatment: ChargeTreatment = charge.treatment === "expense" ? "expense" : "add_to_cost";
+    const paidSeparately = Boolean(charge.paid_separately);
+    // A reversal line carries the answer the bill it gives back was posted under, so it keeps that
+    // membership instead of today's policy — a policy flip must not make a debit note credit money
+    // the original bill never billed (PUR-016).
+    const inPayable =
+      charge.in_payable === undefined
+        ? !paidSeparately || separatelyPaidInPayable
+        : Boolean(charge.in_payable);
+    const isCreditable = (charge.itc_eligibility || "eligible") === "eligible";
+    const creditableTaxPaise = isCreditable ? totalTaxPaise : 0;
+    const nonCreditableTaxPaise = isCreditable ? 0 : totalTaxPaise;
+    // An expensed charge posts ex-GST, plus the tax that can never be claimed back,
+    // so a blocked head cannot make value vanish from the books.
+    const expensePostingPaise = treatment === "expense" ? taxablePaise + nonCreditableTaxPaise : 0;
+
+    const spreadMethod: ChargeSpreadMethod = charge.spread_method || "value";
+    let spreadBasisUsed: SpreadBasis = "none";
+    let spreadFallbackReason: ChargeSpreadFallback | null = null;
+    const linesWithoutWeight: string[] = [];
+    const allocations: TaxEngineChargeAllocation[] = [];
+
+    if (treatment === "add_to_cost" && chargeCount > 0) {
+      // Non-creditable tax cannot be claimed back, so it is capitalised with the charge.
+      const spreadAmountPaise = taxablePaise + nonCreditableTaxPaise;
+      let basis: number[] = [];
+      if (spreadMethod === "weight") {
+        let hasWeightForAll = true;
+        for (let i = 0; i < chargeCount; i++) {
+          const weight = preLines[i].lineInput.gross_weight_kg;
+          if (weight === undefined || weight === null || weight === "" || Number(weight) <= 0) {
+            hasWeightForAll = false;
+            linesWithoutWeight.push(preLines[i].lineInput.line_id || `L${i + 1}`);
+          }
+          basis.push(Math.max(0, Number(weight) || 0));
+        }
+        if (hasWeightForAll) {
+          spreadBasisUsed = "weight";
+        } else {
+          // A mixed basis is forbidden: the whole charge falls back to value.
+          spreadBasisUsed = "value";
+          spreadFallbackReason = "missing_weight";
+          basis = lineTaxablePaiseList;
+        }
+      } else if (spreadMethod === "quantity") {
+        spreadBasisUsed = "quantity";
+        basis = lineTotalUnitsList;
+      } else {
+        spreadBasisUsed = "value";
+        basis = lineTaxablePaiseList;
+      }
+
+      const split = allocateByBasis(Math.abs(spreadAmountPaise), basis);
+      for (let i = 0; i < chargeCount; i++) {
+        const allocPaise = sign * split.allocations[i];
+        lineChargeAllocPaise[i] += allocPaise;
+        landedCostAdditionPaise += allocPaise;
+        allocations.push({
+          line_id: preLines[i].lineInput.line_id,
+          product_id: preLines[i].lineInput.product_id,
+          product_name: preLines[i].lineInput.product_name,
+          allocated_amount: fromPaise(allocPaise),
+          is_remainder_paisa: split.recipients[i],
+        });
+      }
+    }
+
+    if (inPayable) {
+      chargeTaxablePayablePaise += taxablePaise;
+      chargeTaxPayablePaise += totalTaxPaise;
+      chargeTotalPayablePaise += totalAmountPaise;
+      cgstTotalPaise += cgstPaise;
+      sgstTotalPaise += sgstPaise;
+      igstTotalPaise += igstPaise;
+      cessTotalPaise += cessPaise;
+
+      const sac = (charge.sac_code || "996799").trim();
+      // Prefixed key so a charge can never merge into a goods row of the same code.
+      const sacKey = `SAC_${sac}_${gstPercent}_${cessPercent}`;
+      if (!chargeSacMap.has(sacKey)) {
+        chargeSacMap.set(sacKey, {
+          hsn: sac,
+          rate: gstPercent,
+          cessRate: cessPercent,
+          taxablePaise: 0,
+          cgstPaise: 0,
+          sgstPaise: 0,
+          igstPaise: 0,
+          cessPaise: 0,
+        });
+      }
+      const sacRec = chargeSacMap.get(sacKey)!;
+      sacRec.taxablePaise += taxablePaise;
+      sacRec.cgstPaise += cgstPaise;
+      sacRec.sgstPaise += sgstPaise;
+      sacRec.igstPaise += igstPaise;
+      sacRec.cessPaise += cessPaise;
+    } else {
+      separateChargeTaxablePaise += taxablePaise;
+      separateChargeTaxPaise += totalTaxPaise;
+      separateChargeTotalPaise += totalAmountPaise;
+    }
+
+    expenseChargeTotalPaise += expensePostingPaise;
+    chargeCreditableTaxPaise += creditableTaxPaise;
+    chargeNonCreditableTaxPaise += nonCreditableTaxPaise;
+
+    calculatedCharges.push({
+      charge_id: charge.charge_id,
+      head_code: charge.head_code,
+      head_name: charge.head_name,
+      sac_code: charge.sac_code ?? null,
+      note: charge.note ?? null,
+      amount: fromPaise(taxablePaise),
+      treatment,
+      spread_method: spreadMethod,
+      spread_basis_used: spreadBasisUsed,
+      spread_fallback_reason: spreadFallbackReason,
+      lines_without_weight: linesWithoutWeight,
+      gst_rate: gstPercent,
+      cgst_rate: cgstRate,
+      sgst_rate: sgstRate,
+      igst_rate: igstRate,
+      cess_rate: cessPercent,
+      taxable_amount: fromPaise(taxablePaise),
+      cgst_amount: fromPaise(cgstPaise),
+      sgst_amount: fromPaise(sgstPaise),
+      igst_amount: fromPaise(igstPaise),
+      cess_amount: fromPaise(cessPaise),
+      total_tax: fromPaise(totalTaxPaise),
+      total_amount: fromPaise(totalAmountPaise),
+      itc_eligibility: charge.itc_eligibility || "eligible",
+      creditable_tax: fromPaise(creditableTaxPaise),
+      non_creditable_tax: fromPaise(nonCreditableTaxPaise),
+      is_rcm: Boolean(charge.is_rcm),
+      paid_separately: paidSeparately,
+      paid_to_label: charge.paid_to_label ?? null,
+      in_payable: inPayable,
+      expense_posting: fromPaise(expensePostingPaise),
+      allocations,
+    });
+  }
+
+  for (let i = 0; i < calculatedLines.length; i++) {
+    const allocPaise = lineChargeAllocPaise[i] || 0;
+    const landedPaise = lineTaxablePaiseList[i] + allocPaise;
+    const units = Number(calculatedLines[i].total_units) || 0;
+    // PUR-002: free goods absorb their share of the charge, so the effective unit
+    // cost and the landed unit cost are the same number.
+    const perUnit = units > 0 ? fromPaise(roundSigned(landedPaise / units)) : 0;
+    calculatedLines[i].charge_allocation = fromPaise(allocPaise);
+    calculatedLines[i].landed_amount = fromPaise(landedPaise);
+    calculatedLines[i].landed_unit_cost = perUnit;
+    calculatedLines[i].effective_unit_cost = perUnit;
+  }
+
+  // 5. Document Level Rounding (Section 170)
   const totalTaxAllPaise = cgstTotalPaise + sgstTotalPaise + igstTotalPaise + cessTotalPaise;
-  const netBeforeRoundPaise = taxableSubtotalPaise + totalTaxAllPaise;
+  const netBeforeRoundPaise = taxableSubtotalPaise + chargeTaxablePayablePaise + totalTaxAllPaise;
 
   let roundOffPaise = 0;
   let grandTotalPaise = netBeforeRoundPaise;
@@ -445,8 +838,8 @@ export function calculateDocumentTaxes(input: TaxEngineDocumentInput): TaxEngine
     grandTotalPaise = roundedRupeePaise;
   }
 
-  // 5. Build HSN Summary
-  const hsnSummary: TaxHsnSummaryItem[] = Array.from(hsnMap.values()).map((h) => {
+  // 6. Build HSN/SAC Summary
+  const hsnSummary: TaxHsnSummaryItem[] = Array.from([...hsnMap.values(), ...chargeSacMap.values()]).map((h) => {
     const totTaxP = h.cgstPaise + h.sgstPaise + h.igstPaise + h.cessPaise;
     return {
       hsn_code: h.hsn,
@@ -475,6 +868,25 @@ export function calculateDocumentTaxes(input: TaxEngineDocumentInput): TaxEngine
     igst_total: fromPaise(igstTotalPaise),
     cess_total: fromPaise(cessTotalPaise),
     total_tax: fromPaise(totalTaxAllPaise),
+    charge_taxable_total: fromPaise(chargeTaxablePayablePaise),
+    charge_tax_total: fromPaise(chargeTaxPayablePaise),
+    charge_total: fromPaise(chargeTotalPayablePaise),
+    separate_charge_taxable_total: fromPaise(separateChargeTaxablePaise),
+    separate_charge_tax_total: fromPaise(separateChargeTaxPaise),
+    separate_charge_total: fromPaise(separateChargeTotalPaise),
+    landed_cost_addition: fromPaise(landedCostAdditionPaise),
+    expense_charge_total: fromPaise(expenseChargeTotalPaise),
+    creditable_input_tax_total: fromPaise(goodsTotalTaxPaise + chargeCreditableTaxPaise),
+    non_creditable_tax_total: fromPaise(chargeNonCreditableTaxPaise),
+    reconciliation_identity_delta: fromPaise(
+      taxableSubtotalPaise +
+      landedCostAdditionPaise +
+      expenseChargeTotalPaise +
+      goodsTotalTaxPaise +
+      chargeCreditableTaxPaise -
+      netBeforeRoundPaise -
+      separateChargeTotalPaise
+    ),
     net_before_round: fromPaise(netBeforeRoundPaise),
     round_off: fromPaise(roundOffPaise),
     grand_total: fromPaise(grandTotalPaise),
@@ -485,6 +897,7 @@ export function calculateDocumentTaxes(input: TaxEngineDocumentInput): TaxEngine
     gst_type: gstType,
     document_title: documentTitle,
     lines: calculatedLines,
+    charges: calculatedCharges,
     hsn_summary: hsnSummary,
   };
 }

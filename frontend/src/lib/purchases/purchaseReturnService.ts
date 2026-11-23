@@ -6,6 +6,8 @@ import { companySettingsService } from "../settings/companySettingsService";
 import { round2 } from "../billing/billingCalculations";
 import { getIndianFinancialYear } from "../billing/salesReturnService";
 import { calculateDocumentTaxes } from "../tax-engine/taxEngine";
+import { postCharges, removePostedCharges } from "./chargePosting";
+import { findOriginalBill, recordReversals, reversalChargesForReturn } from "./chargeReversal";
 
 export type PurchaseReturnReason = "expired" | "damaged" | "near_expiry" | "wrong_supply" | "excess" | "other";
 export type PurchaseReturnSettlement = "credit_adjust" | "refund";
@@ -111,13 +113,14 @@ export class PurchaseReturnService {
 
     const docNumber = `${prefix}-${nextNum}`;
 
-    await companySettingsService.updateSettings({
-      sequences: {
-        ...settings.sequences,
-        purchaseReturnPrefix: prefix,
-        nextPurchaseReturnNumber: nextNum + 1,
-      },
-    });
+    await companySettingsService.saveLocalSettings(
+      {
+        sequences: {
+          ...settings.sequences,
+          purchaseReturnPrefix: prefix,
+          nextPurchaseReturnNumber: nextNum + 1,
+        },
+      });
 
     return docNumber;
   }
@@ -155,6 +158,9 @@ export class PurchaseReturnService {
     returnId: string;
     returnNumber: string;
     grandTotal: number;
+    /** Whether the server has actually taken the debit note yet (PUR-07). */
+    syncState?: "synced" | "pending";
+    syncMessage?: string;
   }> {
     if (!input.lines || input.lines.length === 0) {
       throw new Error("Cannot create purchase return without any items");
@@ -207,12 +213,32 @@ export class PurchaseReturnService {
     // Determine if original purchase or supplier is inter-state
     const isInterstate = input.supplier_gstin ? !input.supplier_gstin.trim().startsWith("32") : false;
 
+    // PUR-015: goods going back take their share of the bill's charges with them, so the debit
+    // note the operator prints offline already carries the money the supplier gives back. The
+    // server derives the same paisa when it ingests this note; neither adds to the other (SYNC-007).
+    const against = await findOriginalBill({
+      original_purchase_id: input.original_purchase_id,
+      original_purchase_number: input.original_purchase_number,
+      supplier_invoice_no: input.supplier_invoice_no,
+    });
+    const reversalLines = against
+      ? await reversalChargesForReturn(
+          String(against.id),
+          input.lines.map((l) => ({ product_id: l.product_id, batch_no: l.batch_no, return_qty: l.return_qty })),
+          returnId
+        )
+      : [];
+
     // 2. Compute financial breakdown line by line via TaxEngine
     const docTaxes = calculateDocumentTaxes({
+      separately_paid_in_payable: Boolean(
+        companySettingsService.getSettings().purchase_charges?.separately_paid_in_payable
+      ),
       store_state: "32",
       customer_gstin: input.supplier_gstin,
       place_of_supply: isInterstate ? "XX" : "32",
       default_tax_mode: "exclusive",
+      charges: reversalLines,
       lines: input.lines.map((l, idx) => ({
         line_id: `PR_${idx}`,
         product_id: l.product_id,
@@ -315,19 +341,48 @@ export class PurchaseReturnService {
 
     await sqliteStorage.insertRecord("purchase_returns", returnId, returnRecord);
 
+    // The note's own charge rows: the money the supplier gives back. No `itemIdsByLine`, because
+    // a debit note never re-spreads a charge onto goods — it only takes the original bill's share
+    // back, and that reduction is what `recordReversals` writes on the bill (PUR-015).
+    if (reversalLines.length) {
+      await postCharges({
+        purchaseId: returnId,
+        invoiceNumber: returnNumber,
+        charges: reversalLines,
+        result: docTaxes,
+        purchaseLines: [],
+        itemIdsByLine: {},
+      });
+    }
+
+    if (against) await recordReversals(String(against.id));
+
     // 6. Enqueue for sync — a debit note is a purchase document, and pushing it as a "product"
     // made the server drop it (no name to match), so the return never reached the backend.
-    await syncQueueService.enqueue("purchase", returnId, "create", {
+    const queueId = await syncQueueService.enqueue("purchase", returnId, "create", {
       ...returnRecord,
       module_key: "purchase_return",
     } as unknown as Record<string, unknown>);
 
-    return {
-      success: true,
-      returnId,
-      returnNumber,
-      grandTotal,
-    };
+    // The counter is told the note is posted only when the server has taken it; offline it is
+    // saved and queued (PUR-07). A refusal (over-return, duplicate) is reported, not hidden.
+    if (syncQueueService.isOnline()) {
+      const ack = await syncQueueService.syncSingleItem(queueId);
+      if (ack.success) {
+        return { success: true, returnId, returnNumber, grandTotal, syncState: "synced" };
+      }
+
+      return {
+        success: true,
+        returnId,
+        returnNumber,
+        grandTotal,
+        syncState: "pending",
+        syncMessage: ack.error,
+      };
+    }
+
+    return { success: true, returnId, returnNumber, grandTotal, syncState: "pending" };
   }
 
   /**
@@ -378,6 +433,18 @@ export class PurchaseReturnService {
     ret.cancelled_at = now;
     ret.updated_at = now;
     await sqliteStorage.insertRecord("purchase_returns", ret.id, ret);
+
+    // 3. Take the note's charge reversals back out. The note is already flagged cancelled, so
+    // re-deriving the bill's reversal no longer counts its units — which is what puts the landed
+    // cost, the reversed amount and the supplier's credit back exactly where they were (PUR-015).
+    await removePostedCharges(ret.id);
+    const against = await findOriginalBill({
+      original_purchase_id: ret.original_purchase_id,
+      original_purchase_number: ret.original_purchase_number,
+      supplier_invoice_no: ret.supplier_invoice_no,
+      notes: ret.notes,
+    });
+    if (against) await recordReversals(String(against.id));
 
     // Without this the server keeps the debit note as if it were still live and never gives the
     // returned units back to the batch.

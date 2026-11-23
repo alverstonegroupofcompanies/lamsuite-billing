@@ -1,0 +1,160 @@
+{
+  "sale": {
+    "st": 201,
+    "no": "C01-INV-10001"
+  },
+  "found": [
+    "Sales Returns (Credit Notes)",
+    "Process customer returns, issue credit notes, manage stock restocking.",
+    "CREDIT NOTE REGISTER",
+    "RETURN NO\tDATE\tORIGINAL INVOICE\tCUSTOMER\tREFUND AMT\tREFUND MODE\tSTATUS\tACTIONS",
+    "New Sales Return / Credit Note",
+    "C01-INV-10001•Walk-in Customer"
+  ],
+  "after_select": {
+    "active": "INPUT:text:e.g. INV-001, Ravi Kumar, 9876543210, 2026-10-29...=C01-INV-10001",
+    "text": [
+      "Sales Returns (Credit Notes)",
+      "Process customer returns, issue credit notes, manage stock restocking.",
+      "CREDIT NOTE REGISTER",
+      "RETURN NO\tDATE\tORIGINAL INVOICE\tCUSTOMER\tREFUND AMT\tREFUND MODE\tSTATUS\tACTIONS",
+      "New Sales Return / Credit Note"
+    ]
+  },
+  "controls": [
+    "INPUT:text:Search return no, invoice no, customer...",
+    "SELECT:select-one:null",
+    "INPUT:text:Customer name or mobile number...",
+    "INPUT:text:e.g. INV-001, Ravi Kumar, 9876543210, 2026-10-29..."
+  ],
+  "buttons": [
+    "QA Pharma Kochi\nQA-PH\nID:4\nCtrl+Alt+S",
+    "Search actions, modules, or tools...\nCtrl+K",
+    "ML",
+    "",
+    "",
+    "Sales & Bills",
+    "Purchases",
+    "Inventory",
+    "",
+    "B2B Debit Notes",
+    "New Return (F7)",
+    "Counter Returns (Walk-in)",
+    "Customer Debit Notes (B2B Multi-Invoice)",
+    "",
+    "C01-INV-10001•Walk-in Customer\n₹ 210.00\n2026-11-21",
+    "Cancel"
+  ],
+  "loaded": {
+    "active": "BODY::LamSuite Billing\nv2.1.1\n\nRetai=",
+    "text": [
+      "Inventory",
+      "Reports",
+      "Masters",
+      "Import / Export",
+      "Data Migration",
+      "Settings",
+      "Sales Returns (Credit Notes)",
+      "Process customer returns, issue credit notes, manage stock restocking.",
+      "B2B Debit Notes",
+      "New Return (F7)",
+      "Counter Returns (Walk-in)",
+      "Customer Debit Notes (B2B Multi-Invoice)",
+      "All Statuses",
+      "Completed",
+      "Cancelled",
+      "Draft",
+      "CREDIT NOTE REGISTER",
+      "0 Records",
+      "RETURN NO\tDATE\tORIGINAL INVOICE\tCUSTOMER\tREFUND AMT\tREFUND MODE\tSTATUS\tACTIONS",
+      "No sales returns yet",
+      "Click \"New Return\" to process a customer return",
+      "New Sales Return / Credit Note",
+      "Step 2: Select items and quantities to return",
+      "1",
+      "Invoice",
+      "2",
+      "Items",
+      "3",
+      "Payment",
+      "INVOICE",
+      "C01-INV-10001",
+      "DATE",
+      "2026-11-21",
+      "CUSTOMER",
+      "Walk-in Customer",
+      "INVOICE TOTAL",
+      "₹ 210.00",
+      "Select items to return:",
+      "Select All",
+      "|",
+      "Clear",
+      "\tProduct\tBatch / Exp\tSold Units\tMax Return (units)\tReturn Qty (units)\tReason\tCondition",
+      "\t",
+      "QA Paracet 500 Strip",
+      "\t",
+      "PA-OLD",
+      "Exp: 2027-03-30T18:30:00.000000Z",
+      "\t35\t35\t\t",
+      "Customer Return",
+      "Damaged",
+      "Expired",
+      "Wrong Item",
+      "Other",
+      "\t",
+      "Restock to Inventory",
+      "Quarantine Shelf (Hold)",
+      "Damaged / Discard",
+      "Back",
+      "0 item(s) selected • ₹ 0.00 credit",
+      "Next: Payment →"
+    ]
+  },
+  "loaded_controls": [
+    "BUTTON:button:QA Pharma Kochi\nQA-PH\nID:4\nCtrl+Alt+S",
+    "BUTTON:submit:Search actions, modules, or tools...\nCtrl+K",
+    "BUTTON:submit:ML",
+    "BUTTON:submit:",
+    "BUTTON:submit:",
+    "BUTTON:submit:Sales & Bills",
+    "BUTTON:submit:Purchases",
+    "BUTTON:submit:Inventory",
+    "BUTTON:submit:",
+    "BUTTON:submit:B2B Debit Notes",
+    "BUTTON:submit:New Return (F7)",
+    "BUTTON:submit:Counter Returns (Walk-in)",
+    "BUTTON:submit:Customer Debit Notes (B2B Multi-Invoice)",
+    "INPUT:text:Search return no, invoice no, customer...",
+    "SELECT:select-one:All Statuses\nCompleted\nCancelled\nDraft",
+    "BUTTON:submit:",
+    "BUTTON:submit:Select All",
+    "BUTTON:submit:Clear",
+    "INPUT:checkbox:",
+    "INPUT:number:",
+    "BUTTON:submit:Back",
+    "BUTTON:submit:Next: Payment →"
+  ],
+  "saleRow": {
+    "id": 20,
+    "grand_total": 210,
+    "taxable_subtotal": 187.5,
+    "tax_total": 22.5
+  },
+  "preStock": [
+    {
+      "id": 12,
+      "batch_no": "PA-OLD",
+      "stock_qty": 435
+    },
+    {
+      "id": 6,
+      "batch_no": "B1",
+      "stock_qty": 0
+    },
+    {
+      "id": 11,
+      "batch_no": "PA-NEW",
+      "stock_qty": 1388
+    }
+  ]
+}

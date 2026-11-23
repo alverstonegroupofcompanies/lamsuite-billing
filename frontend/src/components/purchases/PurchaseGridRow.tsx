@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from "react";
 import { Trash2, AlertTriangle, AlertCircle, ArrowUpRight, Search, Barcode, Check } from "lucide-react";
-import type { ColumnSetting } from "../../lib/settings/companySettingsService";
+import { companySettingsService, type ColumnSetting } from "../../lib/settings/companySettingsService";
 import type { PurchaseLineItemInput } from "../../lib/purchases/purchaseService";
 import { parseExpiryInput, calculateLineMargin, isValidHsn, suggestGstForHsn } from "../../lib/purchases/purchaseEntryUtils";
 import { purchaseService } from "../../lib/purchases/purchaseService";
@@ -91,7 +91,12 @@ export const PurchaseGridRow: React.FC<PurchaseGridRowProps> = ({
   // Compute live calculations
   const calc = line ? purchaseService.calculateLineTotals(line, isInterstate) : null;
   const marginInfo = line
-    ? calculateLineMargin(line.purchase_rate, line.selling_rate || 0, line.units_per_pack || 1)
+    ? calculateLineMargin(
+        line.purchase_rate,
+        line.selling_rate || 0,
+        (line.gst_percent || 0) + (line.cess_percent || 0),
+        companySettingsService.getSettings().tax_mode !== "exclusive"
+      )
     : { marginPercent: 0, isNegative: false };
 
   // Last purchase rate surge alert

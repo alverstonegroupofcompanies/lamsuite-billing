@@ -73,26 +73,47 @@ describe("Purchase Entry Utils (Expiry, Quantity Shorthand & Margins)", () => {
 
   describe("calculateLineMargin", () => {
     it("calculates positive healthy margin", () => {
-      // purchase rate 100, selling rate 150
-      const res = calculateLineMargin(100, 150, 1);
+      // purchase rate 100, selling rate 150, same unit, no tax
+      const res = calculateLineMargin(100, 150);
       expect(res.effectiveUnitCost).toBe(100);
       expect(res.marginPercent).toBeCloseTo(33.3, 1);
       expect(res.isNegative).toBe(false);
     });
 
-    it("calculates pack unit cost when units_per_pack > 1", () => {
-      // pack rate 200, 10 units/pack -> unit cost 20. selling rate 25 per unit
-      const res = calculateLineMargin(200, 25, 10);
-      expect(res.effectiveUnitCost).toBe(20);
+    it("compares a pack's cost with its selling price instead of dividing only the cost (PUR-04)", () => {
+      // A strip bought at 200 and sold at 250 is a 20% margin, whatever the pack holds.
+      const res = calculateLineMargin(200, 250);
+      expect(res.effectiveUnitCost).toBe(200);
       expect(res.marginPercent).toBe(20);
+      expect(res.isNegative).toBe(false);
+    });
+
+    it("takes GST out of the selling price before comparing (PUR-04)", () => {
+      // Pack of 15, cost 60, sell 90 incl 12% -> ex-tax 80.36 -> 25.3%
+      const res = calculateLineMargin(60, 90, 12);
+      expect(res.effectiveUnitCost).toBe(60);
+      expect(res.marginPercent).toBeCloseTo(25.33, 1);
       expect(res.isNegative).toBe(false);
     });
 
     it("flags negative margin when selling rate is below purchase cost", () => {
       // purchase rate 100, selling rate 80
-      const res = calculateLineMargin(100, 80, 1);
+      const res = calculateLineMargin(100, 80);
       expect(res.isNegative).toBe(true);
       expect(res.marginPercent).toBe(-25);
+    });
+
+    it("flags negative margin once GST is removed from a near-cost price", () => {
+      // 90 incl 12% is 80.36 ex-tax against an 85 cost
+      const res = calculateLineMargin(85, 90, 12);
+      expect(res.isNegative).toBe(true);
+    });
+
+    it("does not de-gross a GST-exclusive selling rate (PUR-04, exclusive-mode store)", () => {
+      // ₹90 ex-tax against a ₹60 ex-tax cost: (90 - 60) / 90 = 33.3%.
+      const res = calculateLineMargin(60, 90, 12, false);
+      expect(res.marginPercent).toBeCloseTo(33.3, 1);
+      expect(res.isNegative).toBe(false);
     });
   });
 

@@ -45,6 +45,10 @@ The Point of Sale (POS) is the primary counter interface for retail and medical 
   - **Given** an invoice pre-round total of ₹142.50,
   - **When** the bill totals are calculated,
   - **Then** Grand Total is ₹143.00 and Round-Off is recorded as `+0.50`.
+  - **CR-C note (behaviour unchanged):** the shared engine now accepts an optional `charges[]` stage that is
+    evaluated **before** this round-off. Sales documents never post charges, so every vector above still holds
+    byte-for-byte; the additions in `specs/gst_tax_test_vectors.json` under `TC11+` exercise the charge stage on the
+    purchase side and must not alter `TC01`–`TC10`.
 
 ### [POS-005] Split Tender & Payment Modes
 - **Story:** As a cashier, I want to accept payments split across multiple modes (Cash, UPI QR, Card, Credit).

@@ -1,0 +1,354 @@
+{
+  "sale": {
+    "st": 201,
+    "no": "C02-INV-1026",
+    "res": "{\"success\":true,\"invoice\":{\"store_id\":4,\"counter_id\":2,\"counter_code\":\"C02\",\"location_name\":\"Back desk\",\"salesperson_id\":null,\"salesperson_name\":null,\"module_key\":\"invoice\",\"invoice_number\":\"C02-INV-1026\",\"invoice_date\":\"2026-11-22\",\"due_date\":null,\"customer_id\":null,\"customer_name\":\"Walk-in Custome"
+  },
+  "preStock": [
+    {
+      "id": 7,
+      "batch_no": "PA-NEW",
+      "stock_qty": 531
+    }
+  ],
+  "line1": {
+    "qty_value": "5",
+    "exp_cell": "PA-NEW Exp: 01/28",
+    "summary": [
+      "\tProduct\tBatch / Exp\tSold Units\tMax Return (units)\tReturn Qty (units)\tReason\tCondition",
+      "1 item(s) selected • ₹ 30.00 credit"
+    ]
+  },
+  "ret1": {
+    "step": [
+      "Sales Returns (Credit Notes)",
+      "Process customer returns, issue credit notes, manage stock restocking.",
+      "B2B Debit Notes",
+      "New Return (F7)",
+      "Counter Returns (Walk-in)",
+      "Customer Debit Notes (B2B Multi-Invoice)",
+      "All Statuses",
+      "Completed",
+      "Cancelled",
+      "Draft",
+      "CREDIT NOTE REGISTER",
+      "0 Records",
+      "RETURN NO\tDATE\tORIGINAL INVOICE\tCUSTOMER\tREFUND AMT\tREFUND MODE\tSTATUS\tACTIONS",
+      "No sales returns yet",
+      "Click \"New Return\" to process a customer return",
+      "New Sales Return / Credit Note",
+      "Step 3: Choose refund method and confirm",
+      "1",
+      "Invoice",
+      "2",
+      "Items",
+      "3",
+      "Payment",
+      "Return Summary",
+      "Items Returning:",
+      "1",
+      "Original Invoice:",
+      "C02-INV-1026",
+      "Credit / Refund Amount:",
+      "₹ 30.00",
+      "Refund Mode",
+      "Cash",
+      "UPI",
+      "Card",
+      "Credit Adjust",
+      "Adjust against outstanding",
+      "Store Credit",
+      "Notes (optional)",
+      "Back",
+      "Save & Print Credit Note"
+    ],
+    "controls": [
+      "BUTTON:submit:",
+      "BUTTON:submit:Sales & Bills",
+      "BUTTON:submit:Purchases",
+      "BUTTON:submit:Inventory",
+      "BUTTON:submit:",
+      "BUTTON:submit:B2B Debit Notes",
+      "BUTTON:submit:New Return (F7)",
+      "BUTTON:submit:Counter Returns (Walk-in)",
+      "BUTTON:submit:Customer Debit Notes (B2B Multi-Invoice)",
+      "INPUT:text:Search return no, invoice no, customer...",
+      "SELECT:select-one:All Statuses\nCompleted\nCancelled\nDraft",
+      "BUTTON:submit:",
+      "BUTTON:submit:Cash",
+      "BUTTON:submit:UPI",
+      "BUTTON:submit:Card",
+      "BUTTON:submit:Credit Adjust\nAdjust against outstanding",
+      "BUTTON:submit:Store Credit",
+      "TEXTAREA:textarea:Return reason summary, manager approval, etc...",
+      "BUTTON:submit:Back",
+      "BUTTON:submit:Save & Print Credit Note"
+    ],
+    "btn": "Save & Print Credit Note",
+    "calls": [
+      {
+        "m": "POST",
+        "u": "/sync/push/batch",
+        "st": 200,
+        "req": "{\"items\":[{\"id\":\"sync_1795317143639_000001\",\"entity_type\":\"invoice\",\"action\":\"create\",\"payload\":{\"id\":\"sr_1795317143614_efed\",\"module_key\":\"credit_note\",\"invoice_number\":\"C02-SR-1001\",\"invoice_date\":\"2026-11-22\",\"customer_id\":null,\"customer_name\":\"Walk-in Customer\",\"customer_gstin\":null,\"place_of_supply\":\"32-Kerala\",\"subtotal\":30,\"taxable_subtotal\":26.79,\"discount_total\":0,\"tax_total\":3.21,\"cgst_total\":1.61,\"sgst_total\":1.6,\"igst_total\":0,\"cess_total\":0,\"round_off\":0,\"grand_total\":30,\"paid_amount\":30,\"payment_mode\":\"Cash\",\"status\":\"issued\",\"original_invoice_number\":\"C02-INV-1026\",\"created_at\":1795317143614,\"original_invoice_id\":\"40\",\"items\":[{\"product_id\":5,\"product_name\":\"QA Paracet 500 Strip\",\"batch_no\":\"PA-NEW\",\"expiry_date\":\"2028-01-30T18:30:00.000000Z\",\"qty\":5,\"loose_qty\":0,\"units_per_pack\":1,\"unit_price\":6,\"stock_action\":\"restock\",\"discount_percent\":0,\"discount_amount\":0,\"gst_percent\":12,\"taxable_amount\":26.79,\"cgst_amount\":1.61,\"sgst_amount\":1.6,\"igst_amount\":0,\"tax_amount\":3.21,\"total_amount\":30}],\"idempotency_key\":\"invoice_sr_1795317143614_efed\",\"client_timestamp\":1795317143639,\"permission_profile_version\":1,\"store_id\":\"4\"}}],\"store_id\":\"4\"}",
+        "res": "{\"success\":true,\"results\":{\"total\":1,\"processed\":1,\"failed\":0,\"processed_ids\":[\"sync_1795317143639_000001\"],\"errors\":[]},\"renumbered\":[{\"external_id\":\"sr_1795317143614_efed\",\"from\":\"C02-SR-1001\",\"to\":\"C01-SR-1002\",\"doc_type\":\"sales_return\",\"counter_id\":1}]}"
+      }
+    ],
+    "after": [
+      "Device Status:",
+      "READY",
+      "Driver:",
+      "HP Universal Printing PCL 6",
+      "Port:",
+      "WSD-PORT",
+      "PAPER SIZE",
+      "A4 (210×297mm)",
+      "A5 (148×210mm)",
+      "Half-A4 (V-Cut)",
+      "Thermal 80mm",
+      "Thermal 58mm",
+      "Dot Matrix 6\" Paper",
+      "Dot Matrix 10\" Paper",
+      "Dot Matrix 12\" Paper",
+      "Dot Matrix 15\" Paper",
+      "Custom Continuous Size",
+      "Copies",
+      "Currency Format",
+      "₹ (Unicode)",
+      "Rs. (Text Mode)",
+      "Silent Background Print (No OS popup)",
+      "Force Native OS Print Dialog",
+      "Mark as DUPLICATE Reprint",
+      "Set as Paper Default",
+      "Test",
+      "Printer: HP LaserJet Pro MFP 4104",
+      "F9 / Ctrl+P",
+      "Cancel",
+      "Print Document (F9)"
+    ]
+  },
+  "db1": {
+    "stock": [
+      {
+        "id": 7,
+        "batch_no": "PA-NEW",
+        "stock_qty": 536
+      }
+    ],
+    "ledger": [
+      {
+        "batch_id": 7,
+        "event_type": "SALES_RETURN",
+        "qty_delta": 5,
+        "reference_type": "INVOICE",
+        "reference_id": "41"
+      },
+      {
+        "batch_id": 7,
+        "event_type": "SALE",
+        "qty_delta": -30,
+        "reference_type": "INVOICE",
+        "reference_id": "40"
+      },
+      {
+        "batch_id": 7,
+        "event_type": "SALE",
+        "qty_delta": -15,
+        "reference_type": "INVOICE",
+        "reference_id": "38"
+      }
+    ],
+    "returns": [
+      {
+        "id": 41,
+        "invoice_number": "C01-SR-1002",
+        "module_key": "credit_note",
+        "status": "issued",
+        "original_invoice_number": "C02-INV-1026",
+        "grand_total": 30,
+        "taxable_subtotal": 26.79,
+        "tax_total": 3.21,
+        "cgst_total": 1.61,
+        "sgst_total": 1.6,
+        "paid_amount": 30,
+        "payment_mode": "Cash"
+      },
+      {
+        "id": 39,
+        "invoice_number": "CN-4-1002",
+        "module_key": "credit_note",
+        "status": "issued",
+        "original_invoice_number": "C02-INV-1025",
+        "grand_total": 30,
+        "taxable_subtotal": 26.79,
+        "tax_total": 3.21,
+        "cgst_total": 1.61,
+        "sgst_total": 1.6,
+        "paid_amount": 30,
+        "payment_mode": "Cash"
+      },
+      {
+        "id": 25,
+        "invoice_number": "C01-SR-1001",
+        "module_key": "credit_note",
+        "status": "issued",
+        "original_invoice_number": "C02-INV-1014",
+        "grand_total": 30,
+        "taxable_subtotal": 26.79,
+        "tax_total": 3.21,
+        "cgst_total": 1.61,
+        "sgst_total": 1.6,
+        "paid_amount": 30,
+        "payment_mode": "Cash"
+      }
+    ]
+  },
+  "line2": {
+    "qty_value": "31",
+    "exp_cell": null,
+    "summary": []
+  },
+  "ret2": {
+    "step": [
+      "Export",
+      "TARGET PRINTER (ALT+P)",
+      "Refresh",
+      "★ EPSON TM-T82 Receipt (Thermal 80mm)",
+      "HP LaserJet Pro 4104 (A4 / A5 Laser)",
+      "TVS MSP 240 (Dot Matrix 80-Col / 10\")",
+      "TVS MSP 245 (Dot Matrix 12\" / 120-Col)",
+      "Epson LQ-2090 (Dot Matrix 15\" / 132-Col Wide)",
+      "Microsoft Print to PDF (Digital Vector)",
+      "Save as High-Fidelity PDF Document",
+      "Device Status:",
+      "READY",
+      "Driver:",
+      "HP Universal Printing PCL 6",
+      "Port:",
+      "WSD-PORT",
+      "PAPER SIZE",
+      "A4 (210×297mm)",
+      "A5 (148×210mm)",
+      "Half-A4 (V-Cut)",
+      "Thermal 80mm",
+      "Thermal 58mm",
+      "Dot Matrix 6\" Paper",
+      "Dot Matrix 10\" Paper",
+      "Dot Matrix 12\" Paper",
+      "Dot Matrix 15\" Paper",
+      "Custom Continuous Size",
+      "Copies",
+      "Currency Format",
+      "₹ (Unicode)",
+      "Rs. (Text Mode)",
+      "Silent Background Print (No OS popup)",
+      "Force Native OS Print Dialog",
+      "Mark as DUPLICATE Reprint",
+      "Set as Paper Default",
+      "Test",
+      "Printer: HP LaserJet Pro MFP 4104",
+      "F9 / Ctrl+P",
+      "Cancel",
+      "Print Document (F9)"
+    ],
+    "controls": [
+      "SELECT:select-one:★ EPSON TM-T82 Receipt (Thermal 80mm)\nHP LaserJet ",
+      "BUTTON:button:A4 (210×297mm)",
+      "BUTTON:button:A5 (148×210mm)",
+      "BUTTON:button:Half-A4 (V-Cut)",
+      "BUTTON:button:Thermal 80mm",
+      "BUTTON:button:Thermal 58mm",
+      "BUTTON:button:Dot Matrix 6\" Paper",
+      "BUTTON:button:Dot Matrix 10\" Paper",
+      "BUTTON:button:Dot Matrix 12\" Paper",
+      "BUTTON:button:Dot Matrix 15\" Paper",
+      "BUTTON:button:Custom Continuous Size",
+      "INPUT:number:",
+      "SELECT:select-one:₹ (Unicode)\nRs. (Text Mode)",
+      "INPUT:checkbox:",
+      "INPUT:checkbox:",
+      "INPUT:checkbox:",
+      "BUTTON:button:Set as Paper Default",
+      "BUTTON:button:Test",
+      "BUTTON:button:Cancel",
+      "BUTTON:button:Print Document (F9)"
+    ],
+    "btn": null,
+    "calls": [],
+    "after": [
+      "Device Status:",
+      "READY",
+      "Driver:",
+      "HP Universal Printing PCL 6",
+      "Port:",
+      "WSD-PORT",
+      "PAPER SIZE",
+      "A4 (210×297mm)",
+      "A5 (148×210mm)",
+      "Half-A4 (V-Cut)",
+      "Thermal 80mm",
+      "Thermal 58mm",
+      "Dot Matrix 6\" Paper",
+      "Dot Matrix 10\" Paper",
+      "Dot Matrix 12\" Paper",
+      "Dot Matrix 15\" Paper",
+      "Custom Continuous Size",
+      "Copies",
+      "Currency Format",
+      "₹ (Unicode)",
+      "Rs. (Text Mode)",
+      "Silent Background Print (No OS popup)",
+      "Force Native OS Print Dialog",
+      "Mark as DUPLICATE Reprint",
+      "Set as Paper Default",
+      "Test",
+      "Printer: HP LaserJet Pro MFP 4104",
+      "F9 / Ctrl+P",
+      "Cancel",
+      "Print Document (F9)"
+    ]
+  },
+  "db2": {
+    "stock": [
+      {
+        "id": 7,
+        "batch_no": "PA-NEW",
+        "stock_qty": 536
+      }
+    ],
+    "returns": [
+      {
+        "id": 41,
+        "invoice_number": "C01-SR-1002",
+        "module_key": "credit_note",
+        "status": "issued",
+        "original_invoice_number": "C02-INV-1026",
+        "grand_total": 30
+      },
+      {
+        "id": 39,
+        "invoice_number": "CN-4-1002",
+        "module_key": "credit_note",
+        "status": "issued",
+        "original_invoice_number": "C02-INV-1025",
+        "grand_total": 30
+      },
+      {
+        "id": 25,
+        "invoice_number": "C01-SR-1001",
+        "module_key": "credit_note",
+        "status": "issued",
+        "original_invoice_number": "C02-INV-1014",
+        "grand_total": 30
+      },
+      {
+        "id": 23,
+        "invoice_number": "CN-4-0002",
+        "module_key": "credit_note",
+        "status": "issued",
+        "original_invoice_number": "C02-INV-1013",
+        "grand_total": 30
+      }
+    ]
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "settlement": true,
+  "sold_invoice": "C01-INV-13006",
+  "return_focus": "INPUT:e.g. INV-001, Ravi Kumar, 9876543210, 2026-10-29...",
+  "results": [
+    {
+      "id": "sales-return-invoice-option-67",
+      "selected": "true",
+      "text": "C01-INV-13006•Walk-in Customer ₹ 90.00 2026-11-22"
+    }
+  ],
+  "activedescendant": "sales-return-invoice-option-67",
+  "after_arrow": {
+    "activedescendant": "sales-return-invoice-option-67",
+    "options": [
+      {
+        "id": "sales-return-invoice-option-67",
+        "selected": "true",
+        "text": "C01-INV-13006•Walk-in Customer ₹ 90.00 2026-11-22"
+      }
+    ]
+  },
+  "after_enter": {
+    "items_step": true,
+    "loaded": [
+      "C01-INV-13006"
+    ]
+  }
+}

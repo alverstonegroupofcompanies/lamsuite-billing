@@ -1,0 +1,656 @@
+{
+  "split_focus": "INPUT:number:0.00=90",
+  "split_after_alt2": {
+    "active": "INPUT:number:0.00=50",
+    "text": [
+      "BALANCE REMAINING",
+      "Cash",
+      "UPI",
+      "#1",
+      "Cash",
+      "UPI"
+    ]
+  },
+  "ref_field": "INPUT:text:12-digit UTR or txn ID=",
+  "split_msgs": [
+    "C01-INV-13008",
+    "Next: C01-INV-13009"
+  ],
+  "split_calls": [
+    {
+      "st": 201,
+      "req": "{\"store_id\":\"4\",\"store_code\":\"QA-PH\",\"external_id\":\"ext_1795321046868_0051c9\",\"idempotency_key\":\"ext_1795321046868_0051c9\",\"invoice_number\":\"C01-INV-13008\",\"invoice_date\":\"2026-11-22\",\"customer_id\":\"\",\"customer_name\":\"Walk-in Customer\",\"customer_phone\":\"\",\"customer_gstin\":\"\",\"place_of_supply\":\"32-Kerala\",\"payment_mode\":\"Cash\",\"paid_amount\":90,\"payments\":[{\"id\":\"pay_1795321043918_0\",\"mode\":\"Cash\",\"amount\":90,\"status\":\"received\",\"tendered_amount\":90,\"change_amount\":0}],\"counter_id\":\"cntr_2\",\"tax_mode\":\"inclusive\",\"store_state\":\"32\",\"gst_type\":\"regular\",\"is_composition\":false,\"salesperson_id\":\"\",\"salesperson_name\":\"\",\"bill_discount_percent\":0,\"bill_discount_amount\":0,\"manual_round_off\":null,\"subtotal\":80.36,\"discount_total\":0,\"tax_total\":9.64,\"round_off\":0,\"grand_total\":90,\"is_inter_state\":false,\"items\":[{\"product_id\":\"5\",\"product_name\":\"QA Paracet 500 Strip\",\"batch_id\":\"12\",\"batch_no\":\"PA-OLD\",\"expiry_date\":\"2027-03-31\",\"qty\":1,\"loose_qty\":0,\"free_qty\":0,\"free_loose_qty\":0,\"units_per_pack\":15,\"unit_price\":90,\"mrp\":90,\"discount_percent\":0,\"discount_amount\":0,\"gst_percent\":12,\"rate_basis\":\"sel_rate\"}],\"counter_code\":\"C01\"}",
+      "res": "{\"success\":true,\"invoice\":{\"store_id\":4,\"counter_id\":2,\"counter_code\":\"C01\",\"location_name\":\"Front desk\",\"salesperson_id\":null,\"salesperson_name\":null,\"module_key\":\"invoice\",\"invoice_number\":\"C01-INV-13008\",\"invoice_date\":\"2026-11-22\",\"due_date\":null,\"customer_id\":null,\"customer_name\":\"Walk-in Customer\",\"customer_gstin\":null,\"customer_phone\":null,\"place_of_supply\":\"32-Kerala\",\"subtotal\":\"90.00\",\"taxable_subtotal\":\"80.36\",\"discount_total\":\"0.00\",\"tax_total\":\"9.64\",\"cgst_total\":\"4.82\",\"sgst_total\":\"4.82\",\"igst_total\":\"0.00\",\"cess_total\":\"0.00\",\"round_off\":\"0.00\",\"grand_total\":\"90.00\",\"store_stat"
+    }
+  ],
+  "split_db": {
+    "inv": {
+      "id": 74,
+      "invoice_number": "C01-INV-13008",
+      "grand_total": 90,
+      "paid_amount": 90,
+      "payment_mode": "Cash",
+      "payment_status": "paid"
+    },
+    "pays": [
+      {
+        "payment_mode": "Cash",
+        "amount": 90,
+        "reference_no": null
+      }
+    ]
+  },
+  "walkin_credit_screen": [
+    "C01-INV-13008",
+    "Next: C01-INV-13009",
+    "Invoice: C01-INV-13009",
+    "Credit",
+    "Credit",
+    "No reference required",
+    "Credit Sale (Udhari) Check",
+    "Credit sales require a registered customer. Please select or add a customer to put ₹ 90.00 on credit."
+  ],
+  "walkin_credit_after": [
+    "C01-INV-13009",
+    "Next: C01-INV-13010"
+  ],
+  "walkin_credit_calls": [
+    {
+      "st": 201,
+      "res": "{\"success\":true,\"invoice\":{\"store_id\":4,\"counter_id\":2,\"counter_code\":\"C01\",\"location_name\":\"Front desk\",\"salesperson_id\":null,\"salesperson_name\":null,\"module_key\":\"invoice\",\"invoice_number\":\"C01-INV-13009\",\"invoice_date\":\"2026-11-22\",\"due_date\":null,\"customer_id\":null,\"customer_name\":\"Walk-in Customer\",\"customer_gstin\":null,\"customer_phone\":null,\"place_of_supply\":\"32-Kerala\",\"subtotal\":\"90.00\",\"t"
+    }
+  ],
+  "cust_pick": [],
+  "named_credit_after": [
+    "C01-INV-13009",
+    "Next: C01-INV-13010"
+  ],
+  "named_credit_calls": [],
+  "cust_pick2": [],
+  "over_limit_screen": [
+    "Invoice: C01-INV-13010",
+    "Credit",
+    "Credit",
+    "No reference required",
+    "Credit Sale (Udhari) Check",
+    "QA Credit",
+    "Credit Limit",
+    "No limit"
+  ],
+  "over_limit_after": [
+    "C01-INV-13010",
+    "Next: C01-INV-13011"
+  ],
+  "over_limit_calls": [
+    {
+      "st": 201,
+      "res": "{\"success\":true,\"invoice\":{\"store_id\":4,\"counter_id\":2,\"counter_code\":\"C01\",\"location_name\":\"Front desk\",\"salesperson_id\":null,\"salesperson_name\":null,\"module_key\":\"invoice\",\"invoice_number\":\"C01-INV-13010\",\"invoice_date\":\"2026-11-22\",\"due_date\":null,\"customer_id\":12,\"customer_name\":\"QA Credit\",\"customer_gstin\":null,\"customer_phone\":null,\"place_of_supply\":\"32-Kerala\",\"subtotal\":\"1080.00\",\"taxable_"
+    }
+  ],
+  "db": [
+    {
+      "id": 4,
+      "invoice_number": "C01-INV-8301",
+      "customer_id": null,
+      "customer_name": "Walk-in Customer",
+      "grand_total": 210,
+      "paid_amount": 500,
+      "payment_mode": "Cash",
+      "payment_status": "paid"
+    },
+    {
+      "id": 5,
+      "invoice_number": "C01-INV-8651",
+      "customer_id": null,
+      "customer_name": "Walk-in Customer",
+      "grand_total": 90,
+      "paid_amount": 90,
+      "payment_mode": "Cash",
+      "payment_status": "paid"
+    },
+    {
+      "id": 6,
+      "invoice_number": "C01-INV-8751",
+      "customer_id": null,
+      "customer_name": "Walk-in Customer",
+      "grand_total": 90,
+      "paid_amount": 90,
+      "payment_mode": "Cash",
+      "payment_status": "paid"
+    },
+    {
+      "id": 7,
+      "invoice_number": "C01-INV-8901",
+      "customer_id": 12,
+      "customer_name": "QA Credit",
+      "grand_total": 1080,
+      "paid_amount": 1080,
+      "payment_mode": "Cash",
+      "payment_status": "paid"
+    },
+    {
+      "id": 8,
+      "invoice_number": "C02-INV-QA001",
+      "customer_id": null,
+      "customer_name": "Walk-in Customer",
+      "grand_total": 90,
+      "paid_amount": 90,
+      "payment_mode": "Split",
+      "payment_status": "paid"
+    },
+    {
+      "id": 9,
+      "invoice_number": "C02-INV-QA002",
+      "customer_id": null,
+      "customer_name": "Walk-in Customer",
+      "grand_total": 90,
+      "paid_amount": 90,
+      "payment_mode": "UPI",
+      "payment_status": "paid"
+    },
+    {
+      "id": 10,
+      "invoice_number": "C02-INV-QA003",
+      "customer_id": null,
+      "customer_name": "Walk-in Customer",
+      "grand_total": 90,
+      "paid_amount": 40,
+      "payment_mode": "Cash",
+      "payment_status": "partially_paid"
+    },
+    {
+      "id": 11,
+      "invoice_number": "C02-INV-QA005",
+      "customer_id": 6,
+      "customer_name": "QA Credit Customer",
+      "grand_total": 90,
+      "paid_amount": 0,
+      "payment_mode": "Credit",
+      "payment_status": "unpaid"
+    },
+    {
+      "id": 12,
+      "invoice_number": "C02-INV-QA009",
+      "customer_id": null,
+      "customer_name": "Walk-in Customer",
+      "grand_total": 42,
+      "paid_amount": 42,
+      "payment_mode": "Cash",
+      "payment_status": "paid"
+    },
+    {
+      "id": 13,
+      "invoice_number": "C02-INV-QA010",
+      "customer_id": null,
+      "customer_name": "Walk-in Customer",
+      "grand_total": 30,
+      "paid_amount": 30,
+      "payment_mode": "Cash",
+      "payment_status": "paid"
+    },
+    {
+      "id": 14,
+      "invoice_number": "C02-INV-QA011",
+      "customer_id": null,
+      "customer_name": "Walk-in Customer",
+      "grand_total": 0,
+      "paid_amount": 36,
+      "payment_mode": "Cash",
+      "payment_status": "unpaid"
+    },
+    {
+      "id": 15,
+      "invoice_number": "C02-INV-QA012",
+      "customer_id": null,
+      "customer_name": "Walk-in Customer",
+      "grand_total": 90,
+      "paid_amount": 1,
+      "payment_mode": "Cash",
+      "payment_status": "partially_paid"
+    },
+    {
+      "id": 16,
+      "invoice_number": "C02-INV-QA013",
+      "customer_id": null,
+      "customer_name": "Walk-in Customer",
+      "grand_total": 150,
+      "paid_amount": 150,
+      "payment_mode": "Cash",
+      "payment_status": "paid"
+    },
+    {
+      "id": 17,
+      "invoice_number": "C02-INV-QA014",
+      "customer_id": null,
+      "customer_name": "Walk-in Customer",
+      "grand_total": 90,
+      "paid_amount": 90,
+      "payment_mode": "Cash",
+      "payment_status": "paid"
+    },
+    {
+      "id": 19,
+      "invoice_number": "C01-INV-9651",
+      "customer_id": null,
+      "customer_name": "Walk-in Customer",
+      "grand_total": 210,
+      "paid_amount": 210,
+      "payment_mode": "Cash",
+      "payment_status": "paid"
+    },
+    {
+      "id": 20,
+      "invoice_number": "C01-INV-10001",
+      "customer_id": null,
+      "customer_name": "Walk-in Customer",
+      "grand_total": 210,
+      "paid_amount": 210,
+      "payment_mode": "Cash",
+      "payment_status": "paid"
+    },
+    {
+      "id": 21,
+      "invoice_number": "C01-INV-10351",
+      "customer_id": null,
+      "customer_name": "Walk-in Customer",
+      "grand_total": 210,
+      "paid_amount": 210,
+      "payment_mode": "Cash",
+      "payment_status": "paid"
+    },
+    {
+      "id": 22,
+      "invoice_number": "C01-SR-1001",
+      "customer_id": null,
+      "customer_name": "Walk-in Customer",
+      "grand_total": 34,
+      "paid_amount": 33.6,
+      "payment_mode": "Cash",
+      "payment_status": "paid"
+    },
+    {
+      "id": 23,
+      "invoice_number": "C01-INV-11002",
+      "customer_id": null,
+      "customer_name": "Walk-in Customer",
+      "grand_total": 230,
+      "paid_amount": 230,
+      "payment_mode": "Cash",
+      "payment_status": "paid"
+    },
+    {
+      "id": 24,
+      "invoice_number": "C01-INV-11003",
+      "customer_id": null,
+      "customer_name": "Walk-in Customer",
+      "grand_total": 345,
+      "paid_amount": 345,
+      "payment_mode": "Cash",
+      "payment_status": "paid"
+    },
+    {
+      "id": 25,
+      "invoice_number": "C01-INV-11001",
+      "customer_id": null,
+      "customer_name": "Walk-in Customer",
+      "grand_total": 115,
+      "paid_amount": 115,
+      "payment_mode": "Cash",
+      "payment_status": "paid"
+    },
+    {
+      "id": 26,
+      "invoice_number": "C02-INV-QA-AFTERCLOSE",
+      "customer_id": null,
+      "customer_name": "Walk-in Customer",
+      "grand_total": 115,
+      "paid_amount": 115,
+      "payment_mode": "Cash",
+      "payment_status": "paid"
+    },
+    {
+      "id": 27,
+      "invoice_number": "C02-INV-LOCKED",
+      "customer_id": null,
+      "customer_name": "Walk-in Customer",
+      "grand_total": 115,
+      "paid_amount": 115,
+      "payment_mode": "Cash",
+      "payment_status": "paid"
+    },
+    {
+      "id": 28,
+      "invoice_number": "C02-INV-SH-Cash",
+      "customer_id": null,
+      "customer_name": "Walk-in Customer",
+      "grand_total": 115,
+      "paid_amount": 115,
+      "payment_mode": "Cash",
+      "payment_status": "paid"
+    },
+    {
+      "id": 29,
+      "invoice_number": "C02-INV-SH-UPI",
+      "customer_id": null,
+      "customer_name": "Walk-in Customer",
+      "grand_total": 230,
+      "paid_amount": 230,
+      "payment_mode": "UPI",
+      "payment_status": "paid"
+    },
+    {
+      "id": 32,
+      "invoice_number": "C02-INV-RACE",
+      "customer_id": null,
+      "customer_name": "Walk-in Customer",
+      "grand_total": 690,
+      "paid_amount": 690,
+      "payment_mode": "Cash",
+      "payment_status": "paid"
+    },
+    {
+      "id": 33,
+      "invoice_number": "C01-INV-11651",
+      "customer_id": null,
+      "customer_name": "Walk-in Customer",
+      "grand_total": 115,
+      "paid_amount": 115,
+      "payment_mode": "Cash",
+      "payment_status": "paid"
+    },
+    {
+      "id": 34,
+      "invoice_number": "C02-INV-RE1",
+      "customer_id": null,
+      "customer_name": "Walk-in Customer",
+      "grand_total": 72,
+      "paid_amount": 81,
+      "payment_mode": "Cash",
+      "payment_status": "paid"
+    },
+    {
+      "id": 35,
+      "invoice_number": "C02-INV-RE2",
+      "customer_id": null,
+      "customer_name": "Walk-in Customer",
+      "grand_total": 90,
+      "paid_amount": 90,
+      "payment_mode": "Cash",
+      "payment_status": "paid"
+    },
+    {
+      "id": 36,
+      "invoice_number": "C02-INV-RE3",
+      "customer_id": null,
+      "customer_name": "Walk-in Customer",
+      "grand_total": 90,
+      "paid_amount": 10,
+      "payment_mode": "Cash",
+      "payment_status": "partially_paid"
+    },
+    {
+      "id": 37,
+      "invoice_number": "C02-INV-RE4",
+      "customer_id": null,
+      "customer_name": "Walk-in Customer",
+      "grand_total": 115,
+      "paid_amount": 115,
+      "payment_mode": "Cash",
+      "payment_status": "paid"
+    },
+    {
+      "id": 38,
+      "invoice_number": "C09-G1-1795303229009",
+      "customer_id": null,
+      "customer_name": "Walk-in Customer",
+      "grand_total": 115,
+      "paid_amount": 115,
+      "payment_mode": "Cash",
+      "payment_status": "paid"
+    },
+    {
+      "id": 39,
+      "invoice_number": "C01-INV-13001",
+      "customer_id": null,
+      "customer_name": "Walk-in Customer",
+      "grand_total": 210,
+      "paid_amount": 210,
+      "payment_mode": "Cash",
+      "payment_status": "paid"
+    },
+    {
+      "id": 40,
+      "invoice_number": "C01-INV-13002",
+      "customer_id": null,
+      "customer_name": "Walk-in Customer",
+      "grand_total": 180,
+      "paid_amount": 180,
+      "payment_mode": "Cash",
+      "payment_status": "paid"
+    },
+    {
+      "id": 41,
+      "invoice_number": "C01-INV-13003",
+      "customer_id": null,
+      "customer_name": "Walk-in Customer",
+      "grand_total": 210,
+      "paid_amount": 210,
+      "payment_mode": "Cash",
+      "payment_status": "paid"
+    },
+    {
+      "id": 42,
+      "invoice_number": "C01-INV-13004",
+      "customer_id": null,
+      "customer_name": "Walk-in Customer",
+      "grand_total": 210,
+      "paid_amount": 210,
+      "payment_mode": "Cash",
+      "payment_status": "paid"
+    },
+    {
+      "id": 43,
+      "invoice_number": "C01-INV-13005",
+      "customer_id": null,
+      "customer_name": "Walk-in Customer",
+      "grand_total": 180,
+      "paid_amount": 180,
+      "payment_mode": "Cash",
+      "payment_status": "paid"
+    },
+    {
+      "id": 44,
+      "invoice_number": "G9849078-INV-1001",
+      "customer_id": null,
+      "customer_name": "Walk-in Customer",
+      "grand_total": 90,
+      "paid_amount": 90,
+      "payment_mode": "Cash",
+      "payment_status": "paid"
+    },
+    {
+      "id": 45,
+      "invoice_number": "G9856597-INV-1001",
+      "customer_id": null,
+      "customer_name": "Walk-in Customer",
+      "grand_total": 90,
+      "paid_amount": 90,
+      "payment_mode": "Cash",
+      "payment_status": "paid"
+    },
+    {
+      "id": 46,
+      "invoice_number": "G9868391-INV-1001",
+      "customer_id": null,
+      "customer_name": "Walk-in Customer",
+      "grand_total": 90,
+      "paid_amount": 90,
+      "payment_mode": "Cash",
+      "payment_status": "paid"
+    },
+    {
+      "id": 47,
+      "invoice_number": "G9874491-INV-1001",
+      "customer_id": null,
+      "customer_name": "Walk-in Customer",
+      "grand_total": 90,
+      "paid_amount": 90,
+      "payment_mode": "Cash",
+      "payment_status": "paid"
+    },
+    {
+      "id": 48,
+      "invoice_number": "G9874491-INV-1002",
+      "customer_id": null,
+      "customer_name": "Walk-in Customer",
+      "grand_total": 30,
+      "paid_amount": 30,
+      "payment_mode": "Cash",
+      "payment_status": "paid"
+    },
+    {
+      "id": 49,
+      "invoice_number": "G9882599-INV-1001",
+      "customer_id": null,
+      "customer_name": "Walk-in Customer",
+      "grand_total": 90,
+      "paid_amount": 90,
+      "payment_mode": "Cash",
+      "payment_status": "paid"
+    },
+    {
+      "id": 50,
+      "invoice_number": "G9882599-INV-1002",
+      "customer_id": null,
+      "customer_name": "Walk-in Customer",
+      "grand_total": 30,
+      "paid_amount": 30,
+      "payment_mode": "Cash",
+      "payment_status": "paid"
+    },
+    {
+      "id": 51,
+      "invoice_number": "G9902346-INV-1001",
+      "customer_id": null,
+      "customer_name": "Walk-in Customer",
+      "grand_total": 90,
+      "paid_amount": 90,
+      "payment_mode": "Cash",
+      "payment_status": "paid"
+    },
+    {
+      "id": 52,
+      "invoice_number": "G9902346-INV-1002",
+      "customer_id": null,
+      "customer_name": "Walk-in Customer",
+      "grand_total": 36,
+      "paid_amount": 36,
+      "payment_mode": "Cash",
+      "payment_status": "paid"
+    },
+    {
+      "id": 53,
+      "invoice_number": "G9902346-INV-1003",
+      "customer_id": null,
+      "customer_name": "Walk-in Customer",
+      "grand_total": 30,
+      "paid_amount": 30,
+      "payment_mode": "Cash",
+      "payment_status": "paid"
+    },
+    {
+      "id": 54,
+      "invoice_number": "G9909765-INV-1001",
+      "customer_id": null,
+      "customer_name": "Walk-in Customer",
+      "grand_total": 90,
+      "paid_amount": 90,
+      "payment_mode": "Cash",
+      "payment_status": "paid"
+    },
+    {
+      "id": 55,
+      "invoice_number": "G9909765-INV-1002",
+      "customer_id": null,
+      "customer_name": "Walk-in Customer",
+      "grand_total": 36,
+      "paid_amount": 36,
+      "payment_mode": "Cash",
+      "payment_status": "paid"
+    },
+    {
+      "id": 56,
+      "invoice_number": "G9909765-INV-1003",
+      "customer_id": null,
+      "customer_name": "Walk-in Customer",
+      "grand_total": 30,
+      "paid_amount": 30,
+      "payment_mode": "Cash",
+      "payment_status": "paid"
+    },
+    {
+      "id": 67,
+      "invoice_number": "C01-INV-13006",
+      "customer_id": null,
+      "customer_name": "Walk-in Customer",
+      "grand_total": 90,
+      "paid_amount": 90,
+      "payment_mode": "Cash",
+      "payment_status": "paid"
+    },
+    {
+      "id": 73,
+      "invoice_number": "C01-INV-13007",
+      "customer_id": null,
+      "customer_name": "Walk-in Customer",
+      "grand_total": 210,
+      "paid_amount": 210,
+      "payment_mode": "Cash",
+      "payment_status": "paid"
+    },
+    {
+      "id": 74,
+      "invoice_number": "C01-INV-13008",
+      "customer_id": null,
+      "customer_name": "Walk-in Customer",
+      "grand_total": 90,
+      "paid_amount": 90,
+      "payment_mode": "Cash",
+      "payment_status": "paid"
+    },
+    {
+      "id": 75,
+      "invoice_number": "C01-INV-13009",
+      "customer_id": null,
+      "customer_name": "Walk-in Customer",
+      "grand_total": 90,
+      "paid_amount": 90,
+      "payment_mode": "Cash",
+      "payment_status": "paid"
+    },
+    {
+      "id": 76,
+      "invoice_number": "C01-INV-13010",
+      "customer_id": 12,
+      "customer_name": "QA Credit",
+      "grand_total": 1080,
+      "paid_amount": 1080,
+      "payment_mode": "Cash",
+      "payment_status": "paid"
+    }
+  ],
+  "customer": [
+    {
+      "id": 6,
+      "name": "QA Credit Customer",
+      "credit_limit": 1000,
+      "current_balance": 0
+    },
+    {
+      "id": 7,
+      "name": "QA No Credit Customer",
+      "credit_limit": 0,
+      "current_balance": 0
+    }
+  ]
+}

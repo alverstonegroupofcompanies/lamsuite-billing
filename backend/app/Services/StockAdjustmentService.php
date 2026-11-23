@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\AuditLog;
+use App\Models\Counter;
 use App\Models\Product;
 use App\Models\ProductBatch;
 use App\Models\StockAdjustment;
@@ -27,7 +28,7 @@ class StockAdjustmentService
      *
      * @return array{document: StockAdjustmentDocument, duplicate: bool}
      */
-    public function post(int $storeId, ?User $user, array $payload): array
+    public function post(int $storeId, ?User $user, array $payload, ?Counter $counter = null): array
     {
         $documentId = trim((string) ($payload['document_id'] ?? ''));
         if ($documentId === '') {
@@ -59,7 +60,8 @@ class StockAdjustmentService
             $resolved,
             $mode,
             $notes,
-            $documentDate
+            $documentDate,
+            $counter
         );
 
         if (!empty($check['errors'])) {
@@ -85,6 +87,7 @@ class StockAdjustmentService
         return DB::transaction(function () use (
             $storeId,
             $user,
+            $counter,
             $documentId,
             $mode,
             $notes,
@@ -98,6 +101,7 @@ class StockAdjustmentService
             $document = StockAdjustmentDocument::create([
                 'document_id' => $documentId,
                 'store_id' => $storeId,
+                'counter_id' => $counter?->id,
                 'mode' => $mode,
                 'reason' => $postedLines[0]['reason'] ?? null,
                 'notes' => $notes,
@@ -336,8 +340,10 @@ class StockAdjustmentService
                     'store_id' => $storeId,
                     'product_id' => $line->product_id,
                     'batch_id' => $line->batch_id,
-                    'counter_id' => null,
-                    'counter_code' => null,
+                    'counter_id' => $document->counter_id,
+                    'counter_code' => $document->counter_id
+                        ? \App\Models\Counter::whereKey($document->counter_id)->value('counter_code')
+                        : null,
                     'location_name' => null,
                     'event_type' => $eventType,
                     'qty_delta' => $delta,

@@ -6,6 +6,7 @@ import {
   formatChord,
   matchesChord,
   parseChord,
+  findShortcut,
   shortcutLabel,
   shortcutsForScope,
   type KeyEventLike,
@@ -28,8 +29,28 @@ describe("central key map", () => {
 
   it("documents intentional screen overrides of global keys", () => {
     const overrides = findScopeOverrides();
-    expect(overrides.some((o) => o.screen.action === "checkout" && o.chord === "F12")).toBe(true);
+    expect(overrides.map((o) => `${o.chord}:${o.screen.action}`)).toEqual([
+      "F1:focusEntry",
+      "F3:rateEdit",
+      "F1:purchaseFocusEntry",
+      "F2:newPurchase",
+      "F6:findPurchase",
+      "F8:saveDraft",
+      "F9:recallDraft",
+      "F7:newSalesReturn",
+    ]);
+    // F12 stopped overriding anything when the till stopped signing people in:
+    // there is no global F12 left, so Checkout and Post Purchase simply own it.
+    expect(centralKeyMap.filter((s) => s.scope === "global" && s.keys.includes("F12"))).toEqual([]);
     expect(overrides.some((o) => o.screen.action === "focusSupplier" && o.chord === "Alt+S")).toBe(false);
+  });
+
+  it("gives the purchase screen its own entry row, new bill and return chords", () => {
+    expect(shortcutLabel("purchaseFocusEntry", "purchase")).toBe("F1");
+    expect(shortcutLabel("newPurchase", "purchase")).toBe("Ctrl+Shift+N");
+    expect(findShortcut("newPurchase", "purchase")?.keys).toContain("F2");
+    expect(shortcutLabel("newSalesReturn", "salesReturns")).toBe("F7");
+    expect(centralKeyMap.filter((s) => s.scope === "salesReturns")).toHaveLength(1);
   });
 
   it("exposes exactly the new advertised shortcuts", () => {
@@ -42,7 +63,7 @@ describe("central key map", () => {
     expect(shortcutLabel("cancelEdit", "edit")).toBe("Ctrl+Q");
     expect(shortcutLabel("filterPayment", "bills")).toBe("Alt+Shift+P");
     expect(shortcutLabel("focusBillDate", "purchase")).toBe("Alt+D");
-    expect(shortcutLabel("focusFreight", "purchase")).toBe("Alt+F");
+    expect(shortcutLabel("toggleCharges", "purchase")).toBe("Alt+F");
     expect(shortcutLabel("toggleDiscountType", "purchase")).toBe("Alt+Y");
     expect(shortcutLabel("quickAddProduct", "purchase")).toBe("Ctrl+N");
   });
@@ -55,6 +76,17 @@ describe("central key map", () => {
     expect(shortcutLabel("toggleAdjustmentMode", "stock")).toBe("Ctrl+M");
     expect(shortcutLabel("importAdjustmentCsv", "stock")).toBe("Ctrl+I");
     expect(shortcutLabel("postStockAdjustment", "stock")).toBe("Ctrl+Enter");
+  });
+
+  it("exposes the Alt+F supplier bill charges grid chords", () => {
+    expect(shortcutLabel("toggleCharges", "purchase")).toBe("Alt+F");
+    expect(shortcutLabel("chargeAddRow", "modal")).toBe("Insert");
+    expect(shortcutLabel("chargeDeleteRow", "modal")).toBe("Delete");
+    expect(shortcutLabel("chargeUndoDelete", "modal")).toBe("Ctrl+Z");
+    expect(shortcutLabel("chargeCycleCell", "modal")).toBe("Space");
+    expect(shortcutLabel("chargeEditCell", "modal")).toBe("Enter");
+    expect(shortcutLabel("chargeApply", "modal")).toBe("Ctrl+Enter");
+    expect(centralKeyMap.filter((s) => s.group === "Charges").every((s) => s.scope === "modal")).toBe(true);
   });
 
   it("does not expose F8/F9 as POS actions any more", () => {
@@ -220,7 +252,7 @@ describe("shortcut dispatcher", () => {
       focusSupplier: vi.fn(() => true),
       focusBillNo: vi.fn(() => true),
       focusBillDate: vi.fn(() => true),
-      focusFreight: vi.fn(() => true),
+      toggleCharges: vi.fn(() => true),
       quickAddProduct: vi.fn(() => true),
       postPurchase: vi.fn(() => true),
     };
@@ -236,7 +268,7 @@ describe("shortcut dispatcher", () => {
     expect(handlers.focusSupplier).toHaveBeenCalledTimes(1);
     expect(handlers.focusBillNo).toHaveBeenCalledTimes(1);
     expect(handlers.focusBillDate).toHaveBeenCalledTimes(1);
-    expect(handlers.focusFreight).toHaveBeenCalledTimes(1);
+    expect(handlers.toggleCharges).toHaveBeenCalledTimes(1);
     expect(handlers.quickAddProduct).toHaveBeenCalledTimes(1);
     expect(handlers.postPurchase).toHaveBeenCalledTimes(1);
   });
@@ -287,6 +319,71 @@ describe("shortcut dispatcher", () => {
     expect(handlers.importAdjustmentCsv).toHaveBeenCalledTimes(1);
     expect(handlers.postStockAdjustment).toHaveBeenCalledTimes(1);
     expect(handlers.undoAdjustmentDelete).toHaveBeenCalledTimes(1);
+  });
+
+  it("routes the Alt+F charges grid's plain keys only while the grid is open", () => {
+    const dispatcher = new ShortcutDispatcher();
+    let gridOpen = false;
+    const handlers = {
+      modalClose: vi.fn(() => true),
+      chargeAddRow: vi.fn(() => true),
+      chargeMoveUp: vi.fn(() => true),
+      chargeCycleCell: vi.fn(() => true),
+      chargeEditCell: vi.fn(() => true),
+      chargeApply: vi.fn(() => true),
+    };
+    dispatcher.register({
+      id: "purchase-charges",
+      scope: "modal",
+      isActive: () => gridOpen,
+      handlers,
+    });
+
+    // Closed: the grid claims nothing, so Enter/Space/arrows reach the screen's own inputs.
+    expect(dispatcher.dispatch(key({ key: "Enter" }))).toBe(false);
+    expect(dispatcher.dispatch(key({ key: " " }))).toBe(false);
+    expect(dispatcher.dispatch(key({ key: "ArrowUp" }))).toBe(false);
+    expect(Object.values(handlers).every((h) => h.mock.calls.length === 0)).toBe(true);
+
+    gridOpen = true;
+    expect(dispatcher.dispatch(key({ key: "Insert" }))).toBe(true);
+    expect(dispatcher.dispatch(key({ key: "ArrowUp" }))).toBe(true);
+    expect(dispatcher.dispatch(key({ key: " " }))).toBe(true);
+    expect(dispatcher.dispatch(key({ key: " ", shiftKey: true }))).toBe(true);
+    expect(dispatcher.dispatch(key({ key: "Enter", ctrlKey: true }))).toBe(true);
+    expect(dispatcher.dispatch(key({ key: "Escape" }))).toBe(true);
+
+    expect(handlers.chargeAddRow).toHaveBeenCalledTimes(1);
+    expect(handlers.chargeMoveUp).toHaveBeenCalledTimes(1);
+    expect(handlers.chargeCycleCell).toHaveBeenCalledTimes(2);
+    expect(handlers.chargeApply).toHaveBeenCalledTimes(1);
+    expect(handlers.modalClose).toHaveBeenCalledTimes(1);
+    expect(handlers.chargeEditCell).not.toHaveBeenCalled();
+  });
+
+  it("lets the charges grid hand a key back while a cell is being typed into", () => {
+    const dispatcher = new ShortcutDispatcher();
+    const apply = vi.fn(() => true);
+    // The grid declines Enter while a number/text cell has the caret, so typing continues.
+    const edit = vi.fn(() => false);
+    dispatcher.register({
+      id: "purchase-charges",
+      scope: "modal",
+      handlers: { chargeEditCell: edit },
+    });
+    dispatcher.register({
+      id: "purchase-lines",
+      scope: "purchase",
+      handlers: { postPurchase: apply },
+    });
+
+    expect(dispatcher.dispatch(key({ key: "Enter" }))).toBe(false);
+    expect(edit).toHaveBeenCalledTimes(1);
+    expect(apply).not.toHaveBeenCalled();
+
+    expect(dispatcher.dispatch(key({ key: "Enter", ctrlKey: true }))).toBe(false);
+    expect(dispatcher.dispatch(key({ key: "F12" }))).toBe(true);
+    expect(apply).toHaveBeenCalledTimes(1);
   });
 
   it("routes Ctrl+Q to cancel-edit only for the edit scope", () => {

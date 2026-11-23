@@ -1,4 +1,16 @@
-import { InvoicePrintData, CreditNotePrintData, DebitNotePrintData, HsnSummaryRow, calculateHsnSummary, numberToWordsIndian } from "./printingEngine";
+import {
+  InvoicePrintData,
+  CreditNotePrintData,
+  DebitNotePrintData,
+  HsnSummaryRow,
+  calculateHsnSummary,
+  numberToWordsIndian,
+  chargeName,
+  chargeInPayable,
+  chargeSeparate,
+  chargeTotalOf,
+  printChargeRows,
+} from "./printingEngine";
 import { jsPDF } from "jspdf";
 
 export type DotMatrixCommandSet = "esc_p" | "tvs_native" | "plain_ascii";
@@ -301,6 +313,36 @@ export class DotMatrixRenderer {
   /**
    * Generates formatted continuous dot-matrix text for a Tax Invoice (6-inch/60C, 10-inch/80C, 12-inch/120C, or 132C).
    */
+  /**
+   * CR-C: the charges a purchase document was billed with, in the same right-aligned footer column
+   * as the tax lines above them. Money handed to a courier rather than the supplier is starred and
+   * legend-marked, because it is deliberately not inside the grand total printed under it. A sales
+   * document owns no charges, so this returns nothing for one.
+   */
+  private chargeFooterLines(
+    data: InvoicePrintData,
+    cols: number,
+    leftMargin: string,
+    curr: string,
+    amountWidth: number
+  ): string[] {
+    const rows = printChargeRows(data);
+    if (!rows.length) return [];
+
+    const lines = rows.map((row) => {
+      const label =
+        this.padRight(chargeName(row).toUpperCase().substring(0, 16), 16) + (chargeSeparate(row) ? "*" : " ");
+      const text = `${label}: ${curr} ` + this.padLeft(this.formatAmount(chargeTotalOf(row)), amountWidth);
+      return leftMargin + this.padLeft(text, cols);
+    });
+
+    if (rows.some((row) => !chargeInPayable(row))) {
+      lines.push(leftMargin + "* PAID SEPARATELY OUTSIDE THIS BILL");
+    }
+
+    return lines;
+  }
+
   renderInvoice(data: InvoicePrintData, options?: DotMatrixOptions): string {
     const cols = resolveDotMatrixColumns(options);
     if (options?.prePrintedStationery) {
@@ -529,6 +571,7 @@ export class DotMatrixRenderer {
       footerLines.push(leftMargin + this.padLeft(roStr, cols));
     }
 
+    this.chargeFooterLines(data, cols, leftMargin, curr, 11).forEach((line) => footerLines.push(line));
     footerLines.push(divDouble);
     const grandTotalStr = `GRAND TOTAL       : ${curr} ` + this.padLeft(this.formatAmount(data.grand_total), 11);
     footerLines.push(leftMargin + this.padLeft(grandTotalStr, cols));
@@ -783,6 +826,7 @@ export class DotMatrixRenderer {
       footerLines.push(leftMargin + this.padLeft(roStr, cols));
     }
 
+    this.chargeFooterLines(data, cols, leftMargin, curr, 11).forEach((line) => footerLines.push(line));
     footerLines.push(divDouble);
     const grandTotalStr = `GRAND TOTAL       : ${curr} ` + this.padLeft(this.formatAmount(data.grand_total), 11);
     footerLines.push(leftMargin + this.padLeft(grandTotalStr, cols));
@@ -990,6 +1034,7 @@ export class DotMatrixRenderer {
       footerLines.push(leftMargin + this.padLeft(roStr, cols));
     }
 
+    this.chargeFooterLines(data, cols, leftMargin, curr, 12).forEach((line) => footerLines.push(line));
     footerLines.push(divDouble);
     const grandTotalStr = `GRAND TOTAL       : ${curr} ` + this.padLeft(this.formatAmount(data.grand_total), 12);
     footerLines.push(leftMargin + this.padLeft(grandTotalStr, cols));
@@ -1169,6 +1214,7 @@ export class DotMatrixRenderer {
     if (data.round_off) {
       footerLines.push(leftMargin + this.padLeft(`Round Off         : ${curr} ` + this.padLeft(this.formatAmount(data.round_off), 14), cols));
     }
+    this.chargeFooterLines(data, cols, leftMargin, curr, 14).forEach((line) => footerLines.push(line));
     footerLines.push(divDouble);
     footerLines.push(leftMargin + this.padLeft(`GRAND TOTAL       : ${curr} ` + this.padLeft(this.formatAmount(data.grand_total), 14), cols));
     footerLines.push(divDouble);

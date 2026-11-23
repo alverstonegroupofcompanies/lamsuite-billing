@@ -1,11 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { autoUpdateService, classifyUpdaterError } from "./autoUpdateService";
+import { autoUpdateService, classifyUpdaterError, resolveUpdateEndpoints } from "./autoUpdateService";
 import { sqliteStorage } from "../db/sqliteStorage";
-import * as tauriUpdater from "@tauri-apps/api/updater";
+import { registerMockHandler, resetMockHandlers } from "../ipc/ipcBridge";
 
 vi.mock("@tauri-apps/api/updater", () => ({
-  checkUpdate: vi.fn(),
-  installUpdate: vi.fn(),
   onUpdaterEvent: vi.fn(),
 }));
 
@@ -257,9 +255,9 @@ describe("AutoUpdateService - Unsynced Offline Bills Safety Gate", () => {
     const { deviceSessionService } = await import("../devices/deviceSessionService");
     const reportSpy = vi.spyOn(deviceSessionService, "reportUpdateFailure").mockResolvedValue(true);
 
-    vi.mocked(tauriUpdater.installUpdate).mockRejectedValue(
-      new Error("Download request failed with status: 404 Not Found")
-    );
+    registerMockHandler("updater_install", () => {
+      throw new Error("Download request failed with status: 404 Not Found");
+    });
 
     const testUrl = "https://github.com/alverstonegroupofcompanies/lamsuite-billing/releases/download/v2.0.21/LamSuite-Billing_2.0.21_x64-setup.nsis.zip";
 
@@ -279,9 +277,9 @@ describe("AutoUpdateService - Unsynced Offline Bills Safety Gate", () => {
     const { deviceSessionService } = await import("../devices/deviceSessionService");
     const reportSpy = vi.spyOn(deviceSessionService, "reportUpdateFailure").mockResolvedValue(true);
 
-    vi.mocked(tauriUpdater.installUpdate).mockRejectedValue(
-      new Error("verify signature error: The signature verification failed")
-    );
+    registerMockHandler("updater_install", () => {
+      throw new Error("verify signature error: The signature verification failed");
+    });
 
     const testUrl = "https://api.lamstonehealthcare.com/api/app/update/download/LamSuite-Billing_2.0.34_x64-setup.nsis.zip";
 
@@ -294,5 +292,89 @@ describe("AutoUpdateService - Unsynced Offline Bills Safety Gate", () => {
       422,
       expect.stringContaining("signature verification failed")
     );
+  });
+});
+
+describe("AutoUpdateService - configured update feed", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+    resetMockHandlers();
+  });
+
+  it("derives the feed from the configured server and never from a hard-coded host", () => {
+    const endpoints = resolveUpdateEndpoints("stable", "http://127.0.0.1:8000");
+
+    expect(endpoints).toEqual(["http://127.0.0.1:8000/api/app/update/latest.json"]);
+    for (const url of endpoints) {
+      expect(url).not.toContain("lamstonehealthcare.com");
+      expect(url).not.toContain("github.com");
+    }
+  });
+
+  it("uses the legacy manifest for the legacy channel and never a GitHub mirror", () => {
+    expect(resolveUpdateEndpoints("legacy_win7", "http://127.0.0.1:8000/")).toEqual([
+      "http://127.0.0.1:8000/api/app/update/latest-legacy-win7.json",
+    ]);
+
+    expect(resolveUpdateEndpoints("stable", "https://api.lamstonehealthcare.com")).toEqual([
+      "https://api.lamstonehealthcare.com/api/app/update/latest.json",
+    ]);
+  });
+
+  it("treats an empty (204) feed as no update and stays on the configured host", async () => {
+    vi.spyOn(autoUpdateService, "isTauri").mockReturnValue(false);
+    vi.spyOn(autoUpdateService, "getConfig").mockReturnValue({
+      channel: "stable",
+      autoCheckOnStartup: true,
+      backgroundCheckIntervalHours: 24,
+    });
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await autoUpdateService.checkForUpdates();
+
+    expect(result.shouldUpdate).toBe(false);
+    expect(result.message).toContain("No updates");
+    expect(fetchMock).toHaveBeenCalled();
+    for (const call of fetchMock.mock.calls) {
+      expect(String(call[0])).not.toContain("lamstonehealthcare.com");
+      expect(String(call[0])).not.toContain("github.com");
+    }
+  });
+
+  it("desktop check and install ask the native updater for the configured server's feed only", async () => {
+    vi.spyOn(autoUpdateService, "isTauri").mockReturnValue(true);
+    vi.spyOn(autoUpdateService, "getConfig").mockReturnValue({
+      channel: "stable",
+      autoCheckOnStartup: true,
+      backgroundCheckIntervalHours: 24,
+    });
+    vi.spyOn(autoUpdateService, "getPrimaryEndpoint").mockReturnValue(
+      "http://127.0.0.1:8000/api/app/update/latest.json"
+    );
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const checked: unknown[] = [];
+    const installed: unknown[] = [];
+    registerMockHandler("updater_check", (args) => {
+      checked.push(args);
+      return { shouldUpdate: false };
+    });
+    registerMockHandler("updater_install", (args) => {
+      installed.push(args);
+      throw new Error("stop before relaunch");
+    });
+
+    const result = await autoUpdateService.checkForUpdates();
+    await autoUpdateService.installAndRestart(undefined, true).catch(() => {});
+
+    expect(result.shouldUpdate).toBe(false);
+    expect(checked).toEqual([{ endpoint: "http://127.0.0.1:8000/api/app/update/latest.json" }]);
+    expect(installed).toEqual([{ endpoint: "http://127.0.0.1:8000/api/app/update/latest.json" }]);
+    for (const call of fetchMock.mock.calls) {
+      expect(String(call[0])).not.toContain("lamstonehealthcare.com");
+      expect(String(call[0])).not.toContain("github.com");
+    }
   });
 });

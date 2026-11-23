@@ -1,0 +1,19 @@
+{
+  "before": [
+    200,
+    "exclusive"
+  ],
+  "put": 200,
+  "seen_after_s": 0.013,
+  "old_bill": {
+    "invoice_number": "C01-INV-1051",
+    "grand_total": 472,
+    "tax_total": 72,
+    "cgst_total": 0,
+    "igst_total": 72
+  },
+  "restored": [
+    200,
+    "exclusive"
+  ]
+}

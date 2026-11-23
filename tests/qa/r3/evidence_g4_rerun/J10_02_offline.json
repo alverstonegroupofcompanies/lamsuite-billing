@@ -1,0 +1,144 @@
+{
+  "bills": [
+    {
+      "i": 1,
+      "screen": [
+        "Offline Mode",
+        "C01-INV-13011",
+        "Next: C01-INV-13012"
+      ]
+    },
+    {
+      "i": 2,
+      "screen": [
+        "Offline Mode",
+        "C01-INV-13012",
+        "Next: C01-INV-13013"
+      ]
+    },
+    {
+      "i": 3,
+      "screen": [
+        "Offline Mode",
+        "C01-INV-13013",
+        "Next: C01-INV-13014"
+      ]
+    }
+  ],
+  "status_offline": [
+    "Offline Mode"
+  ],
+  "dropped_while_offline": 18,
+  "server_during_offline": 0,
+  "status_before_reconnect": [
+    "Offline Mode"
+  ],
+  "reconnect_calls": [
+    {
+      "m": "POST",
+      "u": "/device-sessions/heartbeat",
+      "st": 200,
+      "res": "{\"success\":true,\"status\":\"Active\",\"store_id\":\"4\",\"store_active\":true,\"store_version\":4,\"permission_profile_version\":1,\"last_reset_at\":null,\"last_reset_options\":null,\"public_ip\":\"127.0.0.1\",\"last_seen\":\"2026-11-22T09:50:16+05:30\",\"last_active\":\"2026-11-22T09:50:16+05:30\",\"timestamp\":\"2026-11-22T09:50"
+    },
+    {
+      "m": "POST",
+      "u": "/sync/push/batch",
+      "st": 200,
+      "res": "{\"success\":true,\"results\":{\"total\":3,\"processed\":3,\"failed\":0,\"processed_ids\":[\"sync_1795321188123_000001\",\"sync_1795321197667_000002\",\"sync_1795321207151_000003\"],\"errors\":[]},\"renumbered\":[]}"
+    }
+  ],
+  "status_after": [
+    "Live Synced"
+  ],
+  "server_rows": [
+    {
+      "id": 77,
+      "invoice_number": "C01-INV-13011",
+      "external_id": "ext_1795321188122_fa2328",
+      "grand_total": 115,
+      "counter_code": "C01",
+      "created_at": "2026-11-22 09:50:40"
+    },
+    {
+      "id": 78,
+      "invoice_number": "C01-INV-13012",
+      "external_id": "ext_1795321197667_bebf9a",
+      "grand_total": 230,
+      "counter_code": "C01",
+      "created_at": "2026-11-22 09:50:40"
+    },
+    {
+      "id": 79,
+      "invoice_number": "C01-INV-13013",
+      "external_id": "ext_1795321207150_206205",
+      "grand_total": 345,
+      "counter_code": "C01",
+      "created_at": "2026-11-22 09:50:40"
+    }
+  ],
+  "items": [
+    [
+      {
+        "product_name": "QA Cough Syrup 100ml",
+        "qty": 1,
+        "taxable_amount": 102.68,
+        "tax_amount": 12.32,
+        "total_amount": 115
+      }
+    ],
+    [
+      {
+        "product_name": "QA Cough Syrup 100ml",
+        "qty": 2,
+        "taxable_amount": 205.36,
+        "tax_amount": 24.64,
+        "total_amount": 230
+      }
+    ],
+    [
+      {
+        "product_name": "QA Cough Syrup 100ml",
+        "qty": 3,
+        "taxable_amount": 308.04,
+        "tax_amount": 36.96,
+        "total_amount": 345
+      }
+    ]
+  ],
+  "payments": [
+    [
+      {
+        "payment_mode": "Cash",
+        "amount": 115
+      }
+    ],
+    [
+      {
+        "payment_mode": "Cash",
+        "amount": 230
+      }
+    ],
+    [
+      {
+        "payment_mode": "Cash",
+        "amount": 345
+      }
+    ]
+  ],
+  "dup_numbers": [],
+  "dup_external": [],
+  "ledger": [
+    {
+      "reference_id": "77",
+      "qty_delta": -1
+    },
+    {
+      "reference_id": "78",
+      "qty_delta": -2
+    },
+    {
+      "reference_id": "79",
+      "qty_delta": -3
+    }
+  ]
+}

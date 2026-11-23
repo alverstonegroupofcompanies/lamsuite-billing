@@ -4,11 +4,14 @@ import { buildToolResponse } from "../../utils/formatters.js";
 
 export const approveCounterTool: ToolDefinition = {
   name: "lamsuite_approve_counter",
-  description: "Approve a newly enrolled remote counter workstation via pairing code or counter ID, or revoke an existing device remotely.",
+  description:
+    "Set a counter's status, or hand the workstation the one-time activation code that brings it online. " +
+    "Pairing codes are retired (CNT-013): a counter is joined only by claiming its code.",
   inputSchema: z.object({
-    counter_id: z.string().optional().describe("Counter ID to approve or revoke"),
-    pairing_code: z.string().optional().describe("6-character pairing code e.g. LK-8421 displayed on counter"),
-    status: z.enum(["active", "revoked", "pending_approval", "locked"]).default("active").describe("Target counter status"),
+    counter_id: z.string().describe("Counter ID to update or to issue a code for"),
+    activation_code: z.boolean().optional().describe("Issue a fresh one-time activation code instead of changing status"),
+    reissue: z.boolean().optional().describe("Replace the workstation holding this counter, revoking its device"),
+    status: z.enum(["active", "revoked", "locked"]).optional().describe("Target counter status"),
     reason: z.string().optional().describe("Revocation reason if revoking access"),
   }),
   annotations: {
@@ -19,16 +22,21 @@ export const approveCounterTool: ToolDefinition = {
   requiredPermission: "store:write",
   isWriteTool: true,
   handler: async (args, { client }) => {
-    if (args.pairing_code) {
-      const res = await client.post(`/counters/approve-pairing`, {
-        pairing_code: args.pairing_code,
-      });
-      return buildToolResponse(`Counter approved via pairing code ${args.pairing_code}`, res);
+    const counterId = encodeURIComponent(args.counter_id);
+
+    if (args.reissue) {
+      const res = await client.post(`/admin/counters/${counterId}/reissue`, {});
+      return buildToolResponse(`Counter ${args.counter_id} re-issued; the previous workstation is revoked`, res);
     }
-    if (!args.counter_id) {
-      throw new Error("Either counter_id or pairing_code must be provided.");
+    if (args.activation_code) {
+      const res = await client.post(`/admin/counters/${counterId}/activation-code`, {});
+      return buildToolResponse(`Activation code issued for counter ${args.counter_id} — show it once, it cannot be retrieved`, res);
     }
-    const res = await client.post(`/admin/counters/${encodeURIComponent(args.counter_id)}/status`, {
+    if (!args.status) {
+      throw new Error("Provide status, activation_code or reissue.");
+    }
+
+    const res = await client.post(`/admin/counters/${counterId}/status`, {
       status: args.status,
       revoke_reason: args.reason,
     });

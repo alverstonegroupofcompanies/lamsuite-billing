@@ -184,7 +184,7 @@ export const LoginPage: React.FC = () => {
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
                       className={inputClass}
-                      placeholder="admin@alverstone.in"
+                      placeholder="you@company.com"
                     />
                   </div>
 
@@ -278,7 +278,7 @@ export const LoginPage: React.FC = () => {
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   className={inputClass}
-                  placeholder="admin@alverstone.in"
+                  placeholder="you@company.com"
                 />
               </div>
 
@@ -323,7 +323,7 @@ export const LoginPage: React.FC = () => {
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   className={inputClass}
-                  placeholder="admin@alverstone.in"
+                  placeholder="you@company.com"
                 />
               </div>
 

@@ -61,8 +61,9 @@ import { isClinicalSupported } from "../lib/settings/storeTypePresets";
 import { shortcutDispatcher, type ShortcutHandler } from "../lib/keyboard/shortcutDispatcher";
 import { shortcutLabel, type ShortcutAction } from "../lib/keyboard/centralKeyMap";
 import { ModalLayer } from "../lib/modal/CentralModalManager";
-import { staffAuthService } from "../lib/auth/staffAuthService";
+import { counterSessionService } from "../lib/auth/counterSessionService";
 import { companySettingsService, DEFAULT_COLUMNS, DEFAULT_PAYMENT_MODES, type ColumnSetting, type HeaderFieldSetting, type PaymentModeConfig } from "../lib/settings/companySettingsService";
+import { enabledTenderModes, resolveTenderMode } from "../lib/billing/tenderModeKeys";
 import type { InvoiceTotals } from "../lib/billing/billingCalculations";
 import {
   invoiceManagementService,
@@ -71,11 +72,21 @@ import {
   type InvoiceDiffResult,
 } from "../lib/billing/invoiceManagementService";
 import { invoiceApprovalService } from "../lib/billing/invoiceApprovalService";
+import { ApprovalRequiredError } from "../lib/billing/approvalGateService";
+import { ApprovalDialog } from "../components/ApprovalDialog";
+import {
+  PharmacistConfirmationRequiredError,
+  type PharmacistCredential,
+} from "../lib/billing/pharmacistGate";
+import { PharmacistConfirmationDialog } from "../components/PharmacistConfirmationDialog";
 import { PrintPreviewModal } from "../components/PrintPreviewModal";
 import { TaxOverrideModal } from "../components/TaxOverrideModal";
 import { CustomerCombobox } from "../components/CustomerCombobox";
+import { SalespersonCombobox } from "../components/SalespersonCombobox";
 import { SmartQtyInput } from "../components/SmartQtyInput";
 import { PosGridRow, type PosRateBasis } from "../components/PosGridRow";
+import { ProductSearchDropdown } from "../components/pos/ProductSearchDropdown";
+import { ProductQuickAddModal } from "../components/purchases/ProductQuickAddModal";
 import { BillingColumnsModal } from "../components/BillingColumnsModal";
 import { ConversionModal } from "../components/ConversionModal";
 import { PosShortcutHintBar, type PosFocusContext } from "../components/PosShortcutHintBar";
@@ -86,8 +97,11 @@ import { storeRegistryService, type RegisteredStoreRecord } from "../lib/auth/st
 import { BillDiscountModal } from "../components/BillDiscountModal";
 import { RoundOffModal } from "../components/RoundOffModal";
 import { SalesOrderRecallModal } from "../components/SalesOrderRecallModal";
+import { DocumentNumberBadge } from "../components/DocumentNumberBadge";
 import { calculateDerivedLooseRate, formatQuantityDisplay, formatExpiryDisplay } from "../lib/billing/unitConversion";
-import { partiesStore, type Customer, normalizeIndianPhone, isValidGstin } from "../lib/masters/partiesStore";
+import { stateLabel } from "../lib/gst/stateCodes";
+import { partiesStore, type Customer, normalizeIndianPhone, isValidGstin, isValidIndianPhone } from "../lib/masters/partiesStore";
+import { salespersonStore, type SalespersonMaster } from "../lib/masters/salespersonStore";
 import { syncQueueService } from "../lib/sync/syncQueueService";
 import { posSalesReturnService } from "../lib/billing/posSalesReturnService";
 import { unitsStore } from "../lib/masters/unitsStore";
@@ -128,6 +142,8 @@ type CartSourceDocument = {
   bill_discount_percent?: number | null;
   bill_discount_amount?: number | null;
   discount_total: number;
+  salesperson_id?: string | number | null;
+  salesperson_name?: string | null;
 };
 
 type CartSourceItem = {
@@ -162,11 +178,16 @@ export const PosBillingPage: React.FC = () => {
   const [customerPhone, setCustomerPhone] = useState("");
   const [customerGstin, setCustomerGstin] = useState("");
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
+  // GAP-01 / SPR-010: the person this bill credits, and who this counter may name.
+  const [salespersonName, setSalespersonName] = useState("");
+  const [selectedSalesperson, setSelectedSalesperson] = useState<SalespersonMaster | null>(null);
+  const [salespeopleEligible, setSalespeopleEligible] = useState<SalespersonMaster[]>([]);
   const [activePriceList, setActivePriceList] = useState<string | null>(null);
   const [doctorName, setDoctorName] = useState("");
   const [patientName, setPatientName] = useState("");
   const [billNotes, setBillNotes] = useState("");
   const [invoiceNumber, setInvoiceNumber] = useState<string>(() => companySettingsService.previewNextInvoiceNumber());
+  const [lastIssuedNumber, setLastIssuedNumber] = useState<string | null>(null);
 
   // Keyboard-first Grid & Focus State
   const [selectedRowIndex, setSelectedRowIndex] = useState<number | null>(null);
@@ -203,6 +224,8 @@ export const PosBillingPage: React.FC = () => {
   // Search & Auto-complete
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<ProductItem[]>([]);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [quickAddProductName, setQuickAddProductName] = useState<string | null>(null);
   const [selectedSearchIndex, setSelectedSearchIndex] = useState(0);
   const [dropdownPosition, setDropdownPosition] = useState<{ top: number; left: number; width: number } | null>(null);
   const [selectedProductForBatch, setSelectedProductForBatch] = useState<ProductItem | null>(null);
@@ -213,10 +236,17 @@ export const PosBillingPage: React.FC = () => {
   // Product Entry Style & Inline Entry Row State
   const [appSettingsState, setAppSettingsState] = useState(() => companySettingsService.getSettings());
 
+  // SPR-006: the switch says a bill must name someone. A store that has named
+  // nobody yet is never stranded by its own default, and the server reads that
+  // same pair of facts before it refuses the upload.
+  const salespersonRequired =
+    appSettingsState.salesperson_on_bill === "required" && salespeopleEligible.length > 0;
+
   useEffect(() => {
     companySettingsService.loadSettings().then((fresh) => {
       setAppSettingsState(fresh);
-      if (!editInvoiceParam) {
+      // A late settings load must not renumber a bill that is already open.
+      if (!editInvoiceParam && posCartService.getLines().length === 0) {
         setInvoiceNumber(companySettingsService.previewNextInvoiceNumber());
       }
     });
@@ -404,6 +434,24 @@ export const PosBillingPage: React.FC = () => {
   const isFinalizingRef = useRef(false);
   const [isSendingWhatsApp, setIsSendingWhatsApp] = useState(false);
 
+  // APR-003..010: a bill the server deferred above a threshold. The grant is
+  // bound to the bill's external id, so the retry sends the same identity.
+  const [approvalPrompt, setApprovalPrompt] = useState<{
+    actions: string[];
+    reasons: Record<string, string>;
+    externalId: string;
+    shouldPrint: boolean;
+  } | null>(null);
+  const approvalGrantRef = useRef<{ token: string; externalId: string } | null>(null);
+
+  // PHR-004: a bill held by a restricted drug. The credential is typed for one
+  // request — the ref is emptied before the save runs and never touches disk.
+  const [pharmacistPrompt, setPharmacistPrompt] = useState<{
+    refusal: PharmacistConfirmationRequiredError;
+    shouldPrint: boolean;
+  } | null>(null);
+  const pharmacistCredentialRef = useRef<{ credential: PharmacistCredential; externalId: string } | null>(null);
+
   // Print Preview Modal State
   const [previewModalState, setPreviewModalState] = useState<{
     isOpen: boolean;
@@ -418,6 +466,7 @@ export const PosBillingPage: React.FC = () => {
   // References for focus control
   const searchInputRef = useRef<HTMLInputElement>(null);
   const customerInputRef = useRef<HTMLInputElement>(null);
+  const salespersonInputRef = useRef<HTMLInputElement>(null);
   const customerPhoneInputRef = useRef<HTMLInputElement>(null);
   const doctorInputRef = useRef<HTMLInputElement>(null);
   const patientInputRef = useRef<HTMLInputElement>(null);
@@ -518,7 +567,7 @@ export const PosBillingPage: React.FC = () => {
       String(matchedCust?.id || invoice.customer_id || ""),
       invoice.customer_name || "Walk-in Customer",
       invoice.customer_gstin || matchedCust?.gstin || "",
-      invoice.place_of_supply || matchedCust?.place_of_supply || "32-Kerala",
+      invoice.place_of_supply || matchedCust?.place_of_supply || stateLabel(appSettingsState.state_code),
       resolvedPhone
     );
 
@@ -829,7 +878,7 @@ export const PosBillingPage: React.FC = () => {
     if (editingInvoice) {
       const counterCode =
         storeRegistryService.getActiveStore()?.counter_code ||
-        staffAuthService.getCurrentSession()?.counterCode ||
+        counterSessionService.state().counterCode ||
         "C01";
       void invoiceManagementService.releaseInvoiceLock(editingInvoice.id, counterCode);
       invoiceApprovalService.clearGrant(editingInvoice.id);
@@ -1258,13 +1307,35 @@ export const PosBillingPage: React.FC = () => {
     }
   };
 
-  // Focus search input on initial mount only
+  // Focus the entry row on initial mount only. The row moves with the product-entry layout, so
+  // the landing focus has to follow it - the search_bar input is never mounted in inline_row.
   useEffect(() => {
-    searchInputRef.current?.focus();
+    handleFocusSearch();
     refreshCartState();
     // Warm up and ensure product catalog is ready for billing
     productsStore.getAllProducts().catch(() => {});
   }, []);
+
+  /**
+   * GAP-01 / SPR-010: the people this counter may put on a bill. Pulled to the
+   * device cache so the type-ahead answers with no network, and read again
+   * whenever the counter or the owner's `salesperson_on_bill` switch moves.
+   */
+  useEffect(() => {
+    const load = async () => {
+      await salespersonStore.ensureSalespeoplePopulated().catch(() => {});
+      const rows = await salespersonStore
+        .selectableForCounter(counterSessionService.state().counterId)
+        .catch(() => [] as SalespersonMaster[]);
+      setSalespeopleEligible(rows);
+    };
+
+    void load();
+
+    return counterSessionService.subscribe(() => {
+      void load();
+    });
+  }, [appSettingsState.salesperson_on_bill]);
 
   // Global POS Hotkeys Listener
   useEffect(() => {
@@ -1406,36 +1477,34 @@ export const PosBillingPage: React.FC = () => {
         const activeTag = (document.activeElement?.tagName || "").toLowerCase();
         const isTypingField = activeTag === "input" || activeTag === "textarea";
 
-        const modeMap: Record<string, string> = {
-          "1": "Cash", c: "Cash",
-          "2": "UPI", u: "UPI",
-          "3": "Card", d: "Card",
-          "4": "Bank Transfer", b: "Bank Transfer",
-          "5": "Cheque", q: "Cheque",
-          "6": "Wallet", w: "Wallet",
-          "7": "Gift Voucher", v: "Gift Voucher",
-          "8": "Credit", r: "Credit",
-        };
+        // The tender buttons are the mode map, and their numbers are positions among the modes
+        // this store has enabled. The helper reads the physical key, so macOS Option+2 (`™`)
+        // still resolves to the second button (KB-03).
+        const configuredModes = companySettingsService.getSettings().payments?.modes;
+        const tenderModes = enabledTenderModes(
+          configuredModes?.length ? configuredModes : DEFAULT_PAYMENT_MODES
+        );
+        const pickMode = (evt: KeyboardEvent) => resolveTenderMode(evt, tenderModes);
 
         if (e.altKey) {
-          if (keyLower === "a") {
+          if (code === "KeyA" || keyLower === "a") {
             e.preventDefault();
             handleAddPaymentLine();
             return;
           }
-          if (keyLower === "f") {
+          if (code === "KeyF" || keyLower === "f") {
             e.preventDefault();
             handleFillRemainder(activeTenderIndex);
             return;
           }
-          if (keyLower === "h") {
+          if (code === "KeyH" || keyLower === "h") {
             e.preventDefault();
             handleSplitHalf();
             return;
           }
-          if (modeMap[keyLower] || modeMap[e.key]) {
+          const targetMode = pickMode(e);
+          if (targetMode) {
             e.preventDefault();
-            const targetMode = modeMap[keyLower] || modeMap[e.key];
             if (tenders.length === 1 && tenders[0].amount >= totals.grand_total) {
               handleUpdatePaymentLine(0, { mode: targetMode });
             } else if (tenderCalc.balanceRemaining > 0) {
@@ -1448,9 +1517,9 @@ export const PosBillingPage: React.FC = () => {
         }
 
         if (!isTypingField) {
-          if (modeMap[keyLower] || modeMap[e.key]) {
+          const targetMode = pickMode(e);
+          if (targetMode) {
             e.preventDefault();
-            const targetMode = modeMap[keyLower] || modeMap[e.key];
             if (tenders.length === 1 && tenders[0].amount >= totals.grand_total) {
               handleUpdatePaymentLine(0, { mode: targetMode });
             } else if (tenderCalc.balanceRemaining > 0) {
@@ -1925,6 +1994,13 @@ export const PosBillingPage: React.FC = () => {
       patientInputRef.current?.focus();
       return true;
     },
+    focusSalesperson: () => {
+      // `off` is the owner saying this store keeps no salesperson column, so
+      // the chord belongs to whatever else wants the key.
+      if (appSettingsState.salesperson_on_bill === "off") return false;
+      salespersonInputRef.current?.focus();
+      return true;
+    },
     billDiscount: () => {
       const target = selectedRowIndex !== null ? lines[selectedRowIndex] : undefined;
       if (target) {
@@ -2166,6 +2242,7 @@ export const PosBillingPage: React.FC = () => {
     const query = searchQuery.trim();
     if (!query) {
       setSearchResults([]);
+      setSearchOpen(false);
       return;
     }
 
@@ -2199,6 +2276,7 @@ export const PosBillingPage: React.FC = () => {
         !dropdownRef.current.contains(target)
       ) {
         setSearchResults([]);
+        setSearchOpen(false);
       }
     };
 
@@ -2273,8 +2351,9 @@ export const PosBillingPage: React.FC = () => {
 
     if (e.key === "Escape") {
       e.preventDefault();
-      if (searchResults.length > 0) {
+      if (searchResults.length > 0 || (searchOpen && !entryDraftProduct)) {
         setSearchResults([]);
+        setSearchOpen(false);
         return;
       }
       if (entryDraftProduct) {
@@ -2316,6 +2395,12 @@ export const PosBillingPage: React.FC = () => {
           await selectProductAndAddToCart(found[0], qty);
           setSearchQuery("");
           setSearchResults([]);
+        } else if (canQuickAddProduct) {
+          // PRD-02: Enter on an unknown name opens the same quick-add the
+          // purchase screen has, with what the cashier typed already filled in.
+          openProductQuickAdd(query);
+        } else {
+          showNotification(`No product matches "${query}".`, "warning");
         }
       }
     }
@@ -2354,6 +2439,21 @@ export const PosBillingPage: React.FC = () => {
         searchInputRef.current?.focus();
       }
     }, 40);
+  };
+
+  const canQuickAddProduct = counterSessionService.allowsModule("masters");
+
+  // PRD-02: a cashier who searched a product that does not exist yet can name it
+  // and start billing straight away, without leaving the counter.
+  const openProductQuickAdd = (name: string) => {
+    setSearchResults([]);
+    setSearchOpen(false);
+    setQuickAddProductName(name);
+  };
+
+  const handleQuickProductCreated = async (product: ProductItem) => {
+    await quickScanAddToCart(product, 1);
+    showNotification(`${product.name} created and added to the bill.`, "success");
   };
 
   const handleSelectProductForEntryRow = async (product: ProductItem, prefixQty = 1) => {
@@ -2954,7 +3054,7 @@ export const PosBillingPage: React.FC = () => {
         void invoiceManagementService.releaseInvoiceLock(
           editingInvoice.id,
           storeRegistryService.getActiveStore()?.counter_code ||
-            staffAuthService.getCurrentSession()?.counterCode ||
+            counterSessionService.state().counterCode ||
             "C01"
         );
         posCartService.clearCart();
@@ -3006,7 +3106,11 @@ export const PosBillingPage: React.FC = () => {
     return tenderCalc.changeDue;
   }, [tenderCalc]);
 
-  const preparePrintData = (linesSource?: PosCartLine[], totalsSource?: InvoiceTotals): InvoicePrintData => {
+  const preparePrintData = (
+    linesSource?: PosCartLine[],
+    totalsSource?: InvoiceTotals,
+    documentNumber?: string
+  ): InvoicePrintData => {
     const activeLines = linesSource || (posCartService.getLines().length > 0 ? posCartService.getLines() : lines);
     const activeTotals = totalsSource || (posCartService.getLines().length > 0 ? posCartService.getTotals() : totals);
 
@@ -3016,7 +3120,8 @@ export const PosBillingPage: React.FC = () => {
     const storeHeader = companySettingsService.getStorePrintHeader();
 
     return {
-      invoice_number: invoiceNumber,
+      // The counter issues the number at save; until then this is the preview.
+      invoice_number: documentNumber || invoiceNumber,
       invoice_date: new Date().toISOString().slice(0, 10),
       store_name: storeHeader.store_name,
       store_address: storeHeader.store_address,
@@ -3030,7 +3135,11 @@ export const PosBillingPage: React.FC = () => {
       upi_vpa: storeHeader.upi_vpa,
       terms_and_conditions: storeHeader.terms_and_conditions,
       jurisdiction_note: storeHeader.jurisdiction_note,
-      place_of_supply: settings.state_code ? `${settings.state_code}-Kerala` : "32-Kerala",
+      // A walk-in bill is supplied where the store is, not where an old till assumed.
+      place_of_supply: stateLabel(
+        customerGstin?.trim() || posCartService.getCustomer().placeOfSupply || selectedCustomer?.place_of_supply,
+        settings.state_code
+      ),
       customer_name: customerName || "Walk-in Customer",
       customer_phone: customerPhone || "",
       customer_gstin: customerGstin?.trim().toUpperCase() || undefined,
@@ -3042,9 +3151,11 @@ export const PosBillingPage: React.FC = () => {
         : tenderCalcSnapshot.creditAmount > 0.001
         ? "Partial"
         : "Paid",
-      payments: tenders.map((t) => ({
+      // PAY-02: a ₹500 note on a ₹210 bill prints as ₹210 received and ₹290
+      // change returned — the payment lines always sum to what the bill kept.
+      payments: billingTenderService.settleTenders(activeTotals.grand_total, tenders).lines.map((t) => ({
         mode: t.mode,
-        amount: Number(t.amount) || 0,
+        amount: t.amount,
         reference_no: settings.payments?.printShowReferences
           ? t.reference_no
           : t.reference_no
@@ -3141,16 +3252,17 @@ export const PosBillingPage: React.FC = () => {
         return;
       }
 
-      // Auto-save and sync customer if named customer or phone number entered
+      // Auto-save and sync the customer only when a valid mobile number is on
+      // the bill. A typed name alone must not create a party: a partial name
+      // used to be saved as a brand-new customer instead of matching one.
       let activeCust = selectedCustomer;
       const cleanPhone = customerPhone?.trim() || "";
       const cleanName = customerName?.trim() || "";
       const isNamedCustomer = cleanName !== "" && cleanName.toLowerCase() !== "walk-in" && cleanName.toLowerCase() !== "walk-in customer";
+      const hasValidPhone = isValidIndianPhone(cleanPhone);
 
-      if (!activeCust && (isNamedCustomer || cleanPhone.length >= 10)) {
-        if (cleanPhone) {
-          activeCust = await partiesStore.findCustomerByPhone(cleanPhone).catch(() => null);
-        }
+      if (!activeCust && hasValidPhone) {
+        activeCust = await partiesStore.findCustomerByPhone(cleanPhone).catch(() => null);
         if (!activeCust && isNamedCustomer) {
           const matches = await partiesStore.searchCustomers(cleanName, 5).catch(() => []);
           activeCust = matches.find((m) => m.name.toLowerCase() === cleanName.toLowerCase()) || null;
@@ -3165,8 +3277,8 @@ export const PosBillingPage: React.FC = () => {
           }
         } else {
           const created = await partiesStore.quickCreateCustomer({
-            name: isNamedCustomer ? cleanName : `Customer ${cleanPhone.slice(-4)}`,
-            phone: cleanPhone || undefined,
+            name: isNamedCustomer ? cleanName : `Customer ${normalizeIndianPhone(cleanPhone).slice(-4)}`,
+            phone: cleanPhone,
             gstin: customerGstin?.trim().toUpperCase() || undefined,
           }).catch(() => null);
           if (created) {
@@ -3193,7 +3305,9 @@ export const PosBillingPage: React.FC = () => {
         activeCust?.id || selectedCustomer?.id || "",
         activeCust?.name || customerName || "Walk-in Customer",
         customerGstin || activeCust?.gstin || "",
-        activeCust?.place_of_supply || selectedCustomer?.place_of_supply || "32-Kerala",
+        activeCust?.place_of_supply ||
+          selectedCustomer?.place_of_supply ||
+          stateLabel(companySettingsService.getSettings().state_code),
         customerPhone || activeCust?.phone || selectedCustomer?.phone || ""
       );
 
@@ -3278,7 +3392,6 @@ export const PosBillingPage: React.FC = () => {
       }
 
       const tenderCalcSnapshot = billingTenderService.calculateTenderBalance(totalsSnapshot.grand_total, effectiveTenders);
-      const printData = preparePrintData(cartSnapshot, totalsSnapshot);
 
       // Snapshot promotions before the cart is cleared
       const couponSnapshot = appliedCoupon;
@@ -3286,16 +3399,32 @@ export const PosBillingPage: React.FC = () => {
       const loyaltyCustomerId = activeCust?.id || selectedCustomer?.id || null;
       const netPaidSnapshot = totalsSnapshot.net_before_round;
 
-      // 4. Save invoice with payment lines
+      // 4. Save invoice with payment lines. A retry after an approver's grant
+      // reuses the identity the grant was minted against; the token is read
+      // once and dropped whether or not the save succeeds.
+      const approvalGrant = approvalGrantRef.current;
+      approvalGrantRef.current = null;
+
+      const pharmacistGrant = pharmacistCredentialRef.current;
+      pharmacistCredentialRef.current = null;
+
       const res = await posCartService.finalizeInvoice(invoiceNumber, effectiveTenders, {
         autoClear: false,
         linesSnapshot: cartSnapshot,
         totalsSnapshot,
         cashChange: tenderCalcSnapshot.changeDue,
-        payments: tenders,
+        payments: effectiveTenders,
+        externalId: approvalGrant?.externalId || pharmacistGrant?.externalId,
+        approvalToken: approvalGrant?.token,
+        pharmacist: pharmacistGrant?.credential ?? null,
       });
 
       if (res.success) {
+        // The counter's number is the one filed; the screen only previewed it.
+        const billedNumber = res.invoiceNumber || invoiceNumber;
+        const reissued = Boolean(res.invoiceNumber && res.invoiceNumber !== invoiceNumber);
+        const printData = preparePrintData(cartSnapshot, totalsSnapshot, billedNumber);
+
         let savedPdfPath: string | undefined;
 
         // Record coupon redemption, point redemption and point accrual against the saved invoice
@@ -3346,7 +3475,7 @@ export const PosBillingPage: React.FC = () => {
             setPreviewModalState({
               isOpen: true,
               data: printData,
-              title: `Tax Invoice Preview - #${invoiceNumber}`,
+              title: `Tax Invoice Preview - #${billedNumber}`,
             });
           } else {
             const previewMode = appSettings.printing.previewMode || "always";
@@ -3372,7 +3501,7 @@ export const PosBillingPage: React.FC = () => {
               setPreviewModalState({
                 isOpen: true,
                 data: printData,
-                title: `Tax Invoice Preview - #${invoiceNumber}`,
+                title: `Tax Invoice Preview - #${billedNumber}`,
               });
             }
           }
@@ -3399,7 +3528,7 @@ export const PosBillingPage: React.FC = () => {
         if (appSettings.whatsapp?.enabled && appSettings.whatsapp?.autoSendOnBillSave && customerPhone && customerPhone.trim().length >= 10) {
           whatsappService.dispatchInvoice(customerPhone, printData).then((waRes) => {
             if (waRes.success) {
-              showNotification(`Auto-sent invoice #${invoiceNumber} to customer via WhatsApp!`, "success");
+              showNotification(`Auto-sent invoice #${billedNumber} to customer via WhatsApp!`, "success");
             }
           }).catch((waErr) => {
             console.warn("Auto-dispatch WhatsApp error:", waErr);
@@ -3410,9 +3539,11 @@ export const PosBillingPage: React.FC = () => {
           `${
             savedPdfPath
               ? `Saved to: ${savedPdfPath}`
-              : `Invoice ${invoiceNumber} billed successfully!`
-          }${convertedQuotationNo ? ` Quotation ${convertedQuotationNo} converted.` : ""}`,
-          "success",
+              : `Invoice ${billedNumber} billed successfully!`
+          }${reissued ? ` The counter issued ${billedNumber} in place of ${invoiceNumber}.` : ""}${
+            convertedQuotationNo ? ` Quotation ${convertedQuotationNo} converted.` : ""
+          }`,
+          reissued ? "warning" : "success",
           savedPdfPath
             ? [
                 {
@@ -3428,7 +3559,8 @@ export const PosBillingPage: React.FC = () => {
               ]
             : undefined
         );
-        await companySettingsService.syncNextInvoiceSequence(invoiceNumber);
+        setLastIssuedNumber(billedNumber);
+        await companySettingsService.syncNextInvoiceSequence(billedNumber);
         setInvoiceNumber(companySettingsService.previewNextInvoiceNumber());
         setCustomerName("Walk-in Customer");
         setCustomerPhone("");
@@ -3440,6 +3572,24 @@ export const PosBillingPage: React.FC = () => {
         }, 50);
       }
     } catch (err) {
+      if (err instanceof ApprovalRequiredError) {
+        // Nothing was written. Ask for an approver, then send the same bill.
+        setApprovalPrompt({
+          actions: err.actions,
+          reasons: err.reasons,
+          externalId: err.externalId,
+          shouldPrint,
+        });
+        return;
+      }
+
+      if (err instanceof PharmacistConfirmationRequiredError) {
+        // Nothing was written. Ask the pharmacist on duty, then send the same
+        // bill with their PIN — and forget the PIN once it has been sent.
+        setPharmacistPrompt({ refusal: err, shouldPrint });
+        return;
+      }
+
       showNotification(err instanceof Error ? err.message : "Error saving invoice", "error");
     } finally {
       isFinalizingRef.current = false;
@@ -3502,14 +3652,46 @@ export const PosBillingPage: React.FC = () => {
         </div>
       )}
 
+      {/* APR-003..010: approver gate for a bill above the counter's ceiling. */}
+      <ApprovalDialog
+        open={approvalPrompt !== null}
+        actions={approvalPrompt?.actions ?? []}
+        reasons={approvalPrompt?.reasons ?? {}}
+        externalId={approvalPrompt?.externalId ?? ""}
+        onClose={() => setApprovalPrompt(null)}
+        onGranted={(token) => {
+          const pending = approvalPrompt;
+          setApprovalPrompt(null);
+          if (!pending) return;
+
+          approvalGrantRef.current = { token, externalId: pending.externalId };
+          void handleFinalizeAndPrint(pending.shouldPrint);
+        }}
+      />
+
+      {/* PHR-004: a restricted drug waits for the pharmacist who holds a registration. */}
+      <PharmacistConfirmationDialog
+        open={pharmacistPrompt !== null}
+        refusal={pharmacistPrompt?.refusal ?? null}
+        onClose={() => setPharmacistPrompt(null)}
+        onConfirmed={(credential) => {
+          const pending = pharmacistPrompt;
+          setPharmacistPrompt(null);
+          if (!pending) return;
+
+          pharmacistCredentialRef.current = {
+            credential,
+            externalId: pending.refusal.externalId,
+          };
+          void handleFinalizeAndPrint(pending.shouldPrint);
+        }}
+      />
+
       {/* Header Strip: Customer & Bill Meta */}
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-2.5 shadow-2xs">
         <div className="flex flex-wrap items-center gap-4">
           {posHeaders.find((h) => h.id === "invoice_no")?.visible !== false && (
-            <div>
-              <span className="text-[11px] font-bold text-[var(--color-text-muted)] uppercase tracking-wider">Invoice No</span>
-              <p className="text-xs font-bold font-mono text-[var(--color-accent)]">{invoiceNumber}</p>
-            </div>
+            <DocumentNumberBadge savedNumber={lastIssuedNumber} nextNumber={invoiceNumber} />
           )}
 
           {/* Active Tax Regime Badge */}
@@ -3591,6 +3773,25 @@ export const PosBillingPage: React.FC = () => {
                   </span>
                 )}
               </div>
+            </>
+          )}
+
+          {/* GAP-01 / SPR-006: `off` is the owner saying this store keeps no
+              salesperson column — the field, not just the check, disappears. */}
+          {appSettingsState.salesperson_on_bill !== "off" && (
+            <>
+              <div className="h-6 w-px bg-[var(--color-border)] hidden sm:block" />
+              <SalespersonCombobox
+                value={salespersonName}
+                onChangeText={setSalespersonName}
+                selected={selectedSalesperson}
+                inputRef={salespersonInputRef}
+                required={salespersonRequired}
+                onSelect={(person) => {
+                  setSelectedSalesperson(person);
+                  posCartService.setSalesperson(person?.id || "", person?.name || "");
+                }}
+              />
             </>
           )}
 
@@ -3811,11 +4012,18 @@ export const PosBillingPage: React.FC = () => {
                 ref={searchInputRef}
                 type="text"
                 value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
+                onChange={(e) => {
+                  setSearchQuery(e.target.value);
+                  setSearchOpen(e.target.value.trim().length > 0);
+                  updateDropdownPosition();
+                }}
                 onKeyDown={handleBarcodeOrEnter}
                 onFocus={() => {
                   setFocusContext("search");
                   setSelectedRowIndex(null);
+                  if (searchQuery.trim().length > 0) {
+                    setSearchOpen(true);
+                  }
                   if (searchQuery.trim().length > 0 && searchResults.length === 0) {
                     const { query } = parseQuantityPrefix(searchQuery.trim());
                     productsStore.searchProducts(query).then((res) => {
@@ -3834,6 +4042,7 @@ export const PosBillingPage: React.FC = () => {
                   }
                   setTimeout(() => {
                     setSearchResults([]);
+                    setSearchOpen(false);
                   }, 180);
                 }}
                 placeholder="Scan barcode or type item / product name (Press Enter)... [F1]"
@@ -3848,7 +4057,7 @@ export const PosBillingPage: React.FC = () => {
         )}
 
         {/* Search Dropdown Results rendered in React Portal */}
-        {searchResults.length > 0 && dropdownPosition && createPortal(
+        {searchOpen && searchQuery.trim().length > 0 && dropdownPosition && createPortal(
           <div
             ref={dropdownRef}
             style={{
@@ -3860,73 +4069,20 @@ export const PosBillingPage: React.FC = () => {
             }}
             className="max-h-72 overflow-y-auto rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-dropdown divide-y divide-[var(--color-border-subtle)]"
           >
-            {searchResults.map((prod, index) => {
-              const isSelected = index === selectedSearchIndex;
-              const isOutOfStock = (prod.current_stock || 0) <= 0;
-              return (
-                <div
-                  key={prod.id}
-                  onMouseEnter={() => setSelectedSearchIndex(index)}
-                  onClick={() => {
-                    const { qty } = parseQuantityPrefix(searchQuery);
-                    selectProductAndAddToCart(prod, qty);
-                    setSearchQuery("");
-                    setSearchResults([]);
-                  }}
-                  className={`flex cursor-pointer items-center justify-between px-4 py-2.5 text-xs transition-colors ${
-                    isSelected
-                      ? "bg-[var(--color-accent-soft)] text-[var(--color-text)] border-l-4 border-l-[var(--color-accent)] pl-3"
-                      : "hover:bg-[var(--color-surface-hover)] text-[var(--color-text)]"
-                  }`}
-                >
-                  <div>
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <p className={`font-semibold ${isSelected ? "text-[var(--color-accent)] font-bold" : "text-[var(--color-text)]"}`}>
-                        {prod.name}
-                      </p>
-                      {prod.generic_name && (
-                        <span className="rounded-[4px] bg-[var(--color-surface-subtle)] px-1.5 py-0.5 text-[10px] text-[var(--color-text-muted)] font-normal border border-[var(--color-border)]">
-                          {prod.generic_name}
-                        </span>
-                      )}
-                      {prod.units_per_pack > 1 && (
-                        <span className="rounded-[4px] bg-accent-soft px-1.5 py-0.5 text-[10px] text-accent font-medium">
-                          Pack of {prod.units_per_pack} {prod.sub_unit_name || "pcs"}
-                        </span>
-                      )}
-                      {isOutOfStock && (
-                        <span className="rounded bg-[var(--color-danger-bg)] text-[var(--color-danger-text)] text-[10px] font-bold px-1.5 py-0.2">
-                          Out of Stock
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-[11px] text-[var(--color-text-muted)] mt-0.5 font-mono">
-                      Barcode: <span>{prod.barcode || "—"}</span>{" "}
-                      {prod.hsn_sac_code ? `| HSN: ${prod.hsn_sac_code}` : ""} | GST: {prod.gst_percent}%
-                    </p>
-                  </div>
-                  <div className="text-right shrink-0 ml-4 font-mono">
-                    <p className="font-bold text-[var(--color-text)] text-sm tabular-nums">
-                      ₹ {(prod.sel_rate || prod.mrp).toFixed(2)}
-                      <span className="text-[10px] text-[var(--color-text-muted)] font-normal ml-0.5">
-                        /{prod.units_per_pack > 1 ? (prod.unit_name || "Strip") : (prod.unit_name || "pc")}
-                      </span>
-                    </p>
-                    <p className="text-[10px] text-[var(--color-text-muted)]">
-                      MRP: ₹{prod.mrp.toFixed(2)}
-                      {(prod as any).nearest_expiry ? ` • Exp: ${formatExpiryDisplay((prod as any).nearest_expiry)}` : ""}
-                    </p>
-                    <p
-                      className={`text-[10px] font-medium ${
-                        !isOutOfStock ? "text-[var(--color-success-text)]" : "text-[var(--color-danger-text)] font-bold"
-                      }`}
-                    >
-                      Stock: {prod.current_stock || 0}
-                    </p>
-                  </div>
-                </div>
-              );
-            })}
+            <ProductSearchDropdown
+              results={searchResults}
+              query={searchQuery}
+              selectedIndex={selectedSearchIndex}
+              canQuickAdd={canQuickAddProduct}
+              onHighlight={(index) => setSelectedSearchIndex(index)}
+              onSelect={(prod) => {
+                const { qty } = parseQuantityPrefix(searchQuery);
+                selectProductAndAddToCart(prod, qty);
+                setSearchQuery("");
+                setSearchResults([]);
+              }}
+              onQuickAdd={openProductQuickAdd}
+            />
           </div>,
           document.body
         )}
@@ -3948,10 +4104,14 @@ export const PosBillingPage: React.FC = () => {
               searchQuery={searchQuery}
               onSearchChange={(val) => {
                 setSearchQuery(val);
+                setSearchOpen(val.trim().length > 0);
                 updateDropdownPosition();
               }}
               onSearchFocus={() => {
                 setFocusContext("search");
+                if (searchQuery.trim().length > 0) {
+                  setSearchOpen(true);
+                }
                 if (searchQuery.trim().length > 0 && searchResults.length === 0) {
                   const { query } = parseQuantityPrefix(searchQuery.trim());
                   productsStore.searchProducts(query).then((res) => {
@@ -3970,11 +4130,12 @@ export const PosBillingPage: React.FC = () => {
                 }
                 setTimeout(() => {
                   setSearchResults([]);
+                  setSearchOpen(false);
                 }, 180);
               }}
               onSearchKeyDown={handleBarcodeOrEnter}
               searchInputRef={entryProductInputRef}
-              isDropdownOpen={searchResults.length > 0}
+              isDropdownOpen={searchOpen && searchQuery.trim().length > 0}
               onSelectRow={() => handleFocusSearch()}
               onQtyChange={(newPacks, newLoose) => {
                 setEntryPacks(newPacks);
@@ -4455,16 +4616,8 @@ export const PosBillingPage: React.FC = () => {
         const upiLine = tenders.find((t) => t.mode === "UPI" && t.amount > 0);
         const creditLine = tenders.find((t) => t.mode === "Credit" && t.amount > 0);
         const hasNamedCustomer = Boolean(selectedCustomer || (customerName && customerName.trim() !== "Walk-in Customer"));
-        const availableModes = [
-          "Cash",
-          "UPI",
-          "Card",
-          "Bank Transfer",
-          "Cheque",
-          "Wallet",
-          "Gift Voucher",
-          "Credit",
-        ].filter((m) => modeConfigs[m]?.enabled !== false);
+        // Same list, same order, as the settlement keys: the button numbers are positions here.
+        const availableModes = enabledTenderModes(rawModes);
 
         return (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 select-none font-sans animate-in fade-in duration-100">
@@ -5048,8 +5201,10 @@ export const PosBillingPage: React.FC = () => {
 
                 {/* 4. Dynamic UPI QR Panel */}
                 {(() => {
-                  const activeSession = staffAuthService.getCurrentSession();
-                  const activeCounter = activeSession?.counterId || "Counter 01";
+                  const activeCounter =
+                    storeRegistryService.getActiveStore()?.counter_code ||
+                    counterSessionService.state().counterCode ||
+                    "Counter 01";
                   const activeUpi = companySettingsService.getActiveUpi(activeCounter);
 
                   if (!upiLine || !activeUpi || !activeUpi.showInSettlement) return null;
@@ -5597,6 +5752,14 @@ export const PosBillingPage: React.FC = () => {
       <KeyboardShortcutsModal
         isOpen={isShortcutsModalOpen}
         onClose={() => setIsShortcutsModalOpen(false)}
+      />
+
+      {/* PRD-02: quick-add the product a search could not find */}
+      <ProductQuickAddModal
+        isOpen={quickAddProductName !== null}
+        initialName={quickAddProductName || ""}
+        onClose={() => setQuickAddProductName(null)}
+        onProductCreated={handleQuickProductCreated}
       />
 
       {/* ARIA Live Region for Screen Readers */}

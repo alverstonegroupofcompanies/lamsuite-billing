@@ -11,6 +11,7 @@ class StockAdjustmentDocument extends Model
     protected $fillable = [
         'document_id',
         'store_id',
+        'counter_id',
         'mode',
         'reason',
         'notes',
@@ -39,6 +40,11 @@ class StockAdjustmentDocument extends Model
     public function store(): BelongsTo
     {
         return $this->belongsTo(Store::class);
+    }
+
+    public function counter(): BelongsTo
+    {
+        return $this->belongsTo(Counter::class);
     }
 
     public function lines(): HasMany

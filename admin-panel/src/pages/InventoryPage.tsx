@@ -44,6 +44,16 @@ interface AdjustmentDocument {
   lines?: AdjustmentLine[];
 }
 
+interface ReceiptLineDraft {
+  item_id: number;
+  product_name: string;
+  batch_no: string;
+  dispatched: number;
+  received: number;
+  reason: string;
+  dest_product_id: number | "";
+}
+
 interface AdjustmentPolicy {
   allow_negative_stock: boolean;
   allowed_roles: string[];
@@ -51,6 +61,7 @@ interface AdjustmentPolicy {
   max_qty_per_line: number | null;
   max_value_per_document: number | null;
   max_documents_per_day: number | null;
+  max_units_per_day: number | null;
   require_notes: boolean;
   approval_threshold_value: number | null;
   approval_threshold_qty: number | null;
@@ -89,6 +100,13 @@ export const InventoryPage: React.FC = () => {
   const [transferItems, setTransferItems] = useState<Array<{ product_id: number; batch_no: string; qty: number }>>([
     { product_id: 1, batch_no: "DL9812", qty: 10 },
   ]);
+
+  // Receive Transfer Modal
+  const [receiptTransfer, setReceiptTransfer] = useState<any | null>(null);
+  const [receiptLines, setReceiptLines] = useState<ReceiptLineDraft[]>([]);
+  const [receiptProducts, setReceiptProducts] = useState<Array<{ id: number; name: string; barcode?: string | null }>>([]);
+  const [receiptError, setReceiptError] = useState<string | null>(null);
+  const [receiptBusy, setReceiptBusy] = useState(false);
 
   // Reconciliation Modal
   const [isReconcileModalOpen, setIsReconcileModalOpen] = useState(false);
@@ -159,13 +177,61 @@ export const InventoryPage: React.FC = () => {
     }
   };
 
-  const handleReceiveTransfer = async (transferId: number) => {
+  const openReceiveDialog = async (transfer: any) => {
+    setReceiptError(null);
+    setReceiptTransfer(transfer);
+    setReceiptLines(
+      (transfer.items || []).map((item: any) => ({
+        item_id: item.id,
+        product_name: item.product?.name ?? `#${item.product_id}`,
+        batch_no: item.batch_no,
+        dispatched: Number(item.qty),
+        received: Number(item.qty),
+        reason: "",
+        dest_product_id: "",
+      }))
+    );
+
     try {
-      await api.post(`/admin/inventory/transfers/${transferId}/receive`);
-      alert("Transfer approved and inward stock credited to destination store.");
+      const res = await api.get<any>("/admin/products", { per_page: 200 });
+      const list = Array.isArray(res) ? res : res?.data || [];
+      setReceiptProducts(list);
+    } catch {
+      setReceiptProducts([]);
+    }
+  };
+
+  const handleSubmitReceipt = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!receiptTransfer) return;
+
+    const invalid = receiptLines.find(
+      (line) => line.received < 0 || line.received > line.dispatched || (line.received < line.dispatched && !line.reason.trim())
+    );
+    if (invalid) {
+      setReceiptError(
+        `Batch ${invalid.batch_no}: received quantity must be between 0 and ${invalid.dispatched}, and a shortage reason is required when short.`
+      );
+      return;
+    }
+
+    setReceiptBusy(true);
+    setReceiptError(null);
+    try {
+      await api.post(`/admin/inventory/transfers/${receiptTransfer.id}/receive`, {
+        lines: receiptLines.map((line) => ({
+          item_id: line.item_id,
+          received_qty: line.received,
+          shortage_reason: line.reason.trim() || undefined,
+          dest_product_id: line.dest_product_id === "" ? undefined : line.dest_product_id,
+        })),
+      });
+      setReceiptTransfer(null);
       await fetchInventory();
     } catch (err: any) {
-      alert(err?.message || "Transfer receive failed.");
+      setReceiptError(err?.message || "Transfer receive failed.");
+    } finally {
+      setReceiptBusy(false);
     }
   };
 
@@ -535,10 +601,10 @@ export const InventoryPage: React.FC = () => {
                   <td className="px-4 py-3 text-right">
                     {t.status === "dispatched" && (
                       <button
-                        onClick={() => handleReceiveTransfer(t.id)}
+                        onClick={() => openReceiveDialog(t)}
                         className="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-lg text-[10px]"
                       >
-                        Approve & Inward Stock
+                        Receive Stock
                       </button>
                     )}
                   </td>
@@ -755,6 +821,17 @@ export const InventoryPage: React.FC = () => {
                       min={0}
                       value={adjustmentPolicy.max_documents_per_day ?? ""}
                       onChange={(e) => updatePolicy({ max_documents_per_day: parseNumber(e.target.value) })}
+                      className="w-full px-2.5 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 dark:bg-slate-800 dark:text-white font-mono"
+                    />
+                  </label>
+                  <label className="block text-xs">
+                    <span className="block font-medium text-slate-700 dark:text-slate-300 mb-1">Max units / day</span>
+                    <input
+                      type="number"
+                      min={0}
+                      step="0.001"
+                      value={adjustmentPolicy.max_units_per_day ?? ""}
+                      onChange={(e) => updatePolicy({ max_units_per_day: parseNumber(e.target.value) })}
                       className="w-full px-2.5 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 dark:bg-slate-800 dark:text-white font-mono"
                     />
                   </label>
@@ -1004,6 +1081,133 @@ export const InventoryPage: React.FC = () => {
                   className="px-4 py-2 bg-brand-600 hover:bg-brand-500 text-white font-bold rounded-lg shadow-sm"
                 >
                   Apply Reconciliation
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {receiptTransfer && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 max-w-3xl w-full p-6 space-y-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
+              <div>
+                <h3 className="font-bold text-slate-900 dark:text-white text-sm">
+                  Receive {receiptTransfer.transfer_number}
+                </h3>
+                <p className="text-[11px] text-slate-500">
+                  Enter what actually arrived per line. A short line needs a reason; the sender already moved the full quantity out.
+                </p>
+              </div>
+              <button
+                onClick={() => setReceiptTransfer(null)}
+                className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {receiptError && (
+              <div className="flex items-start gap-2 p-3 rounded-xl bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300 text-xs">
+                <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+                <span>{receiptError}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleSubmitReceipt} className="space-y-3 text-xs">
+              {receiptLines.map((line, index) => {
+                const short = line.received < line.dispatched;
+                return (
+                  <div
+                    key={line.item_id}
+                    className="grid gap-2 md:grid-cols-[1.4fr_0.7fr_0.7fr_0.9fr_1.2fr] items-end p-3 rounded-xl border border-slate-200 dark:border-slate-700"
+                  >
+                    <div>
+                      <div className="font-semibold text-slate-800 dark:text-slate-200">{line.product_name}</div>
+                      <div className="text-[10px] text-slate-500 font-mono">Batch {line.batch_no}</div>
+                    </div>
+                    <div>
+                      <label className="block text-[10px] text-slate-500 mb-0.5">Dispatched</label>
+                      <input
+                        type="text"
+                        disabled
+                        value={line.dispatched}
+                        className="w-full px-2 py-1 font-mono rounded border border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-800"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] text-slate-500 mb-0.5">Received</label>
+                      <input
+                        type="number"
+                        min={0}
+                        max={line.dispatched}
+                        step="0.01"
+                        value={line.received}
+                        onChange={(e) =>
+                          setReceiptLines((lines) =>
+                            lines.map((l, i) => (i === index ? { ...l, received: Number(e.target.value) } : l))
+                          )
+                        }
+                        className="w-full px-2 py-1 font-mono rounded border border-slate-300 dark:border-slate-600 dark:bg-slate-800"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] text-slate-500 mb-0.5">Destination Product</label>
+                      <select
+                        value={line.dest_product_id}
+                        onChange={(e) =>
+                          setReceiptLines((lines) =>
+                            lines.map((l, i) =>
+                              i === index ? { ...l, dest_product_id: e.target.value === "" ? "" : Number(e.target.value) } : l
+                            )
+                          )
+                        }
+                        className="w-full px-2 py-1 rounded border border-slate-300 dark:border-slate-600 dark:bg-slate-800"
+                      >
+                        <option value="">Auto-match by barcode</option>
+                        {receiptProducts.map((product) => (
+                          <option key={product.id} value={product.id}>
+                            {product.name}
+                            {product.barcode ? ` (${product.barcode})` : ""}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-[10px] text-slate-500 mb-0.5">
+                        Shortage Reason {short ? "*" : ""}
+                      </label>
+                      <input
+                        type="text"
+                        value={line.reason}
+                        onChange={(e) =>
+                          setReceiptLines((lines) =>
+                            lines.map((l, i) => (i === index ? { ...l, reason: e.target.value } : l))
+                          )
+                        }
+                        placeholder={short ? "e.g. 5 strips crushed in transit" : "—"}
+                        className="w-full px-2 py-1 rounded border border-slate-300 dark:border-slate-600 dark:bg-slate-800"
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setReceiptTransfer(null)}
+                  className="px-3.5 py-1.5 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={receiptBusy}
+                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 text-white font-bold rounded-lg shadow-sm"
+                >
+                  {receiptBusy ? "Receiving…" : "Receive Stock"}
                 </button>
               </div>
             </form>

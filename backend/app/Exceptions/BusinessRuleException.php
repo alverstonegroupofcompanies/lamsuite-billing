@@ -20,6 +20,8 @@ class BusinessRuleException extends Exception
     public readonly ?string $field;
     public readonly ?string $fix;
     public readonly int $status;
+    /** @var array<string,mixed> machine-readable facts the screen needs to act */
+    public readonly array $context;
 
     public function __construct(
         string $errorCode,
@@ -29,6 +31,7 @@ class BusinessRuleException extends Exception
         ?string $field = null,
         ?string $fix = null,
         int $status = self::STATUS_UNPROCESSABLE,
+        array $context = [],
     ) {
         parent::__construct($message);
 
@@ -38,11 +41,12 @@ class BusinessRuleException extends Exception
         $this->field = $field;
         $this->fix = $fix;
         $this->status = $status;
+        $this->context = $context;
     }
 
     public function toArray(): array
     {
-        return [
+        return array_merge([
             'success' => false,
             // Legacy clients (and older POS builds) read `error`.
             'error' => $this->getMessage(),
@@ -52,7 +56,7 @@ class BusinessRuleException extends Exception
             'field' => $this->field,
             'message' => $this->getMessage(),
             'fix' => $this->fix,
-        ];
+        ], $this->context);
     }
 
     public function render(): JsonResponse

@@ -613,6 +613,8 @@ class DatabaseSeeder extends Seeder
         ]);
 
         // Automatically sync full enterprise catalog & transaction records
-        \Illuminate\Support\Facades\Artisan::call('data:sync-actual');
+        // SET-02: seeding must be self-contained demo data. Importing a
+        // developer's desktop sqlite is an explicit opt-in command
+        // (data:sync-actual), never part of migrate --seed.
     }
 }

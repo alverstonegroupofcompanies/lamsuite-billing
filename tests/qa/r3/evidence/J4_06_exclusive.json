@@ -1,0 +1,81 @@
+{
+  "expected": {
+    "taxable": "400.00",
+    "cgst": "36.00",
+    "sgst": "36.00",
+    "total": "472.00"
+  },
+  "home": [
+    "LamSuite Billing",
+    "v2.1.1",
+    "",
+    "Retail & Pharmacy POS",
+    "",
+    "QA Glow Cosmetics",
+    "QA-CS",
+    "ID:5",
+    "Ctrl+Alt+S",
+    "Search actions, modules, or tools...",
+    "Ctrl+K",
+    "ML"
+  ],
+  "billing_controls": [
+    "Customer Name (F2)",
+    "Mobile (+91)",
+    "Scan barcode or type product name (e.g. 3*paracetamol)"
+  ],
+  "pharmacy_fields_visible": [],
+  "pharmacy_words_on_screen": [
+    "Retail & Pharmacy POS"
+  ],
+  "tax_badge": [
+    "GST Excl"
+  ],
+  "totals": [
+    "₹ 450.00/pc",
+    "₹ 400.00/pc",
+    "\t18%\t₹ 472.00\t",
+    "SUBTOTAL: ₹ 400.00",
+    "GST TAX: ₹ 72.00",
+    "NET PAYABLE",
+    "₹ 472.00"
+  ],
+  "calls": [
+    {
+      "st": 201,
+      "req": "{\"store_id\":\"5\",\"store_code\":\"QA-CS\",\"external_id\":\"ext_1795277499368_265b58\",\"idempotency_key\":\"ext_1795277499368_265b58\",\"invoice_number\":\"C01-INV-1051\",\"invoice_date\":\"2026-11-21\",\"customer_id\":\"\",\"customer_name\":\"Walk-in Customer\",\"customer_phone\":\"\",\"customer_gstin\":\"\",\"place_of_supply\":\"32-Kerala\",\"payment_mode\":\"Cash\",\"paid_amount\":472,\"payments\":[{\"id\":\"pay_1795277498042_0\",\"mode\":\"Cash\",\"amount\":472,\"status\":\"received\"}],\"counter_id\":\"cntr_4\",\"tax_mode\":\"exclusive\",\"store_state\":\"29\",\"gst_type\":\"regular\",\"is_composition\":false,\"bill_discount_percent\":0,\"bill_discount_amount\":0,\"manual_round_off\":null,\"subtotal\":400,\"discount_total\":0,\"tax_total\":72,\"round_off\":0,\"grand_total\":472,\"is_inter_state\":true,\"items\":[{\"product_id\":\"9\",\"product_name\":\"QA Ruby Lipstick\",\"batch_id\":\"10\",\"batch_no\":\"LP-01\",\"expiry_date\":\"2028-12-31\",\"qty\":1,\"loose_qty\":0,\"free_qty\":0,\"free_loose_qty\":0,\"units_per_pack\":1,\"unit_price\":400,\"mrp\":450,\"discount_percent\":0,\"discount_amount\":0,\"gst_percent\":18,\"rate_basis\":\"sel_rate\"}],\"counter_code\":\"C01\"}",
+      "res": "{\"success\":true,\"invoice\":{\"store_id\":5,\"counter_id\":4,\"counter_code\":\"C01\",\"location_name\":\"Entrance\",\"module_key\":\"invoice\",\"invoice_number\":\"C01-INV-1051\",\"invoice_date\":\"2026-11-21\",\"due_date\":null,\"customer_id\":null,\"customer_name\":\"Walk-in Customer\",\"customer_gstin\":null,\"customer_phone\":null,\"place_of_supply\":\"32-Kerala\",\"subtotal\":\"400.00\",\"taxable_subtotal\":\"400.00\",\"discount_total\":\"0.00\",\"tax_total\":\"72.00\",\"cgst_total\":\"0.00\",\"sgst_total\":\"0.00\",\"igst_total\":\"72.00\",\"cess_total\":\"0.0"
+    }
+  ],
+  "db": {
+    "inv": {
+      "id": 18,
+      "invoice_number": "C01-INV-1051",
+      "store_id": 5,
+      "counter_code": "C01",
+      "subtotal": 400,
+      "taxable_subtotal": 400,
+      "cgst_total": 0,
+      "sgst_total": 0,
+      "igst_total": 72,
+      "tax_total": 72,
+      "grand_total": 472,
+      "place_of_supply": "32-Kerala",
+      "store_state_code": "29",
+      "doctor_name": null,
+      "patient_name": null
+    },
+    "items": [
+      {
+        "product_name": "QA Ruby Lipstick",
+        "qty": 1,
+        "unit_price": 400,
+        "taxable_amount": 400,
+        "cgst_amount": 0,
+        "sgst_amount": 0,
+        "igst_amount": 72,
+        "total_amount": 472
+      }
+    ]
+  }
+}

@@ -21,6 +21,7 @@ class ProductBatch extends Model
         'selling_rate',
         'rack_location',
         'shelf_location',
+        'landed_cost_rate',
         'external_id',
         'version',
     ];
@@ -32,6 +33,7 @@ class ProductBatch extends Model
         'mrp' => 'decimal:2',
         'purchase_rate' => 'decimal:2',
         'selling_rate' => 'decimal:2',
+        'landed_cost_rate' => 'decimal:4',
         'version' => 'integer',
     ];
 

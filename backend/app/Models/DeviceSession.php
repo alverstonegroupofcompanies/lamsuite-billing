@@ -166,6 +166,18 @@ class DeviceSession extends Model
     }
 
     /**
+     * The counter this machine works inside one store (CNT-008). A local
+     * registry key such as "store_main" is not a server store, so an unscoped
+     * lookup is what a pre-registry till gets.
+     */
+    private static function counterForDevice(int|string|null $storeId, string $deviceUuid): ?Counter
+    {
+        return Counter::where('device_uuid', $deviceUuid)
+            ->when(is_numeric($storeId), fn ($query) => $query->where('store_id', (int) $storeId))
+            ->first();
+    }
+
+    /**
      * Record a new authenticated device login session.
      */
     public static function recordLogin(
@@ -194,8 +206,10 @@ class DeviceSession extends Model
             ]);
 
         // Resolve the owning counter when the caller only knows the device.
+        // CNT-008: a machine can sit on a counter in several stores, so the
+        // store this login is for decides which one the session belongs to.
         if (empty($counterId)) {
-            $resolvedCounter = Counter::where('device_uuid', $deviceUuid)->first();
+            $resolvedCounter = self::counterForDevice($storeId, $deviceUuid);
             if ($resolvedCounter) {
                 $counterId = $resolvedCounter->id;
                 $counterName = $counterName ?: $resolvedCounter->counter_name;
@@ -204,8 +218,9 @@ class DeviceSession extends Model
         }
 
         if (empty($deviceName)) {
-            $deviceModel = Device::where('device_uuid', $deviceUuid)->first();
-            $counterModel = $counterId ? Counter::find($counterId) : Counter::where('device_uuid', $deviceUuid)->first();
+            $deviceModel = Device::where('store_id', $storeId)->where('device_uuid', $deviceUuid)->first()
+                ?: Device::where('device_uuid', $deviceUuid)->first();
+            $counterModel = $counterId ? Counter::find($counterId) : self::counterForDevice($storeId, $deviceUuid);
             $deviceName = $deviceModel?->device_name ?: $counterModel?->device_name;
         }
 

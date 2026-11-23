@@ -1,4 +1,5 @@
 import { getResolvedApiBaseUrl } from "../../config/env";
+import { storeDeviceService } from "../auth/storeDeviceService";
 
 export type InvoiceApprovalAction = "edit" | "cancel";
 export type InvoiceApprovalMode = "manager" | "one_time_pin";
@@ -30,22 +31,17 @@ function storage(): Storage | null {
   return null;
 }
 
-function authHeaders(storeId: string): Record<string, string> {
-  let token: string | null = null;
-  try {
-    token =
-      storage()?.getItem("staff_token") ??
-      (typeof window !== "undefined" ? window.localStorage?.getItem("staff_token") : null) ??
-      null;
-  } catch {
-    token = null;
-  }
+/**
+ * B8b: the counter asks for the approval; the approver answers with their own
+ * PIN inside the body. The device token only says which store is asking.
+ */
+async function authHeaders(storeId: string): Promise<Record<string, string>> {
   return {
     "Content-Type": "application/json",
     Accept: "application/json",
     "X-Store-Id": storeId,
     "Store-Id": storeId,
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    ...(await storeDeviceService.getDeviceAuthHeaders()),
   };
 }
 
@@ -136,7 +132,7 @@ export class InvoiceApprovalService {
         `${getResolvedApiBaseUrl()}/api/invoices/${encodeURIComponent(invoiceId)}/approvals/verify`,
         {
           method: "POST",
-          headers: authHeaders(storeId),
+          headers: await authHeaders(storeId),
           body: JSON.stringify(body),
         }
       );

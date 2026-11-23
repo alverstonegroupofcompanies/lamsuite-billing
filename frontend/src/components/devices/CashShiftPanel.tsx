@@ -1,15 +1,14 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { ArrowDownCircle, ArrowUpCircle, Lock, RefreshCw, Wallet } from "lucide-react";
 import { cashShiftService, type CashShift } from "../../lib/billing/cashShiftService";
-import { staffAuthService, type ActiveStaffSession } from "../../lib/auth/staffAuthService";
+import { storeDeviceService } from "../../lib/auth/storeDeviceService";
 
 const money = (value: number | null | undefined): string =>
   `₹${Number(value || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 export const CashShiftPanel: React.FC = () => {
-  const [session, setSession] = useState<ActiveStaffSession | null>(() =>
-    staffAuthService.getCurrentSession()
-  );
+  // B8b: the shift belongs to the counter this till claimed, not to a person.
+  const [counter, setCounter] = useState<{ id: string; name: string }>({ id: "", name: "" });
   const [activeShift, setActiveShift] = useState<CashShift | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isBusy, setIsBusy] = useState(false);
@@ -23,10 +22,25 @@ export const CashShiftPanel: React.FC = () => {
   const [movementAmount, setMovementAmount] = useState("");
   const [movementReason, setMovementReason] = useState("");
 
-  useEffect(() => staffAuthService.onSessionChange(setSession), []);
+  useEffect(() => {
+    let cancelled = false;
+    storeDeviceService
+      .getDeviceProfile()
+      .then((profile) => {
+        if (cancelled || !profile) return;
+        setCounter({
+          id: profile.counter_id,
+          name: profile.counter_name || profile.counter_code || profile.counter_id,
+        });
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
-  const counterId = session?.counterId || "";
-  const counterName = session?.counterName || session?.counterCode || counterId;
+  const counterId = counter.id;
+  const counterName = counter.name;
 
   const refresh = useCallback(async () => {
     if (!counterId) {
@@ -67,7 +81,7 @@ export const CashShiftPanel: React.FC = () => {
   }, [countedCash, expected]);
 
   const handleOpenShift = async () => {
-    if (!session) return;
+    if (!counterId) return;
     setIsBusy(true);
     setError(null);
     setNotice(null);
@@ -75,8 +89,8 @@ export const CashShiftPanel: React.FC = () => {
       const shift = await cashShiftService.openShift(
         counterId,
         counterName,
-        String(session.user.id),
-        session.user.full_name || session.user.username,
+        counterId,
+        counterName,
         Number(openingCash || 0)
       );
       setActiveShift(shift);
@@ -182,9 +196,9 @@ export const CashShiftPanel: React.FC = () => {
         </div>
       )}
 
-      {!session ? (
+      {!counterId ? (
         <p className="mt-3 text-xs text-[var(--color-text-muted)]">
-          Sign in at this counter to open and close cash shifts.
+          This terminal is not claimed to a counter yet. Claim a counter to open and close cash shifts.
         </p>
       ) : isLoading && !activeShift ? (
         <p className="mt-3 text-xs text-[var(--color-text-muted)]">Loading shift…</p>

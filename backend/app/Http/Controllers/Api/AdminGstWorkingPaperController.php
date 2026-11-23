@@ -88,7 +88,40 @@ class AdminGstWorkingPaperController
             $data['itc']['total_itc'],
         ];
         $rows[] = ['4 ITC ineligible', '', 0, 0, 0, 0, 0, $data['itc']['ineligible_itc']];
+
+        // REP-009: the charge half of the input tax, head by head, so a reviewer can see which
+        // heads carried credit and which were blocked or reverse-charge.
+        foreach ($data['itc']['charges']['by_head'] as $head) {
+            $rows[] = [
+                '4a Bill charges',
+                $head['head_code'] . ' — ' . $head['head_name'] . ' ['
+                    . $head['itc_eligibility'] . ($head['is_rcm'] ? '/RCM' : '')
+                    . ($head['paid_separately'] ? '/paid separately' : '/in bill') . ']',
+                $head['taxable'],
+                $head['cgst'],
+                $head['sgst'],
+                $head['igst'],
+                $head['cess'],
+                $head['tax'],
+            ];
+        }
+
         $rows[] = ['5 Reverse charge inward', '', $data['itc']['rcm_taxable'], 0, 0, 0, 0, $data['itc']['rcm_tax']];
+
+        // Listed bill by bill because self-paid reverse-charge tax is not ordinary ITC: it has to
+        // be paid and claimed in its own row of the return, so it is flagged here for review.
+        foreach ($data['itc']['rcm_review']['rows'] as $rcm) {
+            $rows[] = [
+                '5a RCM charge — review',
+                $rcm['invoice_number'] . ' / ' . $rcm['head_name'],
+                $rcm['taxable_amount'],
+                0,
+                0,
+                0,
+                0,
+                $rcm['self_paid_tax'],
+            ];
+        }
         $rows[] = [
             '6.1 Net tax payable',
             '',
@@ -155,6 +188,40 @@ class AdminGstWorkingPaperController
 
         $rows[] = ['6', 'Total ITC availed', $data['itc']['total_taxable'], '', '', '', '', $data['itc']['total_itc']];
         $rows[] = ['7', 'ITC reversed / ineligible', 0, '', '', '', '', $data['itc']['ineligible_itc']];
+
+        // REP-009: a charge is input tax like any other, but only its creditable half belongs in
+        // section 6; blocked and reverse-charge tax is shown apart so the filing can be reviewed.
+        $charges = $data['itc']['charges'];
+        $rows[] = [
+            '6',
+            'Of which bill charges — creditable',
+            $charges['total_taxable'],
+            '',
+            '',
+            '',
+            '',
+            $charges['creditable_tax'],
+        ];
+        $rows[] = [
+            '7',
+            'Of which bill charges — blocked or reverse charge',
+            '',
+            '',
+            '',
+            '',
+            '',
+            round((float) $charges['non_creditable_tax'] + (float) $charges['rcm_tax'], 2),
+        ];
+        $rows[] = [
+            '7',
+            'Reverse-charge bills flagged for review',
+            $data['itc']['rcm_review']['total_taxable'],
+            '',
+            '',
+            '',
+            '',
+            $data['itc']['rcm_review']['total_tax'],
+        ];
         $rows[] = ['9', 'Tax paid (per books)', '', '', '', '', '', $data['reconciliation']['tax_per_books']];
         $rows[] = ['11', 'Net tax estimate', '', '', '', '', '', $data['reconciliation']['net_tax_estimate']];
 
@@ -296,11 +363,13 @@ class AdminGstWorkingPaperController
         $headers = [
             'Supplier GSTIN', 'Supplier', 'Invoice Number', 'Invoice Date', 'Taxable Value',
             'IGST', 'CGST', 'SGST', 'Cess', 'Total Value', 'ITC Eligible',
-            'Match Status', 'Matched Purchase', 'Purchase Tax', 'Tax Difference', 'Notes',
+            'Match Status', 'Matched Purchase', 'Purchase Tax', 'Charge Taxable', 'Charge Tax',
+            'Claimable ITC', 'Tax Difference', 'Notes',
         ];
 
         $rows = $import->entries->sortBy('id')->map(function (Gstr2bEntry $entry) {
             $payload = $this->entryPayload($entry);
+            $matched = $payload['matched_purchase'] ?? null;
 
             return [
                 $entry->supplier_gstin,
@@ -315,8 +384,11 @@ class AdminGstWorkingPaperController
                 $entry->total_value,
                 $entry->itc_eligible,
                 $payload['match_status'],
-                $payload['matched_purchase']['invoice_number'] ?? '',
-                $payload['matched_purchase']['tax_total'] ?? '',
+                $matched['invoice_number'] ?? '',
+                $matched['tax_total'] ?? '',
+                $matched['charges']['taxable'] ?? '',
+                $matched['charges']['tax'] ?? '',
+                $matched['itc_claimable'] ?? '',
                 $payload['tax_difference'] ?? '',
                 $entry->notes,
             ];
@@ -467,7 +539,7 @@ class AdminGstWorkingPaperController
             'itc_eligible' => (bool) $entry->itc_eligible,
             'match_status' => $entry->match_status,
             'notes' => $entry->notes,
-            'matched_purchase' => $purchase ? [
+            'matched_purchase' => $purchase ? array_merge([
                 'id' => $purchase->id,
                 'invoice_number' => $purchase->invoice_number,
                 'invoice_date' => $purchase->invoice_date?->toDateString(),
@@ -477,9 +549,54 @@ class AdminGstWorkingPaperController
                 'grand_total' => (float) $purchase->grand_total,
                 'itc_eligibility' => $purchase->itc_eligibility,
                 'is_rcm' => (bool) $purchase->is_rcm,
-            ] : null,
+            ], [
+                // REP-009: 2B and the bill can agree on tax and still differ on what may be claimed,
+                // because a blocked or reverse-charge charge sits inside the header total.
+                'charges' => $this->chargeBlock($purchase),
+                'itc_claimable' => $this->claimableTax($purchase, $purchaseTax),
+            ]) : null,
             'tax_difference' => $purchaseTax !== null ? round($entryTax - $purchaseTax, 2) : null,
         ];
+    }
+
+    /**
+     * @return array<string, float|int>
+     */
+    private function chargeBlock(?Purchase $purchase): array
+    {
+        if (!$purchase) {
+            return ['count' => 0, 'taxable' => 0.0, 'tax' => 0.0, 'creditable_tax' => 0.0, 'non_creditable_tax' => 0.0];
+        }
+
+        $taxable = 0.0;
+        $tax = 0.0;
+        $creditable = 0.0;
+
+        foreach ($purchase->charges as $charge) {
+            $taxable += (float) $charge->taxable_amount;
+            $tax += $charge->taxAmount();
+            $creditable += $charge->creditableTax();
+        }
+
+        return [
+            'count' => (int) $purchase->charges->count(),
+            'taxable' => round($taxable, 2),
+            'tax' => round($tax, 2),
+            'creditable_tax' => round($creditable, 2),
+            'non_creditable_tax' => round($tax - $creditable, 2),
+        ];
+    }
+
+    /** What the working papers actually credit for this bill, to the paisa. */
+    private function claimableTax(Purchase $purchase, float $purchaseTax): float
+    {
+        if ($purchase->is_rcm || ($purchase->itc_eligibility ?? 'eligible') === 'ineligible') {
+            return 0.0;
+        }
+
+        $charges = $this->chargeBlock($purchase);
+
+        return round($purchaseTax - $charges['non_creditable_tax'], 2);
     }
 
     private function entrySummary($entries): array

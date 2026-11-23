@@ -1,0 +1,51 @@
+{
+  "past_bills": [
+    "Showing 19 of 19 matching bills (50 in store)",
+    "G9909765-INV-1003",
+    "G9909765-INV-1002",
+    "G9909765-INV-1001",
+    "G9902346-INV-1003",
+    "G9902346-INV-1002",
+    "G9902346-INV-1001",
+    "G9882599-INV-1002"
+  ],
+  "opened": "BODY:",
+  "search": {
+    "lists": 0,
+    "options": [],
+    "active": "BODY:"
+  },
+  "search_text": [
+    "Search actions, modules, or tools..."
+  ],
+  "invoice_calls": [
+    {
+      "m": "OPTIONS",
+      "u": "http://127.0.0.1:8000/api/invoices?store_id=4&page=1&per_page=50&start_date=2026-11-22&end_date=2026-11-22",
+      "st": 204
+    },
+    {
+      "m": "OPTIONS",
+      "u": "http://127.0.0.1:8000/api/invoices?store_id=4&page=1&per_page=50&start_date=2026-11-22&end_date=2026-11-22",
+      "st": 204
+    },
+    {
+      "m": "GET",
+      "u": "http://127.0.0.1:8000/api/invoices?store_id=4&page=1&per_page=50&start_date=2026-11-22&end_date=2026-11-22",
+      "st": 200
+    },
+    {
+      "m": "GET",
+      "u": "http://127.0.0.1:8000/api/invoices?store_id=4&page=1&per_page=50&start_date=2026-11-22&end_date=2026-11-22",
+      "st": 200
+    },
+    {
+      "m": "OPTIONS",
+      "u": "http://127.0.0.1:8000/api/invoices?store_id=4&page=1&per_page=50&start_date=2026-11-22&end_date=2026-11-22"
+    },
+    {
+      "m": "GET",
+      "u": "http://127.0.0.1:8000/api/invoices?store_id=4&page=1&per_page=50&start_date=2026-11-22&end_date=2026-11-22"
+    }
+  ]
+}

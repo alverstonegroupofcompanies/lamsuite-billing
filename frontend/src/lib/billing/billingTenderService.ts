@@ -5,6 +5,9 @@ export interface PaymentTenderLine {
   id?: string;
   mode: "Cash" | "UPI" | "Card" | "Bank Transfer" | "Cheque" | "Wallet" | "Gift Voucher" | "Credit" | string;
   amount: number;
+  /** What the customer actually handed over; `amount` is what the bill kept. */
+  tendered_amount?: number;
+  change_amount?: number;
   reference_no?: string;
   reference?: string;
   status?: "received" | "pending_clearance" | "cleared" | "bounced" | "refunded";
@@ -34,6 +37,8 @@ export interface InvoicePaymentRecord {
   shift_id?: string;
   payment_mode: string;
   amount: number;
+  tendered_amount?: number;
+  change_amount?: number;
   reference_no?: string;
   status: "received" | "pending_clearance" | "cleared" | "bounced" | "refunded";
   extra_fields?: string; // JSON
@@ -71,6 +76,34 @@ export interface TenderCalculationResult {
   };
 }
 
+/** A tender line read the way the server reads it: kept, handed over, given back. */
+export interface SettledTenderLine extends PaymentTenderLine {
+  amount: number;
+  tendered_amount: number;
+  change_amount: number;
+}
+
+export interface SettledTenders {
+  lines: SettledTenderLine[];
+  paid: number;
+  credit: number;
+  cash: number;
+  digital: number;
+  changeDue: number;
+  balanceDue: number;
+  hasNonCashOverpayment: boolean;
+}
+
+const money = (value: unknown): number =>
+  Math.round(((Number(value) || 0) + Number.EPSILON) * 100) / 100;
+
+const modeKey = (mode: string): string => (mode || "").trim().toUpperCase();
+
+const isCashMode = (mode: string): boolean => modeKey(mode) === "CASH";
+
+const isCreditMode = (mode: string): boolean =>
+  modeKey(mode) === "CREDIT" || modeKey(mode) === "UDHARI";
+
 let holdCounter = 0;
 
 export class BillingTenderService {
@@ -92,11 +125,11 @@ export class BillingTenderService {
     let creditAmount = 0;
 
     for (const p of payments) {
-      const amt = Math.round(((Number(p.amount) || 0) + Number.EPSILON) * 100) / 100;
+      const amt = Math.max(money(p.amount), money(p.tendered_amount ?? p.amount));
       if (amt <= 0) continue;
       totalTendered += amt;
 
-      const upper = (p.mode || "").trim().toUpperCase();
+      const upper = modeKey(p.mode);
       if (upper === "CASH") {
         cashAmount += amt;
       } else if (upper === "CREDIT" || upper === "UDHARI") {
@@ -170,6 +203,84 @@ export class BillingTenderService {
       hasNonCashOverpayment,
       nonCashOverpaid: hasNonCashOverpayment,
       statusBadge,
+    };
+  }
+
+  /**
+   * PAY-02: turn what the cashier keyed into what the bill keeps.
+   *
+   * Mirrors the server's TenderSettlementService so an offline bill and the
+   * invoice the server files for it cannot disagree: non-cash and credit
+   * apply in full, cash fills only what is still owed and the rest goes back
+   * as change. Sending the settled lines onward is idempotent — a line that
+   * already names its `tendered_amount` settles to itself.
+   */
+  settleTenders(grandTotal: number, payments: PaymentTenderLine[]): SettledTenders {
+    const grand = money(grandTotal);
+    const explicit = payments.some((p) => p.tendered_amount !== undefined);
+
+    const draft = payments
+      .map((line) => {
+        const amount = money(line.amount);
+        return {
+          line,
+          amount,
+          tendered: explicit ? Math.max(amount, money(line.tendered_amount ?? amount)) : amount,
+        };
+      })
+      .filter((d) => d.tendered > 0);
+
+    let cashTendered = 0;
+    let nonCashTendered = 0;
+    let creditTendered = 0;
+
+    for (const d of draft) {
+      if (isCreditMode(d.line.mode)) creditTendered += d.tendered;
+      else if (isCashMode(d.line.mode)) cashTendered += d.tendered;
+      else nonCashTendered += d.tendered;
+    }
+
+    const hasNonCashOverpayment = money(nonCashTendered + creditTendered) > grand;
+
+    let remaining = Math.max(0, money(grand - money(nonCashTendered) - money(creditTendered)));
+    let paid = 0;
+    let cash = 0;
+    let digital = 0;
+    let changeDue = 0;
+
+    const lines: SettledTenderLine[] = draft.map((d) => {
+      const credit = isCreditMode(d.line.mode);
+      let applied = d.tendered;
+      let change = 0;
+
+      if (!credit && isCashMode(d.line.mode)) {
+        applied = money(Math.min(d.tendered, remaining));
+        change = money(d.tendered - applied);
+        remaining = money(remaining - applied);
+      }
+
+      if (!credit) {
+        paid = money(paid + applied);
+        if (isCashMode(d.line.mode)) cash = money(cash + applied);
+        else digital = money(digital + applied);
+      }
+      changeDue = money(changeDue + change);
+
+      return { ...d.line, amount: applied, tendered_amount: money(d.tendered), change_amount: change };
+    });
+
+    const credit = money(creditTendered);
+    const balanceDue = Math.max(0, money(grand - paid - credit));
+
+    return {
+      lines,
+      paid,
+      credit,
+      cash,
+      digital,
+      changeDue,
+      balanceDue,
+      hasNonCashOverpayment,
     };
   }
 

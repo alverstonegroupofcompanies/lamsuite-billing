@@ -45,6 +45,7 @@ export const PosShortcutHintBar: React.FC<PosShortcutHintBarProps> = ({
         { key: "Esc in Qty", label: "Remove Line" },
         { key: "↑", label: "Cart Lines" },
         { key: "Alt+C", label: "Customer" },
+        { key: shortcutLabel("focusSalesperson", "pos"), label: "Salesperson" },
         { key: shortcutLabel("billDiscount", "pos"), label: "Bill Disc" },
         { key: "Alt+R", label: "Round-off" },
         { key: "F12", label: "Checkout", highlight: true, onClick: onCheckout },
@@ -85,7 +86,6 @@ export const PosShortcutHintBar: React.FC<PosShortcutHintBarProps> = ({
 
     case "modal":
       hints = [
-        { key: "1 - 5", label: "Pick Pay Mode (1=Cash, 2=UPI, 3=Card, 4=Credit, 5=Split)" },
         { key: "Enter", label: "Confirm & Print", highlight: true },
         { key: "Esc", label: "Close / Cancel" },
       ];
@@ -98,7 +98,7 @@ export const PosShortcutHintBar: React.FC<PosShortcutHintBarProps> = ({
       role="region"
       aria-label="Keyboard Shortcuts Bar"
     >
-      <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-none py-0.5">
+      <div className="flex flex-wrap items-center gap-1.5 py-0.5">
         <div className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-[var(--color-text-muted)] mr-1.5 shrink-0">
           <Keyboard className="h-3.5 w-3.5 text-[var(--color-accent)]" />
           <span className="hidden sm:inline">Keys:</span>

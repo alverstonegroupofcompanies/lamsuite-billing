@@ -208,7 +208,9 @@ class StaffSessionPolicyTest extends TestCase
             'is_active' => true,
         ]);
 
-        $res = $this->postJson("/api/device-sessions/{$session->id}/force-logout", [
+        // G1-SEC: force-logout is the store owner's action, made with the owner's token.
+        $res = $this->actingAs($this->makeUser('store_owner', ['username' => 'owner_user', 'email' => 'owner@policy.test']), 'sanctum')
+            ->postJson("/api/device-sessions/{$session->id}/force-logout", [
             'reason' => 'Policy test termination',
         ]);
         $res->assertStatus(200);

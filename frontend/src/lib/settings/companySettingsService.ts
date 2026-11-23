@@ -1,4 +1,5 @@
 import { sqliteStorage } from "../db/sqliteStorage";
+import { counterSequenceService } from "../auth/counterSequenceService";
 import { getResolvedApiBaseUrl } from "../../config/env";
 
 const memoryFallbackStorage = new Map<string, string>();
@@ -159,6 +160,7 @@ export interface StockAdjustmentPolicyConfig {
   max_qty_per_line: number | null;
   max_value_per_document: number | null;
   max_documents_per_day: number | null;
+  max_units_per_day: number | null;
   require_notes: boolean;
   approval_threshold_value: number | null;
   approval_threshold_qty: number | null;
@@ -167,6 +169,24 @@ export interface StockAdjustmentPolicyConfig {
   allowed_time_window: { start: string; end: string } | null;
 }
 
+/**
+ * PUR-016 / CFG-003. Mirrors the `billing.purchase_charges` block the Laravel server keeps, so
+ * the till reverses a supplier bill's charges exactly the way the cloud will when the note syncs.
+ */
+export interface PurchaseChargePolicyConfig {
+  reverse_on_return: "proportional" | "sunk";
+  /**
+   * CR-C-11 / PUR-016: pull a separately-paid charge into what the supplier is owed, for stores
+   * whose supplier bill already includes freight the operator pays the transporter for.
+   */
+  separately_paid_in_payable: boolean;
+}
+
+export const DEFAULT_PURCHASE_CHARGE_POLICY: PurchaseChargePolicyConfig = {
+  reverse_on_return: "proportional",
+  separately_paid_in_payable: false,
+};
+
 export const DEFAULT_STOCK_ADJUSTMENT_POLICY: StockAdjustmentPolicyConfig = {
   allow_negative_stock: false,
   allowed_roles: [],
@@ -174,6 +194,7 @@ export const DEFAULT_STOCK_ADJUSTMENT_POLICY: StockAdjustmentPolicyConfig = {
   max_qty_per_line: null,
   max_value_per_document: null,
   max_documents_per_day: null,
+  max_units_per_day: null,
   require_notes: false,
   approval_threshold_value: null,
   approval_threshold_qty: null,
@@ -296,6 +317,8 @@ export interface PaymentSettingsConfig {
 
 export interface CompanySettings {
   store_id: string;
+  /** SET-03: the server's settings version (stores.version) this document was read at. */
+  settings_version?: number;
   store_name: string;
   display_name?: string;
   phone: string;
@@ -333,6 +356,7 @@ export interface CompanySettings {
   security: SecurityConfig;
   inventory: InventoryStockSettings;
   stock_adjustment_policy?: StockAdjustmentPolicyConfig;
+  purchase_charges?: PurchaseChargePolicyConfig;
   wallet: WalletConfig;
   smtp: EmailSmtpConfig;
   whatsapp: WhatsAppConfig;
@@ -349,6 +373,8 @@ export interface CompanySettings {
   freight_is_taxable?: boolean;
   /** Batch & expiry capture. Defaults to true for pharmacy stores, false otherwise. */
   batch_required?: boolean;
+  /** GAP-01 / SPR-006: does a bill have to name the person who sold it. */
+  salesperson_on_bill?: "off" | "optional" | "required";
   purchase_columns?: ColumnSetting[];
   purchase_header_fields?: HeaderFieldSetting[];
   active_purchase_preset?: string;
@@ -451,7 +477,7 @@ export const DEFAULT_PURCHASE_COLUMNS: ColumnSetting[] = [
   { id: "scheme", label: "Scheme", visible: false, width: 75, order: 15 },
   { id: "gst", label: "GST %", visible: true, width: 70, order: 16 },
   { id: "hsn", label: "HSN", visible: false, width: 85, order: 17 },
-  { id: "selling_rate", label: "Selling Rate (₹)", visible: true, width: 95, order: 18 },
+  { id: "selling_rate", label: "Selling Rate / pack (₹)", visible: true, width: 95, order: 18 },
   { id: "margin", label: "Margin %", visible: true, width: 80, order: 19 },
   { id: "taxable_value", label: "Taxable (₹)", visible: true, width: 90, order: 20 },
   { id: "tax", label: "Tax (₹)", visible: true, width: 85, order: 21 },
@@ -539,7 +565,7 @@ export const DEFAULT_PAYMENT_MODES: PaymentModeConfig[] = [
     id: "upi",
     name: "UPI",
     enabled: true,
-    referenceRequirement: "optional",
+    referenceRequirement: "required",
     referenceLabel: "UPI Transaction ID / UTR",
     referencePlaceholder: "12-digit UTR or txn ID",
     referenceRegex: "^[0-9A-Za-z_-]{6,35}$",
@@ -552,7 +578,7 @@ export const DEFAULT_PAYMENT_MODES: PaymentModeConfig[] = [
     id: "card",
     name: "Card",
     enabled: true,
-    referenceRequirement: "optional",
+    referenceRequirement: "required",
     referenceLabel: "Card Approval Code / Auth Code",
     referencePlaceholder: "Approval code or last 4",
     duplicateCheck: "warn",
@@ -732,6 +758,8 @@ export const DEFAULT_SETTINGS: CompanySettings = {
 
   stock_adjustment_policy: { ...DEFAULT_STOCK_ADJUSTMENT_POLICY },
 
+  purchase_charges: { ...DEFAULT_PURCHASE_CHARGE_POLICY },
+
   wallet: {
     enabled: true,
     maxCreditLimit: 10000,
@@ -803,6 +831,7 @@ export const DEFAULT_SETTINGS: CompanySettings = {
   enable_ptss: false,
   freight_is_taxable: false,
   batch_required: true,
+  salesperson_on_bill: "required",
   purchase_columns: [...DEFAULT_PURCHASE_COLUMNS],
   purchase_header_fields: [...DEFAULT_PURCHASE_HEADER_FIELDS],
   active_purchase_preset: "pharmacy_inward",
@@ -815,6 +844,7 @@ export const DEFAULT_SETTINGS: CompanySettings = {
     "customer_debit_notes",
     "purchases",
     "purchase_returns",
+    "expenses",
     "stock",
     "stock_transfers",
     "reports",
@@ -824,6 +854,14 @@ export const DEFAULT_SETTINGS: CompanySettings = {
     "counters",
   ],
 };
+
+/** SET-03: the store's settings changed elsewhere since this device read them. */
+export class SettingsConflictError extends Error {
+  constructor(message?: string) {
+    super(message || "These settings were changed elsewhere since this screen loaded. Review them and save again.");
+    this.name = "SettingsConflictError";
+  }
+}
 
 export class CompanySettingsService {
   private currentSettings: CompanySettings = { ...DEFAULT_SETTINGS };
@@ -842,6 +880,10 @@ export class CompanySettingsService {
         stock_adjustment_policy: {
           ...DEFAULT_STOCK_ADJUSTMENT_POLICY,
           ...(record.stock_adjustment_policy || {}),
+        },
+        purchase_charges: {
+          ...DEFAULT_PURCHASE_CHARGE_POLICY,
+          ...(record.purchase_charges || {}),
         },
         wallet: { ...DEFAULT_SETTINGS.wallet, ...(record.wallet || {}) },
         smtp: { ...DEFAULT_SETTINGS.smtp, ...(record.smtp || {}) },
@@ -864,10 +906,13 @@ export class CompanySettingsService {
         enable_ptss: record.enable_ptss ?? DEFAULT_SETTINGS.enable_ptss,
         freight_is_taxable: record.freight_is_taxable ?? DEFAULT_SETTINGS.freight_is_taxable,
         batch_required: record.batch_required ?? ((record.store_type || "pharmacy") === "pharmacy"),
+        salesperson_on_bill: record.salesperson_on_bill ?? DEFAULT_SETTINGS.salesperson_on_bill,
         enabled_menu_items: record.enabled_menu_items?.length
-          ? (record.enabled_menu_items.includes("import_export")
-              ? record.enabled_menu_items
-              : [...record.enabled_menu_items, "import_export"])
+          ? [...new Set([
+              ...record.enabled_menu_items,
+              ...(record.enabled_menu_items.includes("import_export") ? [] : ["import_export"]),
+              ...(record.enabled_menu_items.includes("expenses") ? [] : ["expenses"]),
+            ])]
           : [...DEFAULT_SETTINGS.enabled_menu_items],
       };
     }
@@ -1014,7 +1059,7 @@ export class CompanySettingsService {
     safeStorage.setItem("lamsuite_counter_columns", JSON.stringify(columns));
     this.currentSettings.invoice_columns = [...columns];
     if (persistStore) {
-      await this.updateSettings({ invoice_columns: columns });
+      await this.saveStoreSettings({ invoice_columns: columns });
     }
   }
 
@@ -1035,7 +1080,7 @@ export class CompanySettingsService {
     safeStorage.setItem("lamsuite_counter_header_fields", JSON.stringify(fields));
     this.currentSettings.header_fields = [...fields];
     if (persistStore) {
-      await this.updateSettings({ header_fields: fields });
+      await this.saveStoreSettings({ header_fields: fields });
     }
   }
 
@@ -1059,7 +1104,7 @@ export class CompanySettingsService {
     this.currentSettings.active_billing_preset = preset.id;
 
     if (persistStore) {
-      await this.updateSettings({
+      await this.saveStoreSettings({
         active_billing_preset: preset.id,
         invoice_columns: columns,
         header_fields: headerFields,
@@ -1087,7 +1132,7 @@ export class CompanySettingsService {
     const currentPresets = this.getBillingPresets().filter((p) => !p.isBuiltin);
     currentPresets.push(newPreset);
 
-    await this.updateSettings({
+    await this.saveStoreSettings({
       saved_billing_presets: [...BUILTIN_BILLING_PRESETS, ...currentPresets],
       active_billing_preset: newPreset.id,
     });
@@ -1100,7 +1145,7 @@ export class CompanySettingsService {
     if (!target || target.isBuiltin) return false;
 
     const remaining = (this.currentSettings.saved_billing_presets || []).filter((p) => p.id !== presetId);
-    await this.updateSettings({
+    await this.saveStoreSettings({
       saved_billing_presets: remaining,
       active_billing_preset: "pharmacy",
     });
@@ -1129,7 +1174,7 @@ export class CompanySettingsService {
     safeStorage.setItem("lamsuite_purchase_columns", JSON.stringify(columns));
     this.currentSettings.purchase_columns = [...columns];
     if (persistStore) {
-      await this.updateSettings({ purchase_columns: columns });
+      await this.saveStoreSettings({ purchase_columns: columns });
     }
   }
 
@@ -1150,7 +1195,7 @@ export class CompanySettingsService {
     safeStorage.setItem("lamsuite_purchase_header_fields", JSON.stringify(fields));
     this.currentSettings.purchase_header_fields = [...fields];
     if (persistStore) {
-      await this.updateSettings({ purchase_header_fields: fields });
+      await this.saveStoreSettings({ purchase_header_fields: fields });
     }
   }
 
@@ -1174,7 +1219,7 @@ export class CompanySettingsService {
     this.currentSettings.active_purchase_preset = preset.id;
 
     if (persistStore) {
-      await this.updateSettings({
+      await this.saveStoreSettings({
         active_purchase_preset: preset.id,
         purchase_columns: columns,
         purchase_header_fields: headerFields,
@@ -1202,7 +1247,7 @@ export class CompanySettingsService {
     const currentPresets = this.getPurchasePresets().filter((p) => !p.isBuiltin);
     currentPresets.push(newPreset);
 
-    await this.updateSettings({
+    await this.saveStoreSettings({
       saved_purchase_presets: [...BUILTIN_PURCHASE_PRESETS, ...currentPresets],
       active_purchase_preset: newPreset.id,
     });
@@ -1215,7 +1260,7 @@ export class CompanySettingsService {
     if (!target || target.isBuiltin) return false;
 
     const remaining = (this.currentSettings.saved_purchase_presets || []).filter((p) => p.id !== presetId);
-    await this.updateSettings({
+    await this.saveStoreSettings({
       saved_purchase_presets: remaining,
       active_purchase_preset: "pharmacy_inward",
     });
@@ -1228,7 +1273,52 @@ export class CompanySettingsService {
     return await this.applyBillingPreset("pharmacy", true);
   }
 
-  async updateSettings(updates: Partial<CompanySettings>): Promise<CompanySettings> {
+  /**
+   * SET-03: saves on this device only. Routine work (document numbers, local
+   * layout mirrors, test setup) uses this, and it never reaches the store's
+   * settings on the server.
+   */
+  async saveLocalSettings(updates: Partial<CompanySettings>): Promise<CompanySettings> {
+    return this.applyLocally(updates);
+  }
+
+  /**
+   * SET-03: an explicit store save (the Settings screen, "save as store
+   * default", a saved layout preset). Only the keys whose value actually
+   * changed are sent, together with the settings_version this device read, so
+   * a stale till cannot overwrite what another device or the panel saved.
+   *
+   * - 409: the server's settings are reloaded here and SettingsConflictError
+   *   is thrown so the screen can tell the user to review and save again.
+   * - Other 4xx (permission, validation): thrown as an Error, nothing queued.
+   * - Unreachable / 5xx: the same delta is queued for the background sync.
+   */
+  async saveStoreSettings(updates: Partial<CompanySettings>): Promise<CompanySettings> {
+    const delta = this.changedKeys(updates);
+    await this.applyLocally(updates);
+
+    if (Object.keys(delta).length > 0) {
+      await this.pushStoreDelta(delta);
+    }
+
+    return { ...this.currentSettings };
+  }
+
+  /** The subset of `updates` that differs from what this device holds now. */
+  private changedKeys(updates: Partial<CompanySettings>): Record<string, unknown> {
+    const current = this.currentSettings as unknown as Record<string, unknown>;
+    const delta: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(updates)) {
+      if (key === "store_id" || key === "settings_version" || value === undefined) continue;
+      if (JSON.stringify(value) !== JSON.stringify(current[key])) {
+        delta[key] = value;
+      }
+    }
+    return delta;
+  }
+
+  private async applyLocally(updates: Partial<CompanySettings>): Promise<CompanySettings> {
+    updates = { ...updates };
     // Keep legacy top-level shortcuts in sync with sequences
     if (updates.invoice_prefix) {
       if (!updates.sequences) updates.sequences = { ...this.currentSettings.sequences };
@@ -1280,52 +1370,78 @@ export class CompanySettingsService {
       this.currentSettings.next_invoice_number = this.currentSettings.sequences.nextInvoiceNumber;
     }
 
+    await this.persistLocal();
+
+    return { ...this.currentSettings };
+  }
+
+  private async persistLocal(): Promise<void> {
     await sqliteStorage.insertRecord(
       "store_settings",
       "active_config",
       this.currentSettings as unknown as Record<string, unknown>
     );
-
-    // Save settings directly to central database so all devices on this store share identical configuration
-    await this.pushSettingsToServer(this.currentSettings);
-
-    return { ...this.currentSettings };
   }
 
   /**
-   * Pushes store settings to central backend DB. If offline or server unreachable,
-   * enqueues an update in sync_queue for automatic background synchronization.
+   * Sends one store-settings delta (SET-03). See saveStoreSettings for what
+   * each outcome means. If offline or the server fails, the delta is queued.
    */
-  async pushSettingsToServer(settingsToSave: CompanySettings): Promise<boolean> {
-    const storeId = String(settingsToSave.store_id || "1");
+  private async pushStoreDelta(delta: Record<string, unknown>): Promise<boolean> {
+    const storeId = String(this.currentSettings.store_id || "1");
     const baseUrl = getResolvedApiBaseUrl();
+    const body: Record<string, unknown> = { ...delta, store_id: storeId };
+    if (this.currentSettings.settings_version !== undefined && this.currentSettings.settings_version !== null) {
+      body.settings_version = this.currentSettings.settings_version;
+    }
 
+    let res: Response | null = null;
     try {
-      const token = safeStorage.getItem("staff_token");
+      // B8b: the counter saves its store's settings. Dynamic import because the
+      // device service already reads settings back from this module.
+      const { storeDeviceService } = await import("../auth/storeDeviceService");
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 1000);
-      const res = await fetch(`${baseUrl}/api/settings`, {
+      res = await fetch(`${baseUrl}/api/settings`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Accept: "application/json",
           "X-Store-Id": storeId,
           "Store-Id": storeId,
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          ...(await storeDeviceService.getDeviceAuthHeaders()),
         },
-        body: JSON.stringify({
-          ...settingsToSave,
-          store_id: storeId,
-        }),
+        body: JSON.stringify(body),
         signal: controller.signal,
       });
       clearTimeout(timeoutId);
-
-      if (res.ok) {
-        return true;
-      }
     } catch (_) {
-      // Server unreachable or offline
+      res = null; // Server unreachable or offline: queue below.
+    }
+
+    if (res && res.ok) {
+      const json = await res.json().catch(() => null);
+      const nextVersion = json?.settings?.settings_version;
+      if (nextVersion !== undefined && nextVersion !== null) {
+        this.currentSettings.settings_version = Number(nextVersion);
+        await this.persistLocal();
+      }
+      return true;
+    }
+
+    if (res && res.status === 409) {
+      const json = await res.json().catch(() => null);
+      if (json?.settings) {
+        await this.updateLocalFromRemote(json.settings);
+      } else {
+        await this.fetchRemoteSettings(storeId).catch(() => undefined);
+      }
+      throw new SettingsConflictError(json?.message);
+    }
+
+    if (res && res.status >= 400 && res.status < 500) {
+      const json = await res.json().catch(() => null);
+      throw new Error(json?.message || `Store settings were not saved (HTTP ${res.status}).`);
     }
 
     try {
@@ -1335,10 +1451,7 @@ export class CompanySettingsService {
         entity_type: "settings",
         entity_id: storeId,
         action: "update",
-        payload_json: JSON.stringify({
-          ...settingsToSave,
-          store_id: storeId,
-        }),
+        payload_json: JSON.stringify(body),
         status: "pending",
         retry_count: 0,
         created_at: Date.now(),
@@ -1357,13 +1470,13 @@ export class CompanySettingsService {
     const baseUrl = getResolvedApiBaseUrl();
 
     try {
-      const token = safeStorage.getItem("staff_token");
+      const { storeDeviceService } = await import("../auth/storeDeviceService");
       const res = await fetch(`${baseUrl}/api/settings?store_id=${activeStore}`, {
         headers: {
           Accept: "application/json",
           "X-Store-Id": activeStore,
           "Store-Id": activeStore,
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          ...(await storeDeviceService.getDeviceAuthHeaders()),
         },
       });
 
@@ -1397,6 +1510,25 @@ export class CompanySettingsService {
     const billing = payload.billing || {};
     const taxMode = payload.tax_mode || billing.tax_mode || this.currentSettings.tax_mode;
     const purchaseTaxMode = payload.purchase_tax_mode || billing.purchase_tax_mode || this.currentSettings.purchase_tax_mode;
+    const remoteChargePolicy = payload.purchase_charges || billing.purchase_charges || {};
+    const purchaseCharges: PurchaseChargePolicyConfig = {
+      ...DEFAULT_PURCHASE_CHARGE_POLICY,
+      ...(this.currentSettings.purchase_charges || {}),
+      ...(remoteChargePolicy.reverse_on_return === "sunk" || remoteChargePolicy.reverse_on_return === "proportional"
+        ? { reverse_on_return: remoteChargePolicy.reverse_on_return }
+        : {}),
+      // A settings form that has never shown the switch sends nothing; a legacy payload can
+      // carry it as "1"/"true", so only those spellings turn the payable inclusion on.
+      ...(remoteChargePolicy.separately_paid_in_payable === undefined
+        ? {}
+        : {
+            separately_paid_in_payable:
+              remoteChargePolicy.separately_paid_in_payable === true ||
+              remoteChargePolicy.separately_paid_in_payable === 1 ||
+              remoteChargePolicy.separately_paid_in_payable === "1" ||
+              remoteChargePolicy.separately_paid_in_payable === "true",
+          }),
+    };
     const gstType = payload.gst_type || billing.gst_type || this.currentSettings.gst_type;
     const allowTaxOverride = payload.allow_tax_override_per_bill !== undefined
       ? Boolean(payload.allow_tax_override_per_bill)
@@ -1456,6 +1588,10 @@ export class CompanySettingsService {
     this.currentSettings = {
       ...this.currentSettings,
       store_id: String(payload.store_id || this.currentSettings.store_id),
+      settings_version:
+        payload.settings_version !== undefined && payload.settings_version !== null
+          ? Number(payload.settings_version)
+          : this.currentSettings.settings_version,
       store_name: payload.store_name || payload.name || this.currentSettings.store_name,
       display_name: payload.display_name || this.currentSettings.display_name,
       phone: payload.phone !== undefined ? payload.phone : this.currentSettings.phone,
@@ -1472,6 +1608,7 @@ export class CompanySettingsService {
       allow_tax_override_per_bill: allowTaxOverride,
       tax_mode: taxMode,
       purchase_tax_mode: purchaseTaxMode,
+      purchase_charges: purchaseCharges,
       default_hsn_code: defaultHsn,
       credit_period_days: creditPeriodDays,
       default_discount_percent: defaultDiscount,
@@ -1523,6 +1660,7 @@ export class CompanySettingsService {
       enable_ptss: payload.enable_ptss !== undefined ? Boolean(payload.enable_ptss) : this.currentSettings.enable_ptss,
       freight_is_taxable: payload.freight_is_taxable !== undefined ? Boolean(payload.freight_is_taxable) : this.currentSettings.freight_is_taxable,
       batch_required: payload.batch_required !== undefined ? Boolean(payload.batch_required) : this.currentSettings.batch_required,
+      salesperson_on_bill: payload.salesperson_on_bill !== undefined ? payload.salesperson_on_bill : this.currentSettings.salesperson_on_bill,
       enabled_menu_items: Array.isArray(payload.enabled_menu_items) && payload.enabled_menu_items.length > 0
         ? payload.enabled_menu_items
         : this.currentSettings.enabled_menu_items,
@@ -1539,6 +1677,11 @@ export class CompanySettingsService {
   }
 
   previewNextInvoiceNumber(): string {
+    // CNT-014: a counter bills from its own series, so two counters of one
+    // store never print the same invoice number.
+    const counterNumber = counterSequenceService.previewForActive("invoice");
+    if (counterNumber) return counterNumber;
+
     const seq = this.currentSettings.sequences;
     const prefix = seq?.invoicePrefix || this.currentSettings.invoice_prefix || "INV";
     const currentNum = seq?.nextInvoiceNumber ?? this.currentSettings.next_invoice_number ?? 1001;
@@ -1546,6 +1689,9 @@ export class CompanySettingsService {
   }
 
   async generateNextInvoiceNumber(): Promise<string> {
+    const counterNumber = await counterSequenceService.numberFromActiveCounter("invoice", true);
+    if (counterNumber) return counterNumber;
+
     await this.loadSettings();
     const seq = { ...this.currentSettings.sequences };
     const prefix = seq.invoicePrefix || this.currentSettings.invoice_prefix || "INV";
@@ -1555,16 +1701,18 @@ export class CompanySettingsService {
     // Increment and persist next number
     seq.invoicePrefix = prefix;
     seq.nextInvoiceNumber = currentNum + 1;
-    await this.updateSettings({
-      invoice_prefix: prefix,
-      next_invoice_number: currentNum + 1,
-      sequences: seq,
-    });
+    await this.saveLocalSettings(
+      {
+        invoice_prefix: prefix,
+        next_invoice_number: currentNum + 1,
+        sequences: seq,
+      });
     return invoiceNumber;
   }
 
   async syncNextInvoiceSequence(assignedInvoiceNumber: string): Promise<void> {
     if (!assignedInvoiceNumber) return;
+    await counterSequenceService.stepOverForActiveCounter(assignedInvoiceNumber);
     await this.loadSettings();
     const parts = assignedInvoiceNumber.split("-");
     const lastPart = parseInt(parts[parts.length - 1], 10);
@@ -1572,14 +1720,18 @@ export class CompanySettingsService {
     const currentNext = seq.nextInvoiceNumber ?? this.currentSettings.next_invoice_number ?? 1001;
     if (!isNaN(lastPart) && lastPart >= currentNext) {
       seq.nextInvoiceNumber = lastPart + 1;
-      await this.updateSettings({
-        next_invoice_number: lastPart + 1,
-        sequences: seq,
-      });
+      await this.saveLocalSettings(
+        {
+          next_invoice_number: lastPart + 1,
+          sequences: seq,
+        });
     }
   }
 
   previewNextDocumentNumber(type: "return" | "purchase" | "quotation" | "adjustment" | "transfer"): string {
+    const counterNumber = counterSequenceService.previewForActive(type);
+    if (counterNumber) return counterNumber;
+
     const seq = this.currentSettings.sequences;
     if (type === "return") {
       return `${seq?.returnPrefix || "SR"}-${seq?.nextReturnNumber || 1}`;
@@ -1596,6 +1748,9 @@ export class CompanySettingsService {
   }
 
   async generateNextDocumentNumber(type: "return" | "purchase" | "quotation" | "adjustment" | "transfer"): Promise<string> {
+    const counterNumber = await counterSequenceService.numberFromActiveCounter(type, true);
+    if (counterNumber) return counterNumber;
+
     await this.loadSettings();
     const seq = { ...this.currentSettings.sequences };
 
@@ -1624,7 +1779,7 @@ export class CompanySettingsService {
       seq.nextTransferNumber = num + 1;
     }
 
-    await this.updateSettings({ sequences: seq });
+    await this.saveLocalSettings({ sequences: seq });
     return `${prefix}-${num}`;
   }
 
@@ -1633,6 +1788,7 @@ export class CompanySettingsService {
     assignedNumber: string
   ): Promise<void> {
     if (!assignedNumber) return;
+    await counterSequenceService.stepOverForActiveCounter(assignedNumber);
     await this.loadSettings();
     const parts = assignedNumber.split("-");
     const lastPart = parseInt(parts[parts.length - 1], 10);
@@ -1641,19 +1797,19 @@ export class CompanySettingsService {
     const seq = { ...this.currentSettings.sequences };
     if (type === "return" && lastPart >= (seq.nextReturnNumber || 1)) {
       seq.nextReturnNumber = lastPart + 1;
-      await this.updateSettings({ sequences: seq });
+      await this.saveLocalSettings({ sequences: seq });
     } else if (type === "purchase" && lastPart >= (seq.nextPurchaseNumber || 201)) {
       seq.nextPurchaseNumber = lastPart + 1;
-      await this.updateSettings({ sequences: seq });
+      await this.saveLocalSettings({ sequences: seq });
     } else if (type === "quotation" && lastPart >= (seq.nextQuotationNumber || 101)) {
       seq.nextQuotationNumber = lastPart + 1;
-      await this.updateSettings({ sequences: seq });
+      await this.saveLocalSettings({ sequences: seq });
     } else if (type === "adjustment" && lastPart >= (seq.nextAdjustmentNumber || 401)) {
       seq.nextAdjustmentNumber = lastPart + 1;
-      await this.updateSettings({ sequences: seq });
+      await this.saveLocalSettings({ sequences: seq });
     } else if (type === "transfer" && lastPart >= (seq.nextTransferNumber || 501)) {
       seq.nextTransferNumber = lastPart + 1;
-      await this.updateSettings({ sequences: seq });
+      await this.saveLocalSettings({ sequences: seq });
     }
   }
 

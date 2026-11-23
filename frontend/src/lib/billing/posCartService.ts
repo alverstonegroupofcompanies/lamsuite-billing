@@ -10,11 +10,18 @@ import {
 import { sqliteStorage } from "../db/sqliteStorage";
 import { syncQueueService } from "../sync/syncQueueService";
 import { onlineTransactionService } from "../sync/onlineTransactionService";
-import { staffAuthService } from "../auth/staffAuthService";
 import { storeRegistryService } from "../auth/storeRegistryService";
 import { storeDeviceService } from "../auth/storeDeviceService";
-import type { PaymentTenderLine } from "./billingTenderService";
+import { counterGraceService } from "../auth/counterGraceService";
+import { billingTenderService, type PaymentTenderLine } from "./billingTenderService";
 import { cashShiftService } from "./cashShiftService";
+import { ApprovalRequiredError } from "./approvalGateService";
+import {
+  PharmacistConfirmationRequiredError,
+  isPharmacistRefusal,
+  pharmacistFields,
+  type PharmacistCredential,
+} from "./pharmacistGate";
 import { companySettingsService } from "../settings/companySettingsService";
 import { storeToday, toStoreDateString, getStoreTimezone } from "../dateTimeUtils";
 
@@ -59,6 +66,8 @@ export class PosCartService {
   private customerPhone = "";
   private customerGstin = "";
   private placeOfSupply = "";
+  private salespersonId = "";
+  private salespersonName = "";
   private billDiscount: { type: "percent" | "amount"; value: number } = { type: "amount", value: 0 };
   private manualRoundOff: number | null = null;
   private companyTaxMode: CompanyTaxMode = "inclusive";
@@ -167,6 +176,15 @@ export class PosCartService {
       customerGstin: this.customerGstin,
       placeOfSupply: this.placeOfSupply,
     };
+  }
+
+  /**
+   * GAP-01 / SPR-010: who sold this bill. The name goes with the id because
+   * the bill prints what the till showed, and the person may be renamed later.
+   */
+  setSalesperson(id: string, name: string) {
+    this.salespersonId = id || "";
+    this.salespersonName = id ? name || "" : "";
   }
 
   /** Apply a customer-specific price list. Empty items clears negotiated pricing. */
@@ -666,6 +684,8 @@ export class PosCartService {
     this.customerName = "Walk-in Customer";
     this.customerGstin = "";
     this.placeOfSupply = "";
+    this.salespersonId = "";
+    this.salespersonName = "";
     this.billDiscount = { type: "amount", value: 0 };
     this.manualRoundOff = null;
     this.prescriptionMeta = {};
@@ -720,6 +740,12 @@ export class PosCartService {
       operatorId?: string;
       cashChange?: number;
       payments?: PaymentTenderLine[];
+      /** APR-003: retry of a bill the server already refused, with its grant. */
+      externalId?: string;
+      approvalToken?: string;
+      approvalReason?: string;
+      /** PHR-004: retry of a restricted bill, with the pharmacist who vouched. */
+      pharmacist?: PharmacistCredential | null;
     }
   ): Promise<{ success: boolean; invoiceId: string; invoiceNumber?: string; isOfflineQueued?: boolean; isTempNumber?: boolean }> {
     const resolvedInvoiceNumber = invoiceNumber || (await companySettingsService.generateNextInvoiceNumber());
@@ -736,6 +762,11 @@ export class PosCartService {
       throw new Error("Cannot finalize invoice: Store is disabled by administration.");
     }
 
+    // CNT-011: the grace the store server granted is what lets a dark counter
+    // keep taking bills. Once that window closes the cart stops, here rather
+    // than in the sync queue, so nothing is written that cannot be defended.
+    counterGraceService.assertWorkAllowed();
+
     const totals = options?.totalsSnapshot || this.getTotals();
 
     // Safety net: integrity check verifying invoice totals equal sum of lines
@@ -747,12 +778,15 @@ export class PosCartService {
         `Invoice integrity violation: Line sum (₹${sumLineTotals.toFixed(2)}) minus discount (₹${billDiscount.toFixed(2)}) plus round-off (₹${(totals.round_off || 0).toFixed(2)}) does not match grand total (₹${totals.grand_total.toFixed(2)})`
       );
     }
-    const externalId = `ext_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`;
+    // A retried save reuses the identity the grant was bound to; a new bill gets
+    // its own, so one approval can never settle two documents.
+    const externalId =
+      options?.externalId || `ext_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`;
 
-    const currentSession = staffAuthService.getCurrentSession();
-    const activeCounterId = currentSession?.counterId || "Counter 01";
     const deviceProfile = await storeDeviceService.getDeviceProfile();
-    const activeStoreId = String(activeStore?.id || currentSession?.user?.store_id || deviceProfile?.store_id || "1");
+    // B8b: a sale belongs to the counter this till claimed, not to a person.
+    const activeCounterId = deviceProfile?.counter_id || "Counter 01";
+    const activeStoreId = String(activeStore?.id || deviceProfile?.store_id || "1");
     const activeStoreCode = String(activeStore?.code || deviceProfile?.store_code || "STORE-01");
 
     const resolvedPayments: PaymentTenderLine[] = Array.isArray(paymentModeOrPayments)
@@ -761,9 +795,14 @@ export class PosCartService {
       ? options.payments
       : [{ mode: typeof paymentModeOrPayments === "string" ? paymentModeOrPayments : "Cash", amount: totals.grand_total }];
 
-    const primaryPaymentMode = resolvedPayments.length > 1
+    // PAY-02: ₹500 handed over for a ₹210 bill settled ₹210 and ₹290 back. The
+    // server reads the same way, so the till files what actually stays in the
+    // drawer instead of a payment that never happened.
+    const settled = billingTenderService.settleTenders(totals.grand_total, resolvedPayments);
+
+    const primaryPaymentMode = settled.lines.length > 1
       ? "Split"
-      : (resolvedPayments[0]?.mode || (typeof paymentModeOrPayments === "string" ? paymentModeOrPayments : "Cash"));
+      : (settled.lines[0]?.mode || resolvedPayments[0]?.mode || (typeof paymentModeOrPayments === "string" ? paymentModeOrPayments : "Cash"));
 
     const activeTax = this.getActiveTaxMode();
 
@@ -781,8 +820,8 @@ export class PosCartService {
       customer_gstin: this.customerGstin,
       place_of_supply: this.placeOfSupply,
       payment_mode: primaryPaymentMode,
-      paid_amount: totals.grand_total,
-      payments: resolvedPayments,
+      paid_amount: settled.paid,
+      payments: settled.lines,
       counter_id: activeCounterId,
       tax_mode: activeTax.taxMode,
       store_state: this.storeState,
@@ -791,6 +830,8 @@ export class PosCartService {
       patient_name: this.prescriptionMeta.patient_name,
       doctor_name: this.prescriptionMeta.doctor_name,
       doctor_reg_no: this.prescriptionMeta.doctor_reg_no,
+      salesperson_id: this.salespersonId,
+      salesperson_name: this.salespersonName,
       bill_discount_percent: this.billDiscount?.type === "percent" ? this.billDiscount.value : 0,
       bill_discount_amount: totals.bill_discount_amount,
       manual_round_off: this.manualRoundOff,
@@ -800,6 +841,10 @@ export class PosCartService {
       round_off: totals.round_off,
       grand_total: totals.grand_total,
       is_inter_state: this.isInterState,
+      ...(options?.approvalToken
+        ? { approval_token: options.approvalToken, approval_reason: options.approvalReason }
+        : {}),
+      ...pharmacistFields(options?.pharmacist),
       items: linesToFinalize.map((line) => ({
         product_id: line.product.id,
         product_name: line.product.name,
@@ -821,6 +866,23 @@ export class PosCartService {
     });
 
     if (!txRes.success) {
+      // The server said a threshold was crossed. Hand the caller the action
+      // keys and the document identity the grant must name, so the till can
+      // collect an approver PIN and send the same bill again.
+      if (txRes.businessRule?.code === "approval_required") {
+        throw new ApprovalRequiredError(
+          txRes.businessRule.actions || [],
+          txRes.businessRule.reasons || {},
+          externalId
+        );
+      }
+
+      if (isPharmacistRefusal(txRes.businessRule?.code)) {
+        // Nothing was written. The lines are held until a pharmacist with a
+        // registration that holds says so with their own PIN.
+        throw new PharmacistConfirmationRequiredError(txRes.businessRule!, externalId);
+      }
+
       throw new Error(txRes.error || "Invoice failed to finalize.");
     }
 
@@ -832,7 +894,7 @@ export class PosCartService {
     await companySettingsService.syncNextInvoiceSequence(finalDocNumber).catch(() => {});
 
     // Record tender in active counter shift
-    await cashShiftService.recordSaleTenders(activeCounterId, resolvedPayments, options?.cashChange || 0);
+    await cashShiftService.recordSaleTenders(activeCounterId, settled.lines, options?.cashChange || 0);
 
     // Reset Cart only if autoClear is not explicitly disabled
     if (options?.autoClear !== false) {

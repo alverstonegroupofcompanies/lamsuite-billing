@@ -9,7 +9,7 @@ services:
     container_name: lamsuite-staging-api
     environment:
       - APP_ENV=staging
-      - APP_DEBUG=true
+      - APP_DEBUG=${APP_DEBUG:-false}
       - APP_URL=https://${SUBDOMAIN_API:-api}.staging.${DOMAIN}
       - SANCTUM_STATEFUL_DOMAINS=${SUBDOMAIN_PANEL:-app}.staging.${DOMAIN},${SUBDOMAIN_WEB:-${SUBDOMAIN_APP:-web}}.staging.${DOMAIN},staging.${DOMAIN}
       - SESSION_DOMAIN=.staging.${DOMAIN}

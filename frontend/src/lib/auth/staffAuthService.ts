@@ -117,26 +117,13 @@ export class StaffAuthService {
   private sessionListeners: Array<(session: ActiveStaffSession | null) => void> = [];
 
   constructor() {
+    // B8b: an older build left the signed-in operator — with their credential
+    // hashes — and their bearer token in browser storage. Nothing reads them
+    // back any more, and whatever is still there is erased on boot (IS5).
     try {
       if (typeof localStorage !== "undefined") {
-        const saved = localStorage.getItem("active_staff_session");
-        if (saved) {
-          const parsed = JSON.parse(saved);
-          if (parsed && parsed.sessionId && parsed.user) {
-            // Legacy sessions were stored with a ["*"] wildcard for every role.
-            // Drop it for non-admins so role baselines apply after this upgrade.
-            const legacyWildcard =
-              Array.isArray(parsed.user.permissions) &&
-              parsed.user.permissions.length === 1 &&
-              parsed.user.permissions[0] === "*" &&
-              parsed.user.role !== "super_admin";
-            if (legacyWildcard) {
-              parsed.user.permissions = null;
-              localStorage.setItem("active_staff_session", JSON.stringify(parsed));
-            }
-            this.currentSession = parsed;
-          }
-        }
+        localStorage.removeItem("active_staff_session");
+        localStorage.removeItem("staff_token");
       }
     } catch (_) {}
   }
@@ -438,7 +425,6 @@ export class StaffAuthService {
     // 1. ONLINE FIRST: Authenticate with Cloud Backend API if in browser and online (skip in unit test runner)
     if (typeof window !== "undefined" && navigator.onLine && (typeof process === "undefined" || process.env.NODE_ENV !== "test")) {
       let onlineSuccessStaff: StaffUser | null = null;
-      let onlineToken: string | null = null;
 
       try {
         const targetUserId = localUser?.id || (isNumericId(usernameOrId) ? usernameOrId : undefined);
@@ -488,9 +474,6 @@ export class StaffAuthService {
               permissions: body.user.permissions || null,
               enabled_menus: body.user.enabled_menus || ["pos", "bills"],
             };
-            if (body.token) {
-              onlineToken = body.token;
-            }
             if (body.settings) {
               try {
                 const { companySettingsService } = await import("../settings/companySettingsService");
@@ -523,9 +506,8 @@ export class StaffAuthService {
       }
 
       if (onlineSuccessStaff) {
-        if (onlineToken) {
-          try { localStorage.setItem("staff_token", onlineToken); } catch (_) {}
-        }
+        // B8b: a person's bearer token is kept nowhere — the counter's own
+        // device token authorises what this till asks for.
         return await this.establishSession(onlineSuccessStaff);
       }
     }
@@ -568,7 +550,6 @@ export class StaffAuthService {
     // 1. ONLINE FIRST: Authenticate with Cloud Backend API if in browser and online (skip in unit test runner)
     if (typeof window !== "undefined" && navigator.onLine && (typeof process === "undefined" || process.env.NODE_ENV !== "test")) {
       let onlineSuccessStaff: StaffUser | null = null;
-      let onlineToken: string | null = null;
 
       try {
         const targetUserId = localUser?.id || (isNumericId(usernameOrId) ? usernameOrId : undefined);
@@ -618,9 +599,6 @@ export class StaffAuthService {
               permissions: body.user.permissions || null,
               enabled_menus: body.user.enabled_menus || ["pos", "bills"],
             };
-            if (body.token) {
-              onlineToken = body.token;
-            }
             if (body.settings) {
               try {
                 const { companySettingsService } = await import("../settings/companySettingsService");
@@ -653,9 +631,8 @@ export class StaffAuthService {
       }
 
       if (onlineSuccessStaff) {
-        if (onlineToken) {
-          try { localStorage.setItem("staff_token", onlineToken); } catch (_) {}
-        }
+        // B8b: a person's bearer token is kept nowhere — the counter's own
+        // device token authorises what this till asks for.
         return await this.establishSession(onlineSuccessStaff);
       }
     }
@@ -980,35 +957,29 @@ export class StaffAuthService {
   }
 
   /**
-   * Build headers for the admin user API. POS staff tokens are Sanctum tokens
-   * for the same User record, so the admin endpoints accept them; RBAC on the
-   * server decides what the signed-in operator may actually do.
+   * Build headers for the staff API. B8b: the counter asks, so its device token
+   * is what authorises the call and the store that token was issued for is the
+   * only branch it can reach.
    */
   private async getStaffAdminContext(): Promise<{ headers: Record<string, string>; storeId: string | null }> {
-    let token: string | null = null;
-    try {
-      token = typeof localStorage !== "undefined" ? localStorage.getItem("staff_token") : null;
-    } catch (_) {
-      token = null;
-    }
-    if (!token) {
-      throw new Error("Sign in online to manage staff accounts. Staff management is unavailable offline.");
-    }
-
-    const headers: Record<string, string> = {
-      Accept: "application/json",
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
-    };
-
     const profile = await storeDeviceService.getDeviceProfile().catch(() => null);
     const profileStore = profile?.store_id ? String(profile.store_id) : "";
     const storeId = profileStore && !/^store_/i.test(profileStore) ? profileStore : null;
-    if (storeId) {
-      headers["X-Store-Id"] = storeId;
+
+    const deviceHeaders = await storeDeviceService.getDeviceAuthHeaders();
+    if (!deviceHeaders["X-Device-Token"]) {
+      throw new Error("Claim this terminal to a counter before managing staff accounts.");
     }
 
-    return { headers, storeId };
+    return {
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+        ...(storeId ? { "X-Store-Id": storeId } : {}),
+        ...deviceHeaders,
+      },
+      storeId,
+    };
   }
 
   private async staffAdminRequest<T>(
@@ -1016,7 +987,9 @@ export class StaffAuthService {
     options?: { method?: string; body?: unknown }
   ): Promise<T> {
     const { headers } = await this.getStaffAdminContext();
-    const res = await fetch(`${API_BASE_URL}/api/admin${path}`, {
+    // A16b: /api/admin/users answers for a person only. The till calls the
+    // counter-authorised twin of the same controller.
+    const res = await fetch(`${API_BASE_URL}/api/till${path}`, {
       method: options?.method || "GET",
       headers,
       body: options?.body !== undefined ? JSON.stringify(options.body) : undefined,
@@ -1039,7 +1012,7 @@ export class StaffAuthService {
     if (search && search.trim()) params.set("search", search.trim());
     if (storeId) params.set("store_id", storeId);
 
-    const data = await this.staffAdminRequest<any>(`/users?${params.toString()}`);
+    const data = await this.staffAdminRequest<any>(`/staff?${params.toString()}`);
     const rows = Array.isArray(data?.data) ? data.data : Array.isArray(data) ? data : [];
     return rows
       .map((u: any) => ({
@@ -1064,7 +1037,7 @@ export class StaffAuthService {
     }
     if (payload.username === "") delete payload.username;
 
-    const created = await this.staffAdminRequest<any>("/users", { method: "POST", body: payload });
+    const created = await this.staffAdminRequest<any>("/staff", { method: "POST", body: payload });
     void this.syncStaffFromBackend().catch(() => {});
     return created;
   }
@@ -1075,23 +1048,23 @@ export class StaffAuthService {
     if (payload.pin === "") delete payload.pin;
     if (payload.username === "") payload.username = null;
 
-    const updated = await this.staffAdminRequest<any>(`/users/${id}`, { method: "PUT", body: payload });
+    const updated = await this.staffAdminRequest<any>(`/staff/${id}`, { method: "PUT", body: payload });
     void this.syncStaffFromBackend().catch(() => {});
     return updated;
   }
 
   async deleteStaff(id: string): Promise<void> {
-    await this.staffAdminRequest(`/users/${id}`, { method: "DELETE" });
+    await this.staffAdminRequest(`/staff/${id}`, { method: "DELETE" });
     void this.syncStaffFromBackend().catch(() => {});
   }
 
   async unlockStaff(id: string): Promise<void> {
-    await this.staffAdminRequest(`/users/${id}/unlock`, { method: "POST" });
+    await this.staffAdminRequest(`/staff/${id}/unlock`, { method: "POST" });
     void this.syncStaffFromBackend().catch(() => {});
   }
 
   async resetStaffPin(id: string, pin: string): Promise<void> {
-    await this.staffAdminRequest(`/users/${id}/reset-pin`, { method: "POST", body: { pin } });
+    await this.staffAdminRequest(`/staff/${id}/reset-pin`, { method: "POST", body: { pin } });
     void this.syncStaffFromBackend().catch(() => {});
   }
 
@@ -1157,9 +1130,8 @@ export class StaffAuthService {
       lastActivityAt: Date.now(),
     };
 
-    try {
-      localStorage.setItem("active_staff_session", JSON.stringify(this.currentSession));
-    } catch (_) {}
+    // B8b: the session — and the credential hashes it carries — stays in memory.
+    // Nothing about a person is left in browser storage (IS5).
 
     // Record session in counter_sessions
     await sqliteStorage.insertRecord("counter_sessions", sessionId, {
@@ -1262,13 +1234,6 @@ export class StaffAuthService {
 
     const batch = pending.slice(0, 100);
     const profile = await storeDeviceService.getDeviceProfile().catch(() => null);
-    const token = (() => {
-      try {
-        return typeof localStorage !== "undefined" ? localStorage.getItem("staff_token") : null;
-      } catch {
-        return null;
-      }
-    })();
 
     try {
       const deviceHeaders = await storeDeviceService.getDeviceAuthHeaders();
@@ -1277,7 +1242,6 @@ export class StaffAuthService {
         headers: {
           "Content-Type": "application/json",
           Accept: "application/json",
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
           ...deviceHeaders,
         },
         body: JSON.stringify({

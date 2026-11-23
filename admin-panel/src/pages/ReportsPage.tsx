@@ -5,6 +5,7 @@ import { useAuth } from "../context/AuthContext";
 import { Gstr3bPanel } from "../components/reports/Gstr3bPanel";
 import { Gstr9Panel } from "../components/reports/Gstr9Panel";
 import { Gstr2bPanel } from "../components/reports/Gstr2bPanel";
+import { SalespersonPanel } from "../components/reports/SalespersonPanel";
 import {
   FileBarChart2,
   ClipboardCheck,
@@ -17,6 +18,7 @@ import {
   Layers,
   Building,
   Users,
+  UserCog,
   Stethoscope,
   Mail,
   RefreshCw,
@@ -48,10 +50,140 @@ const emptyScheduleForm = {
   is_active: true,
 };
 
+/**
+ * GAP-02 / PHR-007 — the restricted-drug register.
+ *
+ * One entry per scheduled pack that left a counter, with the pharmacist who
+ * put their name on that bill beside it. A pack that left without one is not
+ * dropped: it is the entry an owner has to be shown, so the column reads
+ * plainly that nobody vouched for it and the footings count it.
+ */
+const RestrictedDrugRegister: React.FC<{ register: any }> = ({ register }) => {
+  const { isAllStores } = useAuth();
+  const rows: any[] = register?.rows || [];
+  const totals = register?.totals || {};
+
+  if (rows.length === 0) {
+    return (
+      <div className="flex items-start gap-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-4 py-3 text-xs text-slate-600 dark:text-slate-300">
+        <Stethoscope className="w-4 h-4 mt-0.5 shrink-0 text-slate-400" />
+        <span>No scheduled packs were dispensed in this window, so the register is empty.</span>
+      </div>
+    );
+  }
+
+  const bodyCell = "px-3 py-2 text-xs text-slate-700 dark:text-slate-200 whitespace-nowrap";
+  const numCell = `${bodyCell} text-right font-mono`;
+  const headCell = "px-3 py-2 text-left text-[11px] font-bold uppercase tracking-wide text-slate-500";
+
+  return (
+    <div className="space-y-3">
+      <div className="overflow-x-auto rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900">
+        <table
+          aria-label="Restricted Drug Register (Schedule H1)"
+          className="w-full text-xs"
+        >
+          <thead className="bg-slate-50 dark:bg-slate-800/50 border-b border-slate-200 dark:border-slate-800">
+            <tr>
+              <th className={headCell} scope="col">
+                Date
+              </th>
+              <th className={headCell} scope="col">
+                Bill No
+              </th>
+              <th className={headCell} scope="col">
+                Counter
+              </th>
+              <th className={headCell} scope="col">
+                Type
+              </th>
+              {isAllStores && (
+                <th className={headCell} scope="col">
+                  Store
+                </th>
+              )}
+              <th className={headCell} scope="col">
+                Scheduled Drug
+              </th>
+              <th className={headCell} scope="col">
+                Batch
+              </th>
+              <th className={headCell} scope="col">
+                Schedule
+              </th>
+              <th className={`${headCell} text-right`} scope="col">
+                Qty
+              </th>
+              <th className={`${headCell} text-right`} scope="col">
+                Value
+              </th>
+              <th className={headCell} scope="col">
+                Pharmacist
+              </th>
+              <th className={headCell} scope="col">
+                Registration No
+              </th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+            {rows.map((row, index) => (
+              <tr
+                key={`${row.invoice_id}-${row.product_id}-${index}`}
+                className={
+                  row.pharmacist_id === null && row.pharmacist_name === null
+                    ? "bg-rose-50/60 dark:bg-rose-950/20"
+                    : undefined
+                }
+              >
+                <td className={bodyCell}>{row.invoice_date}</td>
+                <td className={`${bodyCell} font-mono`}>{row.invoice_number}</td>
+                <td className={`${bodyCell} font-mono`}>{row.counter_code || "—"}</td>
+                <td className={bodyCell}>{row.is_return ? "Return" : "Sale"}</td>
+                {isAllStores && <td className={bodyCell}>{row.store_name || "—"}</td>}
+                <td className={`${bodyCell} font-bold`}>{row.product_name}</td>
+                <td className={`${bodyCell} font-mono`}>{row.batch_no || "—"}</td>
+                <td className={`${bodyCell} text-center font-mono`}>{row.schedule_code}</td>
+                <td className={numCell}>{row.qty}</td>
+                <td className={numCell}>{formatINR(row.total_amount)}</td>
+                <td className={bodyCell}>
+                  {row.pharmacist_name ? (
+                    row.pharmacist_name
+                  ) : (
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300">
+                      No pharmacist
+                    </span>
+                  )}
+                </td>
+                <td className={`${bodyCell} font-mono`}>{row.pharmacist_reg_no || "—"}</td>
+              </tr>
+            ))}
+          </tbody>
+          <tfoot>
+            <tr className="border-t border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950/40">
+              <td className={`${bodyCell} font-black`} colSpan={isAllStores ? 8 : 7}>
+                {totals.lines ?? rows.length} entries
+              </td>
+              <td className={`${numCell} font-black`}>{totals.quantity ?? ""}</td>
+              <td className={`${numCell} font-black`}>{formatINR(totals.value ?? 0)}</td>
+              <td className={bodyCell} colSpan={2} />
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+
+      <p className="text-[11px] text-slate-500 dark:text-slate-400">
+        {totals.unconfirmed ?? 0} without a pharmacist. A restricted pack cannot be billed without one, so these
+        are bills the store accepted while offline or wrote before the rule was in force — read them as the gaps
+        to close.
+      </p>
+    </div>
+  );
+};
+
 export const ReportsPage: React.FC = () => {
   const { activeStore, hasPermission } = useAuth();
   const [activeTab, setActiveTab] = useState<
-    "sales" | "consolidated" | "gstr1" | "gstr3b" | "gstr9" | "gstr2b" | "aging" | "pharmacy" | "scheduled"
+    "sales" | "consolidated" | "gstr1" | "gstr3b" | "gstr9" | "gstr2b" | "aging" | "pharmacy" | "salesperson" | "scheduled"
   >("sales");
 
   const [startDate, setStartDate] = useState(
@@ -79,7 +211,12 @@ export const ReportsPage: React.FC = () => {
   const isPharmacy = !activeStore || (activeStore.store_type || "pharmacy") === "pharmacy";
 
   const fetchReports = async () => {
-    if (activeTab === "gstr3b" || activeTab === "gstr9" || activeTab === "gstr2b") {
+    if (
+      activeTab === "gstr3b" ||
+      activeTab === "gstr9" ||
+      activeTab === "gstr2b" ||
+      activeTab === "salesperson"
+    ) {
       return;
     }
 
@@ -280,6 +417,7 @@ export const ReportsPage: React.FC = () => {
           { id: "gstr2b", label: "GSTR-2B ITC Matching", icon: FileSearch },
           { id: "gstr9", label: "GSTR-9 Annual Return", icon: FileStack },
           { id: "aging", label: "Customer Dues Aging", icon: Users },
+          { id: "salesperson", label: "Salesperson Register", icon: UserCog },
           ...(isPharmacy ? [{ id: "pharmacy", label: "Rx & Schedule H1 Register", icon: Stethoscope }] : []),
           { id: "scheduled", label: "Scheduled Email Digests", icon: Mail },
         ].map((tab) => {
@@ -313,6 +451,8 @@ export const ReportsPage: React.FC = () => {
         <Gstr9Panel />
       ) : activeTab === "gstr2b" ? (
         <Gstr2bPanel />
+      ) : activeTab === "salesperson" ? (
+        <SalespersonPanel startDate={startDate} endDate={endDate} />
       ) : activeTab === "sales" && salesReport ? (
         /* Sales Report */
         <div className="space-y-6">
@@ -473,35 +613,39 @@ export const ReportsPage: React.FC = () => {
           </table>
         </div>
       ) : activeTab === "pharmacy" && pharmacyReport ? (
-        /* Pharmacy Doctor Sales */
-        <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs overflow-hidden">
-          <div className="p-4 border-b border-slate-200 dark:border-slate-800">
-            <h3 className="font-bold text-slate-900 dark:text-white text-sm">
-              Prescription Sales by Registered Doctors
-            </h3>
-          </div>
-          <table className="w-full text-xs text-left text-slate-600 dark:text-slate-300">
-            <thead className="bg-slate-50 dark:bg-slate-800/50 text-slate-500 uppercase text-[10px] font-semibold border-b border-slate-200 dark:border-slate-800">
-              <tr>
-                <th className="px-4 py-3">Doctor Name</th>
-                <th className="px-4 py-3">Medical Reg No</th>
-                <th className="px-4 py-3 text-center">Prescriptions Dispensed</th>
-                <th className="px-4 py-3 text-right">Total Medication Value</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-              {pharmacyReport.doctor_sales?.map((d: any, i: number) => (
-                <tr key={i}>
-                  <td className="px-4 py-3 font-bold text-slate-900 dark:text-white">{d.doctor_name}</td>
-                  <td className="px-4 py-3 font-mono text-slate-500">{d.doctor_reg_no || "—"}</td>
-                  <td className="px-4 py-3 text-center font-mono font-bold">{d.rx_count}</td>
-                  <td className="px-4 py-3 text-right font-mono font-bold text-slate-900 dark:text-white">
-                    {formatINR(d.total_value)}
-                  </td>
+        /* Pharmacy statutory surface */
+        <div className="space-y-6">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs overflow-hidden">
+            <div className="p-4 border-b border-slate-200 dark:border-slate-800">
+              <h3 className="font-bold text-slate-900 dark:text-white text-sm">
+                Prescription Sales by Registered Doctors
+              </h3>
+            </div>
+            <table className="w-full text-xs text-left text-slate-600 dark:text-slate-300">
+              <thead className="bg-slate-50 dark:bg-slate-800/50 text-slate-500 uppercase text-[10px] font-semibold border-b border-slate-200 dark:border-slate-800">
+                <tr>
+                  <th className="px-4 py-3">Doctor Name</th>
+                  <th className="px-4 py-3">Medical Reg No</th>
+                  <th className="px-4 py-3 text-center">Prescriptions Dispensed</th>
+                  <th className="px-4 py-3 text-right">Total Medication Value</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                {pharmacyReport.doctor_sales?.map((d: any, i: number) => (
+                  <tr key={i}>
+                    <td className="px-4 py-3 font-bold text-slate-900 dark:text-white">{d.doctor_name}</td>
+                    <td className="px-4 py-3 font-mono text-slate-500">{d.doctor_reg_no || "—"}</td>
+                    <td className="px-4 py-3 text-center font-mono font-bold">{d.rx_count}</td>
+                    <td className="px-4 py-3 text-right font-mono font-bold text-slate-900 dark:text-white">
+                      {formatINR(d.total_value)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <RestrictedDrugRegister register={pharmacyReport.restricted_drug_register} />
         </div>
       ) : activeTab === "consolidated" && consolidatedReport ? (
         /* Consolidated Items — matching key chosen per run (P-STORE-SCOPE) */

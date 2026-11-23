@@ -1,0 +1,43 @@
+{
+  "storeId": 14,
+  "counterId": 28,
+  "cancel_without_grant": {
+    "st": 403,
+    "body": "{\"success\":false,\"error\":\"Cancelling invoice C01-INV-1001 needs an approver's grant.\",\"code\":\"CANCEL_APPROVAL_REQUIRED\",\"rule\":\"invoice_cancel\",\"field\":\"approval_token\",\"message\":\"Cancelling invoice C"
+  },
+  "cancel_with_grant": {
+    "st": 200,
+    "row": {
+      "status": "cancelled",
+      "cancelled_by": 9
+    }
+  },
+  "replay_on_other_bill": {
+    "st": 403,
+    "body": "{\"success\":false,\"error\":\"The approval for this cancellation is invalid, already used or expired.\",\"code\":\"CANCEL_APPROVAL_INVALID\",\"rule\":\"invoice_cancel\",\"field\":\"approval_token\",\"message\":\"The appr"
+  },
+  "sync_cancel_without_grant": {
+    "st": 200,
+    "body": "{\"success\":false,\"results\":{\"total\":1,\"processed\":0,\"failed\":1,\"processed_ids\":[],\"errors\":[{\"id\":\"g12-q-742376\",\"entity_type\":\"invoice\",\"error\":\"Cancelling invoice C01-INV-1002 needs an approver's grant.\"}]},\"renumbered\":[]}"
+  },
+  "day_close": {
+    "st": 200,
+    "day": "2026-11-22"
+  },
+  "cancel_after_close": {
+    "st": 409,
+    "body": "{\"success\":false,\"error\":\"Day 2026-11-22 is closed. Cancellations and bill changes are blocked for this date.\",\"code\":\"DAY_CLOSED_LOCKED\",\"rule\":\"day_close\",\"field\":\"invoice_date\",\"message\":\"Day 2026-11-22 is closed. Cancellations and bill changes ar"
+  },
+  "panel_cancel_after_close": {
+    "st": 409,
+    "body": "{\"success\":false,\"error\":\"Day 2026-11-22 is closed. Cancellations and bill changes are blocked for this date.\",\"code\":\"DAY_CLOSED_LOCKED\",\"rule\":\"day_close\",\"field\":\"invoice_date\",\"message\":\"Day 2026-"
+  },
+  "reopen": {
+    "st": 200,
+    "day_status": "open"
+  },
+  "cancel_after_reopen": {
+    "st": 200
+  },
+  "failures": []
+}

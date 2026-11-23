@@ -1,0 +1,91 @@
+[
+  [
+    "after F7 F7",
+    "INPUT:text:e.g. INV-001, Ravi Kumar, 9876543210, 2026-10-29...=",
+    [
+      "Process customer returns, issue credit notes, manage stock restocking.",
+      "B2B Debit Notes",
+      "New Return (F7)",
+      "Counter Returns (Walk-in)",
+      "Customer Debit Notes (B2B Multi-Invoice)",
+      "All Statuses",
+      "Completed",
+      "Cancelled",
+      "Draft",
+      "CREDIT NOTE REGISTER",
+      "0 Records",
+      "RETURN NO\tDATE\tORIGINAL INVOICE\tCUSTOMER\tREFUND AMT\tREFUND MODE\tSTATUS\tACTIONS",
+      "No sales returns yet",
+      "Click \"New Return\" to process a customer return",
+      "New Sales Return / Credit Note",
+      "Step 1: Search and select the original invoice",
+      "1",
+      "Invoice",
+      "2",
+      "Items",
+      "3",
+      "Payment",
+      "Return Source *",
+      "Counter Return",
+      "Walk-in customer returns goods against a specific sales bill.",
+      "Customer Debit Note (B2B)",
+      "Customer sent a debit note covering products across 1 or more invoices.",
+      "Find Customer First (all invoices, any date)",
+      "Or Search Any Bill: Invoice Number, Customer, Mobile, Date or Product",
+      "Search for an invoice above to load its items",
+      "Type at least 2 characters to search",
+      "Cancel"
+    ]
+  ],
+  [
+    "clicked New Return",
+    "BODY::LamSuite Billing\nv2.1.1\n\nRetai="
+  ],
+  [
+    "controls",
+    [
+      "BUTTON:submit:Search actions, modules, or tools...\nCtrl+K",
+      "BUTTON:submit:New Return (F7)",
+      "BUTTON:submit:Counter Returns (Walk-in)",
+      "INPUT:text:Search return no, invoice no, customer...",
+      "SELECT:select-one:All Statuses\nCompleted\nCancelled\nDraft",
+      "INPUT:text:Customer name or mobile number...",
+      "INPUT:text:e.g. INV-001, Ravi Kumar, 9876543210, 2026-10-29..."
+    ]
+  ],
+  [
+    "after search",
+    "BODY::LamSuite Billing\nv2.1.1\n\nRetai=",
+    [
+      "Sales Returns (Credit Notes)",
+      "Process customer returns, issue credit notes, manage stock restocking.",
+      "CREDIT NOTE REGISTER",
+      "RETURN NO\tDATE\tORIGINAL INVOICE\tCUSTOMER\tREFUND AMT\tREFUND MODE\tSTATUS\tACTIONS",
+      "New Sales Return / Credit Note"
+    ]
+  ],
+  [
+    "controls2",
+    [
+      "BUTTON:button:QA Pharma Kochi\nQA-PH\nID:4\nCtrl+Alt+S",
+      "BUTTON:submit:Search actions, modules, or tools...\nCtrl+K",
+      "BUTTON:submit:ML",
+      "BUTTON:submit:",
+      "BUTTON:submit:",
+      "BUTTON:submit:Sales & Bills",
+      "BUTTON:submit:Purchases",
+      "BUTTON:submit:Inventory",
+      "BUTTON:submit:",
+      "BUTTON:submit:B2B Debit Notes",
+      "BUTTON:submit:New Return (F7)",
+      "BUTTON:submit:Counter Returns (Walk-in)",
+      "BUTTON:submit:Customer Debit Notes (B2B Multi-Invoice)",
+      "INPUT:text:Search return no, invoice no, customer...",
+      "SELECT:select-one:All Statuses\nCompleted\nCancelled\nDraft",
+      "BUTTON:submit:",
+      "INPUT:text:Customer name or mobile number...",
+      "INPUT:text:e.g. INV-001, Ravi Kumar, 9876543210, 2026-10-29...",
+      "BUTTON:submit:Cancel"
+    ]
+  ]
+]

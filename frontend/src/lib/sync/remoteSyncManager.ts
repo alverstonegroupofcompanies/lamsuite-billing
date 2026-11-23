@@ -4,6 +4,7 @@ import { cloudDeltaSyncService } from "./cloudDeltaSyncService";
 import { syncQueueService, defaultBackendApiClient } from "./syncQueueService";
 import { multiCounterStockService } from "../stock/multiCounterStockService";
 import { storeDeviceService } from "../auth/storeDeviceService";
+import { counterSessionService } from "../auth/counterSessionService";
 import { API_BASE_URL } from "../../config/env";
 
 export type TransportMode = "lan_mesh" | "cloud_sse" | "cloud_poll" | "offline";
@@ -115,7 +116,7 @@ export class RemoteSyncManager {
   /**
    * Connect to backend Near-Real-Time Server-Sent Events stream.
    */
-  connectCloudStream(baseUrl: string, counterCode: string): void {
+  async connectCloudStream(baseUrl: string, counterCode: string): Promise<void> {
     if (this.eventSource) {
       this.eventSource.close();
       this.eventSource = null;
@@ -125,7 +126,16 @@ export class RemoteSyncManager {
       ? window.localStorage.getItem("lamsuite_active_store_id") || ""
       : "";
     const storeQuery = storeId ? `&store_id=${encodeURIComponent(storeId)}` : "";
-    const sseUrl = `${baseUrl}/api/sync/stream?counter_code=${encodeURIComponent(counterCode)}${storeQuery}`;
+    // G1-SEC: /api/sync/stream now requires the counter's token, and EventSource
+    // cannot send headers, so the token travels as the one query parameter the
+    // device guard accepts. Without a token there is no stream; polling covers it.
+    const token = (await storeDeviceService.getDeviceAuthHeaders())["X-Device-Token"];
+    if (!token) {
+      this.startPollingFallback(baseUrl);
+      return;
+    }
+    const tokenQuery = `&device_token=${encodeURIComponent(token)}`;
+    const sseUrl = `${baseUrl}/api/sync/stream?counter_code=${encodeURIComponent(counterCode)}${storeQuery}${tokenQuery}`;
 
     if (typeof EventSource !== "undefined") {
       try {
@@ -290,6 +300,11 @@ export class RemoteSyncManager {
           return res.json();
         },
       });
+    } else if (syncEvt.entity_type === "counter_profile") {
+      // PRF-004: the notice only says the counter's number moved. The document
+      // itself is pulled from the counter's own context — a till never takes a
+      // profile from a broadcast, only the fact that it should ask again.
+      await counterSessionService.refresh();
     } else if (syncEvt.entity_type === "store_reset") {
       const storeId = String(syncEvt.store_id || syncEvt.entity_id || "");
       if (storeId) {

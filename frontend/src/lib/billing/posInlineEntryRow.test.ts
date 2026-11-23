@@ -227,7 +227,7 @@ describe("POS Inline Entry Row & Billing Workflow", () => {
     expect(DEFAULT_SETTINGS.keyboard?.entryRowPosition).toBe("bottom");
 
     // Can toggle to legacy search_bar
-    companySettingsService.updateSettings({
+    companySettingsService.saveLocalSettings({
       keyboard: {
         ...DEFAULT_SETTINGS.keyboard,
         productEntryStyle: "search_bar",
@@ -240,7 +240,7 @@ describe("POS Inline Entry Row & Billing Workflow", () => {
     expect(current.keyboard?.entryRowPosition).toBe("top");
 
     // Reset back to inline_row default
-    companySettingsService.updateSettings({
+    companySettingsService.saveLocalSettings({
       keyboard: {
         ...DEFAULT_SETTINGS.keyboard,
         productEntryStyle: "inline_row",
@@ -465,7 +465,7 @@ describe("POS Inline Entry Row & Billing Workflow", () => {
   it("14. Settings keyboard addLineMode defaults to immediate and supports after_enter", () => {
     expect(DEFAULT_SETTINGS.keyboard?.addLineMode).toBe("immediate");
 
-    companySettingsService.updateSettings({
+    companySettingsService.saveLocalSettings({
       keyboard: {
         ...DEFAULT_SETTINGS.keyboard,
         addLineMode: "after_enter",
@@ -475,7 +475,7 @@ describe("POS Inline Entry Row & Billing Workflow", () => {
     expect(companySettingsService.getSettings().keyboard?.addLineMode).toBe("after_enter");
 
     // Revert back to default
-    companySettingsService.updateSettings({
+    companySettingsService.saveLocalSettings({
       keyboard: {
         ...DEFAULT_SETTINGS.keyboard,
         addLineMode: "immediate",

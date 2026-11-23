@@ -1,0 +1,385 @@
+{
+  "expected": {
+    "total": "210.00",
+    "taxable": "187.50",
+    "tax": "22.50",
+    "cgst": "11.25",
+    "sgst": "11.25",
+    "stock_delta_tablets": -35,
+    "batch": "PA-OLD (FEFO, exp 2027-03-31)"
+  },
+  "pre": {
+    "batches": [
+      {
+        "id": 12,
+        "batch_no": "PA-OLD",
+        "stock_qty": 750
+      },
+      {
+        "id": 6,
+        "batch_no": "B1",
+        "stock_qty": 0
+      },
+      {
+        "id": 11,
+        "batch_no": "PA-NEW",
+        "stock_qty": 1500
+      }
+    ],
+    "product": {
+      "current_stock": 2250
+    },
+    "invoices": 0
+  },
+  "steps": [
+    [
+      "after batch",
+      "INPUT:text:0=1"
+    ],
+    [
+      "typed packs",
+      "INPUT:text:0=2",
+      [
+        "INVOICE NO",
+        "C01-INV-8301",
+        "ITEMS:",
+        "SUBTOTAL: ₹ 160.71",
+        "GST TAX: ₹ 19.29",
+        "Round-off: +₹0.00",
+        "NET PAYABLE",
+        "Round-off"
+      ]
+    ],
+    [
+      "tab",
+      "INPUT:text:0=0"
+    ],
+    [
+      "typed loose",
+      "INPUT:text:0=5",
+      [
+        "INVOICE NO",
+        "C01-INV-8301",
+        "\t12%\t₹ 210.00\t",
+        "ITEMS:",
+        "SUBTOTAL: ₹ 187.50",
+        "GST TAX: ₹ 22.50",
+        "Round-off: +₹0.00",
+        "NET PAYABLE",
+        "₹ 210.00",
+        "Round-off"
+      ]
+    ],
+    [
+      "after Enter",
+      "INPUT:text:Scan barcode or type product name (e.g. 3*paracetamol)=",
+      [
+        "INVOICE NO",
+        "C01-INV-8301",
+        "\t12%\t₹ 210.00\t",
+        "ITEMS:",
+        "SUBTOTAL: ₹ 187.50",
+        "GST TAX: ₹ 22.50",
+        "Round-off: +₹0.00",
+        "NET PAYABLE",
+        "₹ 210.00",
+        "Round-off"
+      ]
+    ]
+  ],
+  "batch_modal": [
+    "Select Batch (FEFO Order): QA Paracet 500 Strip",
+    "Use ↑/↓ arrows to navigate, Enter to select, Esc to cancel",
+    "PA-OLD",
+    "FEFO Recommendation",
+    "Exp: 03/27",
+    "₹ 90.00",
+    "750 in stock",
+    "B1",
+    "Out of Stock",
+    "Exp: 11/27",
+    "₹ 90.00",
+    "0 in stock",
+    "PA-NEW",
+    "Exp: 01/28",
+    "₹ 90.00",
+    "1500 in stock",
+    "Navigate with ↑ ↓",
+    "+ Ad-hoc Batch",
+    "Cancel (Esc)",
+    "Select Batch (Enter)"
+  ],
+  "totals_before_enter": [
+    "INVOICE NO",
+    "C01-INV-8301",
+    "\t12%\t₹ 210.00\t",
+    "ITEMS:",
+    "SUBTOTAL: ₹ 187.50",
+    "GST TAX: ₹ 22.50",
+    "Round-off: +₹0.00",
+    "NET PAYABLE",
+    "₹ 210.00",
+    "Round-off"
+  ],
+  "cart_rows": [
+    "1 QA Paracet 500 Strip 1 pack = 15 pcs ✏️ Edit Alt+E ✏️ PA-OLD ✏️ 03/27 ✏️ strip + tabl = 35 tabls(2 strips + 5 tabls) ₹ 90.00/Strip ₹ 90.00/Strip switch to unit rate - 12% ₹ 210.00"
+  ],
+  "settle_modal": [
+    "Cash",
+    "[1]",
+    "UPI",
+    "[2]",
+    "Card",
+    "[3]",
+    "Bank Transfer",
+    "[4]",
+    "Cheque",
+    "[5]",
+    "Wallet",
+    "[6]",
+    "Gift Voucher",
+    "[7]",
+    "Credit",
+    "[8]",
+    "Cash Denominations:",
+    "+₹100",
+    "+₹200",
+    "+₹500",
+    "+₹2000",
+    "Exact Amount",
+    "Payment Tender Lines (1)",
+    "Enter on last line saves | Tab moves next",
+    "#1",
+    "Cash",
+    "UPI",
+    "Card",
+    "Bank Transfer",
+    "Cheque",
+    "Wallet",
+    "Gift Voucher",
+    "Credit",
+    "₹",
+    "No reference required",
+    "Print Action",
+    "Print Bill (Preview/Default)",
+    "No Print (Save Only)",
+    "WhatsApp Bill",
+    "Email Invoice",
+    "Esc: Cancel | Ctrl+S: Save | F12: Save & Print",
+    "Cancel (Esc)",
+    "Save (Ctrl+S)",
+    "Save & Print [F12]",
+    "Added QA Paracet 500 Strip, Quantity 1. Total: ₹90.00"
+  ],
+  "settle_focus": "INPUT:number:0.00=210",
+  "settle_after_amount": [
+    "PAID SO FAR",
+    "CHANGE DUE",
+    "Quick Tender / Add Mode",
+    "Payment Tender Lines (1)"
+  ],
+  "after_settle": [
+    "↵ in Qty",
+    "Confirm Line",
+    "Esc in Qty",
+    "Remove Line",
+    "↑",
+    "Cart Lines",
+    "Alt+C",
+    "Customer",
+    "Alt+F2",
+    "Bill Disc",
+    "Alt+R",
+    "Round-off",
+    "F12",
+    "Checkout",
+    "Alt+H",
+    "Hold Bill",
+    "Alt+L",
+    "Recall",
+    "Ctrl+N",
+    "New Bill",
+    "Ctrl+Shift+C",
+    "Columns",
+    "Shortcuts",
+    "?",
+    "Added QA Paracet 500 Strip, Quantity 1. Total: ₹90.00"
+  ],
+  "calls": [
+    {
+      "m": "POST",
+      "u": "/invoices",
+      "st": 201,
+      "req": "{\"store_id\":\"4\",\"store_code\":\"QA-PH\",\"external_id\":\"ext_1795277219694_48b901\",\"idempotency_key\":\"ext_1795277219694_48b901\",\"invoice_number\":\"C01-INV-8301\",\"invoice_date\":\"2026-11-21\",\"customer_id\":\"\",\"customer_name\":\"Walk-in Customer\",\"customer_phone\":\"\",\"customer_gstin\":\"\",\"place_of_supply\":\"32-Kerala\",\"payment_mode\":\"Cash\",\"paid_amount\":210,\"payments\":[{\"id\":\"pay_1795277217853_0\",\"mode\":\"Cash\",\"amount\":500,\"status\":\"received\"}],\"counter_id\":\"cntr_2\",\"tax_mode\":\"inclusive\",\"store_state\":\"32\",\"gst_type\":\"regular\",\"is_composition\":false,\"bill_discount_percent\":0,\"bill_discount_amount\":0,\"manual_round_off\":null,\"subtotal\":187.5,\"discount_total\":0,\"tax_total\":22.5,\"round_off\":0,\"grand_total\":210,\"is_inter_state\":false,\"items\":[{\"product_id\":\"5\",\"product_name\":\"QA Paracet 500 Strip\",\"batch_id\":\"12\",\"batch_no\":\"PA-OLD\",\"expiry_date\":\"2027-03-31\",\"qty\":2,\"loose_qty\":5,\"free_qty\":0,\"free_loose_qty\":0,\"units_per_pack\":15,\"unit_price\":90,\"mrp\":90,\"discount_percent\":0,\"discount_amount\":0,\"gst_percent\":12,\"rate_basis\":\"sel_rate\"}],\"counter_code\":\"C01\"}",
+      "res": "{\"success\":true,\"invoice\":{\"store_id\":4,\"counter_id\":2,\"counter_code\":\"C01\",\"location_name\":\"Front desk\",\"module_key\":\"invoice\",\"invoice_number\":\"C01-INV-8301\",\"invoice_date\":\"2026-11-21\",\"due_date\":null,\"customer_id\":null,\"customer_name\":\"Walk-in Customer\",\"customer_gstin\":null,\"customer_phone\":null,\"place_of_supply\":\"32-Kerala\",\"subtotal\":\"210.00\",\"taxable_subtotal\":\"187.50\",\"discount_total\":\"0.00\",\"tax_total\":\"22.50\",\"cgst_total\":\"11.25\",\"sgst_total\":\"11.25\",\"igst_total\":\"0.00\",\"cess_total\":\"0.00\",\"round_off\":\"0.00\",\"grand_total\":\"210.00\",\"store_state_code\":\"32\",\"paid_amount\":\"500.00\",\"payment_mode\":\"Cash\",\"payment_status\":\"paid\",\"status\":\"issued\",\"patient_name\":null,\"doctor_name\":null,\"doctor_reg_no\":null,\"external_id\":\"ext_1795277219694_48b901\",\"synced_at\":\"2026-11-21T16:06:59.000000Z\",\"updated_at\":\"2026-11-21T16:06:59.000000Z\",\"created_at\":\"2026-11-21T16:06:59.000000Z\",\"id\":4,\"items\":[{\"id\":4,\"invoice_id\":4,\"product_id\":5,\"product_name\":\"QA Paracet 500 Strip\",\"batch_no\":\"PA-OLD\",\"expiry_date\":\"2027-03-30T18:30:00.000000Z\",\"qty\":\"2.00\",\"unit_price\":\"90.00\",\"discount_percent\":\"0.00\",\"discount_amount\":\"0.00\",\"gst_percent\":\"12.00\",\"tax_amount\":\"22.50\",\"total_amount\":\"210.00\",\"created_at\":\"2026-11-21T16:06:59.000000Z\",\"updated_at\":\"2026-11-21T16:06:59.000000Z\",\"taxable_amount\":\"187.50\",\"cgst_amount\":\"11.25\",\"sgst_amount\":\"11.25\",\"igst_amount\":\"0.00\",\"cess_rate\":\"0.00\",\"cess_amount\":\"0.00\",\"allocated_discount\":\"0.00\",\"loose_qty\":\"5.00\",\"units_per_pack\":15,\"mrp\":\"90.00\",\"free_qty\":\"0.00\",\"free_loose_qty\":\"0.00\",\"stock_action\":null}],\"payments\":[{\"id\":2,\"store_id\":4,\"invoice_id\":4,\"counter_id\":\"2\",\"counter_code\":\"C01\",\"payment_mode\":\"Cash\",\"amount\":\"500.00\",\"reference_no\":null,\"status\":\"received\",\"extra_fields\":null,\"notes\":null,\"received_by\":\"Counter C01\",\"created_at\":\"2026-11-21T16:06:59.000000Z\",\"updated_at\":\"2026-11-21T16:06:59.000000Z\"}],\"customer\":null},\"affected_batches\":[{\"product_id\":5,\"batch_id\":12,\"batch_no\":\"PA-OLD\",\"remaining_stock\":715,\"qty_deducted\":35}],\"temp_mapped_from\":null,\"message\":\"Invoice created and confirmed authoritatively by server.\"}"
+    },
+    {
+      "m": "POST",
+      "u": "/settings",
+      "st": 200,
+      "req": "{\"store_id\":\"4\",\"store_name\":\"QA Pharma Kochi\",\"display_name\":\"QA Pharma Kochi\",\"phone\":\"\",\"email\":\"\",\"address\":\"QA Lane 1, Kochi 682001\",\"state_code\":\"32\",\"gstin\":\"32ABCDE1234F1Z5\",\"drug_license_numbers\":[],\"fssai_no\":\"\",\"currency_symbol\":\"₹\",\"store_type\":\"pharmacy\",\"gst_type\":\"regular\",\"allow_tax_override_per_bill\":false,\"tax_mode\":\"inclusive\",\"purchase_tax_mode\":\"exclusive\",\"default_hsn_code\":\"30049099\",\"credit_period_days\":30,\"default_discount_percent\":0,\"default_payment_mode\":\"cash\",\"round_off_enabled\":true,\"default_rate_basis\":\"sel_rate\",\"invoice_prefix\":\"INV\",\"next_invoice_number\":8302,\"sequences\":{\"invoicePrefix\":\"INV\",\"nextInvoiceNumber\":8302,\"returnPrefix\":\"SR\",\"nextReturnNumber\":1,\"purchaseReturnPrefix\":\"PR\",\"nextPurchaseReturnNumber\":1,\"purchasePrefix\":\"PUR\",\"nextPurchaseNumber\":1002,\"quotationPrefix\":\"QUO\",\"nextQuotationNumber\":101,\"adjustmentPrefix\":\"ADJ\",\"nextAdjustmentNumber\":401,\"transferPrefix\":\"TRF\",\"nextTransferNumber\":501,\"invoice_prefix\":\"INV\",\"next_invoice_number\":1001,\"quotation_prefix\":\"QUO\",\"next_quotation_number\":101,\"return_prefix\":\"SR\",\"purchase_prefix\":\"PUR\"},\"printing\":{\"paperSize\":\"thermal_80mm\",\"copies\":1,\"activeTemplate\":\"thermal_standard\",\"footerNote\":\"Thank you for shopping with us! Get well soon.\",\"termsAndConditions\":\"Goods once sold cannot be returned without original cash memo.\",\"jurisdictionNote\":\"Subject to Local Jurisdiction only.\",\"brandByline\":\"LamSuite Billing\",\"printDrugLicenses\":true,\"printDoctorDetails\":true,\"printPatientDetails\":true,\"printUpiQrCode\":true,\"printHsnSummary\":true,\"printDiscountColumn\":true,\"printMrp\":true,\"previewMode\":\"always\",\"defaultCopyMarker\":\"Original for Recipient\",\"silentPrinting\":true,\"selectedPrinterName\":\"Default System Thermal Printer\",\"dotMatrixEndOfJob\":\"stop_immediately\",\"dotMatrixTearOffFeedLines\":0,\"dotMatrixPageLength\":66,\"dotMatrixCommandSet\":\"esc_p\",\"dotMatrixDefaultPaperWidth\":\"10in\",\"dotMatrixCarriageWidth\":80,\"dotMatrixAutoCenter\":true,\"paper_size\":\"thermal_80mm\",\"active_template\":\"thermal_standard\",\"print_upi_qr\":true,\"print_drug_license\":true,\"footer_note\":\"Thank you for shopping with us! Get well soon.\"},\"workspace\":{\"theme\":\"light\",\"density\":\"comfortable\",\"fontSize\":\"base\",\"notificationsEnabled\":true,\"autoUpdateCheck\":true,\"wifiStrengthSimulator\":95,\"defaultLandingPage\":\"dashboard\",\"billsDefaultPeriod\":\"today\"},\"security\":{\"idleTimeoutMinutes\":15,\"maxFailedLogins\":5,\"allowBiometricSignIn\":true,\"defaultRole\":\"cashier\",\"offlineGraceHours\":72,\"allowMultiCounterRoles\":[]},\"inventory\":{\"allowSellingOutOfStock\":\"always\",\"warnOnNegativeStock\":true,\"requireManagerPinForNegativeStock\":false,\"allowExpiredBatchSale\":\"warn_confirm\"},\"stock_adjustment_policy\":{\"allow_negative_stock\":false,\"allowed_roles\":[],\"allowed_reasons\":[],\"max_qty_per_line\":null,\"max_value_per_document\":null,\"max_documents_per_day\":null,\"require_notes\":false,\"approval_threshold_value\":null,\"approval_threshold_qty\":null,\"approver_roles\":[\"store_owner\",\"manager\",\"super_admin\"],\"locked_before_date\":null,\"allowed_time_window\":null},\"purchase_charges\":{\"reverse_on_return\":\"proportional\",\"separately_paid_in_payable\":false},\"wallet\":{\"enabled\":true,\"maxCreditLimit\":10000,\"referencePrefix\":\"WLT\",\"max_credit_limit\":10000,\"reference_prefix\":\"WLT\"},\"smtp\":{\"enabled\":false,\"host\":\"smtp.postmarkapp.com\",\"port\":587,\"encryption\":\"tls\",\"fromEmail\":\"invoices@lamstone.in\",\"fromName\":\"LamStone Billing Desk\",\"replyTo\":\"support@lamstone.in\",\"from_email\":\"billing@lamstone.in\",\"from_name\":\"QA Pharma Kochi\",\"username\":\"lamstone_smtp\",\"password\":\"••••••••••••\"},\"whatsapp\":{\"enabled\":false,\"provider\":\"openwa\",\"apiUrl\":\"https://wa-api.alverstone.in\",\"apiKey\":null,\"sessionId\":\"default\",\"sendPdfInvoice\":true,\"autoSendOnBillSave\":false,\"customCaption\":null,\"api_url\":\"https://wa-api.alverstone.in\",\"api_key\":\"••••••••••••\",\"session_id\":\"default\",\"send_pdf\":true,\"auto_send_on_save\":false,\"custom_caption\":null},\"payments\":{\"modes\":[{\"id\":\"cash\",\"name\":\"Cash\",\"enabled\":true,\"referenceRequirement\":\"off\",\"referenceLabel\":\"N/A\",\"duplicateCheck\":\"off\",\"extraFields\":{\"notes\":true}},{\"id\":\"upi\",\"name\":\"UPI\",\"enabled\":true,\"referenceRequirement\":\"optional\",\"referenceLabel\":\"UPI Transaction ID / UTR\",\"referencePlaceholder\":\"12-digit UTR or txn ID\",\"referenceRegex\":\"^[0-9A-Za-z_-]{6,35}$\",\"referenceMinLength\":6,\"referenceMaxLength\":35,\"duplicateCheck\":\"warn\",\"extraFields\":{\"payerVpa\":true,\"notes\":true}},{\"id\":\"card\",\"name\":\"Card\",\"enabled\":true,\"referenceRequirement\":\"optional\",\"referenceLabel\":\"Card Approval Code / Auth Code\",\"referencePlaceholder\":\"Approval code or last 4\",\"duplicateCheck\":\"warn\",\"extraFields\":{\"cardLastFour\":true,\"cardNetwork\":true,\"notes\":true}},{\"id\":\"bank_transfer\",\"name\":\"Bank Transfer\",\"enabled\":true,\"referenceRequirement\":\"optional\",\"referenceLabel\":\"Bank Reference / UTR\",\"referencePlaceholder\":\"NEFT/RTGS/IMPS ref\",\"duplicateCheck\":\"warn\",\"extraFields\":{\"bankName\":true,\"notes\":true}},{\"id\":\"cheque\",\"name\":\"Cheque\",\"enabled\":true,\"referenceRequirement\":\"required\",\"referenceLabel\":\"Cheque Number\",\"referencePlaceholder\":\"6-digit cheque number\",\"referenceMinLength\":6,\"referenceMaxLength\":20,\"duplicateCheck\":\"block\",\"extraFields\":{\"bankName\":true,\"chequeDate\":true,\"notes\":true}},{\"id\":\"wallet\",\"name\":\"Wallet / Store Credit\",\"enabled\":true,\"referenceRequirement\":\"optional\",\"referenceLabel\":\"Wallet Ref / Mobile\",\"duplicateCheck\":\"warn\",\"extraFields\":{\"notes\":true}},{\"id\":\"gift_voucher\",\"name\":\"Gift Voucher\",\"enabled\":true,\"referenceRequirement\":\"required\",\"referenceLabel\":\"Voucher Code\",\"duplicateCheck\":\"block\",\"extraFields\":{\"notes\":true}},{\"id\":\"credit\",\"name\":\"Credit (Udhari)\",\"enabled\":true,\"referenceRequirement\":\"off\",\"referenceLabel\":\"Credit Agreement Ref\",\"duplicateCheck\":\"off\",\"extraFields\":{\"notes\":true}}],\"upiVpa\":null,\"upiPayeeName\":null,\"enableDynamicUpiQr\":true,\"enableQuickDenominations\":true,\"creditPolicy\":\"block_on_exceed\",\"printShowReferences\":false,\"upi\":{\"enabled\":true,\"showInSettlement\":true,\"showOnPrintedBills\":true,\"qrSubtext\":\"Scan & Pay with any UPI app\",\"accounts\":[],\"defaultUpiId\":null,\"defaultPayeeName\":null}},\"keyboard\":{\"enterAfterQty\":\"search\",\"autoFocusQtyAfterAdd\":true,\"selectAllOnFocus\":true,\"quickDeleteWithoutConfirm\":true,\"scannerSpeedThresholdMs\":45,\"productEntryStyle\":\"inline_row\",\"entryRowPosition\":\"bottom\",\"addLineMode\":\"immediate\",\"keyBindings\":{\"focusSearch\":\"F1\",\"checkout\":\"F12\",\"holdBill\":\"F8\",\"recallBill\":\"F9\",\"findBill\":\"F6\",\"newBill\":\"Ctrl+N\",\"clearBill\":\"Ctrl+Backspace\",\"deleteLine\":\"Delete\",\"undoDelete\":\"Ctrl+Z\",\"changeBatch\":\"Ctrl+B\",\"toggleUnitRate\":\"Ctrl+U\",\"editConversion\":\"Ctrl+E\",\"editDiscount\":\"F2\",\"editRate\":\"F3\",\"focusCustomer\":\"Alt+C\",\"focusMobile\":\"Alt+M\",\"focusDoctor\":\"Alt+D\",\"focusPatient\":\"Alt+P\",\"columnsConfig\":\"Ctrl+Shift+C\",\"shortcutsHelp\":\"?\"}},\"invoice_columns\":[{\"id\":\"idx\",\"label\":\"#\",\"visible\":true,\"width\":40,\"order\":1,\"required\":true},{\"id\":\"product_name\",\"label\":\"Product Name\",\"visible\":true,\"width\":260,\"order\":2,\"required\":true},{\"id\":\"batch_no\",\"label\":\"Batch\",\"visible\":true,\"width\":110,\"order\":3},{\"id\":\"expiry_date\",\"label\":\"Expiry\",\"visible\":true,\"width\":95,\"order\":4},{\"id\":\"qty\",\"label\":\"Quantity\",\"visible\":true,\"width\":175,\"order\":5,\"required\":true},{\"id\":\"mrp\",\"label\":\"MRP (₹)\",\"visible\":true,\"width\":85,\"order\":6},{\"id\":\"rate\",\"label\":\"Rate (₹)\",\"visible\":true,\"width\":85,\"order\":7},{\"id\":\"discount\",\"label\":\"Disc %\",\"visible\":true,\"width\":75,\"order\":8},{\"id\":\"gst\",\"label\":\"GST %\",\"visible\":true,\"width\":75,\"order\":9},{\"id\":\"hsn\",\"label\":\"HSN/SAC\",\"visible\":false,\"width\":90,\"order\":10},{\"id\":\"free_qty\",\"label\":\"Free Qty\",\"visible\":false,\"width\":130,\"order\":11},{\"id\":\"rack_shelf\",\"label\":\"Rack/Shelf\",\"visible\":false,\"width\":90,\"order\":12},{\"id\":\"current_stock\",\"label\":\"Stock\",\"visible\":false,\"width\":80,\"order\":13},{\"id\":\"total\",\"label\":\"Total (₹)\",\"visible\":true,\"width\":100,\"order\":14,\"required\":true},{\"id\":\"actions\",\"label\":\"Action\",\"visible\":true,\"width\":60,\"order\":15,\"required\":true}],\"header_fields\":[{\"id\":\"invoice_no\",\"label\":\"Invoice No\",\"visible\":true,\"required\":true,\"order\":1},{\"id\":\"customer_name\",\"label\":\"Customer Name\",\"visible\":true,\"required\":true,\"order\":2},{\"id\":\"customer_phone\",\"label\":\"Mobile Number\",\"visible\":true,\"order\":3},{\"id\":\"customer_gstin\",\"label\":\"Customer GSTIN\",\"visible\":false,\"order\":4},{\"id\":\"doctor\",\"label\":\"Doctor Details\",\"visible\":true,\"order\":5},{\"id\":\"patient\",\"label\":\"Patient Details\",\"visible\":true,\"order\":6},{\"id\":\"payment_mode\",\"label\":\"Payment Mode\",\"visible\":true,\"order\":7},{\"id\":\"salesman\",\"label\":\"Salesman / Staff\",\"visible\":false,\"order\":8},{\"id\":\"notes\",\"label\":\"Bill Notes / Remarks\",\"visible\":false,\"order\":9}],\"active_billing_preset\":\"pharmacy\",\"saved_billing_presets\":[{\"id\":\"pharmacy\",\"name\":\"Pharmacy\",\"description\":\"Complete clinical billing with Batch, Expiry, Pack+Loose units, Doctor, and Patient details.\",\"isBuiltin\":true,\"columns\":[{\"id\":\"idx\",\"label\":\"#\",\"visible\":true,\"width\":40,\"order\":1,\"required\":true},{\"id\":\"product_name\",\"label\":\"Product Name\",\"visible\":true,\"width\":260,\"order\":2,\"required\":true},{\"id\":\"batch_no\",\"label\":\"Batch\",\"visible\":true,\"width\":110,\"order\":3},{\"id\":\"expiry_date\",\"label\":\"Expiry\",\"visible\":true,\"width\":95,\"order\":4},{\"id\":\"qty\",\"label\":\"Quantity\",\"visible\":true,\"width\":175,\"order\":5,\"required\":true},{\"id\":\"mrp\",\"label\":\"MRP (₹)\",\"visible\":true,\"width\":85,\"order\":6},{\"id\":\"rate\",\"label\":\"Rate (₹)\",\"visible\":true,\"width\":85,\"order\":7},{\"id\":\"discount\",\"label\":\"Disc %\",\"visible\":true,\"width\":75,\"order\":8},{\"id\":\"gst\",\"label\":\"GST %\",\"visible\":true,\"width\":75,\"order\":9},{\"id\":\"hsn\",\"label\":\"HSN/SAC\",\"visible\":false,\"width\":90,\"order\":10},{\"id\":\"free_qty\",\"label\":\"Free Qty\",\"visible\":true,\"width\":130,\"order\":11},{\"id\":\"rack_shelf\",\"label\":\"Rack/Shelf\",\"visible\":false,\"width\":90,\"order\":12},{\"id\":\"current_stock\",\"label\":\"Stock\",\"visible\":false,\"width\":80,\"order\":13},{\"id\":\"total\",\"label\":\"Total (₹)\",\"visible\":true,\"width\":100,\"order\":14,\"required\":true},{\"id\":\"actions\",\"label\":\"Action\",\"visible\":true,\"width\":60,\"order\":15,\"required\":true}],\"headerFields\":[{\"id\":\"invoice_no\",\"label\":\"Invoice No\",\"visible\":true,\"required\":true,\"order\":1},{\"id\":\"customer_name\",\"label\":\"Customer Name\",\"visible\":true,\"required\":true,\"order\":2},{\"id\":\"customer_phone\",\"label\":\"Mobile Number\",\"visible\":true,\"order\":3},{\"id\":\"customer_gstin\",\"label\":\"Customer GSTIN\",\"visible\":false,\"order\":4},{\"id\":\"doctor\",\"label\":\"Doctor Details\",\"visible\":true,\"order\":5},{\"id\":\"patient\",\"label\":\"Patient Details\",\"visible\":true,\"order\":6},{\"id\":\"payment_mode\",\"label\":\"Payment Mode\",\"visible\":true,\"order\":7},{\"id\":\"salesman\",\"label\":\"Salesman / Staff\",\"visible\":false,\"order\":8},{\"id\":\"notes\",\"label\":\"Bill Notes / Remarks\",\"visible\":false,\"order\":9}]},{\"id\":\"retail\",\"name\":\"Retail\",\"description\":\"Standard retail counter layout with Product, Qty, MRP, Rate, Discount, and GST.\",\"isBuiltin\":true,\"columns\":[{\"id\":\"idx\",\"label\":\"#\",\"visible\":true,\"width\":40,\"order\":1,\"required\":true},{\"id\":\"product_name\",\"label\":\"Product Name\",\"visible\":true,\"width\":260,\"order\":2,\"required\":true},{\"id\":\"batch_no\",\"label\":\"Batch\",\"visible\":false,\"width\":110,\"order\":3},{\"id\":\"expiry_date\",\"label\":\"Expiry\",\"visible\":false,\"width\":95,\"order\":4},{\"id\":\"qty\",\"label\":\"Quantity\",\"visible\":true,\"width\":175,\"order\":5,\"required\":true},{\"id\":\"mrp\",\"label\":\"MRP (₹)\",\"visible\":true,\"width\":85,\"order\":6},{\"id\":\"rate\",\"label\":\"Rate (₹)\",\"visible\":true,\"width\":85,\"order\":7},{\"id\":\"discount\",\"label\":\"Disc %\",\"visible\":true,\"width\":75,\"order\":8},{\"id\":\"gst\",\"label\":\"GST %\",\"visible\":true,\"width\":75,\"order\":9},{\"id\":\"hsn\",\"label\":\"HSN/SAC\",\"visible\":false,\"width\":90,\"order\":10},{\"id\":\"free_qty\",\"label\":\"Free Qty\",\"visible\":false,\"width\":130,\"order\":11},{\"id\":\"rack_shelf\",\"label\":\"Rack/Shelf\",\"visible\":false,\"width\":90,\"order\":12},{\"id\":\"current_stock\",\"label\":\"Stock\",\"visible\":false,\"width\":80,\"order\":13},{\"id\":\"total\",\"label\":\"Total (₹)\",\"visible\":true,\"width\":100,\"order\":14,\"required\":true},{\"id\":\"actions\",\"label\":\"Action\",\"visible\":true,\"width\":60,\"order\":15,\"required\":true}],\"headerFields\":[{\"id\":\"invoice_no\",\"label\":\"Invoice No\",\"visible\":true,\"required\":true,\"order\":1},{\"id\":\"customer_name\",\"label\":\"Customer Name\",\"visible\":true,\"required\":true,\"order\":2},{\"id\":\"customer_phone\",\"label\":\"Mobile Number\",\"visible\":true,\"order\":3},{\"id\":\"customer_gstin\",\"label\":\"Customer GSTIN\",\"visible\":false,\"order\":4},{\"id\":\"doctor\",\"label\":\"Doctor Details\",\"visible\":false,\"order\":5},{\"id\":\"patient\",\"label\":\"Patient Details\",\"visible\":false,\"order\":6},{\"id\":\"payment_mode\",\"label\":\"Payment Mode\",\"visible\":true,\"order\":7},{\"id\":\"salesman\",\"label\":\"Salesman / Staff\",\"visible\":false,\"order\":8},{\"id\":\"notes\",\"label\":\"Bill Notes / Remarks\",\"visible\":false,\"order\":9}]},{\"id\":\"fast_counter\",\"name\":\"Fast Counter (Minimal)\",\"description\":\"Streamlined ultra-fast checkout showing only Product, Qty, Rate, and Net Total.\",\"isBuiltin\":true,\"columns\":[{\"id\":\"idx\",\"label\":\"#\",\"visible\":true,\"width\":40,\"order\":1,\"required\":true},{\"id\":\"product_name\",\"label\":\"Product Name\",\"visible\":true,\"width\":260,\"order\":2,\"required\":true},{\"id\":\"batch_no\",\"label\":\"Batch\",\"visible\":false,\"width\":110,\"order\":3},{\"id\":\"expiry_date\",\"label\":\"Expiry\",\"visible\":false,\"width\":95,\"order\":4},{\"id\":\"qty\",\"label\":\"Quantity\",\"visible\":true,\"width\":175,\"order\":5,\"required\":true},{\"id\":\"mrp\",\"label\":\"MRP (₹)\",\"visible\":false,\"width\":85,\"order\":6},{\"id\":\"rate\",\"label\":\"Rate (₹)\",\"visible\":true,\"width\":85,\"order\":7},{\"id\":\"discount\",\"label\":\"Disc %\",\"visible\":false,\"width\":75,\"order\":8},{\"id\":\"gst\",\"label\":\"GST %\",\"visible\":false,\"width\":75,\"order\":9},{\"id\":\"hsn\",\"label\":\"HSN/SAC\",\"visible\":false,\"width\":90,\"order\":10},{\"id\":\"free_qty\",\"label\":\"Free Qty\",\"visible\":false,\"width\":130,\"order\":11},{\"id\":\"rack_shelf\",\"label\":\"Rack/Shelf\",\"visible\":false,\"width\":90,\"order\":12},{\"id\":\"current_stock\",\"label\":\"Stock\",\"visible\":false,\"width\":80,\"order\":13},{\"id\":\"total\",\"label\":\"Total (₹)\",\"visible\":true,\"width\":100,\"order\":14,\"required\":true},{\"id\":\"actions\",\"label\":\"Action\",\"visible\":true,\"width\":60,\"order\":15,\"required\":true}],\"headerFields\":[{\"id\":\"invoice_no\",\"label\":\"Invoice No\",\"visible\":true,\"required\":true,\"order\":1},{\"id\":\"customer_name\",\"label\":\"Customer Name\",\"visible\":true,\"required\":true,\"order\":2},{\"id\":\"customer_phone\",\"label\":\"Mobile Number\",\"visible\":false,\"order\":3},{\"id\":\"customer_gstin\",\"label\":\"Customer GSTIN\",\"visible\":false,\"order\":4},{\"id\":\"doctor\",\"label\":\"Doctor Details\",\"visible\":false,\"order\":5},{\"id\":\"patient\",\"label\":\"Patient Details\",\"visible\":false,\"order\":6},{\"id\":\"payment_mode\",\"label\":\"Payment Mode\",\"visible\":true,\"order\":7},{\"id\":\"salesman\",\"label\":\"Salesman / Staff\",\"visible\":false,\"order\":8},{\"id\":\"notes\",\"label\":\"Bill Notes / Remarks\",\"visible\":false,\"order\":9}]}],\"enable_pts\":false,\"enable_ptss\":false,\"freight_is_taxable\":false,\"batch_required\":true,\"purchase_columns\":[{\"id\":\"idx\",\"label\":\"#\",\"visible\":true,\"width\":40,\"order\":1,\"required\":true},{\"id\":\"product_name\",\"label\":\"Product\",\"visible\":true,\"width\":240,\"order\":2,\"required\":true},{\"id\":\"batch_no\",\"label\":\"Batch\",\"visible\":true,\"width\":105,\"order\":3,\"required\":true},{\"id\":\"expiry_date\",\"label\":\"Expiry (MM/YY)\",\"visible\":true,\"width\":95,\"order\":4,\"required\":true},{\"id\":\"mfg_date\",\"label\":\"Mfg Date\",\"visible\":false,\"width\":95,\"order\":5},{\"id\":\"qty\",\"label\":\"Quantity\",\"visible\":true,\"width\":140,\"order\":6,\"required\":true},{\"id\":\"free_qty\",\"label\":\"Free Qty\",\"visible\":true,\"width\":80,\"order\":7},{\"id\":\"mrp\",\"label\":\"MRP (₹)\",\"visible\":true,\"width\":85,\"order\":8},{\"id\":\"ptr\",\"label\":\"PTR (₹)\",\"visible\":false,\"width\":80,\"order\":9},{\"id\":\"pts\",\"label\":\"PTS (₹)\",\"visible\":false,\"width\":80,\"order\":10},{\"id\":\"ptss\",\"label\":\"PTSS (₹)\",\"visible\":false,\"width\":80,\"order\":11},{\"id\":\"purchase_rate\",\"label\":\"Pur. Rate (₹)\",\"visible\":true,\"width\":95,\"order\":12,\"required\":true},{\"id\":\"discount\",\"label\":\"Disc %/₹\",\"visible\":true,\"width\":75,\"order\":13},{\"id\":\"discount_amount\",\"label\":\"Disc (₹)\",\"visible\":false,\"width\":75,\"order\":14},{\"id\":\"scheme\",\"label\":\"Scheme\",\"visible\":false,\"width\":75,\"order\":15},{\"id\":\"gst\",\"label\":\"GST %\",\"visible\":true,\"width\":70,\"order\":16},{\"id\":\"hsn\",\"label\":\"HSN\",\"visible\":false,\"width\":85,\"order\":17},{\"id\":\"selling_rate\",\"label\":\"Selling Rate (₹)\",\"visible\":true,\"width\":95,\"order\":18},{\"id\":\"margin\",\"label\":\"Margin %\",\"visible\":true,\"width\":80,\"order\":19},{\"id\":\"taxable_value\",\"label\":\"Taxable (₹)\",\"visible\":true,\"width\":90,\"order\":20},{\"id\":\"tax\",\"label\":\"Tax (₹)\",\"visible\":true,\"width\":85,\"order\":21},{\"id\":\"total\",\"label\":\"Total (₹)\",\"visible\":true,\"width\":100,\"order\":22,\"required\":true},{\"id\":\"actions\",\"label\":\"Action\",\"visible\":true,\"width\":60,\"order\":23,\"required\":true}],\"purchase_header_fields\":[{\"id\":\"entry_no\",\"label\":\"Entry No\",\"visible\":true,\"required\":true,\"order\":1},{\"id\":\"supplier\",\"label\":\"Supplier\",\"visible\":true,\"required\":true,\"order\":2},{\"id\":\"supplier_bill_no\",\"label\":\"Supplier Bill No\",\"visible\":true,\"required\":true,\"order\":3},{\"id\":\"bill_date\",\"label\":\"Bill Date\",\"visible\":true,\"required\":true,\"order\":4},{\"id\":\"received_date\",\"label\":\"Received Date\",\"visible\":true,\"order\":5},{\"id\":\"purchase_type\",\"label\":\"Purchase Type\",\"visible\":true,\"order\":6},{\"id\":\"due_date\",\"label\":\"Due Date\",\"visible\":true,\"order\":7},{\"id\":\"place_of_supply\",\"label\":\"Place of Supply / GST\",\"visible\":true,\"order\":8},{\"id\":\"po_grn_link\",\"label\":\"Link PO / GRN\",\"visible\":true,\"order\":9},{\"id\":\"remarks\",\"label\":\"Remarks\",\"visible\":true,\"order\":10}],\"active_purchase_preset\":\"pharmacy_inward\",\"saved_purchase_presets\":[{\"id\":\"pharmacy_inward\",\"name\":\"Pharmacy Inward (Complete)\",\"description\":\"Full clinical inward with Batch, Expiry, Pack/Loose, Free Qty, MRP, Purchase Rate, Margins & GST.\",\"isBuiltin\":true,\"columns\":[{\"id\":\"idx\",\"label\":\"#\",\"visible\":true,\"width\":40,\"order\":1,\"required\":true},{\"id\":\"product_name\",\"label\":\"Product\",\"visible\":true,\"width\":240,\"order\":2,\"required\":true},{\"id\":\"batch_no\",\"label\":\"Batch\",\"visible\":true,\"width\":105,\"order\":3,\"required\":true},{\"id\":\"expiry_date\",\"label\":\"Expiry (MM/YY)\",\"visible\":true,\"width\":95,\"order\":4,\"required\":true},{\"id\":\"mfg_date\",\"label\":\"Mfg Date\",\"visible\":false,\"width\":95,\"order\":5},{\"id\":\"qty\",\"label\":\"Quantity\",\"visible\":true,\"width\":140,\"order\":6,\"required\":true},{\"id\":\"free_qty\",\"label\":\"Free Qty\",\"visible\":true,\"width\":80,\"order\":7},{\"id\":\"mrp\",\"label\":\"MRP (₹)\",\"visible\":true,\"width\":85,\"order\":8},{\"id\":\"ptr\",\"label\":\"PTR (₹)\",\"visible\":false,\"width\":80,\"order\":9},{\"id\":\"pts\",\"label\":\"PTS (₹)\",\"visible\":false,\"width\":80,\"order\":10},{\"id\":\"ptss\",\"label\":\"PTSS (₹)\",\"visible\":false,\"width\":80,\"order\":11},{\"id\":\"purchase_rate\",\"label\":\"Pur. Rate (₹)\",\"visible\":true,\"width\":95,\"order\":12,\"required\":true},{\"id\":\"discount\",\"label\":\"Disc %/₹\",\"visible\":true,\"width\":75,\"order\":13},{\"id\":\"discount_amount\",\"label\":\"Disc (₹)\",\"visible\":false,\"width\":75,\"order\":14},{\"id\":\"scheme\",\"label\":\"Scheme\",\"visible\":false,\"width\":75,\"order\":15},{\"id\":\"gst\",\"label\":\"GST %\",\"visible\":true,\"width\":70,\"order\":16},{\"id\":\"hsn\",\"label\":\"HSN\",\"visible\":false,\"width\":85,\"order\":17},{\"id\":\"selling_rate\",\"label\":\"Selling Rate (₹)\",\"visible\":true,\"width\":95,\"order\":18},{\"id\":\"margin\",\"label\":\"Margin %\",\"visible\":true,\"width\":80,\"order\":19},{\"id\":\"taxable_value\",\"label\":\"Taxable (₹)\",\"visible\":true,\"width\":90,\"order\":20},{\"id\":\"tax\",\"label\":\"Tax (₹)\",\"visible\":false,\"width\":85,\"order\":21},{\"id\":\"total\",\"label\":\"Total (₹)\",\"visible\":true,\"width\":100,\"order\":22,\"required\":true},{\"id\":\"actions\",\"label\":\"Action\",\"visible\":true,\"width\":60,\"order\":23,\"required\":true}],\"headerFields\":[{\"id\":\"entry_no\",\"label\":\"Entry No\",\"visible\":true,\"required\":true,\"order\":1},{\"id\":\"supplier\",\"label\":\"Supplier\",\"visible\":true,\"required\":true,\"order\":2},{\"id\":\"supplier_bill_no\",\"label\":\"Supplier Bill No\",\"visible\":true,\"required\":true,\"order\":3},{\"id\":\"bill_date\",\"label\":\"Bill Date\",\"visible\":true,\"required\":true,\"order\":4},{\"id\":\"received_date\",\"label\":\"Received Date\",\"visible\":true,\"order\":5},{\"id\":\"purchase_type\",\"label\":\"Purchase Type\",\"visible\":true,\"order\":6},{\"id\":\"due_date\",\"label\":\"Due Date\",\"visible\":true,\"order\":7},{\"id\":\"place_of_supply\",\"label\":\"Place of Supply / GST\",\"visible\":true,\"order\":8},{\"id\":\"po_grn_link\",\"label\":\"Link PO / GRN\",\"visible\":true,\"order\":9},{\"id\":\"remarks\",\"label\":\"Remarks\",\"visible\":true,\"order\":10}]},{\"id\":\"standard_inward\",\"name\":\"Standard Inward\",\"description\":\"Standard inventory receiving layout with Product, Batch, Expiry, Qty, Rate, Tax & Totals.\",\"isBuiltin\":true,\"columns\":[{\"id\":\"idx\",\"label\":\"#\",\"visible\":true,\"width\":40,\"order\":1,\"required\":true},{\"id\":\"product_name\",\"label\":\"Product\",\"visible\":true,\"width\":240,\"order\":2,\"required\":true},{\"id\":\"batch_no\",\"label\":\"Batch\",\"visible\":true,\"width\":105,\"order\":3,\"required\":true},{\"id\":\"expiry_date\",\"label\":\"Expiry (MM/YY)\",\"visible\":true,\"width\":95,\"order\":4,\"required\":true},{\"id\":\"mfg_date\",\"label\":\"Mfg Date\",\"visible\":false,\"width\":95,\"order\":5},{\"id\":\"qty\",\"label\":\"Quantity\",\"visible\":true,\"width\":140,\"order\":6,\"required\":true},{\"id\":\"free_qty\",\"label\":\"Free Qty\",\"visible\":true,\"width\":80,\"order\":7},{\"id\":\"mrp\",\"label\":\"MRP (₹)\",\"visible\":true,\"width\":85,\"order\":8},{\"id\":\"ptr\",\"label\":\"PTR (₹)\",\"visible\":false,\"width\":80,\"order\":9},{\"id\":\"pts\",\"label\":\"PTS (₹)\",\"visible\":false,\"width\":80,\"order\":10},{\"id\":\"ptss\",\"label\":\"PTSS (₹)\",\"visible\":false,\"width\":80,\"order\":11},{\"id\":\"purchase_rate\",\"label\":\"Pur. Rate (₹)\",\"visible\":true,\"width\":95,\"order\":12,\"required\":true},{\"id\":\"discount\",\"label\":\"Disc %/₹\",\"visible\":true,\"width\":75,\"order\":13},{\"id\":\"discount_amount\",\"label\":\"Disc (₹)\",\"visible\":false,\"width\":75,\"order\":14},{\"id\":\"scheme\",\"label\":\"Scheme\",\"visible\":false,\"width\":75,\"order\":15},{\"id\":\"gst\",\"label\":\"GST %\",\"visible\":true,\"width\":70,\"order\":16},{\"id\":\"hsn\",\"label\":\"HSN\",\"visible\":false,\"width\":85,\"order\":17},{\"id\":\"selling_rate\",\"label\":\"Selling Rate (₹)\",\"visible\":false,\"width\":95,\"order\":18},{\"id\":\"margin\",\"label\":\"Margin %\",\"visible\":false,\"width\":80,\"order\":19},{\"id\":\"taxable_value\",\"label\":\"Taxable (₹)\",\"visible\":true,\"width\":90,\"order\":20},{\"id\":\"tax\",\"label\":\"Tax (₹)\",\"visible\":true,\"width\":85,\"order\":21},{\"id\":\"total\",\"label\":\"Total (₹)\",\"visible\":true,\"width\":100,\"order\":22,\"required\":true},{\"id\":\"actions\",\"label\":\"Action\",\"visible\":true,\"width\":60,\"order\":23,\"required\":true}],\"headerFields\":[{\"id\":\"entry_no\",\"label\":\"Entry No\",\"visible\":true,\"required\":true,\"order\":1},{\"id\":\"supplier\",\"label\":\"Supplier\",\"visible\":true,\"required\":true,\"order\":2},{\"id\":\"supplier_bill_no\",\"label\":\"Supplier Bill No\",\"visible\":true,\"required\":true,\"order\":3},{\"id\":\"bill_date\",\"label\":\"Bill Date\",\"visible\":true,\"required\":true,\"order\":4},{\"id\":\"received_date\",\"label\":\"Received Date\",\"visible\":false,\"order\":5},{\"id\":\"purchase_type\",\"label\":\"Purchase Type\",\"visible\":true,\"order\":6},{\"id\":\"due_date\",\"label\":\"Due Date\",\"visible\":true,\"order\":7},{\"id\":\"place_of_supply\",\"label\":\"Place of Supply / GST\",\"visible\":true,\"order\":8},{\"id\":\"po_grn_link\",\"label\":\"Link PO / GRN\",\"visible\":false,\"order\":9},{\"id\":\"remarks\",\"label\":\"Remarks\",\"visible\":false,\"order\":10}]},{\"id\":\"price_margin\",\"name\":\"Pricing & Trade Margin\",\"description\":\"Focus on MRP, PTR, PTS, Purchase Rate, Selling Rate, and Margin analysis.\",\"isBuiltin\":true,\"columns\":[{\"id\":\"idx\",\"label\":\"#\",\"visible\":true,\"width\":40,\"order\":1,\"required\":true},{\"id\":\"product_name\",\"label\":\"Product\",\"visible\":true,\"width\":240,\"order\":2,\"required\":true},{\"id\":\"batch_no\",\"label\":\"Batch\",\"visible\":true,\"width\":105,\"order\":3,\"required\":true},{\"id\":\"expiry_date\",\"label\":\"Expiry (MM/YY)\",\"visible\":true,\"width\":95,\"order\":4,\"required\":true},{\"id\":\"mfg_date\",\"label\":\"Mfg Date\",\"visible\":false,\"width\":95,\"order\":5},{\"id\":\"qty\",\"label\":\"Quantity\",\"visible\":true,\"width\":140,\"order\":6,\"required\":true},{\"id\":\"free_qty\",\"label\":\"Free Qty\",\"visible\":false,\"width\":80,\"order\":7},{\"id\":\"mrp\",\"label\":\"MRP (₹)\",\"visible\":true,\"width\":85,\"order\":8},{\"id\":\"ptr\",\"label\":\"PTR (₹)\",\"visible\":true,\"width\":80,\"order\":9},{\"id\":\"pts\",\"label\":\"PTS (₹)\",\"visible\":true,\"width\":80,\"order\":10},{\"id\":\"ptss\",\"label\":\"PTSS (₹)\",\"visible\":false,\"width\":80,\"order\":11},{\"id\":\"purchase_rate\",\"label\":\"Pur. Rate (₹)\",\"visible\":true,\"width\":95,\"order\":12,\"required\":true},{\"id\":\"discount\",\"label\":\"Disc %/₹\",\"visible\":false,\"width\":75,\"order\":13},{\"id\":\"discount_amount\",\"label\":\"Disc (₹)\",\"visible\":false,\"width\":75,\"order\":14},{\"id\":\"scheme\",\"label\":\"Scheme\",\"visible\":false,\"width\":75,\"order\":15},{\"id\":\"gst\",\"label\":\"GST %\",\"visible\":false,\"width\":70,\"order\":16},{\"id\":\"hsn\",\"label\":\"HSN\",\"visible\":false,\"width\":85,\"order\":17},{\"id\":\"selling_rate\",\"label\":\"Selling Rate (₹)\",\"visible\":true,\"width\":95,\"order\":18},{\"id\":\"margin\",\"label\":\"Margin %\",\"visible\":true,\"width\":80,\"order\":19},{\"id\":\"taxable_value\",\"label\":\"Taxable (₹)\",\"visible\":false,\"width\":90,\"order\":20},{\"id\":\"tax\",\"label\":\"Tax (₹)\",\"visible\":false,\"width\":85,\"order\":21},{\"id\":\"total\",\"label\":\"Total (₹)\",\"visible\":true,\"width\":100,\"order\":22,\"required\":true},{\"id\":\"actions\",\"label\":\"Action\",\"visible\":true,\"width\":60,\"order\":23,\"required\":true}],\"headerFields\":[{\"id\":\"entry_no\",\"label\":\"Entry No\",\"visible\":true,\"required\":true,\"order\":1},{\"id\":\"supplier\",\"label\":\"Supplier\",\"visible\":true,\"required\":true,\"order\":2},{\"id\":\"supplier_bill_no\",\"label\":\"Supplier Bill No\",\"visible\":true,\"required\":true,\"order\":3},{\"id\":\"bill_date\",\"label\":\"Bill Date\",\"visible\":true,\"required\":true,\"order\":4},{\"id\":\"received_date\",\"label\":\"Received Date\",\"visible\":true,\"order\":5},{\"id\":\"purchase_type\",\"label\":\"Purchase Type\",\"visible\":true,\"order\":6},{\"id\":\"due_date\",\"label\":\"Due Date\",\"visible\":true,\"order\":7},{\"id\":\"place_of_supply\",\"label\":\"Place of Supply / GST\",\"visible\":true,\"order\":8},{\"id\":\"po_grn_link\",\"label\":\"Link PO / GRN\",\"visible\":true,\"order\":9},{\"id\":\"remarks\",\"label\":\"Remarks\",\"visible\":true,\"order\":10}]},{\"id\":\"fast_wholesale\",\"name\":\"Fast Wholesale (Minimal)\",\"description\":\"Minimalist ultra-fast receiving showing only Product, Batch, Expiry, Qty, Rate, and Net Total.\",\"isBuiltin\":true,\"columns\":[{\"id\":\"idx\",\"label\":\"#\",\"visible\":true,\"width\":40,\"order\":1,\"required\":true},{\"id\":\"product_name\",\"label\":\"Product\",\"visible\":true,\"width\":240,\"order\":2,\"required\":true},{\"id\":\"batch_no\",\"label\":\"Batch\",\"visible\":true,\"width\":105,\"order\":3,\"required\":true},{\"id\":\"expiry_date\",\"label\":\"Expiry (MM/YY)\",\"visible\":true,\"width\":95,\"order\":4,\"required\":true},{\"id\":\"mfg_date\",\"label\":\"Mfg Date\",\"visible\":false,\"width\":95,\"order\":5},{\"id\":\"qty\",\"label\":\"Quantity\",\"visible\":true,\"width\":140,\"order\":6,\"required\":true},{\"id\":\"free_qty\",\"label\":\"Free Qty\",\"visible\":false,\"width\":80,\"order\":7},{\"id\":\"mrp\",\"label\":\"MRP (₹)\",\"visible\":false,\"width\":85,\"order\":8},{\"id\":\"ptr\",\"label\":\"PTR (₹)\",\"visible\":false,\"width\":80,\"order\":9},{\"id\":\"pts\",\"label\":\"PTS (₹)\",\"visible\":false,\"width\":80,\"order\":10},{\"id\":\"ptss\",\"label\":\"PTSS (₹)\",\"visible\":false,\"width\":80,\"order\":11},{\"id\":\"purchase_rate\",\"label\":\"Pur. Rate (₹)\",\"visible\":true,\"width\":95,\"order\":12,\"required\":true},{\"id\":\"discount\",\"label\":\"Disc %/₹\",\"visible\":false,\"width\":75,\"order\":13},{\"id\":\"discount_amount\",\"label\":\"Disc (₹)\",\"visible\":false,\"width\":75,\"order\":14},{\"id\":\"scheme\",\"label\":\"Scheme\",\"visible\":false,\"width\":75,\"order\":15},{\"id\":\"gst\",\"label\":\"GST %\",\"visible\":true,\"width\":70,\"order\":16},{\"id\":\"hsn\",\"label\":\"HSN\",\"visible\":false,\"width\":85,\"order\":17},{\"id\":\"selling_rate\",\"label\":\"Selling Rate (₹)\",\"visible\":false,\"width\":95,\"order\":18},{\"id\":\"margin\",\"label\":\"Margin %\",\"visible\":false,\"width\":80,\"order\":19},{\"id\":\"taxable_value\",\"label\":\"Taxable (₹)\",\"visible\":false,\"width\":90,\"order\":20},{\"id\":\"tax\",\"label\":\"Tax (₹)\",\"visible\":false,\"width\":85,\"order\":21},{\"id\":\"total\",\"label\":\"Total (₹)\",\"visible\":true,\"width\":100,\"order\":22,\"required\":true},{\"id\":\"actions\",\"label\":\"Action\",\"visible\":true,\"width\":60,\"order\":23,\"required\":true}],\"headerFields\":[{\"id\":\"entry_no\",\"label\":\"Entry No\",\"visible\":true,\"required\":true,\"order\":1},{\"id\":\"supplier\",\"label\":\"Supplier\",\"visible\":true,\"required\":true,\"order\":2},{\"id\":\"supplier_bill_no\",\"label\":\"Supplier Bill No\",\"visible\":true,\"required\":true,\"order\":3},{\"id\":\"bill_date\",\"label\":\"Bill Date\",\"visible\":true,\"required\":true,\"order\":4},{\"id\":\"received_date\",\"label\":\"Received Date\",\"visible\":false,\"order\":5},{\"id\":\"purchase_type\",\"label\":\"Purchase Type\",\"visible\":true,\"order\":6},{\"id\":\"due_date\",\"label\":\"Due Date\",\"visible\":false,\"order\":7},{\"id\":\"place_of_supply\",\"label\":\"Place of Supply / GST\",\"visible\":false,\"order\":8},{\"id\":\"po_grn_link\",\"label\":\"Link PO / GRN\",\"visible\":false,\"order\":9},{\"id\":\"remarks\",\"label\":\"Remarks\",\"visible\":false,\"order\":10}]}],\"enabled_menu_items\":[\"pos\",\"bills\",\"purchases\",\"stock\",\"reports\",\"masters\",\"settings\",\"import_export\"],\"is_active\":true}",
+      "res": "{\"success\":true,\"message\":\"Store settings saved successfully.\",\"settings\":{\"store_id\":\"4\",\"store_name\":\"QA Pharma Kochi\",\"display_name\":\"QA Pharma Kochi\",\"phone\":\"\",\"email\":\"\",\"address\":\"QA Lane 1, Kochi 682001\",\"state_code\":\"32\",\"gstin\":\"32ABCDE1234F1Z5\",\"drug_license_numbers\":[],\"fssai_no\":\"\",\"timezone\":\"Asia\\/Kolkata\",\"currency_symbol\":\"\\u20b9\",\"store_type\":\"pharmacy\",\"gst_type\":\"regular\",\"allow_tax_override_per_bill\":false,\"tax_mode\":\"inclusive\",\"purchase_tax_mode\":\"exclusive\",\"default_hsn_code\":\"30049099\",\"credit_period_days\":30,\"default_discount_percent\":0,\"default_payment_mode\":\"cash\",\"round_off_enabled\":true,\"default_rate_basis\":\"sel_rate\",\"sequences\":{\"invoicePrefix\":\"INV\",\"invoice_prefix\":\"INV\",\"nextInvoiceNumber\":8302,\"next_invoice_number\":1001,\"quotationPrefix\":\"QUO\",\"quotation_prefix\":\"QUO\",\"nextQuotationNumber\":101,\"next_quotation_number\":101,\"returnPrefix\":\"SR\",\"return_prefix\":\"SR\",\"nextReturnNumber\":1,\"purchasePrefix\":\"PUR\",\"purchase_prefix\":\"PUR\",\"nextPurchaseNumber\":1002,\"purchaseReturnPrefix\":\"PR\",\"nextPurchaseReturnNumber\":1,\"adjustmentPrefix\":\"ADJ\",\"nextAdjustmentNumber\":401,\"transferPrefix\":\"TRF\",\"nextTransferNumber\":501},\"invoice_prefix\":\"INV\",\"next_invoice_number\":8302,\"printing\":{\"paperSize\":\"thermal_80mm\",\"paper_size\":\"thermal_80mm\",\"copies\":1,\"activeTemplate\":\"thermal_standard\",\"active_template\":\"thermal_standard\",\"printUpiQrCode\":true,\"print_upi_qr\":true,\"printDrugLicenses\":true,\"print_drug_license\":true,\"printDoctorDetails\":true,\"printPatientDetails\":true,\"printHsnSummary\":true,\"printDiscountColumn\":true,\"printMrp\":true,\"previewMode\":\"always\",\"defaultCopyMarker\":\"Original for Recipient\",\"silentPrinting\":true,\"selectedPrinterName\":\"Default System Thermal Printer\",\"footerNote\":\"Thank you for shopping with us! Get well soon.\",\"footer_note\":\"Thank you for shopping with us! Get well soon.\",\"termsAndConditions\":\"Goods once sold cannot be returned without original cash memo.\",\"jurisdictionNote\":\"Subject to Local Jurisdiction only.\",\"brandByline\":\"LamSuite Billing\",\"dotMatrixEndOfJob\":\"stop_immediately\",\"dotMatrixTearOffFeedLines\":0,\"dotMatrixPageLength\":66,\"dotMatrixCommandSet\":\"esc_p\",\"dotMatrixDefaultPaperWidth\":\"10in\",\"dotMatrixCarriageWidth\":80,\"dotMatrixAutoCenter\":true},\"workspace\":{\"theme\":\"light\",\"density\":\"comfortable\",\"fontSize\":\"base\",\"notificationsEnabled\":true,\"autoUpdateCheck\":true,\"wifiStrengthSimulator\":95,\"defaultLandingPage\":\"dashboard\",\"billsDefaultPeriod\":\"today\"},\"bills_default_period\":\"today\",\"security\":{\"idleTim"
+    },
+    {
+      "m": "POST",
+      "u": "/counter/sequences/lease",
+      "st": 200,
+      "req": "{\"doc_type\":\"invoice\",\"block_size\":50}",
+      "res": "{\"success\":true,\"counter_id\":2,\"counter_code\":\"C01\",\"doc_type\":\"invoice\",\"prefix\":\"C01-INV\",\"financial_year\":\"2026-27\",\"range_start\":8451,\"range_end\":8500,\"block_size\":50,\"next_number\":8451,\"leased_block\":{\"counter_id\":2,\"counter_code\":\"C01\",\"doc_type\":\"invoice\",\"financial_year\":\"2026-27\",\"prefix\":\"C01-INV\",\"range_start\":8451,\"range_end\":8500,\"block_size\":50,\"next_number\":8451},\"sequences\":{\"counter_id\":2,\"counter_code\":\"C01\",\"financial_year\":\"2026-27\",\"doc_types\":[\"invoice\",\"sales_return\",\"quotation\",\"purchase_bill\",\"receipt\",\"stock_adjustment\",\"stock_transfer\"],\"items\":[{\"counter_id\":2,\"doc_type\":\"invoice\",\"financial_year\":\"2026-27\",\"prefix\":\"C01-INV\",\"next_number\":8501,\"range_start\":8451,\"range_end\":8500},{\"counter_id\":2,\"doc_type\":\"sales_return\",\"financial_year\":\"2026-27\",\"prefix\":\"C01-SR\",\"next_number\":1001,\"range_start\":null,\"range_end\":null},{\"counter_id\":2,\"doc_type\":\"quotation\",\"financial_year\":\"2026-27\",\"prefix\":\"C01-QUO\",\"next_number\":1001,\"range_start\":null,\"range_end\":null},{\"counter_id\":2,\"doc_type\":\"purchase_bill\",\"financial_year\":\"2026-27\",\"prefix\":\"C01-PUR\",\"next_number\":1001,\"range_start\":null,\"range_end\":null},{\"counter_id\":2,\"doc_type\":\"receipt\",\"financial_year\":\"2026-27\",\"prefix\":\"C01-REC\",\"next_number\":1001,\"range_start\":null,\"range_end\":null},{\"counter_id\":2,\"doc_type\":\"stock_adjustment\",\"financial_year\":\"2026-27\",\"prefix\":\"C01-ADJ\",\"next_number\":1001,\"range_start\":null,\"range_end\":null},{\"counter_id\":2,\"doc_type\":\"stock_transfer\",\"financial_year\":\"2026-27\",\"prefix\":\"C01-TRF\",\"next_number\":1001,\"range_start\":null,\"range_end\":null}]},\"message\":\"Numbers 8451-8500 reserved for C01-INV.\"}"
+    }
+  ],
+  "db": {
+    "invoices": [
+      {
+        "id": 4,
+        "store_id": 4,
+        "counter_id": "2",
+        "user_id": null,
+        "module_key": "invoice",
+        "invoice_number": "C01-INV-8301",
+        "invoice_date": "2026-11-21",
+        "due_date": null,
+        "customer_id": null,
+        "customer_name": "Walk-in Customer",
+        "customer_gstin": null,
+        "place_of_supply": "32-Kerala",
+        "subtotal": 210,
+        "discount_total": 0,
+        "tax_total": 22.5,
+        "round_off": 0,
+        "grand_total": 210,
+        "paid_amount": 500,
+        "payment_mode": "Cash",
+        "status": "issued",
+        "cancel_reason": null,
+        "cancelled_at": null,
+        "cancelled_by": null,
+        "patient_name": null,
+        "doctor_name": null,
+        "doctor_reg_no": null,
+        "external_id": "ext_1795277219694_48b901",
+        "synced_at": "2026-11-21 21:36:59",
+        "version": 1,
+        "created_at": "2026-11-21 21:36:59",
+        "updated_at": "2026-11-21 21:36:59",
+        "counter_code": "C01",
+        "location_name": "Front desk",
+        "locked_by_counter_id": null,
+        "locked_until": null,
+        "taxable_subtotal": 187.5,
+        "cgst_total": 11.25,
+        "sgst_total": 11.25,
+        "igst_total": 0,
+        "cess_total": 0,
+        "store_state_code": "32",
+        "payment_status": "paid",
+        "customer_phone": null,
+        "original_invoice_id": null,
+        "original_invoice_number": null,
+        "irn": null,
+        "irn_ack_no": null,
+        "irn_ack_date": null,
+        "irn_qr": null,
+        "irn_status": null,
+        "irn_cancelled_at": null,
+        "irn_cancel_reason": null,
+        "irn_error": null,
+        "ewb_number": null,
+        "ewb_date": null,
+        "ewb_valid_until": null,
+        "ewb_status": null,
+        "ewb_part_a": null,
+        "ewb_part_b": null
+      }
+    ],
+    "items": [
+      {
+        "id": 4,
+        "invoice_id": 4,
+        "product_id": 5,
+        "product_name": "QA Paracet 500 Strip",
+        "batch_no": "PA-OLD",
+        "expiry_date": "2027-03-31 00:00:00",
+        "qty": 2,
+        "unit_price": 90,
+        "discount_percent": 0,
+        "discount_amount": 0,
+        "gst_percent": 12,
+        "tax_amount": 22.5,
+        "total_amount": 210,
+        "created_at": "2026-11-21 21:36:59",
+        "updated_at": "2026-11-21 21:36:59",
+        "taxable_amount": 187.5,
+        "cgst_amount": 11.25,
+        "sgst_amount": 11.25,
+        "igst_amount": 0,
+        "cess_rate": 0,
+        "cess_amount": 0,
+        "allocated_discount": 0,
+        "loose_qty": 5,
+        "units_per_pack": 15,
+        "mrp": 90,
+        "free_qty": 0,
+        "free_loose_qty": 0,
+        "stock_action": null
+      }
+    ],
+    "payments": [
+      {
+        "id": 2,
+        "store_id": 4,
+        "invoice_id": 4,
+        "counter_id": "2",
+        "counter_code": "C01",
+        "payment_mode": "Cash",
+        "amount": 500,
+        "reference_no": null,
+        "status": "received",
+        "extra_fields": null,
+        "notes": null,
+        "received_by": "Counter C01",
+        "created_at": "2026-11-21 21:36:59",
+        "updated_at": "2026-11-21 21:36:59"
+      }
+    ],
+    "batches": [
+      {
+        "id": 12,
+        "batch_no": "PA-OLD",
+        "stock_qty": 715
+      },
+      {
+        "id": 6,
+        "batch_no": "B1",
+        "stock_qty": 0
+      },
+      {
+        "id": 11,
+        "batch_no": "PA-NEW",
+        "stock_qty": 1500
+      }
+    ],
+    "product": {
+      "current_stock": 2215
+    },
+    "ledger": [
+      {
+        "batch_id": 12,
+        "event_type": "SALE",
+        "qty_delta": -35,
+        "reference_type": "INVOICE",
+        "reference_id": "4",
+        "counter_code": "C01",
+        "balance_after": 715
+      }
+    ],
+    "count": 1
+  },
+  "later_calls": [
+    "POST /invoices 201",
+    "POST /settings 200",
+    "POST /counter/sequences/lease 200",
+    "POST /counter/sequences/lease 200",
+    "POST /counter/sequences/lease 200"
+  ]
+}

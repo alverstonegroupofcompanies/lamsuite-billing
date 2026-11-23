@@ -1,0 +1,40 @@
+{
+  "before_mode": "exclusive",
+  "update": 200,
+  "counter_sees_inclusive_after_s": 0.024,
+  "old_bill_unchanged": {
+    "grand_total": 472,
+    "tax_total": 72
+  },
+  "old_bill_before": {
+    "id": 18,
+    "invoice_number": "C01-INV-1051",
+    "grand_total": 472,
+    "tax_total": 72
+  },
+  "profile_get": {
+    "st": 200,
+    "keys": [
+      "success",
+      "counter_id",
+      "profile"
+    ],
+    "sample": "{\"success\":true,\"counter_id\":3,\"profile\":{\"permissions\":{\"version\":1,\"modules\":[\"dashboard\",\"pos\",\"bills\",\"sales_returns\",\"customer_debit_notes\",\"purchases\",\"purchase_returns\",\"stock\",\"stock_transfers\",\"reports\",\"masters\",\"import_export\",\"migration\",\"settings\",\"counters\"],\"screens\":[],\"cash_drawer\":true,\"discount\":{\"max_pct\":100,\"approval_pct\":null,\"max_amount\":null},\"price_override\":{\"allowed\":true,\"approval_pct\":null},\"sell_beyond_stock\":{\"allowed\":true,\"approval_required\":false},\"edits\":{\"allowed\":true,\"approval_required\":false,\"window_days\":null},\"cancellations\":{\"allowed\":true,\"approval_r"
+  },
+  "update /app/update/latest.json": {
+    "st": 204,
+    "body": ""
+  },
+  "update /app/update/windows-x86_64/2.1.0": {
+    "st": 204,
+    "body": ""
+  },
+  "update /app/update/windows-x86_64/2.1.1": {
+    "st": 204,
+    "body": ""
+  },
+  "update /app/update/download/does-not-exist.zip": {
+    "st": 404,
+    "body": "{\n    \"message\": \"Updater package 'does-not-exist.zip' is not found on this server.\"\n}"
+  }
+}

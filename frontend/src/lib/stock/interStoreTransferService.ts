@@ -4,6 +4,7 @@ import { storeService, type BranchStore } from "../masters/storeService";
 import { companySettingsService } from "../settings/companySettingsService";
 import { round2 } from "../billing/billingCalculations";
 import { normalizePackLoose } from "../billing/unitConversion";
+import { identityConflictMessage, identityConflicts } from "./productIdentity";
 import type { InvoicePrintData } from "../printing/printingEngine";
 import { syncQueueService } from "../sync/syncQueueService";
 
@@ -659,7 +660,34 @@ export class InterStoreTransferService {
   async matchDestinationProduct(line: InterStoreTransferLine): Promise<{ product: ProductItem; match: "barcode" | "created" }> {
     if (line.barcode) {
       const byBarcode = await productsStore.findProductByBarcode(line.barcode);
-      if (byBarcode) return { product: byBarcode, match: "barcode" };
+      if (byBarcode) {
+        const conflicts = identityConflicts(
+          {
+            name: line.product_name,
+            barcode: line.barcode,
+            hsn_sac_code: line.hsn_code,
+            gst_percent: line.gst_percent,
+            units_per_pack: line.units_per_pack,
+          },
+          byBarcode,
+        );
+        if (conflicts.length > 0) {
+          throw new Error(
+            identityConflictMessage(
+              {
+                name: line.product_name,
+                barcode: line.barcode,
+                hsn_sac_code: line.hsn_code,
+                gst_percent: line.gst_percent,
+                units_per_pack: line.units_per_pack,
+              },
+              byBarcode,
+              conflicts,
+            ),
+          );
+        }
+        return { product: byBarcode, match: "barcode" };
+      }
     }
 
     const now = Date.now();

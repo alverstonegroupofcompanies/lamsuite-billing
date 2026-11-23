@@ -20,7 +20,7 @@ class ExpenseManagementTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        $this->withoutMiddleware(\App\Http\Middleware\AuthenticateDevice::class);
+        $this->actAsClaimedCounterOfRequestedStore();
 
         $this->store1 = Store::create([
             'name' => 'Store Palakkad',
@@ -287,5 +287,44 @@ class ExpenseManagementTest extends TestCase
             'expense_number' => 'EXP-00090',
             'amount' => 300,
         ]);
+    }
+
+    /**
+     * EXP-01: a till numbers its expenses from its own local count, so a second
+     * till (or one whose local book was reset) sends an EXP-00001 the server
+     * already holds for a different expense. The till's own document id is the
+     * replay key; the number is display-only and re-minted on a collision.
+     */
+    public function test_two_tills_reusing_a_local_number_keep_both_expenses(): void
+    {
+        $push = fn (string $localId, string $head, float $amount) => $this->postJson('/api/sync/push/batch', [
+            'store_id' => $this->store1->id,
+            'items' => [[
+                'entity_type' => 'expense',
+                'action' => 'create',
+                'entity_id' => $localId,
+                'payload' => [
+                    'id' => $localId,
+                    'store_id' => $this->store1->id,
+                    'expense_number' => 'EXP-00001',
+                    'expense_head' => $head,
+                    'amount' => $amount,
+                    'payment_mode' => 'Cash',
+                    'expense_date' => '2026-11-22',
+                ],
+            ]],
+        ])->assertStatus(200)->assertJsonPath('results.failed', 0);
+
+        $push('exp_till_a_1', 'Refreshments & Tea', 60);
+        $push('exp_till_b_1', 'Printing & Stationery', 140);
+        // A replay of the first till's document is still one row.
+        $push('exp_till_a_1', 'Refreshments & Tea', 60);
+
+        $rows = Expense::where('store_id', $this->store1->id)->orderBy('id')->get();
+        $this->assertCount(2, $rows);
+        $this->assertSame('Refreshments & Tea', $rows[0]->expense_head);
+        $this->assertSame('EXP-00001', $rows[0]->expense_number);
+        $this->assertSame('Printing & Stationery', $rows[1]->expense_head);
+        $this->assertNotSame('EXP-00001', $rows[1]->expense_number);
     }
 }

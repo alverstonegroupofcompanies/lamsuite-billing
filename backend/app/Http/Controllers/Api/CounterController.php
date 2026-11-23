@@ -4,8 +4,17 @@ namespace App\Http\Controllers\Api;
 
 use App\Models\AuditLog;
 use App\Models\Counter;
+use App\Models\CounterProfileException;
 use App\Models\CounterSequence;
-use App\Models\CounterShift;
+use App\Models\Invoice;
+use App\Models\User;
+use App\Services\Counter\CounterPresenceService;
+use App\Services\CounterSequenceService;
+use App\Support\RequestTenant;
+use Illuminate\Support\Carbon;
+use Illuminate\Support\Collection;
+use Illuminate\Validation\Rule;
+use App\Services\Counter\CounterShiftService;
 use App\Models\DeviceSession;
 use App\Models\Store;
 use App\Models\StoreDayClose;
@@ -16,22 +25,106 @@ use Illuminate\Support\Facades\DB;
 class CounterController
 {
     /**
-     * List all counters for a store with online status, sync watermark, and sequence summary.
+     * List all counters for a store: status, last activity and bill, operator,
+     * sync backlog and offline periods, plus the permission watermark.
      */
     public function index(Request $request): JsonResponse
     {
-        $storeId = $request->header('X-Store-Id') ?: $request->query('store_id', 1);
+        // G1-SEC: the authenticated tenant's counters only; never store 1 by default.
+        $storeId = RequestTenant::requireStoreId($request);
 
         $counters = Counter::where('store_id', $storeId)
             ->with(['sequences'])
             ->orderBy('counter_code', 'asc')
             ->get();
 
-        $data = $counters->map(function (Counter $counter) {
-            $isOnline = $counter->last_seen_at && $counter->last_seen_at->gt(now()->subMinutes(2));
+        $counterIds = $counters->pluck('id')->all();
+        $deviceUuids = $counters->pluck('device_uuid')->filter()->unique()->values()->all();
+
+        // CNT-01: the last bill each counter issued, and the last salesperson
+        // stamped on one of its bills (GAP-01), as two aggregates over the store.
+        $lastBills = $this->latestBills($storeId, $counterIds, false);
+        $lastSoldBills = $this->latestBills($storeId, $counterIds, true);
+
+        // CNT-01: the latest session beat per counter, which carries the operator
+        // and the sync backlog the till last reported.
+        $sessions = $this->latestSessions($storeId, $counterIds, $deviceUuids);
+        $operatorNames = User::whereIn(
+            'id',
+            $sessions->pluck('user_id')->filter()->unique()->values()->all()
+        )->pluck('name', 'id');
+
+        // CNT-01: offline spans recorded from heartbeats.
+        $presence = app(CounterPresenceService::class)->summaries($counters);
+
+        $openExceptions = CounterProfileException::whereIn('counter_id', $counterIds)
+            ->where('status', CounterProfileException::STATUS_OPEN)
+            ->selectRaw('counter_id, COUNT(*) as total')
+            ->groupBy('counter_id')
+            ->pluck('total', 'counter_id');
+
+        $data = $counters->map(function (Counter $counter) use ($lastBills, $lastSoldBills, $sessions, $operatorNames, $presence, $openExceptions) {
+            $id = (int) $counter->id;
+            $session = $sessions->get('counter:' . $id)
+                ?? ($counter->device_uuid ? $sessions->get('device:' . $counter->device_uuid) : null);
+            $presenceRow = $presence[$id] ?? null;
+
+            $lastActivity = $counter->last_seen_at;
+            foreach ([$session?->last_active_at, $presenceRow['last_beat_at'] ?? null] as $candidate) {
+                $at = $candidate instanceof Carbon ? $candidate : ($candidate ? Carbon::parse($candidate) : null);
+                if ($at && (! $lastActivity || $at->gt($lastActivity))) {
+                    $lastActivity = $at;
+                }
+            }
+
+            $isOnline = $lastActivity !== null && $lastActivity->gt(now()->subMinutes(2));
+
+            // CNT-01: the open offline period starts at the last moment the store
+            // heard from the counter by any channel, not only its last span.
+            if ($presenceRow && $lastActivity && ! empty($presenceRow['offline_since'])
+                && $lastActivity->gt(Carbon::parse($presenceRow['offline_since']))) {
+                $presenceRow['offline_since'] = $lastActivity->toIso8601String();
+                $presenceRow['offline_periods'] = array_map(fn (array $period) => $period['ended_at'] === null
+                    ? [
+                        'started_at' => $lastActivity->toIso8601String(),
+                        'ended_at' => null,
+                        'minutes' => max(0, (int) round($lastActivity->diffInSeconds(now()) / 60)),
+                    ]
+                    : $period, $presenceRow['offline_periods']);
+            }
+
+            // The salesperson is whoever the owner's master says sold the last
+            // bill; the signed-in user is only the operator, reported apart.
+            $lastBill = $lastBills->get($id);
+            $lastSold = $lastSoldBills->get($id);
+            $salespersonId = $lastSold?->salesperson_id ?? $counter->last_salesperson_id;
+            $salespersonName = $lastSold?->salesperson_name ?? $counter->last_salesperson_name;
+            $operatorId = $session?->user_id ? (int) $session->user_id : null;
+            $operatorName = $operatorId ? ($operatorNames[$operatorId] ?? null) : null;
+
+            $lastBillAt = $lastBill?->created_at;
+
             return array_merge($counter->toArray(), [
-                'is_online' => (bool)$isOnline,
+                'is_online' => (bool) $isOnline,
+                // PRF-006: the panel needs to know a PIN exists without ever seeing it.
+                'unlock_pin_set' => $counter->unlock_pin_hash !== null,
                 'status_display' => $counter->status === 'active' ? ($isOnline ? 'Online' : 'Offline') : ucfirst($counter->status),
+                // PRF-001/Q1: what the counter works inside, and whether anything
+                // it made in the dark is still waiting for the owner.
+                'permission_profile_version' => (int) ($counter->permission_profile_version ?? \App\Support\Counter\CounterProfile::VERSION),
+                'open_profile_exceptions' => (int) ($openExceptions[$id] ?? $openExceptions[(string) $id] ?? 0),
+                // CNT-01: what the owner asked to see — when the counter last
+                // worked, what it last sold, and when it was dark.
+                'last_activity_at' => $lastActivity?->toIso8601String(),
+                'last_bill_at' => $lastBillAt ? Carbon::parse($lastBillAt)->toIso8601String() : null,
+                'last_bill_number' => $lastBill?->invoice_number,
+                'last_salesperson_id' => $salespersonId ? (int) $salespersonId : null,
+                'last_salesperson_name' => $salespersonName ?: null,
+                'last_operator_id' => $operatorName ? $operatorId : null,
+                'last_operator_name' => $operatorName,
+                'unsynced_items_count' => (int) ($session?->unsynced_items_count ?? 0),
+                'offline_since' => $presenceRow['offline_since'] ?? null,
+                'offline_periods' => $presenceRow['offline_periods'] ?? [],
             ]);
         });
 
@@ -42,140 +135,68 @@ class CounterController
     }
 
     /**
-     * Submit new device registration for store owner approval.
+     * CNT-01: the newest bill per counter in one query — optionally only bills
+     * that carry a salesperson — keyed by counter id.
+     *
+     * @param array<int, int> $counterIds
+     * @return Collection<int, Invoice>
      */
-    public function enroll(Request $request): JsonResponse
+    private function latestBills(int $storeId, array $counterIds, bool $withSalesperson): Collection
     {
-        $validated = $request->validate([
-            'store_id' => 'required',
-            'device_uuid' => 'required|string',
-            'counter_name' => 'required|string|max:100',
-            'counter_code' => 'required|string|max:20',
-            'location_name' => 'nullable|string|max:100',
-            'is_remote' => 'nullable|boolean',
-            'is_digital_only' => 'nullable|boolean',
-            'mac_address' => 'nullable|string',
-        ]);
-
-        $store = is_numeric($validated['store_id'])
-            ? Store::find($validated['store_id'])
-            : Store::where('code', $validated['store_id'])->first();
-
-        if (!$store) {
-            return response()->json(['error' => 'Store not found'], 404);
+        if ($counterIds === []) {
+            return collect();
         }
 
-        // Check if device or counter code already exists
-        $existing = Counter::where('store_id', $store->id)
-            ->where(function ($q) use ($validated) {
-                $q->where('device_uuid', $validated['device_uuid'])
-                  ->orWhere('counter_code', $validated['counter_code']);
-            })->first();
+        $latestIds = Invoice::query()
+            ->selectRaw('MAX(id)')
+            ->where('store_id', $storeId)
+            ->whereIn('counter_id', $counterIds)
+            ->where('module_key', 'invoice')
+            ->when($withSalesperson, fn ($q) => $q->whereNotNull('salesperson_name')->where('salesperson_name', '!=', ''))
+            ->groupBy('counter_id');
 
-        // Counter names are unique per store among active/locked/pending counters.
-        $nameConflict = Counter::nameConflict($store->id, $validated['counter_name'], $existing?->id);
-        if ($nameConflict) {
-            return $this->counterNameConflictResponse($nameConflict);
+        return Invoice::query()
+            ->whereIn('id', $latestIds)
+            ->get(['id', 'counter_id', 'invoice_number', 'created_at', 'salesperson_id', 'salesperson_name'])
+            ->keyBy(fn (Invoice $invoice) => (int) $invoice->counter_id);
+    }
+
+    /**
+     * The latest session beat for each counter, keyed both by counter and by
+     * device so a counter whose workstation has not claimed it yet still finds
+     * its session.
+     *
+     * @param array<int, int> $counterIds
+     * @param array<int, string> $deviceUuids
+     * @return Collection<string, DeviceSession>
+     */
+    private function latestSessions(int $storeId, array $counterIds, array $deviceUuids): Collection
+    {
+        if ($counterIds === [] && $deviceUuids === []) {
+            return collect();
         }
 
-        if ($existing) {
-            // Update device details
-            $existing->update([
-                'device_uuid' => $validated['device_uuid'],
-                'counter_name' => $validated['counter_name'],
-                'location_name' => $validated['location_name'] ?? $existing->location_name,
-                'ip_address' => $request->ip(),
-                'last_seen_at' => now(),
-            ]);
-
-            $pairingCode = null;
-            if ($existing->status === 'pending_approval') {
-                if (!$existing->pairing_code || !$existing->pairing_expires_at || $existing->pairing_expires_at->isPast()) {
-                    $pairingCode = $existing->generatePairingCode();
-                } else {
-                    $pairingCode = $existing->pairing_code;
+        $rows = DeviceSession::where('store_id', $storeId)
+            ->where(function ($query) use ($counterIds, $deviceUuids) {
+                $query->whereIn('counter_id', $counterIds);
+                if ($deviceUuids !== []) {
+                    $query->orWhereIn('device_uuid', $deviceUuids);
                 }
+            })
+            ->orderByDesc('last_active_at')
+            ->get();
+
+        $byKey = collect();
+        foreach ($rows as $row) {
+            if ($row->counter_id !== null && ! $byKey->has('counter:' . $row->counter_id)) {
+                $byKey->put('counter:' . $row->counter_id, $row);
             }
-
-            return response()->json([
-                'success' => true,
-                'counter' => $existing,
-                'status' => $existing->status,
-                'pairing_code' => $pairingCode,
-                'device_token' => $existing->status === 'active' ? ($existing->device_token ?? $existing->issueDeviceToken()) : null,
-                'message' => "Device enrollment updated. Current status: {$existing->status}",
-            ]);
-        }
-
-        $hasAuth = auth('sanctum')->check();
-        $activationKeyInput = $request->input('activation_key');
-        $validKey = false;
-        if (!empty($activationKeyInput)) {
-            $keyHash = \App\Models\ActivationKey::hashKey($activationKeyInput);
-            $keyModel = \App\Models\ActivationKey::where('key_hash', $keyHash)->where('store_id', $store->id)->first();
-            if ($keyModel && $keyModel->isValid()) {
-                $validKey = true;
-                $keyModel->incrementActivation();
+            if ($row->device_uuid && ! $byKey->has('device:' . $row->device_uuid)) {
+                $byKey->put('device:' . $row->device_uuid, $row);
             }
         }
 
-        $autoApprove = ($hasAuth || $validKey) && !$store->require_device_approval;
-
-        $counter = Counter::create([
-            'store_id' => $store->id,
-            'counter_code' => strtoupper($validated['counter_code']),
-            'counter_name' => $validated['counter_name'],
-            'location_name' => $validated['location_name'] ?? 'Remote Office',
-            'is_remote' => (bool)($validated['is_remote'] ?? true),
-            'is_digital_only' => (bool)($validated['is_digital_only'] ?? false),
-            'status' => $autoApprove ? 'active' : 'pending_approval',
-            'device_uuid' => $validated['device_uuid'],
-            'mac_address' => $validated['mac_address'] ?? null,
-            'ip_address' => $request->ip(),
-            'last_seen_at' => now(),
-            'role_profile' => [
-                'allow_cancel' => false,
-                'allow_price_change' => false,
-                'allow_stock_adj' => false,
-                'require_manager_pin' => false,
-            ],
-            'printer_profile' => [
-                'type' => 'thermal_80mm',
-                'auto_print' => true,
-                'copies' => 1,
-            ],
-        ]);
-
-        $pairingCode = null;
-        $deviceToken = null;
-
-        if ($autoApprove) {
-            $deviceToken = $counter->issueDeviceToken();
-            $fy = $this->calculateFinancialYear();
-            $this->ensureCounterSequences($counter, $fy);
-        } else {
-            $pairingCode = $counter->generatePairingCode();
-        }
-
-        AuditLog::log(
-            'counter_enroll_requested',
-            'Counter',
-            (string)$counter->id,
-            null,
-            ['device_uuid' => $counter->device_uuid, 'location' => $counter->location_name, 'pairing_code' => $pairingCode],
-            $store->id
-        );
-
-        return response()->json([
-            'success' => true,
-            'counter' => $counter,
-            'status' => $counter->status,
-            'pairing_code' => $pairingCode,
-            'device_token' => $deviceToken,
-            'message' => $autoApprove
-                ? 'Counter registered and activated directly.'
-                : 'Remote counter registered successfully. Awaiting store owner approval in Admin Panel with pairing code.',
-        ], 201);
+        return $byKey;
     }
 
     /**
@@ -201,13 +222,10 @@ class CounterController
             'location_name' => $validated['location_name'] ?? $counter->location_name,
         ]);
 
-        // Auto-initialize sequence series if approved
+        // Auto-initialize sequence series if approved. A status change never mints
+        // a token: CNT-013 makes a claimed activation code the only way onto a till.
         if ($counter->status === 'active') {
-            if (!$counter->device_token) {
-                $counter->issueDeviceToken();
-            }
-            $fy = $this->calculateFinancialYear();
-            $this->ensureCounterSequences($counter, $fy);
+            app(CounterSequenceService::class)->ensureFor($counter);
         }
 
         AuditLog::log(
@@ -261,13 +279,31 @@ class CounterController
     }
 
     /**
-     * Lease or allocate number sequences for a counter.
+     * CNT-014 — lease or reshape a counter\'s document series.
+     *
+     * The path parameter is a counter id or, as tills in the field have always
+     * sent it, a counter code; the code is read inside the store the request
+     * names, so one counter cannot be reached through another store.
      */
     public function leaseSequence(Request $request, string $id): JsonResponse
     {
-        $counter = Counter::findOrFail($id);
+        $counter = $this->resolveCounter($request, $id);
+
+        if (!$counter) {
+            return response()->json([
+                'success' => false,
+                'error' => 'counter_not_found',
+                'message' => "No counter {$id} in this store.",
+            ], 404);
+        }
+
+        $service = app(CounterSequenceService::class);
+
         $validated = $request->validate([
-            'doc_type' => 'required|in:invoice,sales_return,receipt,stock_transfer',
+            'doc_type' => ['required', 'string', Rule::in(array_merge(
+                CounterSequenceService::docTypes(),
+                array_keys(CounterSequenceService::DOC_TYPE_ALIASES)
+            ))],
             'financial_year' => 'nullable|string',
             'prefix' => 'nullable|string',
             'range_start' => 'nullable|integer',
@@ -275,195 +311,157 @@ class CounterController
             'next_number' => 'nullable|integer',
             'allocate_block' => 'nullable|boolean',
             'block_size' => 'nullable|integer|min:5|max:1000',
+        ], [
+            'doc_type.in' => 'The document series must be one of: ' . implode(', ', CounterSequenceService::docTypes()) . '.',
         ]);
 
-        $fy = $validated['financial_year'] ?? $this->calculateFinancialYear();
-        $defaultPrefix = $validated['prefix'] ?? "{$counter->counter_code}-" . strtoupper(substr($validated['doc_type'], 0, 3));
+        $fy = $validated['financial_year'] ?? $service->currentFinancialYear();
+        $docType = CounterSequenceService::normalizeDocType($validated['doc_type']);
 
-        $sequence = CounterSequence::firstOrCreate(
-            [
-                'counter_id' => $counter->id,
-                'doc_type' => $validated['doc_type'],
-                'financial_year' => $fy,
-            ],
-            [
-                'store_id' => $counter->store_id,
-                'prefix' => $defaultPrefix,
-                'next_number' => $validated['next_number'] ?? 1001,
-            ]
-        );
-
-        $leasedBlock = null;
         if (!empty($validated['allocate_block'])) {
-            $blockSize = (int)($validated['block_size'] ?? 50);
-            $rangeStart = $sequence->next_number;
-            $rangeEnd = $rangeStart + $blockSize - 1;
+            $block = $service->lease(
+                $counter,
+                $docType,
+                (int) ($validated['block_size'] ?? CounterSequenceService::DEFAULT_BLOCK_SIZE),
+                $fy,
+            );
 
-            $sequence->update([
-                'prefix' => $validated['prefix'] ?? $sequence->prefix,
-                'range_start' => $rangeStart,
-                'range_end' => $rangeEnd,
-                'next_number' => $rangeEnd + 1,
+            $sequence = CounterSequence::where('counter_id', $counter->id)
+                ->where('doc_type', $block['doc_type'])
+                ->where('financial_year', $fy)
+                ->first();
+
+            if (!empty($validated['prefix'])) {
+                $sequence->update(['prefix' => $validated['prefix']]);
+                $block['prefix'] = $validated['prefix'];
+            }
+
+            return response()->json([
+                'success' => true,
+                'counter_id' => (int) $counter->id,
+                'counter_code' => $counter->counter_code,
+                'doc_type' => $block['doc_type'],
+                'sequence' => $sequence,
+                'leased_block' => $block,
+                'message' => "Allocated number block {$block['range_start']}-{$block['range_end']} for {$block['prefix']}.",
             ]);
-
-            $leasedBlock = [
-                'prefix' => $sequence->prefix,
-                'financial_year' => $fy,
-                'range_start' => $rangeStart,
-                'range_end' => $rangeEnd,
-                'block_size' => $blockSize,
-                'next_number' => $rangeStart,
-            ];
-        } else {
-            $sequence->update(array_filter([
-                'prefix' => $validated['prefix'] ?? $sequence->prefix,
-                'range_start' => $validated['range_start'] ?? $sequence->range_start,
-                'range_end' => $validated['range_end'] ?? $sequence->range_end,
-                'next_number' => $validated['next_number'] ?? $sequence->next_number,
-            ], fn($v) => !is_null($v)));
         }
+
+        $sequence = $service->sequenceFor($counter, $docType, $fy);
+        $sequence->update(array_filter([
+            'prefix' => $validated['prefix'] ?? null,
+            'range_start' => $validated['range_start'] ?? null,
+            'range_end' => $validated['range_end'] ?? null,
+            'next_number' => $validated['next_number'] ?? null,
+        ], fn ($v) => $v !== null));
 
         return response()->json([
             'success' => true,
+            'counter_id' => (int) $counter->id,
+            'counter_code' => $counter->counter_code,
+            'doc_type' => $sequence->fresh()->doc_type,
             'sequence' => $sequence->fresh(),
-            'leased_block' => $leasedBlock,
-            'message' => $leasedBlock 
-                ? "Allocated number block {$leasedBlock['range_start']}-{$leasedBlock['range_end']} for {$counter->counter_code}."
-                : "Document series leased for {$counter->counter_code} ({$sequence->prefix}).",
+            'leased_block' => null,
+            'message' => "Document series leased for {$counter->counter_code} ({$sequence->prefix}).",
         ]);
+    }
+
+    /** A counter addressed by its server id or, the way tills do, by its code. */
+    private function resolveCounter(Request $request, string $key): ?Counter
+    {
+        // G1-SEC: only a counter of the authenticated store; a counter's token
+        // may only lease for itself.
+        $storeId = \App\Support\RequestTenant::requireStoreId($request);
+        $query = Counter::where('store_id', $storeId);
+        $counter = is_numeric($key)
+            ? $query->whereKey($key)->first()
+            : $query->where('counter_code', strtoupper(trim($key)))->first();
+
+        $own = \App\Support\RequestTenant::counterId($request);
+        if ($counter && $own !== null && (int) $counter->id !== $own) {
+            return null;
+        }
+
+        return $counter;
     }
 
     /**
      * Open a counter shift with opening cash float.
+     *
+     * B9 / PRF-007: this is the panel's path — a person opening the drawer of a
+     * counter they can see, recorded as `panel_user`. A till opens its own
+     * drawer at `/api/counter/shift/open` with its device token and its PIN, and
+     * its rows are keyed to the counter with no person at all.
      */
-    public function openShift(Request $request, string $id): JsonResponse
+    public function openShift(Request $request, string $id, CounterShiftService $shifts): JsonResponse
     {
-        $counter = Counter::findOrFail($id);
+        $counter = $this->panelCounter($request, $id);
         $validated = $request->validate([
             'opening_float' => 'nullable|numeric|min:0',
             'notes' => 'nullable|string',
         ]);
 
-        $openingFloat = (float)($validated['opening_float'] ?? 0);
-        $user = $request->user();
-
-        // Check if an open shift already exists for this counter
-        $existing = CounterShift::where('counter_id', $counter->id)
-            ->where('status', 'open')
-            ->first();
-
-        if ($existing) {
-            return response()->json([
-                'success' => true,
-                'shift' => $existing,
-                'message' => 'Shift is already open for this counter.',
-            ]);
-        }
-
-        $shift = CounterShift::create([
-            'store_id' => $counter->store_id,
-            'counter_id' => $counter->id,
-            'opened_by_user_id' => $user?->id,
-            'opening_float' => $openingFloat,
-            'cash_sales' => 0,
-            'digital_sales' => 0,
-            'cash_refunds' => 0,
-            'cash_drops' => 0,
-            'status' => 'open',
-            'opened_at' => now(),
-            'notes' => $validated['notes'] ?? 'Shift opened at counter terminal',
-        ]);
-
-        AuditLog::log(
-            'counter_shift_opened',
-            'CounterShift',
-            (string)$shift->id,
-            null,
-            ['opening_float' => $openingFloat, 'counter_code' => $counter->counter_code],
-            $counter->store_id,
-            $user?->id
-        );
-
-        return response()->json([
-            'success' => true,
-            'shift' => $shift,
-            'message' => "Shift opened with opening float ₹{$openingFloat} for counter {$counter->counter_code}.",
-        ]);
-    }
-
-    /**
-     * Close a counter shift (reconciliation of cash, card, UPI, and discrepancy).
-     */
-    public function closeShift(Request $request, string $id): JsonResponse
-    {
-        $counter = Counter::findOrFail($id);
-        $validated = $request->validate([
-            'closing_cash_actual' => 'required|numeric',
-            'closing_discrepancy' => 'nullable|numeric',
-            'cash_sales' => 'nullable|numeric',
-            'digital_sales' => 'nullable|numeric',
-            'cash_refunds' => 'nullable|numeric',
-            'cash_drops' => 'nullable|numeric',
-            'notes' => 'nullable|string',
-        ]);
-
-        $shift = CounterShift::where('counter_id', $counter->id)
-            ->where('status', 'open')
-            ->latest('opened_at')
-            ->first();
-
-        $attributes = [
-            'closed_by_user_id' => $request->user()?->id,
-            'cash_sales' => $validated['cash_sales'] ?? ($shift->cash_sales ?? 0),
-            'digital_sales' => $validated['digital_sales'] ?? ($shift->digital_sales ?? 0),
-            'cash_refunds' => $validated['cash_refunds'] ?? ($shift->cash_refunds ?? 0),
-            'cash_drops' => $validated['cash_drops'] ?? ($shift->cash_drops ?? 0),
-            'closing_cash_actual' => $validated['closing_cash_actual'],
-            'status' => 'closed',
-            'closed_at' => now(),
-            'notes' => $validated['notes'] ?? ($shift->notes ?? null),
-        ];
-
-        $openingFloat = (float) ($shift->opening_float ?? 0);
-        $expected = $openingFloat
-            + (float) $attributes['cash_sales']
-            - (float) $attributes['cash_refunds']
-            - (float) $attributes['cash_drops'];
-
-        $attributes['closing_discrepancy'] = $validated['closing_discrepancy']
-            ?? round((float) $validated['closing_cash_actual'] - $expected, 2);
-
-        if ($shift) {
-            $shift->update($attributes);
-            $shift = $shift->fresh();
-        } else {
-            $shift = CounterShift::create(array_merge($attributes, [
-                'store_id' => $counter->store_id,
-                'counter_id' => $counter->id,
-                'opened_by_user_id' => $request->user()?->id,
-                'opening_float' => 0.00,
-                'opened_at' => now()->startOfDay(),
-            ]));
-        }
-
-        AuditLog::log(
-            'counter_shift_closed',
-            'CounterShift',
-            (string) $shift->id,
-            null,
+        $shift = $shifts->open(
+            $counter,
             [
-                'closing_cash_actual' => (float) $shift->closing_cash_actual,
-                'closing_discrepancy' => (float) $shift->closing_discrepancy,
+                'opening_float' => $validated['opening_float'] ?? 0,
+                'notes' => $validated['notes'] ?? null,
             ],
-            $counter->store_id,
+            CounterShiftService::VIA_PANEL_USER,
             $request->user()?->id
         );
 
         return response()->json([
             'success' => true,
             'shift' => $shift,
-            'message' => "Shift closed for counter {$counter->counter_code}. Variance ₹" . number_format((float) $shift->closing_discrepancy, 2) . '.',
+            'message' => "Shift opened with opening float ₹" . number_format((float) $shift->opening_float, 2)
+                . " for counter {$counter->counter_code}.",
         ]);
+    }
+
+    /**
+     * Close a counter shift (reconciliation of cash, card, UPI, and discrepancy).
+     *
+     * The variance is computed rather than accepted: the drawer's components come
+     * from whoever counted it, but what they add up to is the store's figure, and
+     * the answer carries the cloud's own tally for the same counter beside it.
+     */
+    public function closeShift(Request $request, string $id, CounterShiftService $shifts): JsonResponse
+    {
+        $counter = $this->panelCounter($request, $id);
+        $validated = $request->validate([
+            'closing_cash_actual' => 'required|numeric|min:0',
+            'cash_sales' => 'nullable|numeric|min:0',
+            'digital_sales' => 'nullable|numeric|min:0',
+            'cash_refunds' => 'nullable|numeric|min:0',
+            'cash_in' => 'nullable|numeric|min:0',
+            'cash_drops' => 'nullable|numeric|min:0',
+            'notes' => 'nullable|string',
+        ]);
+
+        $result = $shifts->close($counter, $validated, CounterShiftService::VIA_PANEL_USER, $request->user()?->id);
+
+        return response()->json([
+            'success' => true,
+            'shift' => $result['shift'],
+            'expected_cash' => $result['expected_cash'],
+            'variance' => $result['variance'],
+            'server_tally' => $result['reconciliation']['server'] ?? null,
+            'ignored_client_totals' => $result['reconciliation']['ignored_client_totals'] ?? [],
+            'reconciliation' => $result['reconciliation'],
+            'message' => "Shift closed for counter {$counter->counter_code}. Variance ₹"
+                . number_format($result['variance'], 2) . '.',
+        ]);
+    }
+
+    /** A counter inside the store the panel is working in, or a 404. */
+    private function panelCounter(Request $request, string $id): Counter
+    {
+        $storeId = $request->attributes->get('active_store_id');
+
+        return Counter::where('id', $id)
+            ->when($storeId, fn ($q) => $q->where('store_id', (int) $storeId))
+            ->firstOrFail();
     }
 
     /**
@@ -471,10 +469,8 @@ class CounterController
      */
     public function closeStoreDay(Request $request): JsonResponse
     {
-        $storeId = (int) ($request->get('active_store_id')
-            ?: $request->header('X-Store-Id')
-            ?: $request->input('store_id')
-            ?: $request->user()?->store_id);
+        // G1-SEC: the day is closed for the authenticated tenant's store only.
+        $storeId = (int) (\App\Support\RequestTenant::storeId($request) ?? 0);
         $closeDate = (string) $request->input('close_date', now()->toDateString());
 
         if (! $storeId) {
@@ -498,103 +494,6 @@ class CounterController
             'day_close' => $dayClose,
             'summary' => $service->summary($storeId, $closeDate),
             'message' => "Store day close consolidated for date {$closeDate}.",
-        ]);
-    }
-
-    /**
-     * Poll / check device enrollment status by hardware UUID.
-     */
-    public function checkEnrollmentStatus(Request $request, string $deviceUuid): JsonResponse
-    {
-        $counter = Counter::where('device_uuid', $deviceUuid)->with(['store'])->first();
-
-        if (!$counter) {
-            return response()->json([
-                'success' => false,
-                'status' => 'not_found',
-                'message' => 'Device not registered.',
-            ], 404);
-        }
-
-        $store = $counter->store;
-
-        return response()->json([
-            'success' => true,
-            'status' => $counter->status,
-            'counter_id' => $counter->id,
-            'counter_code' => $counter->counter_code,
-            'counter_name' => $counter->counter_name,
-            'store_id' => $counter->store_id,
-            'store_name' => $store ? $store->name : null,
-            'store_code' => $store ? $store->code : null,
-            'is_active' => $counter->status === 'active',
-            'is_store_active' => $store ? (bool)$store->is_active : false,
-            'device_token' => $counter->status === 'active' ? $counter->device_token : null,
-            'pairing_code' => $counter->status === 'pending_approval' ? $counter->pairing_code : null,
-            'pairing_expires_at' => $counter->pairing_expires_at ? $counter->pairing_expires_at->toIso8601String() : null,
-            'role_profile' => $counter->role_profile,
-            'printer_profile' => $counter->printer_profile,
-        ]);
-    }
-
-    /**
-     * Approve counter enrollment using 6-character pairing code (e.g. LK-8421).
-     */
-    public function approvePairing(Request $request): JsonResponse
-    {
-        $validated = $request->validate([
-            'pairing_code' => 'required|string',
-            'store_id' => 'nullable',
-        ]);
-
-        $normalizedCode = strtoupper(trim($validated['pairing_code']));
-
-        $query = Counter::where('pairing_code', $normalizedCode)
-            ->where('status', 'pending_approval');
-
-        if (!empty($validated['store_id'])) {
-            $query->where('store_id', $validated['store_id']);
-        }
-
-        $counter = $query->first();
-
-        if (!$counter) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Invalid pairing code or counter not found.',
-            ], 404);
-        }
-
-        if ($counter->pairing_expires_at && $counter->pairing_expires_at->isPast()) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Pairing code has expired. Please refresh registration on the device.',
-            ], 410);
-        }
-
-        $deviceToken = $counter->issueDeviceToken();
-        $counter->update([
-            'approved_by' => $request->user()?->id,
-        ]);
-
-        $fy = $this->calculateFinancialYear();
-        $this->ensureCounterSequences($counter, $fy);
-
-        AuditLog::log(
-            'counter_pairing_approved',
-            'Counter',
-            (string)$counter->id,
-            null,
-            ['pairing_code' => $normalizedCode, 'counter_code' => $counter->counter_code],
-            $counter->store_id,
-            $request->user()?->id
-        );
-
-        return response()->json([
-            'success' => true,
-            'message' => "Counter '{$counter->counter_name}' ({$counter->counter_code}) approved successfully.",
-            'counter' => $counter->fresh(['sequences']),
-            'device_token' => $deviceToken,
         ]);
     }
 
@@ -641,59 +540,4 @@ class CounterController
         ]);
     }
 
-    /**
-     * Explain which workstation already owns a counter name so the operator can
-     * release it instead of guessing why enrollment failed.
-     */
-    private function counterNameConflictResponse(Counter $conflict): \Illuminate\Http\JsonResponse
-    {
-        return response()->json([
-            'success' => false,
-            'error' => 'COUNTER_NAME_TAKEN',
-            'message' => "Counter name '{$conflict->counter_name}' is already used by workstation "
-                . "'{$conflict->device_name}' ({$conflict->device_uuid}). Release or rename that counter first.",
-            'conflict' => [
-                'id' => (string)$conflict->id,
-                'counter_name' => $conflict->counter_name,
-                'counter_code' => $conflict->counter_code,
-                'device_uuid' => $conflict->device_uuid,
-                'device_name' => $conflict->device_name,
-                'status' => $conflict->status,
-            ],
-        ], 422);
-    }
-
-    private function calculateFinancialYear(): string
-    {
-        $month = (int)date('n');
-        $year = (int)date('Y');
-        if ($month >= 4) {
-            return $year . '-' . substr((string)($year + 1), -2);
-        }
-        return ($year - 1) . '-' . substr((string)$year, -2);
-    }
-
-    private function ensureCounterSequences(Counter $counter, string $fy): void
-    {
-        $docTypes = [
-            'invoice' => "{$counter->counter_code}-INV",
-            'sales_return' => "{$counter->counter_code}-SR",
-            'receipt' => "{$counter->counter_code}-REC",
-        ];
-
-        foreach ($docTypes as $type => $prefix) {
-            CounterSequence::firstOrCreate(
-                [
-                    'counter_id' => $counter->id,
-                    'doc_type' => $type,
-                    'financial_year' => $fy,
-                ],
-                [
-                    'store_id' => $counter->store_id,
-                    'prefix' => $prefix,
-                    'next_number' => 1001,
-                ]
-            );
-        }
-    }
 }

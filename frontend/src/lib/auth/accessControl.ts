@@ -29,6 +29,7 @@ export const MENU_PERMISSIONS: Record<string, MenuPermission> = {
   customer_debit_notes: { module: "sales", action: "edit" },
   purchases: { module: "purchases", action: "view" },
   purchase_returns: { module: "purchases", action: "edit" },
+  expenses: { module: "billing", action: "create" },
   stock: { module: "inventory", action: "view" },
   stock_transfers: { module: "inventory", action: "edit" },
   reports: { module: "reports", action: "view" },

@@ -1,0 +1,82 @@
+{
+  "found": true,
+  "vw": 1366,
+  "vh": 768,
+  "scrollWidth": 1366,
+  "barHeight": 63,
+  "barBottom": 753,
+  "chips": [
+    {
+      "text": "F1 Entry Row",
+      "right": 180,
+      "bottom": 719
+    },
+    {
+      "text": "Enter Select & Auto-Add",
+      "right": 343,
+      "bottom": 719
+    },
+    {
+      "text": "↵ in Qty Confirm Line",
+      "right": 496,
+      "bottom": 719
+    },
+    {
+      "text": "Esc in Qty Remove Line",
+      "right": 660,
+      "bottom": 719
+    },
+    {
+      "text": "↑ Cart Lines",
+      "right": 757,
+      "bottom": 719
+    },
+    {
+      "text": "Alt+C Customer",
+      "right": 877,
+      "bottom": 719
+    },
+    {
+      "text": "Alt+F2 Bill Disc",
+      "right": 992,
+      "bottom": 719
+    },
+    {
+      "text": "Alt+R Round-off",
+      "right": 1113,
+      "bottom": 719
+    },
+    {
+      "text": "F12 Checkout",
+      "right": 1217,
+      "bottom": 717
+    },
+    {
+      "text": "Alt+H Hold Bill",
+      "right": 130,
+      "bottom": 746
+    },
+    {
+      "text": "Alt+L Recall",
+      "right": 230,
+      "bottom": 746
+    },
+    {
+      "text": "Ctrl+N New Bill",
+      "right": 345,
+      "bottom": 746
+    },
+    {
+      "text": "Ctrl+Shift+C Columns",
+      "right": 502,
+      "bottom": 746
+    },
+    {
+      "text": "Shortcuts ?",
+      "right": 1341,
+      "bottom": 733
+    }
+  ],
+  "clipped": [],
+  "offBottom": []
+}

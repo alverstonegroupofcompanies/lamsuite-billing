@@ -11,6 +11,8 @@ use App\Models\StockTransferItem;
 use App\Models\TransferProductMapping;
 use App\Models\User;
 use App\Services\Catalog\StoreCatalogCopyService;
+use App\Support\Catalog\ProductIdentity;
+use App\Exceptions\TransferMappingRequired;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
@@ -26,6 +28,8 @@ use Illuminate\Validation\ValidationException;
  */
 class InterStoreTransferService
 {
+    public const DEFAULT_SHORTAGE_REASON = 'Short in transit';
+
     public function __construct(private StoreCatalogCopyService $catalogCopy)
     {
     }
@@ -167,25 +171,63 @@ class InterStoreTransferService
         $instructionsByItem = [];
         foreach ($lineInstructions as $instruction) {
             if (isset($instruction['item_id'])) {
-                $instructionsByItem[(string) $instruction['item_id']] = $instruction['dest_product_id'] ?? null;
+                $received = $instruction['received_qty'] ?? null;
+                $instructionsByItem[(string) $instruction['item_id']] = [
+                    'dest_product_id' => $instruction['dest_product_id'] ?? null,
+                    'received_qty' => ($received === null || $received === '') ? null : (float) $received,
+                    'shortage_reason' => trim((string) ($instruction['shortage_reason'] ?? '')),
+                ];
             }
         }
 
-        $resolutions = [];
-        foreach ($transfer->items()->orderBy('id')->get() as $item) {
-            $sourceProduct = Product::where('store_id', $transfer->from_store_id)->find($item->product_id);
-            $sourceBatch = ProductBatch::where('store_id', $transfer->from_store_id)
-                ->where('product_id', $item->product_id)
-                ->where('batch_no', $item->batch_no)
-                ->first();
+        // Resolution may create products or drop stale mappings; it shares one
+        // transaction with the posting so a refused receipt leaves nothing behind.
+        return DB::transaction(fn () => $this->receiveLines($transfer, $user, $instructionsByItem, $autoCreate));
+    }
 
+    private function receiveLines(StockTransfer $transfer, ?User $user, array $instructionsByItem, bool $autoCreate): array
+    {
+        $resolutions = [];
+        $unresolved = [];
+        foreach ($transfer->items()->orderBy('id')->get() as $item) {
+            $instruction = $instructionsByItem[(string) $item->id]
+                ?? ['dest_product_id' => null, 'received_qty' => null, 'shortage_reason' => ''];
+            $dispatchedQty = (float) $item->qty;
+            $receivedQty = $instruction['received_qty'] ?? $dispatchedQty;
+
+            if ($receivedQty < 0) {
+                throw ValidationException::withMessages([
+                    'lines' => sprintf('Received quantity for batch %s cannot be negative.', $item->batch_no),
+                ]);
+            }
+
+            if ($receivedQty > $dispatchedQty + 0.0001) {
+                throw ValidationException::withMessages([
+                    'lines' => sprintf(
+                        'Cannot receive %s units for batch %s: only %s were dispatched.',
+                        $receivedQty,
+                        $item->batch_no,
+                        $dispatchedQty
+                    ),
+                ]);
+            }
+
+            $shortQty = round($dispatchedQty - $receivedQty, 3);
+            if ($shortQty > 0.0001 && $instruction['shortage_reason'] === '') {
+                // STK-03: the shortfall is always recorded; a receiver who gives no
+                // reason gets the neutral one rather than a refused receipt.
+                $instruction['shortage_reason'] = self::DEFAULT_SHORTAGE_REASON;
+            }
+
+            $conflict = null;
             $destProduct = $this->resolveDestinationProduct(
                 $transfer->from_store_id,
                 $transfer->to_store_id,
                 $item,
-                $instructionsByItem[(string) $item->id] ?? null,
+                $instruction['dest_product_id'],
                 $autoCreate,
-                $user
+                $user,
+                $conflict
             );
 
             $resolutions[] = [
@@ -193,23 +235,38 @@ class InterStoreTransferService
                 'source_product_id' => $item->product_id,
                 'dest_product_id' => $destProduct?->id,
                 'dest_product_name' => $destProduct?->name,
-                'qty' => (float) $item->qty,
+                'qty' => $dispatchedQty,
+                'received_qty' => $receivedQty,
+                'short_qty' => $shortQty,
+                'shortage_reason' => $instruction['shortage_reason'] ?: null,
                 'batch_no' => $item->batch_no,
             ];
 
             if (!$destProduct) {
-                throw ValidationException::withMessages([
-                    'lines' => array_map(
-                        fn (array $r) => sprintf(
+                $sourceProduct = Product::where('store_id', $transfer->from_store_id)->find($item->product_id);
+                $unresolved[] = [
+                    'item_id' => $item->id,
+                    'source_product_id' => $item->product_id,
+                    'source_product_name' => $sourceProduct?->name,
+                    'barcode' => $sourceProduct?->barcode,
+                    'batch_no' => $item->batch_no,
+                    'reason' => $conflict ? 'attributes_differ' : 'no_match',
+                    'candidate' => $conflict ? ['id' => $conflict['product']->id, 'name' => $conflict['product']->name] : null,
+                    'differences' => $conflict['differences'] ?? [],
+                    'message' => $conflict
+                        ? ProductIdentity::conflictMessage($sourceProduct, $conflict['product'], $conflict['differences'])
+                        : sprintf(
                             'No product in this store matches "%s" (barcode %s, batch %s). Map it to one of your products or allow create-in-my-store.',
                             $sourceProduct?->name ?? ('#' . $item->product_id),
-                            $sourceProduct?->barcode ?? '—',
+                            $sourceProduct?->barcode ?: '—',
                             $item->batch_no
                         ),
-                        array_filter($resolutions, fn (array $r) => $r['dest_product_id'] === null)
-                    ),
-                ]);
+                ];
             }
+        }
+
+        if ($unresolved !== []) {
+            throw TransferMappingRequired::forLines($unresolved);
         }
 
         return DB::transaction(function () use ($transfer, $user, $resolutions) {
@@ -228,8 +285,19 @@ class InterStoreTransferService
                     ->where('batch_no', $item->batch_no)
                     ->first();
 
+                $item->update([
+                    'received_qty' => $resolution['received_qty'],
+                    'short_qty' => $resolution['short_qty'],
+                    'shortage_reason' => $resolution['shortage_reason'],
+                ]);
+
                 $ledgerKey = 'trf_in_' . $transfer->transfer_number . '_' . $item->id;
                 if (StockLedgerEntry::where('idempotency_key', $ledgerKey)->exists()) {
+                    continue;
+                }
+
+                if ($resolution['received_qty'] <= 0) {
+                    // Everything short or damaged: nothing arrives, nothing is credited.
                     continue;
                 }
 
@@ -249,7 +317,7 @@ class InterStoreTransferService
                     ]
                 );
 
-                $newBalance = round((float) $destBatch->stock_qty + (float) $item->qty, 3);
+                $newBalance = round((float) $destBatch->stock_qty + (float) $resolution['received_qty'], 3);
                 $destBatch->update(['stock_qty' => $newBalance]);
                 $this->syncProductStock($destProduct->id, $transfer->to_store_id);
 
@@ -260,7 +328,7 @@ class InterStoreTransferService
                         'product_id' => $destProduct->id,
                         'batch_id' => $destBatch->id,
                         'event_type' => 'TRANSFER_IN',
-                        'qty_delta' => (float) $item->qty,
+                        'qty_delta' => (float) $resolution['received_qty'],
                         'reference_type' => 'STOCK_TRANSFER',
                         'reference_id' => $transfer->transfer_number,
                         'balance_after' => $newBalance,
@@ -421,7 +489,8 @@ class InterStoreTransferService
         StockTransferItem $item,
         $explicitDestProductId,
         bool $autoCreate,
-        ?User $user
+        ?User $user,
+        ?array &$conflict = null
     ): ?Product {
         $explicit = null;
         if ($explicitDestProductId !== null && $explicitDestProductId !== '') {
@@ -434,6 +503,11 @@ class InterStoreTransferService
             }
         }
 
+        $sourceProduct = Product::where('store_id', $fromStoreId)->find($item->product_id);
+        if (!$sourceProduct) {
+            return null;
+        }
+
         $mapping = TransferProductMapping::where('from_store_id', $fromStoreId)
             ->where('to_store_id', $toStoreId)
             ->where('source_product_id', $item->product_id)
@@ -441,19 +515,36 @@ class InterStoreTransferService
         if ($mapping) {
             // @store-scope-ok: dest_product_id is a remembered receiving-store choice
             $mapped = Product::where('store_id', $toStoreId)->find($mapping->dest_product_id);
+            if ($mapped && $mapping->matched_by !== 'manual' && ProductIdentity::conflicts($sourceProduct, $mapped) !== []) {
+                // A machine-remembered pair from before STK-02 can still name two
+                // different articles. It loses its vote and the receiver is asked.
+                $mapping->delete();
+                $mapped = null;
+            }
             if ($mapped) {
                 return $mapped;
             }
         }
 
-        $sourceProduct = Product::where('store_id', $fromStoreId)->find($item->product_id);
-        if (!$sourceProduct) {
-            return null;
-        }
-
         if ($sourceProduct->barcode) {
             $byBarcode = Product::where('store_id', $toStoreId)->where('barcode', $sourceProduct->barcode)->first();
             if ($byBarcode) {
+                $conflicts = ProductIdentity::conflicts($sourceProduct, $byBarcode);
+                if ($conflicts !== []) {
+                    // STK-02: same barcode, different article. Never book into it.
+                    if ($autoCreate) {
+                        // The barcode is taken in this store, so the copy goes in without it.
+                        $created = $this->catalogCopy->createCopy($sourceProduct, $toStoreId, $user?->id, false);
+                        $this->rememberMapping($fromStoreId, $toStoreId, $item->product_id, $created->id, 'auto_create', $user);
+
+                        return $created;
+                    }
+
+                    $conflict = ['product' => $byBarcode, 'differences' => $conflicts];
+
+                    return null;
+                }
+
                 $this->rememberMapping($fromStoreId, $toStoreId, $item->product_id, $byBarcode->id, 'barcode', $user);
 
                 return $byBarcode;
@@ -487,18 +578,32 @@ class InterStoreTransferService
         string $matchedBy,
         ?User $user
     ): void {
-        TransferProductMapping::firstOrCreate(
-            [
-                'from_store_id' => $fromStoreId,
-                'to_store_id' => $toStoreId,
-                'source_product_id' => $sourceProductId,
-            ],
-            [
+        $key = [
+            'from_store_id' => $fromStoreId,
+            'to_store_id' => $toStoreId,
+            'source_product_id' => $sourceProductId,
+        ];
+        $existing = TransferProductMapping::where($key)->first();
+
+        if (!$existing) {
+            TransferProductMapping::create($key + [
                 'dest_product_id' => $destProductId,
                 'matched_by' => $matchedBy,
                 'created_by' => $user?->id,
-            ]
-        );
+            ]);
+
+            return;
+        }
+
+        // A person's choice always replaces what was remembered (including a stale
+        // barcode guess); a machine match never overrides a person's choice.
+        if ($matchedBy === 'manual' || $existing->matched_by !== 'manual') {
+            $existing->update([
+                'dest_product_id' => $destProductId,
+                'matched_by' => $matchedBy,
+                'created_by' => $user?->id ?? $existing->created_by,
+            ]);
+        }
     }
 
     private function syncProductStock(int $productId, int $storeId): void

@@ -1,7 +1,7 @@
 {
-  "version": "1.0",
-  "description": "LamSuite Billing Statutory GST Test Vectors covering all statutory and commercial edge cases to the paisa",
-  "rounding_convention": "Per line, in integer paisa: EXCLUSIVE taxable = discounted base, GST = round_half_up(taxable * gst_percent / 100) and cess = round_half_up(taxable * cess_percent / 100). INCLUSIVE (MRP includes tax) taxable = round_half_up(discounted base / (1 + (gst+cess)/100)) and total tax = discounted base - taxable, so taxable + tax is exactly what the customer is charged. The GST amount is then split cgst = round_half_up(gst/2), sgst = gst - cgst, so the two halves always sum to the line's GST. Rounding each half off the taxable base instead loses a paisa whenever both halves round down.",
+  "version": "1.2",
+  "description": "LamSuite Billing Statutory GST Test Vectors covering all statutory and commercial edge cases to the paisa. v1.1 adds the CR-C supplier-bill charge stage (TC11-TC20): an optional top-level 'charges'[] input and 'expected_charges'[] output, plus charge totals inside 'expected_totals'. v1.2 adds the CR-C-11 payable policy (TC21-TC22): an optional top-level 'separately_paid_in_payable' flag that decides whether a separately-paid charge is inside what the supplier is owed, with 'in_payable' per charge. TC01-TC10 are sales-side and MUST NOT change.",
+  "rounding_convention": "Per line, in integer paisa: EXCLUSIVE taxable = discounted base, GST = round_half_up(taxable * gst_percent / 100) and cess = round_half_up(taxable * cess_percent / 100). INCLUSIVE (MRP includes tax) taxable = round_half_up(discounted base / (1 + (gst+cess)/100)) and total tax = discounted base - taxable, so taxable + tax is exactly what the customer is charged. The GST amount is then split cgst = round_half_up(gst/2), sgst = gst - cgst, so the two halves always sum to the line's GST. Rounding each half off the taxable base instead loses a paisa whenever both halves round down. CHARGES (CR-C): a charge is taxed by the same primitives, evaluated after bill-discount allocation and before round-off, split intra/inter-state by the SUPPLIER's place of supply, with the sign of the amount applied to the tax. Add-to-cost charges are spread over the bill's lines in integer paisa: floor the exact quotient per line, then hand the leftover paisa out one at a time to the largest fractional remainder, ties to the first line in grid order, so the allocations always sum exactly to the charge's taxable amount plus any non-creditable tax on it (unrecoverable GST is capitalised with the charge); a basis that sums to zero places the whole amount on the first line in grid order. A charge treated as expense posts amount + non-creditable tax to the expense register and puts only the creditable tax in input tax. A charge marked paid_separately is computed identically but excluded from charge_taxable_total, charge_tax_total, charge_total, total_tax, net_before_round and grand_total; it is reported only in the separate_charge_* totals while still spreading into landed cost and still counted as creditable input tax. taxable_subtotal always stays goods-only, and per line landed_unit_cost equals the charge-inclusive effective_unit_cost (PUR-002). The reconciliation identity asserted by every charge vector: goods taxable + landed_cost_addition + expense_charge_total + creditable_input_tax_total == (grand_total - round_off) + separate_charge_total.",
   "store_defaults": {
     "state_code": "32",
     "state_name": "Kerala",
@@ -24,7 +24,7 @@
           "qty": 2,
           "loose_qty": 0,
           "units_per_pack": 10,
-          "unit_price": 100.00,
+          "unit_price": 100.0,
           "rate_basis": "sel_rate",
           "discount_percent": 0,
           "discount_amount": 0,
@@ -32,39 +32,42 @@
           "cess_percent": 0
         }
       ],
-      "bill_discount": { "type": "amount", "value": 0 },
+      "bill_discount": {
+        "type": "amount",
+        "value": 0
+      },
       "auto_round_off": true,
       "expected_lines": [
         {
           "line_id": "L1",
-          "gross_amount": 200.00,
-          "line_discount": 0.00,
-          "allocated_bill_discount": 0.00,
-          "taxable_amount": 200.00,
+          "gross_amount": 200.0,
+          "line_discount": 0.0,
+          "allocated_bill_discount": 0.0,
+          "taxable_amount": 200.0,
           "cgst_rate": 9.0,
-          "cgst_amount": 18.00,
+          "cgst_amount": 18.0,
           "sgst_rate": 9.0,
-          "sgst_amount": 18.00,
+          "sgst_amount": 18.0,
           "igst_rate": 0.0,
-          "igst_amount": 0.00,
-          "cess_amount": 0.00,
-          "total_tax": 36.00,
-          "total_amount": 236.00
+          "igst_amount": 0.0,
+          "cess_amount": 0.0,
+          "total_tax": 36.0,
+          "total_amount": 236.0
         }
       ],
       "expected_totals": {
-        "gross_subtotal": 200.00,
-        "line_discount_total": 0.00,
-        "bill_discount_total": 0.00,
-        "taxable_subtotal": 200.00,
-        "cgst_total": 18.00,
-        "sgst_total": 18.00,
-        "igst_total": 0.00,
-        "cess_total": 0.00,
-        "total_tax": 36.00,
-        "net_before_round": 236.00,
-        "round_off": 0.00,
-        "grand_total": 236.00
+        "gross_subtotal": 200.0,
+        "line_discount_total": 0.0,
+        "bill_discount_total": 0.0,
+        "taxable_subtotal": 200.0,
+        "cgst_total": 18.0,
+        "sgst_total": 18.0,
+        "igst_total": 0.0,
+        "cess_total": 0.0,
+        "total_tax": 36.0,
+        "net_before_round": 236.0,
+        "round_off": 0.0,
+        "grand_total": 236.0
       }
     },
     {
@@ -82,7 +85,7 @@
           "qty": 1,
           "loose_qty": 0,
           "units_per_pack": 10,
-          "unit_price": 201.60,
+          "unit_price": 201.6,
           "rate_basis": "mrp",
           "discount_percent": 0,
           "discount_amount": 0,
@@ -90,39 +93,42 @@
           "cess_percent": 0
         }
       ],
-      "bill_discount": { "type": "amount", "value": 0 },
+      "bill_discount": {
+        "type": "amount",
+        "value": 0
+      },
       "auto_round_off": true,
       "expected_lines": [
         {
           "line_id": "L1",
-          "gross_amount": 201.60,
-          "line_discount": 0.00,
-          "allocated_bill_discount": 0.00,
-          "taxable_amount": 180.00,
+          "gross_amount": 201.6,
+          "line_discount": 0.0,
+          "allocated_bill_discount": 0.0,
+          "taxable_amount": 180.0,
           "cgst_rate": 6.0,
-          "cgst_amount": 10.80,
+          "cgst_amount": 10.8,
           "sgst_rate": 6.0,
-          "sgst_amount": 10.80,
+          "sgst_amount": 10.8,
           "igst_rate": 0.0,
-          "igst_amount": 0.00,
-          "cess_amount": 0.00,
-          "total_tax": 21.60,
-          "total_amount": 201.60
+          "igst_amount": 0.0,
+          "cess_amount": 0.0,
+          "total_tax": 21.6,
+          "total_amount": 201.6
         }
       ],
       "expected_totals": {
-        "gross_subtotal": 201.60,
-        "line_discount_total": 0.00,
-        "bill_discount_total": 0.00,
-        "taxable_subtotal": 180.00,
-        "cgst_total": 10.80,
-        "sgst_total": 10.80,
-        "igst_total": 0.00,
-        "cess_total": 0.00,
-        "total_tax": 21.60,
-        "net_before_round": 201.60,
-        "round_off": 0.40,
-        "grand_total": 202.00
+        "gross_subtotal": 201.6,
+        "line_discount_total": 0.0,
+        "bill_discount_total": 0.0,
+        "taxable_subtotal": 180.0,
+        "cgst_total": 10.8,
+        "sgst_total": 10.8,
+        "igst_total": 0.0,
+        "cess_total": 0.0,
+        "total_tax": 21.6,
+        "net_before_round": 201.6,
+        "round_off": 0.4,
+        "grand_total": 202.0
       }
     },
     {
@@ -140,7 +146,7 @@
           "qty": 5,
           "loose_qty": 0,
           "units_per_pack": 1,
-          "unit_price": 450.00,
+          "unit_price": 450.0,
           "rate_basis": "sel_rate",
           "discount_percent": 0,
           "discount_amount": 0,
@@ -148,39 +154,42 @@
           "cess_percent": 0
         }
       ],
-      "bill_discount": { "type": "amount", "value": 0 },
+      "bill_discount": {
+        "type": "amount",
+        "value": 0
+      },
       "auto_round_off": true,
       "expected_lines": [
         {
           "line_id": "L1",
-          "gross_amount": 2250.00,
-          "line_discount": 0.00,
-          "allocated_bill_discount": 0.00,
-          "taxable_amount": 2250.00,
+          "gross_amount": 2250.0,
+          "line_discount": 0.0,
+          "allocated_bill_discount": 0.0,
+          "taxable_amount": 2250.0,
           "cgst_rate": 0.0,
-          "cgst_amount": 0.00,
+          "cgst_amount": 0.0,
           "sgst_rate": 0.0,
-          "sgst_amount": 0.00,
+          "sgst_amount": 0.0,
           "igst_rate": 12.0,
-          "igst_amount": 270.00,
-          "cess_amount": 0.00,
-          "total_tax": 270.00,
-          "total_amount": 2520.00
+          "igst_amount": 270.0,
+          "cess_amount": 0.0,
+          "total_tax": 270.0,
+          "total_amount": 2520.0
         }
       ],
       "expected_totals": {
-        "gross_subtotal": 2250.00,
-        "line_discount_total": 0.00,
-        "bill_discount_total": 0.00,
-        "taxable_subtotal": 2250.00,
-        "cgst_total": 0.00,
-        "sgst_total": 0.00,
-        "igst_total": 270.00,
-        "cess_total": 0.00,
-        "total_tax": 270.00,
-        "net_before_round": 2520.00,
-        "round_off": 0.00,
-        "grand_total": 2520.00
+        "gross_subtotal": 2250.0,
+        "line_discount_total": 0.0,
+        "bill_discount_total": 0.0,
+        "taxable_subtotal": 2250.0,
+        "cgst_total": 0.0,
+        "sgst_total": 0.0,
+        "igst_total": 270.0,
+        "cess_total": 0.0,
+        "total_tax": 270.0,
+        "net_before_round": 2520.0,
+        "round_off": 0.0,
+        "grand_total": 2520.0
       }
     },
     {
@@ -198,7 +207,7 @@
           "qty": 1,
           "loose_qty": 0,
           "units_per_pack": 1,
-          "unit_price": 100.00,
+          "unit_price": 100.0,
           "rate_basis": "sel_rate",
           "discount_percent": 10,
           "discount_amount": 0,
@@ -212,10 +221,10 @@
           "qty": 2,
           "loose_qty": 0,
           "units_per_pack": 1,
-          "unit_price": 150.00,
+          "unit_price": 150.0,
           "rate_basis": "sel_rate",
           "discount_percent": 0,
-          "discount_amount": 20.00,
+          "discount_amount": 20.0,
           "gst_percent": 12,
           "cess_percent": 0
         },
@@ -226,7 +235,7 @@
           "qty": 1,
           "loose_qty": 0,
           "units_per_pack": 1,
-          "unit_price": 200.00,
+          "unit_price": 200.0,
           "rate_basis": "sel_rate",
           "discount_percent": 0,
           "discount_amount": 0,
@@ -234,71 +243,74 @@
           "cess_percent": 0
         }
       ],
-      "bill_discount": { "type": "amount", "value": 57.00 },
+      "bill_discount": {
+        "type": "amount",
+        "value": 57.0
+      },
       "auto_round_off": true,
       "expected_lines": [
         {
           "line_id": "L1",
-          "gross_amount": 100.00,
-          "line_discount": 10.00,
-          "allocated_bill_discount": 9.00,
-          "taxable_amount": 81.00,
+          "gross_amount": 100.0,
+          "line_discount": 10.0,
+          "allocated_bill_discount": 9.0,
+          "taxable_amount": 81.0,
           "cgst_rate": 2.5,
           "cgst_amount": 2.03,
           "sgst_rate": 2.5,
           "sgst_amount": 2.02,
           "igst_rate": 0.0,
-          "igst_amount": 0.00,
-          "cess_amount": 0.00,
+          "igst_amount": 0.0,
+          "cess_amount": 0.0,
           "total_tax": 4.05,
           "total_amount": 85.05
         },
         {
           "line_id": "L2",
-          "gross_amount": 300.00,
-          "line_discount": 20.00,
-          "allocated_bill_discount": 28.00,
-          "taxable_amount": 252.00,
+          "gross_amount": 300.0,
+          "line_discount": 20.0,
+          "allocated_bill_discount": 28.0,
+          "taxable_amount": 252.0,
           "cgst_rate": 6.0,
           "cgst_amount": 15.12,
           "sgst_rate": 6.0,
           "sgst_amount": 15.12,
           "igst_rate": 0.0,
-          "igst_amount": 0.00,
-          "cess_amount": 0.00,
+          "igst_amount": 0.0,
+          "cess_amount": 0.0,
           "total_tax": 30.24,
           "total_amount": 282.24
         },
         {
           "line_id": "L3",
-          "gross_amount": 200.00,
-          "line_discount": 0.00,
-          "allocated_bill_discount": 20.00,
-          "taxable_amount": 180.00,
+          "gross_amount": 200.0,
+          "line_discount": 0.0,
+          "allocated_bill_discount": 20.0,
+          "taxable_amount": 180.0,
           "cgst_rate": 9.0,
-          "cgst_amount": 16.20,
+          "cgst_amount": 16.2,
           "sgst_rate": 9.0,
-          "sgst_amount": 16.20,
+          "sgst_amount": 16.2,
           "igst_rate": 0.0,
-          "igst_amount": 0.00,
-          "cess_amount": 0.00,
-          "total_tax": 32.40,
-          "total_amount": 212.40
+          "igst_amount": 0.0,
+          "cess_amount": 0.0,
+          "total_tax": 32.4,
+          "total_amount": 212.4
         }
       ],
       "expected_totals": {
-        "gross_subtotal": 600.00,
-        "line_discount_total": 30.00,
-        "bill_discount_total": 57.00,
-        "taxable_subtotal": 513.00,
+        "gross_subtotal": 600.0,
+        "line_discount_total": 30.0,
+        "bill_discount_total": 57.0,
+        "taxable_subtotal": 513.0,
         "cgst_total": 33.35,
         "sgst_total": 33.34,
-        "igst_total": 0.00,
-        "cess_total": 0.00,
+        "igst_total": 0.0,
+        "cess_total": 0.0,
         "total_tax": 66.69,
         "net_before_round": 579.69,
         "round_off": 0.31,
-        "grand_total": 580.00
+        "grand_total": 580.0
       }
     },
     {
@@ -316,7 +328,7 @@
           "qty": 2,
           "loose_qty": 1,
           "units_per_pack": 3,
-          "unit_price": 120.00,
+          "unit_price": 120.0,
           "rate_basis": "sel_rate",
           "discount_percent": 0,
           "discount_amount": 0,
@@ -324,39 +336,42 @@
           "cess_percent": 0
         }
       ],
-      "bill_discount": { "type": "amount", "value": 0 },
+      "bill_discount": {
+        "type": "amount",
+        "value": 0
+      },
       "auto_round_off": true,
       "expected_lines": [
         {
           "line_id": "L1",
-          "gross_amount": 280.00,
-          "line_discount": 0.00,
-          "allocated_bill_discount": 0.00,
-          "taxable_amount": 280.00,
+          "gross_amount": 280.0,
+          "line_discount": 0.0,
+          "allocated_bill_discount": 0.0,
+          "taxable_amount": 280.0,
           "cgst_rate": 6.0,
-          "cgst_amount": 16.80,
+          "cgst_amount": 16.8,
           "sgst_rate": 6.0,
-          "sgst_amount": 16.80,
+          "sgst_amount": 16.8,
           "igst_rate": 0.0,
-          "igst_amount": 0.00,
-          "cess_amount": 0.00,
-          "total_tax": 33.60,
-          "total_amount": 313.60
+          "igst_amount": 0.0,
+          "cess_amount": 0.0,
+          "total_tax": 33.6,
+          "total_amount": 313.6
         }
       ],
       "expected_totals": {
-        "gross_subtotal": 280.00,
-        "line_discount_total": 0.00,
-        "bill_discount_total": 0.00,
-        "taxable_subtotal": 280.00,
-        "cgst_total": 16.80,
-        "sgst_total": 16.80,
-        "igst_total": 0.00,
-        "cess_total": 0.00,
-        "total_tax": 33.60,
-        "net_before_round": 313.60,
-        "round_off": 0.40,
-        "grand_total": 314.00
+        "gross_subtotal": 280.0,
+        "line_discount_total": 0.0,
+        "bill_discount_total": 0.0,
+        "taxable_subtotal": 280.0,
+        "cgst_total": 16.8,
+        "sgst_total": 16.8,
+        "igst_total": 0.0,
+        "cess_total": 0.0,
+        "total_tax": 33.6,
+        "net_before_round": 313.6,
+        "round_off": 0.4,
+        "grand_total": 314.0
       }
     },
     {
@@ -374,7 +389,7 @@
           "qty": 1,
           "loose_qty": 0,
           "units_per_pack": 1,
-          "unit_price": 1000.00,
+          "unit_price": 1000.0,
           "rate_basis": "sel_rate",
           "discount_percent": 0,
           "discount_amount": 0,
@@ -382,39 +397,42 @@
           "cess_percent": 12
         }
       ],
-      "bill_discount": { "type": "amount", "value": 0 },
+      "bill_discount": {
+        "type": "amount",
+        "value": 0
+      },
       "auto_round_off": true,
       "expected_lines": [
         {
           "line_id": "L1",
-          "gross_amount": 1000.00,
-          "line_discount": 0.00,
-          "allocated_bill_discount": 0.00,
-          "taxable_amount": 1000.00,
+          "gross_amount": 1000.0,
+          "line_discount": 0.0,
+          "allocated_bill_discount": 0.0,
+          "taxable_amount": 1000.0,
           "cgst_rate": 14.0,
-          "cgst_amount": 140.00,
+          "cgst_amount": 140.0,
           "sgst_rate": 14.0,
-          "sgst_amount": 140.00,
+          "sgst_amount": 140.0,
           "igst_rate": 0.0,
-          "igst_amount": 0.00,
-          "cess_amount": 120.00,
-          "total_tax": 400.00,
-          "total_amount": 1400.00
+          "igst_amount": 0.0,
+          "cess_amount": 120.0,
+          "total_tax": 400.0,
+          "total_amount": 1400.0
         }
       ],
       "expected_totals": {
-        "gross_subtotal": 1000.00,
-        "line_discount_total": 0.00,
-        "bill_discount_total": 0.00,
-        "taxable_subtotal": 1000.00,
-        "cgst_total": 140.00,
-        "sgst_total": 140.00,
-        "igst_total": 0.00,
-        "cess_total": 120.00,
-        "total_tax": 400.00,
-        "net_before_round": 1400.00,
-        "round_off": 0.00,
-        "grand_total": 1400.00
+        "gross_subtotal": 1000.0,
+        "line_discount_total": 0.0,
+        "bill_discount_total": 0.0,
+        "taxable_subtotal": 1000.0,
+        "cgst_total": 140.0,
+        "sgst_total": 140.0,
+        "igst_total": 0.0,
+        "cess_total": 120.0,
+        "total_tax": 400.0,
+        "net_before_round": 1400.0,
+        "round_off": 0.0,
+        "grand_total": 1400.0
       }
     },
     {
@@ -432,7 +450,7 @@
           "qty": 1,
           "loose_qty": 0,
           "units_per_pack": 1,
-          "unit_price": 100.00,
+          "unit_price": 100.0,
           "rate_basis": "mrp",
           "discount_percent": 0,
           "discount_amount": 0,
@@ -440,39 +458,42 @@
           "cess_percent": 2
         }
       ],
-      "bill_discount": { "type": "amount", "value": 0 },
+      "bill_discount": {
+        "type": "amount",
+        "value": 0
+      },
       "auto_round_off": true,
       "expected_lines": [
         {
           "line_id": "L1",
-          "gross_amount": 100.00,
-          "line_discount": 0.00,
-          "allocated_bill_discount": 0.00,
+          "gross_amount": 100.0,
+          "line_discount": 0.0,
+          "allocated_bill_discount": 0.0,
           "taxable_amount": 87.72,
           "cgst_rate": 6.0,
           "cgst_amount": 5.27,
           "sgst_rate": 6.0,
           "sgst_amount": 5.26,
           "igst_rate": 0.0,
-          "igst_amount": 0.00,
+          "igst_amount": 0.0,
           "cess_amount": 1.75,
           "total_tax": 12.28,
-          "total_amount": 100.00
+          "total_amount": 100.0
         }
       ],
       "expected_totals": {
-        "gross_subtotal": 100.00,
-        "line_discount_total": 0.00,
-        "bill_discount_total": 0.00,
+        "gross_subtotal": 100.0,
+        "line_discount_total": 0.0,
+        "bill_discount_total": 0.0,
         "taxable_subtotal": 87.72,
         "cgst_total": 5.27,
         "sgst_total": 5.26,
-        "igst_total": 0.00,
+        "igst_total": 0.0,
         "cess_total": 1.75,
         "total_tax": 12.28,
-        "net_before_round": 100.00,
-        "round_off": 0.00,
-        "grand_total": 100.00
+        "net_before_round": 100.0,
+        "round_off": 0.0,
+        "grand_total": 100.0
       }
     },
     {
@@ -498,39 +519,42 @@
           "cess_percent": 0
         }
       ],
-      "bill_discount": { "type": "amount", "value": 0 },
+      "bill_discount": {
+        "type": "amount",
+        "value": 0
+      },
       "auto_round_off": true,
       "expected_lines": [
         {
           "line_id": "L1",
           "gross_amount": 0.83,
-          "line_discount": 0.00,
-          "allocated_bill_discount": 0.00,
+          "line_discount": 0.0,
+          "allocated_bill_discount": 0.0,
           "taxable_amount": 0.83,
           "cgst_rate": 2.5,
           "cgst_amount": 0.02,
           "sgst_rate": 2.5,
           "sgst_amount": 0.02,
           "igst_rate": 0.0,
-          "igst_amount": 0.00,
-          "cess_amount": 0.00,
+          "igst_amount": 0.0,
+          "cess_amount": 0.0,
           "total_tax": 0.04,
           "total_amount": 0.87
         }
       ],
       "expected_totals": {
         "gross_subtotal": 0.83,
-        "line_discount_total": 0.00,
-        "bill_discount_total": 0.00,
+        "line_discount_total": 0.0,
+        "bill_discount_total": 0.0,
         "taxable_subtotal": 0.83,
         "cgst_total": 0.02,
         "sgst_total": 0.02,
-        "igst_total": 0.00,
-        "cess_total": 0.00,
+        "igst_total": 0.0,
+        "cess_total": 0.0,
         "total_tax": 0.04,
         "net_before_round": 0.87,
         "round_off": 0.13,
-        "grand_total": 1.00
+        "grand_total": 1.0
       }
     },
     {
@@ -548,7 +572,7 @@
           "qty": 1,
           "loose_qty": 0,
           "units_per_pack": 1,
-          "unit_price": 1500.00,
+          "unit_price": 1500.0,
           "rate_basis": "sel_rate",
           "discount_percent": 0,
           "discount_amount": 0,
@@ -556,39 +580,42 @@
           "cess_percent": 0
         }
       ],
-      "bill_discount": { "type": "amount", "value": 0 },
+      "bill_discount": {
+        "type": "amount",
+        "value": 0
+      },
       "auto_round_off": true,
       "expected_lines": [
         {
           "line_id": "L1",
-          "gross_amount": 1500.00,
-          "line_discount": 0.00,
-          "allocated_bill_discount": 0.00,
-          "taxable_amount": 1500.00,
+          "gross_amount": 1500.0,
+          "line_discount": 0.0,
+          "allocated_bill_discount": 0.0,
+          "taxable_amount": 1500.0,
           "cgst_rate": 0.0,
-          "cgst_amount": 0.00,
+          "cgst_amount": 0.0,
           "sgst_rate": 0.0,
-          "sgst_amount": 0.00,
+          "sgst_amount": 0.0,
           "igst_rate": 0.0,
-          "igst_amount": 0.00,
-          "cess_amount": 0.00,
-          "total_tax": 0.00,
-          "total_amount": 1500.00
+          "igst_amount": 0.0,
+          "cess_amount": 0.0,
+          "total_tax": 0.0,
+          "total_amount": 1500.0
         }
       ],
       "expected_totals": {
-        "gross_subtotal": 1500.00,
-        "line_discount_total": 0.00,
-        "bill_discount_total": 0.00,
-        "taxable_subtotal": 1500.00,
-        "cgst_total": 0.00,
-        "sgst_total": 0.00,
-        "igst_total": 0.00,
-        "cess_total": 0.00,
-        "total_tax": 0.00,
-        "net_before_round": 1500.00,
-        "round_off": 0.00,
-        "grand_total": 1500.00
+        "gross_subtotal": 1500.0,
+        "line_discount_total": 0.0,
+        "bill_discount_total": 0.0,
+        "taxable_subtotal": 1500.0,
+        "cgst_total": 0.0,
+        "sgst_total": 0.0,
+        "igst_total": 0.0,
+        "cess_total": 0.0,
+        "total_tax": 0.0,
+        "net_before_round": 1500.0,
+        "round_off": 0.0,
+        "grand_total": 1500.0
       }
     },
     {
@@ -614,39 +641,2195 @@
           "cess_percent": 0
         }
       ],
-      "bill_discount": { "type": "amount", "value": 0 },
+      "bill_discount": {
+        "type": "amount",
+        "value": 0
+      },
       "auto_round_off": true,
       "expected_lines": [
         {
           "line_id": "L1",
           "gross_amount": 85.04,
-          "line_discount": 0.00,
-          "allocated_bill_discount": 0.00,
+          "line_discount": 0.0,
+          "allocated_bill_discount": 0.0,
           "taxable_amount": 85.04,
           "cgst_rate": 9.0,
           "cgst_amount": 7.66,
           "sgst_rate": 9.0,
           "sgst_amount": 7.65,
           "igst_rate": 0.0,
-          "igst_amount": 0.00,
-          "cess_amount": 0.00,
+          "igst_amount": 0.0,
+          "cess_amount": 0.0,
           "total_tax": 15.31,
           "total_amount": 100.35
         }
       ],
       "expected_totals": {
         "gross_subtotal": 85.04,
-        "line_discount_total": 0.00,
-        "bill_discount_total": 0.00,
+        "line_discount_total": 0.0,
+        "bill_discount_total": 0.0,
         "taxable_subtotal": 85.04,
         "cgst_total": 7.66,
         "sgst_total": 7.65,
-        "igst_total": 0.00,
-        "cess_total": 0.00,
+        "igst_total": 0.0,
+        "cess_total": 0.0,
         "total_tax": 15.31,
         "net_before_round": 100.35,
         "round_off": -0.35,
-        "grand_total": 100.00
+        "grand_total": 100.0
+      }
+    },
+    {
+      "id": "TC11_PURCHASE_CHARGES_WORKED_EXAMPLE_INTRA",
+      "name": "CR-C worked example: goods 10,000 @12% + freight 200 @18% + packing 100 @18% = 11,554, intra-state, add-to-cost",
+      "store_state": "32",
+      "customer_gstin": null,
+      "place_of_supply": "32",
+      "tax_mode": "exclusive",
+      "lines": [
+        {
+          "line_id": "L1",
+          "product_name": "Amoxicillin 500mg (100 capsules)",
+          "hsn_code": "30041090",
+          "qty": 100,
+          "loose_qty": 0,
+          "units_per_pack": 1,
+          "unit_price": 100.0,
+          "rate_basis": "ptr",
+          "discount_percent": 0,
+          "discount_amount": 0,
+          "gst_percent": 12,
+          "cess_percent": 0
+        }
+      ],
+      "bill_discount": {
+        "type": "amount",
+        "value": 0
+      },
+      "charges": [
+        {
+          "charge_id": "C1",
+          "head_code": "FREIGHT",
+          "head_name": "Freight",
+          "sac_code": "996714",
+          "amount": 200.0,
+          "gst_percent": 18,
+          "treatment": "add_to_cost",
+          "spread_method": "value",
+          "itc_eligibility": "eligible",
+          "is_rcm": false,
+          "paid_separately": false
+        },
+        {
+          "charge_id": "C2",
+          "head_code": "PACKING",
+          "head_name": "Packing",
+          "sac_code": "996799",
+          "amount": 100.0,
+          "gst_percent": 18,
+          "treatment": "add_to_cost",
+          "spread_method": "value",
+          "itc_eligibility": "eligible",
+          "is_rcm": false,
+          "paid_separately": false
+        }
+      ],
+      "auto_round_off": true,
+      "expected_lines": [
+        {
+          "line_id": "L1",
+          "gross_amount": 10000.0,
+          "line_discount": 0.0,
+          "allocated_bill_discount": 0.0,
+          "taxable_amount": 10000.0,
+          "cgst_rate": 6.0,
+          "cgst_amount": 600.0,
+          "sgst_rate": 6.0,
+          "sgst_amount": 600.0,
+          "igst_rate": 0.0,
+          "igst_amount": 0.0,
+          "cess_amount": 0.0,
+          "total_tax": 1200.0,
+          "total_amount": 11200.0,
+          "charge_allocation": 300.0,
+          "landed_amount": 10300.0,
+          "landed_unit_cost": 103.0
+        }
+      ],
+      "expected_charges": [
+        {
+          "charge_id": "C1",
+          "taxable_amount": 200.0,
+          "cgst_amount": 18.0,
+          "sgst_amount": 18.0,
+          "igst_amount": 0.0,
+          "cess_amount": 0.0,
+          "total_tax": 36.0,
+          "total_amount": 236.0,
+          "spread_basis_used": "value",
+          "in_payable": true,
+          "creditable_tax": 36.0,
+          "non_creditable_tax": 0.0,
+          "expense_posting": 0.0,
+          "allocations": [
+            {
+              "line_id": "L1",
+              "allocated_amount": 200.0,
+              "is_remainder_paisa": false
+            }
+          ]
+        },
+        {
+          "charge_id": "C2",
+          "taxable_amount": 100.0,
+          "cgst_amount": 9.0,
+          "sgst_amount": 9.0,
+          "igst_amount": 0.0,
+          "cess_amount": 0.0,
+          "total_tax": 18.0,
+          "total_amount": 118.0,
+          "spread_basis_used": "value",
+          "in_payable": true,
+          "creditable_tax": 18.0,
+          "non_creditable_tax": 0.0,
+          "expense_posting": 0.0,
+          "allocations": [
+            {
+              "line_id": "L1",
+              "allocated_amount": 100.0,
+              "is_remainder_paisa": false
+            }
+          ]
+        }
+      ],
+      "expected_totals": {
+        "gross_subtotal": 10000.0,
+        "line_discount_total": 0.0,
+        "bill_discount_total": 0.0,
+        "taxable_subtotal": 10000.0,
+        "cgst_total": 627.0,
+        "sgst_total": 627.0,
+        "igst_total": 0.0,
+        "cess_total": 0.0,
+        "total_tax": 1254.0,
+        "net_before_round": 11554.0,
+        "round_off": 0.0,
+        "grand_total": 11554.0,
+        "charge_taxable_total": 300.0,
+        "charge_tax_total": 54.0,
+        "charge_total": 354.0,
+        "separate_charge_taxable_total": 0.0,
+        "separate_charge_tax_total": 0.0,
+        "separate_charge_total": 0.0,
+        "landed_cost_addition": 300.0,
+        "expense_charge_total": 0.0,
+        "creditable_input_tax_total": 1254.0,
+        "non_creditable_tax_total": 0.0,
+        "reconciliation_identity_delta": 0.0
+      }
+    },
+    {
+      "id": "TC12_PURCHASE_CHARGES_INTER_STATE_IGST",
+      "name": "CR-C worked example from another state: identical money, all charge and goods tax as IGST",
+      "store_state": "32",
+      "customer_gstin": null,
+      "place_of_supply": "29",
+      "tax_mode": "exclusive",
+      "lines": [
+        {
+          "line_id": "L1",
+          "product_name": "Amoxicillin 500mg (100 capsules)",
+          "hsn_code": "30041090",
+          "qty": 100,
+          "loose_qty": 0,
+          "units_per_pack": 1,
+          "unit_price": 100.0,
+          "rate_basis": "ptr",
+          "discount_percent": 0,
+          "discount_amount": 0,
+          "gst_percent": 12,
+          "cess_percent": 0
+        }
+      ],
+      "bill_discount": {
+        "type": "amount",
+        "value": 0
+      },
+      "charges": [
+        {
+          "charge_id": "C1",
+          "head_code": "FREIGHT",
+          "head_name": "Freight",
+          "sac_code": "996714",
+          "amount": 200.0,
+          "gst_percent": 18,
+          "treatment": "add_to_cost",
+          "spread_method": "value",
+          "itc_eligibility": "eligible",
+          "is_rcm": false,
+          "paid_separately": false
+        },
+        {
+          "charge_id": "C2",
+          "head_code": "PACKING",
+          "head_name": "Packing",
+          "sac_code": "996799",
+          "amount": 100.0,
+          "gst_percent": 18,
+          "treatment": "add_to_cost",
+          "spread_method": "value",
+          "itc_eligibility": "eligible",
+          "is_rcm": false,
+          "paid_separately": false
+        }
+      ],
+      "auto_round_off": true,
+      "expected_lines": [
+        {
+          "line_id": "L1",
+          "gross_amount": 10000.0,
+          "line_discount": 0.0,
+          "allocated_bill_discount": 0.0,
+          "taxable_amount": 10000.0,
+          "cgst_rate": 0.0,
+          "cgst_amount": 0.0,
+          "sgst_rate": 0.0,
+          "sgst_amount": 0.0,
+          "igst_rate": 12.0,
+          "igst_amount": 1200.0,
+          "cess_amount": 0.0,
+          "total_tax": 1200.0,
+          "total_amount": 11200.0,
+          "charge_allocation": 300.0,
+          "landed_amount": 10300.0,
+          "landed_unit_cost": 103.0
+        }
+      ],
+      "expected_charges": [
+        {
+          "charge_id": "C1",
+          "taxable_amount": 200.0,
+          "cgst_amount": 0.0,
+          "sgst_amount": 0.0,
+          "igst_amount": 36.0,
+          "cess_amount": 0.0,
+          "total_tax": 36.0,
+          "total_amount": 236.0,
+          "spread_basis_used": "value",
+          "in_payable": true,
+          "creditable_tax": 36.0,
+          "non_creditable_tax": 0.0,
+          "expense_posting": 0.0,
+          "allocations": [
+            {
+              "line_id": "L1",
+              "allocated_amount": 200.0,
+              "is_remainder_paisa": false
+            }
+          ]
+        },
+        {
+          "charge_id": "C2",
+          "taxable_amount": 100.0,
+          "cgst_amount": 0.0,
+          "sgst_amount": 0.0,
+          "igst_amount": 18.0,
+          "cess_amount": 0.0,
+          "total_tax": 18.0,
+          "total_amount": 118.0,
+          "spread_basis_used": "value",
+          "in_payable": true,
+          "creditable_tax": 18.0,
+          "non_creditable_tax": 0.0,
+          "expense_posting": 0.0,
+          "allocations": [
+            {
+              "line_id": "L1",
+              "allocated_amount": 100.0,
+              "is_remainder_paisa": false
+            }
+          ]
+        }
+      ],
+      "expected_totals": {
+        "gross_subtotal": 10000.0,
+        "line_discount_total": 0.0,
+        "bill_discount_total": 0.0,
+        "taxable_subtotal": 10000.0,
+        "cgst_total": 0.0,
+        "sgst_total": 0.0,
+        "igst_total": 1254.0,
+        "cess_total": 0.0,
+        "total_tax": 1254.0,
+        "net_before_round": 11554.0,
+        "round_off": 0.0,
+        "grand_total": 11554.0,
+        "charge_taxable_total": 300.0,
+        "charge_tax_total": 54.0,
+        "charge_total": 354.0,
+        "separate_charge_taxable_total": 0.0,
+        "separate_charge_tax_total": 0.0,
+        "separate_charge_total": 0.0,
+        "landed_cost_addition": 300.0,
+        "expense_charge_total": 0.0,
+        "creditable_input_tax_total": 1254.0,
+        "non_creditable_tax_total": 0.0,
+        "reconciliation_identity_delta": 0.0
+      }
+    },
+    {
+      "id": "TC13_CHARGE_SPREAD_BY_VALUE_REMAINDER_PAISA",
+      "name": "CR-C remainder rule: Rs 100 spread by value over three equal Rs 100 lines -> 33.34 / 33.33 / 33.33, tie to first line in grid order",
+      "store_state": "32",
+      "customer_gstin": null,
+      "place_of_supply": "32",
+      "tax_mode": "exclusive",
+      "lines": [
+        {
+          "line_id": "L1",
+          "product_name": "Line one",
+          "hsn_code": "30049099",
+          "qty": 1,
+          "loose_qty": 0,
+          "units_per_pack": 1,
+          "unit_price": 100.0,
+          "rate_basis": "ptr",
+          "discount_percent": 0,
+          "discount_amount": 0,
+          "gst_percent": 0,
+          "cess_percent": 0
+        },
+        {
+          "line_id": "L2",
+          "product_name": "Line two",
+          "hsn_code": "30049099",
+          "qty": 1,
+          "loose_qty": 0,
+          "units_per_pack": 1,
+          "unit_price": 100.0,
+          "rate_basis": "ptr",
+          "discount_percent": 0,
+          "discount_amount": 0,
+          "gst_percent": 0,
+          "cess_percent": 0
+        },
+        {
+          "line_id": "L3",
+          "product_name": "Line three",
+          "hsn_code": "30049099",
+          "qty": 1,
+          "loose_qty": 0,
+          "units_per_pack": 1,
+          "unit_price": 100.0,
+          "rate_basis": "ptr",
+          "discount_percent": 0,
+          "discount_amount": 0,
+          "gst_percent": 0,
+          "cess_percent": 0
+        }
+      ],
+      "bill_discount": {
+        "type": "amount",
+        "value": 0
+      },
+      "charges": [
+        {
+          "charge_id": "C1",
+          "head_code": "FREIGHT",
+          "head_name": "Freight",
+          "sac_code": "996714",
+          "amount": 100.0,
+          "gst_percent": 18,
+          "treatment": "add_to_cost",
+          "spread_method": "value",
+          "itc_eligibility": "eligible",
+          "is_rcm": false,
+          "paid_separately": false
+        }
+      ],
+      "auto_round_off": true,
+      "expected_lines": [
+        {
+          "line_id": "L1",
+          "gross_amount": 100.0,
+          "line_discount": 0.0,
+          "allocated_bill_discount": 0.0,
+          "taxable_amount": 100.0,
+          "cgst_rate": 0.0,
+          "cgst_amount": 0.0,
+          "sgst_rate": 0.0,
+          "sgst_amount": 0.0,
+          "igst_rate": 0.0,
+          "igst_amount": 0.0,
+          "cess_amount": 0.0,
+          "total_tax": 0.0,
+          "total_amount": 100.0,
+          "charge_allocation": 33.34,
+          "landed_amount": 133.34,
+          "landed_unit_cost": 133.34
+        },
+        {
+          "line_id": "L2",
+          "gross_amount": 100.0,
+          "line_discount": 0.0,
+          "allocated_bill_discount": 0.0,
+          "taxable_amount": 100.0,
+          "cgst_rate": 0.0,
+          "cgst_amount": 0.0,
+          "sgst_rate": 0.0,
+          "sgst_amount": 0.0,
+          "igst_rate": 0.0,
+          "igst_amount": 0.0,
+          "cess_amount": 0.0,
+          "total_tax": 0.0,
+          "total_amount": 100.0,
+          "charge_allocation": 33.33,
+          "landed_amount": 133.33,
+          "landed_unit_cost": 133.33
+        },
+        {
+          "line_id": "L3",
+          "gross_amount": 100.0,
+          "line_discount": 0.0,
+          "allocated_bill_discount": 0.0,
+          "taxable_amount": 100.0,
+          "cgst_rate": 0.0,
+          "cgst_amount": 0.0,
+          "sgst_rate": 0.0,
+          "sgst_amount": 0.0,
+          "igst_rate": 0.0,
+          "igst_amount": 0.0,
+          "cess_amount": 0.0,
+          "total_tax": 0.0,
+          "total_amount": 100.0,
+          "charge_allocation": 33.33,
+          "landed_amount": 133.33,
+          "landed_unit_cost": 133.33
+        }
+      ],
+      "expected_charges": [
+        {
+          "charge_id": "C1",
+          "taxable_amount": 100.0,
+          "cgst_amount": 9.0,
+          "sgst_amount": 9.0,
+          "igst_amount": 0.0,
+          "cess_amount": 0.0,
+          "total_tax": 18.0,
+          "total_amount": 118.0,
+          "spread_basis_used": "value",
+          "in_payable": true,
+          "creditable_tax": 18.0,
+          "non_creditable_tax": 0.0,
+          "expense_posting": 0.0,
+          "allocations": [
+            {
+              "line_id": "L1",
+              "allocated_amount": 33.34,
+              "is_remainder_paisa": true
+            },
+            {
+              "line_id": "L2",
+              "allocated_amount": 33.33,
+              "is_remainder_paisa": false
+            },
+            {
+              "line_id": "L3",
+              "allocated_amount": 33.33,
+              "is_remainder_paisa": false
+            }
+          ]
+        }
+      ],
+      "expected_totals": {
+        "gross_subtotal": 300.0,
+        "line_discount_total": 0.0,
+        "bill_discount_total": 0.0,
+        "taxable_subtotal": 300.0,
+        "cgst_total": 9.0,
+        "sgst_total": 9.0,
+        "igst_total": 0.0,
+        "cess_total": 0.0,
+        "total_tax": 18.0,
+        "net_before_round": 418.0,
+        "round_off": 0.0,
+        "grand_total": 418.0,
+        "charge_taxable_total": 100.0,
+        "charge_tax_total": 18.0,
+        "charge_total": 118.0,
+        "separate_charge_taxable_total": 0.0,
+        "separate_charge_tax_total": 0.0,
+        "separate_charge_total": 0.0,
+        "landed_cost_addition": 100.0,
+        "expense_charge_total": 0.0,
+        "creditable_input_tax_total": 18.0,
+        "non_creditable_tax_total": 0.0,
+        "reconciliation_identity_delta": 0.0
+      }
+    },
+    {
+      "id": "TC14_CHARGE_SPREAD_BY_WEIGHT",
+      "name": "CR-C weight basis: 20kg / 30kg / 50kg lines share a Rs 1,200 charge as 240 / 360 / 600",
+      "store_state": "32",
+      "customer_gstin": null,
+      "place_of_supply": "32",
+      "tax_mode": "exclusive",
+      "lines": [
+        {
+          "line_id": "L1",
+          "product_name": "Weighted line one",
+          "hsn_code": "30049099",
+          "qty": 10,
+          "loose_qty": 0,
+          "units_per_pack": 1,
+          "unit_price": 100.0,
+          "rate_basis": "ptr",
+          "discount_percent": 0,
+          "discount_amount": 0,
+          "gst_percent": 0,
+          "cess_percent": 0,
+          "gross_weight_kg": 20.0
+        },
+        {
+          "line_id": "L2",
+          "product_name": "Weighted line two",
+          "hsn_code": "30049099",
+          "qty": 10,
+          "loose_qty": 0,
+          "units_per_pack": 1,
+          "unit_price": 200.0,
+          "rate_basis": "ptr",
+          "discount_percent": 0,
+          "discount_amount": 0,
+          "gst_percent": 0,
+          "cess_percent": 0,
+          "gross_weight_kg": 30.0
+        },
+        {
+          "line_id": "L3",
+          "product_name": "Weighted line three",
+          "hsn_code": "30049099",
+          "qty": 10,
+          "loose_qty": 0,
+          "units_per_pack": 1,
+          "unit_price": 300.0,
+          "rate_basis": "ptr",
+          "discount_percent": 0,
+          "discount_amount": 0,
+          "gst_percent": 0,
+          "cess_percent": 0,
+          "gross_weight_kg": 50.0
+        }
+      ],
+      "bill_discount": {
+        "type": "amount",
+        "value": 0
+      },
+      "charges": [
+        {
+          "charge_id": "C1",
+          "head_code": "FREIGHT",
+          "head_name": "Freight",
+          "sac_code": "996714",
+          "amount": 1200.0,
+          "gst_percent": 18,
+          "treatment": "add_to_cost",
+          "spread_method": "weight",
+          "itc_eligibility": "eligible",
+          "is_rcm": false,
+          "paid_separately": false
+        }
+      ],
+      "auto_round_off": true,
+      "expected_lines": [
+        {
+          "line_id": "L1",
+          "gross_amount": 1000.0,
+          "line_discount": 0.0,
+          "allocated_bill_discount": 0.0,
+          "taxable_amount": 1000.0,
+          "cgst_rate": 0.0,
+          "cgst_amount": 0.0,
+          "sgst_rate": 0.0,
+          "sgst_amount": 0.0,
+          "igst_rate": 0.0,
+          "igst_amount": 0.0,
+          "cess_amount": 0.0,
+          "total_tax": 0.0,
+          "total_amount": 1000.0,
+          "charge_allocation": 240.0,
+          "landed_amount": 1240.0,
+          "landed_unit_cost": 124.0
+        },
+        {
+          "line_id": "L2",
+          "gross_amount": 2000.0,
+          "line_discount": 0.0,
+          "allocated_bill_discount": 0.0,
+          "taxable_amount": 2000.0,
+          "cgst_rate": 0.0,
+          "cgst_amount": 0.0,
+          "sgst_rate": 0.0,
+          "sgst_amount": 0.0,
+          "igst_rate": 0.0,
+          "igst_amount": 0.0,
+          "cess_amount": 0.0,
+          "total_tax": 0.0,
+          "total_amount": 2000.0,
+          "charge_allocation": 360.0,
+          "landed_amount": 2360.0,
+          "landed_unit_cost": 236.0
+        },
+        {
+          "line_id": "L3",
+          "gross_amount": 3000.0,
+          "line_discount": 0.0,
+          "allocated_bill_discount": 0.0,
+          "taxable_amount": 3000.0,
+          "cgst_rate": 0.0,
+          "cgst_amount": 0.0,
+          "sgst_rate": 0.0,
+          "sgst_amount": 0.0,
+          "igst_rate": 0.0,
+          "igst_amount": 0.0,
+          "cess_amount": 0.0,
+          "total_tax": 0.0,
+          "total_amount": 3000.0,
+          "charge_allocation": 600.0,
+          "landed_amount": 3600.0,
+          "landed_unit_cost": 360.0
+        }
+      ],
+      "expected_charges": [
+        {
+          "charge_id": "C1",
+          "taxable_amount": 1200.0,
+          "cgst_amount": 108.0,
+          "sgst_amount": 108.0,
+          "igst_amount": 0.0,
+          "cess_amount": 0.0,
+          "total_tax": 216.0,
+          "total_amount": 1416.0,
+          "spread_basis_used": "weight",
+          "spread_fallback_reason": null,
+          "in_payable": true,
+          "creditable_tax": 216.0,
+          "non_creditable_tax": 0.0,
+          "expense_posting": 0.0,
+          "allocations": [
+            {
+              "line_id": "L1",
+              "allocated_amount": 240.0,
+              "is_remainder_paisa": false
+            },
+            {
+              "line_id": "L2",
+              "allocated_amount": 360.0,
+              "is_remainder_paisa": false
+            },
+            {
+              "line_id": "L3",
+              "allocated_amount": 600.0,
+              "is_remainder_paisa": false
+            }
+          ]
+        }
+      ],
+      "expected_totals": {
+        "gross_subtotal": 6000.0,
+        "line_discount_total": 0.0,
+        "bill_discount_total": 0.0,
+        "taxable_subtotal": 6000.0,
+        "cgst_total": 108.0,
+        "sgst_total": 108.0,
+        "igst_total": 0.0,
+        "cess_total": 0.0,
+        "total_tax": 216.0,
+        "net_before_round": 7416.0,
+        "round_off": 0.0,
+        "grand_total": 7416.0,
+        "charge_taxable_total": 1200.0,
+        "charge_tax_total": 216.0,
+        "charge_total": 1416.0,
+        "separate_charge_taxable_total": 0.0,
+        "separate_charge_tax_total": 0.0,
+        "separate_charge_total": 0.0,
+        "landed_cost_addition": 1200.0,
+        "expense_charge_total": 0.0,
+        "creditable_input_tax_total": 216.0,
+        "non_creditable_tax_total": 0.0,
+        "reconciliation_identity_delta": 0.0
+      }
+    },
+    {
+      "id": "TC15_CHARGE_SPREAD_BY_WEIGHT_MISSING_WEIGHT_FALLBACK",
+      "name": "CR-C weight fallback: line three has no weight, so the weight charge spreads by value (200 / 400 / 600) and says why",
+      "store_state": "32",
+      "customer_gstin": null,
+      "place_of_supply": "32",
+      "tax_mode": "exclusive",
+      "lines": [
+        {
+          "line_id": "L1",
+          "product_name": "Weighted line one",
+          "hsn_code": "30049099",
+          "qty": 10,
+          "loose_qty": 0,
+          "units_per_pack": 1,
+          "unit_price": 100.0,
+          "rate_basis": "ptr",
+          "discount_percent": 0,
+          "discount_amount": 0,
+          "gst_percent": 0,
+          "cess_percent": 0,
+          "gross_weight_kg": 20.0
+        },
+        {
+          "line_id": "L2",
+          "product_name": "Weighted line two",
+          "hsn_code": "30049099",
+          "qty": 10,
+          "loose_qty": 0,
+          "units_per_pack": 1,
+          "unit_price": 200.0,
+          "rate_basis": "ptr",
+          "discount_percent": 0,
+          "discount_amount": 0,
+          "gst_percent": 0,
+          "cess_percent": 0,
+          "gross_weight_kg": 30.0
+        },
+        {
+          "line_id": "L3",
+          "product_name": "Unweighted line three",
+          "hsn_code": "30049099",
+          "qty": 10,
+          "loose_qty": 0,
+          "units_per_pack": 1,
+          "unit_price": 300.0,
+          "rate_basis": "ptr",
+          "discount_percent": 0,
+          "discount_amount": 0,
+          "gst_percent": 0,
+          "cess_percent": 0,
+          "gross_weight_kg": null
+        }
+      ],
+      "bill_discount": {
+        "type": "amount",
+        "value": 0
+      },
+      "charges": [
+        {
+          "charge_id": "C1",
+          "head_code": "FREIGHT",
+          "head_name": "Freight",
+          "sac_code": "996714",
+          "amount": 1200.0,
+          "gst_percent": 18,
+          "treatment": "add_to_cost",
+          "spread_method": "weight",
+          "itc_eligibility": "eligible",
+          "is_rcm": false,
+          "paid_separately": false
+        }
+      ],
+      "auto_round_off": true,
+      "expected_lines": [
+        {
+          "line_id": "L1",
+          "gross_amount": 1000.0,
+          "line_discount": 0.0,
+          "allocated_bill_discount": 0.0,
+          "taxable_amount": 1000.0,
+          "cgst_rate": 0.0,
+          "cgst_amount": 0.0,
+          "sgst_rate": 0.0,
+          "sgst_amount": 0.0,
+          "igst_rate": 0.0,
+          "igst_amount": 0.0,
+          "cess_amount": 0.0,
+          "total_tax": 0.0,
+          "total_amount": 1000.0,
+          "charge_allocation": 200.0,
+          "landed_amount": 1200.0,
+          "landed_unit_cost": 120.0
+        },
+        {
+          "line_id": "L2",
+          "gross_amount": 2000.0,
+          "line_discount": 0.0,
+          "allocated_bill_discount": 0.0,
+          "taxable_amount": 2000.0,
+          "cgst_rate": 0.0,
+          "cgst_amount": 0.0,
+          "sgst_rate": 0.0,
+          "sgst_amount": 0.0,
+          "igst_rate": 0.0,
+          "igst_amount": 0.0,
+          "cess_amount": 0.0,
+          "total_tax": 0.0,
+          "total_amount": 2000.0,
+          "charge_allocation": 400.0,
+          "landed_amount": 2400.0,
+          "landed_unit_cost": 240.0
+        },
+        {
+          "line_id": "L3",
+          "gross_amount": 3000.0,
+          "line_discount": 0.0,
+          "allocated_bill_discount": 0.0,
+          "taxable_amount": 3000.0,
+          "cgst_rate": 0.0,
+          "cgst_amount": 0.0,
+          "sgst_rate": 0.0,
+          "sgst_amount": 0.0,
+          "igst_rate": 0.0,
+          "igst_amount": 0.0,
+          "cess_amount": 0.0,
+          "total_tax": 0.0,
+          "total_amount": 3000.0,
+          "charge_allocation": 600.0,
+          "landed_amount": 3600.0,
+          "landed_unit_cost": 360.0
+        }
+      ],
+      "expected_charges": [
+        {
+          "charge_id": "C1",
+          "taxable_amount": 1200.0,
+          "cgst_amount": 108.0,
+          "sgst_amount": 108.0,
+          "igst_amount": 0.0,
+          "cess_amount": 0.0,
+          "total_tax": 216.0,
+          "total_amount": 1416.0,
+          "spread_basis_used": "value",
+          "spread_fallback_reason": "missing_weight",
+          "lines_without_weight": [
+            "L3"
+          ],
+          "in_payable": true,
+          "creditable_tax": 216.0,
+          "non_creditable_tax": 0.0,
+          "expense_posting": 0.0,
+          "allocations": [
+            {
+              "line_id": "L1",
+              "allocated_amount": 200.0,
+              "is_remainder_paisa": false
+            },
+            {
+              "line_id": "L2",
+              "allocated_amount": 400.0,
+              "is_remainder_paisa": false
+            },
+            {
+              "line_id": "L3",
+              "allocated_amount": 600.0,
+              "is_remainder_paisa": false
+            }
+          ]
+        }
+      ],
+      "expected_totals": {
+        "gross_subtotal": 6000.0,
+        "line_discount_total": 0.0,
+        "bill_discount_total": 0.0,
+        "taxable_subtotal": 6000.0,
+        "cgst_total": 108.0,
+        "sgst_total": 108.0,
+        "igst_total": 0.0,
+        "cess_total": 0.0,
+        "total_tax": 216.0,
+        "net_before_round": 7416.0,
+        "round_off": 0.0,
+        "grand_total": 7416.0,
+        "charge_taxable_total": 1200.0,
+        "charge_tax_total": 216.0,
+        "charge_total": 1416.0,
+        "separate_charge_taxable_total": 0.0,
+        "separate_charge_tax_total": 0.0,
+        "separate_charge_total": 0.0,
+        "landed_cost_addition": 1200.0,
+        "expense_charge_total": 0.0,
+        "creditable_input_tax_total": 216.0,
+        "non_creditable_tax_total": 0.0,
+        "reconciliation_identity_delta": 0.0
+      }
+    },
+    {
+      "id": "TC16_NEGATIVE_CHARGE_AND_BLOCKED_ITC_EXPENSE",
+      "name": "CR-C: Rs 500 insurance blocked for ITC expensed gross (590) and a -Rs 500 cash discount spread negative; payable stays 11,200",
+      "store_state": "32",
+      "customer_gstin": null,
+      "place_of_supply": "32",
+      "tax_mode": "exclusive",
+      "lines": [
+        {
+          "line_id": "L1",
+          "product_name": "Goods line one",
+          "hsn_code": "30049099",
+          "qty": 50,
+          "loose_qty": 0,
+          "units_per_pack": 1,
+          "unit_price": 100.0,
+          "rate_basis": "ptr",
+          "discount_percent": 0,
+          "discount_amount": 0,
+          "gst_percent": 12,
+          "cess_percent": 0
+        },
+        {
+          "line_id": "L2",
+          "product_name": "Goods line two",
+          "hsn_code": "30049099",
+          "qty": 50,
+          "loose_qty": 0,
+          "units_per_pack": 1,
+          "unit_price": 100.0,
+          "rate_basis": "ptr",
+          "discount_percent": 0,
+          "discount_amount": 0,
+          "gst_percent": 12,
+          "cess_percent": 0
+        }
+      ],
+      "bill_discount": {
+        "type": "amount",
+        "value": 0
+      },
+      "charges": [
+        {
+          "charge_id": "C1",
+          "head_code": "INSURANCE",
+          "head_name": "Insurance",
+          "sac_code": "996121",
+          "amount": 500.0,
+          "gst_percent": 18,
+          "treatment": "expense",
+          "spread_method": "value",
+          "itc_eligibility": "blocked",
+          "is_rcm": false,
+          "paid_separately": false
+        },
+        {
+          "charge_id": "C2",
+          "head_code": "CASH_DISCOUNT",
+          "head_name": "Cash Discount",
+          "sac_code": "996799",
+          "amount": -500.0,
+          "gst_percent": 18,
+          "treatment": "add_to_cost",
+          "spread_method": "value",
+          "itc_eligibility": "eligible",
+          "is_rcm": false,
+          "paid_separately": false
+        }
+      ],
+      "auto_round_off": true,
+      "expected_lines": [
+        {
+          "line_id": "L1",
+          "gross_amount": 5000.0,
+          "line_discount": 0.0,
+          "allocated_bill_discount": 0.0,
+          "taxable_amount": 5000.0,
+          "cgst_rate": 6.0,
+          "cgst_amount": 300.0,
+          "sgst_rate": 6.0,
+          "sgst_amount": 300.0,
+          "igst_rate": 0.0,
+          "igst_amount": 0.0,
+          "cess_amount": 0.0,
+          "total_tax": 600.0,
+          "total_amount": 5600.0,
+          "charge_allocation": -250.0,
+          "landed_amount": 4750.0,
+          "landed_unit_cost": 95.0
+        },
+        {
+          "line_id": "L2",
+          "gross_amount": 5000.0,
+          "line_discount": 0.0,
+          "allocated_bill_discount": 0.0,
+          "taxable_amount": 5000.0,
+          "cgst_rate": 6.0,
+          "cgst_amount": 300.0,
+          "sgst_rate": 6.0,
+          "sgst_amount": 300.0,
+          "igst_rate": 0.0,
+          "igst_amount": 0.0,
+          "cess_amount": 0.0,
+          "total_tax": 600.0,
+          "total_amount": 5600.0,
+          "charge_allocation": -250.0,
+          "landed_amount": 4750.0,
+          "landed_unit_cost": 95.0
+        }
+      ],
+      "expected_charges": [
+        {
+          "charge_id": "C1",
+          "taxable_amount": 500.0,
+          "cgst_amount": 45.0,
+          "sgst_amount": 45.0,
+          "igst_amount": 0.0,
+          "cess_amount": 0.0,
+          "total_tax": 90.0,
+          "total_amount": 590.0,
+          "spread_basis_used": "none",
+          "in_payable": true,
+          "creditable_tax": 0.0,
+          "non_creditable_tax": 90.0,
+          "expense_posting": 590.0,
+          "allocations": []
+        },
+        {
+          "charge_id": "C2",
+          "taxable_amount": -500.0,
+          "cgst_amount": -45.0,
+          "sgst_amount": -45.0,
+          "igst_amount": 0.0,
+          "cess_amount": 0.0,
+          "total_tax": -90.0,
+          "total_amount": -590.0,
+          "spread_basis_used": "value",
+          "in_payable": true,
+          "creditable_tax": -90.0,
+          "non_creditable_tax": 0.0,
+          "expense_posting": 0.0,
+          "allocations": [
+            {
+              "line_id": "L1",
+              "allocated_amount": -250.0,
+              "is_remainder_paisa": false
+            },
+            {
+              "line_id": "L2",
+              "allocated_amount": -250.0,
+              "is_remainder_paisa": false
+            }
+          ]
+        }
+      ],
+      "expected_totals": {
+        "gross_subtotal": 10000.0,
+        "line_discount_total": 0.0,
+        "bill_discount_total": 0.0,
+        "taxable_subtotal": 10000.0,
+        "cgst_total": 600.0,
+        "sgst_total": 600.0,
+        "igst_total": 0.0,
+        "cess_total": 0.0,
+        "total_tax": 1200.0,
+        "net_before_round": 11200.0,
+        "round_off": 0.0,
+        "grand_total": 11200.0,
+        "charge_taxable_total": 0.0,
+        "charge_tax_total": 0.0,
+        "charge_total": 0.0,
+        "separate_charge_taxable_total": 0.0,
+        "separate_charge_tax_total": 0.0,
+        "separate_charge_total": 0.0,
+        "landed_cost_addition": -500.0,
+        "expense_charge_total": 590.0,
+        "creditable_input_tax_total": 1110.0,
+        "non_creditable_tax_total": 90.0,
+        "reconciliation_identity_delta": 0.0
+      }
+    },
+    {
+      "id": "TC17_WORKED_EXAMPLE_EXPENSE_TREATMENT",
+      "name": "CR-C worked example, expense treatment: identical payable 11,554, stock unchanged at 10,000, expense register 300",
+      "store_state": "32",
+      "customer_gstin": null,
+      "place_of_supply": "32",
+      "tax_mode": "exclusive",
+      "lines": [
+        {
+          "line_id": "L1",
+          "product_name": "Amoxicillin 500mg (100 capsules)",
+          "hsn_code": "30041090",
+          "qty": 100,
+          "loose_qty": 0,
+          "units_per_pack": 1,
+          "unit_price": 100.0,
+          "rate_basis": "ptr",
+          "discount_percent": 0,
+          "discount_amount": 0,
+          "gst_percent": 12,
+          "cess_percent": 0
+        }
+      ],
+      "bill_discount": {
+        "type": "amount",
+        "value": 0
+      },
+      "charges": [
+        {
+          "charge_id": "C1",
+          "head_code": "FREIGHT",
+          "head_name": "Freight",
+          "sac_code": "996714",
+          "amount": 200.0,
+          "gst_percent": 18,
+          "treatment": "expense",
+          "spread_method": "value",
+          "itc_eligibility": "eligible",
+          "is_rcm": false,
+          "paid_separately": false
+        },
+        {
+          "charge_id": "C2",
+          "head_code": "PACKING",
+          "head_name": "Packing",
+          "sac_code": "996799",
+          "amount": 100.0,
+          "gst_percent": 18,
+          "treatment": "expense",
+          "spread_method": "value",
+          "itc_eligibility": "eligible",
+          "is_rcm": false,
+          "paid_separately": false
+        }
+      ],
+      "auto_round_off": true,
+      "expected_lines": [
+        {
+          "line_id": "L1",
+          "gross_amount": 10000.0,
+          "line_discount": 0.0,
+          "allocated_bill_discount": 0.0,
+          "taxable_amount": 10000.0,
+          "cgst_rate": 6.0,
+          "cgst_amount": 600.0,
+          "sgst_rate": 6.0,
+          "sgst_amount": 600.0,
+          "igst_rate": 0.0,
+          "igst_amount": 0.0,
+          "cess_amount": 0.0,
+          "total_tax": 1200.0,
+          "total_amount": 11200.0,
+          "charge_allocation": 0.0,
+          "landed_amount": 10000.0,
+          "landed_unit_cost": 100.0
+        }
+      ],
+      "expected_charges": [
+        {
+          "charge_id": "C1",
+          "taxable_amount": 200.0,
+          "cgst_amount": 18.0,
+          "sgst_amount": 18.0,
+          "igst_amount": 0.0,
+          "cess_amount": 0.0,
+          "total_tax": 36.0,
+          "total_amount": 236.0,
+          "spread_basis_used": "none",
+          "in_payable": true,
+          "creditable_tax": 36.0,
+          "non_creditable_tax": 0.0,
+          "expense_posting": 200.0,
+          "allocations": []
+        },
+        {
+          "charge_id": "C2",
+          "taxable_amount": 100.0,
+          "cgst_amount": 9.0,
+          "sgst_amount": 9.0,
+          "igst_amount": 0.0,
+          "cess_amount": 0.0,
+          "total_tax": 18.0,
+          "total_amount": 118.0,
+          "spread_basis_used": "none",
+          "in_payable": true,
+          "creditable_tax": 18.0,
+          "non_creditable_tax": 0.0,
+          "expense_posting": 100.0,
+          "allocations": []
+        }
+      ],
+      "expected_totals": {
+        "gross_subtotal": 10000.0,
+        "line_discount_total": 0.0,
+        "bill_discount_total": 0.0,
+        "taxable_subtotal": 10000.0,
+        "cgst_total": 627.0,
+        "sgst_total": 627.0,
+        "igst_total": 0.0,
+        "cess_total": 0.0,
+        "total_tax": 1254.0,
+        "net_before_round": 11554.0,
+        "round_off": 0.0,
+        "grand_total": 11554.0,
+        "charge_taxable_total": 300.0,
+        "charge_tax_total": 54.0,
+        "charge_total": 354.0,
+        "separate_charge_taxable_total": 0.0,
+        "separate_charge_tax_total": 0.0,
+        "separate_charge_total": 0.0,
+        "landed_cost_addition": 0.0,
+        "expense_charge_total": 300.0,
+        "creditable_input_tax_total": 1254.0,
+        "non_creditable_tax_total": 0.0,
+        "reconciliation_identity_delta": 0.0
+      }
+    },
+    {
+      "id": "TC18_SEPARATELY_PAID_CHARGE_AND_TCS",
+      "name": "CR-C: transporter freight Rs 300 paid separately lands in cost but not in the payable (5,936); TCS Rs 100 at 0% is expensed",
+      "store_state": "32",
+      "customer_gstin": null,
+      "place_of_supply": "32",
+      "tax_mode": "exclusive",
+      "lines": [
+        {
+          "line_id": "L1",
+          "product_name": "Paracetamol 650mg (100 tablets)",
+          "hsn_code": "30049099",
+          "qty": 100,
+          "loose_qty": 0,
+          "units_per_pack": 1,
+          "unit_price": 50.0,
+          "rate_basis": "ptr",
+          "discount_percent": 0,
+          "discount_amount": 0,
+          "gst_percent": 12,
+          "cess_percent": 0
+        }
+      ],
+      "bill_discount": {
+        "type": "amount",
+        "value": 0
+      },
+      "charges": [
+        {
+          "charge_id": "C1",
+          "head_code": "FREIGHT",
+          "head_name": "Freight",
+          "sac_code": "996714",
+          "amount": 200.0,
+          "gst_percent": 18,
+          "treatment": "add_to_cost",
+          "spread_method": "value",
+          "itc_eligibility": "eligible",
+          "is_rcm": false,
+          "paid_separately": false
+        },
+        {
+          "charge_id": "C2",
+          "head_code": "FREIGHT",
+          "head_name": "Freight",
+          "sac_code": "996714",
+          "amount": 300.0,
+          "gst_percent": 18,
+          "treatment": "add_to_cost",
+          "spread_method": "value",
+          "itc_eligibility": "eligible",
+          "is_rcm": true,
+          "paid_separately": true,
+          "paid_to_label": "Kerala Transports"
+        },
+        {
+          "charge_id": "C3",
+          "head_code": "TCS",
+          "head_name": "Tax Collected at Source",
+          "sac_code": "996799",
+          "amount": 100.0,
+          "gst_percent": 0,
+          "treatment": "expense",
+          "spread_method": "value",
+          "itc_eligibility": "eligible",
+          "is_rcm": false,
+          "paid_separately": false
+        }
+      ],
+      "auto_round_off": true,
+      "expected_lines": [
+        {
+          "line_id": "L1",
+          "gross_amount": 5000.0,
+          "line_discount": 0.0,
+          "allocated_bill_discount": 0.0,
+          "taxable_amount": 5000.0,
+          "cgst_rate": 6.0,
+          "cgst_amount": 300.0,
+          "sgst_rate": 6.0,
+          "sgst_amount": 300.0,
+          "igst_rate": 0.0,
+          "igst_amount": 0.0,
+          "cess_amount": 0.0,
+          "total_tax": 600.0,
+          "total_amount": 5600.0,
+          "charge_allocation": 500.0,
+          "landed_amount": 5500.0,
+          "landed_unit_cost": 55.0
+        }
+      ],
+      "expected_charges": [
+        {
+          "charge_id": "C1",
+          "taxable_amount": 200.0,
+          "cgst_amount": 18.0,
+          "sgst_amount": 18.0,
+          "igst_amount": 0.0,
+          "cess_amount": 0.0,
+          "total_tax": 36.0,
+          "total_amount": 236.0,
+          "spread_basis_used": "value",
+          "in_payable": true,
+          "is_rcm": false,
+          "creditable_tax": 36.0,
+          "non_creditable_tax": 0.0,
+          "expense_posting": 0.0,
+          "allocations": [
+            {
+              "line_id": "L1",
+              "allocated_amount": 200.0,
+              "is_remainder_paisa": false
+            }
+          ]
+        },
+        {
+          "charge_id": "C2",
+          "taxable_amount": 300.0,
+          "cgst_amount": 27.0,
+          "sgst_amount": 27.0,
+          "igst_amount": 0.0,
+          "cess_amount": 0.0,
+          "total_tax": 54.0,
+          "total_amount": 354.0,
+          "spread_basis_used": "value",
+          "in_payable": false,
+          "is_rcm": true,
+          "creditable_tax": 54.0,
+          "non_creditable_tax": 0.0,
+          "expense_posting": 0.0,
+          "allocations": [
+            {
+              "line_id": "L1",
+              "allocated_amount": 300.0,
+              "is_remainder_paisa": false
+            }
+          ]
+        },
+        {
+          "charge_id": "C3",
+          "taxable_amount": 100.0,
+          "cgst_amount": 0.0,
+          "sgst_amount": 0.0,
+          "igst_amount": 0.0,
+          "cess_amount": 0.0,
+          "total_tax": 0.0,
+          "total_amount": 100.0,
+          "spread_basis_used": "none",
+          "in_payable": true,
+          "is_rcm": false,
+          "creditable_tax": 0.0,
+          "non_creditable_tax": 0.0,
+          "expense_posting": 100.0,
+          "allocations": []
+        }
+      ],
+      "expected_totals": {
+        "gross_subtotal": 5000.0,
+        "line_discount_total": 0.0,
+        "bill_discount_total": 0.0,
+        "taxable_subtotal": 5000.0,
+        "cgst_total": 318.0,
+        "sgst_total": 318.0,
+        "igst_total": 0.0,
+        "cess_total": 0.0,
+        "total_tax": 636.0,
+        "net_before_round": 5936.0,
+        "round_off": 0.0,
+        "grand_total": 5936.0,
+        "charge_taxable_total": 300.0,
+        "charge_tax_total": 36.0,
+        "charge_total": 336.0,
+        "separate_charge_taxable_total": 300.0,
+        "separate_charge_tax_total": 54.0,
+        "separate_charge_total": 354.0,
+        "landed_cost_addition": 500.0,
+        "expense_charge_total": 100.0,
+        "creditable_input_tax_total": 690.0,
+        "non_creditable_tax_total": 0.0,
+        "reconciliation_identity_delta": 0.0
+      }
+    },
+    {
+      "id": "TC19_CHARGE_SPREAD_REMAINDER_TIEBREAK_WITH_BLOCKED_ITC",
+      "name": "CR-C: Rs 99.99 freight at 18% with blocked ITC spread by value over Rs 33.33 / 33.33 / 33.34 -> capitalised tax spreads, leftover paisa tie goes to the first line, round-off closes the bill to Rs 230.00",
+      "store_state": "32",
+      "customer_gstin": null,
+      "place_of_supply": "32",
+      "tax_mode": "exclusive",
+      "lines": [
+        {
+          "line_id": "L1",
+          "product_name": "Line one",
+          "hsn_code": "30049099",
+          "qty": 1,
+          "loose_qty": 0,
+          "units_per_pack": 1,
+          "unit_price": 33.33,
+          "rate_basis": "ptr",
+          "discount_percent": 0,
+          "discount_amount": 0,
+          "gst_percent": 12,
+          "cess_percent": 0
+        },
+        {
+          "line_id": "L2",
+          "product_name": "Line two",
+          "hsn_code": "30049099",
+          "qty": 1,
+          "loose_qty": 0,
+          "units_per_pack": 1,
+          "unit_price": 33.33,
+          "rate_basis": "ptr",
+          "discount_percent": 0,
+          "discount_amount": 0,
+          "gst_percent": 12,
+          "cess_percent": 0
+        },
+        {
+          "line_id": "L3",
+          "product_name": "Line three",
+          "hsn_code": "30049099",
+          "qty": 1,
+          "loose_qty": 0,
+          "units_per_pack": 1,
+          "unit_price": 33.34,
+          "rate_basis": "ptr",
+          "discount_percent": 0,
+          "discount_amount": 0,
+          "gst_percent": 12,
+          "cess_percent": 0
+        }
+      ],
+      "bill_discount": {
+        "type": "amount",
+        "value": 0
+      },
+      "charges": [
+        {
+          "charge_id": "C1",
+          "head_code": "FREIGHT",
+          "head_name": "Freight",
+          "sac_code": "996714",
+          "amount": 99.99,
+          "gst_percent": 18,
+          "treatment": "add_to_cost",
+          "spread_method": "value",
+          "itc_eligibility": "blocked",
+          "is_rcm": false,
+          "paid_separately": false,
+          "note": "Block ITC head on a bill that needs a paisa of round-off"
+        }
+      ],
+      "auto_round_off": true,
+      "expected_lines": [
+        {
+          "line_id": "L1",
+          "gross_amount": 33.33,
+          "line_discount": 0.0,
+          "allocated_bill_discount": 0.0,
+          "taxable_amount": 33.33,
+          "cgst_rate": 6.0,
+          "cgst_amount": 2.0,
+          "sgst_rate": 6.0,
+          "sgst_amount": 2.0,
+          "igst_rate": 0.0,
+          "igst_amount": 0.0,
+          "cess_amount": 0.0,
+          "total_tax": 4.0,
+          "total_amount": 37.33,
+          "charge_allocation": 39.33,
+          "landed_amount": 72.66,
+          "landed_unit_cost": 72.66
+        },
+        {
+          "line_id": "L2",
+          "gross_amount": 33.33,
+          "line_discount": 0.0,
+          "allocated_bill_discount": 0.0,
+          "taxable_amount": 33.33,
+          "cgst_rate": 6.0,
+          "cgst_amount": 2.0,
+          "sgst_rate": 6.0,
+          "sgst_amount": 2.0,
+          "igst_rate": 0.0,
+          "igst_amount": 0.0,
+          "cess_amount": 0.0,
+          "total_tax": 4.0,
+          "total_amount": 37.33,
+          "charge_allocation": 39.32,
+          "landed_amount": 72.65,
+          "landed_unit_cost": 72.65
+        },
+        {
+          "line_id": "L3",
+          "gross_amount": 33.34,
+          "line_discount": 0.0,
+          "allocated_bill_discount": 0.0,
+          "taxable_amount": 33.34,
+          "cgst_rate": 6.0,
+          "cgst_amount": 2.0,
+          "sgst_rate": 6.0,
+          "sgst_amount": 2.0,
+          "igst_rate": 0.0,
+          "igst_amount": 0.0,
+          "cess_amount": 0.0,
+          "total_tax": 4.0,
+          "total_amount": 37.34,
+          "charge_allocation": 39.34,
+          "landed_amount": 72.68,
+          "landed_unit_cost": 72.68
+        }
+      ],
+      "expected_charges": [
+        {
+          "charge_id": "C1",
+          "taxable_amount": 99.99,
+          "cgst_amount": 9.0,
+          "sgst_amount": 9.0,
+          "igst_amount": 0.0,
+          "cess_amount": 0.0,
+          "total_tax": 18.0,
+          "total_amount": 117.99,
+          "spread_basis_used": "value",
+          "spread_fallback_reason": null,
+          "lines_without_weight": [],
+          "in_payable": true,
+          "is_rcm": false,
+          "creditable_tax": 0.0,
+          "non_creditable_tax": 18.0,
+          "expense_posting": 0.0,
+          "allocations": [
+            {
+              "line_id": "L1",
+              "allocated_amount": 39.33,
+              "is_remainder_paisa": true
+            },
+            {
+              "line_id": "L2",
+              "allocated_amount": 39.32,
+              "is_remainder_paisa": false
+            },
+            {
+              "line_id": "L3",
+              "allocated_amount": 39.34,
+              "is_remainder_paisa": true
+            }
+          ]
+        }
+      ],
+      "expected_totals": {
+        "gross_subtotal": 100.0,
+        "line_discount_total": 0.0,
+        "bill_discount_total": 0.0,
+        "taxable_subtotal": 100.0,
+        "cgst_total": 15.0,
+        "sgst_total": 15.0,
+        "igst_total": 0.0,
+        "cess_total": 0.0,
+        "total_tax": 30.0,
+        "net_before_round": 229.99,
+        "round_off": 0.01,
+        "grand_total": 230.0,
+        "charge_taxable_total": 99.99,
+        "charge_tax_total": 18.0,
+        "charge_total": 117.99,
+        "separate_charge_taxable_total": 0.0,
+        "separate_charge_tax_total": 0.0,
+        "separate_charge_total": 0.0,
+        "landed_cost_addition": 117.99,
+        "expense_charge_total": 0.0,
+        "creditable_input_tax_total": 12.0,
+        "non_creditable_tax_total": 18.0,
+        "reconciliation_identity_delta": 0.0
+      }
+    },
+    {
+      "id": "TC20_QUANTITY_SPREAD_WITH_FREE_UNITS_AND_SEPARATELY_PAID_RCM",
+      "name": "CR-C: freight spread by quantity absorbs the free packs' share, a separately-paid RCM transport charge stays out of the payable, and an expensed loading charge posts ex-GST",
+      "store_state": "32",
+      "customer_gstin": null,
+      "place_of_supply": "32",
+      "tax_mode": "exclusive",
+      "lines": [
+        {
+          "line_id": "L1",
+          "product_name": "Amoxicillin 250mg dry syrup",
+          "hsn_code": "30032090",
+          "qty": 2,
+          "loose_qty": 0,
+          "units_per_pack": 10,
+          "free_qty": 1,
+          "unit_price": 50.0,
+          "rate_basis": "ptr",
+          "discount_percent": 0,
+          "discount_amount": 0,
+          "gst_percent": 5,
+          "cess_percent": 0
+        },
+        {
+          "line_id": "L2",
+          "product_name": "Cetirizine 10mg",
+          "hsn_code": "30049099",
+          "qty": 1,
+          "loose_qty": 0,
+          "units_per_pack": 10,
+          "unit_price": 100.0,
+          "rate_basis": "ptr",
+          "discount_percent": 0,
+          "discount_amount": 0,
+          "gst_percent": 5,
+          "cess_percent": 0
+        }
+      ],
+      "bill_discount": {
+        "type": "amount",
+        "value": 0
+      },
+      "charges": [
+        {
+          "charge_id": "C1",
+          "head_code": "FREIGHT",
+          "head_name": "Freight",
+          "sac_code": "996714",
+          "amount": 300.0,
+          "gst_percent": 18,
+          "treatment": "add_to_cost",
+          "spread_method": "quantity",
+          "itc_eligibility": "eligible",
+          "is_rcm": false,
+          "paid_separately": false
+        },
+        {
+          "charge_id": "C2",
+          "head_code": "TRANSPORT",
+          "head_name": "Transport (paid to transporter)",
+          "sac_code": "996432",
+          "amount": 500.0,
+          "gst_percent": 18,
+          "treatment": "expense",
+          "spread_method": "value",
+          "itc_eligibility": "eligible",
+          "is_rcm": true,
+          "paid_separately": true,
+          "paid_to_label": "Coastal Logistics",
+          "note": "RCM tax paid by us on the transporter's own bill"
+        },
+        {
+          "charge_id": "C3",
+          "head_code": "LOADING",
+          "head_name": "Loading",
+          "sac_code": "996719",
+          "amount": 100.0,
+          "gst_percent": 12,
+          "treatment": "expense",
+          "spread_method": "value",
+          "itc_eligibility": "eligible",
+          "is_rcm": false,
+          "paid_separately": false
+        }
+      ],
+      "auto_round_off": true,
+      "expected_lines": [
+        {
+          "line_id": "L1",
+          "gross_amount": 100.0,
+          "line_discount": 0.0,
+          "allocated_bill_discount": 0.0,
+          "taxable_amount": 100.0,
+          "cgst_rate": 2.5,
+          "cgst_amount": 2.5,
+          "sgst_rate": 2.5,
+          "sgst_amount": 2.5,
+          "igst_rate": 0.0,
+          "igst_amount": 0.0,
+          "cess_amount": 0.0,
+          "total_tax": 5.0,
+          "total_amount": 105.0,
+          "charge_allocation": 225.0,
+          "landed_amount": 325.0,
+          "landed_unit_cost": 10.83
+        },
+        {
+          "line_id": "L2",
+          "gross_amount": 100.0,
+          "line_discount": 0.0,
+          "allocated_bill_discount": 0.0,
+          "taxable_amount": 100.0,
+          "cgst_rate": 2.5,
+          "cgst_amount": 2.5,
+          "sgst_rate": 2.5,
+          "sgst_amount": 2.5,
+          "igst_rate": 0.0,
+          "igst_amount": 0.0,
+          "cess_amount": 0.0,
+          "total_tax": 5.0,
+          "total_amount": 105.0,
+          "charge_allocation": 75.0,
+          "landed_amount": 175.0,
+          "landed_unit_cost": 17.5
+        }
+      ],
+      "expected_charges": [
+        {
+          "charge_id": "C1",
+          "taxable_amount": 300.0,
+          "cgst_amount": 27.0,
+          "sgst_amount": 27.0,
+          "igst_amount": 0.0,
+          "cess_amount": 0.0,
+          "total_tax": 54.0,
+          "total_amount": 354.0,
+          "spread_basis_used": "quantity",
+          "spread_fallback_reason": null,
+          "lines_without_weight": [],
+          "in_payable": true,
+          "is_rcm": false,
+          "creditable_tax": 54.0,
+          "non_creditable_tax": 0.0,
+          "expense_posting": 0.0,
+          "allocations": [
+            {
+              "line_id": "L1",
+              "allocated_amount": 225.0,
+              "is_remainder_paisa": false
+            },
+            {
+              "line_id": "L2",
+              "allocated_amount": 75.0,
+              "is_remainder_paisa": false
+            }
+          ]
+        },
+        {
+          "charge_id": "C2",
+          "taxable_amount": 500.0,
+          "cgst_amount": 45.0,
+          "sgst_amount": 45.0,
+          "igst_amount": 0.0,
+          "cess_amount": 0.0,
+          "total_tax": 90.0,
+          "total_amount": 590.0,
+          "spread_basis_used": "none",
+          "spread_fallback_reason": null,
+          "lines_without_weight": [],
+          "in_payable": false,
+          "is_rcm": true,
+          "paid_to_label": "Coastal Logistics",
+          "creditable_tax": 90.0,
+          "non_creditable_tax": 0.0,
+          "expense_posting": 500.0,
+          "allocations": []
+        },
+        {
+          "charge_id": "C3",
+          "taxable_amount": 100.0,
+          "cgst_amount": 6.0,
+          "sgst_amount": 6.0,
+          "igst_amount": 0.0,
+          "cess_amount": 0.0,
+          "total_tax": 12.0,
+          "total_amount": 112.0,
+          "spread_basis_used": "none",
+          "spread_fallback_reason": null,
+          "lines_without_weight": [],
+          "in_payable": true,
+          "is_rcm": false,
+          "creditable_tax": 12.0,
+          "non_creditable_tax": 0.0,
+          "expense_posting": 100.0,
+          "allocations": []
+        }
+      ],
+      "expected_totals": {
+        "gross_subtotal": 200.0,
+        "line_discount_total": 0.0,
+        "bill_discount_total": 0.0,
+        "taxable_subtotal": 200.0,
+        "cgst_total": 38.0,
+        "sgst_total": 38.0,
+        "igst_total": 0.0,
+        "cess_total": 0.0,
+        "total_tax": 76.0,
+        "net_before_round": 676.0,
+        "round_off": 0.0,
+        "grand_total": 676.0,
+        "charge_taxable_total": 400.0,
+        "charge_tax_total": 66.0,
+        "charge_total": 466.0,
+        "separate_charge_taxable_total": 500.0,
+        "separate_charge_tax_total": 90.0,
+        "separate_charge_total": 590.0,
+        "landed_cost_addition": 300.0,
+        "expense_charge_total": 600.0,
+        "creditable_input_tax_total": 166.0,
+        "non_creditable_tax_total": 0.0,
+        "reconciliation_identity_delta": 0.0
+      }
+    },
+    {
+      "id": "TC21_SEPARATELY_PAID_CHARGE_POLICY_OFF",
+      "name": "CR-C-11: Rs 1,000 goods at 12% with Rs 200 freight at 12% and Rs 50 insurance at 5% both paid separately, outside the payable while separately_paid_in_payable is off (payable 1,120.00, separately paid 276.50)",
+      "store_state": "32",
+      "customer_gstin": null,
+      "place_of_supply": "32",
+      "tax_mode": "exclusive",
+      "lines": [
+        {
+          "line_id": "L1",
+          "product_name": "Dolo 650 Tablets (strip of 15)",
+          "hsn_code": "30049090",
+          "qty": 10,
+          "loose_qty": 0,
+          "units_per_pack": 1,
+          "unit_price": 100.0,
+          "rate_basis": "ptr",
+          "discount_percent": 0,
+          "discount_amount": 0,
+          "gst_percent": 12,
+          "cess_percent": 0
+        }
+      ],
+      "bill_discount": {
+        "type": "amount",
+        "value": 0.0
+      },
+      "charges": [
+        {
+          "charge_id": "C1",
+          "head_code": "FREIGHT",
+          "head_name": "Freight",
+          "sac_code": "996714",
+          "amount": 200.0,
+          "gst_percent": 12,
+          "treatment": "add_to_cost",
+          "spread_method": "value",
+          "itc_eligibility": "eligible",
+          "is_rcm": false,
+          "paid_separately": true,
+          "paid_to_label": "Kerala Transports"
+        },
+        {
+          "charge_id": "C2",
+          "head_code": "INSURANCE",
+          "head_name": "Insurance",
+          "sac_code": "997110",
+          "amount": 50.0,
+          "gst_percent": 5,
+          "treatment": "expense",
+          "spread_method": "value",
+          "itc_eligibility": "eligible",
+          "is_rcm": false,
+          "paid_separately": true,
+          "paid_to_label": "United Insurance"
+        }
+      ],
+      "separately_paid_in_payable": false,
+      "auto_round_off": false,
+      "expected_lines": [
+        {
+          "line_id": "L1",
+          "gross_amount": 1000.0,
+          "line_discount": 0.0,
+          "allocated_bill_discount": 0.0,
+          "taxable_amount": 1000.0,
+          "cgst_rate": 6.0,
+          "cgst_amount": 60.0,
+          "sgst_rate": 6.0,
+          "sgst_amount": 60.0,
+          "igst_rate": 0.0,
+          "igst_amount": 0.0,
+          "cess_amount": 0.0,
+          "total_tax": 120.0,
+          "total_amount": 1120.0,
+          "charge_allocation": 200.0,
+          "landed_amount": 1200.0,
+          "landed_unit_cost": 120.0
+        }
+      ],
+      "expected_charges": [
+        {
+          "charge_id": "C1",
+          "taxable_amount": 200.0,
+          "cgst_amount": 12.0,
+          "sgst_amount": 12.0,
+          "igst_amount": 0.0,
+          "cess_amount": 0.0,
+          "total_tax": 24.0,
+          "total_amount": 224.0,
+          "spread_basis_used": "value",
+          "in_payable": false,
+          "is_rcm": false,
+          "creditable_tax": 24.0,
+          "non_creditable_tax": 0.0,
+          "expense_posting": 0.0,
+          "allocations": [
+            {
+              "line_id": "L1",
+              "allocated_amount": 200.0,
+              "is_remainder_paisa": false
+            }
+          ]
+        },
+        {
+          "charge_id": "C2",
+          "taxable_amount": 50.0,
+          "cgst_amount": 1.25,
+          "sgst_amount": 1.25,
+          "igst_amount": 0.0,
+          "cess_amount": 0.0,
+          "total_tax": 2.5,
+          "total_amount": 52.5,
+          "spread_basis_used": "none",
+          "in_payable": false,
+          "is_rcm": false,
+          "creditable_tax": 2.5,
+          "non_creditable_tax": 0.0,
+          "expense_posting": 50.0,
+          "allocations": []
+        }
+      ],
+      "expected_totals": {
+        "gross_subtotal": 1000.0,
+        "line_discount_total": 0.0,
+        "bill_discount_total": 0.0,
+        "taxable_subtotal": 1000.0,
+        "cgst_total": 60.0,
+        "sgst_total": 60.0,
+        "igst_total": 0.0,
+        "cess_total": 0.0,
+        "total_tax": 120.0,
+        "net_before_round": 1120.0,
+        "round_off": 0.0,
+        "grand_total": 1120.0,
+        "charge_taxable_total": 0.0,
+        "charge_tax_total": 0.0,
+        "charge_total": 0.0,
+        "separate_charge_taxable_total": 250.0,
+        "separate_charge_tax_total": 26.5,
+        "separate_charge_total": 276.5,
+        "landed_cost_addition": 200.0,
+        "expense_charge_total": 50.0,
+        "creditable_input_tax_total": 146.5,
+        "non_creditable_tax_total": 0.0,
+        "reconciliation_identity_delta": 0.0
+      }
+    },
+    {
+      "id": "TC22_SEPARATELY_PAID_CHARGE_POLICY_ON",
+      "name": "CR-C-11: the same bill with separately_paid_in_payable on moves the identical 276.50 into the payable (1,396.50) while landed cost and the expense posting stay unchanged",
+      "store_state": "32",
+      "customer_gstin": null,
+      "place_of_supply": "32",
+      "tax_mode": "exclusive",
+      "lines": [
+        {
+          "line_id": "L1",
+          "product_name": "Dolo 650 Tablets (strip of 15)",
+          "hsn_code": "30049090",
+          "qty": 10,
+          "loose_qty": 0,
+          "units_per_pack": 1,
+          "unit_price": 100.0,
+          "rate_basis": "ptr",
+          "discount_percent": 0,
+          "discount_amount": 0,
+          "gst_percent": 12,
+          "cess_percent": 0
+        }
+      ],
+      "bill_discount": {
+        "type": "amount",
+        "value": 0.0
+      },
+      "charges": [
+        {
+          "charge_id": "C1",
+          "head_code": "FREIGHT",
+          "head_name": "Freight",
+          "sac_code": "996714",
+          "amount": 200.0,
+          "gst_percent": 12,
+          "treatment": "add_to_cost",
+          "spread_method": "value",
+          "itc_eligibility": "eligible",
+          "is_rcm": false,
+          "paid_separately": true,
+          "paid_to_label": "Kerala Transports"
+        },
+        {
+          "charge_id": "C2",
+          "head_code": "INSURANCE",
+          "head_name": "Insurance",
+          "sac_code": "997110",
+          "amount": 50.0,
+          "gst_percent": 5,
+          "treatment": "expense",
+          "spread_method": "value",
+          "itc_eligibility": "eligible",
+          "is_rcm": false,
+          "paid_separately": true,
+          "paid_to_label": "United Insurance"
+        }
+      ],
+      "separately_paid_in_payable": true,
+      "auto_round_off": false,
+      "expected_lines": [
+        {
+          "line_id": "L1",
+          "gross_amount": 1000.0,
+          "line_discount": 0.0,
+          "allocated_bill_discount": 0.0,
+          "taxable_amount": 1000.0,
+          "cgst_rate": 6.0,
+          "cgst_amount": 60.0,
+          "sgst_rate": 6.0,
+          "sgst_amount": 60.0,
+          "igst_rate": 0.0,
+          "igst_amount": 0.0,
+          "cess_amount": 0.0,
+          "total_tax": 120.0,
+          "total_amount": 1120.0,
+          "charge_allocation": 200.0,
+          "landed_amount": 1200.0,
+          "landed_unit_cost": 120.0
+        }
+      ],
+      "expected_charges": [
+        {
+          "charge_id": "C1",
+          "taxable_amount": 200.0,
+          "cgst_amount": 12.0,
+          "sgst_amount": 12.0,
+          "igst_amount": 0.0,
+          "cess_amount": 0.0,
+          "total_tax": 24.0,
+          "total_amount": 224.0,
+          "spread_basis_used": "value",
+          "in_payable": true,
+          "is_rcm": false,
+          "creditable_tax": 24.0,
+          "non_creditable_tax": 0.0,
+          "expense_posting": 0.0,
+          "allocations": [
+            {
+              "line_id": "L1",
+              "allocated_amount": 200.0,
+              "is_remainder_paisa": false
+            }
+          ]
+        },
+        {
+          "charge_id": "C2",
+          "taxable_amount": 50.0,
+          "cgst_amount": 1.25,
+          "sgst_amount": 1.25,
+          "igst_amount": 0.0,
+          "cess_amount": 0.0,
+          "total_tax": 2.5,
+          "total_amount": 52.5,
+          "spread_basis_used": "none",
+          "in_payable": true,
+          "is_rcm": false,
+          "creditable_tax": 2.5,
+          "non_creditable_tax": 0.0,
+          "expense_posting": 50.0,
+          "allocations": []
+        }
+      ],
+      "expected_totals": {
+        "gross_subtotal": 1000.0,
+        "line_discount_total": 0.0,
+        "bill_discount_total": 0.0,
+        "taxable_subtotal": 1000.0,
+        "cgst_total": 73.25,
+        "sgst_total": 73.25,
+        "igst_total": 0.0,
+        "cess_total": 0.0,
+        "total_tax": 146.5,
+        "net_before_round": 1396.5,
+        "round_off": 0.0,
+        "grand_total": 1396.5,
+        "charge_taxable_total": 250.0,
+        "charge_tax_total": 26.5,
+        "charge_total": 276.5,
+        "separate_charge_taxable_total": 0.0,
+        "separate_charge_tax_total": 0.0,
+        "separate_charge_total": 0.0,
+        "landed_cost_addition": 200.0,
+        "expense_charge_total": 50.0,
+        "creditable_input_tax_total": 146.5,
+        "non_creditable_tax_total": 0.0,
+        "reconciliation_identity_delta": 0.0
+      }
+    },
+    {
+      "id": "TC23_PERCENT_DISCOUNT_WITH_ITS_DERIVED_AMOUNT",
+      "name": "TAX-01: a line carrying 60% and its own result Rs 54 is discounted once (90 incl 12% -> 36.00)",
+      "store_state": "32",
+      "customer_gstin": null,
+      "place_of_supply": "32",
+      "tax_mode": "inclusive",
+      "lines": [
+        {
+          "line_id": "L1",
+          "product_name": "QA Paracet 500 Strip",
+          "hsn_code": "30049099",
+          "qty": 1,
+          "loose_qty": 0,
+          "units_per_pack": 15,
+          "unit_price": 90.0,
+          "rate_basis": "sel_rate",
+          "discount_percent": 60,
+          "discount_amount": 54.0,
+          "gst_percent": 12,
+          "cess_percent": 0
+        }
+      ],
+      "bill_discount": {
+        "type": "amount",
+        "value": 0
+      },
+      "auto_round_off": true,
+      "expected_lines": [
+        {
+          "line_id": "L1",
+          "gross_amount": 90.0,
+          "line_discount": 54.0,
+          "allocated_bill_discount": 0.0,
+          "taxable_amount": 32.14,
+          "cgst_rate": 6.0,
+          "cgst_amount": 1.93,
+          "sgst_rate": 6.0,
+          "sgst_amount": 1.93,
+          "igst_rate": 0.0,
+          "igst_amount": 0.0,
+          "cess_amount": 0.0,
+          "total_tax": 3.86,
+          "total_amount": 36.0
+        }
+      ],
+      "expected_totals": {
+        "gross_subtotal": 90.0,
+        "line_discount_total": 54.0,
+        "bill_discount_total": 0.0,
+        "taxable_subtotal": 32.14,
+        "cgst_total": 1.93,
+        "sgst_total": 1.93,
+        "igst_total": 0.0,
+        "cess_total": 0.0,
+        "total_tax": 3.86,
+        "net_before_round": 36.0,
+        "round_off": 0.0,
+        "grand_total": 36.0
       }
     }
   ]

@@ -12,9 +12,6 @@ class Store extends Model
     protected $fillable = [
         'name',
         'code',
-        'activation_key',
-        'activation_key_hash',
-        'require_device_approval',
         'wipe_on_revocation',
         'phone',
         'email',
@@ -38,7 +35,6 @@ class Store extends Model
 
     protected $casts = [
         'is_active' => 'boolean',
-        'require_device_approval' => 'boolean',
         'wipe_on_revocation' => 'boolean',
         'drug_license_numbers' => 'array',
         'enabled_menu_items' => 'array',

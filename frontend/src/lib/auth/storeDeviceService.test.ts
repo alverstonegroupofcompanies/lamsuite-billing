@@ -1,9 +1,10 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { storeDeviceService } from "./storeDeviceService";
-import { sqliteStorage } from "../db/sqliteStorage";
+import { sqliteStorage, getMockDatabase } from "../db/sqliteStorage";
 import { resetMockHandlers, invokeCommand } from "../ipc/ipcBridge";
+import { DEFAULT_IDLE_LOCK_MINUTES, counterLockingService } from "./counterLockingService";
 
-describe("Workstation Activation Security (SEC-004)", () => {
+describe("Workstation session security (SEC-004)", () => {
   beforeEach(async () => {
     resetMockHandlers();
     sqliteStorage.registerMockIpcHandlers();
@@ -11,78 +12,10 @@ describe("Workstation Activation Security (SEC-004)", () => {
     vi.restoreAllMocks();
   });
 
-  it("1. Rejects invalid activation key returned by server, leaving device unregistered with no profile, vault entry, or tokens", async () => {
-    // Mock server returning 422 generic rejection
-    vi.spyOn(global, "fetch").mockResolvedValueOnce({
-      ok: false,
-      status: 422,
-      json: async () => ({ message: "Invalid, expired, or revoked activation key." }),
-    } as any);
-
-    await expect(
-      storeDeviceService.registerWithActivationKey("RANDOM-INVALID-KEY-12345", "Counter Station 01")
-    ).rejects.toThrow("Invalid, expired, or revoked activation key.");
-
-    // Verify no tokens or profiles stored in secure vault
-    const token = await invokeCommand("secure_store_get", { key: "device_token" });
-    const profile = await invokeCommand("secure_store_get", { key: "store_device_profile" });
-
-    expect(token).toBeNull();
-    expect(profile).toBeNull();
-
-    // Verify device is not registered
-    const isReg = await storeDeviceService.isDeviceRegistered();
-    expect(isReg).toBe(false);
-  });
-
-  it("2. Does NOT activate when offline or server unreachable (shows clear 'Cannot reach server' message)", async () => {
-    // Mock network failure
-    vi.spyOn(global, "fetch").mockRejectedValueOnce(new TypeError("Failed to fetch"));
-
-    await expect(
-      storeDeviceService.registerWithActivationKey("LAM-TEST-2026-KEY", "Counter Station 01")
-    ).rejects.toThrow("Cannot reach server. Online verification is required to activate this workstation.");
-
-    // Verify no offline profile was fabricated
-    const profile = await invokeCommand("secure_store_get", { key: "store_device_profile" });
-    expect(profile).toBeNull();
-
-    const isReg = await storeDeviceService.isDeviceRegistered();
-    expect(isReg).toBe(false);
-  });
-
-  it("3. Valid key from server registers device token and store profile in OS secure store", async () => {
-    vi.spyOn(global, "fetch").mockResolvedValueOnce({
-      ok: true,
-      status: 200,
-      json: async () => ({
-        success: true,
-        device_id: "dev_verified_123",
-        counter_id: "cntr_verified_01",
-        counter_name: "Counter 01",
-        counter_code: "C01",
-        store_id: "1",
-        store_name: "LamStone Pharmacy Main",
-        store_code: "STORE-01",
-        device_token: "lsd_valid_secure_token_abc123",
-        refresh_token: "ref_valid_secure_token_xyz789",
-        license_plan: "Enterprise Retail",
-        status: "active",
-        admin_staff_present: true,
-      }),
-    } as any);
-
-    const profile = await storeDeviceService.registerWithActivationKey("LAM-VALID-KEY-9999", "Counter 01");
-
-    expect(profile.store_id).toBe("1");
-    expect(profile.store_name).toBe("LamStone Pharmacy Main");
-
-    const savedToken = await invokeCommand("secure_store_get", { key: "device_token" });
-    expect(savedToken).toBe("lsd_valid_secure_token_abc123");
-
-    const isReg = await storeDeviceService.isDeviceRegistered();
-    expect(isReg).toBe(true);
-  });
+  // CNT-013: getting onto a till at all is the claim path, covered by
+  // storeDeviceService.claim.test.ts and the backend RetiredRegistrationPathsTest.
+  // What is left here is what a claimed workstation does when the server changes
+  // its mind about it.
 
   it("4. Device session validation locks and resets device if server revokes or does not recognize token", async () => {
     // Pre-populate secure store with an active session
@@ -196,56 +129,64 @@ describe("Workstation Activation Security (SEC-004)", () => {
     expect(check.locked).toBe(false);
     expect(await invokeCommand("secure_store_get", { key: "device_token" })).toBe("lsd_registered_token");
   });
+});
 
-  it("5. Release code verification: No demo bypass key or auto-activation exists in App.tsx or storeDeviceService", async () => {
-    // Verify that attempting to activate with any dummy string without server contact fails
-    vi.spyOn(global, "fetch").mockRejectedValueOnce(new Error("Network down"));
-
-    await expect(
-      storeDeviceService.registerWithActivationKey("LAM-DEMO-2026-KEY", "Counter 01")
-    ).rejects.toThrow();
+/**
+ * IS9 — the counter's lock caches are till-local caches like the series and the
+ * grace clock: when the counter stops being this machine's, the owner's idle
+ * minutes and the cached unlock credential go with it.
+ */
+describe("The counter's lock caches go with the counter (IS9)", () => {
+  beforeEach(async () => {
+    resetMockHandlers();
+    sqliteStorage.registerMockIpcHandlers();
+    getMockDatabase().reset();
+    storeDeviceService.clearProfileCache();
+    counterLockingService.unload();
+    vi.restoreAllMocks();
   });
 
-  it("6. Falls back to local dev server if cloud endpoint rejects local activation key", async () => {
-    const { setApiBaseUrl } = await import("../../config/env");
-    setApiBaseUrl("https://api.lamstonehealthcare.com");
+  async function seedCounterLockCaches(): Promise<void> {
+    await counterLockingService.applyContext({
+      counter: { id: 12, counter_code: "C01", counter_name: "Front Counter" },
+      store: { id: 1 },
+      locking: { idle_lock_minutes: 2, unlock: { pin_set: true, failed_attempts: 0, locked_until: null } },
+    } as any);
 
-    // 1st call (cloud): rejects with 422
-    // 2nd call (local): accepts with 200
-    vi.spyOn(global, "fetch")
-      .mockResolvedValueOnce({
-        ok: false,
-        status: 422,
-        json: async () => ({ message: "Invalid, expired, or revoked activation key." }),
-      } as any)
-      .mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        json: async () => ({
-          success: true,
-          device_id: "dev_local_123",
-          counter_id: "cntr_local_01",
-          counter_name: "Counter 01",
-          counter_code: "C01",
-          store_id: "4",
-          store_name: "Test Store",
-          store_code: "TESTSTORE",
-          device_token: "lsd_local_token_abc123",
-          refresh_token: "ref_local_token_xyz789",
-          license_plan: "Professional",
-          status: "active",
-        }),
-      } as any);
+    vi.spyOn(global, "fetch").mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        success: true,
+        counter_id: 12,
+        store_id: 1,
+        credentials: [
+          { kind: "counter_unlock", pin_set: true, algorithm: "bcrypt", hash: "$2y$10$aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" },
+        ],
+      }),
+    } as any);
 
-    const profile = await storeDeviceService.registerWithActivationKey("LAM-TESTSTOR-5B97D9A407A62056-1A4370E8", "Counter 01");
-    expect(profile.store_id).toBe("4");
-    expect(profile.store_name).toBe("Test Store");
+    expect(await counterLockingService.cacheUnlockHash()).toBe(true);
+    expect(await sqliteStorage.findAll("counter_unlock_cache")).toHaveLength(1);
+    expect(counterLockingService.idleTimeoutMs()).toBe(2 * 60_000);
+  }
 
-    // Verify fallback updated the API_BASE_URL to local server
-    const { API_BASE_URL } = await import("../../config/env");
-    expect(API_BASE_URL).toBe("http://127.0.0.1:8000");
+  it("purges the idle minutes and cached unlock credential when the server takes the counter back", async () => {
+    await seedCounterLockCaches();
 
-    // Reset back to local default
-    setApiBaseUrl("http://127.0.0.1:8000");
+    await storeDeviceService.lockAndResetWorkstation();
+
+    expect(await sqliteStorage.findAll("counter_unlock_cache")).toHaveLength(0);
+    expect(await sqliteStorage.findAll("counter_locking")).toHaveLength(0);
+    expect(counterLockingService.idleTimeoutMs()).toBe(DEFAULT_IDLE_LOCK_MINUTES * 60_000);
+  });
+
+  it("purges them when a cloud admin wipes the store on this machine", async () => {
+    await seedCounterLockCaches();
+
+    await storeDeviceService.remoteStoreReset("QA wipe");
+
+    expect(await sqliteStorage.findAll("counter_unlock_cache")).toHaveLength(0);
+    expect(await sqliteStorage.findAll("counter_locking")).toHaveLength(0);
   });
 });

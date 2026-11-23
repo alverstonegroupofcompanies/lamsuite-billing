@@ -5,11 +5,23 @@ export type MockHandler = (args?: unknown) => Promise<unknown> | unknown;
 const mockHandlers = new Map<string, MockHandler>();
 const inMemorySecureVault = new Map<string, string>();
 
+/**
+ * CNT-006: the desktop keeps these in the OS credential store. The key shape is
+ * the rule on both sides, so a mock can never look more secure than the app.
+ */
+const CREDENTIAL_KEY = /(device_token|refresh_token|access_token)$/i;
+
+export function isCredentialKey(key: string): boolean {
+  return CREDENTIAL_KEY.test(String(key || ""));
+}
+
 function initDefaultMockHandlers() {
   mockHandlers.set("secure_store_set", (args: any) => {
     inMemorySecureVault.set(args.key, args.value);
-    if (typeof localStorage !== "undefined") {
-      try { localStorage.setItem(`lamsuite_vault_${args.key}`, args.value); } catch (_) {}
+    if (!isCredentialKey(args.key)) {
+      if (typeof localStorage !== "undefined") {
+        try { localStorage.setItem(`lamsuite_vault_${args.key}`, args.value); } catch (_) {}
+      }
     }
     return { success: true };
   });
@@ -17,7 +29,7 @@ function initDefaultMockHandlers() {
     if (inMemorySecureVault.has(args.key)) {
       return inMemorySecureVault.get(args.key) || null;
     }
-    if (typeof localStorage !== "undefined") {
+    if (!isCredentialKey(args.key) && typeof localStorage !== "undefined") {
       try {
         const stored = localStorage.getItem(`lamsuite_vault_${args.key}`);
         if (stored !== null) {
@@ -30,8 +42,10 @@ function initDefaultMockHandlers() {
   });
   mockHandlers.set("secure_store_delete", (args: any) => {
     inMemorySecureVault.delete(args.key);
-    if (typeof localStorage !== "undefined") {
-      try { localStorage.removeItem(`lamsuite_vault_${args.key}`); } catch (_) {}
+    if (!isCredentialKey(args.key)) {
+      if (typeof localStorage !== "undefined") {
+        try { localStorage.removeItem(`lamsuite_vault_${args.key}`); } catch (_) {}
+      }
     }
     return { success: true };
   });

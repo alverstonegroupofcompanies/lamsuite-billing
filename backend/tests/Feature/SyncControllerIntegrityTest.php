@@ -21,7 +21,7 @@ class SyncControllerIntegrityTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        $this->withoutMiddleware(\App\Http\Middleware\AuthenticateDevice::class);
+        $this->actAsClaimedCounterOfRequestedStore();
 
         $this->inclusiveStore = Store::create([
             'name' => 'Metro Retail Palakkad',
@@ -128,7 +128,7 @@ class SyncControllerIntegrityTest extends TestCase
             ],
         ];
 
-        $response = $this->postJson('/api/sync/push/invoices', $payload);
+        $response = $this->postJson('/api/sync/push/invoices', $payload, ['X-Store-Id' => (string) $this->exclusiveStore->id]);
         $response->assertStatus(200);
 
         $invoice = Invoice::where('external_id', 'inv_test_exc_01')->first();
@@ -156,7 +156,7 @@ class SyncControllerIntegrityTest extends TestCase
             ],
         ];
 
-        $response = $this->postJson('/api/sync/push/invoices', $payload);
+        $response = $this->postJson('/api/sync/push/invoices', $payload, ['X-Store-Id' => (string) $this->compositionStore->id]);
         $response->assertStatus(200);
 
         $invoice = Invoice::where('external_id', 'inv_test_comp_01')->first();

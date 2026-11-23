@@ -1,0 +1,23 @@
+{
+  "sale": {
+    "no": null,
+    "res": null
+  },
+  "preStock": [
+    {
+      "id": 12,
+      "batch_no": "PA-OLD",
+      "stock_qty": 370
+    },
+    {
+      "id": 6,
+      "batch_no": "B1",
+      "stock_qty": 0
+    },
+    {
+      "id": 11,
+      "batch_no": "PA-NEW",
+      "stock_qty": 1253
+    }
+  ]
+}

@@ -15,10 +15,15 @@ class StockTransferItem extends Model
         'product_id',
         'batch_no',
         'qty',
+        'received_qty',
+        'short_qty',
+        'shortage_reason',
     ];
 
     protected $casts = [
         'qty' => 'decimal:2',
+        'received_qty' => 'decimal:2',
+        'short_qty' => 'decimal:2',
     ];
 
     public function transfer(): BelongsTo

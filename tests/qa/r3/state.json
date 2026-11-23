@@ -1,0 +1,54 @@
+{
+  "stores": {
+    "QA-PH": 4,
+    "QA-CS": 5
+  },
+  "codes": {
+    "PH Front Till": "LAM-C01-61424F06A2BAB273-1F30878E0956E92A",
+    "PH Back Till": "LAM-C02-34E8D31873CE7299-DAD0BB41D9D0EC21",
+    "CS Front Till": "LAM-C01-40E33873AC2F9F54-B358A5AD2D0EB6E4",
+    "CS Back Till": "LAM-C02-1E64934F96A123D8-C6EDE206464C60F5"
+  },
+  "adminToken": "17|KBrwzT4TAqIJ6s6JYf2acE6sMVO6BAMvnPXVqQNB95d7969b",
+  "expiryProbe": {
+    "counter_id": 6,
+    "code": "LAM-C03-7089CEF924D1073E-91569D4B88DB1615",
+    "issued_at": "2026-11-21T15:29:50.947Z",
+    "expires_at": "2026-11-21T21:59:50+05:30"
+  },
+  "revokedCode": "LAM-C02-72E32CEB6F0C6473-DB464205BAB4204C",
+  "tillA": {
+    "counterId": 2,
+    "token": "lsd_4RjdbcgCEHiySuBEAaqY2GF6F015p7yr2m0V7tN1"
+  },
+  "products": {
+    "QA Paracet 500 Strip": 5,
+    "QA Cough Syrup 100ml": 6,
+    "QA Alprazolam 0.25 Strip": 7,
+    "QA Glow Face Cream 50g": 8,
+    "QA Ruby Lipstick": 9
+  },
+  "parties": {
+    "QA Credit Customer": 6,
+    "QA No Credit Customer": 7,
+    "QA Pharma Distributors": 8,
+    "Dr QA Physician": 9,
+    "QA Beauty Client": 10,
+    "QA Beauty Wholesale MH": 11
+  },
+  "purchaseBill": "QA-PB-002",
+  "apiTillPH": {
+    "counterId": 3,
+    "token": "lsd_7xVAgKGPjJphmXKYTv1OgVAGcj5t9GL7nhmz8Zfo"
+  },
+  "j4Invoice": 4,
+  "phManager": 7,
+  "apiTillCS": {
+    "counterId": 5,
+    "token": "lsd_XhouPSCMCAPdHfNVbWJ5j626lyPjU9DGEsGvPTkH"
+  },
+  "apiTillPH_C01": {
+    "counterId": 2,
+    "token": "lsd_sLi5AZaMmeRpphazBrDhzPLyfmJV65079COgtwFR"
+  }
+}

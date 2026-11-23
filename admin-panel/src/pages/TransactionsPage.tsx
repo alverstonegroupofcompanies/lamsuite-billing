@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { Invoice, InvoiceItem } from "../types";
+import { Invoice, InvoiceItem, type PaymentAllocationInput } from "../types";
 import { api, ApiError } from "../services/api";
 import { formatINR, formatDate, formatDateTime, formatIndianNumber } from "../utils/formatters";
 import { useAuth } from "../context/AuthContext";
@@ -7,6 +7,8 @@ import { ConfirmModal } from "../components/ConfirmModal";
 import { ConflictModal } from "../components/ConflictModal";
 import { DocumentEditorModal, type DocumentKind } from "../components/transactions/DocumentEditorModal";
 import { CustomerReceiptModal } from "../components/transactions/CustomerReceiptModal";
+import { AllocationPicker } from "../components/transactions/AllocationPicker";
+import { PurchaseChargesPanel } from "../components/transactions/PurchaseChargesPanel";
 import {
   Receipt,
   Search,
@@ -34,6 +36,7 @@ import {
   ShieldCheck,
   Pencil,
   Trash2,
+  ScrollText,
 } from "lucide-react";
 
 const todayInputValue = () => {
@@ -70,6 +73,7 @@ export const TransactionsPage: React.FC = () => {
     | "supplier_payments"
     | "held_bills"
     | "shifts"
+    | "purchase_charges"
   >("invoices");
 
   const [invoices, setInvoices] = useState<Invoice[]>([]);
@@ -125,6 +129,7 @@ export const TransactionsPage: React.FC = () => {
   const [supplierPayMode, setSupplierPayMode] = useState("Bank Transfer");
   const [supplierPayRef, setSupplierPayRef] = useState("");
   const [supplierPayNotes, setSupplierPayNotes] = useState("");
+  const [supplierPayAllocations, setSupplierPayAllocations] = useState<PaymentAllocationInput[] | undefined>(undefined);
   const [suppliersList, setSuppliersList] = useState<any[]>([]);
 
   // Expense Voucher Modal
@@ -345,18 +350,36 @@ export const TransactionsPage: React.FC = () => {
     if (!activeStore || !supplierPaySupplierId || !supplierPayAmount) return;
 
     try {
-      await api.post("/admin/supplier-payments", {
-        store_id: activeStore.id,
-        supplier_id: supplierPaySupplierId,
-        amount: Number(supplierPayAmount),
-        payment_mode: supplierPayMode,
-        reference_no: supplierPayRef,
-        notes: supplierPayNotes,
-      });
+      const res = await api.post<{ allocated_amount?: number; unallocated_amount?: number }>(
+        "/admin/supplier-payments",
+        {
+          store_id: activeStore.id,
+          supplier_id: supplierPaySupplierId,
+          amount: Number(supplierPayAmount),
+          payment_mode: supplierPayMode,
+          reference_no: supplierPayRef,
+          notes: supplierPayNotes,
+          ...(supplierPayAllocations && supplierPayAllocations.length > 0
+            ? { allocations: supplierPayAllocations }
+            : {}),
+        }
+      );
+      const paid = Number(supplierPayAmount);
+      const settled = Number(res?.allocated_amount || 0);
+      const onAccount = Number(res?.unallocated_amount || 0);
       setIsSupplierPayModalOpen(false);
       setSupplierPayAmount("");
       setSupplierPayRef("");
       setSupplierPayNotes("");
+      setSupplierPayAllocations(undefined);
+      setActionFeedback({
+        kind: "success",
+        message:
+          settled > 0
+            ? `Disbursed ${formatINR(paid)} — ${formatINR(settled)} settled against purchase bills` +
+              (onAccount > 0 ? `, ${formatINR(onAccount)} left on account.` : ".")
+            : `Disbursed ${formatINR(paid)} — no open purchase bills to settle.`,
+      });
       await fetchTransactions();
     } catch (err: any) {
       alert(err?.message || "Failed to record supplier payment.");
@@ -695,6 +718,7 @@ export const TransactionsPage: React.FC = () => {
           { id: "purchases", label: "Inward Purchases", icon: ShoppingBag },
           { id: "purchase_returns", label: "Purchase Returns", icon: ArrowRightLeft },
           { id: "purchase_orders", label: "Purchase Orders", icon: FileCheck2 },
+          { id: "purchase_charges", label: "Bill Charges", icon: ScrollText },
           { id: "held_bills", label: "Held Bills", icon: PauseCircle },
           { id: "shifts", label: "Shifts & Cash Close", icon: Layers },
           { id: "transfers", label: "Stock Transfers", icon: Package },
@@ -722,6 +746,9 @@ export const TransactionsPage: React.FC = () => {
       </div>
 
       {/* Search & Filter Toolbar */}
+      {/* The charges register owns its filters — head, treatment, payable membership and a bill-date
+          range are not expressible in one search box, and a second box beside them reads as a bug. */}
+      {activeTab !== "purchase_charges" && (
       <div className="bg-white dark:bg-slate-900 p-3 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xs flex flex-col sm:flex-row items-center justify-between gap-3">
         <div className="relative w-full sm:w-80">
           <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
@@ -770,6 +797,10 @@ export const TransactionsPage: React.FC = () => {
           </button>
         </div>
       </div>
+      )}
+
+      {/* Bill Charges — CR-C: the freight, packing and courier of every supplier bill, as rows */}
+      {activeTab === "purchase_charges" && <PurchaseChargesPanel />}
 
       {/* Invoices Table */}
       {activeTab === "invoices" && (
@@ -1063,6 +1094,7 @@ export const TransactionsPage: React.FC = () => {
                 {isAllStores && <th className="px-4 py-3">Store</th>}
                 <th className="px-4 py-3">Supplier Name</th>
                 <th className="px-4 py-3">Supplier GSTIN</th>
+                <th className="px-4 py-3 text-right">Charges</th>
                 <th className="px-4 py-3 text-right">Tax Total</th>
                 <th className="px-4 py-3 text-right">Grand Total</th>
                 <th className="px-4 py-3 text-center">Status</th>
@@ -1071,7 +1103,7 @@ export const TransactionsPage: React.FC = () => {
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
               {purchases.length === 0 ? (
                 <tr>
-                  <td colSpan={isAllStores ? 7 : 6} className="px-4 py-8 text-center text-slate-400">
+                  <td colSpan={(isAllStores ? 8 : 7)} className="px-4 py-8 text-center text-slate-400">
                     No inward purchase bills recorded.
                   </td>
                 </tr>
@@ -1079,7 +1111,10 @@ export const TransactionsPage: React.FC = () => {
                 purchases.map((p) => (
                   <tr key={p.id} className="hover:bg-slate-50/50">
                     <td className="px-4 py-3 font-mono font-bold text-slate-900 dark:text-white">
-                      {p.invoice_number}
+                      {p.supplier_invoice_no || p.invoice_number}
+                      {p.document_number && p.document_number !== (p.supplier_invoice_no || p.invoice_number) && (
+                        <div className="text-[10px] text-slate-500 font-normal">Till {p.document_number}</div>
+                      )}
                       <div className="text-[10px] text-slate-400">{formatDate(p.invoice_date)}</div>
                     </td>
                     {isAllStores && (
@@ -1087,6 +1122,16 @@ export const TransactionsPage: React.FC = () => {
                     )}
                     <td className="px-4 py-3 font-semibold">{p.supplier_name}</td>
                     <td className="px-4 py-3 font-mono">{p.supplier_gstin || "—"}</td>
+                    {/* REP-007: the goods total and the charge total are two blocks, so the row can be
+                        footed against the payable instead of hiding freight inside a tax column. */}
+                    <td className="px-4 py-3 text-right font-mono">
+                      {formatINR(p.charge_register?.charge_total ?? 0)}
+                      {Number(p.charge_register?.separately_paid?.total ?? 0) > 0 && (
+                        <div className="text-[10px] text-amber-600 dark:text-amber-400">
+                          + {formatINR(p.charge_register.separately_paid.total)} outside
+                        </div>
+                      )}
+                    </td>
                     <td className="px-4 py-3 text-right font-mono">{formatINR(p.tax_total)}</td>
                     <td className="px-4 py-3 text-right font-mono font-bold text-slate-900 dark:text-white">
                       {formatINR(p.grand_total)}
@@ -1732,7 +1777,7 @@ export const TransactionsPage: React.FC = () => {
 
       {isSupplierPayModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
-          <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 max-w-md w-full p-6 space-y-4">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 max-w-lg w-full p-6 space-y-4">
             <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
               <h3 className="font-bold text-slate-900 dark:text-white text-sm flex items-center gap-2">
                 <DollarSign className="w-4 h-4 text-brand-600" />
@@ -1749,7 +1794,10 @@ export const TransactionsPage: React.FC = () => {
                 <select
                   required
                   value={supplierPaySupplierId}
-                  onChange={(e) => setSupplierPaySupplierId(e.target.value)}
+                  onChange={(e) => {
+                    setSupplierPaySupplierId(e.target.value);
+                    setSupplierPayAllocations(undefined);
+                  }}
                   className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl font-medium"
                 >
                   <option value="">-- Choose Supplier --</option>
@@ -1773,6 +1821,16 @@ export const TransactionsPage: React.FC = () => {
                   className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl font-mono text-sm"
                 />
               </div>
+
+              {supplierPaySupplierId && activeStore?.id && (
+                <AllocationPicker
+                  storeId={activeStore.id}
+                  partyType="supplier"
+                  partyId={String(supplierPaySupplierId)}
+                  amount={supplierPayAmount}
+                  onAllocationsChange={setSupplierPayAllocations}
+                />
+              )}
 
               <div>
                 <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">Payment Mode</label>

@@ -1,0 +1,24 @@
+{
+  "stores": {
+    "QA-PH": 4,
+    "QA-CS": 5
+  },
+  "products": {
+    "QA Paracet 500 Strip": 5,
+    "QA Cough Syrup 100ml": 6,
+    "QA Alprazolam 0.25 Strip": 7,
+    "QA Glow Face Cream 50g": 8,
+    "QA Ruby Lipstick": 9
+  },
+  "adminToken": "6|CduORWLT9CXGRGEFu8EYM918p5B5gzvd7PFXXdYt7c11d2d8",
+  "apiTillCS": {
+    "counterId": 4,
+    "storeId": 5,
+    "token": "lsd_qX4mvK78OvwO78mSfdTKGwTU15bEaFhHoPCo2DLi"
+  },
+  "apiTillPH": {
+    "counterId": 2,
+    "storeId": 4,
+    "token": "lsd_Ypv1i4TDOlQKZBXIsJsW1siEoshh69vZhUiVPMbA"
+  }
+}

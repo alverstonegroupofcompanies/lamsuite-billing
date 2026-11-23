@@ -54,6 +54,48 @@ paths:
         '200':
           description: Device paired and activated
 
+  /devices/validate:
+    post:
+      summary: Workstation handshake — counter lifecycle and offline grace clock (CNT-011)
+      description: >
+        Called on every boot and every reconnection. The token names the tenant and the counter; no
+        parameter selects either. The counter's lifecycle outranks the device row, so a revoked or
+        retired counter is refused even while its device record still says active. A clean handshake
+        is a renewal: it re-stamps the counter's last-seen watermark and answers the absolute deadline
+        the till must respect while it is dark. No response ever repeats the credential it was given.
+      parameters:
+        - name: X-Device-Token
+          in: header
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: >
+            Active and verified. `offline.grace_until` is absolute (watermark + owner-set
+            `grace_hours`, null when grace is 0); `server_time` lets a till whose clock disagrees with
+            the store's still honour exactly the hours it was granted.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  valid: { type: boolean, example: true }
+                  status: { type: string, example: active }
+                  server_time: { type: string, format: date-time }
+                  wipe_on_revocation: { type: boolean }
+                  offline:
+                    type: object
+                    properties:
+                      grace_hours: { type: integer }
+                      last_seen_at: { type: string, format: date-time, nullable: true }
+                      grace_until: { type: string, format: date-time, nullable: true }
+        '401':
+          description: Missing or unrecognized token — action lock_and_reset
+        '403':
+          description: >
+            `store_inactive` or `revoked` ⇒ action lock_and_reset (the till wipes its token and locks);
+            `locked` ⇒ action counter_locked (the till pauses but keeps its claim and renews nothing).
+
   /products:
     get:
       summary: List catalog items with filters
@@ -178,11 +220,17 @@ paths:
   /purchase-documents:
     get:
       summary: List purchase bills and returns
+      parameters:
+        - { name: store_id, in: query, schema: { type: integer }, description: "Explicit store required for cross-store admin scope; own store implied for tills." }
+        - { name: from, in: query, schema: { type: string, format: date } }
+        - { name: to, in: query, schema: { type: string, format: date } }
+        - { name: has_charges, in: query, schema: { type: boolean }, description: "Filter to bills carrying supplier bill charges (CR-C)." }
+        - { name: charge_head, in: query, schema: { type: string }, description: "Filter by charge head code (CR-C)." }
       responses:
         '200':
-          description: Purchase documents list
+          description: Purchase documents list, each with a charges[] summary (count, taxable, tax, total, split by treatment and paid-separately) and the payable/kept-apart halves split on the membership stored with each charge row (CR-C-11)
     post:
-      summary: Record inward purchase bill
+      summary: Record inward purchase bill (items + charges in one aggregate)
       requestBody:
         required: true
         content:
@@ -191,7 +239,216 @@ paths:
               $ref: '#/components/schemas/PurchaseDocumentInput'
       responses:
         '201':
-          description: Purchase bill recorded
+          description: >
+            Purchase bill recorded. Charge lines are validated against the store's charge policy
+            (CFG-003) and its own store's heads (R12); the server re-derives every charge's tax and
+            allocation with the shared engine and returns the computed document.
+        '422':
+          description: >
+            Charge rejected — head unknown in this store (R12) or deactivated, an amount whose sign
+            the head does not allow (`allowed_sign`), an amount the store's policy refuses
+            (`billing.purchase_charges.allow_negative_charges` off, named at `charges.{i}.amount`),
+            a charge total above `billing.purchase_charges.max_percent_of_goods` of the goods value
+            (named at `charges`, quoting the percent, the charge total and the goods total), or a
+            charge carrying its own place of supply that differs from the supplier bill's. Both
+            policy checks run at one place inside the bill's own transaction before any charge row
+            is written, so a rejected bill leaves no header, rows, allocations or expense.
+            Allocations are not accepted from a client: the engine re-spreads the taxable amount plus
+            non-creditable tax in whole paise, so they sum
+            to the charge by construction.
+
+  /purchase-documents/{id}:
+    get:
+      summary: Read a purchase bill with its charges and per-line allocations
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: Header, items (with charge_allocation, landed_unit_cost, gross_weight_kg), charges[] with allocations[], landed vs billed cost split, payable built from the rows whose stored `in_payable` is true — separately-paid money included only where the bill was keyed while that policy was on (CR-C-11)
+        '404':
+          description: Not found in the caller's store scope
+    put:
+      summary: Edit a purchase bill (reverse-and-repost, CR-C)
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PurchaseDocumentInput'
+      responses:
+        '200':
+          description: >
+            Atomic in one transaction - old charges, landed cost, expense postings, supplier payable
+            and input tax reversed; then re-posted from the new payload (PUR-015).
+    delete:
+      summary: Cancel a purchase bill
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: Full reversal - stock restored, payable debited, every charge reversed to the paisa, expense reversed, tax reversed (PUR-015)
+
+  /purchase-charges:
+    get:
+      summary: Every purchase charge across bills, filterable (CR-C, PUR-008/PUR-013)
+      description: >
+        Routed as `GET /api/admin/purchase-charges` (`AdminPurchaseChargeController::index`,
+        `rbac:transactions,view` — the same permission as `/purchases`), landed with Task 4.14. The
+        admin panel reads it from the Bill Charges tab of Transactions. Every figure comes from the
+        stored row: `in_payable` is reported as the bill was posted with it, never re-derived from
+        today's policy, so this screen cannot contradict a printed document (PUR-016). Filters are
+        matched literally — `head_code` upper-cased, the three flags read as truthy/falsey, an enum
+        value outside its set simply matches nothing — because this endpoint reports rows and takes
+        no writes.
+      parameters:
+        - { name: store_id, in: query, schema: { type: integer }, description: "Ignored for a store-scoped user; a cross-store read names each row's store." }
+        - { name: from, in: query, schema: { type: string, format: date }, description: "Bill invoice date, inclusive." }
+        - { name: to, in: query, schema: { type: string, format: date } }
+        - { name: search, in: query, schema: { type: string }, description: "Substring over invoice number, supplier name, head name, note and paid-to label." }
+        - { name: head_code, in: query, schema: { type: string } }
+        - { name: treatment, in: query, schema: { type: string, enum: [add_to_cost, expense] } }
+        - { name: spread_method, in: query, schema: { type: string, enum: [value, quantity, weight] } }
+        - { name: itc_eligibility, in: query, schema: { type: string, enum: [eligible, ineligible, blocked, partial] } }
+        - { name: is_rcm, in: query, schema: { type: boolean }, description: "Reverse-charge rows for review (REP-009)." }
+        - { name: paid_separately, in: query, schema: { type: boolean } }
+        - { name: in_payable, in: query, schema: { type: boolean }, description: "Money inside the supplier payable vs. money paid over its head." }
+        - { name: page, in: query, schema: { type: integer, default: 1 } }
+        - { name: per_page, in: query, schema: { type: integer, minimum: 1, maximum: 500, default: 25 } }
+        - { name: export, in: query, schema: { type: string, enum: ["true"] }, description: "Unpaginated answer to the same filters, ordered by bill then seq; the response omits `meta` and the panel builds the CSV itself." }
+      responses:
+        '200':
+          description: >
+            `{success, data[], meta|null, summary}` where `summary` is measured over the whole
+            filtered set, not the page: `row_count`, `charge_amount_total`, `in_payable_total`,
+            `outside_payable_total`. Each row carries store identity (`store{id,name,code}`), its
+            parent bill (`purchase{invoice_number,supplier_name,invoice_date}`), `seq`, the head as
+            posted, taxable/tax/total, allocation, reversal, and the stored flags.
+        '403':
+          description: Caller lacks `transactions.view`
+
+  /purchase-charges/export:
+    get:
+      summary: Streamed CSV/Excel export of the filtered charge rows
+      x-status: superseded
+      description: >
+        Not built as its own route. `GET /admin/purchase-charges?export=true` returns the whole
+        filtered set unpaginated and the admin panel writes the file (`admin-panel/src/utils/csv.ts`),
+        which is what Task 4.14 shipped; nothing consumes a server-side stream of these rows today.
+
+  /lookups/{id}:
+    delete:
+      summary: Delete a store-scoped master row, after its references move (R12, MST-008)
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+        - { name: reassign_to, in: query, schema: { type: integer }, description: "Required when the row is still referenced. Another active row of the same type in the same store." }
+      description: >
+        Units (v2.1.1) and charge heads (CR-C) are store-scoped, and a row that data still points at
+        is not deletable by ignoring the pointer: the charge keeps its denormalised `head_name` and
+        the product keeps its unit, so the bills already printed stay readable while the master stops
+        lying about what exists. A row with no references deletes as any other lookup does.
+      responses:
+        '200':
+          description: >
+            Deleted. With `reassign_to`, the response also reports how many references moved —
+            products onto the replacement unit, or charge lines onto the replacement head.
+        '404':
+          description: Row outside the caller's store scope, which is the same as not existing
+        '409':
+          description: >
+            `{reassignment_required: true, ...}` plus the referrers and the candidates that could take
+            them: `referencing_products` / `candidate_units` for a unit, `referencing_bills` (bill
+            number and the charge amount riding on it) / `candidate_heads` for a charge head. The
+            screen is expected to make the owner pick one, not to delete anyway.
+
+  /lookups/reset-charge-heads:
+    post:
+      summary: Reset a store's charge heads to the seeded default set (R12, MST-008)
+      description: >
+        Routed as `POST /api/admin/lookups/reset-charge-heads` (`AdminMasterController::resetChargeHeads`);
+        the head type is not a path segment because only `charge_head` resets this way. The store comes
+        from `store_id` or the caller's own scope.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                store_id: { type: integer }
+      responses:
+        '200':
+          description: Missing defaults re-seeded, unreferenced custom heads removed, referenced custom heads kept
+
+  /settings:
+    get:
+      summary: The store's settings payload (CFG-003) — only the charge policy block is CR-C contract
+      description: >
+        Routed as `GET /api/admin/settings` (`rbac:settings,view`). The till gets the same block in its
+        sync pull bundle and keeps its own copy (CFG-003). CR-C adds one nested block here; the rest of
+        the payload predates it and is not restated.
+      responses:
+        '200':
+          description: >
+            `billing.purchase_charges` is always present, normalized into exactly the shapes the two
+            engines read: `reverse_on_return` (`proportional` | `sunk` — any other stored spelling
+            reads as `proportional`), `separately_paid_in_payable` (boolean, default `false`) and
+            `allow_negative_charges` (boolean, default `true`) as real booleans so a legacy `"1"` /
+            `"true"` reads as on and `"0"`, `""`, `null` or a stray word reads as off, and
+            `max_percent_of_goods` as a number or `null`, where `null` and `0` both mean no cap.
+    post:
+      summary: Save settings — the charge policy an owner can now set from the panel (CFG-003)
+      description: >
+        `POST` or `PUT /api/admin/settings` (`rbac:settings,edit`). The `billing` block is stored as
+        sent, not merged, so a client that wants to change one switch posts the whole block it read:
+        the panel edits `billing.purchase_charges` as a patch over the value it fetched, which is why
+        keys this screen does not show survive a save.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                billing:
+                  type: object
+                  properties:
+                    purchase_charges:
+                      type: object
+                      description: "Enforced at posting by `PurchaseChargeService::assertPolicyAllows()`, on both the REST and the sync path, inside the bill's transaction. Changing it restates no already-posted bill (PUR-016)."
+                      properties:
+                        reverse_on_return: { type: string, enum: [proportional, sunk] }
+                        separately_paid_in_payable: { type: boolean }
+                        allow_negative_charges: { type: boolean }
+                        max_percent_of_goods:
+                          type: [number, "null"]
+                          description: "Percent of the goods value. No cap when `null`, absent or `0` — `assertPolicyAllows()` returns before measuring for any cap `<= 0`."
+      responses:
+        '200':
+          description: Saved, with the full recomputed settings payload returned in normalized shapes
+
+  /expenses:
+    post:
+      summary: Record an expense (now linkable to a purchase charge, CR-C PUR-012/PUR-013)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExpenseInput'
+      responses:
+        '201':
+          description: Expense created
+    get:
+      summary: Expense register rows (REP-008)
+      parameters:
+        - { name: store_id, in: query, schema: { type: integer } }
+        - { name: head, in: query, schema: { type: string } }
+        - { name: purchase_id, in: query, schema: { type: string } }
+        - { name: source, in: query, schema: { type: string, enum: [manual, purchase_charge] } }
+      responses:
+        '200':
+          description: Manual expenses and expense-treated purchase charges, each with tax columns, ITC flag and bill link
 
   /customers:
     get:
@@ -258,6 +515,35 @@ paths:
         '200':
           description: Invoices ingested and synced
 
+  /sync/purchases:
+    post:
+      summary: >
+        Idempotent push of offline purchase bills (CR-C, SYNC-007). Charges travel inside the purchase
+        aggregate - there is no separate charge entity in the sync queue, so a bill can never land
+        with its charges missing.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                purchases:
+                  type: array
+                  items: { $ref: '#/components/schemas/PurchaseDocumentInput' }
+      responses:
+        '200':
+          description: >
+            Each bill upserted by (store_id, external_id); child charge rows replaced atomically the
+            same way purchase items are. Server re-derives tax and allocations and must reproduce the
+            till's paisa exactly. Retried pushes change nothing. A debit note (`module_key`
+            `purchase_return` / `debit_note`) carries no client charges: the reversal rows are derived
+            server-side from the original bill's stored charge rows, which is also why they bypass the
+            head-existence check - a posted charge outlives the head it was keyed to. The till runs the
+            same derivation offline so the printed note agrees to the paisa (PUR-015).
+        '422':
+          description: Bill rejected (store scope, head unknown to that store, charge policy, or reconciliation failure)
+
   /sync/stock-events:
     post:
       summary: Stream stock transactions to central ledger
@@ -294,8 +580,160 @@ paths:
         '200':
           description: Tabular report dataset
 
+  /reports/expense-register:
+    get:
+      summary: Expense Register — manual expenses and expense-treated bill charges (REP-008)
+      description: >
+        One register over two sources: rows with `source = purchase_charge` are read from the bill's
+        own `purchase_charges` (treatment `expense`), so a charge shows up whether or not its twin row
+        in `expenses` survived an edit, and rows with `source = manual` are the `expenses` records that
+        no charge created. A charge row is therefore never counted twice.
+      operationId: expenseRegister
+      parameters:
+        - name: start_date
+          in: query
+          schema: { type: string, format: date }
+          description: Charge rows are dated by their bill's invoice date, manual rows by expense_date.
+        - name: end_date
+          in: query
+          schema: { type: string, format: date }
+        - name: head
+          in: query
+          schema: { type: string }
+          description: Like-match on the head name/code (charge rows) or expense head (manual rows).
+        - name: source
+          in: query
+          schema: { type: string, enum: [all, manual, purchase_charge] }
+      responses:
+        '200':
+          description: >
+            `rows[]` with date, source, head, tax columns (cgst/sgst/igst/cess), `itc_eligibility`,
+            `creditable_tax`/`non_creditable_tax`, `amount` (the posting: taxable + non-creditable tax,
+            PUR-012), `is_rcm`, `paid_separately`, `in_payable` (CR-C-11: the membership stored with the
+            charge row, which is what splits the payable columns; `paid_separately` still drives `payment_mode`),
+            `payment_mode` and — for charge rows — the purchase
+            link; plus `totals` and a `reconciliation` block proving the expense half of the identity in
+            `specs/modules/purchase-management.md`.
+        '422': { description: Bad date or source parameter }
+
+  /counter/sequences:
+    get:
+      summary: The number series this counter owns (CNT-014)
+      description: >
+        Device-authenticated. The workstation token names the counter; no parameter selects one.
+        Answers the same manifest the claim and /counter/context boot paths carry, so a till that
+        lost its own local series boots onto the store server's count instead of restarting it.
+      parameters:
+        - name: X-Device-Token
+          in: header
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: The counter's complete series set
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  counter_id: { type: integer }
+                  counter_code: { type: string }
+                  financial_year: { type: string, example: "2026-27" }
+                  doc_types:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/CounterDocType'
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/CounterSequenceManifestItem'
+        '401': { description: No or invalid workstation token }
+        '409': { description: counter_unclaimed — this workstation is not on a counter yet }
+
+  /counter/sequences/lease:
+    post:
+      summary: Reserve a block of numbers for offline billing (CNT-014)
+      description: >
+        Locks the named series and hands the counter the next unused range. A leased block is the
+        only source of numbers for a till that cannot reach the server; when it runs out the till
+        marks documents temporary and the counter renumbers them on push. `counter_id` and
+        `store_id` in the body are ignored — the token decides.
+      parameters:
+        - name: X-Device-Token
+          in: header
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [doc_type]
+              properties:
+                doc_type:
+                  $ref: '#/components/schemas/CounterDocType'
+                block_size: { type: integer, minimum: 5, maximum: 1000, default: 50 }
+                financial_year: { type: string }
+      responses:
+        '200':
+          description: The reserved block, plus the whole manifest after the lease
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  counter_id: { type: integer }
+                  counter_code: { type: string }
+                  doc_type: { $ref: '#/components/schemas/CounterDocType' }
+                  prefix: { type: string, example: "C01-INV" }
+                  range_start: { type: integer }
+                  range_end: { type: integer }
+                  block_size: { type: integer }
+                  next_number: { type: integer }
+                  sequences:
+                    $ref: '#/components/schemas/CounterSequenceManifest'
+        '409': { description: counter_unclaimed }
+        '422': { description: doc_type outside the seven counter series, or block_size out of range }
+
 components:
   schemas:
+    CounterDocType:
+      type: string
+      description: >
+        The seven series every counter holds. Older tills, print templates and stored rows also say
+        bill, sales, return, credit_note, estimate, purchase, inward, payment, adjustment or transfer;
+        the server reads each as its canonical series and never forks a second one.
+      enum: [invoice, sales_return, quotation, purchase_bill, receipt, stock_adjustment, stock_transfer]
+
+    CounterSequenceManifestItem:
+      type: object
+      required: [counter_id, doc_type, financial_year, prefix, next_number]
+      properties:
+        counter_id: { type: integer }
+        doc_type: { $ref: '#/components/schemas/CounterDocType' }
+        financial_year: { type: string, example: "2026-27" }
+        prefix: { type: string, example: "C01-INV" }
+        next_number: { type: integer, example: 1001 }
+        range_start: { type: integer, nullable: true }
+        range_end: { type: integer, nullable: true }
+
+    CounterSequenceManifest:
+      type: object
+      required: [counter_id, counter_code, financial_year, doc_types, items]
+      properties:
+        counter_id: { type: integer }
+        counter_code: { type: string }
+        financial_year: { type: string }
+        doc_types:
+          type: array
+          items: { $ref: '#/components/schemas/CounterDocType' }
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/CounterSequenceManifestItem' }
+
     ProductInput:
       type: object
       required: [name, barcode, mrp, sel_rate, gst_percent]
@@ -373,7 +811,125 @@ components:
         purchase_number: { type: string }
         purchase_date: { type: string }
         supplier_id: { type: string }
+        supplier_gstin: { type: string }
+        place_of_supply: { type: string }
+        store_id: { type: integer }
         grand_total: { type: number }
+        round_off: { type: number }
+        po_id: { type: string }
+        notes: { type: string }
+        lines:
+          type: array
+          items: { $ref: '#/components/schemas/PurchaseLineInput' }
+        charges:
+          type: array
+          description: >
+            Supplier bill charges (CR-C). Evaluated by the shared engine after bill discount and before
+            round-off. Omitted or empty means no charges; a legacy bill carrying only freight_charges is
+            accepted and normalised into one Freight charge head row.
+          items: { $ref: '#/components/schemas/PurchaseChargeInput' }
+        freight_charges:
+          type: number
+          deprecated: true
+          description: Legacy single freight scalar - superseded by charges[] (PUR-017).
+
+    PurchaseLineInput:
+      type: object
+      properties:
+        external_id: { type: string }
+        product_id: { type: string }
+        batch_no: { type: string }
+        expiry_date: { type: string }
+        pack_qty: { type: number }
+        loose_qty: { type: number }
+        free_qty: { type: number }
+        units_per_pack: { type: integer }
+        purchase_rate: { type: number, description: "As billed by the supplier. Never rewritten by charge allocation." }
+        gross_weight_kg:
+          type: number
+          description: "Total chargeable weight in kg for this line, entered at purchase (CR-C D1). Null or zero on any line makes a weight-basis charge fall back to value for the whole charge."
+        discount_percent: { type: number }
+        discount_amount: { type: number }
+        gst_percent: { type: number }
+        taxable_amount: { type: number }
+        total_amount: { type: number }
+        charge_allocation:
+          type: number
+          readOnly: true
+          description: "Paise-exact share of add-to-cost charges computed by the engine (PUR-010)."
+        landed_unit_cost:
+          type: number
+          readOnly: true
+          description: "(taxable + charge_allocation) / total received units incl. free (PUR-002/PUR-011)."
+
+    PurchaseChargeInput:
+      type: object
+      required: [external_id, head_code, amount, gst_percent, treatment, spread_method, itc_eligibility]
+      properties:
+        external_id: { type: string, description: "Till GUID; unique per store; the idempotency key for retries." }
+        seq: { type: integer }
+        head_code: { type: string, description: "Must resolve in the caller's store (R12). Cross-store head code -> 422." }
+        head_name: { type: string, description: "Denormalised onto the row so registers survive head deletion." }
+        note: { type: string }
+        treatment: { type: string, enum: [add_to_cost, expense] }
+        spread_method: { type: string, enum: [value, quantity, weight] }
+        itc_eligibility: { type: string, enum: [eligible, ineligible, blocked, partial] }
+        is_rcm: { type: boolean, description: "Reverse-charge case, flagged for review in the working papers (REP-009)." }
+        paid_separately:
+          type: boolean
+          description: "Paid to a transporter/insurer outside the supplier bill. Excluded from grand_total, supplier payable and the invoice-total check unless the store's billing.purchase_charges.separately_paid_in_payable policy bills it in (PUR-013, PUR-016, CR-C-11). Drives the payment column, the expense register and GSTR-2B attribution either way."
+        in_payable:
+          type: boolean
+          readOnly: true
+          description: "CR-C-11: whether this line was inside what the supplier is owed, stored with the row so a later policy change cannot restate a printed bill (PUR-016). Derived server-side from paid_separately plus the store's policy; a client value is never trusted on a purchase push, and only the reversal service supplies it so a debit note inherits the bill it returns."
+        paid_to_label: { type: string }
+        place_of_supply: { type: string, description: "Read-only in effect: GST is charged at document level, so a charge may only restate its supplier bill's place of supply (PUR-009). A different value -> 422 on charges.{i}.place_of_supply, before any row is written, on both the REST and sync paths." }
+        sac_code: { type: string }
+        amount:
+          type: number
+          description: "SIGNED. Negative = cash discount, round-off or TCS shown on the supplier's bill (PUR-014). Rejected on a positive-only head, and on any head when the store switched `allow_negative_charges` off."
+        gst_percent: { type: number }
+        taxable_amount: { type: number, readOnly: true }
+        cgst_amount: { type: number, readOnly: true }
+        sgst_amount: { type: number, readOnly: true }
+        igst_amount: { type: number, readOnly: true }
+        cess_amount: { type: number, readOnly: true }
+        total_amount: { type: number, readOnly: true }
+        spread_basis_used: { type: string, enum: [value, quantity, weight], readOnly: true }
+        allocations:
+          type: array
+          readOnly: true
+          items: { $ref: '#/components/schemas/PurchaseChargeAllocation' }
+
+    PurchaseChargeAllocation:
+      type: object
+      properties:
+        purchase_item_id: { type: string }
+        batch_id: { type: string }
+        basis_amount: { type: number }
+        basis_share: { type: number }
+        allocated_amount: { type: number, description: "Integer paisa. Sum across allocations always equals the charge's taxable_amount (PUR-010)." }
+        is_remainder_paisa: { type: boolean, description: "Largest-remainder paisa granted to this line; ties go to the first line in grid order." }
+
+    ExpenseInput:
+      type: object
+      required: [expense_head, amount, expense_date]
+      properties:
+        external_id: { type: string }
+        expense_head: { type: string }
+        amount: { type: number, description: "Ex-GST for purchase-charge-sourced rows; non-creditable tax is added (CR-C D3)." }
+        gst_percent: { type: number }
+        cgst_amount: { type: number }
+        sgst_amount: { type: number }
+        igst_amount: { type: number }
+        itc_eligibility: { type: string, enum: [eligible, ineligible, blocked, partial] }
+        purchase_id: { type: string, description: "Set when the row came from a purchase charge (PUR-012)." }
+        purchase_charge_id: { type: string }
+        paid_separately: { type: boolean }
+        payment_mode: { type: string }
+        reference_no: { type: string }
+        expense_date: { type: string }
+        notes: { type: string }
 
     CustomerInput:
       type: object

@@ -26,6 +26,7 @@ export interface User {
   locked_until?: string | null;
   is_locked?: boolean;
   has_pin?: boolean;
+  is_approver?: boolean;
   store?: Store;
 }
 
@@ -33,7 +34,6 @@ export interface Store {
   id: number;
   name: string;
   code: string;
-  activation_key?: string;
   phone?: string;
   email?: string;
   address?: string;
@@ -115,6 +115,8 @@ export interface Product {
   units_per_pack: number;
   rack_location?: string;
   shelf_location?: string;
+  drug_schedule_id?: number | string | null;
+  schedule_code?: string | null;
   reorder_level: number;
   current_stock: number;
   is_active: boolean;
@@ -208,6 +210,24 @@ export interface Invoice {
   items?: InvoiceItem[];
   customer?: Party;
   store?: Store;
+}
+
+export interface PaymentAllocationInput {
+  invoice_id?: number;
+  purchase_id?: number;
+  amount: number;
+}
+
+// PAY-05: an open bill a receipt may be tied to, as served by
+// GET /admin/outstanding-documents (oldest debt first).
+export interface OutstandingDocument {
+  document_type: "invoice" | "purchase";
+  document_id: number;
+  document_number: string;
+  document_date?: string | null;
+  grand_total: number;
+  paid_amount: number;
+  outstanding: number;
 }
 
 export interface SyncEvent {

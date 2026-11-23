@@ -8,13 +8,24 @@ use App\Models\Party;
 use App\Models\Product;
 use App\Models\ProductBatch;
 use App\Models\Store;
+use App\Services\Gst\PartyStateResolver;
 use App\Services\Masters\UnitDefaultsService;
+use App\Services\Masters\ChargeHeadDefaultsService;
+use App\Services\Stock\StockLedgerService;
+use App\Support\DrugSchedule;
+use App\Support\GstStateCodes;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 
 class AdminMasterController
 {
+    public function __construct(private StockLedgerService $stockLedger)
+    {
+    }
+
     /**
      * List products with batches and stock.
      * Cross-store read (All Stores scope) is admin aggregation; store identity always included.
@@ -79,7 +90,12 @@ class AdminMasterController
             'rack_location' => 'nullable|string',
             'shelf_location' => 'nullable|string',
             'reorder_level' => 'nullable|numeric|min:0',
-            'current_stock' => 'nullable|numeric|min:0',
+            'drug_schedule_id' => 'nullable|integer',
+            'initial_batch' => 'nullable|array',
+            'initial_batch.batch_no' => 'nullable|string|max:50',
+            'initial_batch.mfg_date' => 'nullable|date',
+            'initial_batch.expiry_date' => 'nullable|date',
+            'initial_batch.stock_qty' => 'nullable|numeric|min:0',
         ]);
 
         $validated['version'] = 1;
@@ -93,30 +109,50 @@ class AdminMasterController
             ], 422);
         }
 
-        $product = Product::create($validated);
+        $batchData = $validated['initial_batch'] ?? null;
+        unset($validated['initial_batch']);
 
-        // Optional initial batch
-        if ($request->has('initial_batch')) {
-            $batchData = $request->input('initial_batch');
-            ProductBatch::create([
-                'store_id' => $product->store_id,
-                'product_id' => $product->id,
-                'batch_no' => $batchData['batch_no'] ?? 'B1',
-                'mfg_date' => $batchData['mfg_date'] ?? null,
-                'expiry_date' => $batchData['expiry_date'] ?? date('Y-m-d', strtotime('+1 year')),
-                'stock_qty' => $batchData['stock_qty'] ?? ($validated['current_stock'] ?? 0),
-                'mrp' => $validated['mrp'],
-                'purchase_rate' => $validated['ptr'] ?? ($validated['mrp'] * 0.7),
-                'selling_rate' => $validated['sel_rate'],
-                'rack_location' => $validated['rack_location'] ?? null,
-                'shelf_location' => $validated['shelf_location'] ?? null,
-                'version' => 1,
+        if ($refusal = $this->stampSchedule($validated, (int) $validated['store_id'])) {
+            return $refusal;
+        }
+
+        $openingQty = (float) ($batchData['stock_qty'] ?? 0);
+        $hasBatch = $openingQty > 0;
+        if ($hasBatch && (blank($batchData['batch_no'] ?? null) || blank($batchData['expiry_date'] ?? null))) {
+            throw ValidationException::withMessages([
+                'initial_batch' => 'Opening stock needs a batch number and an expiry date.',
             ]);
         }
 
+        $actor = $request->user();
+        $product = DB::transaction(function () use ($validated, $batchData, $hasBatch, $actor) {
+            $product = Product::create($validated);
+
+            if ($hasBatch) {
+                $batch = ProductBatch::create([
+                    'store_id' => $product->store_id,
+                    'product_id' => $product->id,
+                    'batch_no' => $batchData['batch_no'],
+                    'mfg_date' => $batchData['mfg_date'] ?? null,
+                    'expiry_date' => $batchData['expiry_date'],
+                    'stock_qty' => $batchData['stock_qty'],
+                    'mrp' => $validated['mrp'],
+                    'purchase_rate' => $validated['ptr'] ?? ($validated['mrp'] * 0.7),
+                    'selling_rate' => $validated['sel_rate'],
+                    'rack_location' => $validated['rack_location'] ?? null,
+                    'shelf_location' => $validated['shelf_location'] ?? null,
+                    'version' => 1,
+                ]);
+
+                $this->stockLedger->postOpeningStock($batch, $actor);
+            }
+
+            return $product;
+        });
+
         AuditLog::log('create_product', 'Product', (string)$product->id, null, $product->toArray(), $product->store_id);
 
-        return response()->json($product->load('batches'), 201);
+        return response()->json($product->fresh()->load('batches'), 201);
     }
 
     /**
@@ -152,7 +188,7 @@ class AdminMasterController
             'rack_location' => 'nullable|string',
             'shelf_location' => 'nullable|string',
             'reorder_level' => 'nullable|numeric|min:0',
-            'current_stock' => 'nullable|numeric|min:0',
+            'drug_schedule_id' => 'nullable|integer',
             'is_active' => 'nullable|boolean',
         ]);
 
@@ -171,6 +207,10 @@ class AdminMasterController
                     'existing_product' => $clash->name,
                 ], 422);
             }
+        }
+
+        if ($refusal = $this->stampSchedule($validated, (int) $product->store_id)) {
+            return $refusal;
         }
 
         $product->update($validated);
@@ -268,11 +308,13 @@ class AdminMasterController
         ]);
 
         $validated['version'] = $batch->version + 1;
-        $batch->update($validated);
-
-        // Recalculate product current_stock
-        $totalStock = ProductBatch::where('product_id', $batch->product_id)->sum('stock_qty');
-        Product::where('id', $batch->product_id)->update(['current_stock' => $totalStock]);
+        $oldQty = (float) $batch->stock_qty;
+        $actor = $request->user();
+        DB::transaction(function () use ($batch, $validated, $oldQty, $actor) {
+            $batch->update($validated);
+            // STK-01: a hand edit of the quantity is a stock movement and is booked.
+            $this->stockLedger->postAdminCorrection($batch, $oldQty, (float) $batch->stock_qty, $actor);
+        });
 
         AuditLog::log('update_batch', 'ProductBatch', (string)$batch->id, $oldData, $batch->toArray(), $batch->store_id);
 
@@ -294,10 +336,14 @@ class AdminMasterController
             ->where('batch_no', $batch->batch_no)
             ->exists();
 
+        $oldQty = (float) $batch->stock_qty;
+        $actor = $request->user();
+
         if ($hasInvoices) {
-            $batch->update(['stock_qty' => 0, 'version' => $batch->version + 1]);
-            $totalStock = ProductBatch::where('product_id', $productId)->sum('stock_qty');
-            Product::where('id', $productId)->update(['current_stock' => $totalStock]);
+            DB::transaction(function () use ($batch, $oldQty, $actor) {
+                $batch->update(['stock_qty' => 0, 'version' => $batch->version + 1]);
+                $this->stockLedger->postAdminCorrection($batch, $oldQty, 0.0, $actor);
+            });
 
             AuditLog::log('zero_batch_stock', 'ProductBatch', (string)$id, $oldData, $batch->toArray(), $storeId);
             return response()->json([
@@ -307,10 +353,14 @@ class AdminMasterController
             ]);
         }
 
-        $batch->delete();
-
-        $totalStock = ProductBatch::where('product_id', $productId)->sum('stock_qty');
-        Product::where('id', $productId)->update(['current_stock' => $totalStock]);
+        DB::transaction(function () use ($batch, $oldQty, $actor) {
+            // Book the stock out before the row goes, so the product's ledger
+            // total still matches its batches once the batch is gone.
+            $batch->update(['stock_qty' => 0, 'version' => $batch->version + 1]);
+            $this->stockLedger->postAdminCorrection($batch, $oldQty, 0.0, $actor);
+            $batch->delete();
+            $this->stockLedger->syncProductStock($batch->product);
+        });
 
         AuditLog::log('delete_batch', 'ProductBatch', (string)$id, $oldData, null, $storeId);
 
@@ -336,24 +386,27 @@ class AdminMasterController
             'shelf_location' => 'nullable|string',
         ]);
 
-        $batch = ProductBatch::create([
-            'store_id' => $product->store_id,
-            'product_id' => $product->id,
-            'batch_no' => $validated['batch_no'],
-            'mfg_date' => $validated['mfg_date'] ?? null,
-            'expiry_date' => $validated['expiry_date'],
-            'stock_qty' => $validated['stock_qty'],
-            'mrp' => $validated['mrp'],
-            'purchase_rate' => $validated['purchase_rate'] ?? ($validated['mrp'] * 0.7),
-            'selling_rate' => $validated['selling_rate'],
-            'rack_location' => $validated['rack_location'] ?? null,
-            'shelf_location' => $validated['shelf_location'] ?? null,
-            'version' => 1,
-        ]);
+        $batch = DB::transaction(function () use ($product, $validated, $request) {
+            $batch = ProductBatch::create([
+                'store_id' => $product->store_id,
+                'product_id' => $product->id,
+                'batch_no' => $validated['batch_no'],
+                'mfg_date' => $validated['mfg_date'] ?? null,
+                'expiry_date' => $validated['expiry_date'],
+                'stock_qty' => $validated['stock_qty'],
+                'mrp' => $validated['mrp'],
+                'purchase_rate' => $validated['purchase_rate'] ?? ($validated['mrp'] * 0.7),
+                'selling_rate' => $validated['selling_rate'],
+                'rack_location' => $validated['rack_location'] ?? null,
+                'shelf_location' => $validated['shelf_location'] ?? null,
+                'version' => 1,
+            ]);
 
-        // Recalculate product current_stock
-        $totalStock = ProductBatch::where('product_id', $product->id)->sum('stock_qty');
-        $product->update(['current_stock' => $totalStock, 'version' => $product->version + 1]);
+            $this->stockLedger->postOpeningStock($batch, $request->user());
+            $product->update(['version' => $product->version + 1]);
+
+            return $batch;
+        });
 
         AuditLog::log('add_batch', 'ProductBatch', (string)$batch->id, null, $batch->toArray(), $product->store_id);
 
@@ -420,16 +473,44 @@ class AdminMasterController
         $storeId = $request->get('active_store_id');
         $type = $request->query('type');
 
-        // Units are store-scoped: a store without unit rows gets its default set
-        // on first use (self-heals stores that predate the store-scoped units).
-        if ($type === 'unit' && $storeId
-            && MasterLookup::where('store_id', $storeId)->where('type', 'unit')->count() === 0) {
-            app(UnitDefaultsService::class)->seedDefaultsForStore((int) $storeId);
+        // Units (R11) and charge heads (R12) are store-scoped: a store with no rows of
+        // the type gets its default set on first read, self-healing pre-CR stores.
+        $defaults = [
+            'unit' => UnitDefaultsService::class,
+            'charge_head' => ChargeHeadDefaultsService::class,
+        ];
+        if ($storeId && isset($defaults[$type])
+            && MasterLookup::where('store_id', $storeId)->where('type', $type)->count() === 0) {
+            app($defaults[$type])->seedDefaultsForStore((int) $storeId);
         }
+
+        // Store-scoped types never fall back to the legacy shared (store-less) rows.
+        $storeScoped = array_keys($defaults);
+        $isStoreScoped = isset($defaults[$type]);
 
         $query = MasterLookup::query()
             ->when($type, fn($q) => $q->where('type', $type))
-            ->when($storeId, fn($q) => $q->where(fn($sub) => $sub->where('store_id', $storeId)->orWhereNull('store_id')));
+            ->when($storeId, function ($q) use ($storeId, $type, $storeScoped, $isStoreScoped) {
+                if ($isStoreScoped) {
+                    $q->where('store_id', $storeId);
+
+                    return;
+                }
+
+                // Own rows, plus the legacy shared (store-less) rows of the types that
+                // are still allowed to be shared.
+                $q->where(function ($scoped) use ($storeId, $type, $storeScoped) {
+                    $scoped->where('store_id', $storeId);
+
+                    if ($type === null || $type === '') {
+                        $scoped->orWhere(fn($shared) => $shared->whereNotIn('type', $storeScoped)->whereNull('store_id'));
+
+                        return;
+                    }
+
+                    $scoped->orWhereNull('store_id');
+                });
+            });
 
         if ($search = $request->query('search')) {
             $query->where(function ($q) use ($search) {
@@ -471,6 +552,26 @@ class AdminMasterController
             $validated['store_id'] = $storeId;
         }
 
+        // R12: a charge head belongs to exactly one store — no shared, store-less row.
+        if ($validated['type'] === 'charge_head') {
+            if (empty($validated['store_id'])) {
+                return response()->json([
+                    'message' => 'R12: a charge head must belong to a store.',
+                ], 422);
+            }
+            $validated['config'] = $this->chargeHeadConfig($validated['config'] ?? []);
+        }
+
+        // PHR-001/PHR-011: a drug schedule is a pharmacy's own list. A store that
+        // sells no medicines has nothing to mark restricted, and gets no field for it.
+        if ($validated['type'] === DrugSchedule::TYPE) {
+            if ($refusal = $this->drugScheduleRefusal((int) ($validated['store_id'] ?? 0))) {
+                return $refusal;
+            }
+
+            $validated['config'] = DrugSchedule::cleanConfig($validated['config'] ?? []);
+        }
+
         $lookup = MasterLookup::create($validated);
         AuditLog::log('create_lookup', 'MasterLookup', (string)$lookup->id, null, $lookup->toArray(), $lookup->store_id);
 
@@ -490,6 +591,20 @@ class AdminMasterController
             'config' => 'nullable|array',
             'is_active' => 'nullable|boolean',
         ]);
+
+        if ($lookup->type === 'charge_head' && array_key_exists('config', $validated)) {
+            $validated['config'] = $this->chargeHeadConfig($validated['config'] ?? [], $lookup->config ?? []);
+        }
+
+        if ($lookup->type === DrugSchedule::TYPE) {
+            if ($refusal = $this->drugScheduleRefusal((int) ($lookup->store_id ?? 0))) {
+                return $refusal;
+            }
+
+            if (array_key_exists('config', $validated)) {
+                $validated['config'] = DrugSchedule::cleanConfig($validated['config'] ?? [], (array) ($lookup->config ?? []));
+            }
+        }
 
         $lookup->update($validated);
         AuditLog::log('update_lookup', 'MasterLookup', (string)$lookup->id, $oldData, $lookup->toArray(), $lookup->store_id);
@@ -535,10 +650,177 @@ class AdminMasterController
             }
         }
 
+        // MST-008 / R12: a head that posted charges reference is deleted only after
+        // those charges are reassigned to a replacement head of the same store.
+        if ($lookup->type === 'charge_head') {
+            $headStoreId = (int) ($lookup->store_id ?: $request->get('active_store_id'));
+            $service = app(ChargeHeadDefaultsService::class);
+            $references = $service->referencingCharges($headStoreId, $lookup);
+
+            if ($references !== []) {
+                if (!$request->filled('reassign_to')) {
+                    return response()->json([
+                        'message' => "Charge head \"{$lookup->name}\" is used by " . count($references)
+                            . ' bill(s) in this store. Choose a replacement head to reassign them before deleting.',
+                        'reassignment_required' => true,
+                        'referencing_bills' => $references,
+                        'candidate_heads' => $service->candidateHeads($headStoreId, $lookup),
+                    ], 409);
+                }
+
+                $reassigned = $service->reassignAndDelete($headStoreId, $lookup, (int) $request->input('reassign_to'));
+                AuditLog::log('delete_lookup', 'MasterLookup', (string)$id, $oldData, [
+                    'reassigned_to' => (int) $request->input('reassign_to'),
+                    'reassigned_count' => $reassigned,
+                ], $lookup->store_id);
+
+                return response()->json([
+                    'success' => true,
+                    'message' => "Charge head deleted and {$reassigned} charge line(s) reassigned.",
+                    'reassigned_count' => $reassigned,
+                ]);
+            }
+        }
+
         $lookup->delete();
         AuditLog::log('delete_lookup', 'MasterLookup', (string)$id, $oldData, null, $lookup->store_id);
 
         return response()->json(['success' => true, 'message' => 'Lookup record deleted successfully.']);
+    }
+
+    /**
+     * Restore the store's default charge head set: missing defaults re-seeded,
+     * unreferenced custom heads removed, referenced custom heads kept.
+     */
+    public function resetChargeHeads(Request $request): JsonResponse
+    {
+        $storeId = $this->requireStoreId($request);
+
+        $summary = app(ChargeHeadDefaultsService::class)->resetForStore($storeId);
+        AuditLog::log('reset_charge_heads', 'MasterLookup', 'charge_heads', null, $summary, $storeId);
+
+        return response()->json(['success' => true] + $summary);
+    }
+
+    /**
+     * A charge head prefills the POS grid, so its config is limited to the enums both
+     * tax engines understand; anything else is refused rather than silently stored.
+     *
+     * @param  array<string, mixed>  $config
+     * @param  array<string, mixed>  $existing
+     * @return array<string, mixed>
+     */
+    private function chargeHeadConfig(array $config, array $existing = []): array
+    {
+        $enums = [
+            'default_treatment' => ['add_to_cost', 'expense'],
+            'default_spread_method' => ['value', 'quantity', 'weight'],
+            'default_itc_eligibility' => ['eligible', 'ineligible', 'blocked', 'partial'],
+            'allowed_sign' => ['positive', 'negative', 'both'],
+        ];
+
+        $clean = ['seeded' => (bool) ($existing['seeded'] ?? false)];
+
+        foreach ($enums as $key => $allowed) {
+            if (!array_key_exists($key, $config)) {
+                continue;
+            }
+            if (!in_array($config[$key], $allowed, true)) {
+                abort(422, "Charge head {$key} must be one of: " . implode(', ', $allowed) . '.');
+            }
+            $clean[$key] = $config[$key];
+        }
+
+        if (array_key_exists('sac_code', $config)) {
+            $sac = trim((string) $config['sac_code']);
+            if ($sac !== '' && !preg_match('/^\d{6}(\d{2})?$/', $sac)) {
+                abort(422, 'Charge head sac_code must be a 6 or 8 digit SAC.');
+            }
+            $clean['sac_code'] = $sac === '' ? null : $sac;
+        }
+
+        return $clean;
+    }
+
+    /**
+     * PHR-001/PHR-011 — a drug schedule exists for one pharmacy and nowhere else.
+     *
+     * The list is what the server later reads to decide whether a bill needs a
+     * pharmacist, so a store-less row or a grocery row would be a rule nobody
+     * can see. The refusal names the store so the panel can say which one to fix.
+     */
+    private function drugScheduleRefusal(int $storeId): ?JsonResponse
+    {
+        if ($storeId <= 0) {
+            return response()->json([
+                'message' => 'A drug schedule must belong to a store. Choose the pharmacy first.',
+                'errors' => ['store_id' => ['A drug schedule must belong to a store.']],
+            ], 422);
+        }
+
+        $store = Store::find($storeId);
+
+        if ($store === null || (string) $store->store_type !== 'pharmacy') {
+            $name = $store?->name ?? 'this store';
+
+            return response()->json([
+                'message' => "\"{$name}\" is not a pharmacy, so it keeps no drug schedule list. "
+                    . 'Change the store type under Stores & Locations first.',
+                'errors' => ['store_id' => ['Only a pharmacy keeps drug schedules.']],
+            ], 422);
+        }
+
+        return null;
+    }
+
+    /**
+     * PHR-001 — the schedule a product may name, and the code stamped with it.
+     *
+     * A product names a schedule of its own store only, and the code travels on
+     * the row so an old bill still reads what that item was called when sold.
+     */
+    private function stampSchedule(array &$validated, int $storeId): ?JsonResponse
+    {
+        if (!array_key_exists('drug_schedule_id', $validated)) {
+            return null;
+        }
+
+        $scheduleId = $validated['drug_schedule_id'];
+
+        if ($scheduleId === null || $scheduleId === '') {
+            $validated['drug_schedule_id'] = null;
+            $validated['schedule_code'] = null;
+
+            return null;
+        }
+
+        $schedule = MasterLookup::query()
+            ->where('type', DrugSchedule::TYPE)
+            ->find((int) $scheduleId);
+
+        if ($schedule === null || (int) $schedule->store_id !== $storeId) {
+            $own = DrugSchedule::forStore($storeId);
+
+            return response()->json([
+                'message' => 'A product can only carry a drug schedule from its own store\'s list.',
+                'errors' => ['drug_schedule_id' => [
+                    'Choose a schedule from the product\'s own store'
+                        . ($own->isEmpty() ? ' — this store has no drug schedules yet.' : '.'),
+                ]],
+            ], 422);
+        }
+
+        if (! (bool) $schedule->is_active) {
+            return response()->json([
+                'message' => "Drug schedule \"{$schedule->name}\" is retired, so no new product may carry it.",
+                'errors' => ['drug_schedule_id' => ['This schedule is switched off in the list.']],
+            ], 422);
+        }
+
+        $validated['drug_schedule_id'] = (int) $schedule->id;
+        $validated['schedule_code'] = strtoupper((string) ($schedule->code ?: $schedule->name));
+
+        return null;
     }
 
     /**
@@ -630,12 +912,18 @@ class AdminMasterController
             'gstin' => 'nullable|string|max:20',
             'pan' => 'nullable|string|max:20',
             'address' => 'nullable|string',
-            'state_code' => 'nullable|string|max:10',
+            'state_code' => ['nullable', 'string', Rule::in(GstStateCodes::all())],
             'credit_limit' => 'nullable|numeric|min:0',
             'opening_balance' => 'nullable|numeric',
             'reg_no' => 'nullable|string|max:50',
         ]);
 
+        $this->assertPartyGstinMatchesState($validated['gstin'] ?? null, $validated['state_code'] ?? null);
+        $validated['state_code'] = app(PartyStateResolver::class)->resolve(
+            $validated['state_code'] ?? null,
+            $validated['gstin'] ?? null,
+            $store
+        );
         $validated['current_balance'] = $validated['opening_balance'] ?? 0;
         $party = Party::create($validated);
 
@@ -662,11 +950,26 @@ class AdminMasterController
             'gstin' => 'nullable|string|max:20',
             'pan' => 'nullable|string|max:20',
             'address' => 'nullable|string',
-            'state_code' => 'nullable|string|max:10',
+            'state_code' => ['nullable', 'string', Rule::in(GstStateCodes::all())],
             'credit_limit' => 'nullable|numeric|min:0',
             'reg_no' => 'nullable|string|max:50',
             'is_active' => 'nullable|boolean',
         ]);
+
+        $gstin = array_key_exists('gstin', $validated) ? $validated['gstin'] : $party->gstin;
+        $stateCode = array_key_exists('state_code', $validated) ? $validated['state_code'] : $party->state_code;
+        $this->assertPartyGstinMatchesState($gstin, $stateCode);
+
+        // A GSTIN carries its own registered state. When no state was supplied
+        // (or it was emptied), follow the GSTIN; with no GSTIN leave the stored
+        // state alone rather than guessing the store's.
+        if (!array_key_exists('state_code', $validated) || $validated['state_code'] === null) {
+            if (GstStateCodes::isValidGstin($gstin)) {
+                $validated['state_code'] = GstStateCodes::fromGstin($gstin);
+            } else {
+                unset($validated['state_code']);
+            }
+        }
 
         $validated['version'] = $party->version + 1;
         $party->update($validated);
@@ -674,6 +977,37 @@ class AdminMasterController
         AuditLog::log('update_party', 'Party', (string)$party->id, null, $party->toArray(), $party->store_id);
 
         return response()->json($party);
+    }
+
+    /**
+     * MST-01: a GSTIN's first two digits are the registered state; an explicit
+     * state that disagrees with it is a data-entry error, not a preference.
+     */
+    private function assertPartyGstinMatchesState(?string $gstin, ?string $stateCode): void
+    {
+        $gstin = $gstin === null ? null : trim($gstin);
+        if ($gstin === '') {
+            $gstin = null;
+        }
+
+        if ($gstin !== null && !GstStateCodes::isValidGstin($gstin)) {
+            throw ValidationException::withMessages([
+                'gstin' => 'Enter a valid 15-character GSTIN or leave it blank.',
+            ]);
+        }
+
+        $stateCode = GstStateCodes::normalize($stateCode);
+        if ($stateCode !== null && !GstStateCodes::isValid($stateCode)) {
+            throw ValidationException::withMessages([
+                'state_code' => 'Choose a valid GST state code (01-38 or 97).',
+            ]);
+        }
+
+        if ($gstin !== null && $stateCode !== null && GstStateCodes::fromGstin($gstin) !== $stateCode) {
+            throw ValidationException::withMessages([
+                'state_code' => "State code {$stateCode} does not match the GSTIN's state.",
+            ]);
+        }
     }
 
     /**
@@ -749,8 +1083,7 @@ class AdminMasterController
                 $duplicate = Product::findOrFail($validated['duplicate_id']);
                 // Re-link batches and recalculate stock
                 ProductBatch::where('product_id', $duplicate->id)->update(['product_id' => $primary->id]);
-                $newStock = ProductBatch::where('product_id', $primary->id)->sum('stock_qty');
-                $primary->update(['current_stock' => $newStock]);
+                $this->stockLedger->syncProductStock($primary);
 
                 // Archive duplicate
                 $duplicate->update(['is_active' => false, 'name' => $duplicate->name . ' (Merged into #' . $primary->id . ')']);
@@ -797,6 +1130,21 @@ class AdminMasterController
                     $errors[] = "Row #" . ($index + 1) . ": Barcode {$barcode} is already used by \"{$clash->name}\" in this store. Row skipped.";
                     continue;
                 }
+
+                $openingQty = (float) ($row['current_stock'] ?? 0);
+                $openingBatch = null;
+                if ($openingQty > 0) {
+                    if (blank($row['batch_no'] ?? null) || blank($row['expiry_date'] ?? null)) {
+                        $errors[] = "Row #" . ($index + 1) . ": opening stock needs a batch number and an expiry date. Row skipped.";
+                        continue;
+                    }
+                    $openingBatch = [
+                        'batch_no' => $row['batch_no'],
+                        'expiry_date' => $row['expiry_date'],
+                        'stock_qty' => $openingQty,
+                    ];
+                }
+
                 $validRows[] = [
                     'store_id' => $validated['store_id'],
                     'name' => $row['name'],
@@ -805,11 +1153,9 @@ class AdminMasterController
                     'mrp' => (float)($row['mrp'] ?? 0),
                     'sel_rate' => (float)($row['sel_rate'] ?? 0),
                     'gst_percent' => (float)($row['gst_percent'] ?? 12),
-                    'current_stock' => (float)($row['current_stock'] ?? 0),
                     'is_active' => true,
                     'version' => 1,
-                    'created_at' => now(),
-                    'updated_at' => now(),
+                    'opening_batch' => $openingBatch,
                 ];
             }
         }
@@ -824,8 +1170,34 @@ class AdminMasterController
             ]);
         }
 
-        // Perform actual import
-        DB::table('products')->insert($validRows);
+        // Perform actual import. Opening stock enters as a real batch and a ledger
+        // movement; a CSV row is not allowed to write products.current_stock alone.
+        $actor = $request->user();
+        DB::transaction(function () use ($validRows, $actor) {
+            foreach ($validRows as $row) {
+                $openingBatch = $row['opening_batch'] ?? null;
+                unset($row['opening_batch']);
+
+                $product = Product::create($row);
+
+                if ($openingBatch) {
+                    $batch = ProductBatch::create([
+                        'store_id' => $product->store_id,
+                        'product_id' => $product->id,
+                        'batch_no' => $openingBatch['batch_no'],
+                        'expiry_date' => $openingBatch['expiry_date'],
+                        'stock_qty' => $openingBatch['stock_qty'],
+                        'mrp' => $row['mrp'],
+                        'purchase_rate' => $row['mrp'] * 0.7,
+                        'selling_rate' => $row['sel_rate'],
+                        'version' => 1,
+                    ]);
+
+                    $this->stockLedger->postOpeningStock($batch, $actor);
+                }
+            }
+        });
+
         AuditLog::log('import_master', 'Product', 'bulk', null, ['count' => count($validRows)], $validated['store_id']);
 
         return response()->json([

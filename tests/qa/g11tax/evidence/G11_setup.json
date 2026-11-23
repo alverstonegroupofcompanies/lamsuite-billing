@@ -1,0 +1,10 @@
+{
+  "parties": [],
+  "tills": {
+    "apiTillPH": {
+      "st": 200,
+      "counterId": 2,
+      "storeId": 4
+    }
+  }
+}

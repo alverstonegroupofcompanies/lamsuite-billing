@@ -1,0 +1,205 @@
+{
+  "created": [
+    {
+      "p": {
+        "store": "QA-PH",
+        "type": "customer",
+        "name": "QA Credit Customer",
+        "phone": "9000000101",
+        "limit": "1000",
+        "open": "0"
+      },
+      "calls": [
+        {
+          "m": "POST",
+          "u": "/admin/parties",
+          "st": 201,
+          "req": "{\"type\":\"customer\",\"name\":\"QA Credit Customer\",\"phone\":\"9000000101\",\"email\":\"\",\"gstin\":\"\",\"address\":\"\",\"state_code\":\"32\",\"credit_limit\":1000,\"opening_balance\":0,\"is_active\":true,\"store_id\":4}",
+          "res": "{\"store_id\":4,\"type\":\"customer\",\"name\":\"QA Credit Customer\",\"phone\":\"9000000101\",\"email\":null,\"gstin\":null,\"address\":null,\"state_code\":\"32\",\"credit_limit\":\"1000.00\",\"opening_balance\":\"0.00\",\"current_balance\":\"0.00\",\"updated_at\":\"2026-11-21T15:38:08.000000Z\",\"created_at\":\"2026-11-21T15:38:08.000000Z\""
+        }
+      ],
+      "db": [
+        {
+          "id": 6,
+          "store_id": 4,
+          "type": "customer",
+          "name": "QA Credit Customer",
+          "phone": "9000000101",
+          "gstin": null,
+          "state_code": "32",
+          "credit_limit": 1000,
+          "current_balance": 0,
+          "reg_no": null
+        }
+      ]
+    },
+    {
+      "p": {
+        "store": "QA-PH",
+        "type": "customer",
+        "name": "QA No Credit Customer",
+        "phone": "9000000102",
+        "limit": "0",
+        "open": "0"
+      },
+      "calls": [
+        {
+          "m": "POST",
+          "u": "/admin/parties",
+          "st": 201,
+          "req": "{\"type\":\"customer\",\"name\":\"QA No Credit Customer\",\"phone\":\"9000000102\",\"email\":\"\",\"gstin\":\"\",\"address\":\"\",\"state_code\":\"32\",\"credit_limit\":0,\"opening_balance\":0,\"is_active\":true,\"store_id\":4}",
+          "res": "{\"store_id\":4,\"type\":\"customer\",\"name\":\"QA No Credit Customer\",\"phone\":\"9000000102\",\"email\":null,\"gstin\":null,\"address\":null,\"state_code\":\"32\",\"credit_limit\":\"0.00\",\"opening_balance\":\"0.00\",\"current_balance\":\"0.00\",\"updated_at\":\"2026-11-21T15:38:19.000000Z\",\"created_at\":\"2026-11-21T15:38:19.000000Z\""
+        }
+      ],
+      "db": [
+        {
+          "id": 7,
+          "store_id": 4,
+          "type": "customer",
+          "name": "QA No Credit Customer",
+          "phone": "9000000102",
+          "gstin": null,
+          "state_code": "32",
+          "credit_limit": 0,
+          "current_balance": 0,
+          "reg_no": null
+        }
+      ]
+    },
+    {
+      "p": {
+        "store": "QA-PH",
+        "type": "supplier",
+        "name": "QA Pharma Distributors",
+        "phone": "9000000103",
+        "gstin": "32AAACQ1234A1Z1",
+        "limit": "0",
+        "open": "0"
+      },
+      "calls": [
+        {
+          "m": "POST",
+          "u": "/admin/parties",
+          "st": 201,
+          "req": "{\"type\":\"supplier\",\"name\":\"QA Pharma Distributors\",\"phone\":\"9000000103\",\"email\":\"\",\"gstin\":\"32AAACQ1234A1Z1\",\"address\":\"\",\"state_code\":\"32\",\"credit_limit\":0,\"opening_balance\":0,\"is_active\":true,\"store_id\":4}",
+          "res": "{\"store_id\":4,\"type\":\"supplier\",\"name\":\"QA Pharma Distributors\",\"phone\":\"9000000103\",\"email\":null,\"gstin\":\"32AAACQ1234A1Z1\",\"address\":null,\"state_code\":\"32\",\"credit_limit\":\"0.00\",\"opening_balance\":\"0.00\",\"current_balance\":\"0.00\",\"updated_at\":\"2026-11-21T15:38:31.000000Z\",\"created_at\":\"2026-11-21T15:"
+        }
+      ],
+      "db": [
+        {
+          "id": 8,
+          "store_id": 4,
+          "type": "supplier",
+          "name": "QA Pharma Distributors",
+          "phone": "9000000103",
+          "gstin": "32AAACQ1234A1Z1",
+          "state_code": "32",
+          "credit_limit": 0,
+          "current_balance": 0,
+          "reg_no": null
+        }
+      ]
+    },
+    {
+      "p": {
+        "store": "QA-PH",
+        "type": "doctor",
+        "name": "Dr QA Physician",
+        "phone": "9000000104",
+        "reg": "KMC-12345",
+        "limit": "0",
+        "open": "0"
+      },
+      "calls": [
+        {
+          "m": "POST",
+          "u": "/admin/parties",
+          "st": 201,
+          "req": "{\"type\":\"doctor\",\"name\":\"Dr QA Physician\",\"phone\":\"9000000104\",\"email\":\"\",\"gstin\":\"\",\"address\":\"\",\"state_code\":\"32\",\"credit_limit\":0,\"opening_balance\":0,\"is_active\":true,\"reg_no\":\"KMC-12345\",\"store_id\":4}",
+          "res": "{\"store_id\":4,\"type\":\"doctor\",\"name\":\"Dr QA Physician\",\"phone\":\"9000000104\",\"email\":null,\"gstin\":null,\"address\":null,\"state_code\":\"32\",\"credit_limit\":\"0.00\",\"opening_balance\":\"0.00\",\"reg_no\":\"KMC-12345\",\"current_balance\":\"0.00\",\"updated_at\":\"2026-11-21T15:38:43.000000Z\",\"created_at\":\"2026-11-21T15:3"
+        }
+      ],
+      "db": [
+        {
+          "id": 9,
+          "store_id": 4,
+          "type": "doctor",
+          "name": "Dr QA Physician",
+          "phone": "9000000104",
+          "gstin": null,
+          "state_code": "32",
+          "credit_limit": 0,
+          "current_balance": 0,
+          "reg_no": "KMC-12345"
+        }
+      ]
+    },
+    {
+      "p": {
+        "store": "QA-CS",
+        "type": "customer",
+        "name": "QA Beauty Client",
+        "phone": "9000000201",
+        "limit": "2000",
+        "open": "0"
+      },
+      "calls": [
+        {
+          "m": "POST",
+          "u": "/admin/parties",
+          "st": 201,
+          "req": "{\"type\":\"customer\",\"name\":\"QA Beauty Client\",\"phone\":\"9000000201\",\"email\":\"\",\"gstin\":\"\",\"address\":\"\",\"state_code\":\"32\",\"credit_limit\":2000,\"opening_balance\":0,\"is_active\":true,\"store_id\":5}",
+          "res": "{\"store_id\":5,\"type\":\"customer\",\"name\":\"QA Beauty Client\",\"phone\":\"9000000201\",\"email\":null,\"gstin\":null,\"address\":null,\"state_code\":\"32\",\"credit_limit\":\"2000.00\",\"opening_balance\":\"0.00\",\"current_balance\":\"0.00\",\"updated_at\":\"2026-11-21T15:38:54.000000Z\",\"created_at\":\"2026-11-21T15:38:54.000000Z\",\""
+        }
+      ],
+      "db": [
+        {
+          "id": 10,
+          "store_id": 5,
+          "type": "customer",
+          "name": "QA Beauty Client",
+          "phone": "9000000201",
+          "gstin": null,
+          "state_code": "32",
+          "credit_limit": 2000,
+          "current_balance": 0,
+          "reg_no": null
+        }
+      ]
+    },
+    {
+      "p": {
+        "store": "QA-CS",
+        "type": "supplier",
+        "name": "QA Beauty Wholesale MH",
+        "phone": "9000000202",
+        "gstin": "27AAACQ5678B1Z2",
+        "limit": "0",
+        "open": "0"
+      },
+      "calls": [
+        {
+          "m": "POST",
+          "u": "/admin/parties",
+          "st": 201,
+          "req": "{\"type\":\"supplier\",\"name\":\"QA Beauty Wholesale MH\",\"phone\":\"9000000202\",\"email\":\"\",\"gstin\":\"27AAACQ5678B1Z2\",\"address\":\"\",\"state_code\":\"32\",\"credit_limit\":0,\"opening_balance\":0,\"is_active\":true,\"store_id\":5}",
+          "res": "{\"store_id\":5,\"type\":\"supplier\",\"name\":\"QA Beauty Wholesale MH\",\"phone\":\"9000000202\",\"email\":null,\"gstin\":\"27AAACQ5678B1Z2\",\"address\":null,\"state_code\":\"32\",\"credit_limit\":\"0.00\",\"opening_balance\":\"0.00\",\"current_balance\":\"0.00\",\"updated_at\":\"2026-11-21T15:39:06.000000Z\",\"created_at\":\"2026-11-21T15:"
+        }
+      ],
+      "db": [
+        {
+          "id": 11,
+          "store_id": 5,
+          "type": "supplier",
+          "name": "QA Beauty Wholesale MH",
+          "phone": "9000000202",
+          "gstin": "27AAACQ5678B1Z2",
+          "state_code": "32",
+          "credit_limit": 0,
+          "current_balance": 0,
+          "reg_no": null
+        }
+      ]
+    }
+  ]
+}

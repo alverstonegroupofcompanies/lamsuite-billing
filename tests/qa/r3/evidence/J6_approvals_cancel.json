@@ -1,0 +1,157 @@
+{
+  "create_manager": {
+    "st": 201,
+    "body": "{\"name\":\"QA PH Manager\",\"email\":\"qa.ph.manager@example.test\",\"role\":\"manager\",\"store_id\":4,\"username\":\"qa.ph.manager\",\"idle_timeout_minutes\":15,\"max_failed_logins\":5,\"updated_at\":\"2026-11-21T16:19:05.000000Z\",\"created_at\":\"2026-11-21T16:19:05.000000Z\",\"id\":7,\"has_pin\":true,\"is_locked\":false}"
+  },
+  "issue": {
+    "st": 201,
+    "has_pin": true,
+    "msg": "One-time edit PIN issued. It expires in 10 minute(s) and works once."
+  },
+  "otp_other_doc": {
+    "st": 422,
+    "body": "{\"success\":false,\"code\":\"PIN_AND_USER_REQUIRED\",\"error\":\"Enter the one-time PIN issued for your account.\"}"
+  },
+  "otp_wrong_action": {
+    "st": 422,
+    "body": "{\"success\":false,\"code\":\"PIN_AND_USER_REQUIRED\",\"error\":\"Enter the one-time PIN issued for your account.\"}"
+  },
+  "otp_ok": {
+    "st": 422,
+    "body": "{\"success\":false,\"code\":\"PIN_AND_USER_REQUIRED\",\"error\":\"Enter the one-time PIN issued for your account.\"}"
+  },
+  "otp_reuse": {
+    "st": 422,
+    "body": "{\"success\":false,\"code\":\"PIN_AND_USER_REQUIRED\",\"error\":\"Enter the one-time PIN issued for your account.\"}"
+  },
+  "otp_unauth": {
+    "st": 422,
+    "body": "{\"success\":false,\"code\":\"PIN_AND_USER_REQUIRED\",\"error\":\"Enter the one-time PIN issued for your account.\"}"
+  },
+  "mgr_ok": {
+    "st": 422,
+    "body": "{\"success\":false,\"code\":\"CREDENTIALS_REQUIRED\",\"error\":\"Enter the approving manager username\\/email and password or PIN.\"}"
+  },
+  "mgr_wrong": [
+    "422 {\"success\":false,\"code\":\"CREDENTIALS_REQUIRED\",\"error\":\"Enter the approving manager username\\/email and password or PIN.",
+    "422 {\"success\":false,\"code\":\"CREDENTIALS_REQUIRED\",\"error\":\"Enter the approving manager username\\/email and password or PIN.",
+    "422 {\"success\":false,\"code\":\"CREDENTIALS_REQUIRED\",\"error\":\"Enter the approving manager username\\/email and password or PIN.",
+    "422 {\"success\":false,\"code\":\"CREDENTIALS_REQUIRED\",\"error\":\"Enter the approving manager username\\/email and password or PIN.",
+    "422 {\"success\":false,\"code\":\"CREDENTIALS_REQUIRED\",\"error\":\"Enter the approving manager username\\/email and password or PIN.",
+    "422 {\"success\":false,\"code\":\"CREDENTIALS_REQUIRED\",\"error\":\"Enter the approving manager username\\/email and password or PIN."
+  ],
+  "mgr_after_lock": {
+    "st": 422,
+    "body": "{\"success\":false,\"code\":\"CREDENTIALS_REQUIRED\",\"error\":\"Enter the approving manager username\\/email and password or PIN.\"}"
+  },
+  "otp_expired": {
+    "st": 422,
+    "body": "{\"success\":false,\"code\":\"PIN_AND_USER_REQUIRED\",\"error\":\"Enter the one-time PIN issued for your account.\"}"
+  },
+  "approvals_rows": [
+    {
+      "id": 1,
+      "invoice_id": 5,
+      "action": "edit",
+      "mode": "one_time_pin",
+      "status": "pending",
+      "expires_at": "2026-11-21 21:59:05",
+      "used_at": null
+    },
+    {
+      "id": 2,
+      "invoice_id": 6,
+      "action": "cancel",
+      "mode": "one_time_pin",
+      "status": "pending",
+      "expires_at": "2026-11-21 21:50:05",
+      "used_at": null
+    }
+  ],
+  "cancel": {
+    "st": 200,
+    "body": "{\"success\":true,\"status\":\"cancelled\",\"message\":\"Invoice #C01-INV-8651 cancelled and batch stock restored.\"}",
+    "pre": {
+      "inv": {
+        "status": "issued",
+        "invoice_number": "C01-INV-8651",
+        "grand_total": 90
+      },
+      "stock": {
+        "stock_qty": 405
+      },
+      "ledger": 1
+    },
+    "post": {
+      "inv": {
+        "status": "cancelled",
+        "invoice_number": "C01-INV-8651",
+        "cancel_reason": "QA: customer changed mind",
+        "cancelled_at": "2026-11-21 21:50:11",
+        "cancelled_by": null,
+        "grand_total": 90,
+        "paid_amount": 90
+      },
+      "payments": [
+        {
+          "payment_mode": "Cash",
+          "amount": 90,
+          "status": "refunded"
+        }
+      ],
+      "stock": {
+        "stock_qty": 420
+      },
+      "ledger": [
+        {
+          "event_type": "SALE",
+          "qty_delta": -15
+        },
+        {
+          "event_type": "CANCEL_RESTORE",
+          "qty_delta": 15
+        }
+      ],
+      "audit": [
+        {
+          "action": "invoice_approval_issued",
+          "entity_id": "1"
+        },
+        {
+          "action": "invoice_create_authoritative",
+          "entity_id": "5"
+        },
+        {
+          "action": "create_product",
+          "entity_id": "5"
+        },
+        {
+          "action": "counter_activation_code_issued",
+          "entity_id": "5"
+        },
+        {
+          "action": "counter_created",
+          "entity_id": "5"
+        }
+      ]
+    }
+  },
+  "cancel_number_reused": 1,
+  "day_close": {
+    "st": 422,
+    "body": "{\"message\":\"The close date field is required.\",\"errors\":{\"close_date\":[\"The close date field is required.\"]}}"
+  },
+  "cancel_after_close": {
+    "st": 200,
+    "body": "{\"success\":true,\"status\":\"cancelled\",\"message\":\"Invoice #C01-INV-8751 cancelled and batch stock restored.\"}",
+    "status_now": "cancelled"
+  },
+  "sale_after_close": {
+    "st": 201,
+    "body": "{\"success\":true,\"invoice\":{\"store_id\":4,\"counter_id\":2,\"counter_code\":\"C01\",\"location_name\":\"Front desk\",\"module_key\":\"invoice\",\"invoice_number\":\"C02-INV-QA-AFTERCLOSE\",\"invoice_date\":\"2026-11-21\",\"du"
+  },
+  "reopen": {
+    "st": 422,
+    "body": "{\"message\":\"The close date field is required.\",\"errors\":{\"close_date\":[\"The close date field is required.\"]}}"
+  }
+}

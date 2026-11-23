@@ -2,6 +2,8 @@ import React, { useEffect, useRef, useState } from "react";
 import { X, Building2, Check, AlertCircle } from "lucide-react";
 import { supplierLedgerService, type SupplierMaster } from "../../lib/purchases/supplierLedgerService";
 import { isValidGstin, isValidIndianPhone } from "../../lib/masters/partiesStore";
+import { companySettingsService } from "../../lib/settings/companySettingsService";
+import { GST_STATE_NAMES, stateCodeOf, stateLabel } from "../../lib/gst/stateCodes";
 import { useModalEscape } from "../../lib/ui/modalEscapeManager";
 
 interface SupplierQuickAddModalProps {
@@ -12,7 +14,20 @@ interface SupplierQuickAddModalProps {
   onSupplierCreated: (supplier: SupplierMaster) => void;
 }
 
-const PLACE_OF_SUPPLY_DEFAULT = "Kerala (32)";
+const STATE_OPTIONS = Object.entries(GST_STATE_NAMES)
+  .filter(([code]) => code !== "99")
+  .map(([code, name]) => ({ code, label: `${code}-${name}` }));
+
+/** A new supplier defaults to the store's own state, not a hardcoded Kerala. */
+function storePlaceOfSupply(): string {
+  return stateLabel(companySettingsService.getSettings().state_code);
+}
+
+/** First enabled place-of-supply option matching a code, else the code's own label. */
+function placeOfSupplyFor(stateCode: string): string {
+  const match = STATE_OPTIONS.find((opt) => opt.code === stateCode);
+  return match ? match.label : stateLabel(stateCode);
+}
 
 export const SupplierQuickAddModal: React.FC<SupplierQuickAddModalProps> = ({
   isOpen,
@@ -29,7 +44,7 @@ export const SupplierQuickAddModal: React.FC<SupplierQuickAddModalProps> = ({
   const [phone, setPhone] = useState("");
   const [gstin, setGstin] = useState("");
   const [address, setAddress] = useState("");
-  const [placeOfSupply, setPlaceOfSupply] = useState(PLACE_OF_SUPPLY_DEFAULT);
+  const [placeOfSupply, setPlaceOfSupply] = useState(storePlaceOfSupply());
   const [creditDays, setCreditDays] = useState(30);
   const [openingBalance, setOpeningBalance] = useState(0);
   const [error, setError] = useState<string | null>(null);
@@ -42,7 +57,7 @@ export const SupplierQuickAddModal: React.FC<SupplierQuickAddModalProps> = ({
     setPhone("");
     setGstin("");
     setAddress("");
-    setPlaceOfSupply(PLACE_OF_SUPPLY_DEFAULT);
+    setPlaceOfSupply(storePlaceOfSupply());
     setCreditDays(30);
     setOpeningBalance(0);
     setError(null);
@@ -52,6 +67,13 @@ export const SupplierQuickAddModal: React.FC<SupplierQuickAddModalProps> = ({
     const timer = setTimeout(() => focusTarget?.focus(), 30);
     return () => clearTimeout(timer);
   }, [isOpen, initialName]);
+
+  // A GSTIN says which state the supplier is registered in; follow it until
+  // the operator picks a place of supply by hand.
+  useEffect(() => {
+    const code = stateCodeOf(gstin.trim());
+    if (code) setPlaceOfSupply(placeOfSupplyFor(code));
+  }, [gstin]);
 
   if (!isOpen) return null;
 
@@ -75,7 +97,10 @@ export const SupplierQuickAddModal: React.FC<SupplierQuickAddModalProps> = ({
       setError(null);
       const id = `sup_${Date.now()}_${Math.random().toString(16).slice(2, 6)}`;
       const cleanGstin = gstin.trim().toUpperCase();
-      const stateCode = cleanGstin.length >= 2 ? cleanGstin.slice(0, 2) : "32";
+      const stateCode =
+        stateCodeOf(cleanGstin) ??
+        stateCodeOf(companySettingsService.getSettings().state_code) ??
+        "32";
 
       const newSupplier: SupplierMaster = {
         id,
@@ -168,18 +193,18 @@ export const SupplierQuickAddModal: React.FC<SupplierQuickAddModalProps> = ({
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="font-semibold text-[var(--color-text)] block mb-1">Place of Supply</label>
+              <label htmlFor="supplier-quick-add-pos" className="font-semibold text-[var(--color-text)] block mb-1">Place of Supply</label>
               <select
+                id="supplier-quick-add-pos"
                 value={placeOfSupply}
                 onChange={(e) => setPlaceOfSupply(e.target.value)}
                 className="w-full rounded-[10px] border border-[var(--color-border)] px-2.5 py-2 text-xs focus:border-[var(--color-accent)] focus:outline-none bg-[var(--color-surface)] text-[var(--color-text)]"
               >
-                <option value="Kerala (32)">Kerala (32)</option>
-                <option value="Tamil Nadu (33)">Tamil Nadu (33)</option>
-                <option value="Karnataka (29)">Karnataka (29)</option>
-                <option value="Maharashtra (27)">Maharashtra (27)</option>
-                <option value="Delhi (07)">Delhi (07)</option>
-                <option value="Other State">Other State</option>
+                {STATE_OPTIONS.map((opt) => (
+                  <option key={opt.code} value={opt.label}>
+                    {opt.label}
+                  </option>
+                ))}
               </select>
             </div>
             <div>

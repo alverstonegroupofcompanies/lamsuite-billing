@@ -23,6 +23,7 @@ use App\Models\StockTransfer;
 use App\Models\StockTransferItem;
 use App\Models\Store;
 use App\Models\User;
+use App\Services\Gst\PartyStateResolver;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
@@ -291,7 +292,11 @@ class MigrationPipelineRunner
                     'gstin' => $item['gstin'] ?? null,
                     'pan' => $item['pan'] ?? null,
                     'address' => $item['address'] ?? null,
-                    'state_code' => $item['state_code'] ?? '32',
+                    'state_code' => app(PartyStateResolver::class)->resolve(
+                        $item['state_code'] ?? null,
+                        $item['gstin'] ?? null,
+                        Store::find($storeId)
+                    ),
                     'credit_limit' => (float)($item['credit_limit'] ?? 0),
                     'opening_balance' => (float)($item['opening_balance'] ?? 0),
                     'current_balance' => (float)($item['current_balance'] ?? $item['balance'] ?? 0),

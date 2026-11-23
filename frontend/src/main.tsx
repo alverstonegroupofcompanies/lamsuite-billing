@@ -10,7 +10,10 @@ import "@fontsource/ibm-plex-mono/600.css";
 import "@fontsource/ibm-plex-mono/700.css";
 import App from "./App";
 import { I18nProvider } from "./lib/i18n/I18nContext";
+import { installCounterRequestIdentity } from "./lib/auth/counterRequestIdentity";
 import "./index.css";
+
+installCounterRequestIdentity();
 
 const rootElement = document.getElementById("root");
 if (rootElement) {

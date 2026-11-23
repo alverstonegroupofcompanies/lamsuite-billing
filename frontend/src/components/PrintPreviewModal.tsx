@@ -354,9 +354,9 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
     setStatusMessage({ text: "Columns reset to defaults", type: "info" });
   };
 
-  const handleSaveAsStoreDefault = () => {
+  const handleSaveAsStoreDefault = async () => {
     try {
-      companySettingsService.updateSettings({
+      await companySettingsService.saveStoreSettings({
         printing: {
           ...settings.printing,
           paperSize: paperSize as any,
@@ -380,8 +380,11 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
         printerName: selectedPrinterName,
       });
       setStatusMessage({ text: "Saved as store-wide default layout!", type: "success" });
-    } catch {
-      setStatusMessage({ text: "Failed to save store defaults", type: "error" });
+    } catch (err) {
+      setStatusMessage({
+        text: err instanceof Error && err.message ? err.message : "Failed to save store defaults",
+        type: "error",
+      });
     }
   };
 

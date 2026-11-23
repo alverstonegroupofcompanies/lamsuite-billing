@@ -16,6 +16,8 @@ class InvoicePayment extends Model
         'counter_code',
         'payment_mode',
         'amount',
+        'tendered_amount',
+        'change_amount',
         'reference_no',
         'status',
         'extra_fields',
@@ -25,6 +27,8 @@ class InvoicePayment extends Model
 
     protected $casts = [
         'amount' => 'decimal:2',
+        'tendered_amount' => 'decimal:2',
+        'change_amount' => 'decimal:2',
         'extra_fields' => 'array',
     ];
 

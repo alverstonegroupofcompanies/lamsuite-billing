@@ -30,6 +30,8 @@ export const KeyboardShortcutsModal: React.FC<KeyboardShortcutsModalProps> = ({ 
     { category: "Bills Register", shortcuts: toShortcuts("bills") },
     { category: "Invoice Edit", shortcuts: toShortcuts("edit") },
     { category: "Purchase Inward & Goods Receipt", shortcuts: toShortcuts("purchase") },
+    { category: "Sales Returns & Credit Notes", shortcuts: toShortcuts("salesReturns") },
+    { category: "Supplier Bill Charges (Alt+F)", shortcuts: toShortcuts("modal") },
     { category: "Stock Adjustment", shortcuts: toShortcuts("stock") },
     { category: "Navigation & Global", shortcuts: toShortcuts("global") },
   ];

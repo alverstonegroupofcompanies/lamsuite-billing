@@ -304,6 +304,17 @@ export const SettingsPage: React.FC = () => {
     });
   };
 
+  // The charge policy is one nested block the server reads on every posted bill, so it is edited as
+  // a patch over the stored value rather than rebuilt — keys this panel does not show survive a save.
+  const setChargePolicy = (patch: Record<string, any>) =>
+    setSettingsData((prev: any) => ({
+      ...prev,
+      billing: {
+        ...prev?.billing,
+        purchase_charges: { ...(prev?.billing?.purchase_charges || {}), ...patch },
+      },
+    }));
+
   const handleSaveGeneral = async (e: React.FormEvent) => {    e.preventDefault();
     try {
       await api.post("/admin/settings", {
@@ -316,6 +327,7 @@ export const SettingsPage: React.FC = () => {
         security: settingsData.security,
         inventory: settingsData.inventory,
         batch_required: Boolean(settingsData.batch_required),
+        salesperson_on_bill: settingsData.salesperson_on_bill,
         timezone: settingsData.timezone,
       });
       alert("Settings saved successfully.");
@@ -501,6 +513,101 @@ export const SettingsPage: React.FC = () => {
               </div>
             </div>
 
+            {/* Supplier bill charges (CR-C / CFG-003) */}
+            <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs space-y-4 lg:col-span-2">
+              <div>
+                <h3 className="font-bold text-slate-900 dark:text-white text-sm">Supplier bill charges</h3>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
+                  The server applies these to every purchase bill this store posts — including the ones an
+                  offline till syncs later, which are refused at the link, not at the till.
+                </p>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
+                <div>
+                  <label
+                    htmlFor="charge-reverse-on-return"
+                    className="block font-medium text-slate-700 dark:text-slate-300 mb-1"
+                  >
+                    Charge reversal on return
+                  </label>
+                  <select
+                    id="charge-reverse-on-return"
+                    value={settingsData.billing?.purchase_charges?.reverse_on_return || "proportional"}
+                    onChange={(e) => setChargePolicy({ reverse_on_return: e.target.value })}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                  >
+                    <option value="proportional">Reverse share proportional to quantity</option>
+                    <option value="sunk">Leave it on the original bill (sunk cost)</option>
+                  </select>
+                  <p className="mt-1 text-[10px] text-slate-400">
+                    Sunk means a return reverses none of the charge — the store keeps paying it.
+                  </p>
+                </div>
+
+                <div>
+                  <label
+                    htmlFor="charge-max-percent"
+                    className="block font-medium text-slate-700 dark:text-slate-300 mb-1"
+                  >
+                    Maximum charges as % of goods value
+                  </label>
+                  <input
+                    id="charge-max-percent"
+                    type="number"
+                    min="0"
+                    step="0.1"
+                    value={settingsData.billing?.purchase_charges?.max_percent_of_goods ?? ""}
+                    onChange={(e) =>
+                      // Blank means no cap and is stored as null, so the field reads back empty; the engine
+                      // treats 0 as no cap too, but showing "0" in a box that limits nothing would mislead.
+                      setChargePolicy({
+                        max_percent_of_goods: e.target.value === "" ? null : Number(e.target.value),
+                      })
+                    }
+                    placeholder="No limit"
+                    className="w-full px-3 py-2 rounded-xl font-mono border border-slate-200 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                  />
+                  <p className="mt-1 text-[10px] text-slate-400">
+                    A bill over this limit is rejected whole, naming the allowance it broke.
+                  </p>
+                </div>
+
+                <label className="flex items-start gap-2 text-slate-700 dark:text-slate-300">
+                  <input
+                    id="charge-separately-paid-in-payable"
+                    type="checkbox"
+                    checked={Boolean(settingsData.billing?.purchase_charges?.separately_paid_in_payable)}
+                    onChange={(e) => setChargePolicy({ separately_paid_in_payable: e.target.checked })}
+                    className="mt-0.5 w-4 h-4 rounded border-slate-300 dark:border-slate-600"
+                  />
+                  <span>
+                    Count separately paid charges into the supplier payable
+                    <span className="block text-[10px] text-slate-400 font-normal">
+                      Already decided per bill: stored lines keep their own answer, so changing this moves
+                      only future bills.
+                    </span>
+                  </span>
+                </label>
+
+                <label className="flex items-start gap-2 text-slate-700 dark:text-slate-300">
+                  <input
+                    id="charge-allow-negative"
+                    type="checkbox"
+                    checked={settingsData.billing?.purchase_charges?.allow_negative_charges !== false}
+                    onChange={(e) => setChargePolicy({ allow_negative_charges: e.target.checked })}
+                    className="mt-0.5 w-4 h-4 rounded border-slate-300 dark:border-slate-600"
+                  />
+                  <span>
+                    Allow negative charge lines
+                    <span className="block text-[10px] text-slate-400 font-normal">
+                      Off means a discount-shaped negative charge must be entered as a bill discount
+                      instead, so it stays visible in GST.
+                    </span>
+                  </span>
+                </label>
+              </div>
+            </div>
+
             {/* Document Sequences & Prefixes */}
             <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs space-y-4">
               <h3 className="font-bold text-slate-900 dark:text-white text-sm">Document Sequences & Prefixes</h3>
@@ -647,6 +754,34 @@ export const SettingsPage: React.FC = () => {
                   />
                   <span>Require batch &amp; expiry (pharmacy)</span>
                 </label>
+                <div className="md:col-span-2">
+                  <label
+                    htmlFor="salesperson-on-bill"
+                    className="block font-medium text-slate-700 dark:text-slate-300 mb-1"
+                  >
+                    Salesperson on bill
+                  </label>
+                  <select
+                    id="salesperson-on-bill"
+                    value={
+                      ["off", "optional", "required"].includes(settingsData.salesperson_on_bill)
+                        ? settingsData.salesperson_on_bill
+                        : "required"
+                    }
+                    onChange={(e) =>
+                      setSettingsData({ ...settingsData, salesperson_on_bill: e.target.value })
+                    }
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                  >
+                    <option value="required">Required — every bill names who sold (shipped default)</option>
+                    <option value="optional">Optional — the till may leave it blank</option>
+                    <option value="off">Off — no salesperson on bills at all</option>
+                  </select>
+                  <p className="mt-1 text-[10px] text-slate-400">
+                    Until this store has any salespeople on the master, a required bill still saves without one,
+                    so an upgrade never blocks the counter.
+                  </p>
+                </div>
               </div>
             </div>
           </div>

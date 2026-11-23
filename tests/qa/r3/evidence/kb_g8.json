@@ -1,0 +1,130 @@
+{
+  "before_pos_arrival": {
+    "route": "/masters",
+    "active": "BODY::"
+  },
+  "pos_arrival": {
+    "route": "/pos",
+    "active": "INPUT:text:Scan barcode or type product name (e.g. 3*paracetamol)"
+  },
+  "list_after_F2": {
+    "route": "/purchases",
+    "active": "BODY::"
+  },
+  "form_after_F2": {
+    "route": "/purchases",
+    "entry_row": true,
+    "bill_number": [
+      "INWARD ENTRY NO",
+      "C01-PUR-1001"
+    ]
+  },
+  "dirty_bill": {
+    "active": "INPUT:text:INV-001",
+    "confirms": []
+  },
+  "purchase_F1": {
+    "route": "/purchases",
+    "active": "INPUT:text:Scan barcode or type product name [F1]..."
+  },
+  "purchase_F9": {
+    "route": "/purchases",
+    "drafts_modal": true,
+    "confirms": []
+  },
+  "purchase_F8": {
+    "route": "/purchases",
+    "still_in_bill": true
+  },
+  "purchase_guard_refused": {
+    "route": "/purchases",
+    "confirms": [
+      {
+        "message": "Discard the unsaved purchase bill and leave? Any line items will be lost.",
+        "answer": false
+      }
+    ]
+  },
+  "purchase_guard_approved": {
+    "route": "/stock",
+    "confirms": [
+      {
+        "message": "Discard the unsaved purchase bill and leave? Any line items will be lost.",
+        "answer": true
+      }
+    ]
+  },
+  "purchase_F2_refused": {
+    "route": "/purchases",
+    "confirms": [
+      {
+        "message": "Start a new purchase bill? Any unsaved line items will be lost.",
+        "answer": false
+      }
+    ],
+    "bill_no_kept": "QA-KB-G8-B"
+  },
+  "purchase_F6_refused": {
+    "route": "/purchases",
+    "confirms": [
+      {
+        "message": "Start a new purchase bill? Any unsaved line items will be lost.",
+        "answer": false
+      },
+      {
+        "message": "Close purchase bill entry? Any unsaved line items will be lost.",
+        "answer": false
+      }
+    ],
+    "still_in_bill": true
+  },
+  "purchase_F6_approved": {
+    "route": "/purchases",
+    "confirms": [
+      {
+        "message": "Close purchase bill entry? Any unsaved line items will be lost.",
+        "answer": true
+      }
+    ],
+    "back_on_list": true
+  },
+  "returns_after_F7_F7": {
+    "route": "/returns/sales",
+    "active": "INPUT:text:e.g. INV-001, Ravi Kumar, 9876543210, 2026-10-29...",
+    "query": "G9909765-INV-"
+  },
+  "returns_results": {
+    "options": [],
+    "activedescendant": null
+  },
+  "returns_arrow": {
+    "activedescendant": null,
+    "options": []
+  },
+  "returns_enter": {
+    "items_step": false
+  },
+  "returns_escape": {
+    "options": [],
+    "still_open": false,
+    "route": "/returns/sales"
+  },
+  "settlement_open": {
+    "modal": true,
+    "modes": [
+      "Cash"
+    ]
+  },
+  "settlement_alt2": {
+    "modes": [
+      "UPI"
+    ],
+    "buttons": {}
+  },
+  "settlement_alt8": {
+    "modes": [
+      "Credit"
+    ]
+  },
+  "console_errors": []
+}

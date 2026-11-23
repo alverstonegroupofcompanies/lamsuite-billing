@@ -5,7 +5,7 @@ import { canAccessReport } from "./permissions";
 describe("ReportRegistry & Pluggable Modules", () => {
   it("registers all modern ERP report modules across all 8 business categories", () => {
     const all = reportRegistry.getAll();
-    expect(all.length).toBe(31);
+    expect(all.length).toBe(32);
 
     const ids = all.map((r) => r.id);
 
@@ -34,10 +34,11 @@ describe("ReportRegistry & Pluggable Modules", () => {
     expect(ids).toContain("fast-moving-stock");
     expect(ids).toContain("stock-movement-ledger");
 
-    // 4. Purchases & Inward (3)
+    // 4. Purchases & Inward (4)
     expect(ids).toContain("purchase-register");
     expect(ids).toContain("item-wise-purchase");
     expect(ids).toContain("purchase-return-register");
+    expect(ids).toContain("expense-register");
 
     // 5. Supplier Accounts (2)
     expect(ids).toContain("supplier-ageing");

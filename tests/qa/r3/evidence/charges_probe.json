@@ -1,0 +1,136 @@
+[
+  [
+    "open",
+    {
+      "active": "BUTTON:",
+      "ring": [
+        "0-amount"
+      ],
+      "rows": [
+        "1 FREIGHT — 0 Add to cost Value Eligible No No — —"
+      ]
+    }
+  ],
+  [
+    "ArrowDown",
+    {
+      "active": "DIV:0-amount",
+      "ring": [
+        "0-amount"
+      ],
+      "rows": [
+        "1 FREIGHT — 0 Add to cost Value Eligible No No — —"
+      ]
+    }
+  ],
+  [
+    "ArrowUp",
+    {
+      "active": "DIV:0-amount",
+      "ring": [
+        "0-amount"
+      ],
+      "rows": [
+        "1 FREIGHT — 0 Add to cost Value Eligible No No — —"
+      ]
+    }
+  ],
+  [
+    "ArrowRight",
+    {
+      "active": "DIV:0-gst_percent",
+      "ring": [
+        "0-gst_percent"
+      ],
+      "rows": [
+        "1 FREIGHT — 0 Add to cost Value Eligible No No — —"
+      ]
+    }
+  ],
+  [
+    "Enter",
+    {
+      "active": "DIV:0-gst_percent",
+      "ring": [
+        "0-gst_percent"
+      ],
+      "rows": [
+        "1 FREIGHT — 5 Add to cost Value Eligible No No — —"
+      ]
+    }
+  ],
+  [
+    "T:200",
+    {
+      "active": "DIV:0-gst_percent",
+      "ring": [
+        "0-gst_percent"
+      ],
+      "rows": [
+        "1 FREIGHT — 5 Add to cost Value Eligible No No — —"
+      ]
+    }
+  ],
+  [
+    "Enter",
+    {
+      "active": "DIV:0-gst_percent",
+      "ring": [
+        "0-gst_percent"
+      ],
+      "rows": [
+        "1 FREIGHT — 12 Add to cost Value Eligible No No — —"
+      ]
+    }
+  ],
+  [
+    "ArrowRight",
+    {
+      "active": "DIV:0-treatment",
+      "ring": [
+        "0-treatment"
+      ],
+      "rows": [
+        "1 FREIGHT — 12 Add to cost Value Eligible No No — —"
+      ]
+    }
+  ],
+  [
+    "Space",
+    {
+      "active": "DIV:0-treatment",
+      "ring": [
+        "0-treatment"
+      ],
+      "rows": [
+        "1 FREIGHT — 12 Expense Value Eligible No No — —"
+      ]
+    }
+  ],
+  [
+    "Insert",
+    {
+      "active": "DIV:1-amount",
+      "ring": [
+        "1-amount"
+      ],
+      "rows": [
+        "1 FREIGHT — 12 Expense Value Eligible No No — —",
+        "2 FREIGHT — 0 Add to cost Value Eligible No No — —"
+      ]
+    }
+  ],
+  [
+    "Space",
+    {
+      "active": "DIV:1-amount",
+      "ring": [
+        "1-amount"
+      ],
+      "rows": [
+        "1 FREIGHT — 12 Expense Value Eligible No No — —",
+        "2 FREIGHT — 0 Add to cost Value Eligible No No — —"
+      ]
+    }
+  ]
+]

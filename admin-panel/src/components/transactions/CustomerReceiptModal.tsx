@@ -2,6 +2,8 @@ import React, { useEffect, useState } from "react";
 import { X, CreditCard, Loader2 } from "lucide-react";
 import { api } from "../../services/api";
 import { formatINR } from "../../utils/formatters";
+import { AllocationPicker } from "./AllocationPicker";
+import type { PaymentAllocationInput } from "../../types";
 
 interface CustomerOption {
   id: number;
@@ -30,6 +32,7 @@ export const CustomerReceiptModal: React.FC<CustomerReceiptModalProps> = ({ stor
   const [reference, setReference] = useState("");
   const [notes, setNotes] = useState("");
   const [paymentDate, setPaymentDate] = useState(todayValue());
+  const [allocations, setAllocations] = useState<PaymentAllocationInput[] | undefined>(undefined);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState("");
 
@@ -68,16 +71,27 @@ export const CustomerReceiptModal: React.FC<CustomerReceiptModalProps> = ({ stor
 
     setIsSaving(true);
     try {
-      await api.post("/admin/payments/customer", {
-        store_id: storeId,
-        customer_id: Number(customerId),
-        amount: Number(amount),
-        payment_mode: mode,
-        reference_no: reference.trim() || undefined,
-        notes: notes.trim() || undefined,
-        payment_date: paymentDate,
-      });
-      onSaved(`Receipt of ${formatINR(Number(amount))} recorded for ${selected?.name || "customer"}.`);
+      const res = await api.post<{ allocated_amount?: number; unallocated_amount?: number }>(
+        "/admin/payments/customer",
+        {
+          store_id: storeId,
+          customer_id: Number(customerId),
+          amount: Number(amount),
+          payment_mode: mode,
+          reference_no: reference.trim() || undefined,
+          notes: notes.trim() || undefined,
+          payment_date: paymentDate,
+          ...(allocations && allocations.length > 0 ? { allocations } : {}),
+        }
+      );
+      const settled = Number(res?.allocated_amount || 0);
+      const onAccount = Number(res?.unallocated_amount || 0);
+      onSaved(
+        `Receipt of ${formatINR(Number(amount))} recorded for ${selected?.name || "customer"} — ` +
+          (settled > 0
+            ? `${formatINR(settled)} settled${onAccount > 0 ? `, ${formatINR(onAccount)} left on account` : ""}.`
+            : "no open bills to settle.")
+      );
     } catch (err: any) {
       setError(err?.message || "Failed to record the receipt.");
     } finally {
@@ -87,7 +101,7 @@ export const CustomerReceiptModal: React.FC<CustomerReceiptModalProps> = ({ stor
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
-      <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 max-w-md w-full p-6 space-y-4">
+      <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 max-w-lg w-full p-6 space-y-4">
         <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
           <h3 className="font-bold text-slate-900 dark:text-white text-sm flex items-center gap-2">
             <CreditCard className="w-4 h-4 text-brand-600" />
@@ -104,7 +118,10 @@ export const CustomerReceiptModal: React.FC<CustomerReceiptModalProps> = ({ stor
             <select
               required
               value={customerId}
-              onChange={(e) => setCustomerId(e.target.value)}
+              onChange={(e) => {
+                setCustomerId(e.target.value);
+                setAllocations(undefined);
+              }}
               disabled={isLoading}
               className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl"
             >
@@ -147,6 +164,16 @@ export const CustomerReceiptModal: React.FC<CustomerReceiptModalProps> = ({ stor
               />
             </div>
           </div>
+
+          {customerId && (
+            <AllocationPicker
+              storeId={storeId}
+              partyType="customer"
+              partyId={customerId}
+              amount={amount}
+              onAllocationsChange={setAllocations}
+            />
+          )}
 
           <div>
             <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">Payment Mode</label>

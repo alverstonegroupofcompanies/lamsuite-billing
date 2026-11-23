@@ -15,6 +15,8 @@ class DeviceActivationAttempt extends Model
         'device_name',
         'attempted_key_prefix',
         'store_id',
+        'counter_id',
+        'activation_key_id',
         'success',
         'failure_reason',
     ];
@@ -28,21 +30,30 @@ class DeviceActivationAttempt extends Model
         return $this->belongsTo(Store::class);
     }
 
-    /**
-     * Get count of failed activation attempts for this IP or device UUID within the given window (minutes).
-     */
-    public static function countRecentFailures(string $ipAddress, ?string $deviceUuid = null, int $windowMinutes = 15): int
+    /** CNT-005: refusals that belong to the workstation that typed them. */
+    public static function countRecentDeviceFailures(string $deviceUuid, int $windowMinutes = 15): int
     {
-        $since = now()->subMinutes($windowMinutes);
+        return self::where('success', false)
+            ->where('device_uuid', $deviceUuid)
+            ->where('created_at', '>=', now()->subMinutes($windowMinutes))
+            ->count();
+    }
+
+    /**
+     * CNT-005: the high IP ceiling that still catches a caller rotating device
+     * UUIDs from one address. A shared shop network must never reach it by
+     * ordinary mistyping.
+     */
+    public static function countRecentIpFailures(string $ipAddress, int $windowMinutes = 15): int
+    {
+        $ipAddress = trim($ipAddress);
+        if ($ipAddress === '' || $ipAddress === '0.0.0.0') {
+            return 0;
+        }
 
         return self::where('success', false)
-            ->where('created_at', '>=', $since)
-            ->where(function ($q) use ($ipAddress, $deviceUuid) {
-                $q->where('ip_address', $ipAddress);
-                if (!empty($deviceUuid)) {
-                    $q->orWhere('device_uuid', $deviceUuid);
-                }
-            })
+            ->where('ip_address', $ipAddress)
+            ->where('created_at', '>=', now()->subMinutes($windowMinutes))
             ->count();
     }
 }

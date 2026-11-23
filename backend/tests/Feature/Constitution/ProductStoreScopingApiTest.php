@@ -93,13 +93,15 @@ class ProductStoreScopingApiTest extends TestCase
             ->assertJsonFragment(['existing_product' => 'New Item A']);
 
         // A store_id in the payload cannot re-scope the write to another store.
+        // G1-SEC: naming a store the person cannot reach is refused, not followed
+        // (and not silently ignored) — the same answer a counter gets.
         $this->actingAsStaff($this->staffA)
             ->postJson('/api/products', [
                 'name' => 'Smuggled Item', 'barcode' => 'SMUG-1', 'mrp' => 10, 'sel_rate' => 9,
                 'gst_percent' => 5, 'store_id' => $this->storeB->id,
             ])
-            ->assertCreated()
-            ->assertJsonPath('store_id', $this->storeA->id);
+            ->assertStatus(403);
+        $this->assertSame(0, \App\Models\Product::where('barcode', 'SMUG-1')->count());
     }
 
     public function test_foreign_store_products_are_404_for_show_update_destroy_and_add_batch(): void

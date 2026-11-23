@@ -1,0 +1,113 @@
+{
+  "options": [
+    "Add new product \"QA Vitamin C Quickadd\""
+  ],
+  "modal": [
+    {
+      "ph": "Select or search supplier (Alt+S)...",
+      "v": ""
+    },
+    {
+      "ph": "INV-001",
+      "v": ""
+    },
+    {
+      "ph": "",
+      "v": "2026-11-21"
+    },
+    {
+      "ph": "",
+      "v": "credit"
+    },
+    {
+      "ph": "Inward Notes",
+      "v": ""
+    },
+    {
+      "ph": "Scan barcode or type product name [F1]...",
+      "v": "QA Vitamin C Quickadd"
+    },
+    {
+      "ph": "Physical Bill Total",
+      "v": ""
+    },
+    {
+      "ph": "e.g. Augmentin 625 Duo Tablet",
+      "v": "QA Vitamin C Quickadd"
+    },
+    {
+      "ph": "e.g. Amoxicillin + Clavulanic Acid",
+      "v": ""
+    },
+    {
+      "ph": "Auto-generated if empty",
+      "v": ""
+    },
+    {
+      "ph": "30049099",
+      "v": "30049099"
+    },
+    {
+      "ph": "",
+      "v": "12"
+    },
+    {
+      "ph": "10",
+      "v": "10"
+    },
+    {
+      "ph": "0.00",
+      "v": ""
+    },
+    {
+      "ph": "0.00",
+      "v": ""
+    },
+    {
+      "ph": "0.00",
+      "v": ""
+    },
+    {
+      "ph": "",
+      "v": "on"
+    }
+  ],
+  "prefilled": true,
+  "calls": [
+    {
+      "m": "POST",
+      "u": "/sync/push/batch",
+      "st": 200,
+      "res": "{\"success\":true,\"results\":{\"total\":1,\"processed\":1,\"failed\":0,\"errors\":[]},\"renumbered\":[]}"
+    },
+    {
+      "m": "POST",
+      "u": "/counter/sequences/lease",
+      "st": 200,
+      "res": "{\"success\":true,\"counter_id\":2,\"counter_code\":\"C01\",\"doc_type\":\"invoice\",\"prefix\":\"C01-INV\",\"financial_year\":\"2026-27\",\"range_start\":12901,\"range_end\":12950,\"block_size\":50,\"next_number\":12901,\"leased_block\":{\"counter_id\":2,\"counter_code\":\"C01\",\"doc_type\":\"invoice\",\"financial_year\":\"2026-27\",\"prefix\":\"C01-INV\",\"range_start\":12901,\"range_end\":12950,\"block_size\":50,\"next_number\":12901},\"sequences\":{"
+    },
+    {
+      "m": "POST",
+      "u": "/counter/sequences/lease",
+      "st": 200,
+      "res": "{\"success\":true,\"counter_id\":2,\"counter_code\":\"C01\",\"doc_type\":\"invoice\",\"prefix\":\"C01-INV\",\"financial_year\":\"2026-27\",\"range_start\":12951,\"range_end\":13000,\"block_size\":50,\"next_number\":12951,\"leased_block\":{\"counter_id\":2,\"counter_code\":\"C01\",\"doc_type\":\"invoice\",\"financial_year\":\"2026-27\",\"prefix\":\"C01-INV\",\"range_start\":12951,\"range_end\":13000,\"block_size\":50,\"next_number\":12951},\"sequences\":{"
+    }
+  ],
+  "after_active": "DIV::purchase-batch-0=",
+  "server": [
+    {
+      "id": 10,
+      "store_id": 4,
+      "name": "QA Vitamin C Quickadd",
+      "barcode": "890597476120",
+      "hsn_sac_code": "30049099",
+      "gst_percent": 12,
+      "units_per_pack": 10
+    }
+  ],
+  "second_counter_sees_after_s": 0.031,
+  "admin": {
+    "in_store4": true,
+    "in_store5": false
+  }
+}

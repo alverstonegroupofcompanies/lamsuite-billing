@@ -3,19 +3,12 @@ import { APP_VERSION } from "../../config/version";
 import { storeDeviceService } from "../auth/storeDeviceService";
 import { storeRegistryService } from "../auth/storeRegistryService";
 import { syncQueueService } from "../sync/syncQueueService";
-import { staffAuthService } from "../auth/staffAuthService";
+import { counterLockingService } from "../auth/counterLockingService";
+import { counterSessionService } from "../auth/counterSessionService";
+import { handleDeviceAuthFailure, isDeviceAuthFailure } from "../auth/deviceAuthFailure";
 import { publicIpService } from "../network/publicIpService";
 import { deviceIpService, formatIpv4 } from "../network/deviceIpService";
 import { getOrCreateClientDeviceUuid, detectDeviceFriendlyName } from "../auth/clientDeviceIdentifier";
-
-function getStoredToken(): string | null {
-  try {
-    if (typeof localStorage !== "undefined" && typeof localStorage.getItem === "function") {
-      return localStorage.getItem("staff_token");
-    }
-  } catch (_) {}
-  return null;
-}
 
 /**
  * Local registry ids look like "store_main"; the server only knows numeric ids
@@ -127,18 +120,15 @@ export class DeviceSessionService {
     const url = `${API_BASE_URL}/api/device-sessions?${params.toString()}`;
 
     try {
-      const token =
-        profile?.device_token ||
-        (typeof localStorage !== "undefined" && typeof localStorage.getItem === "function"
-          ? localStorage.getItem("staff_token")
-          : null);
+      // B8b: the roster is read by the counter that owns this store, so the
+      // device token is the only credential the request carries.
+      const deviceHeaders = await storeDeviceService.getDeviceAuthHeaders();
 
       const res = await fetch(url, {
         method: "GET",
         headers: {
           Accept: "application/json",
-          "X-Device-Uuid": clientUuid,
-          ...(token ? { "X-Device-Token": token, Authorization: `Bearer ${token}` } : {}),
+          ...deviceHeaders,
         },
       });
 
@@ -219,8 +209,6 @@ export class DeviceSessionService {
         unsynced = pending.length;
       }
 
-      const staff = staffAuthService.getCurrentSession();
-      const userRole = staff?.user.role === "admin" ? "Store Admin" : (staff?.user.role || "Cashier");
       const publicIp = await publicIpService.getPublicIp().catch(() => null);
       const localIpv4 = await deviceIpService.getLocalIpv4().catch(() => null);
 
@@ -238,11 +226,9 @@ export class DeviceSessionService {
           counter_name: profile?.counter_name || undefined,
           counter_id: profile?.counter_id || undefined,
           counter_code: profile?.counter_code || undefined,
-          user_id: staff?.user.id || undefined,
           app_version: params?.app_version || APP_VERSION,
           unsynced_items_count: unsynced,
           status: params?.status || "Active",
-          user_role: userRole,
           store_id: storeId,
           public_ip: publicIp || undefined,
           device_ipv4: localIpv4 || undefined,
@@ -252,16 +238,24 @@ export class DeviceSessionService {
         }),
       });
 
-      if (res.status === 403 || res.status === 409) {
+      if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         if (body.action === "lock_and_reset" || body.status === "revoked") {
           await storeDeviceService.lockAndResetWorkstation(Boolean(body.wipe_on_revocation));
-        } else if (body.force_logged_out || body.action === "sign_in_required" || body.error === "SESSION_NOT_ESTABLISHED") {
-          staffAuthService.handleDeviceSessionTerminated(
-            body.reason || body.message || "Session ended by the server"
-          );
-        } else if (!res.ok) {
           return false;
+        }
+        if (body.force_logged_out || body.action === "sign_in_required" || body.error === "SESSION_NOT_ESTABLISHED") {
+          // B8b: there is no operator session to end here. What the server just
+          // stopped trusting is this counter, so the till locks and waits for the
+          // counter PIN rather than going on working unauthorised.
+          counterLockingService.lock();
+          return false;
+        }
+        // SYNC-02: a refused device credential is a revocation, not a bad
+        // connection. The authority that tells a suspended store from a retired
+        // counter decides; a 5xx never reaches here.
+        if (isDeviceAuthFailure(res.status, body)) {
+          await handleDeviceAuthFailure();
         }
         return false;
       }
@@ -286,6 +280,10 @@ export class DeviceSessionService {
             body.last_reset_options || undefined
           );
         }
+        // PRF-004: the beat already carries the counter's watermark, so an owner
+        // who just changed the surface is answered on the next beat instead of
+        // waiting on the watch. The beat stays silent when the numbers agree.
+        await counterSessionService.alignToVersion(body?.permission_profile_version);
         return true;
       }
 
@@ -313,13 +311,13 @@ export class DeviceSessionService {
    */
   async renameDevice(id: string, newNames: { counter_name?: string; device_name?: string }): Promise<boolean> {
     try {
-      const token = getStoredToken();
+      const deviceHeaders = await storeDeviceService.getDeviceAuthHeaders();
       const res = await fetch(`${API_BASE_URL}/api/device-sessions/${id}/rename`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Accept: "application/json",
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          ...deviceHeaders,
         },
         body: JSON.stringify(newNames),
       });
@@ -339,12 +337,12 @@ export class DeviceSessionService {
    */
   async lockDevice(id: string): Promise<boolean> {
     try {
-      const token = getStoredToken();
+      const deviceHeaders = await storeDeviceService.getDeviceAuthHeaders();
       const res = await fetch(`${API_BASE_URL}/api/device-sessions/${id}/lock`, {
         method: "POST",
         headers: {
           Accept: "application/json",
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          ...deviceHeaders,
         },
       });
 
@@ -363,12 +361,12 @@ export class DeviceSessionService {
    */
   async unlockDevice(id: string): Promise<boolean> {
     try {
-      const token = getStoredToken();
+      const deviceHeaders = await storeDeviceService.getDeviceAuthHeaders();
       const res = await fetch(`${API_BASE_URL}/api/device-sessions/${id}/unlock`, {
         method: "POST",
         headers: {
           Accept: "application/json",
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          ...deviceHeaders,
         },
       });
 
@@ -387,13 +385,13 @@ export class DeviceSessionService {
    */
   async revokeDevice(id: string, reason?: string): Promise<boolean> {
     try {
-      const token = getStoredToken();
+      const deviceHeaders = await storeDeviceService.getDeviceAuthHeaders();
       const res = await fetch(`${API_BASE_URL}/api/device-sessions/${id}/revoke`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Accept: "application/json",
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          ...deviceHeaders,
         },
         body: JSON.stringify({ reason: reason || "Revoked by admin" }),
       });
@@ -413,12 +411,12 @@ export class DeviceSessionService {
    */
   async forceLogout(id: string): Promise<boolean> {
     try {
-      const token = getStoredToken();
+      const deviceHeaders = await storeDeviceService.getDeviceAuthHeaders();
       const res = await fetch(`${API_BASE_URL}/api/device-sessions/${id}/force-logout`, {
         method: "POST",
         headers: {
           Accept: "application/json",
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          ...deviceHeaders,
         },
       });
 
@@ -472,11 +470,16 @@ export class DeviceSessionService {
       clearInterval(this.heartbeatInterval);
     }
 
-    // Presence only exists for a signed-in operator: a bare workstation must not
-    // hammer the heartbeat endpoint with SESSION_NOT_ESTABLISHED 409s.
+    // B8b: presence belongs to the claimed counter, not to a signed-in operator.
+    // An unclaimed terminal still has no counter to report, and must not hammer
+    // the heartbeat endpoint with SESSION_NOT_ESTABLISHED 409s.
     const beat = () => {
-      if (!staffAuthService.getCurrentSession()) return;
-      this.sendHeartbeat().catch(() => {});
+      storeDeviceService
+        .getDeviceProfile()
+        .then((profile) => {
+          if (profile?.counter_id) this.sendHeartbeat().catch(() => {});
+        })
+        .catch(() => {});
     };
 
     // Immediate first ping

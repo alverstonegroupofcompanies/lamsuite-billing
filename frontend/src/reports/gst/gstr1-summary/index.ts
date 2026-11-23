@@ -1,6 +1,7 @@
 import type { ReportModule, ReportColumn, ReportFilterDef } from "../../types";
 import { sqliteStorage } from "../../../lib/db/sqliteStorage";
 import type { InvoiceRecord, InvoiceItemRecord } from "../../../lib/billing/invoiceManagementService";
+import { stateLabel } from "../../../lib/gst/stateCodes";
 
 export interface Gstr1TableRow {
   section_table: string; // "Table 4: B2B Invoices" | "Table 5: B2C Large" | "Table 7: B2C Small" | "Table 9: Credit/Debit Notes"
@@ -242,7 +243,7 @@ export const gstr1SummaryReport: ReportModule<any, Gstr1TableRow> = {
           document_date: inv.invoice_date,
           recipient_gstin: inv.customer_gstin || "-",
           recipient_name: inv.customer_name || "Consumer / Unregistered",
-          place_of_supply: inv.place_of_supply || `${storeStateCode}-Kerala`,
+          place_of_supply: inv.place_of_supply || stateLabel(storeStateCode),
           rate,
           taxable_value: Math.round(vals.taxable * 100) / 100,
           cgst: Math.round(vals.cgst * 100) / 100,

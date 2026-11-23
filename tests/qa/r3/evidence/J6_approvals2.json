@@ -1,0 +1,139 @@
+{
+  "otp_other_doc": {
+    "st": 422,
+    "body": "{\"success\":false,\"code\":\"INVALID_ONE_TIME_PIN\",\"error\":\"The one-time PIN is invalid, already used or expired. Ask an administrator for a new one.\"}"
+  },
+  "otp_wrong_action": {
+    "st": 422,
+    "body": "{\"success\":false,\"code\":\"INVALID_ONE_TIME_PIN\",\"error\":\"The one-time PIN is invalid, already used or expired. Ask an administrator for a new one.\"}"
+  },
+  "otp_ok": {
+    "st": 200,
+    "body": "{\"success\":true,\"token\":\"E2ZnALHArh9vvJhfZFXdPyqTkRsVHrDFGEQk1QkZoxQaixCV\",\"approval\":{\"id\":\"3\",\"invoice_id\":\"21\",\"action\":\"edit\",\"mode\":\"one_time_pin\",\"status\":\"used\",\"approved_by_name\":\"Rajesh Sharma\",\"expires_at\":\"202"
+  },
+  "otp_reuse": {
+    "st": 422,
+    "body": "{\"success\":false,\"code\":\"INVALID_ONE_TIME_PIN\",\"error\":\"The one-time PIN is invalid, already used or expired. Ask an administrator for a new one.\"}"
+  },
+  "otp_no_token": {
+    "st": 422,
+    "body": "{\"success\":false,\"code\":\"INVALID_ONE_TIME_PIN\",\"error\":\"The one-time PIN is invalid, already used or expired. Ask an administrator for a new one.\"}"
+  },
+  "mgr_ok": {
+    "st": 200,
+    "body": "{\"success\":true,\"token\":\"myY01T5ctp07bV1fVdrmBA5crZHkWGsIvRSIDvFkIkTxHzsr\",\"approval\":{\"id\":\"5\",\"invoice_id\":\"21\",\"action\":\"edit\",\"mode\":\"manager\",\"status\":\"used\",\"approved_by_name\":\"QA PH Manager\",\"expires_at\":\"2026-11-"
+  },
+  "mgr_wrong": [
+    "{\"success\":false,\"code\":\"INVALID_CREDENTIALS\",\"error\":\"Invalid manager credentials.\"}",
+    "{\"success\":false,\"code\":\"INVALID_CREDENTIALS\",\"error\":\"Invalid manager credentials.\"}",
+    "{\"success\":false,\"code\":\"INVALID_CREDENTIALS\",\"error\":\"Invalid manager credentials.\"}",
+    "{\"success\":false,\"code\":\"INVALID_CREDENTIALS\",\"error\":\"Invalid manager credentials.\"}",
+    "{\"success\":false,\"code\":\"INVALID_CREDENTIALS\",\"error\":\"Invalid manager credentials.\"}",
+    "{\"success\":false,\"code\":\"APPROVER_LOCKED\",\"error\":\"The approving account is temporarily locked. Ask an adminis"
+  ],
+  "mgr_after_lock": {
+    "st": 423,
+    "body": "{\"success\":false,\"code\":\"APPROVER_LOCKED\",\"error\":\"The approving account is temporarily locked. Ask an administrator to unlock it.\"}"
+  },
+  "otp_expired": {
+    "st": 422,
+    "body": "{\"success\":false,\"code\":\"INVALID_ONE_TIME_PIN\",\"error\":\"The one-time PIN is invalid, already used or expired. Ask an administrator for a new one.\"}"
+  },
+  "approvals": [
+    {
+      "id": 1,
+      "invoice_id": 5,
+      "action": "edit",
+      "mode": "one_time_pin",
+      "status": "pending",
+      "used_at": null
+    },
+    {
+      "id": 2,
+      "invoice_id": 6,
+      "action": "cancel",
+      "mode": "one_time_pin",
+      "status": "pending",
+      "used_at": null
+    },
+    {
+      "id": 3,
+      "invoice_id": 21,
+      "action": "edit",
+      "mode": "one_time_pin",
+      "status": "used",
+      "used_at": "2026-11-21 21:50:40"
+    },
+    {
+      "id": 4,
+      "invoice_id": 19,
+      "action": "edit",
+      "mode": "one_time_pin",
+      "status": "pending",
+      "used_at": null
+    },
+    {
+      "id": 5,
+      "invoice_id": 21,
+      "action": "edit",
+      "mode": "manager",
+      "status": "used",
+      "used_at": "2026-11-21 21:50:41"
+    }
+  ],
+  "audit": [
+    {
+      "action": "invoice_approval_failed",
+      "entity_type": "Invoice",
+      "entity_id": "19"
+    },
+    {
+      "action": "invoice_approval_failed",
+      "entity_type": "Invoice",
+      "entity_id": "21"
+    },
+    {
+      "action": "invoice_approval_failed",
+      "entity_type": "Invoice",
+      "entity_id": "21"
+    },
+    {
+      "action": "invoice_approval_failed",
+      "entity_type": "Invoice",
+      "entity_id": "21"
+    },
+    {
+      "action": "invoice_approval_failed",
+      "entity_type": "Invoice",
+      "entity_id": "21"
+    },
+    {
+      "action": "invoice_approval_failed",
+      "entity_type": "Invoice",
+      "entity_id": "21"
+    },
+    {
+      "action": "invoice_approval_used",
+      "entity_type": "InvoiceApproval",
+      "entity_id": "5"
+    },
+    {
+      "action": "invoice_approval_issued",
+      "entity_type": "InvoiceApproval",
+      "entity_id": "4"
+    }
+  ],
+  "day_close": {
+    "st": 200,
+    "body": "{\"success\":true,\"day_close\":{\"store_id\":4,\"store_name\":\"QA Pharma Kochi\",\"close_date\":\"2026-11-21\",\"sales\":{\"gross_total\":3487,\"tax_total\":373.57,\"discount_total\":90,\"bills_count\":19},\"returns\":{\"count\":1,\"total\":34},\"tenders\":{\"cash\":{\"collected\":3487.6,\"refunded\":34,\"net\":3453.6,\"pending\":0,\"recei"
+  },
+  "cancel_after_close": {
+    "st": 200,
+    "body": "{\"success\":true,\"status\":\"cancelled\",\"message\":\"Invoice #C02-INV-QA002 cancelled and batch stock restored.\"}",
+    "status_now": "cancelled"
+  },
+  "reopen": {
+    "st": 200,
+    "body": "{\"success\":true,\"day_close\":{\"store_id\":4,\"store_name\":\"QA Pharma Kochi\",\"close_date\":\"2026-11-21\",\"sales\":{\"gross_total\":3397,\"tax_total\":363.93,\"discount_total\":90,\"bills_count\":18},\"returns\":{\"coun"
+  }
+}

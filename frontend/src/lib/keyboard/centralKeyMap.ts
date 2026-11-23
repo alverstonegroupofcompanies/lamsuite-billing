@@ -7,6 +7,7 @@ export type ShortcutScope =
   | "pos"
   | "bills"
   | "purchase"
+  | "salesReturns"
   | "stock"
   | "edit"
   | "modal"
@@ -18,7 +19,6 @@ export type ShortcutAction =
   | "switchStore"
   | "lockTerminal"
   | "commandPalette"
-  | "accountSwitcher"
   | "navPos"
   | "navPurchases"
   | "navPurchaseReturns"
@@ -42,6 +42,7 @@ export type ShortcutAction =
   | "checkout"
   | "columns"
   | "focusCustomer"
+  | "focusSalesperson"
   | "focusMobile"
   | "focusDoctor"
   | "focusPatient"
@@ -67,11 +68,12 @@ export type ShortcutAction =
   // edit mode
   | "cancelEdit"
   // purchase
+  | "purchaseFocusEntry"
   | "focusSupplier"
   | "focusBillNo"
   | "focusBillDate"
   | "focusPurchaseType"
-  | "focusFreight"
+  | "toggleCharges"
   | "focusBillTotal"
   | "purchaseRoundOff"
   | "toggleDiscountType"
@@ -82,6 +84,8 @@ export type ShortcutAction =
   | "recallDraft"
   | "postPurchase"
   | "postPurchasePrint"
+  // sales returns
+  | "newSalesReturn"
   // stock
   | "newStockAdjustment"
   | "addAdjustmentLine"
@@ -91,7 +95,18 @@ export type ShortcutAction =
   | "importAdjustmentCsv"
   | "undoAdjustmentDelete"
   // generic
-  | "modalClose";
+  | "modalClose"
+  // Alt+F charges grid (PUR-007)
+  | "chargeAddRow"
+  | "chargeDeleteRow"
+  | "chargeUndoDelete"
+  | "chargeMoveUp"
+  | "chargeMoveDown"
+  | "chargeMoveLeft"
+  | "chargeMoveRight"
+  | "chargeCycleCell"
+  | "chargeEditCell"
+  | "chargeApply";
 
 export interface ShortcutDefinition {
   action: ShortcutAction;
@@ -118,7 +133,6 @@ export const centralKeyMap: ShortcutDefinition[] = [
   def("switchStore", ["Ctrl+Alt+S"], "Switch Store", "global", "Global"),
   def("lockTerminal", ["Ctrl+L"], "Lock Terminal", "global", "Global"),
   def("commandPalette", ["Ctrl+K"], "Command Palette", "global", "Global"),
-  def("accountSwitcher", ["F12"], "Switch Account", "global", "Global"),
   def("navPos", ["F1"], "POS Billing", "global", "Navigation"),
   def("navPurchases", ["F2"], "Purchases", "global", "Navigation"),
   def("navPurchaseReturns", ["Shift+F2"], "Purchase Returns", "global", "Navigation"),
@@ -144,6 +158,7 @@ export const centralKeyMap: ShortcutDefinition[] = [
   def("columns", ["Ctrl+Shift+C"], "Columns & Layout", "pos", "Billing"),
   def("focusEntry", ["F1"], "Product Entry Row", "pos", "Billing"),
   def("focusCustomer", ["Alt+C"], "Customer", "pos", "Billing"),
+  def("focusSalesperson", ["Alt+S"], "Salesperson", "pos", "Billing"),
   def("focusMobile", ["Alt+M"], "Customer Mobile", "pos", "Billing"),
   def("focusDoctor", ["Alt+D"], "Doctor (pharmacy)", "pos", "Billing"),
   def("focusPatient", ["Alt+P"], "Patient (pharmacy)", "pos", "Billing"),
@@ -171,21 +186,25 @@ export const centralKeyMap: ShortcutDefinition[] = [
   def("cancelEdit", ["Ctrl+Q"], "Cancel Invoice Edit", "edit", "Edit"),
 
   // --- Purchase -----------------------------------------------------------
+  def("purchaseFocusEntry", ["F1"], "Entry Row", "purchase", "Purchase"),
   def("focusSupplier", ["Alt+S"], "Supplier", "purchase", "Purchase"),
   def("focusBillNo", ["Alt+B"], "Bill No", "purchase", "Purchase"),
   def("focusBillDate", ["Alt+D"], "Bill Date", "purchase", "Purchase"),
   def("focusPurchaseType", ["Alt+T"], "Purchase Type", "purchase", "Purchase"),
-  def("focusFreight", ["Alt+F"], "Freight", "purchase", "Purchase"),
+  def("toggleCharges", ["Alt+F"], "Bill Charges", "purchase", "Purchase"),
   def("focusBillTotal", ["Alt+I"], "Supplier Bill Total", "purchase", "Purchase"),
   def("purchaseRoundOff", ["Alt+R"], "Round-Off", "purchase", "Purchase"),
   def("toggleDiscountType", ["Alt+Y"], "Toggle Discount % / Amount", "purchase", "Purchase"),
   def("quickAddProduct", ["Ctrl+N"], "Quick Add Product", "purchase", "Purchase"),
-  def("newPurchase", ["Ctrl+Shift+N"], "New Purchase Bill", "purchase", "Purchase"),
+  def("newPurchase", ["Ctrl+Shift+N", "F2"], "New Purchase Bill", "purchase", "Purchase"),
   def("findPurchase", ["F6"], "Find Purchase Bill", "purchase", "Purchase"),
   def("saveDraft", ["F8"], "Save Draft", "purchase", "Purchase"),
   def("recallDraft", ["F9"], "Recall Draft", "purchase", "Purchase"),
   def("postPurchase", ["F12"], "Post Purchase", "purchase", "Purchase"),
   def("postPurchasePrint", ["Shift+F12"], "Post & Print Labels", "purchase", "Purchase"),
+
+  // --- Sales returns ------------------------------------------------------
+  def("newSalesReturn", ["F7"], "New Sales Return", "salesReturns", "Sales Returns"),
 
   // --- Stock --------------------------------------------------------------
   def("newStockAdjustment", ["Alt+A"], "New Stock Adjustment", "stock", "Stock"),
@@ -198,6 +217,20 @@ export const centralKeyMap: ShortcutDefinition[] = [
 
   // --- Modal / preview / login -------------------------------------------
   def("modalClose", ["Esc"], "Close Modal", "modal", "Modal", true),
+
+  // --- Alt+F supplier bill charges grid (PUR-007) ------------------------
+  // These live in the modal scope so the grid owns plain keys like Enter and Delete
+  // while it is open, and every other screen keeps them.
+  def("chargeAddRow", ["Insert"], "Add Charge Row", "modal", "Charges"),
+  def("chargeDeleteRow", ["Delete"], "Delete Charge Row", "modal", "Charges"),
+  def("chargeUndoDelete", ["Ctrl+Z"], "Undo Charge Row Delete", "modal", "Charges"),
+  def("chargeMoveUp", ["Up"], "Previous Charge Row", "modal", "Charges"),
+  def("chargeMoveDown", ["Down"], "Next Charge Row", "modal", "Charges"),
+  def("chargeMoveLeft", ["Left"], "Previous Charge Column", "modal", "Charges"),
+  def("chargeMoveRight", ["Right"], "Next Charge Column", "modal", "Charges"),
+  def("chargeCycleCell", ["Space", "Shift+Space"], "Cycle Charge Preset", "modal", "Charges"),
+  def("chargeEditCell", ["Enter"], "Edit Charge Amount", "modal", "Charges"),
+  def("chargeApply", ["Ctrl+Enter"], "Apply Charges To Bill", "modal", "Charges"),
 ];
 
 // ---------------------------------------------------------------------------

@@ -76,64 +76,53 @@ class IamAndDeviceRegistrationTest extends TestCase
         ];
     }
 
-    public function test_remote_device_enrollment_generates_pairing_code_and_awaits_approval(): void
+    /**
+     * CNT-002 / CNT-006 / CNT-013: the owner pre-creates the counter and hands
+     * over a code; the till claims it and is live. Pairing codes are retired.
+     */
+    public function test_a_remote_till_is_brought_onto_a_pre_created_counter_by_its_code(): void
     {
-        $response = $this->postJson('/api/counters/enroll', [
+        $counter = Counter::create([
             'store_id' => $this->store->id,
-            'device_uuid' => 'uuid-remote-pc-01',
-            'counter_name' => 'Front Counter',
             'counter_code' => 'C01',
+            'counter_name' => 'Front Counter',
             'location_name' => 'Checkout Area',
             'is_remote' => true,
+            'status' => Counter::STATUS_UNCLAIMED,
         ]);
 
-        $response->assertStatus(201)
-            ->assertJson([
-                'success' => true,
-                'status' => 'pending_approval',
-            ]);
+        $issued = \App\Models\ActivationKey::generateForCounter($counter);
+        $this->assertMatchesRegularExpression(
+            '/^LAM-C01-[0-9A-F]{16}-[0-9A-F]{16}$/',
+            $issued['raw_key'],
+            'a counter code carries its counter and nothing else'
+        );
 
-        $pairingCode = $response->json('pairing_code');
-        $this->assertNotNull($pairingCode);
-        $this->assertMatchesRegularExpression('/^[A-Z]{2}-\d{4}$/', $pairingCode);
-
-        // Check enrollment status polling
-        $statusRes = $this->getJson("/api/counters/enrollment-status/uuid-remote-pc-01");
-        $statusRes->assertStatus(200)
-            ->assertJson([
-                'success' => true,
-                'status' => 'pending_approval',
-                'counter_code' => 'C01',
-                'pairing_code' => $pairingCode,
-            ]);
-
-        // Owner approves counter using pairing code
-        $approveRes = $this->actingAs($this->ownerUser)->postJson('/api/counters/approve-pairing', [
-            'pairing_code' => $pairingCode,
-            'store_id' => $this->store->id,
+        $claim = $this->postJson('/api/counters/claim', [
+            'code' => $issued['raw_key'],
+            'device_uuid' => 'uuid-remote-pc-01',
+            'device_name' => 'Front Counter PC',
         ]);
 
-        $approveRes->assertStatus(200)
+        $claim->assertStatus(200)
             ->assertJson([
                 'success' => true,
+                'token_stored_as' => 'hash_only',
+                'counter' => ['counter_code' => 'C01', 'counter_name' => 'Front Counter'],
             ]);
 
-        $deviceToken = $approveRes->json('device_token');
-        $this->assertNotNull($deviceToken);
+        $deviceToken = (string) $claim->json('device_token');
         $this->assertStringStartsWith('lsd_', $deviceToken);
 
-        // Device polling now reports active with device_token
-        $pollActive = $this->getJson("/api/counters/enrollment-status/uuid-remote-pc-01");
-        $pollActive->assertStatus(200)
-            ->assertJson([
-                'status' => 'active',
-                'is_active' => true,
-                'device_token' => $deviceToken,
-            ]);
+        // Only the hash survives on the server side.
+        $fresh = $counter->fresh();
+        $this->assertSame(Counter::STATUS_ACTIVE, $fresh->status);
+        $this->assertNull($fresh->device_token);
+        $this->assertSame(hash('sha256', $deviceToken), $fresh->device_token_hash);
+        $this->assertStringNotContainsString($deviceToken, (string) json_encode($fresh->toArray()));
 
         // Watch endpoint verifies status and updates heartbeat
-        $counterId = $pollActive->json('counter_id');
-        $watchRes = $this->getJson("/api/counters/{$counterId}/watch");
+        $watchRes = $this->getJson("/api/counters/{$fresh->id}/watch");
         $watchRes->assertStatus(200)
             ->assertJson([
                 'success' => true,
@@ -260,7 +249,10 @@ class IamAndDeviceRegistrationTest extends TestCase
             'device_uuid' => 'dev-shift-uuid-99',
         ]);
 
-        $res = $this->actingAs($this->staffUser)->postJson("/api/counters/{$counter->id}/shifts/open", [
+        // B9 / PRF-007: opening a drawer by counter id is the panel's path and
+        // needs a person who may edit devices. A till opens its own shift at
+        // /api/counter/shift/open with its device token and its PIN.
+        $res = $this->actingAs($this->ownerUser)->postJson("/api/counters/{$counter->id}/shifts/open", [
             'opening_float' => 2000.00,
             'notes' => 'Morning shift opening cash',
         ]);

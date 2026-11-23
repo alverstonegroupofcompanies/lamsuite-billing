@@ -7,6 +7,11 @@ use App\Models\Product;
 use App\Models\Party;
 use App\Models\Invoice;
 use App\Models\Purchase;
+use App\Models\PurchaseCharge;
+use App\Models\PurchaseItem;
+use App\Models\Store;
+use App\Services\Gst\PartyStateResolver;
+use App\Services\Reports\PurchaseRegisterService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -126,13 +131,19 @@ class DataExchangeController
             } elseif ($entityType === 'customers' || $entityType === 'suppliers') {
                 $partyType = $entityType === 'customers' ? 'customer' : 'supplier';
                 foreach ($rows as $row) {
+                    $gstin = $row['gstin'] ?? null;
                     Party::create([
                         'store_id' => $storeId,
                         'name' => $row['name'],
                         'type' => $partyType,
                         'phone' => $row['phone'] ?? null,
-                        'gstin' => $row['gstin'] ?? null,
+                        'gstin' => $gstin,
                         'address' => $row['address'] ?? null,
+                        'state_code' => app(PartyStateResolver::class)->resolve(
+                            $row['state_code'] ?? null,
+                            $gstin,
+                            Store::find($storeId)
+                        ),
                         'is_active' => true,
                         'version' => 1,
                     ]);
@@ -196,6 +207,49 @@ class DataExchangeController
                     'credit_period_days' => 30,
                 ],
             ],
+            // CR-C: a purchase row may carry its charges beside the bill, one head per row, and
+            // a legacy `freight` column imports as the Freight head (PUR-017).
+            'purchases' => [
+                'fields' => [
+                    'supplier_name', 'supplier_gstin', 'invoice_number', 'invoice_date',
+                    'taxable_amount', 'cgst_amount', 'sgst_amount', 'igst_amount', 'cess_amount',
+                    'total_amount', 'round_off', 'payment_status', 'freight',
+                    'charge_head', 'charge_amount', 'charge_gst_percent', 'charge_treatment',
+                    'charge_spread_method', 'charge_itc_eligibility', 'charge_is_rcm',
+                    'charge_paid_separately', 'charge_paid_to', 'charge_note',
+                ],
+                'sample' => [
+                    'supplier_name' => 'Apex Pharma Distributors',
+                    'invoice_number' => 'PUR-1001',
+                    'invoice_date' => '15-11-2026',
+                    'taxable_amount' => 10000,
+                    'cgst_amount' => 600,
+                    'sgst_amount' => 600,
+                    'total_amount' => 11554,
+                    'charge_head' => 'FREIGHT',
+                    'charge_amount' => 200,
+                    'charge_gst_percent' => 18,
+                    'charge_treatment' => 'add_to_cost',
+                    'charge_spread_method' => 'value',
+                    'charge_itc_eligibility' => 'eligible',
+                ],
+            ],
+            'purchase_charges' => [
+                'fields' => [
+                    'purchase_reference', 'charge_head', 'amount', 'gst_percent', 'treatment',
+                    'spread_method', 'itc_eligibility', 'is_rcm', 'paid_separately', 'paid_to',
+                    'note',
+                ],
+                'sample' => [
+                    'purchase_reference' => 'PUR-1001',
+                    'charge_head' => 'PACKING',
+                    'amount' => 100,
+                    'gst_percent' => 18,
+                    'treatment' => 'expense',
+                    'spread_method' => 'value',
+                    'itc_eligibility' => 'eligible',
+                ],
+            ],
         ];
 
         if (!isset($templates[$type])) {
@@ -228,7 +282,51 @@ class DataExchangeController
         } elseif ($type === 'invoices') {
             $query = Invoice::where('store_id', $storeId);
         } elseif ($type === 'purchases') {
-            $query = Purchase::where('store_id', $storeId);
+            // REP-007: every bill leaves with its charges beside it, and each item line with the
+            // rate it was billed at next to the landed rate the charges moved it to (PUR-011).
+            $register = new PurchaseRegisterService();
+
+            $rows = Purchase::with(['items', 'charges'])
+                ->where('store_id', $storeId)
+                ->orderBy('invoice_date')
+                ->orderBy('id')
+                ->get()
+                ->map(function (Purchase $purchase) use ($register): array {
+                    $line = $purchase->toArray();
+                    $line['charges'] = $register->chargeRows($purchase);
+                    $line['items'] = $purchase->items->map(fn (PurchaseItem $item): array => array_merge(
+                        $item->toArray(),
+                        [
+                            'billed_cost' => round((float) $item->purchase_rate, 4),
+                            'landed_cost' => round((float) ($item->landed_unit_cost
+                                ?? $item->effective_unit_cost
+                                ?? $item->purchase_rate), 4),
+                        ]
+                    ))->values();
+
+                    return $line;
+                })
+                ->values()
+                ->all();
+
+            return response()->json(['success' => true, 'type' => $type, 'data' => $rows]);
+        } elseif ($type === 'purchase_charges') {
+            $rows = PurchaseCharge::with('purchase:id,invoice_number,supplier_name,invoice_date')
+                ->where('store_id', $storeId)
+                ->orderBy('purchase_id')
+                ->orderBy('seq')
+                ->get();
+
+            return response()->json([
+                'success' => true,
+                'type' => $type,
+                'data' => $rows
+                    ->map(fn (PurchaseCharge $charge): array => array_merge(
+                        $charge->toArray(),
+                        ['purchase_reference' => (string) ($charge->purchase?->invoice_number ?? '')]
+                    ))
+                    ->values(),
+            ]);
         } else {
             return response()->json(['message' => "Unsupported export entity: {$type}"], 404);
         }

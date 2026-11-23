@@ -5,6 +5,22 @@ export interface BusinessRuleErrorPayload {
   field: string | null;
   message: string;
   fix: string | null;
+  /** APR-003: the action keys an `approval_required` answer names. */
+  actions?: string[];
+  /** APR-003: why each action was deferred, keyed by action. */
+  reasons?: Record<string, string>;
+  /** PHR-004: the restricted lines an unconfirmed bill was refused for. */
+  restricted_items?: RestrictedDrugLine[];
+}
+
+/** One line of a refused document, as the server's schedule list read it. */
+export interface RestrictedDrugLine {
+  line: number;
+  product_id: number | null;
+  product_name: string;
+  batch_no: string | null;
+  schedule_code: string;
+  qty: number;
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -18,6 +34,53 @@ const asLineNumber = (value: unknown): number | null => {
   return typeof parsed === "number" && Number.isInteger(parsed) && parsed > 0 ? parsed : null;
 };
 
+function asActions(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+
+  const actions = value
+    .map((entry) => (typeof entry === "string" ? entry.trim() : ""))
+    .filter((entry) => entry !== "");
+
+  return actions.length > 0 ? actions : undefined;
+}
+
+function asReasons(value: unknown): Record<string, string> | undefined {
+  if (!isRecord(value)) return undefined;
+
+  const reasons: Record<string, string> = {};
+
+  for (const [action, message] of Object.entries(value)) {
+    const text = asNonEmptyString(message);
+    if (text) reasons[action] = text;
+  }
+
+  return Object.keys(reasons).length > 0 ? reasons : undefined;
+}
+
+function asRestrictedLines(value: unknown): RestrictedDrugLine[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+
+  const lines: RestrictedDrugLine[] = [];
+
+  for (const entry of value) {
+    if (!isRecord(entry)) continue;
+
+    const productName = asNonEmptyString(entry.product_name);
+    if (!productName) continue;
+
+    lines.push({
+      line: asLineNumber(entry.line) ?? lines.length + 1,
+      product_id: typeof entry.product_id === "number" ? entry.product_id : null,
+      product_name: productName,
+      batch_no: asNonEmptyString(entry.batch_no),
+      schedule_code: (asNonEmptyString(entry.schedule_code) || "").toUpperCase(),
+      qty: Number(entry.qty) || 0,
+    });
+  }
+
+  return lines.length > 0 ? lines : undefined;
+}
+
 function fromPayload(candidate: Record<string, unknown>): BusinessRuleErrorPayload | null {
   const code = asNonEmptyString(candidate.code);
   const message = asNonEmptyString(candidate.message);
@@ -30,6 +93,9 @@ function fromPayload(candidate: Record<string, unknown>): BusinessRuleErrorPaylo
     field: asNonEmptyString(candidate.field),
     message,
     fix: asNonEmptyString(candidate.fix),
+    actions: asActions(candidate.actions),
+    reasons: asReasons(candidate.reasons),
+    restricted_items: asRestrictedLines(candidate.restricted_items),
   };
 }
 

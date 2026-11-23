@@ -70,6 +70,19 @@ Master Data provides the foundational registries for the entire billing ecosyste
   - **When** committed,
   - **Then** valid rows are imported into local SQLite and queued for cloud sync.
 
+### [MST-008] Charge Heads Master (per store)
+- **Story:** As a store owner, I want to maintain my own list of supplier-bill charge heads with my own defaults.
+- **Acceptance Criteria:**
+  - **Given** the Masters screen (POS) or the admin panel Masters page,
+  - **When** the "Charge Heads" tab is opened,
+  - **Then** only the active store's heads are listed (never another store's, never a shared row — rule `R12`), each with name, code, SAC/HSN, default treatment, default spread method, default ITC eligibility, allowed sign and active flag.
+  - **Given** a store with no heads yet (new store, or a store created before this CR),
+  - **When** the master is first opened from either the POS or the admin panel, or the store is created,
+  - **Then** the seeded set `Freight`, `Packing`, `Loading/Unloading`, `Insurance`, `Other` is created for that store, and a "Reset to defaults" action restores missing seeded heads, removes unreferenced custom heads, and keeps referenced custom heads — the same lifecycle already defined for units (`R11`).
+  - **When** a head that charges reference is deleted,
+  - **Then** the delete is rejected with the referencing bills listed and completes only via an explicit reassign-then-delete.
+  - **Then** head deltas pulled by a till contain only that store's rows.
+
 ---
 
 ## 3. Offline Behavior & Conflict Rules

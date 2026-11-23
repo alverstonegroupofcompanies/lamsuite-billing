@@ -37,6 +37,10 @@ class WhatsAppIntegrationTest extends TestCase
             'role' => 'super_admin',
             'store_id' => $this->store->id,
         ]);
+
+        // G1-SEC: the WhatsApp gateway routes need a caller; the store's admin
+        // makes these calls and the store comes from their checked scope.
+        \Laravel\Sanctum\Sanctum::actingAs($this->adminUser);
     }
 
     public function test_format_chat_id(): void

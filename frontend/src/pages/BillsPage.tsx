@@ -42,6 +42,7 @@ import {
 import { whatsappService } from "../lib/integrations/whatsappService";
 import { isTauri } from "../lib/ipc/ipcBridge";
 import { posCartService } from "../lib/billing/posCartService";
+import { stateLabel } from "../lib/gst/stateCodes";
 import { productsStore, formatExpiryDisplay, type ProductBatch, type ProductItem } from "../lib/masters/productsStore";
 import {
   companySettingsService,
@@ -51,7 +52,7 @@ import { canonicalizeInvoiceIdentity, clearInvoiceChildren } from "../lib/db/inv
 import { onlineTransactionService } from "../lib/sync/onlineTransactionService";
 import { storeRegistryService, type RegisteredStoreRecord } from "../lib/auth/storeRegistryService";
 import { storeDeviceService, type StoreDeviceProfile } from "../lib/auth/storeDeviceService";
-import { staffAuthService } from "../lib/auth/staffAuthService";
+import { counterSessionService } from "../lib/auth/counterSessionService";
 import { partiesStore } from "../lib/masters/partiesStore";
 import { PrintPreviewModal } from "../components/PrintPreviewModal";
 import { InvoiceApprovalDialog } from "../components/InvoiceApprovalDialog";
@@ -130,11 +131,17 @@ const sumCollectedTenders = (inv: InvoiceRecord): number => {
   return Math.round(amount * 100) / 100;
 };
 
+// B8b: nobody signs in at the till, so what it remembers belongs to the counter.
+const billsPrefScope = (): string => {
+  const counterId = counterSessionService.state().counterId;
+  return counterId ? `cntr_${counterId}` : "";
+};
+
 const resolveInitialBillsPeriod = (): BillsPeriod => {
   let pinned: unknown;
   try {
-    const session = staffAuthService.getCurrentSession();
-    const preferences = session?.user?.id ? userPreferencesService.get(session.user.id) : {};
+    const scope = billsPrefScope();
+    const preferences = scope ? userPreferencesService.get(scope) : {};
     pinned = preferences[BILLS_PINNED_PERIOD_KEY];
   } catch {
     // Preferences are optional; fall through to the owner default.
@@ -248,8 +255,7 @@ export const BillsPage: React.FC = () => {
     setLoading(true);
     try {
       const reg = activeStore || storeRegistryService.getActiveStore();
-      const session = staffAuthService.getCurrentSession();
-      let activeStoreId = String(reg?.id || session?.user?.store_id || "");
+      let activeStoreId = String(reg?.id || counterSessionService.state().storeId || "");
       if (!activeStoreId && typeof window !== "undefined" && window.localStorage) {
         try {
           activeStoreId = window.localStorage.getItem("lamsuite_active_store_id") || "";
@@ -797,9 +803,9 @@ export const BillsPage: React.FC = () => {
 
     const applyPeriod = (next: BillsPeriod) => {
       setDateRange(next);
-      const userId = staffAuthService.getCurrentSession()?.user?.id;
-      if (userId) {
-        void userPreferencesService.set(userId, BILLS_PINNED_PERIOD_KEY, next).catch(() => undefined);
+      const scope = billsPrefScope();
+      if (scope) {
+        void userPreferencesService.set(scope, BILLS_PINNED_PERIOD_KEY, next).catch(() => undefined);
       }
     };
 
@@ -902,7 +908,7 @@ export const BillsPage: React.FC = () => {
       gst_type: (invoice as any).gst_type || header.gst_type,
       drug_license_numbers: header.drug_license_numbers,
       fssai_no: header.fssai_no,
-      place_of_supply: invoice.place_of_supply || "32-Kerala",
+      place_of_supply: invoice.place_of_supply || stateLabel(companySettingsService.getSettings().state_code),
       customer_name: invoice.customer_name || "Walk-in Customer",
       customer_phone: invoice.customer_phone || (invoice as any).customer?.phone || "",
       customer_gstin: invoice.customer_gstin || undefined,
@@ -1065,7 +1071,7 @@ export const BillsPage: React.FC = () => {
       selectedInvoice.customer_id || "",
       selectedInvoice.customer_name || "Walk-in Customer",
       selectedInvoice.customer_gstin || "",
-      selectedInvoice.place_of_supply || "32-Kerala",
+      selectedInvoice.place_of_supply || stateLabel(companySettingsService.getSettings().state_code),
       selectedInvoice.customer_phone || ""
     );
 
@@ -1251,14 +1257,14 @@ export const BillsPage: React.FC = () => {
               key={chip.id}
               onClick={() => {
                 setDateRange(chip.id);
-                const userId = staffAuthService.getCurrentSession()?.user?.id;
-                if (userId) {
+                const scope = billsPrefScope();
+                if (scope) {
                   void userPreferencesService
-                    .set(userId, BILLS_PINNED_PERIOD_KEY, chip.id)
+                    .set(scope, BILLS_PINNED_PERIOD_KEY, chip.id)
                     .catch(() => undefined);
                 }
               }}
-              title={`Show ${chip.label} (remembered as your default period)`}
+              title={`Show ${chip.label} (remembered as this counter's default period)`}
               className={`rounded-[8px] px-2.5 py-1 text-xs font-semibold transition-colors cursor-pointer ${
                 dateRange === chip.id
                   ? "bg-[var(--color-accent)] text-white shadow-2xs"
@@ -1340,13 +1346,13 @@ export const BillsPage: React.FC = () => {
 
       {/* Diagnostics & Store Identification Bar */}
       {(() => {
-        const currentSession = staffAuthService.getCurrentSession();
-        const currentStoredId = (typeof window !== "undefined" ? window.localStorage?.getItem("lamsuite_active_store_id") : null) || currentSession?.user?.store_id || "4";
+        const counterState = counterSessionService.state();
+        const currentStoredId = (typeof window !== "undefined" ? window.localStorage?.getItem("lamsuite_active_store_id") : null) || counterState.storeId || "4";
         const displayStore = activeStore || storeRegistryService.getActiveStore() || storeRegistryService.getStores().find(s => String(s.id) === String(currentStoredId)) || null;
         const displayStoreName = displayStore?.alias || displayStore?.name || `Store ${currentStoredId}`;
         const displayStoreCode = displayStore?.code || `STORE-${String(currentStoredId).padStart(2, "0")}`;
         const displayStoreId = displayStore?.id || currentStoredId;
-        const displayCounter = displayStore?.counter_code || currentSession?.counterCode || "C01";
+        const displayCounter = displayStore?.counter_code || counterState.counterCode || "C01";
 
         return (
           <div className="flex flex-wrap items-center justify-between gap-2 rounded-[10px] border border-[var(--color-border)] bg-[var(--color-surface-subtle)] px-3 py-1.5 text-[11px] text-[var(--color-text-muted)] shadow-2xs">
@@ -1762,7 +1768,7 @@ export const BillsPage: React.FC = () => {
                 <div>
                   <span className="text-[10px] font-bold text-[var(--color-text-muted)] uppercase tracking-wider">GSTIN / Place of Supply</span>
                   <p className="font-mono text-[var(--color-text-muted)] mt-0.5">
-                    {selectedInvoice.customer_gstin || "Unregistered"} ({selectedInvoice.place_of_supply || "32-Kerala"})
+                    {selectedInvoice.customer_gstin || "Unregistered"} ({selectedInvoice.place_of_supply || stateLabel(companySettingsService.getSettings().state_code)})
                   </p>
                 </div>
               </div>

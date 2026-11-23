@@ -2,6 +2,13 @@ import type { ReportModule, ReportColumn, ReportFilterDef } from "../../types";
 import { sqliteStorage } from "../../../lib/db/sqliteStorage";
 import type { InvoiceRecord, InvoiceItemRecord } from "../../../lib/billing/invoiceManagementService";
 import type { PurchaseDocumentRecord } from "../../../lib/purchases/purchaseService";
+import type { PurchaseChargeRecord } from "../../../lib/reports/purchaseChargeRegister";
+import {
+  addIntoItcMoney,
+  documentItcBuckets,
+  emptyItcMoney,
+  type ItcChargeBill,
+} from "../../../lib/reports/chargeItc";
 
 export interface Gstr3bRow {
   section_key: string;
@@ -113,11 +120,11 @@ export const gstr3bFilters: ReportFilterDef[] = [
 export const gstr3bSummaryReport: ReportModule<any, Gstr3bRow> = {
   id: "gstr-3b-summary",
   title: "GSTR-3B Monthly Return Summary",
-  description: "Statutory GSTR-3B monthly return computation comparing Table 3.1 Outward Tax liability against Table 4 Inward Eligible ITC.",
+  description: "Statutory GSTR-3B monthly return computation comparing Table 3.1 Outward Tax liability against Table 4 Inward Eligible ITC, with each supplier-bill charge placed in the section its own eligibility and reverse-charge flag decide.",
   category: "gst",
   permission: "reports.gst.view",
   menuVisibilityKey: "reports",
-  keywords: ["gstr3b", "gst return", "itc", "tax liability", "statutory", "table 3.1", "table 4"],
+  keywords: ["gstr3b", "gst return", "itc", "tax liability", "statutory", "table 3.1", "table 4", "bill charges", "rcm"],
   defaultSort: { column: "section_key", direction: "asc" },
   supportedPrintLayouts: ["a4", "dot-matrix"],
   exportFormats: ["csv", "excel", "pdf"],
@@ -131,12 +138,14 @@ export const gstr3bSummaryReport: ReportModule<any, Gstr3bRow> = {
     const startDateStr = String(dates.startDate || "").trim().slice(0, 10);
     const endDateStr = String(dates.endDate || "").trim().slice(0, 10);
 
-    const [allInvoices, allInvoiceItems, allPurchasesDocs, allPurchasesAlt] = await Promise.all([
-      sqliteStorage.findAll<InvoiceRecord>("invoices").catch(() => []),
-      sqliteStorage.findAll<InvoiceItemRecord>("invoice_items").catch(() => []),
-      sqliteStorage.findAll<PurchaseDocumentRecord>("purchase_documents").catch(() => []),
-      sqliteStorage.findAll<PurchaseDocumentRecord>("purchases").catch(() => []),
-    ]);
+    const [allInvoices, allInvoiceItems, allPurchasesDocs, allPurchasesAlt, allCharges] =
+      await Promise.all([
+        sqliteStorage.findAll<InvoiceRecord>("invoices").catch(() => []),
+        sqliteStorage.findAll<InvoiceItemRecord>("invoice_items").catch(() => []),
+        sqliteStorage.findAll<PurchaseDocumentRecord>("purchase_documents").catch(() => []),
+        sqliteStorage.findAll<PurchaseDocumentRecord>("purchases").catch(() => []),
+        sqliteStorage.findAll<PurchaseChargeRecord>("purchase_charges").catch(() => []),
+      ]);
 
     const purchaseMap = new Map<string, PurchaseDocumentRecord>();
     for (const p of allPurchasesAlt) {
@@ -175,12 +184,6 @@ export const gstr3bSummaryReport: ReportModule<any, Gstr3bRow> = {
     // 2. Table 3.1(c) Nil rated / Exempted
     let exemptTaxable = 0;
 
-    // 3. Table 3.1(d) Inward RCM
-    let rcmTaxable = 0;
-    let rcmCgst = 0;
-    let rcmSgst = 0;
-    let rcmIgst = 0;
-
     for (const item of allInvoiceItems) {
       if (!activeInvMap.has(item.invoice_id)) continue;
       const inv = activeInvMap.get(item.invoice_id)!;
@@ -202,45 +205,22 @@ export const gstr3bSummaryReport: ReportModule<any, Gstr3bRow> = {
       }
     }
 
-    // 4. Eligible ITC from purchases (Table 4(A)(5))
-    let itcTaxable = 0;
-    let itcCgst = 0;
-    let itcSgst = 0;
-    let itcIgst = 0;
-
-    // 5. Ineligible / Blocked ITC (Table 4(D))
-    let ineligTaxable = 0;
-    let ineligCgst = 0;
-    let ineligSgst = 0;
-    let ineligIgst = 0;
+    // 3. Table 3.1(d) Inward RCM, 4. Eligible ITC (Table 4(A)(5)), 5. Blocked ITC (Table 4(D))
+    const rcm = emptyItcMoney();
+    const eligible = emptyItcMoney();
+    const ineligible = emptyItcMoney();
 
     for (const p of filteredPurchases) {
       const isReturn = p.module_key === "purchase_return" || p.module_key === "debit_note";
       const sign = isReturn ? -1 : 1;
 
-      const taxable = (Number(p.subtotal) || 0) * sign;
-      const cgst = (Number(p.cgst_total) || 0) * sign;
-      const sgst = (Number(p.sgst_total) || 0) * sign;
-      const igst = (Number(p.igst_total) || 0) * sign;
+      // REP-009: the header already carries the supplier-borne charge GST (PUR-001), so the charge
+      // rows decide which section that tax belongs to — ordinary ITC, 4(D), or reverse charge.
+      const buckets = documentItcBuckets(p as unknown as ItcChargeBill, allCharges, sign);
 
-      if (p.is_rcm) {
-        rcmTaxable += taxable;
-        rcmCgst += cgst;
-        rcmSgst += sgst;
-        rcmIgst += igst;
-      }
-
-      if (p.itc_eligibility === "ineligible" || p.itc_eligibility === "blocked") {
-        ineligTaxable += taxable;
-        ineligCgst += cgst;
-        ineligSgst += sgst;
-        ineligIgst += igst;
-      } else {
-        itcTaxable += taxable;
-        itcCgst += cgst;
-        itcSgst += sgst;
-        itcIgst += igst;
-      }
+      addIntoItcMoney(eligible, buckets.eligible);
+      addIntoItcMoney(ineligible, buckets.ineligible);
+      addIntoItcMoney(rcm, buckets.rcm);
     }
 
     const round = (num: number) => Math.round((num + Number.EPSILON) * 100) / 100;
@@ -269,45 +249,45 @@ export const gstr3bSummaryReport: ReportModule<any, Gstr3bRow> = {
       {
         section_key: "3.1(d)",
         section_description: "Inward supplies liable to reverse charge (RCM)",
-        taxable_value: round(rcmTaxable),
-        cgst_amount: round(rcmCgst),
-        sgst_amount: round(rcmSgst),
-        igst_amount: round(rcmIgst),
-        cess_amount: 0,
-        total_tax: round(rcmCgst + rcmSgst + rcmIgst),
+        taxable_value: round(rcm.taxable),
+        cgst_amount: round(rcm.cgst),
+        sgst_amount: round(rcm.sgst),
+        igst_amount: round(rcm.igst),
+        cess_amount: round(rcm.cess),
+        total_tax: round(rcm.tax),
       },
       {
         section_key: "4(A)(5)",
-        section_description: "Eligible ITC - All other inward supplies (Purchases)",
-        taxable_value: round(itcTaxable),
-        cgst_amount: round(itcCgst),
-        sgst_amount: round(itcSgst),
-        igst_amount: round(itcIgst),
-        cess_amount: 0,
-        total_tax: round(itcCgst + itcSgst + itcIgst),
+        section_description: "Eligible ITC - All other inward supplies (Purchases + bill charges)",
+        taxable_value: round(eligible.taxable),
+        cgst_amount: round(eligible.cgst),
+        sgst_amount: round(eligible.sgst),
+        igst_amount: round(eligible.igst),
+        cess_amount: round(eligible.cess),
+        total_tax: round(eligible.tax),
       },
       {
         section_key: "4(D)",
         section_description: "Ineligible / Blocked ITC (Section 17(5) / others)",
-        taxable_value: round(ineligTaxable),
-        cgst_amount: round(ineligCgst),
-        sgst_amount: round(ineligSgst),
-        igst_amount: round(ineligIgst),
-        cess_amount: 0,
-        total_tax: round(ineligCgst + ineligSgst + ineligIgst),
+        taxable_value: round(ineligible.taxable),
+        cgst_amount: round(ineligible.cgst),
+        sgst_amount: round(ineligible.sgst),
+        igst_amount: round(ineligible.igst),
+        cess_amount: round(ineligible.cess),
+        total_tax: round(ineligible.tax),
       },
       {
         section_key: "Net Payable",
         section_description: "Net GST Payable in Cash (Output Liability - Eligible ITC)",
-        taxable_value: round(outTaxable - itcTaxable),
-        cgst_amount: round(Math.max(0, outCgst - itcCgst)),
-        sgst_amount: round(Math.max(0, outSgst - itcSgst)),
-        igst_amount: round(Math.max(0, outIgst - itcIgst)),
+        taxable_value: round(outTaxable - eligible.taxable),
+        cgst_amount: round(Math.max(0, outCgst - eligible.cgst)),
+        sgst_amount: round(Math.max(0, outSgst - eligible.sgst)),
+        igst_amount: round(Math.max(0, outIgst - eligible.igst)),
         cess_amount: 0,
         total_tax: round(
-          Math.max(0, outCgst - itcCgst) +
-          Math.max(0, outSgst - itcSgst) +
-          Math.max(0, outIgst - itcIgst)
+          Math.max(0, outCgst - eligible.cgst) +
+          Math.max(0, outSgst - eligible.sgst) +
+          Math.max(0, outIgst - eligible.igst)
         ),
       },
     ];

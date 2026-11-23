@@ -303,7 +303,12 @@ export const DayClosePage: React.FC = () => {
             )}
             {status === "reconciled" && (
               <span className="text-[11px] text-slate-500 dark:text-slate-400">
-                Backdated bills are blocked for this date.
+                Backdated bills and cancellations are blocked for this date.
+              </span>
+            )}
+            {status === "closed" && (
+              <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                Cancellations are blocked for this date until it is reopened.
               </span>
             )}
           </div>
@@ -445,7 +450,8 @@ export const DayClosePage: React.FC = () => {
                     {busy === "reconcile" ? "Reconciling…" : "Reconcile & Lock"}
                   </button>
                 )}
-                {status === "reconciled" && isSuperAdmin && (
+                {/* G12: a closed day blocks cancellations, so whoever closed it can reopen it; a reconciled day needs a super admin. */}
+                {(status === "closed" || (status === "reconciled" && isSuperAdmin)) && (
                   <div className="space-y-2">
                     <input
                       type="text"

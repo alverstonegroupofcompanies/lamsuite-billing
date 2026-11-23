@@ -145,9 +145,15 @@ export const grossProfitReport: ReportModule<any, GrossProfitRow> = {
     // Build batch cost map and product fallback cost map
     const batchCostMap = new Map<string, number>();
     for (const b of allBatches) {
-      if (b.purchase_rate && b.purchase_rate > 0) {
-        batchCostMap.set(b.id, Number(b.purchase_rate));
-        batchCostMap.set(`${b.product_id}_${b.batch_no}`, Number(b.purchase_rate));
+      // REP-009: a batch whose cost was moved by add-to-cost charges is costed at its landed rate;
+      // every other batch keeps the rate this report has always used, so a store that never uses
+      // charges sees exactly the margin it saw before.
+      const landed = Number(b.landed_cost_rate) || 0;
+      const booked = Number(b.purchase_rate) || 0;
+      const cost = landed > 0 ? landed : booked;
+      if (cost > 0) {
+        batchCostMap.set(b.id, cost);
+        batchCostMap.set(`${b.product_id}_${b.batch_no}`, cost);
       }
     }
 

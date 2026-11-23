@@ -61,7 +61,7 @@ class AuditLog extends Model
         return self::create([
             'store_id' => $storeId ?? (auth()->check() ? auth()->user()->store_id : null),
             'user_id' => $userId ?? (auth()->check() ? auth()->id() : null),
-            'impersonator_id' => $impersonatorId ?? (session('impersonator_id') ?? null),
+            'impersonator_id' => $impersonatorId ?? ($request?->hasSession() ? session('impersonator_id') : null),
             'action' => $action,
             'entity_type' => $entityType,
             'entity_id' => (string) $entityId,

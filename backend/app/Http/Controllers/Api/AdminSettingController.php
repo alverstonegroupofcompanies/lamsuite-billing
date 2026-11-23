@@ -8,10 +8,13 @@ use App\Models\FinancialYear;
 use App\Models\GstLockPeriod;
 use App\Models\Store;
 use App\Services\Webhook\WebhookOutboxService;
+use App\Support\GstStateCodes;
+use App\Support\RequestTenant;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 
 class AdminSettingController
 {
@@ -20,27 +23,11 @@ class AdminSettingController
      */
     public function resolveStore(Request $request): ?Store
     {
-        $candidate = $request->attributes->get('active_store_id')
-            ?? $request->get('active_store_id')
-            ?? $request->header('X-Store-Id')
-            ?? $request->header('Store-Id')
-            ?? $request->input('store_id')
-            ?? $request->query('store_id')
-            ?? ($request->user() ? $request->user()->store_id : null);
+        // G1-SEC: the authenticated tenant only (counter token or ScopeStore);
+        // never a body/query field and never "the first store".
+        $storeId = \App\Support\RequestTenant::storeId($request);
 
-        if ($candidate !== null && $candidate !== '') {
-            if (is_numeric($candidate)) {
-                $store = Store::find((int)$candidate);
-                if ($store) return $store;
-            }
-            $store = Store::where('code', $candidate)
-                ->orWhere('id', $candidate)
-                ->orWhere('name', $candidate)
-                ->first();
-            if ($store) return $store;
-        }
-
-        return Store::first();
+        return $storeId === null ? null : Store::find($storeId);
     }
 
     /**
@@ -136,6 +123,19 @@ class AdminSettingController
             'round_off_enabled' => $roundOffEnabled,
             'default_hsn_code' => $defaultHsn,
         ], $billing);
+
+        // CR-C: the charge policy is read back in the same shapes the engine uses, so a store configured
+        // before booleans were honest JSON — "0", "1" — still shows its switch as off/on rather than on.
+        $chargePolicy = is_array($billing['purchase_charges'] ?? null) ? $billing['purchase_charges'] : [];
+        $chargeCap = $chargePolicy['max_percent_of_goods'] ?? null;
+        $billingFull['purchase_charges'] = [
+            'reverse_on_return' => in_array($chargePolicy['reverse_on_return'] ?? '', ['proportional', 'sunk'], true)
+                ? $chargePolicy['reverse_on_return']
+                : 'proportional',
+            'separately_paid_in_payable' => filter_var($chargePolicy['separately_paid_in_payable'] ?? false, FILTER_VALIDATE_BOOLEAN),
+            'allow_negative_charges' => filter_var($chargePolicy['allow_negative_charges'] ?? true, FILTER_VALIDATE_BOOLEAN),
+            'max_percent_of_goods' => is_numeric($chargeCap) ? (float) $chargeCap : null,
+        ];
 
         $sequencesFull = array_merge([
             'invoicePrefix' => $invoicePrefix,
@@ -236,15 +236,21 @@ class AdminSettingController
         $freightIsTaxable = $settings['freight_is_taxable']->value ?? false;
         $batchRequired = $settings['batch_required']->value
             ?? (($store->store_type ?? 'pharmacy') === 'pharmacy');
+        // SPR-006: a store that never chose still bills with a salesperson.
+        $salespersonOnBill = in_array($settings['salesperson_on_bill']->value ?? null, \App\Support\SalespersonBillRule::MODES, true)
+            ? $settings['salesperson_on_bill']->value
+            : \App\Support\SalespersonBillRule::REQUIRED;
 
         $enabledMenuItems = $store->enabled_menu_items ?? ($settings['enabled_menu_items']->value ?? [
             'dashboard', 'pos', 'bills', 'sales_returns', 'customer_debit_notes',
-            'purchases', 'purchase_returns', 'stock', 'stock_transfers',
+            'purchases', 'purchase_returns', 'expenses', 'stock', 'stock_transfers',
             'reports', 'masters', 'import_export', 'settings', 'counters',
         ]);
 
         return [
             'store_id' => (string)$store->id,
+            // SET-03: a write must quote the version it was read at (stores.version).
+            'settings_version' => (int) $store->version,
             'store_name' => $store->name,
             'display_name' => $general['display_name'] ?? $store->name,
             'phone' => $store->phone ?? '',
@@ -302,6 +308,7 @@ class AdminSettingController
             'enable_ptss' => (bool)$enablePtss,
             'freight_is_taxable' => (bool)$freightIsTaxable,
             'batch_required' => (bool)$batchRequired,
+            'salesperson_on_bill' => $salespersonOnBill,
             'enabled_menu_items' => $enabledMenuItems,
             'is_active' => (bool)$store->is_active,
 
@@ -335,6 +342,30 @@ class AdminSettingController
         }
         $storeId = $store->id;
         $input = $request->all();
+
+        // SET-03: optimistic lock. A writer that quotes the version it read must
+        // still be current; a stale document (another device or the panel saved
+        // since) is refused rather than silently overwriting newer settings.
+        if (array_key_exists('settings_version', $input)
+            && (int) $input['settings_version'] !== (int) $store->version) {
+            return response()->json([
+                'error' => 'SETTINGS_CONFLICT',
+                'message' => 'These settings were changed elsewhere since this screen loaded. Reload and save again.',
+                'current_version' => (int) $store->version,
+                'client_version' => (int) $input['settings_version'],
+                'settings' => $this->getSettingsPayload($store),
+            ], 409);
+        }
+        unset($input['settings_version']);
+
+        // SET-03: document numbering belongs to the counter's own series
+        // (CNT-014), never to a device's settings document. A paired till may
+        // still save the rest of its Settings screen.
+        if (RequestTenant::isCounter($request)) {
+            unset($input['sequences'], $input['next_invoice_number'], $input['invoice_prefix']);
+        }
+
+        $this->assertStoreIdentity($request, $store);
 
         // 1. Update Store model columns
         $storeUpdates = [];
@@ -411,6 +442,16 @@ class AdminSettingController
             }
         }
 
+        $changedOld = [];
+        $changedNew = [];
+        foreach ($storeUpdates as $field => $value) {
+            $before = $store->getOriginal($field);
+            if ($before != $value) {
+                $changedOld[$field] = $before;
+                $changedNew[$field] = $value;
+            }
+        }
+
         if (!empty($storeUpdates)) {
             $store->update($storeUpdates);
         }
@@ -465,13 +506,22 @@ class AdminSettingController
             );
         }
 
+        // 3c. SPR-006: the salesperson switch is one of three words; a value
+        // the till and the server have no meaning for is not stored.
+        if (isset($input['salesperson_on_bill'])
+            && !in_array($input['salesperson_on_bill'], \App\Support\SalespersonBillRule::MODES, true)
+        ) {
+            unset($input['salesperson_on_bill']);
+        }
+
         // 4. Save each specific sub-config key
         $sections = [
             'sequences', 'printing', 'workspace', 'security', 'inventory',
             'wallet', 'smtp', 'sms', 'whatsapp', 'webhook', 'keyboard', 'payments',
             'invoice_columns', 'header_fields', 'active_billing_preset', 'saved_billing_presets',
             'purchase_columns', 'purchase_header_fields', 'active_purchase_preset', 'saved_purchase_presets',
-            'enable_pts', 'enable_ptss', 'freight_is_taxable', 'batch_required', 'enabled_menu_items',
+            'enable_pts', 'enable_ptss', 'freight_is_taxable', 'batch_required',
+            'salesperson_on_bill', 'enabled_menu_items',
         ];
 
         foreach ($sections as $key) {
@@ -511,8 +561,16 @@ class AdminSettingController
             }
         }
 
-        AuditLog::log('update_settings', 'CompanySetting', 'all', null, array_keys($input), $storeId);
+        AuditLog::log(
+            'update_settings',
+            'CompanySetting',
+            'all',
+            $changedOld ?: null,
+            ['keys' => array_keys($input), 'store' => $changedNew],
+            $storeId
+        );
 
+        $store->increment('version');
         $store->refresh();
         return response()->json([
             'success' => true,
@@ -642,4 +700,50 @@ class AdminSettingController
         ]);
     }
 
+    /**
+     * SET-01: a settings document may carry the store's state and GSTIN (the
+     * till's Settings screen does), so both are validated here before any
+     * column or general-section write.
+     */
+    private function assertStoreIdentity(Request $request, Store $store): void
+    {
+        $input = $request->all();
+        $general = is_array($input['general'] ?? null) ? $input['general'] : [];
+
+        $hasState = array_key_exists('state_code', $input) || array_key_exists('state_code', $general);
+        $hasGstin = array_key_exists('gstin', $input) || array_key_exists('gstin', $general);
+        if (!$hasState && !$hasGstin) {
+            return;
+        }
+
+        $rawState = array_key_exists('state_code', $input) ? $input['state_code'] : ($general['state_code'] ?? null);
+        $state = GstStateCodes::normalize(is_string($rawState) ? $rawState : null) ?? $store->state_code;
+        $state = GstStateCodes::normalize($state);
+
+        if ($state !== null && !GstStateCodes::isValid($state)) {
+            throw ValidationException::withMessages([
+                'state_code' => 'Choose a valid GST state code (01-38 or 97).',
+            ]);
+        }
+
+        $rawGstin = array_key_exists('gstin', $input) ? $input['gstin'] : ($general['gstin'] ?? null);
+        if ($rawGstin === null) {
+            $gstin = $store->gstin;
+        } else {
+            $gstin = trim((string) $rawGstin);
+            $gstin = $gstin === '' ? null : $gstin;
+        }
+
+        if ($gstin !== null && !GstStateCodes::isValidGstin($gstin)) {
+            throw ValidationException::withMessages([
+                'gstin' => 'Enter a valid 15-character GSTIN or leave it blank.',
+            ]);
+        }
+
+        if ($gstin !== null && $state !== null && GstStateCodes::fromGstin($gstin) !== $state) {
+            throw ValidationException::withMessages([
+                'state_code' => "State code {$state} does not match the GSTIN's state.",
+            ]);
+        }
+    }
 }

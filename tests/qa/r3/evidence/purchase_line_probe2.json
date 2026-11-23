@@ -1,0 +1,97 @@
+[
+  [
+    "tab to product row",
+    "INPUT:text:Scan barcode or type product name [F1]...="
+  ],
+  [
+    "suggestions",
+    [
+      "QA Paracet 500 Strip",
+      "Add new product \"QA Paracet\""
+    ]
+  ],
+  [
+    "field 0",
+    "DIV::purchase-batch-0="
+  ],
+  [
+    "field 1",
+    "INPUT:text:MM/YY="
+  ],
+  [
+    "field 2",
+    "INPUT:text:Packs=1"
+  ],
+  [
+    "field 3",
+    "INPUT:number:MRP=90"
+  ],
+  [
+    "field 4",
+    "INPUT:number:Rate=60"
+  ],
+  [
+    "field 5",
+    "INPUT:number:Line discount percent=0"
+  ],
+  [
+    "field 6",
+    "INPUT:number:=12"
+  ],
+  [
+    "field 7",
+    "INPUT:number:Sell=90"
+  ],
+  [
+    "field 8",
+    "INPUT:number:Sell=90"
+  ],
+  [
+    "field 9",
+    "INPUT:number:Sell=90"
+  ],
+  [
+    "field 10",
+    "INPUT:number:Sell=90"
+  ],
+  [
+    "field 11",
+    "INPUT:number:Sell=90"
+  ],
+  [
+    "field 12",
+    "INPUT:number:Sell=90"
+  ],
+  [
+    "field 13",
+    "INPUT:number:Sell=90"
+  ],
+  [
+    "field 14",
+    "INPUT:number:Sell=90"
+  ],
+  [
+    "field 15",
+    "INPUT:number:Sell=90"
+  ],
+  [
+    "field 16",
+    "INPUT:number:Sell=90"
+  ],
+  [
+    "field 17",
+    "INPUT:number:Sell=90"
+  ],
+  [
+    "grid text",
+    [
+      "BILL NUMBER\tSUPPLIER NAME\tSUPPLIER INV #\tDATE\tTAXABLE\tGST TAX\tGRAND TOTAL\tPAYMENT\tSTATUS\tACTIONS",
+      "GST TAX MODE",
+      "#\tPRODUCT\tBATCH\tEXPIRY (MM/YY)\tQUANTITY\tFREE QTY\tMRP (₹)\tPUR. RATE (₹)\tDISC %/₹\tGST %\tSELLING RATE (₹)\tMARGIN %\tTAXABLE (₹)\tTAX (₹)\tTOTAL (₹)\tACTION",
+      "QA Paracet 500 Strip",
+      "SUBTOTAL: ₹ 0.00",
+      "GST TAX: ₹ 0.00",
+      "NET PAYABLE"
+    ]
+  ]
+]

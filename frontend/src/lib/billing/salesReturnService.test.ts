@@ -5,10 +5,10 @@ import { partiesStore } from "../masters/partiesStore";
 import {
   salesReturnService,
   toBaseUnits,
-  returnKey,
   buildReturnableQtyMap,
   type SalesReturnInput,
 } from "./salesReturnService";
+import { returnKey } from "./salesReturnPricing";
 
 describe("salesReturnService - Credit Notes & Sales Returns", () => {
   const dummyProduct = {
@@ -54,7 +54,67 @@ describe("salesReturnService - Credit Notes & Sales Returns", () => {
     });
   });
 
+  // A counter return always credits a bill the till can see, so the money tests seed
+  // that bill and the credit is reversed from what the customer actually paid.
+  const seedOriginal = async (
+    invoiceNumber: string,
+    line: {
+      qty: number;
+      unit_price: number;
+      taxable_amount: number;
+      cgst_amount: number;
+      sgst_amount: number;
+      total_amount: number;
+    }
+  ) => {
+    const id = `inv_${invoiceNumber}`;
+    const tax = Math.round((line.total_amount - line.taxable_amount) * 100) / 100;
+    await sqliteStorage.insertRecord("invoices", id, {
+      id,
+      module_key: "invoice",
+      invoice_number: invoiceNumber,
+      invoice_date: "2026-11-01",
+      customer_name: "Amit Sharma",
+      status: "issued",
+      subtotal: line.taxable_amount,
+      taxable_subtotal: line.taxable_amount,
+      tax_total: tax,
+      cgst_total: line.cgst_amount,
+      sgst_total: line.sgst_amount,
+      grand_total: line.total_amount,
+      paid_amount: line.total_amount,
+      place_of_supply: "32-Kerala",
+      store_state_code: "32",
+    });
+    await sqliteStorage.insertRecord("invoice_items", `item_${invoiceNumber}`, {
+      id: `item_${invoiceNumber}`,
+      invoice_id: id,
+      product_id: "prod_dolo_sr",
+      product_name: "Dolo 650 Tablet",
+      batch_no: "DL2601",
+      qty: line.qty,
+      loose_qty: 0,
+      units_per_pack: 1,
+      unit_price: line.unit_price,
+      gst_percent: 12,
+      taxable_amount: line.taxable_amount,
+      cgst_amount: line.cgst_amount,
+      sgst_amount: line.sgst_amount,
+      tax_amount: tax,
+      total_amount: line.total_amount,
+    });
+  };
+
   it("successfully creates a sales return, restores batch stock, and records credit note", async () => {
+    // 4 units sold at ₹30 each, GST-inclusive: 107.14 taxable + 12.86 tax = 120.00.
+    await seedOriginal("INV-2026-0001", {
+      qty: 4,
+      unit_price: 30,
+      taxable_amount: 107.14,
+      cgst_amount: 6.43,
+      sgst_amount: 6.43,
+      total_amount: 120,
+    });
     const input: SalesReturnInput = {
       original_invoice_number: "INV-2026-0001",
       original_invoice_date: "2026-10-01",
@@ -89,15 +149,86 @@ describe("salesReturnService - Credit Notes & Sales Returns", () => {
     const updatedBatch = await sqliteStorage.findById<any>("product_batches", "batch_dolo_sr1");
     expect(updatedBatch.stock_qty).toBe(101);
 
-    // Financial check: 1 unit @ 30.0 = Taxable 30.00, GST 12% = 3.60, Total = 33.60 -> rounded 34.00
-    expect(res.grandTotal).toBe(34);
+    // Financial check: 30 is MRP-inclusive, so the credit is 26.79 + 3.21, not 30 + 12%.
+    expect(res.grandTotal).toBe(30);
 
     // Verify record in sales_returns
     const saved = await salesReturnService.getSalesReturnById(res.returnId);
     expect(saved).not.toBeNull();
     expect(saved?.lines.length).toBe(1);
     expect(saved?.status).toBe("completed");
-    expect(saved?.refund_amount).toBe(34);
+    expect(saved?.refund_amount).toBe(30);
+  });
+
+  it("refunds an inclusive-priced line at the value it was sold for", async () => {
+    // 15 tablets sold for 90.00 inclusive of 12%: 80.36 taxable + 9.64 tax.
+    await sqliteStorage.insertRecord("invoices", "inv_inc_1", {
+      id: "inv_inc_1",
+      module_key: "invoice",
+      invoice_number: "INV-INC-1",
+      invoice_date: "2026-11-01",
+      status: "issued",
+      subtotal: 90,
+      taxable_subtotal: 80.36,
+      tax_total: 9.64,
+      cgst_total: 4.82,
+      sgst_total: 4.82,
+      grand_total: 90,
+      paid_amount: 90,
+      place_of_supply: "32-Kerala",
+      store_state_code: "32",
+    });
+    await sqliteStorage.insertRecord("invoice_items", "inv_inc_item_1", {
+      id: "inv_inc_item_1",
+      invoice_id: "inv_inc_1",
+      product_id: "prod_dolo_sr",
+      product_name: "Dolo 650 Tablet",
+      batch_no: "DL2601",
+      qty: 1,
+      loose_qty: 0,
+      units_per_pack: 15,
+      unit_price: 90,
+      gst_percent: 12,
+      taxable_amount: 80.36,
+      cgst_amount: 4.82,
+      sgst_amount: 4.82,
+      tax_amount: 9.64,
+      total_amount: 90,
+    });
+
+    const res = await salesReturnService.createSalesReturn({
+      original_invoice_number: "INV-INC-1",
+      customer_name: "Walk-in Customer",
+      refund_mode: "Cash",
+      lines: [
+        {
+          product_id: "prod_dolo_sr",
+          product_name: "Dolo 650 Tablet",
+          batch_id: "batch_dolo_sr1",
+          batch_no: "DL2601",
+          sold_qty: 15,
+          return_qty: 5,
+          unit_price: 90,
+          gst_percent: 12,
+          reason: "customer_return",
+          condition: "restock",
+        },
+      ],
+    });
+
+    expect(res.grandTotal).toBe(30);
+
+    const saved = await salesReturnService.getSalesReturnById(res.returnId);
+    expect(saved?.lines[0].total_amount).toBe(30);
+    expect(saved?.lines[0].taxable_amount).toBe(26.79);
+    expect(saved?.lines[0].cgst_amount).toBe(1.61);
+    expect(saved?.lines[0].sgst_amount).toBe(1.6);
+
+    const mirror = await sqliteStorage.findById<any>("invoices", res.returnId);
+    expect(mirror.grand_total).toBe(30);
+    expect(mirror.taxable_subtotal).toBe(26.79);
+    expect(mirror.round_off).toBe(0);
+    expect(mirror.paid_amount).toBe(30);
   });
 
   it("enforces hard limit: cannot return more than sold_qty - already_returned_qty", async () => {
@@ -231,6 +362,14 @@ describe("salesReturnService - Credit Notes & Sales Returns", () => {
   });
 
   it("updates customer outstanding balance when refund mode is Credit Adjust", async () => {
+    await seedOriginal("INV-2026-0004", {
+      qty: 1,
+      unit_price: 30,
+      taxable_amount: 26.79,
+      cgst_amount: 1.61,
+      sgst_amount: 1.6,
+      total_amount: 30,
+    });
     const input: SalesReturnInput = {
       original_invoice_number: "INV-2026-0004",
       customer_id: "cust_test_sr",
@@ -253,11 +392,11 @@ describe("salesReturnService - Credit Notes & Sales Returns", () => {
     };
 
     const res = await salesReturnService.createSalesReturn(input);
-    expect(res.grandTotal).toBe(34);
+    expect(res.grandTotal).toBe(30);
 
-    // Customer outstanding was 500, now should be 500 - 34 = 466
+    // Customer outstanding was 500, now should be 500 - 30 = 470
     const cust = await partiesStore.getCustomerById("cust_test_sr");
-    expect(cust?.outstanding_balance).toBe(466);
+    expect(cust?.outstanding_balance).toBe(470);
   });
 
   it("cancelling a sales return reverses stock and customer ledger adjustments", async () => {
@@ -373,6 +512,14 @@ describe("salesReturnService - Credit Notes & Sales Returns", () => {
   });
 
   it("pushes the credit note with its lines, not the bare return record", async () => {
+    await seedOriginal("INV-2026-0009", {
+      qty: 4,
+      unit_price: 30,
+      taxable_amount: 107.14,
+      cgst_amount: 6.43,
+      sgst_amount: 6.43,
+      total_amount: 120,
+    });
     const created = await salesReturnService.createSalesReturn(returnInput);
 
     const queued = await queueItemFor(created.returnId);
@@ -391,12 +538,12 @@ describe("salesReturnService - Credit Notes & Sales Returns", () => {
     expect(payload.items[0].qty).toBe(1);
     // The server has to be told which lines never went back on the shelf, or it restocks discards.
     expect(payload.items[0].stock_action).toBe("restock");
-    expect(payload.items[0].taxable_amount).toBe(30);
-    expect(payload.items[0].cgst_amount).toBe(1.8);
-    expect(payload.items[0].sgst_amount).toBe(1.8);
+    expect(payload.items[0].taxable_amount).toBe(26.79);
+    expect(payload.items[0].cgst_amount).toBe(1.61);
+    expect(payload.items[0].sgst_amount).toBe(1.6);
     // The server only re-prices from lines it can see, and a line with no tax_amount reads as
     // untaxed in every GST report.
-    expect(payload.items[0].tax_amount).toBe(3.6);
+    expect(payload.items[0].tax_amount).toBe(3.21);
   });
 
   it("pushes a cancellation as header only so the credit note keeps its lines", async () => {

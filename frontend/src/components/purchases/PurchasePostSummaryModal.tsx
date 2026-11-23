@@ -10,6 +10,8 @@ import {
   DollarSign,
 } from "lucide-react";
 import { useModalEscape } from "../../lib/ui/modalEscapeManager";
+import { TREATMENT_LABELS } from "../../lib/purchases/chargesGrid";
+import type { ChargeTreatment } from "../../lib/tax-engine/taxEngine";
 
 export interface PostValidationCheckSummary {
   supplierName: string;
@@ -25,6 +27,19 @@ export interface PostValidationCheckSummary {
   nearExpiryBatches: { product_name: string; batch_no: string; expiry_date: string }[];
   negativeMarginItems: { product_name: string; margin: number; purchase_rate: number; selling_rate: number }[];
   missingHsnGstItems: { product_name: string }[];
+  /**
+   * CR-C / PUR-007: the extra costs the bill posts, so the operator sees the charges they keyed
+   * with Alt+F before committing — the summary is the last stop before the payable is written.
+   */
+  charges?: {
+    head_name: string;
+    amount: number;
+    gst_percent: number;
+    treatment: string;
+    paid_separately: boolean;
+  }[];
+  chargeTotal?: number;
+  separateChargeTotal?: number;
   hasBlockers: boolean;
 }
 
@@ -201,6 +216,48 @@ export const PurchasePostSummaryModal: React.FC<PurchasePostSummaryModalProps> =
             <div className="rounded-[10px] bg-[var(--color-canvas)] p-3 border border-[var(--color-border)] text-[var(--color-text-muted)] space-y-1">
               <span className="font-bold text-[var(--color-text)]">Missing HSN Code ({checks.missingHsnGstItems.length} items)</span>
               <p className="text-[11px]">Recommended for statutory GSTR-2B ITC filing.</p>
+            </div>
+          )}
+
+          {/* Charges keyed with Alt+F (PUR-007) */}
+          {checks.charges && checks.charges.length > 0 && (
+            <div
+              data-charge-summary-block="true"
+              className="rounded-[10px] bg-[var(--color-canvas)] p-3 border border-[var(--color-border)] space-y-1.5"
+            >
+              <div className="flex items-center gap-2">
+                <DollarSign className="h-4 w-4 shrink-0 text-[var(--color-accent)]" />
+                <span className="font-bold text-[var(--color-text)]">
+                  Charges on this bill ({checks.charges.length})
+                </span>
+              </div>
+              <ul className="space-y-0.5 text-[11px] font-mono">
+                {checks.charges.map((charge, i) => (
+                  <li key={i} className="flex items-center justify-between gap-2">
+                    <span className="truncate">
+                      {charge.head_name}
+                      <span className="text-[var(--color-text-muted)]">
+                        {" · "}
+                        {TREATMENT_LABELS[charge.treatment as ChargeTreatment] || charge.treatment}
+                        {" · "}{charge.gst_percent}%
+                      </span>
+                    </span>
+                    <span className="shrink-0">
+                      ₹{charge.amount.toFixed(2)}
+                      {charge.paid_separately && (
+                        <span className="text-[var(--color-text-muted)]"> outside payable</span>
+                      )}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+              {checks.chargeTotal !== undefined && (
+                <p className="text-[11px] text-[var(--color-text-muted)]">
+                  Added to payable ₹{(checks.chargeTotal || 0).toFixed(2)}
+                  {(checks.separateChargeTotal || 0) > 0.004 &&
+                    ` · paid separately outside the bill ₹${(checks.separateChargeTotal || 0).toFixed(2)}`}
+                </p>
+              )}
             </div>
           )}
 

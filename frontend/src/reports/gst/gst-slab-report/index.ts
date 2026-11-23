@@ -2,6 +2,10 @@ import type { ReportModule, ReportColumn, ReportFilterDef } from "../../types";
 import { sqliteStorage } from "../../../lib/db/sqliteStorage";
 import type { InvoiceRecord, InvoiceItemRecord } from "../../../lib/billing/invoiceManagementService";
 import type { PurchaseDocumentRecord, PurchaseItemRecord } from "../../../lib/purchases/purchaseService";
+import {
+  indexChargeRegister,
+  type PurchaseChargeRecord,
+} from "../../../lib/reports/purchaseChargeRegister";
 
 export interface GstSlabRow {
   rate_label: string; // "0% (Exempt)", "5%", "12%", "18%", "28%"
@@ -86,6 +90,25 @@ export const gstSlabColumns: ReportColumn<GstSlabRow>[] = [
 const today = new Date().toISOString().slice(0, 10);
 const startOfMonth = `${today.slice(0, 7)}-01`;
 
+/** Standard GST slabs, pre-seeded so an empty period still prints the familiar rate table. */
+const SLABS = [0, 5, 12, 18, 28];
+
+const slabRow = (rate: number): GstSlabRow => ({
+  rate_label: rate === 0 ? "0% (Nil / Exempt)" : `${rate}%`,
+  tax_rate: rate,
+  outward_taxable: 0,
+  outward_cgst: 0,
+  outward_sgst: 0,
+  outward_igst: 0,
+  total_output_tax: 0,
+  inward_taxable: 0,
+  inward_cgst: 0,
+  inward_sgst: 0,
+  inward_igst: 0,
+  total_input_tax: 0,
+  net_tax_payable: 0,
+});
+
 export const gstSlabFilters: ReportFilterDef[] = [
   {
     id: "date_range",
@@ -96,14 +119,24 @@ export const gstSlabFilters: ReportFilterDef[] = [
   },
 ];
 
+/** The slab bucket for a rate, created on demand so an off-slab rate still reports. */
+const atSlab = (slabMap: Map<number, GstSlabRow>, rate: number): GstSlabRow => {
+  let row = slabMap.get(rate);
+  if (!row) {
+    row = slabRow(rate);
+    slabMap.set(rate, row);
+  }
+  return row;
+};
+
 export const gstSlabReport: ReportModule<any, GstSlabRow> = {
   id: "gst-slab-report",
   title: "GST Rate Slab-wise Tax Analysis",
-  description: "Comparative GST slab breakdown (0%, 5%, 12%, 18%, 28%) analyzing Output tax collected against Input tax paid.",
+  description: "Comparative GST slab breakdown (0%, 5%, 12%, 18%, 28%) analyzing Output tax collected against Input tax paid, with each bill's supplier charges placed on their own slab beside its goods.",
   category: "gst",
   permission: "reports.gst.view",
   menuVisibilityKey: "reports",
-  keywords: ["gst slabs", "tax rates", "5%", "12%", "18%", "output tax", "input tax", "tax analysis"],
+  keywords: ["gst slabs", "tax rates", "5%", "12%", "18%", "output tax", "input tax", "tax analysis", "charges"],
   defaultSort: { column: "tax_rate", direction: "asc" },
   supportedPrintLayouts: ["a4", "dot-matrix"],
   exportFormats: ["csv", "excel", "pdf"],
@@ -117,12 +150,20 @@ export const gstSlabReport: ReportModule<any, GstSlabRow> = {
     const startDateStr = String(dates.startDate || "").trim().slice(0, 10);
     const endDateStr = String(dates.endDate || "").trim().slice(0, 10);
 
-    const [allInvoices, allInvoiceItems, allPurchasesDocs, allPurchasesAlt, allPurchaseItems] = await Promise.all([
+    const [
+      allInvoices,
+      allInvoiceItems,
+      allPurchasesDocs,
+      allPurchasesAlt,
+      allPurchaseItems,
+      allCharges,
+    ] = await Promise.all([
       sqliteStorage.findAll<InvoiceRecord>("invoices").catch(() => []),
       sqliteStorage.findAll<InvoiceItemRecord>("invoice_items").catch(() => []),
       sqliteStorage.findAll<PurchaseDocumentRecord>("purchase_documents").catch(() => []),
       sqliteStorage.findAll<PurchaseDocumentRecord>("purchases").catch(() => []),
       sqliteStorage.findAll<PurchaseItemRecord>("purchase_items").catch(() => []),
+      sqliteStorage.findAll<PurchaseChargeRecord>("purchase_charges").catch(() => []),
     ]);
 
     const purchaseDedupMap = new Map<string, PurchaseDocumentRecord>();
@@ -155,26 +196,9 @@ export const gstSlabReport: ReportModule<any, GstSlabRow> = {
     const purchaseMap = new Map(filteredPurchases.map((p) => [p.id, p]));
 
     // Standard GST slabs
-    const slabs = [0, 5, 12, 18, 28];
     const slabMap = new Map<number, GstSlabRow>();
 
-    for (const rate of slabs) {
-      slabMap.set(rate, {
-        rate_label: rate === 0 ? "0% (Nil / Exempt)" : `${rate}%`,
-        tax_rate: rate,
-        outward_taxable: 0,
-        outward_cgst: 0,
-        outward_sgst: 0,
-        outward_igst: 0,
-        total_output_tax: 0,
-        inward_taxable: 0,
-        inward_cgst: 0,
-        inward_sgst: 0,
-        inward_igst: 0,
-        total_input_tax: 0,
-        net_tax_payable: 0,
-      });
-    }
+    for (const rate of SLABS) slabMap.set(rate, slabRow(rate));
 
     // Accumulate outward items
     for (const item of allInvoiceItems) {
@@ -184,25 +208,7 @@ export const gstSlabReport: ReportModule<any, GstSlabRow> = {
       const sign = isReturn ? -1 : 1;
 
       const rate = Math.round(Number(item.gst_percent) || 0);
-      if (!slabMap.has(rate)) {
-        slabMap.set(rate, {
-          rate_label: `${rate}%`,
-          tax_rate: rate,
-          outward_taxable: 0,
-          outward_cgst: 0,
-          outward_sgst: 0,
-          outward_igst: 0,
-          total_output_tax: 0,
-          inward_taxable: 0,
-          inward_cgst: 0,
-          inward_sgst: 0,
-          inward_igst: 0,
-          total_input_tax: 0,
-          net_tax_payable: 0,
-        });
-      }
-
-      const row = slabMap.get(rate)!;
+      const row = atSlab(slabMap, rate);
       const cgst = (Number(item.cgst_amount) || 0) * sign;
       const sgst = (Number(item.sgst_amount) || 0) * sign;
       const igst = (Number(item.igst_amount) || 0) * sign;
@@ -226,25 +232,7 @@ export const gstSlabReport: ReportModule<any, GstSlabRow> = {
       const rate = Math.round(
         Number((pItem as any).gst_percent || (pItem as any).gst_rate) || 0
       );
-      if (!slabMap.has(rate)) {
-        slabMap.set(rate, {
-          rate_label: `${rate}%`,
-          tax_rate: rate,
-          outward_taxable: 0,
-          outward_cgst: 0,
-          outward_sgst: 0,
-          outward_igst: 0,
-          total_output_tax: 0,
-          inward_taxable: 0,
-          inward_cgst: 0,
-          inward_sgst: 0,
-          inward_igst: 0,
-          total_input_tax: 0,
-          net_tax_payable: 0,
-        });
-      }
-
-      const row = slabMap.get(rate)!;
+      const row = atSlab(slabMap, rate);
       const taxable = (Number((pItem as any).taxable_amount || ((pItem.total_units || 0) * (pItem.purchase_rate || 0))) || 0) * sign;
       const cgst = (Number((pItem as any).cgst_amount) || (p.is_interstate ? 0 : (taxable * rate) / 200)) * sign;
       const sgst = (Number((pItem as any).sgst_amount) || (p.is_interstate ? 0 : (taxable * rate) / 200)) * sign;
@@ -255,6 +243,26 @@ export const gstSlabReport: ReportModule<any, GstSlabRow> = {
       row.inward_sgst += sgst;
       row.inward_igst += igst;
       row.total_input_tax += cgst + sgst + igst;
+    }
+
+    // REP-007: a bill's charges are inward supplies of their own, each at its own SAC rate, so the
+    // slab table only matches the GSTR-2 and GSTR-3B registers once they are read too. Going
+    // through the register index means a pre-CR-C bill's legacy freight lands on the 0% slab here
+    // exactly as it does there — no tax invented, its value still counted once.
+    const chargeIndex = indexChargeRegister(filteredPurchases, allCharges, []);
+    for (const p of filteredPurchases) {
+      const isReturn = p.module_key === "purchase_return" || p.module_key === "debit_note";
+      const sign = isReturn ? -1 : 1;
+
+      for (const charge of chargeIndex.byBill.get(p.id)?.by_head || []) {
+        const row = atSlab(slabMap, Math.round(charge.gst_percent));
+
+        row.inward_taxable += charge.taxable * sign;
+        row.inward_cgst += charge.cgst * sign;
+        row.inward_sgst += charge.sgst * sign;
+        row.inward_igst += charge.igst * sign;
+        row.total_input_tax += charge.tax * sign;
+      }
     }
 
     const round = (num: number) => Math.round((num + Number.EPSILON) * 100) / 100;

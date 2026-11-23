@@ -21,9 +21,10 @@ import {
   RefreshCw,
   PowerOff,
   Printer,
+  Receipt,
 } from "lucide-react";
 import { productsStore, formatExpiryDisplay, isBatchExpired, type ProductItem, type ProductBatch } from "../lib/masters/productsStore";
-import { staffAuthService } from "../lib/auth/staffAuthService";
+import { counterSessionService } from "../lib/auth/counterSessionService";
 import { useModalEscape } from "../lib/ui/modalEscapeManager";
 import {
   partiesStore,
@@ -38,6 +39,11 @@ import {
 } from "../lib/masters/partiesStore";
 import { discountSchemaEngine, type DiscountRule } from "../lib/masters/discountSchemaEngine";
 import { unitsStore, type UnitMaster } from "../lib/masters/unitsStore";
+import {
+  chargeHeadsStore,
+  type ChargeHeadMaster,
+  type ChargeHeadReference,
+} from "../lib/masters/chargeHeadsStore";
 import { sqliteStorage } from "../lib/db/sqliteStorage";
 import { ImportWizardModal } from "../lib/data-exchange/ui/ImportWizardModal";
 import { ExportDialogModal } from "../lib/data-exchange/ui/ExportDialogModal";
@@ -45,6 +51,28 @@ import { UnitAutocompleteInput } from "../components/UnitAutocompleteInput";
 import { BarcodePrintModal } from "../components/purchases/BarcodePrintModal";
 
 const BATCH_EXPIRY_PATTERN = /^\d{4}-(0[1-9]|1[0-2])(-\d{2})?$/;
+
+// How the per-store charge head presets read in the masters table and the POS charges grid.
+const CHARGE_TREATMENT_LABELS: Record<string, string> = {
+  add_to_cost: "Add to item cost",
+  expense: "Book as expense",
+};
+const CHARGE_SPREAD_LABELS: Record<string, string> = {
+  value: "Value",
+  quantity: "Quantity",
+  weight: "Weight",
+};
+const CHARGE_ITC_LABELS: Record<string, string> = {
+  eligible: "Creditable",
+  blocked: "Blocked",
+  ineligible: "Ineligible",
+  partial: "Partial",
+};
+const CHARGE_SIGN_LABELS: Record<string, string> = {
+  positive: "Charge only",
+  negative: "Credit only",
+  both: "Charge or credit",
+};
 
 const isBatchExpiringSoon = (expiryDate: string, months = 6): boolean => {
   if (!expiryDate || isBatchExpired(expiryDate)) return false;
@@ -55,7 +83,7 @@ const isBatchExpiringSoon = (expiryDate: string, months = 6): boolean => {
 };
 
 export const MastersPage: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<"products" | "batches" | "parties" | "discounts" | "units">("products");
+  const [activeTab, setActiveTab] = useState<"products" | "batches" | "parties" | "discounts" | "units" | "charge_heads">("products");
   const [searchQuery, setSearchQuery] = useState("");
   const [notification, setNotification] = useState<{ message: string; type: "success" | "error" } | null>(null);
   const [importEntityId, setImportEntityId] = useState<string | null>(null);
@@ -101,6 +129,27 @@ export const MastersPage: React.FC = () => {
   });
   const [unitReassign, setUnitReassign] = useState<{ unit: UnitMaster; references: string[] } | null>(null);
   const [unitReassignTarget, setUnitReassignTarget] = useState("");
+
+  // Charge heads state (CR-C, rule R12: per-store supplier bill charge heads)
+  const [chargeHeads, setChargeHeads] = useState<ChargeHeadMaster[]>([]);
+  const [isChargeHeadModalOpen, setIsChargeHeadModalOpen] = useState(false);
+  useModalEscape(isChargeHeadModalOpen, () => setIsChargeHeadModalOpen(false));
+  const [editingChargeHead, setEditingChargeHead] = useState<ChargeHeadMaster | null>(null);
+  const [chargeHeadForm, setChargeHeadForm] = useState<Partial<ChargeHeadMaster>>({
+    name: "",
+    code: "",
+    sac_code: "",
+    default_treatment: "add_to_cost",
+    default_spread_method: "value",
+    default_itc_eligibility: "eligible",
+    allowed_sign: "positive",
+    is_active: true,
+  });
+  const [chargeHeadReassign, setChargeHeadReassign] = useState<{
+    head: ChargeHeadMaster;
+    references: ChargeHeadReference[];
+  } | null>(null);
+  const [chargeHeadReassignTarget, setChargeHeadReassignTarget] = useState("");
 
   // Product Form state
   const [prodForm, setProdForm] = useState<Partial<ProductItem>>({
@@ -189,6 +238,8 @@ export const MastersPage: React.FC = () => {
 
       const allUnits = await unitsStore.getAllUnits(true);
       setUnits(allUnits);
+
+      setChargeHeads(await chargeHeadsStore.getAllHeads(true));
     } catch (err) {
       console.error("Error loading master data:", err);
       setIsSyncing(false);
@@ -235,6 +286,15 @@ export const MastersPage: React.FC = () => {
     return (
       (u.name?.toLowerCase().includes(q) ?? false) ||
       (u.symbol?.toLowerCase().includes(q) ?? false)
+    );
+  });
+
+  const filteredChargeHeads = chargeHeads.filter((h) => {
+    if (!searchQuery) return true;
+    const q = searchQuery.toLowerCase();
+    return (
+      (h.name?.toLowerCase().includes(q) ?? false) ||
+      (h.code?.toLowerCase().includes(q) ?? false)
     );
   });
 
@@ -358,8 +418,91 @@ export const MastersPage: React.FC = () => {
     }
   };
 
+  // Save Charge Head — the presets prefill the purchase-entry charges grid (Alt+F)
+  const handleSaveChargeHead = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const name = chargeHeadForm.name?.trim();
+    if (!name) {
+      showNotification("Charge head name is required", "error");
+      return;
+    }
+
+    try {
+      const code = (chargeHeadForm.code?.trim() || name.replace(/[^a-zA-Z0-9]/g, "").slice(0, 4)).toUpperCase();
+      await chargeHeadsStore.upsertHead({
+        id: editingChargeHead ? editingChargeHead.id : undefined,
+        name,
+        code,
+        sac_code: chargeHeadForm.sac_code?.trim() || undefined,
+        default_treatment: chargeHeadForm.default_treatment ?? "add_to_cost",
+        default_spread_method: chargeHeadForm.default_spread_method ?? "value",
+        default_itc_eligibility: chargeHeadForm.default_itc_eligibility ?? "eligible",
+        allowed_sign: chargeHeadForm.allowed_sign ?? "positive",
+        is_active: chargeHeadForm.is_active ?? true,
+      });
+
+      showNotification(editingChargeHead ? `Charge head "${name}" updated` : `Charge head "${name}" created`);
+      setIsChargeHeadModalOpen(false);
+      setEditingChargeHead(null);
+      await loadData();
+    } catch (err: any) {
+      showNotification(err.message || "Failed to save charge head", "error");
+    }
+  };
+
+  // Delete Charge Head — R12: a head used by posted bills must be reassigned first
+  const handleDeleteChargeHead = async (head: ChargeHeadMaster) => {
+    const references = await chargeHeadsStore.getHeadReferences(head.id);
+    if (references.length > 0) {
+      setChargeHeadReassignTarget("");
+      setChargeHeadReassign({ head, references });
+      return;
+    }
+    if (confirm(`Are you sure you want to delete charge head "${head.name}" (${head.code})?`)) {
+      try {
+        await chargeHeadsStore.deleteHead(head.id);
+        showNotification(`Charge head "${head.name}" deleted successfully`);
+        await loadData();
+      } catch (err: any) {
+        showNotification(err.message || "Failed to delete charge head", "error");
+      }
+    }
+  };
+
+  const handleConfirmChargeHeadReassign = async () => {
+    if (!chargeHeadReassign || !chargeHeadReassignTarget) return;
+    try {
+      const moved = await chargeHeadsStore.reassignHead(
+        chargeHeadReassign.head.id,
+        chargeHeadReassignTarget
+      );
+      showNotification(
+        `Charge head "${chargeHeadReassign.head.name}" deleted — ${moved} charge line(s) moved to the replacement head`
+      );
+      setChargeHeadReassign(null);
+      await loadData();
+    } catch (err: any) {
+      showNotification(err.message || "Failed to reassign charge lines", "error");
+    }
+  };
+
+  const handleResetChargeHeads = async () => {
+    try {
+      const summary = await chargeHeadsStore.resetToDefaults();
+      const parts = [
+        summary.seeded.length ? `${summary.seeded.length} default head(s) restored` : "",
+        summary.removed.length ? `${summary.removed.length} unused custom head(s) removed` : "",
+        summary.kept.length ? `${summary.kept.length} referenced custom head(s) kept` : "",
+      ].filter(Boolean);
+      showNotification(parts.length ? `Charge heads reset — ${parts.join("; ")}` : "Charge heads already match the default set");
+      await loadData();
+    } catch (err: any) {
+      showNotification(err.message || "Failed to reset charge heads", "error");
+    }
+  };
+
   // Deactivate Product (soft delete — hidden from billing, kept for history)
-  const canDeleteProducts = staffAuthService.hasPermission("masters", "delete");
+  const canDeleteProducts = counterSessionService.allowsModule("masters");
   const handleDeactivateProduct = async (product: ProductItem) => {
     if (!confirm(`Deactivate "${product.name}"? It will no longer appear in billing or this list.`)) return;
     try {
@@ -603,6 +746,15 @@ export const MastersPage: React.FC = () => {
             <Scale className="h-3.5 w-3.5" />
             <span>Units ({units.length})</span>
           </button>
+          <button
+            onClick={() => { setActiveTab("charge_heads"); setSearchQuery(""); }}
+            className={`flex items-center gap-1.5 rounded-btn px-3 py-1.5 text-xs font-semibold transition-colors ${
+              activeTab === "charge_heads" ? "bg-surface text-accent shadow-xs border border-border-main/50" : "text-text-muted hover:text-text-main"
+            }`}
+          >
+            <Receipt className="h-3.5 w-3.5" />
+            <span>Charge Heads ({chargeHeads.length})</span>
+          </button>
         </div>
         </div>
       </div>
@@ -844,6 +996,38 @@ export const MastersPage: React.FC = () => {
               >
                 <Plus className="h-4 w-4" />
                 <span>Add Unit</span>
+              </button>
+            </>
+          )}
+          {activeTab === "charge_heads" && (
+            <>
+              <button
+                onClick={handleResetChargeHeads}
+                className="flex items-center gap-1.5 rounded-btn border border-border-main bg-surface px-3 py-2 text-xs font-semibold text-text-main shadow-xs hover:bg-canvas cursor-pointer transition-colors"
+                title="Restore missing default charge heads and remove unused custom heads"
+              >
+                <RefreshCw className="h-3.5 w-3.5 text-accent" />
+                <span>Reset to Defaults</span>
+              </button>
+              <button
+                onClick={() => {
+                  setEditingChargeHead(null);
+                  setChargeHeadForm({
+                    name: "",
+                    code: "",
+                    sac_code: "",
+                    default_treatment: "add_to_cost",
+                    default_spread_method: "value",
+                    default_itc_eligibility: "eligible",
+                    allowed_sign: "positive",
+                    is_active: true,
+                  });
+                  setIsChargeHeadModalOpen(true);
+                }}
+                className="flex items-center gap-1.5 rounded-btn bg-accent px-3 py-2 text-xs font-semibold text-white shadow-xs hover:bg-accent/90 cursor-pointer transition-colors"
+              >
+                <Plus className="h-4 w-4" />
+                <span>Add Charge Head</span>
               </button>
             </>
           )}
@@ -1250,6 +1434,102 @@ export const MastersPage: React.FC = () => {
                           onClick={() => handleDeleteUnit(u)}
                           className="rounded-btn p-1 text-text-muted hover:bg-canvas hover:text-red-500 cursor-pointer transition-colors"
                           title="Delete Unit"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        )}
+        {activeTab === "charge_heads" && (
+          <table className="w-full text-left text-xs text-text-muted">
+            <thead className="sticky top-0 bg-canvas text-[11px] font-semibold uppercase tracking-wider text-text-muted border-b border-border-main">
+              <tr>
+                <th className="px-4 py-3">Charge Head</th>
+                <th className="px-4 py-3">SAC / HSN</th>
+                <th className="px-4 py-3">Treatment</th>
+                <th className="px-4 py-3">Spread By</th>
+                <th className="px-4 py-3">ITC</th>
+                <th className="px-4 py-3">Allowed Sign</th>
+                <th className="px-4 py-3 text-center">Status</th>
+                <th className="px-4 py-3 text-center">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border-main/50 font-sans">
+              {filteredChargeHeads.length === 0 ? (
+                <tr>
+                  <td colSpan={8} className="py-8 text-center text-text-muted">
+                    No charge heads found. Click "Add Charge Head" to create one for this store.
+                  </td>
+                </tr>
+              ) : (
+                filteredChargeHeads.map((h) => (
+                  <tr key={h.id} className="hover:bg-canvas/50 transition-colors">
+                    <td className="px-4 py-2.5 font-semibold text-text-main">
+                      <div className="flex items-center gap-2">
+                        <div className="rounded-btn bg-accent-soft/70 p-1 text-accent">
+                          <Receipt className="h-3.5 w-3.5" />
+                        </div>
+                        <span>{h.name}</span>
+                        <span className="rounded bg-canvas px-1.5 py-0.5 font-mono text-[10px] text-text-muted">
+                          {h.code}
+                        </span>
+                      </div>
+                    </td>
+                    <td className="px-4 py-2.5 font-mono text-text-main">
+                      {h.sac_code || <span className="text-text-muted">996799 (default)</span>}
+                    </td>
+                    <td className="px-4 py-2.5 text-text-main">
+                      {CHARGE_TREATMENT_LABELS[h.default_treatment] || h.default_treatment}
+                    </td>
+                    <td className="px-4 py-2.5 text-text-main">
+                      {CHARGE_SPREAD_LABELS[h.default_spread_method] || h.default_spread_method}
+                    </td>
+                    <td className="px-4 py-2.5 text-text-main">
+                      {CHARGE_ITC_LABELS[h.default_itc_eligibility] || h.default_itc_eligibility}
+                    </td>
+                    <td className="px-4 py-2.5 text-text-main">
+                      {CHARGE_SIGN_LABELS[h.allowed_sign] || h.allowed_sign}
+                    </td>
+                    <td className="px-4 py-2.5 text-center">
+                      <span
+                        className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                          h.is_active ? "bg-accent-soft text-accent" : "bg-canvas text-text-muted"
+                        }`}
+                      >
+                        {h.is_active ? "Active" : "Inactive"}
+                      </span>
+                    </td>
+                    <td className="px-4 py-2.5 text-center">
+                      <div className="flex items-center justify-center gap-1.5">
+                        <button
+                          onClick={() => {
+                            setEditingChargeHead(h);
+                            setChargeHeadForm({
+                              name: h.name,
+                              code: h.code,
+                              sac_code: h.sac_code || "",
+                              default_treatment: h.default_treatment,
+                              default_spread_method: h.default_spread_method,
+                              default_itc_eligibility: h.default_itc_eligibility,
+                              allowed_sign: h.allowed_sign,
+                              is_active: h.is_active,
+                            });
+                            setIsChargeHeadModalOpen(true);
+                          }}
+                          className="rounded-btn p-1 text-text-muted hover:bg-canvas hover:text-accent cursor-pointer transition-colors"
+                          title="Edit Charge Head"
+                        >
+                          <Edit2 className="h-3.5 w-3.5" />
+                        </button>
+                        <button
+                          onClick={() => handleDeleteChargeHead(h)}
+                          className="rounded-btn p-1 text-text-muted hover:bg-canvas hover:text-red-500 cursor-pointer transition-colors"
+                          title="Delete Charge Head"
                         >
                           <Trash2 className="h-3.5 w-3.5" />
                         </button>
@@ -2038,6 +2318,268 @@ export const MastersPage: React.FC = () => {
                 className="rounded-btn bg-red-500 px-4 py-2 text-xs font-semibold text-white shadow-xs hover:bg-red-600 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 Reassign &amp; Delete Unit
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Add / edit a per-store charge head */}
+      {isChargeHeadModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-md rounded-card bg-surface p-6 shadow-2xl border border-border-main">
+            <div className="flex items-center justify-between border-b border-border-main pb-3">
+              <div className="flex items-center gap-2">
+                <div className="rounded-btn bg-accent-soft p-1.5 text-accent">
+                  <Receipt className="h-4 w-4" />
+                </div>
+                <h2 className="text-base font-bold text-text-main">
+                  {editingChargeHead ? "Edit Charge Head" : "Add Charge Head"}
+                </h2>
+              </div>
+              <button
+                onClick={() => setIsChargeHeadModalOpen(false)}
+                className="text-text-muted hover:text-text-main transition-colors cursor-pointer"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveChargeHead} className="mt-4 space-y-4">
+              <div>
+                <label className="block text-[11px] font-semibold uppercase tracking-wider text-text-muted">
+                  Head Name *
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. Freight, Cold Chain, Loading/Unloading"
+                  value={chargeHeadForm.name || ""}
+                  onChange={(e) => {
+                    const name = e.target.value;
+                    const autoCode =
+                      !editingChargeHead &&
+                      (!chargeHeadForm.code ||
+                        chargeHeadForm.code === chargeHeadForm.name?.replace(/[^a-zA-Z0-9]/g, "").slice(0, 4).toUpperCase())
+                        ? name.replace(/[^a-zA-Z0-9]/g, "").slice(0, 4).toUpperCase()
+                        : chargeHeadForm.code;
+                    setChargeHeadForm({ ...chargeHeadForm, name, code: autoCode });
+                  }}
+                  className="mt-1 w-full rounded-input border border-border-main bg-surface p-2 text-xs text-text-main shadow-2xs focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-[11px] font-semibold uppercase tracking-wider text-text-muted">
+                    Head Code *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="e.g. FREIGHT"
+                    value={chargeHeadForm.code || ""}
+                    onChange={(e) =>
+                      setChargeHeadForm({ ...chargeHeadForm, code: e.target.value.toUpperCase() })
+                    }
+                    className="mt-1 w-full rounded-input border border-border-main bg-surface p-2 text-xs font-mono font-bold text-accent uppercase shadow-2xs focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-semibold uppercase tracking-wider text-text-muted">
+                    SAC / HSN
+                  </label>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    placeholder="6 or 8 digits"
+                    value={chargeHeadForm.sac_code || ""}
+                    onChange={(e) =>
+                      setChargeHeadForm({ ...chargeHeadForm, sac_code: e.target.value })
+                    }
+                    className="mt-1 w-full rounded-input border border-border-main bg-surface p-2 text-xs font-mono text-text-main shadow-2xs focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
+                  />
+                  <p className="mt-1 text-[10px] text-text-muted">
+                    Blank posts the charge under the default service code 996799.
+                  </p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-[11px] font-semibold uppercase tracking-wider text-text-muted">
+                    Default Treatment
+                  </label>
+                  <select
+                    value={chargeHeadForm.default_treatment || "add_to_cost"}
+                    onChange={(e) =>
+                      setChargeHeadForm({ ...chargeHeadForm, default_treatment: e.target.value as ChargeHeadMaster["default_treatment"] })
+                    }
+                    className="mt-1 w-full rounded-input border border-border-main bg-surface p-2 text-xs text-text-main shadow-2xs focus:border-accent focus:outline-none"
+                  >
+                    <option value="add_to_cost">Add to item cost</option>
+                    <option value="expense">Book as expense</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-[11px] font-semibold uppercase tracking-wider text-text-muted">
+                    Spread By
+                  </label>
+                  <select
+                    value={chargeHeadForm.default_spread_method || "value"}
+                    onChange={(e) =>
+                      setChargeHeadForm({ ...chargeHeadForm, default_spread_method: e.target.value as ChargeHeadMaster["default_spread_method"] })
+                    }
+                    className="mt-1 w-full rounded-input border border-border-main bg-surface p-2 text-xs text-text-main shadow-2xs focus:border-accent focus:outline-none"
+                  >
+                    <option value="value">Item value</option>
+                    <option value="quantity">Item quantity</option>
+                    <option value="weight">Item weight</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-[11px] font-semibold uppercase tracking-wider text-text-muted">
+                    Default ITC Eligibility
+                  </label>
+                  <select
+                    value={chargeHeadForm.default_itc_eligibility || "eligible"}
+                    onChange={(e) =>
+                      setChargeHeadForm({ ...chargeHeadForm, default_itc_eligibility: e.target.value as ChargeHeadMaster["default_itc_eligibility"] })
+                    }
+                    className="mt-1 w-full rounded-input border border-border-main bg-surface p-2 text-xs text-text-main shadow-2xs focus:border-accent focus:outline-none"
+                  >
+                    <option value="eligible">Creditable</option>
+                    <option value="blocked">Blocked (Sec 17(5))</option>
+                    <option value="ineligible">Ineligible</option>
+                    <option value="partial">Partial (50%)</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-[11px] font-semibold uppercase tracking-wider text-text-muted">
+                    Allowed Sign
+                  </label>
+                  <select
+                    value={chargeHeadForm.allowed_sign || "positive"}
+                    onChange={(e) =>
+                      setChargeHeadForm({ ...chargeHeadForm, allowed_sign: e.target.value as ChargeHeadMaster["allowed_sign"] })
+                    }
+                    className="mt-1 w-full rounded-input border border-border-main bg-surface p-2 text-xs text-text-main shadow-2xs focus:border-accent focus:outline-none"
+                  >
+                    <option value="positive">Charge only</option>
+                    <option value="negative">Credit / rebate only</option>
+                    <option value="both">Charge or credit</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 pt-2">
+                <input
+                  type="checkbox"
+                  id="charge_head_active"
+                  checked={chargeHeadForm.is_active ?? true}
+                  onChange={(e) =>
+                    setChargeHeadForm({ ...chargeHeadForm, is_active: e.target.checked })
+                  }
+                  className="rounded border-border-main text-accent focus:ring-accent h-4 w-4"
+                />
+                <label
+                  htmlFor="charge_head_active"
+                  className="text-xs font-medium text-text-main cursor-pointer"
+                >
+                  Available on purchase entry
+                </label>
+              </div>
+
+              <div className="flex justify-end gap-2 border-t border-border-main pt-4">
+                <button
+                  type="button"
+                  onClick={() => setIsChargeHeadModalOpen(false)}
+                  className="rounded-btn border border-border-main px-4 py-2 text-xs font-semibold text-text-muted hover:bg-canvas cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="rounded-btn bg-accent px-4 py-2 text-xs font-semibold text-white shadow-xs hover:bg-accent/90 cursor-pointer"
+                >
+                  {editingChargeHead ? "Update Charge Head" : "Save Charge Head"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Reassign-before-delete dialog for a referenced charge head (R12) */}
+      {chargeHeadReassign && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-md rounded-card bg-surface p-6 shadow-2xl border border-border-main">
+            <div className="flex items-center justify-between border-b border-border-main pb-3">
+              <h2 className="text-base font-bold text-text-main">Reassign charge lines before deleting</h2>
+              <button
+                onClick={() => setChargeHeadReassign(null)}
+                className="text-text-muted hover:text-text-main transition-colors cursor-pointer"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="mt-4 space-y-3 text-xs text-text-main">
+              <p>
+                Charge head{" "}
+                <strong>
+                  "{chargeHeadReassign.head.name}" ({chargeHeadReassign.head.code})
+                </strong>{" "}
+                is used by {chargeHeadReassign.references.length} supplier bill
+                {chargeHeadReassign.references.length === 1 ? "" : "s"}. Choose a replacement head to
+                move those charge lines onto, then the head can be deleted. Posted amounts do not
+                change.
+              </p>
+              <ul className="max-h-32 overflow-y-auto rounded-btn border border-border-main bg-canvas p-2 space-y-1">
+                {chargeHeadReassign.references.map((ref) => (
+                  <li key={ref.purchase_id} className="flex items-center justify-between gap-2">
+                    <span className="truncate">• {ref.invoice_number}</span>
+                    <span className="font-mono tabular-nums">₹{ref.amount.toFixed(2)}</span>
+                  </li>
+                ))}
+              </ul>
+              <div>
+                <label className="block text-[11px] font-semibold uppercase tracking-wider text-text-muted">
+                  Replacement charge head *
+                </label>
+                <select
+                  value={chargeHeadReassignTarget}
+                  onChange={(e) => setChargeHeadReassignTarget(e.target.value)}
+                  className="mt-1 w-full rounded-input border border-border-main bg-surface p-2 text-xs text-text-main shadow-2xs focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
+                >
+                  <option value="">Select replacement head...</option>
+                  {chargeHeads
+                    .filter((h) => h.id !== chargeHeadReassign.head.id)
+                    .map((h) => (
+                      <option key={h.id} value={h.id}>
+                        {h.name} ({h.code})
+                      </option>
+                    ))}
+                </select>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 border-t border-border-main pt-4 mt-4">
+              <button
+                onClick={() => setChargeHeadReassign(null)}
+                className="rounded-btn border border-border-main px-4 py-2 text-xs font-semibold text-text-muted hover:bg-canvas cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleConfirmChargeHeadReassign}
+                disabled={!chargeHeadReassignTarget}
+                className="rounded-btn bg-red-500 px-4 py-2 text-xs font-semibold text-white shadow-xs hover:bg-red-600 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Reassign &amp; Delete Head
               </button>
             </div>
           </div>

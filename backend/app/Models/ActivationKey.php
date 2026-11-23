@@ -13,10 +13,15 @@ class ActivationKey extends Model
 
     protected $fillable = [
         'store_id',
+        'counter_id',
+        'label',
         'key_hash',
         'key_prefix',
         'max_devices',
         'devices_activated_count',
+        'consumed_at',
+        'consumed_device_uuid',
+        'ttl_hours',
         'is_single_use',
         'expires_at',
         'is_revoked',
@@ -29,10 +34,20 @@ class ActivationKey extends Model
         'is_single_use' => 'boolean',
         'is_revoked' => 'boolean',
         'expires_at' => 'datetime',
+        'consumed_at' => 'datetime',
         'revoked_at' => 'datetime',
         'max_devices' => 'integer',
+        'ttl_hours' => 'integer',
         'devices_activated_count' => 'integer',
     ];
+
+    /** IS5: a code hash is as good as the code to anyone who can brute force it. */
+    protected $hidden = [
+        'key_hash',
+    ];
+
+    /** CNT-003: the owner-set lifetime of a code, when they do not choose one. */
+    public const DEFAULT_TTL_HOURS = 24;
 
     public function store(): BelongsTo
     {
@@ -49,6 +64,11 @@ class ActivationKey extends Model
         return $this->hasMany(Device::class);
     }
 
+    public function counter(): BelongsTo
+    {
+        return $this->belongsTo(Counter::class);
+    }
+
     /**
      * Compute SHA-256 hash of activation key for secure storage and comparison.
      */
@@ -58,43 +78,104 @@ class ActivationKey extends Model
     }
 
     /**
-     * Generate a new high-entropy activation key tied to a store.
-     * Generates a key with 128-bit cryptographic entropy:
-     * Format: LAM-{STORE_CODE}-{16_HEX_CHARS} (e.g. LAM-MAIN-7F3A9C82B14D6E05)
-     * Returns: ['raw_key' => $rawKey, 'model' => $activationKey]
+     * CNT-003 / CNT-004: mint a one-time code for exactly one counter.
+     * The raw code exists only in the returned array — never in a column.
      */
-    public static function generateKey(Store $store, array $options = []): array
+    public static function generateForCounter(Counter $counter, array $options = []): array
     {
-        $code = strtoupper(preg_replace('/[^A-Z0-9]/', '', $store->code ?: 'STORE'));
-        $code = substr($code, 0, 8);
-        $randomPart = strtoupper(bin2hex(random_bytes(8))); // 16 random hex characters (64 bits random)
-        $suffix = strtoupper(bin2hex(random_bytes(4)));     // another 8 chars
-        $rawKey = "LAM-{$code}-{$randomPart}-{$suffix}";
-        $keyHash = self::hashKey($rawKey);
-        $prefix = substr($rawKey, 0, 14) . '****';
+        $ttlHours = max(1, (int) ($options['ttl_hours'] ?? self::DEFAULT_TTL_HOURS));
+        $tag = strtoupper((string) preg_replace('/[^A-Z0-9]/', '', $counter->counter_code));
 
-        $activationKey = self::create([
-            'store_id' => $store->id,
-            'key_hash' => $keyHash,
-            'key_prefix' => $prefix,
-            'max_devices' => $options['max_devices'] ?? 5,
+        // 128 bits of randomness, in two typed groups.
+        $rawKey = sprintf(
+            'LAM-%s-%s-%s',
+            $tag,
+            strtoupper(bin2hex(random_bytes(8))),
+            strtoupper(bin2hex(random_bytes(8)))
+        );
+
+        $key = self::create([
+            'store_id' => $counter->store_id,
+            'counter_id' => $counter->id,
+            'label' => $options['label'] ?? null,
+            'key_hash' => self::hashKey($rawKey),
+            'key_prefix' => substr($rawKey, 0, 14) . '****',
+            'max_devices' => 1,
             'devices_activated_count' => 0,
-            'is_single_use' => (bool)($options['is_single_use'] ?? false),
-            'expires_at' => $options['expires_at'] ?? now()->addYear(),
-            'is_revoked' => false,
+            'is_single_use' => true,
+            'ttl_hours' => $ttlHours,
+            'expires_at' => now()->addHours($ttlHours),
             'created_by' => $options['created_by'] ?? null,
-        ]);
-
-        // Keep stores.activation_key and stores.activation_key_hash updated for fast lookup & admin display
-        $store->update([
-            'activation_key' => $rawKey,
-            'activation_key_hash' => $keyHash,
         ]);
 
         return [
             'raw_key' => $rawKey,
-            'model' => $activationKey,
+            'model' => $key,
+            'qr_payload' => [
+                'v' => 1,
+                'kind' => 'lam_suite_counter_claim',
+                'code' => $rawKey,
+                'store_id' => $counter->store_id,
+                'counter_id' => $counter->id,
+            ],
         ];
+    }
+
+    /** CNT-003: the only lookup path — the hash of whatever was typed or scanned. */
+    public static function findByCode(string $rawKey): ?self
+    {
+        return self::where('key_hash', self::hashKey($rawKey))->first();
+    }
+
+    /** CNT-003 / IS2: look a typed or scanned code up inside exactly one store. */
+    public static function resolveForClaim(string $rawKey, int $storeId): ?self
+    {
+        $key = self::findByCode($rawKey);
+
+        if (!$key
+            || (int) $key->store_id !== $storeId
+            || $key->counter_id === null
+            || !$key->isValid()) {
+            return null;
+        }
+
+        return $key;
+    }
+
+    /** CNT-007: one code binds one device, once. */
+    public function markConsumed(?string $deviceUuid = null): void
+    {
+        $this->consumed_at = now();
+        $this->consumed_device_uuid = $deviceUuid;
+        $this->save();
+
+        $this->increment('devices_activated_count');
+    }
+
+    /** CNT-005: the internal reason a code was refused, never shown to the till. */
+    public function whyInvalid(): ?string
+    {
+        if ($this->is_revoked) {
+            return 'revoked';
+        }
+
+        if ($this->consumed_at !== null || ($this->is_single_use && $this->devices_activated_count >= 1)) {
+            return 'consumed';
+        }
+
+        if ($this->expires_at && $this->expires_at->isPast()) {
+            return 'expired';
+        }
+
+        if ($this->max_devices !== null && $this->devices_activated_count >= $this->max_devices) {
+            return 'device_limit';
+        }
+
+        if (!$this->store || !$this->store->is_active) {
+            return 'store_suspended';
+        }
+
+        return null;
     }
 
     /**
@@ -107,6 +188,11 @@ class ActivationKey extends Model
         }
 
         if ($this->expires_at && $this->expires_at->isPast()) {
+            return false;
+        }
+
+        // CNT-003: a counter code binds exactly one device, whatever max_devices says.
+        if ($this->consumed_at !== null) {
             return false;
         }
 

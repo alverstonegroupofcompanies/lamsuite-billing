@@ -1,0 +1,177 @@
+{
+  "store_4": {
+    "invoices_api": 24,
+    "invoices_db": 25,
+    "foreign_invoices": [],
+    "products_api": 3,
+    "products_db": 3,
+    "foreign_products": []
+  },
+  "store_5": {
+    "invoices_api": 1,
+    "invoices_db": 1,
+    "foreign_invoices": [],
+    "products_api": 2,
+    "products_db": 2,
+    "foreign_products": []
+  },
+  "sales_report": {
+    "st": 200,
+    "head": "{\"date_range\":{\"start_date\":\"2026-11-01\",\"end_date\":\"2026-11-21\"},\"total_invoices_count\":21,\"gross_sales\":3857,\"returns\":34,\"net_sales\":3823,\"total_taxable\":3977,\"total_tax\":416.81,\"by_tender\":{\"cash\":3481,\"upi\":230,\"card\":0,\"credit\":90}}"
+  },
+  "notifications": [
+    {
+      "store_id": 4,
+      "type": "counter_claim_lockout",
+      "title": "Counter activation locked"
+    }
+  ],
+  "alert_lockout": 1,
+  "audit_actions": [
+    {
+      "action": "close_store_day",
+      "n": 1
+    },
+    {
+      "action": "counter_activation_code_issued",
+      "n": 16
+    },
+    {
+      "action": "counter_claim_lockout_triggered",
+      "n": 1
+    },
+    {
+      "action": "counter_created",
+      "n": 5
+    },
+    {
+      "action": "counter_locked",
+      "n": 1
+    },
+    {
+      "action": "counter_reissued",
+      "n": 26
+    },
+    {
+      "action": "counter_unlock_failed",
+      "n": 4
+    },
+    {
+      "action": "counter_unlock_locked",
+      "n": 1
+    },
+    {
+      "action": "counter_unlock_pin_reset",
+      "n": 1
+    },
+    {
+      "action": "counter_unlocked",
+      "n": 1
+    },
+    {
+      "action": "create_party",
+      "n": 6
+    },
+    {
+      "action": "create_product",
+      "n": 5
+    },
+    {
+      "action": "create_store",
+      "n": 2
+    },
+    {
+      "action": "create_user",
+      "n": 1
+    },
+    {
+      "action": "dispatch_transfer",
+      "n": 1
+    },
+    {
+      "action": "invoice_approval_failed",
+      "n": 10
+    },
+    {
+      "action": "invoice_approval_issued",
+      "n": 4
+    },
+    {
+      "action": "invoice_approval_used",
+      "n": 2
+    },
+    {
+      "action": "invoice_create_authoritative",
+      "n": 21
+    },
+    {
+      "action": "post_stock_adjustment",
+      "n": 7
+    },
+    {
+      "action": "receive_transfer",
+      "n": 1
+    },
+    {
+      "action": "record_customer_payment",
+      "n": 1
+    },
+    {
+      "action": "record_supplier_payment",
+      "n": 1
+    },
+    {
+      "action": "reopen_store_day",
+      "n": 1
+    },
+    {
+      "action": "submit_stock_adjustment",
+      "n": 2
+    },
+    {
+      "action": "update_settings",
+      "n": 12
+    },
+    {
+      "action": "update_stock_adjustment_policy",
+      "n": 2
+    },
+    {
+      "action": "update_store",
+      "n": 6
+    }
+  ],
+  "audit_missing": [
+    "counter_claimed",
+    "invoice_cancelled",
+    "cancel_invoice",
+    "purchase",
+    "lock_counter",
+    "day_close"
+  ],
+  "cs_before": 200,
+  "disable": {
+    "st": 200,
+    "body": "{\"id\":5,\"name\":\"QA Glow Cosmetics\",\"code\":\"QA-CS\",\"phone\":null,\"email\":null,\"address\":\"QA Road 2, Bengaluru 560001\",\"state_code\":\"29\",\"gstin\":\"29ABCDE1234F1Z5\",\"drug_license_numbers\":[],\"fssai_no\":nul"
+  },
+  "cs_blocked_after_s": null,
+  "cs_probes": [
+    200,
+    200,
+    200,
+    200,
+    200,
+    200,
+    200,
+    200,
+    200,
+    200,
+    200,
+    200
+  ],
+  "sale_while_suspended": {
+    "st": 201,
+    "body": "{\"success\":true,\"invoice\":{\"store_id\":5,\"counter_id\":4,\"counter_code\":\"C01\",\"location_name\":\"Entrance\",\"module_key\":\"invoice\",\"invoice_number\":\"C02-INV-SUSP\",\"i"
+  },
+  "enable": 200
+}

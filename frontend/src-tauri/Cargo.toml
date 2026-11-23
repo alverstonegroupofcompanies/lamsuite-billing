@@ -1,6 +1,6 @@
 [package]
 name = "lamsuite-billing"
-version = "2.1.1"
+version = "2.1.2"
 description = "LamSuite Billing Desktop"
 authors = ["Muhammad Anshad <muhammad.anshad@teronext.com>"]
 edition = "2021"
@@ -25,6 +25,12 @@ uuid = { version = "1", features = ["v4"] }
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 parking_lot = "0.12"
 local-ip-address = "0.6"
+
+# CNT-006: the counter token lives in the OS credential store. macOS goes through
+# the system `security` tool; Windows (Credential Manager) and Linux (Secret
+# Service) through keyring.
+[target.'cfg(not(target_os = "macos"))'.dependencies]
+keyring = "3.6.3"
 
 [features]
 default = ["custom-protocol"]

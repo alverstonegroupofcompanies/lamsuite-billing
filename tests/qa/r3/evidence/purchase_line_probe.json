@@ -1,0 +1,103 @@
+[
+  [
+    "after Alt+S",
+    "INPUT:text:Select or search supplier (Alt+S)...="
+  ],
+  [
+    "supplier dropdown",
+    [
+      "QA Pharma Distributors",
+      "QA Pharma Distributors"
+    ]
+  ],
+  [
+    "after Enter on supplier",
+    "INPUT:text:INV-001="
+  ],
+  [
+    "after Alt+B",
+    "INPUT:text:INV-001="
+  ],
+  [
+    "after F1",
+    "BODY::LamSuite Billing\nv2.1.1\n\nRetai="
+  ],
+  [
+    "product suggestions",
+    null
+  ],
+  [
+    "field 0",
+    "BODY::LamSuite Billing\nv2.1.1\n\nRetai="
+  ],
+  [
+    "field 1",
+    "INPUT:text:Scan barcode or type product name (e.g. 3*paracetamol)=PB-NEW"
+  ],
+  [
+    "field 2",
+    "INPUT:text:Scan barcode or type product name (e.g. 3*paracetamol)=128"
+  ],
+  [
+    "field 3",
+    "INPUT:text:Scan barcode or type product name (e.g. 3*paracetamol)=128"
+  ],
+  [
+    "field 4",
+    "INPUT:text:Scan barcode or type product name (e.g. 3*paracetamol)=128100"
+  ],
+  [
+    "field 5",
+    "INPUT:text:Scan barcode or type product name (e.g. 3*paracetamol)=1281000"
+  ],
+  [
+    "field 6",
+    "INPUT:text:Scan barcode or type product name (e.g. 3*paracetamol)=12810000"
+  ],
+  [
+    "field 7",
+    "INPUT:text:Scan barcode or type product name (e.g. 3*paracetamol)=1281000090"
+  ],
+  [
+    "field 8",
+    "INPUT:text:Scan barcode or type product name (e.g. 3*paracetamol)=128100009060"
+  ],
+  [
+    "field 9",
+    "INPUT:text:Scan barcode or type product name (e.g. 3*paracetamol)=1281000090600"
+  ],
+  [
+    "field 10",
+    "INPUT:text:Scan barcode or type product name (e.g. 3*paracetamol)=128100009060012"
+  ],
+  [
+    "field 11",
+    "INPUT:text:Scan barcode or type product name (e.g. 3*paracetamol)=12810000906001290"
+  ],
+  [
+    "field 12",
+    "INPUT:text:Scan barcode or type product name (e.g. 3*paracetamol)=9099"
+  ],
+  [
+    "field 13",
+    "INPUT:text:0=1"
+  ],
+  [
+    "field 14",
+    "INPUT:text:Scan barcode or type product name (e.g. 3*paracetamol)="
+  ],
+  [
+    "field 15",
+    "INPUT:text:Scan barcode or type product name (e.g. 3*paracetamol)="
+  ],
+  [
+    "grid text",
+    [
+      "QA Paracet 500 Strip",
+      "SUBTOTAL: ₹ 80.36",
+      "GST TAX: ₹ 9.64",
+      "NET PAYABLE",
+      "Added QA Paracet 500 Strip, Quantity 1. Total: ₹90.00"
+    ]
+  ]
+]

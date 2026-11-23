@@ -3,9 +3,21 @@ import { productsStore, type ProductBatch } from "../masters/productsStore";
 import { partiesStore, type Customer } from "../masters/partiesStore";
 import { syncQueueService } from "../sync/syncQueueService";
 import { companySettingsService } from "../settings/companySettingsService";
+import { counterSequenceService } from "../auth/counterSequenceService";
 import { storeToday } from "../dateTimeUtils";
 import { round2 } from "./billingCalculations";
 import { calculateDocumentTaxes } from "../tax-engine/taxEngine";
+import {
+  returnKey,
+  reverseCreditsFromOriginal,
+  reverseOriginalLine,
+  returnBaseUnits,
+  sumReturnCredits,
+  type OriginalReturnLine,
+  type ReturnCredit,
+  type ReturnCreditTotals,
+} from "./salesReturnPricing";
+import { stateLabel } from "../gst/stateCodes";
 import type { InvoiceRecord, InvoiceItemRecord } from "../reports/reportEngine";
 
 export type ReturnReason = "damaged" | "expired" | "wrong_item" | "customer_return" | "other";
@@ -118,9 +130,6 @@ export function toBaseUnits(
   return packs * upp + loose;
 }
 
-export const returnKey = (productId: string, batchNo: string | undefined): string =>
-  `${productId}_${batchNo || ""}`;
-
 /**
  * Builds the per-line returnable quantity in base units: sold − already returned.
  * `items` are the original invoice lines; `returnedBaseUnits` comes from the
@@ -151,6 +160,10 @@ export class SalesReturnService {
    * Previews sequential return number following sequences in settings without advancing
    */
   async previewNextReturnNumber(): Promise<string> {
+    // CNT-014: a till that is on a counter returns on that counter's own series.
+    const counterNumber = counterSequenceService.previewForActive("sales_return");
+    if (counterNumber) return counterNumber;
+
     const settings = await companySettingsService.loadSettings();
     let prefix = settings.sequences?.returnPrefix || "SR";
     prefix = prefix.replace(/-+$/, "");
@@ -176,6 +189,9 @@ export class SalesReturnService {
    * Generates a sequential, configurable return number following sequences in settings
    */
   async generateNextReturnNumber(): Promise<string> {
+    const counterNumber = await counterSequenceService.numberFromActiveCounter("sales_return", true);
+    if (counterNumber) return counterNumber;
+
     const settings = await companySettingsService.loadSettings();
     let prefix = settings.sequences?.returnPrefix || "SR";
     prefix = prefix.replace(/-+$/, "");
@@ -196,13 +212,14 @@ export class SalesReturnService {
 
     const docNumber = `${prefix}-${nextNum}`;
 
-    await companySettingsService.updateSettings({
-      sequences: {
-        ...settings.sequences,
-        returnPrefix: prefix,
-        nextReturnNumber: nextNum + 1,
-      },
-    });
+    await companySettingsService.saveLocalSettings(
+      {
+        sequences: {
+          ...settings.sequences,
+          returnPrefix: prefix,
+          nextReturnNumber: nextNum + 1,
+        },
+      });
 
     return docNumber;
   }
@@ -215,13 +232,14 @@ export class SalesReturnService {
     const settings = await companySettingsService.loadSettings();
     const currNext = settings.sequences?.nextReturnNumber || 1;
     if (lastNum >= currNext) {
-      await companySettingsService.updateSettings({
-        sequences: {
-          ...settings.sequences,
-          returnPrefix: settings.sequences?.returnPrefix || "SR",
-          nextReturnNumber: lastNum + 1,
-        },
-      });
+      await companySettingsService.saveLocalSettings(
+        {
+          sequences: {
+            ...settings.sequences,
+            returnPrefix: settings.sequences?.returnPrefix || "SR",
+            nextReturnNumber: lastNum + 1,
+          },
+        });
     }
   }
 
@@ -319,9 +337,16 @@ export class SalesReturnService {
     }
 
     // 1. Validation against original invoice
-    if (input.original_invoice_number) {
-      const returnedQtyMap = await this.getReturnedQtyMapForInvoice(input.original_invoice_number);
+    const returnedQtyMap = await this.getReturnedQtyMapForInvoice(
+      input.original_invoice_number || ""
+    );
+    const originalItems = originalInv
+      ? (await sqliteStorage.findAll<InvoiceItemRecord>("invoice_items")).filter(
+          (it) => String(it.invoice_id) === String(originalInv!.id)
+        )
+      : [];
 
+    if (input.original_invoice_number) {
       for (const line of input.lines) {
         const requestedBaseUnits = toBaseUnits(
           line.return_qty,
@@ -344,44 +369,82 @@ export class SalesReturnService {
       }
     }
 
-    // 2. Compute financial breakdown line by line via statutory TaxEngine
-    const taxLines = input.lines.map((line, idx) => ({
-      line_id: `line_${idx}`,
-      product_id: line.product_id,
-      product_name: line.product_name,
-      hsn_code: line.hsn_code || "",
-      qty: line.return_qty,
-      pack_qty: line.return_qty,
-      loose_qty: line.loose_qty || 0,
-      units_per_pack: line.units_per_pack || 1,
-      unit_price: line.unit_price,
-      discount_percent: line.discount_percent || 0,
-      gst_percent: line.gst_percent || 0,
-      gst_rate: line.gst_percent || 0,
-      cess_percent: (line as any).cess_percent || 0,
-      cess_rate: (line as any).cess_percent || 0,
-    }));
+    // 2. A return credits the money the original line was charged, so whenever the
+    //    bill is held locally and every line is on it, the credit is reversed from
+    //    those lines. Otherwise the till has nothing to reverse and falls back to
+    //    pricing the return on its own.
+    let credits: ReturnCredit[] | null = reverseCreditsFromOriginal(
+      originalInv,
+      originalItems,
+      input.lines,
+      returnedQtyMap
+    );
 
     const customerGstin = input.customer_gstin || originalInv?.customer_gstin;
-    const placeOfSupply = originalInv?.place_of_supply || "32-Kerala";
     const storeState = (originalInv as any)?.store_state_code;
-    const isTaxInclusive = (originalInv as any)?.is_tax_inclusive || false;
+    // A return follows the original document; without one it is supplied where the store is.
+    const placeOfSupply = originalInv?.place_of_supply || stateLabel(storeState || companySettingsService.getSettings().state_code);
 
-    const isComposition = (originalInv as any)?.is_composition || (originalInv as any)?.gst_type === "composition" || (originalInv as any)?.gst_type === "no_tax" || (originalInv && originalInv.tax_total === 0);
-    const taxResult = calculateDocumentTaxes({
-      store_state: storeState || "32",
-      lines: taxLines,
-      customer_gstin: customerGstin,
-      place_of_supply: placeOfSupply,
-      default_tax_mode: isTaxInclusive ? "inclusive" : "exclusive",
-      is_composition: Boolean(isComposition),
-    });
+    let totals: ReturnCreditTotals;
+    if (!credits) {
+      const isTaxInclusive = (originalInv as any)?.is_tax_inclusive || false;
+      const isComposition = (originalInv as any)?.is_composition || (originalInv as any)?.gst_type === "composition" || (originalInv as any)?.gst_type === "no_tax" || (originalInv && originalInv.tax_total === 0);
+      const taxResult = calculateDocumentTaxes({
+        store_state: storeState || "32",
+        lines: input.lines.map((line, idx) => ({
+          line_id: `line_${idx}`,
+          product_id: line.product_id,
+          product_name: line.product_name,
+          hsn_code: line.hsn_code || "",
+          qty: line.return_qty,
+          pack_qty: line.return_qty,
+          loose_qty: line.loose_qty || 0,
+          units_per_pack: line.units_per_pack || 1,
+          unit_price: line.unit_price,
+          discount_percent: line.discount_percent || 0,
+          gst_percent: line.gst_percent || 0,
+          gst_rate: line.gst_percent || 0,
+          cess_percent: (line as any).cess_percent || 0,
+          cess_rate: (line as any).cess_percent || 0,
+        })),
+        customer_gstin: customerGstin,
+        place_of_supply: placeOfSupply,
+        default_tax_mode: isTaxInclusive ? "inclusive" : "exclusive",
+        is_composition: Boolean(isComposition),
+      });
+
+      credits = taxResult.lines.map((line) => ({
+        taxable_amount: line.taxable_amount,
+        cgst_amount: line.cgst_amount,
+        sgst_amount: line.sgst_amount,
+        igst_amount: line.igst_amount,
+        cess_amount: line.cess_amount,
+        tax_amount: line.total_tax,
+        total_amount: line.total_amount,
+        discount_amount: line.line_discount,
+      }));
+
+      totals = {
+        subtotal: taxResult.taxable_subtotal,
+        taxable_subtotal: taxResult.taxable_subtotal,
+        discount_total: round2(taxResult.line_discount_total + taxResult.bill_discount_total),
+        tax_total: taxResult.total_tax,
+        cgst_total: taxResult.cgst_total,
+        sgst_total: taxResult.sgst_total,
+        igst_total: taxResult.igst_total,
+        cess_total: taxResult.cess_total,
+        round_off: taxResult.round_off,
+        grand_total: taxResult.grand_total,
+      };
+    } else {
+      totals = sumReturnCredits(credits);
+    }
 
     const returnLines: SalesReturnItem[] = [];
 
     for (let i = 0; i < input.lines.length; i++) {
       const line = input.lines[i];
-      const lineRes = taxResult.lines[i];
+      const credit = credits[i];
       const itemId = `sri_${now}_${i}_${Math.random().toString(16).slice(2, 6)}`;
       const returnedBaseUnits = toBaseUnits(line.return_qty, line.loose_qty, line.units_per_pack);
 
@@ -389,12 +452,12 @@ export class SalesReturnService {
         ...line,
         id: itemId,
         return_id: returnId,
-        discount_amount: lineRes.line_discount,
-        taxable_amount: lineRes.taxable_amount,
-        cgst_amount: lineRes.cgst_amount,
-        sgst_amount: lineRes.sgst_amount,
-        igst_amount: lineRes.igst_amount,
-        total_amount: lineRes.total_amount,
+        discount_amount: credit.discount_amount,
+        taxable_amount: credit.taxable_amount,
+        cgst_amount: credit.cgst_amount,
+        sgst_amount: credit.sgst_amount,
+        igst_amount: credit.igst_amount,
+        total_amount: credit.total_amount,
       });
 
       // 3. Double-entry Stock updates
@@ -457,14 +520,15 @@ export class SalesReturnService {
       }
     }
 
-    const subtotal = taxResult.taxable_subtotal;
-    const discountTotal = round2(taxResult.line_discount_total + taxResult.bill_discount_total);
-    const taxTotal = taxResult.total_tax;
-    const cgstTotal = taxResult.cgst_total;
-    const sgstTotal = taxResult.sgst_total;
-    const igstTotal = taxResult.igst_total;
-    const roundOff = taxResult.round_off;
-    const grandTotal = taxResult.grand_total;
+    const subtotal = totals.subtotal;
+    const discountTotal = totals.discount_total;
+    const taxTotal = totals.tax_total;
+    const cgstTotal = totals.cgst_total;
+    const sgstTotal = totals.sgst_total;
+    const igstTotal = totals.igst_total;
+    const cessTotal = totals.cess_total;
+    const roundOff = totals.round_off;
+    const grandTotal = totals.grand_total;
 
     const refundAmount = input.refund_amount !== undefined ? input.refund_amount : grandTotal;
     const refundStatus = refundAmount >= grandTotal ? "paid" : refundAmount > 0 ? "partial" : "unpaid";
@@ -523,13 +587,13 @@ export class SalesReturnService {
       customer_gstin: customerGstin,
       place_of_supply: placeOfSupply,
       subtotal,
-      taxable_subtotal: taxResult.taxable_subtotal,
+      taxable_subtotal: totals.taxable_subtotal,
       discount_total: discountTotal,
       tax_total: taxTotal,
       cgst_total: cgstTotal,
       sgst_total: sgstTotal,
       igst_total: igstTotal,
-      cess_total: taxResult.cess_total,
+      cess_total: cessTotal,
       round_off: roundOff,
       grand_total: grandTotal,
       paid_amount: refundAmount,
@@ -542,7 +606,6 @@ export class SalesReturnService {
 
     for (let i = 0; i < returnLines.length; i++) {
       const item = returnLines[i];
-      const lineRes = taxResult.lines[i];
       const mirrorItem: InvoiceItemRecord = {
         id: item.id,
         invoice_id: returnId,
@@ -557,6 +620,7 @@ export class SalesReturnService {
         unit_price: item.unit_price,
         discount_percent: item.discount_percent,
         discount_amount: item.discount_amount,
+        taxable_amount: item.taxable_amount,
         gst_percent: item.gst_percent,
         cgst_amount: item.cgst_amount,
         sgst_amount: item.sgst_amount,
@@ -571,6 +635,9 @@ export class SalesReturnService {
     // zero-line bill and recomputed its tax from an empty line set.
     await syncQueueService.enqueue("invoice", returnId, "create", {
       ...mirrorInvoice,
+      // The server reverses a credit note from the bill it credits. The till's own id for
+      // that bill survives a server renumbering; the number printed on it may not.
+      original_invoice_id: input.original_invoice_id || originalInv?.id || null,
       items: returnLines.map((item) => ({
         product_id: item.product_id,
         product_name: item.product_name,

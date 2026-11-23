@@ -2,15 +2,16 @@ import { sqliteStorage } from "../db/sqliteStorage";
 import { canonicalizeInvoiceIdentity, clearInvoiceChildren } from "../db/invoiceCacheIdentity";
 import { getResolvedApiBaseUrl } from "../../config/env";
 import { counterSequenceService, type DocType } from "../auth/counterSequenceService";
-import { storeDeviceService } from "../auth/storeDeviceService";
+import { storeDeviceService, counterSequenceKey } from "../auth/storeDeviceService";
 import { storeRegistryService } from "../auth/storeRegistryService";
-import { staffAuthService } from "../auth/staffAuthService";
 import { syncQueueService } from "./syncQueueService";
 import { companySettingsService } from "../settings/companySettingsService";
 import { storeToday } from "../dateTimeUtils";
 import { calculateDocumentTaxes } from "../tax-engine/taxEngine";
+import { stateCodeOf, stateLabel } from "../gst/stateCodes";
 import { parseBusinessRuleError, type BusinessRuleErrorPayload } from "../errors/businessRuleError";
-import type { PaymentTenderLine } from "../billing/billingTenderService";
+import { billingTenderService, type PaymentTenderLine } from "../billing/billingTenderService";
+import { withoutPharmacistPin } from "../billing/pharmacistGate";
 
 export type ConnectionState = "online" | "slow" | "offline";
 
@@ -65,6 +66,11 @@ export interface OnlineInvoicePayload {
   patient_name?: string;
   doctor_name?: string;
   doctor_reg_no?: string;
+  salesperson_id?: string;
+  salesperson_name?: string;
+  /** PHR-004: who vouched for a restricted line, and the PIN they typed. */
+  pharmacist_id?: string;
+  pharmacist_pin?: string;
   bill_discount_percent?: number;
   bill_discount_amount?: number;
   manual_round_off?: number | null;
@@ -79,6 +85,9 @@ export interface OnlineInvoicePayload {
   is_composition?: boolean;
   is_inter_state?: boolean;
   is_offline_temp?: boolean;
+  /** APR-003: the grant an approver minted for this bill, redeemed on save. */
+  approval_token?: string;
+  approval_reason?: string;
   items: OnlineInvoiceLinePayload[];
 }
 
@@ -107,6 +116,8 @@ export class OnlineTransactionService {
   private healthCheckInterval: ReturnType<typeof setInterval> | null = null;
   private listeners = new Set<(health: NetworkHealth) => void>();
   private activeBaseUrl?: string;
+  /** One lease request at a time, so a heartbeat cannot stack a second block. */
+  private leaseRequest: Promise<boolean> | null = null;
 
   constructor(baseUrl?: string) {
     this.activeBaseUrl = baseUrl;
@@ -157,38 +168,54 @@ export class OnlineTransactionService {
       const timeoutId = setTimeout(() => controller.abort(), 2500);
 
       const activeStore = storeRegistryService.getActiveStore();
-      const activeStoreId = String(activeStore?.id || "1");
 
-      const res = await fetch(`${baseUrl}/api/license/check?store_id=${encodeURIComponent(activeStoreId)}`, {
-        method: "GET",
-        headers: {
-          Accept: "application/json",
-          "X-Store-Id": activeStoreId,
-          "Store-Id": activeStoreId,
-        },
-        cache: "no-store",
-        signal: controller.signal,
-      });
-      clearTimeout(timeoutId);
+      // Before a counter is claimed there is no store to name. Probe the
+      // server's health route instead of asking about store 1's licence.
+      if (!activeStore) {
+        const res = await fetch(`${baseUrl}/up`, {
+          method: "GET",
+          headers: { Accept: "application/json" },
+          cache: "no-store",
+          signal: controller.signal,
+        });
+        clearTimeout(timeoutId);
 
-      latency = Date.now() - start;
-      if (res.ok) {
-        isConnected = true;
-        const body = await res.json().catch(() => ({}));
-        if (body && body.is_active !== undefined) {
-          const isActive = Boolean(body.is_active);
-          if (activeStore && activeStore.is_active !== isActive) {
-            await storeRegistryService.setStoreActiveStatus(activeStore.id, isActive);
-            await companySettingsService.updateLocalFromRemote({ is_active: isActive });
+        latency = Date.now() - start;
+        isConnected = res.ok;
+      } else {
+        const activeStoreId = String(activeStore.id);
+
+        const res = await fetch(`${baseUrl}/api/license/check?store_id=${encodeURIComponent(activeStoreId)}`, {
+          method: "GET",
+          headers: {
+            Accept: "application/json",
+            "X-Store-Id": activeStoreId,
+            "Store-Id": activeStoreId,
+          },
+          cache: "no-store",
+          signal: controller.signal,
+        });
+        clearTimeout(timeoutId);
+
+        latency = Date.now() - start;
+        if (res.ok) {
+          isConnected = true;
+          const body = await res.json().catch(() => ({}));
+          if (body && body.is_active !== undefined) {
+            const isActive = Boolean(body.is_active);
+            if (activeStore.is_active !== isActive) {
+              await storeRegistryService.setStoreActiveStatus(activeStore.id, isActive);
+              await companySettingsService.updateLocalFromRemote({ is_active: isActive });
+            }
           }
-        }
-        if (body && body.last_reset_at) {
-          const storeId = String(body.store_id || activeStore?.id || "");
-          await storeRegistryService.applyRemoteResetOnce(
-            storeId,
-            body.last_reset_at,
-            body.last_reset_options || undefined
-          );
+          if (body && body.last_reset_at) {
+            const storeId = String(body.store_id || activeStore.id || "");
+            await storeRegistryService.applyRemoteResetOnce(
+              storeId,
+              body.last_reset_at,
+              body.last_reset_options || undefined
+            );
+          }
         }
       }
     } catch {
@@ -271,83 +298,57 @@ export class OnlineTransactionService {
   }
 
   /**
-   * Check status of counter's pre-leased number series block and auto-replenish if online and low (< 20%).
+   * Check status of this counter's leased number block and ask for more only
+   * when it is actually spent. CNT-014: the block belongs to the counter, the
+   * server reserves it, and a heartbeat must never burn the series.
    */
   async checkLeaseBlockStatus(docType: DocType = "invoice"): Promise<{ remaining: number; isLow: boolean }> {
     try {
       const profile = await storeDeviceService.getDeviceProfile();
-      const counterId = profile?.counter_code || "C01";
-      const fy = counterSequenceService.getCurrentFinancialYear();
-      const seqId = `${counterId}_${docType}_${fy}`;
+      if (!profile) return { remaining: 0, isLow: true };
 
-      const seq = await sqliteStorage.findById<any>("counter_sequences", seqId);
-      if (!seq || !seq.range_end) {
-        return { remaining: 50, isLow: false };
+      const counterId = counterSequenceKey(profile, profile.counter_code);
+      const status = await counterSequenceService.leaseStatus(counterId, docType);
+
+      if (status.remaining === 0 && this.connectionState !== "offline") {
+        void this.replenishLeasedBlock(counterId, docType);
       }
 
-      const remaining = Math.max(0, seq.range_end - seq.next_number + 1);
-      const isLow = remaining < 10;
-
-      // Proactive replenishment when online
-      if (isLow && this.connectionState !== "offline") {
-        this.replenishLeasedBlock(counterId, docType).catch(() => {});
-      }
-
-      return { remaining, isLow };
+      return status;
     } catch {
-      return { remaining: 50, isLow: false };
+      return { remaining: 0, isLow: true };
     }
   }
 
   /**
-   * Request a new reserved block of numbers from cloud backend.
+   * Request a new reserved block of numbers from the store server, keyed by the
+   * counter's own id. One request at a time: the heartbeat runs every few
+   * seconds and a stack of asks is what used to open block after block.
    */
-  async replenishLeasedBlock(counterCode: string, docType: DocType = "invoice", blockSize = 50): Promise<boolean> {
-    try {
-      const activeStore = storeRegistryService.getActiveStore();
-      const profile = await storeDeviceService.getDeviceProfile();
-      const storeId = String(activeStore?.id || profile?.store_id || "1");
+  async replenishLeasedBlock(counterId: number | string, docType: DocType = "invoice", blockSize = 50): Promise<boolean> {
+    if (this.leaseRequest) return this.leaseRequest;
 
-      const res = await fetch(`${this.getEffectiveBaseUrl()}/api/counters/${counterCode}/lease-sequence`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Accept: "application/json",
-          "X-Store-Id": storeId,
-          "Store-Id": storeId,
-        },
-        body: JSON.stringify({
-          doc_type: docType,
-          allocate_block: true,
-          block_size: blockSize,
-        }),
-      });
+    this.leaseRequest = (async () => {
+      try {
+        const profile = await storeDeviceService.getDeviceProfile();
+        const activeStore = storeRegistryService.getActiveStore();
+        const storeId = String(activeStore?.id || profile?.store_id || "");
 
-      if (!res.ok) return false;
-
-      const data = await res.json();
-      if (data.success && data.leased_block) {
-        const b = data.leased_block;
-        const fy = b.financial_year || counterSequenceService.getCurrentFinancialYear();
-        const seqId = `${counterCode}_${docType}_${fy}`;
-
-        await sqliteStorage.insertRecord("counter_sequences", seqId, {
-          id: seqId,
-          counter_id: counterCode,
-          doc_type: docType,
-          financial_year: fy,
-          prefix: b.prefix,
-          next_number: b.range_start,
-          range_start: b.range_start,
-          range_end: b.range_end,
-          updated_at: Date.now(),
+        await counterSequenceService.lease(counterId, docType, blockSize, {
+          baseUrl: this.getEffectiveBaseUrl(),
+          token: await storeDeviceService.getDeviceToken(),
+          storeId: /^\d+$/.test(storeId) ? storeId : undefined,
         });
+
         return true;
+      } catch {
+        return false;
+      } finally {
+        this.leaseRequest = null;
       }
-      return false;
-    } catch {
-      return false;
-    }
+    })();
+
+    return this.leaseRequest;
   }
 
   /**
@@ -358,8 +359,7 @@ export class OnlineTransactionService {
   async submitAuthoritativeInvoice(payload: OnlineInvoicePayload): Promise<AuthoritativeInvoiceResponse> {
     const profile = await storeDeviceService.getDeviceProfile();
     const activeStore = storeRegistryService.getActiveStore();
-    const session = staffAuthService.getCurrentSession();
-    const resolvedStoreId = String(payload.store_id || activeStore?.id || session?.user?.store_id || profile?.store_id || "1");
+    const resolvedStoreId = String(payload.store_id || activeStore?.id || profile?.store_id || "1");
     const resolvedStoreCode = String(payload.store_code || activeStore?.code || profile?.store_code || "STORE-01");
     const counterCode = payload.counter_code || profile?.counter_code || "C01";
     const idempotencyKey = payload.idempotency_key || payload.external_id || `tx_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`;
@@ -446,7 +446,7 @@ export class OnlineTransactionService {
 
   /**
    * Offline Mode Execution:
-   * 1. Obtains number from pre-leased block or emergency temp series
+   * 1. Obtains a number the server pre-leased; refuses to bill when the block is spent
    * 2. Persists durable write-ahead queue entry (WAL)
    * 3. Updates local SQLite cache and pending stock ledger
    * 4. Enqueues in syncQueueService for reconnect sync
@@ -458,22 +458,25 @@ export class OnlineTransactionService {
   ): Promise<AuthoritativeInvoiceResponse> {
     const profile = await storeDeviceService.getDeviceProfile();
     const activeStore = storeRegistryService.getActiveStore();
-    const session = staffAuthService.getCurrentSession();
-    const resolvedStoreId = String(payload.store_id || activeStore?.id || session?.user?.store_id || profile?.store_id || "1");
+    const resolvedStoreId = String(payload.store_id || activeStore?.id || profile?.store_id || "1");
     const resolvedStoreCode = String(payload.store_code || activeStore?.code || profile?.store_code || "STORE-01");
-    const counterId = profile?.counter_code || counterCode || "C01";
+    const counterId = counterSequenceKey(profile, counterCode);
 
     let assignedDocNumber = payload.invoice_number || "";
-    let isTempNumber = false;
 
     if (!assignedDocNumber) {
       try {
-        assignedDocNumber = await counterSequenceService.getNextDocumentNumber(counterId, counterCode, "invoice");
+        assignedDocNumber = await counterSequenceService.takeLeasedNumber(counterId, counterCode, "invoice");
       } catch {
-        // Leased block exhausted while offline: Fall back to emergency temporary series!
-        const emergencySeq = Math.floor(Math.random() * 9000) + 1000;
-        assignedDocNumber = `TEMP-${counterCode}-${Date.now().toString().slice(-4)}${emergencySeq}`;
-        isTempNumber = true;
+        // A number the server never reserved is not this store's to issue, so the
+        // bill stops here rather than inventing one that may collide in the book.
+        return {
+          success: false,
+          isOnline: false,
+          invoice: null,
+          error:
+            "This till has no offline invoice numbers left. Connect it to the store server to lease a new block, then bill again.",
+        };
       }
     }
 
@@ -486,10 +489,17 @@ export class OnlineTransactionService {
     const gstType = payload.gst_type || storeSettings.gst_type || "regular";
     const taxMode = (payload.tax_mode as any) || storeSettings.tax_mode || "inclusive";
 
+    // A walk-in bill is supplied where the store is. Only the buyer's GSTIN — or
+    // the destination the caller resolved for a registered customer — may move it.
+    const posLabel = stateLabel(
+      stateCodeOf(payload.customer_gstin) ?? (payload.is_inter_state ? payload.place_of_supply : null),
+      stState
+    );
+
     const docTaxes = calculateDocumentTaxes({
       store_state: stState,
       customer_gstin: payload.customer_gstin,
-      place_of_supply: payload.place_of_supply || (payload.is_inter_state ? "XX" : stState),
+      place_of_supply: posLabel,
       default_tax_mode: taxMode,
       gst_type: gstType as any,
       is_composition: payload.is_composition || gstType === "composition" || gstType === "no_tax",
@@ -559,20 +569,20 @@ export class OnlineTransactionService {
     const finalRoundOff = docTaxes.round_off;
     const finalGrandTotal = docTaxes.grand_total;
 
-    const paymentLines = payload.payments && payload.payments.length > 0
+    const requestedLines = payload.payments && payload.payments.length > 0
       ? payload.payments
       : [{ mode: payload.payment_mode || "Cash", amount: payload.paid_amount ?? finalGrandTotal }];
 
-    let creditPortion = 0;
-    let totalPaid = 0;
-    for (const p of paymentLines) {
-      const upper = (p.mode || "").trim().toUpperCase();
-      if (upper === "CREDIT" || upper === "UDHARI") {
-        creditPortion += Number(p.amount) || 0;
-      } else {
-        totalPaid += Number(p.amount) || 0;
-      }
-    }
+    // PAY-02: the till's own copy of the bill reads the way the server reads
+    // it — `amount` is what the bill kept, `tendered_amount` what the customer
+    // handed over and `change_amount` what went back. Re-settling settled
+    // lines is a no-op, so a bill that arrives from either till version keeps
+    // one set of numbers here and on the server.
+    const settledTenders = billingTenderService.settleTenders(finalGrandTotal, requestedLines);
+    const paymentLines = settledTenders.lines;
+    const creditPortion = settledTenders.credit;
+    const totalPaid = settledTenders.paid;
+
     const primaryMode = paymentLines.length > 1 ? "Split" : (paymentLines[0]?.mode || "Cash");
     let paymentStatus = "paid";
     if (creditPortion >= finalGrandTotal - 0.01) {
@@ -580,6 +590,13 @@ export class OnlineTransactionService {
     } else if (creditPortion > 0.001 || totalPaid < finalGrandTotal - 0.01) {
       paymentStatus = "partially_paid";
     }
+
+    // PHR-006: what the till keeps is who confirmed, never what they typed. An
+    // offline bill names its pharmacist from the device's own staff cache, and
+    // the server re-checks the credential when the document lands.
+    const confirmedBy = payload.pharmacist_id
+      ? await sqliteStorage.findById<any>("salespeople", String(payload.pharmacist_id))
+      : null;
 
     // Build local invoice record
     const invoiceRecord = {
@@ -593,7 +610,7 @@ export class OnlineTransactionService {
       customer_name: payload.customer_name || "Walk-in Customer",
       customer_phone: payload.customer_phone || "",
       customer_gstin: payload.customer_gstin || "",
-      place_of_supply: payload.place_of_supply || "32-Kerala",
+      place_of_supply: posLabel,
       subtotal: calculatedSubtotal,
       taxable_subtotal: taxableSubtotal,
       discount_total: discountTotal,
@@ -614,14 +631,24 @@ export class OnlineTransactionService {
       patient_name: payload.patient_name || "",
       doctor_name: payload.doctor_name || "",
       doctor_reg_no: payload.doctor_reg_no || "",
-      external_id: idempotencyKey,
+      salesperson_id: payload.salesperson_id || "",
+      salesperson_name: payload.salesperson_name || "",
+      pharmacist_id: payload.pharmacist_id || "",
+      pharmacist_name: confirmedBy?.name || "",
+      pharmacist_reg_no: confirmedBy?.reg_no || "",
+      pharmacist_confirmed_at: confirmedBy ? now : 0,
       is_offline: true,
-      is_offline_temp: isTempNumber,
+      is_offline_temp: false,
       sync_state: "pending",
       created_at: now,
       updated_at: now,
       items: lineRecords,
     };
+
+    // PHR-006: a PIN is evidence for the one request it was typed into. What
+    // lands on disk is who the store named, never what they typed — the server
+    // re-checks the confirmation when the document arrives.
+    const queuedPayload = withoutPharmacistPin(payload);
 
     // 1. Write to Durable Write-Ahead Queue (WAL) on disk/SQLite to survive crashes
     await sqliteStorage.insertRecord("offline_durable_queue", idempotencyKey, {
@@ -630,11 +657,11 @@ export class OnlineTransactionService {
       entity_type: "invoice",
       document_number: assignedDocNumber,
       payload_json: JSON.stringify({
-        ...payload,
+        ...queuedPayload,
         store_id: resolvedStoreId,
         store_code: resolvedStoreCode,
         invoice_number: assignedDocNumber,
-        is_offline_temp: isTempNumber,
+        is_offline_temp: false,
       }),
       status: "pending",
       created_at: now,
@@ -660,6 +687,8 @@ export class OnlineTransactionService {
         counter_code: counterCode,
         payment_mode: p.mode || "Cash",
         amount: Number(p.amount) || 0,
+        tendered_amount: Number(p.tendered_amount ?? p.amount) || 0,
+        change_amount: Number(p.change_amount) || 0,
         reference_no: p.reference_no || null,
         status: p.status || "received",
         extra_fields: p.extra_fields ? JSON.stringify(p.extra_fields) : null,
@@ -727,11 +756,12 @@ export class OnlineTransactionService {
 
     // 4. Enqueue in sync queue service for background sync-back
     await syncQueueService.enqueue("invoice", invoiceId, "create", {
-      ...payload,
+      ...queuedPayload,
       store_id: resolvedStoreId,
       store_code: resolvedStoreCode,
       invoice_number: assignedDocNumber,
-      is_offline_temp: isTempNumber,
+      place_of_supply: posLabel,
+      is_offline_temp: false,
       external_id: idempotencyKey,
     });
 
@@ -739,7 +769,6 @@ export class OnlineTransactionService {
       success: true,
       isOnline: false,
       isOfflineQueued: true,
-      isTempNumber,
       invoice: invoiceRecord,
     };
   }
@@ -840,6 +869,8 @@ export class OnlineTransactionService {
           counter_code: serverInvoice.counter_code,
           payment_mode: p.payment_mode || p.mode || "Cash",
           amount: Number(p.amount) || 0,
+          tendered_amount: Number(p.tendered_amount ?? p.amount ?? 0) || 0,
+          change_amount: Number(p.change_amount) || 0,
           reference_no: p.reference_no || null,
           status: p.status || "received",
           extra_fields: typeof p.extra_fields === "object" ? JSON.stringify(p.extra_fields) : p.extra_fields,

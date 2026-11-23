@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { expenseService } from "./expenseService";
 import { customerCreditService } from "./customerCreditService";
 import { partiesStore } from "../../masters/partiesStore";
+import { cashShiftService } from "../../billing/cashShiftService";
 
 describe("ExpenseService and CustomerCreditService", () => {
   beforeEach(async () => {
@@ -56,5 +57,32 @@ describe("ExpenseService and CustomerCreditService", () => {
 
     const updatedCustomer = (await partiesStore.getAllParties()).find((p) => p.id === customer.id);
     expect(updatedCustomer?.outstanding_balance).toBe(3000);
+  });
+
+  it("takes a cash expense out of the drawer the counter is standing on", async () => {
+    // No device profile in the test harness, so this is the counter the till charges.
+    await cashShiftService.openShift("Counter 01", "Counter 01", "staff_exp", "Counter 01", 1000);
+
+    await expenseService.recordExpense({
+      expense_head: "Refreshments & Tea",
+      amount: 50,
+      payment_mode: "Cash",
+    });
+
+    const afterCash = await cashShiftService.getActiveShift("Counter 01");
+    expect(afterCash?.cash_out).toBe(50);
+    expect(afterCash?.expected_cash).toBe(950);
+
+    // Money that did not leave the drawer is not the drawer's business.
+    await expenseService.recordExpense({
+      expense_head: "Shop Rent",
+      amount: 500,
+      payment_mode: "Bank Transfer",
+      reference_no: "NEFT-EXP-1",
+    });
+
+    const afterBank = await cashShiftService.getActiveShift("Counter 01");
+    expect(afterBank?.cash_out).toBe(50);
+    expect(afterBank?.expected_cash).toBe(950);
   });
 });

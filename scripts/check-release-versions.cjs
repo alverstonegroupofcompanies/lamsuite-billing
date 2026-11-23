@@ -5,6 +5,7 @@
  * - frontend/package.json
  * - frontend/src-tauri/Cargo.toml
  * - frontend/src-tauri/tauri.conf.json
+ * - admin-panel/package.json (shown in the admin sidebar footer)
  * Optionally checks against a provided git tag argument (e.g. "v2.0.11" or "2.0.11").
  */
 
@@ -15,11 +16,13 @@ const targetTag = process.argv[2] ? process.argv[2].replace(/^refs\/tags\//, '')
 
 const rootDir = path.resolve(__dirname, '..');
 const pkgPath = path.join(rootDir, 'frontend', 'package.json');
+const adminPkgPath = path.join(rootDir, 'admin-panel', 'package.json');
 const cargoPath = path.join(rootDir, 'frontend', 'src-tauri', 'Cargo.toml');
 const tauriConfPath = path.join(rootDir, 'frontend', 'src-tauri', 'tauri.conf.json');
 const tauriLegacyConfPath = path.join(rootDir, 'frontend', 'src-tauri', 'tauri.legacy.conf.json');
 
 const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+const adminPkg = JSON.parse(fs.readFileSync(adminPkgPath, 'utf8'));
 const cargoContent = fs.readFileSync(cargoPath, 'utf8');
 const cargoMatch = cargoContent.match(/\[package\][\s\S]*?version\s*=\s*"([^"]+)"/);
 const cargoVersion = cargoMatch ? cargoMatch[1] : null;
@@ -35,6 +38,7 @@ if (fs.existsSync(tauriLegacyConfPath)) {
 
 console.log('--- LamSuite Billing Version Integrity Check ---');
 console.log(`frontend/package.json:            ${pkg.version}`);
+console.log(`admin-panel/package.json:         ${adminPkg.version}`);
 console.log(`frontend/Cargo.toml:              ${cargoVersion}`);
 console.log(`frontend/tauri.conf.json:         ${tauriVersion}`);
 if (tauriLegacyVersion) {
@@ -48,6 +52,9 @@ const errors = [];
 if (!cargoVersion) errors.push('Could not parse version from Cargo.toml');
 if (!tauriVersion) errors.push('Could not parse version from tauri.conf.json');
 
+if (adminPkg.version !== pkg.version) {
+  errors.push(`Version mismatch: admin-panel/package.json (${adminPkg.version}) does not match frontend/package.json (${pkg.version})`);
+}
 if (pkg.version !== cargoVersion) {
   errors.push(`Version mismatch: package.json (${pkg.version}) does not match Cargo.toml (${cargoVersion})`);
 }

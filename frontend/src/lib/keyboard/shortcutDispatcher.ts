@@ -28,6 +28,7 @@ const DEFAULT_PRIORITY: Record<ShortcutScope, number> = {
   pos: 60,
   bills: 60,
   purchase: 60,
+  salesReturns: 60,
   stock: 60,
   global: 10,
 };

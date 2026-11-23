@@ -6,6 +6,7 @@ import { useAuth } from "../context/AuthContext";
 import { ConflictModal } from "../components/ConflictModal";
 import { ConfirmModal } from "../components/ConfirmModal";
 import { CopyProductsModal } from "../components/masters/CopyProductsModal";
+import { GST_STATE_OPTIONS, isStateCode, stateCodeFromGstin } from "../lib/gstStates";
 import {
   Package,
   Layers,
@@ -17,6 +18,7 @@ import {
   Percent,
   Receipt,
   Wallet,
+  Truck,
   Landmark,
   Search,
   Plus,
@@ -31,6 +33,7 @@ import {
   CheckCircle,
   FileSpreadsheet,
   SlidersHorizontal,
+  ShieldAlert,
   Copy as CopyIcon,
 } from "lucide-react";
 
@@ -45,6 +48,8 @@ export type MasterTab =
   | "discounts"
   | "tax_rates"
   | "expense_heads"
+  | "charge_heads"
+  | "schedules"
   | "banks";
 
 export const MastersPage: React.FC = () => {
@@ -72,7 +77,7 @@ export const MastersPage: React.FC = () => {
   const [copyModalProducts, setCopyModalProducts] = useState<Product[]>([]);
   const [editingProduct, setEditingProduct] = useState<Partial<Product> | null>(null);
   const [initialBatchData, setInitialBatchData] = useState<{ batch_no: string; expiry_date: string; stock_qty: number }>({
-    batch_no: "B1",
+    batch_no: "",
     expiry_date: "",
     stock_qty: 0,
   });
@@ -108,14 +113,19 @@ export const MastersPage: React.FC = () => {
   const [groupLookups, setGroupLookups] = useState<MasterLookup[]>([]);
   const [brandLookups, setBrandLookups] = useState<MasterLookup[]>([]);
   const [mfgLookups, setMfgLookups] = useState<MasterLookup[]>([]);
+  // GAP-02: only a pharmacy keeps a drug schedule list, so only one gets the options.
+  const [scheduleLookups, setScheduleLookups] = useState<MasterLookup[]>([]);
 
-  // Units are store-scoped: deleting an assigned unit requires reassignment first
-  const [unitReassign, setUnitReassign] = useState<{
+  // A store-scoped master row cannot be deleted while data still points at it. The server answers
+  // 409 with the referrers and the rows they can be moved to; this is that choice. Products for
+  // units (v2.1.1), bills for charge heads (CR-C).
+  const [lookupReassign, setLookupReassign] = useState<{
     lookup: MasterLookup;
-    references: string[];
+    kind: "unit" | "head";
+    references: Array<{ label: string; detail?: string }>;
     candidates: Array<{ id: number; name: string; code?: string }>;
   } | null>(null);
-  const [unitReassignTarget, setUnitReassignTarget] = useState<number | "">("");
+  const [lookupReassignTarget, setLookupReassignTarget] = useState<number | "">("");
 
   // Ledger Modal State
   const [selectedLedgerParty, setSelectedLedgerParty] = useState<Party | null>(null);
@@ -181,6 +191,10 @@ export const MastersPage: React.FC = () => {
         return "tax_rate";
       case "expense_heads":
         return "expense_head";
+      case "charge_heads":
+        return "charge_head";
+      case "schedules":
+        return "drug_schedule";
       case "banks":
         return "bank";
       default:
@@ -191,16 +205,20 @@ export const MastersPage: React.FC = () => {
   // Load auxiliary lookups for select dropdowns
   const fetchAuxiliaryLookups = async () => {
     try {
-      const [uRes, gRes, bRes, mRes] = await Promise.all([
+      const [uRes, gRes, bRes, mRes, sRes] = await Promise.all([
         api.get<any>("/admin/lookups", { type: "unit" }),
         api.get<any>("/admin/lookups", { type: "group" }),
         api.get<any>("/admin/lookups", { type: "brand" }),
         api.get<any>("/admin/lookups", { type: "manufacturer" }),
+        isPharmacy
+          ? api.get<any>("/admin/lookups", { type: "drug_schedule" })
+          : Promise.resolve({ data: [] }),
       ]);
       setUnitLookups(Array.isArray(uRes) ? uRes : uRes.data || []);
       setGroupLookups(Array.isArray(gRes) ? gRes : gRes.data || []);
       setBrandLookups(Array.isArray(bRes) ? bRes : bRes.data || []);
       setMfgLookups(Array.isArray(mRes) ? mRes : mRes.data || []);
+      setScheduleLookups(Array.isArray(sRes) ? sRes : sRes.data || []);
     } catch {
       // ignore
     }
@@ -209,6 +227,11 @@ export const MastersPage: React.FC = () => {
   useEffect(() => {
     fetchAuxiliaryLookups();
   }, [activeStore]);
+
+  // A schedule list exists only in a pharmacy, so leaving that scope closes the tab.
+  useEffect(() => {
+    if (activeTab === "schedules" && !isPharmacy) setActiveTab("products");
+  }, [activeTab, isPharmacy]);
 
   // Primary data loader
   const fetchData = async () => {
@@ -310,7 +333,7 @@ export const MastersPage: React.FC = () => {
     if (tab === "products") setProductPage(1);
     if (tab === "batches") setBatchPage(1);
     if (tab === "parties") setPartyPage(1);
-    if (["units", "groups", "brands", "manufacturers", "discounts", "tax_rates", "expense_heads", "banks"].includes(tab)) {
+    if (["units", "groups", "brands", "manufacturers", "discounts", "tax_rates", "expense_heads", "charge_heads", "banks"].includes(tab)) {
       setLookupPage(1);
     }
   };
@@ -327,10 +350,14 @@ export const MastersPage: React.FC = () => {
         await api.put(`/admin/products/${editingProduct.id}`, editingProduct);
         showToast(`Product "${editingProduct.name}" updated successfully.`);
       } else {
+        if (Number(initialBatchData.stock_qty) > 0 && (!initialBatchData.batch_no.trim() || !initialBatchData.expiry_date)) {
+          showToast("Opening stock needs a batch number and an expiry date.", "error");
+          return;
+        }
         await api.post("/admin/products", {
           ...editingProduct,
           store_id: activeStore.id,
-          initial_batch: initialBatchData.batch_no && initialBatchData.expiry_date ? initialBatchData : undefined,
+          initial_batch: Number(initialBatchData.stock_qty) > 0 ? initialBatchData : undefined,
         });
         showToast(`Product "${editingProduct.name}" created successfully.`);
       }
@@ -507,10 +534,19 @@ export const MastersPage: React.FC = () => {
   };
 
   const confirmDeleteLookup = (lookup: MasterLookup) => {
+    // PHR-001 — deleting a schedule is a rule change, not a tidy-up: the products that
+    // still carry it stop needing a pharmacist, so the confirm has to say so.
+    const message =
+      activeTab === "schedules"
+        ? `Deleting "${lookup.name}" takes the rule off every product that still carries ${
+            lookup.code || "this schedule"
+          }. Those items need no pharmacist on their next bill; bills already written keep what was stamped on them.`
+        : `Are you sure you want to delete "${lookup.name}"? This lookup entry will be permanently removed.`;
+
     setDeleteConfirm({
       isOpen: true,
-      title: `Delete ${getTabLabel(activeTab).slice(0, -1)}: ${lookup.name}`,
-      message: `Are you sure you want to delete "${lookup.name}"? This lookup entry will be permanently removed.`,
+      title: `Delete ${getSingularLabel(activeTab)}: ${lookup.name}`,
+      message,
       actionName: "Delete Record",
       onConfirm: async () => {
         try {
@@ -520,11 +556,15 @@ export const MastersPage: React.FC = () => {
           fetchAuxiliaryLookups();
         } catch (err: any) {
           if (err instanceof ApiError && err.status === 409 && err.data?.reassignment_required) {
-            setUnitReassignTarget("");
-            setUnitReassign({
+            const bills = Array.isArray(err.data.referencing_bills) ? err.data.referencing_bills : null;
+            setLookupReassignTarget("");
+            setLookupReassign({
+              kind: bills ? "head" : "unit",
               lookup,
-              references: err.data.referencing_products || [],
-              candidates: err.data.candidate_units || [],
+              references: bills
+                ? bills.map((b: any) => ({ label: b.invoice_number, detail: formatINR(b.amount) }))
+                : (err.data.referencing_products || []).map((name: string) => ({ label: name })),
+              candidates: bills ? err.data.candidate_heads : err.data.candidate_units || [],
             });
             setDeleteConfirm((prev) => ({ ...prev, isOpen: false }));
             return;
@@ -535,16 +575,16 @@ export const MastersPage: React.FC = () => {
     });
   };
 
-  const handleConfirmUnitReassign = async () => {
-    if (!unitReassign || !unitReassignTarget) return;
+  const handleConfirmLookupReassign = async () => {
+    if (!lookupReassign || !lookupReassignTarget) return;
     try {
-      const res = await api.delete(`/admin/lookups/${unitReassign.lookup.id}?reassign_to=${unitReassignTarget}`);
-      showToast(res?.message || "Unit deleted and products reassigned.");
-      setUnitReassign(null);
+      const res = await api.delete(`/admin/lookups/${lookupReassign.lookup.id}?reassign_to=${lookupReassignTarget}`);
+      showToast(res?.message || "Record deleted after reassigning its references.");
+      setLookupReassign(null);
       await fetchData();
       fetchAuxiliaryLookups();
     } catch (err: any) {
-      showToast(err?.message || "Failed to reassign products.", "error");
+      showToast(err?.message || "Failed to reassign references.", "error");
     }
   };
 
@@ -561,6 +601,22 @@ export const MastersPage: React.FC = () => {
       fetchAuxiliaryLookups();
     } catch (err: any) {
       showToast(err?.message || "Failed to reset units.", "error");
+    }
+  };
+
+  const handleResetChargeHeads = async () => {
+    try {
+      const res = await api.post("/admin/lookups/reset-charge-heads", {});
+      const parts = [
+        res?.seeded?.length ? `${res.seeded.length} default head(s) restored` : "",
+        res?.removed?.length ? `${res.removed.length} unreferenced custom head(s) removed` : "",
+        res?.kept?.length ? `${res.kept.length} referenced custom head(s) kept` : "",
+      ].filter(Boolean);
+      showToast(parts.length ? `Charge heads reset — ${parts.join("; ")}.` : "Heads already match the default set.");
+      await fetchData();
+      fetchAuxiliaryLookups();
+    } catch (err: any) {
+      showToast(err?.message || "Failed to reset charge heads.", "error");
     }
   };
 
@@ -675,14 +731,9 @@ export const MastersPage: React.FC = () => {
         gst_percent: 12,
         units_per_pack: 1,
         reorder_level: 10,
-        current_stock: 0,
         is_active: true,
       });
-      setInitialBatchData({
-        batch_no: "B1",
-        expiry_date: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10),
-        stock_qty: 0,
-      });
+      setInitialBatchData({ batch_no: "", expiry_date: "", stock_qty: 0 });
       setIsProductModalOpen(true);
     } else if (activeTab === "batches") {
       setEditingBatch({
@@ -703,7 +754,9 @@ export const MastersPage: React.FC = () => {
         email: "",
         gstin: "",
         address: "",
-        state_code: "32",
+        // A party is supplied where the store is, until its GSTIN says otherwise.
+        // With no store selected the server fills it from the party's store (MST-01).
+        state_code: activeStore?.state_code || "",
         credit_limit: 5000,
         opening_balance: 0,
         is_active: true,
@@ -715,6 +768,19 @@ export const MastersPage: React.FC = () => {
       if (activeTab === "discounts") defaultConfig = { rule_type: "percentage", discount_percent: 5, min_quantity: 1 };
       if (activeTab === "tax_rates") defaultConfig = { tax_percent: 12 };
       if (activeTab === "banks") defaultConfig = { account_type: "Current" };
+      // A new head starts as the safest shape the engines understand: money added to cost, spread
+      // by value, creditable, positive-only. The owner loosens it deliberately, never by accident.
+      if (activeTab === "charge_heads") {
+        defaultConfig = {
+          default_treatment: "add_to_cost",
+          default_spread_method: "value",
+          default_itc_eligibility: "eligible",
+          allowed_sign: "positive",
+          sac_code: "",
+        };
+      }
+      // A named list stops no bill by itself: the marks that do are set deliberately.
+      if (activeTab === "schedules") defaultConfig = { restricted: false, prescription_required: false };
 
       setEditingLookup({
         type: currentLookupType,
@@ -750,8 +816,43 @@ export const MastersPage: React.FC = () => {
         return "Tax & HSN";
       case "expense_heads":
         return "Expense Heads";
+      case "charge_heads":
+        return "Charge Heads";
+      case "schedules":
+        return "Drug Schedules";
       case "banks":
         return "Bank Accounts";
+    }
+  };
+
+  const getSingularLabel = (tab: MasterTab): string => {
+    switch (tab) {
+      case "products":
+        return "Product";
+      case "batches":
+        return "Batch";
+      case "parties":
+        return "Party";
+      case "units":
+        return "Unit";
+      case "groups":
+        return "Category";
+      case "brands":
+        return "Brand";
+      case "manufacturers":
+        return "Manufacturer";
+      case "discounts":
+        return "Discount";
+      case "tax_rates":
+        return "Tax & HSN";
+      case "expense_heads":
+        return "Expense Head";
+      case "charge_heads":
+        return "Charge Head";
+      case "schedules":
+        return "Drug Schedule";
+      case "banks":
+        return "Bank Account";
     }
   };
 
@@ -760,6 +861,7 @@ export const MastersPage: React.FC = () => {
       {/* Toast Alert */}
       {notification && (
         <div
+          role={notification.type === "error" ? "alert" : "status"}
           className={`fixed right-6 top-16 z-50 flex items-center gap-2 rounded-xl border px-4 py-3 shadow-xl text-xs font-semibold animate-in fade-in transition-all ${
             notification.type === "success"
               ? "bg-emerald-50 border-emerald-300 text-emerald-800 dark:bg-emerald-950 dark:border-emerald-800 dark:text-emerald-200"
@@ -829,10 +931,14 @@ export const MastersPage: React.FC = () => {
                 </button>
               )}
 
-              {activeTab === "units" && (
+              {(activeTab === "units" || activeTab === "charge_heads") && (
                 <button
-                  onClick={handleResetUnits}
-                  title="Restore missing default units and remove unused custom units for this store"
+                  onClick={activeTab === "units" ? handleResetUnits : handleResetChargeHeads}
+                  title={
+                    activeTab === "units"
+                      ? "Restore missing default units and remove unused custom units for this store"
+                      : "Restore missing default charge heads and remove custom heads no posted charge uses"
+                  }
                   className="flex items-center gap-1.5 px-3 py-1.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-semibold rounded-xl text-slate-700 dark:text-slate-300 shadow-2xs hover:bg-slate-50 dark:hover:bg-slate-700"
                 >
                   <RefreshCw className="w-3.5 h-3.5" />
@@ -845,7 +951,7 @@ export const MastersPage: React.FC = () => {
                 className="flex items-center gap-1.5 px-3.5 py-1.5 bg-brand-600 hover:bg-brand-500 text-white text-xs font-bold rounded-xl shadow-sm transition"
               >
                 <Plus className="w-4 h-4" />
-                <span>Add {getTabLabel(activeTab).slice(0, -1) || getTabLabel(activeTab)}</span>
+                <span>Add {getSingularLabel(activeTab)}</span>
               </button>
             </>
           )}
@@ -866,25 +972,29 @@ export const MastersPage: React.FC = () => {
             { id: "discounts", label: "Discount Schemas", icon: Percent },
             { id: "tax_rates", label: "Tax & HSN Slabs", icon: Receipt },
             { id: "expense_heads", label: "Expense Heads", icon: Wallet },
+            { id: "charge_heads", label: "Charge Heads", icon: Truck },
+            { id: "schedules", label: "Drug Schedules", icon: ShieldAlert },
             { id: "banks", label: "Bank Accounts", icon: Landmark },
-          ].map((tab) => {
-            const Icon = tab.icon;
-            const isSelected = activeTab === tab.id;
-            return (
-              <button
-                key={tab.id}
-                onClick={() => handleTabChange(tab.id as MasterTab)}
-                className={`whitespace-nowrap px-3 py-2 rounded-xl flex items-center gap-2 transition-all font-semibold ${
-                  isSelected
-                    ? "bg-brand-600 text-white shadow-sm font-bold"
-                    : "text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
-                }`}
-              >
-                <Icon className="w-4 h-4" />
-                <span>{tab.label}</span>
-              </button>
-            );
-          })}
+          ]
+            .filter((tab) => tab.id !== "schedules" || isPharmacy)
+            .map((tab) => {
+              const Icon = tab.icon;
+              const isSelected = activeTab === tab.id;
+              return (
+                <button
+                  key={tab.id}
+                  onClick={() => handleTabChange(tab.id as MasterTab)}
+                  className={`whitespace-nowrap px-3 py-2 rounded-xl flex items-center gap-2 transition-all font-semibold ${
+                    isSelected
+                      ? "bg-brand-600 text-white shadow-sm font-bold"
+                      : "text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
+                  }`}
+                >
+                  <Icon className="w-4 h-4" />
+                  <span>{tab.label}</span>
+                </button>
+              );
+            })}
         </div>
       </div>
 
@@ -1016,6 +1126,14 @@ export const MastersPage: React.FC = () => {
                       <td className="px-4 py-3 font-mono">
                         <div>{p.hsn_sac_code}</div>
                         <div className="text-[10px] text-brand-600 font-semibold">{p.gst_percent}% GST</div>
+                        {p.schedule_code && (
+                          <div
+                            title={`Drug schedule ${p.schedule_code}`}
+                            className="inline-block mt-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300"
+                          >
+                            {p.schedule_code}
+                          </div>
+                        )}
                       </td>
                       <td className="px-4 py-3 text-right font-semibold">{formatINR(p.mrp)}</td>
                       <td className="px-4 py-3 text-right font-bold text-slate-900 dark:text-white">
@@ -1433,9 +1551,41 @@ export const MastersPage: React.FC = () => {
                             A/C: {l.config?.account_no || "—"} | IFSC: {l.config?.ifsc || "—"} | {l.config?.account_type || "Current"}
                           </span>
                         )}
-                        {!["units", "discounts", "tax_rates", "banks"].includes(activeTab) && (
-                          l.config ? JSON.stringify(l.config) : "—"
+                        {activeTab === "charge_heads" && (
+                          <span className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                            <span className="capitalize">{l.config?.default_treatment ?? "add_to_cost"}</span>
+                            <span aria-hidden>|</span>
+                            <span>spread {l.config?.default_spread_method ?? "value"}</span>
+                            <span aria-hidden>|</span>
+                            <span>ITC {l.config?.default_itc_eligibility ?? "eligible"}</span>
+                            <span aria-hidden>|</span>
+                            <span>sign {l.config?.allowed_sign ?? "positive"}</span>
+                            {l.config?.sac_code && (
+                              <span className="text-slate-400">{l.config.sac_code}</span>
+                            )}
+                          </span>
                         )}
+                        {activeTab === "schedules" && (
+                          <span className="flex flex-wrap items-center gap-1.5">
+                            {l.config?.restricted ? (
+                              <span className="px-2 py-0.5 rounded-full bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300 font-bold">
+                                Needs a pharmacist
+                              </span>
+                            ) : (
+                              <span className="px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400">
+                                No pharmacist needed
+                              </span>
+                            )}
+                            {l.config?.prescription_required && (
+                              <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 font-bold">
+                                Prescription details
+                              </span>
+                            )}
+                          </span>
+                        )}
+                        {!["units", "discounts", "tax_rates", "banks", "charge_heads", "schedules"].includes(
+                          activeTab
+                        ) && (l.config ? JSON.stringify(l.config) : "—")}
                       </td>
                       <td className="px-4 py-3 text-slate-500 truncate max-w-xs">{l.description || "—"}</td>
                       <td className="px-4 py-3 text-center">
@@ -1486,9 +1636,14 @@ export const MastersPage: React.FC = () => {
       {/* ---------------------------------------------------------------------------------- */}
       {isProductModalOpen && editingProduct && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 overflow-y-auto">
-          <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 max-w-2xl w-full p-6 space-y-4 my-8">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="product-modal-title"
+            className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 max-w-2xl w-full p-6 space-y-4 my-8"
+          >
             <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
-              <h3 className="font-bold text-slate-900 dark:text-white text-sm">
+              <h3 id="product-modal-title" className="font-bold text-slate-900 dark:text-white text-sm">
                 {editingProduct.id ? `Edit Product: ${editingProduct.name}` : "Create Catalog Product SKU"}
               </h3>
               <button
@@ -1502,10 +1657,11 @@ export const MastersPage: React.FC = () => {
             <form onSubmit={handleSaveProduct} className="space-y-4 text-xs">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div className="col-span-2">
-                  <label className="block font-medium text-slate-700 dark:text-slate-300 mb-1">
+                  <label htmlFor="product-name" className="block font-medium text-slate-700 dark:text-slate-300 mb-1">
                     Product / Brand Item Name *
                   </label>
                   <input
+                    id="product-name"
                     type="text"
                     required
                     value={editingProduct.name || ""}
@@ -1553,6 +1709,39 @@ export const MastersPage: React.FC = () => {
                     className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                   />
                 </div>
+
+                {isPharmacy && (
+                  <div>
+                    <label htmlFor="product-schedule" className="block font-medium text-slate-700 dark:text-slate-300 mb-1">
+                      Drug Schedule ({activeStore?.name})
+                    </label>
+                    <select
+                      id="product-schedule"
+                      value={editingProduct.drug_schedule_id ? String(editingProduct.drug_schedule_id) : ""}
+                      onChange={(e) =>
+                        setEditingProduct({
+                          ...editingProduct,
+                          drug_schedule_id: e.target.value ? Number(e.target.value) : null,
+                        })
+                      }
+                      className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                    >
+                      <option value="">No schedule</option>
+                      {scheduleLookups
+                        .filter((s) => s.is_active)
+                        .map((s) => (
+                          <option key={s.id} value={String(s.id)}>
+                            {s.code || s.name} — {s.config?.restricted ? "pharmacist needed" : "no pharmacist"}
+                          </option>
+                        ))}
+                    </select>
+                    {scheduleLookups.filter((s) => s.is_active).length === 0 && (
+                      <p className="text-[10px] text-slate-500 mt-1">
+                        This pharmacy keeps no schedules yet — add one under Drug Schedules.
+                      </p>
+                    )}
+                  </div>
+                )}
 
                 <div>
                   <label className="block font-medium text-slate-700 dark:text-slate-300 mb-1">
@@ -1695,7 +1884,10 @@ export const MastersPage: React.FC = () => {
 
               {!editingProduct.id && (
                 <div className="bg-slate-50 dark:bg-slate-800/40 p-3 rounded-xl border border-slate-200 dark:border-slate-700/60 space-y-2">
-                  <span className="font-bold text-slate-800 dark:text-slate-200 block">Initial SKU Batch (Optional)</span>
+                  <span className="font-bold text-slate-800 dark:text-slate-200 block">Opening Stock Batch (Optional)</span>
+                  <p className="text-[10px] text-slate-500">
+                    Enter a quantity to create the batch. Batch number and expiry are required when stock is positive.
+                  </p>
                   <div className="grid grid-cols-3 gap-2">
                     <div>
                       <label className="block text-[10px] text-slate-500 mb-0.5">Batch No</label>
@@ -2006,16 +2198,47 @@ export const MastersPage: React.FC = () => {
                 </div>
 
                 <div>
-                  <label className="block font-medium text-slate-700 dark:text-slate-300 mb-1">
+                  <label htmlFor="party-gstin" className="block font-medium text-slate-700 dark:text-slate-300 mb-1">
                     GSTIN
                   </label>
                   <input
+                    id="party-gstin"
                     type="text"
+                    maxLength={15}
                     value={editingParty.gstin || ""}
                     onChange={(e) => setEditingParty({ ...editingParty, gstin: e.target.value.toUpperCase() })}
+                    onBlur={() => {
+                      // A GSTIN carries its own state code; the party follows it.
+                      const code = stateCodeFromGstin(editingParty.gstin);
+                      if (code && code !== editingParty.state_code) {
+                        setEditingParty({ ...editingParty, state_code: code });
+                      }
+                    }}
                     placeholder="15-digit GSTIN"
                     className="w-full px-3 py-2 font-mono uppercase rounded-xl border border-slate-200 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                   />
+                </div>
+
+                <div>
+                  <label htmlFor="party-state-code" className="block font-medium text-slate-700 dark:text-slate-300 mb-1">
+                    State Code (GST) *
+                  </label>
+                  <select
+                    id="party-state-code"
+                    required
+                    value={isStateCode(editingParty.state_code) ? editingParty.state_code : ""}
+                    onChange={(e) => setEditingParty({ ...editingParty, state_code: e.target.value })}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                  >
+                    <option value="" disabled>
+                      Select GST state
+                    </option>
+                    {GST_STATE_OPTIONS.map((opt) => (
+                      <option key={opt.code} value={opt.code}>
+                        {opt.label}
+                      </option>
+                    ))}
+                  </select>
                 </div>
 
                 <div className="col-span-2">
@@ -2111,10 +2334,15 @@ export const MastersPage: React.FC = () => {
       {/* ---------------------------------------------------------------------------------- */}
       {isLookupModalOpen && editingLookup && currentLookupType && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 overflow-y-auto">
-          <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 max-w-md w-full p-6 space-y-4 my-8">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="lookup-modal-title"
+            className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 max-w-md w-full p-6 space-y-4 my-8"
+          >
             <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
-              <h3 className="font-bold text-slate-900 dark:text-white text-sm">
-                {editingLookup.id ? `Edit ${getTabLabel(activeTab).slice(0, -1)}` : `Create ${getTabLabel(activeTab).slice(0, -1)}`}
+              <h3 id="lookup-modal-title" className="font-bold text-slate-900 dark:text-white text-sm">
+                {editingLookup.id ? `Edit ${getSingularLabel(activeTab)}` : `Create ${getSingularLabel(activeTab)}`}
               </h3>
               <button
                 onClick={() => setIsLookupModalOpen(false)}
@@ -2126,10 +2354,11 @@ export const MastersPage: React.FC = () => {
 
             <form onSubmit={handleSaveLookup} className="space-y-4 text-xs">
               <div>
-                <label className="block font-medium text-slate-700 dark:text-slate-300 mb-1">
+                <label htmlFor="lookup-name" className="block font-medium text-slate-700 dark:text-slate-300 mb-1">
                   Name / Label *
                 </label>
                 <input
+                  id="lookup-name"
                   type="text"
                   required
                   value={editingLookup.name || ""}
@@ -2145,6 +2374,8 @@ export const MastersPage: React.FC = () => {
                       ? "Bulk Wholesale 5%"
                       : activeTab === "tax_rates"
                       ? "Pharma Standard 12%"
+                      : activeTab === "schedules"
+                      ? "Schedule H1"
                       : activeTab === "expense_heads"
                       ? "Shop Electricity"
                       : "HDFC Current Account"
@@ -2154,16 +2385,19 @@ export const MastersPage: React.FC = () => {
               </div>
 
               <div>
-                <label className="block font-medium text-slate-700 dark:text-slate-300 mb-1">
+                <label htmlFor="lookup-code" className="block font-medium text-slate-700 dark:text-slate-300 mb-1">
                   {activeTab === "units"
                     ? "Symbol (e.g. STP)"
                     : activeTab === "tax_rates"
                     ? "HSN / SAC Code (e.g. 3004)"
+                    : activeTab === "schedules"
+                    ? "Schedule Code (e.g. H1)"
                     : activeTab === "banks"
                     ? "Bank IFSC Code"
                     : "Code / Short Name"}
                 </label>
                 <input
+                  id="lookup-code"
                   type="text"
                   value={editingLookup.code || ""}
                   onChange={(e) => setEditingLookup({ ...editingLookup, code: e.target.value.toUpperCase() })}
@@ -2191,6 +2425,156 @@ export const MastersPage: React.FC = () => {
                     }
                     className="w-full px-3 py-2 font-mono rounded-xl border border-slate-200 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                   />
+                </div>
+              )}
+
+              {/* CR-C: a charge head is the POS grid's prefill, so these four enums are what the
+                  till inherits the moment an operator picks the head — edit them deliberately. */}
+              {activeTab === "charge_heads" && (
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label htmlFor="head-treatment" className="block font-medium text-slate-700 dark:text-slate-300 mb-1">
+                      Default treatment
+                    </label>
+                    <select
+                      id="head-treatment"
+                      value={editingLookup.config?.default_treatment || "add_to_cost"}
+                      onChange={(e) =>
+                        setEditingLookup({
+                          ...editingLookup,
+                          config: { ...editingLookup.config, default_treatment: e.target.value },
+                        })
+                      }
+                      className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                    >
+                      <option value="add_to_cost">Add to cost (landed cost)</option>
+                      <option value="expense">Expense (to the register)</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label htmlFor="head-spread" className="block font-medium text-slate-700 dark:text-slate-300 mb-1">
+                      Default spread
+                    </label>
+                    <select
+                      id="head-spread"
+                      value={editingLookup.config?.default_spread_method || "value"}
+                      onChange={(e) =>
+                        setEditingLookup({
+                          ...editingLookup,
+                          config: { ...editingLookup.config, default_spread_method: e.target.value },
+                        })
+                      }
+                      className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                    >
+                      <option value="value">By value</option>
+                      <option value="quantity">By quantity</option>
+                      <option value="weight">By weight</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label htmlFor="head-itc" className="block font-medium text-slate-700 dark:text-slate-300 mb-1">
+                      Default ITC eligibility
+                    </label>
+                    <select
+                      id="head-itc"
+                      value={editingLookup.config?.default_itc_eligibility || "eligible"}
+                      onChange={(e) =>
+                        setEditingLookup({
+                          ...editingLookup,
+                          config: { ...editingLookup.config, default_itc_eligibility: e.target.value },
+                        })
+                      }
+                      className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 dark:bg-slate-800 dark:text-white capitalize"
+                    >
+                      <option value="eligible">Eligible</option>
+                      <option value="ineligible">Ineligible</option>
+                      <option value="blocked">Blocked</option>
+                      <option value="partial">Partial</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label htmlFor="head-sign" className="block font-medium text-slate-700 dark:text-slate-300 mb-1">
+                      Allowed sign
+                    </label>
+                    <select
+                      id="head-sign"
+                      value={editingLookup.config?.allowed_sign || "positive"}
+                      onChange={(e) =>
+                        setEditingLookup({
+                          ...editingLookup,
+                          config: { ...editingLookup.config, allowed_sign: e.target.value },
+                        })
+                      }
+                      className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 dark:bg-slate-800 dark:text-white capitalize"
+                    >
+                      <option value="positive">Positive only</option>
+                      <option value="negative">Negative only</option>
+                      <option value="both">Both signs</option>
+                    </select>
+                  </div>
+                  <div className="col-span-2">
+                    <label htmlFor="head-sac" className="block font-medium text-slate-700 dark:text-slate-300 mb-1">
+                      SAC code (6 or 8 digits)
+                    </label>
+                    <input
+                      id="head-sac"
+                      type="text"
+                      inputMode="numeric"
+                      value={editingLookup.config?.sac_code ?? ""}
+                      onChange={(e) =>
+                        setEditingLookup({
+                          ...editingLookup,
+                          config: { ...editingLookup.config, sac_code: e.target.value.trim() },
+                        })
+                      }
+                      placeholder="996731"
+                      className="w-full px-3 py-2 font-mono rounded-xl border border-slate-200 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* GAP-02 / PHR-001 — these two marks are the whole rule: the server reads them on
+                  the next bill, so a schedule named without a mark stops nothing. */}
+              {activeTab === "schedules" && (
+                <div className="space-y-2 rounded-xl border border-slate-200 dark:border-slate-700 p-3">
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                    {activeStore?.name} keeps this list on its own — a schedule never reaches another store.
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      id="schedule-restricted"
+                      checked={Boolean(editingLookup.config?.restricted)}
+                      onChange={(e) =>
+                        setEditingLookup({
+                          ...editingLookup,
+                          config: { ...editingLookup.config, restricted: e.target.checked },
+                        })
+                      }
+                      className="rounded text-brand-600"
+                    />
+                    <label htmlFor="schedule-restricted" className="font-medium text-slate-700 dark:text-slate-300">
+                      Needs a pharmacist
+                    </label>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      id="schedule-rx"
+                      checked={Boolean(editingLookup.config?.prescription_required)}
+                      onChange={(e) =>
+                        setEditingLookup({
+                          ...editingLookup,
+                          config: { ...editingLookup.config, prescription_required: e.target.checked },
+                        })
+                      }
+                      className="rounded text-brand-600"
+                    />
+                    <label htmlFor="schedule-rx" className="font-medium text-slate-700 dark:text-slate-300">
+                      Needs prescription details
+                    </label>
+                  </div>
                 </div>
               )}
 
@@ -2713,15 +3097,20 @@ export const MastersPage: React.FC = () => {
       )}
 
       {/* ---------------------------------------------------------------------------------- */}
-      {/* UNIT REASSIGN-BEFORE-DELETE MODAL                                                  */}
+      {/* STORE-SCOPED MASTER REASSIGN-BEFORE-DELETE MODAL (units v2.1.1, heads CR-C)       */}
       {/* ---------------------------------------------------------------------------------- */}
-      {unitReassign && (
+      {lookupReassign && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="w-full max-w-md rounded-2xl bg-white dark:bg-slate-800 p-6 shadow-2xl border border-slate-200 dark:border-slate-700">
+          <div
+            data-testid={lookupReassign.kind === "head" ? "charge-head-reassign" : "unit-reassign"}
+            className="w-full max-w-md rounded-2xl bg-white dark:bg-slate-800 p-6 shadow-2xl border border-slate-200 dark:border-slate-700"
+          >
             <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-700 pb-3">
-              <h2 className="text-base font-bold text-slate-800 dark:text-white">Reassign products before deleting</h2>
+              <h2 className="text-base font-bold text-slate-800 dark:text-white">
+                Reassign {lookupReassign.kind === "head" ? "bills" : "products"} before deleting
+              </h2>
               <button
-                onClick={() => setUnitReassign(null)}
+                onClick={() => setLookupReassign(null)}
                 className="text-slate-400 hover:text-slate-700 dark:hover:text-white transition"
               >
                 <X className="w-5 h-5" />
@@ -2730,28 +3119,41 @@ export const MastersPage: React.FC = () => {
 
             <div className="mt-4 space-y-3 text-sm text-slate-700 dark:text-slate-300">
               <p>
-                Unit <strong>"{unitReassign.lookup.name}"</strong> is assigned to{" "}
-                {unitReassign.references.length} product{unitReassign.references.length === 1 ? "" : "s"} in this store.
-                Choose a replacement unit to move them onto, then the unit can be deleted.
+                {lookupReassign.kind === "head" ? "Charge head" : "Unit"}{" "}
+                <strong>"{lookupReassign.lookup.name}"</strong> is used by{" "}
+                {lookupReassign.references.length} {lookupReassign.kind === "head" ? "bill" : "product"}
+                {lookupReassign.references.length === 1 ? "" : "s"} in this store. Choose a replacement{" "}
+                {lookupReassign.kind === "head" ? "head" : "unit"} to move them onto, then the row can be
+                deleted.
               </p>
               <ul className="max-h-32 overflow-y-auto rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 p-2 space-y-1 text-xs">
-                {unitReassign.references.map((name) => (
-                  <li key={name} className="truncate">• {name}</li>
+                {lookupReassign.references.map((ref) => (
+                  <li key={ref.label} className="flex items-center justify-between gap-2 truncate">
+                    <span className="font-mono">{ref.label}</span>
+                    {ref.detail && <span className="text-slate-500 dark:text-slate-400">{ref.detail}</span>}
+                  </li>
                 ))}
               </ul>
               <div>
-                <label className="block font-medium mb-1 text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                  Replacement unit
+                <label
+                  htmlFor="lookup-reassign-target"
+                  className="block font-medium mb-1 text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400"
+                >
+                  Replacement {lookupReassign.kind === "head" ? "head" : "unit"}
                 </label>
                 <select
-                  value={unitReassignTarget}
-                  onChange={(e) => setUnitReassignTarget(e.target.value ? Number(e.target.value) : "")}
+                  id="lookup-reassign-target"
+                  value={lookupReassignTarget}
+                  onChange={(e) => setLookupReassignTarget(e.target.value ? Number(e.target.value) : "")}
                   className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 dark:bg-slate-800 dark:text-white text-sm"
                 >
-                  <option value="">Select replacement unit...</option>
-                  {unitReassign.candidates.map((c) => (
+                  <option value="">
+                    Select replacement {lookupReassign.kind === "head" ? "head" : "unit"}...
+                  </option>
+                  {lookupReassign.candidates.map((c) => (
                     <option key={c.id} value={c.id}>
-                      {c.name}{c.code ? ` (${c.code})` : ""}
+                      {c.name}
+                      {c.code ? ` (${c.code})` : ""}
                     </option>
                   ))}
                 </select>
@@ -2760,17 +3162,17 @@ export const MastersPage: React.FC = () => {
 
             <div className="flex justify-end gap-2 border-t border-slate-200 dark:border-slate-700 pt-4 mt-4">
               <button
-                onClick={() => setUnitReassign(null)}
+                onClick={() => setLookupReassign(null)}
                 className="px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 text-sm font-semibold text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700"
               >
                 Cancel
               </button>
               <button
-                onClick={handleConfirmUnitReassign}
-                disabled={!unitReassignTarget}
+                onClick={handleConfirmLookupReassign}
+                disabled={!lookupReassignTarget}
                 className="px-4 py-2 rounded-xl bg-red-600 hover:bg-red-500 text-white text-sm font-bold shadow-sm transition disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                Reassign &amp; Delete Unit
+                Reassign &amp; Delete {lookupReassign.kind === "head" ? "Head" : "Unit"}
               </button>
             </div>
           </div>

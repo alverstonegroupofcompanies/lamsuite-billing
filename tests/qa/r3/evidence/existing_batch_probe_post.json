@@ -1,0 +1,81 @@
+[
+  [
+    "batch cell",
+    "DIV::purchase-batch-0=",
+    []
+  ],
+  [
+    "batch options after typing",
+    [
+      "Batch: CS-A1"
+    ]
+  ],
+  [
+    "INPUT:text:MM/YY=",
+    "->",
+    "INPUT:text:Packs=1",
+    []
+  ],
+  [
+    "INPUT:text:Packs=1",
+    "->",
+    "INPUT:number:MRP=120",
+    []
+  ],
+  [
+    "INPUT:number:MRP=120",
+    "->",
+    "INPUT:number:Rate=80",
+    []
+  ],
+  [
+    "INPUT:number:Rate=80",
+    "->",
+    "INPUT:number:Line discount percent=0",
+    []
+  ],
+  [
+    "INPUT:number:Line discount percent=0",
+    "->",
+    "INPUT:number:=12",
+    []
+  ],
+  [
+    "INPUT:number:=12",
+    "->",
+    "INPUT:number:Sell=115",
+    []
+  ],
+  [
+    "INPUT:number:Sell=115",
+    "->",
+    "INPUT:number:Sell=115",
+    []
+  ],
+  [
+    "rows",
+    [
+      "# PRODUCT BATCH EXPIRY (MM/YY) QUANTITY FREE QTY MRP (₹) PUR. RATE (₹) DISC %/₹ GST % SELLING RATE (₹) MARGIN % TAXABLE (₹) TAX (₹) TOTAL (₹) ACTION",
+      "+ QA Cough Syrup 100ml HSN: 30049011 QA Cough Syrup 100ml Batch: CS-A1 (40 on hand) % 47.8% ₹ 1500.00 ₹ 180.00 ₹ 1680.00"
+    ]
+  ],
+  [
+    "post screen",
+    [
+      "\t\t\t47.8%\t₹ 1500.00\t₹ 180.00\t₹ 1680.00\t",
+      "SUBTOTAL: ₹ 1500.00",
+      "GST TAX: ₹ 180.00",
+      "₹ 0.00",
+      "Round: +₹0.00",
+      "₹ 1680.00"
+    ]
+  ],
+  [
+    "calls",
+    []
+  ],
+  [
+    "server purchases",
+    []
+  ]
+]

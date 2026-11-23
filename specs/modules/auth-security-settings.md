@@ -62,6 +62,40 @@ This module governs terminal provisioning, operator authentication, role-based s
   - **When** the desktop app starts or syncs,
   - **Then** the sidebar navigation dynamically reflects the permitted modules, keeping the interface uncluttered for simple retail stores while expanding for full medical facilities.
 
+### [CFG-003] Per-Store Purchase Charge Policy
+- **Story:** As a multi-store owner, I want each store to decide how supplier-bill charges behave.
+- **Acceptance Criteria:**
+  - **Given** the store's `billing` company settings,
+  - **When** the charge policy is set — the settings API, the admin panel Settings page (Billing & Document
+    Sequences tab, "Supplier bill charges") and the till's own stored copy,
+  - **Then** these keys are persisted per store and served to the till with the store profile:
+    `purchase_charges.reverse_on_return` (`proportional` default | `sunk`),
+    `purchase_charges.separately_paid_in_payable` (boolean, default `false` — added by CR-C-11; on, a charge marked
+    `paid_separately` is priced into `grand_total` and the supplier payable exactly like a supplier-borne one),
+    `purchase_charges.allow_negative_charges` (boolean, default `true`; off, a negative charge line is refused even
+    when its head's `allowed_sign` would permit it — the head answers "what kind of money is this", the store answers
+    "what will this store accept"), and
+    `purchase_charges.max_percent_of_goods` (optional cap on the charge total as a share of the goods value; `null`,
+    absent or `0` means no cap — the engine's "no cap" test is `cap <= 0`, so an owner clearing the field and an
+    owner typing 0 get the same store).
+    The per-head defaults are **not** billing keys: `default_treatment`, `default_spread_method` and
+    `default_itc_eligibility` live in each store's `charge_head` master rows
+    ([PUR-008](purchase-management.md#pur-008-charge-head-master)).
+  - **When** a legacy profile payload spells a boolean as `"1"` or `"true"`,
+  - **Then** the till reads it as on, and any other spelling — `"0"`, `""`, `null`, a stray word — as off, so a value
+    the settings screen never offered cannot silently reprice a bill. The settings API normalizes the stored block
+    into those same shapes on read, so the panel shows a switch's honest position rather than the string that set it.
+  - **When** a purchase document is validated server-side,
+  - **Then** the same policy is enforced there, so a till cannot post what the API would reject. The check runs once,
+    inside the bill's own transaction and before any charge row is written, on both write paths (HTTP `POST` and the
+    till's sync push), so a refused bill leaves no header, rows, allocations or expense behind.
+  - **Then** a refusal names the line that broke the sign rule (`charges.<n>.amount`) or the bill that broke the cap
+    (`charges`), and quotes the allowance — the store's percent, the charge total, the goods total — so the owner can
+    fix the entry or the policy without guessing.
+  - **Then** policy reads never leak across stores, and a policy change alters future bills only: the payable
+    membership each charge line was posted with is stored on that line (`purchase_charges.in_payable`), so a bill
+    that already printed, its register reading and any debit note against it keep their answer ([PUR-013](purchase-management.md), [PUR-016](purchase-management.md)).
+
 ---
 
 ## 3. Permissions Matrix

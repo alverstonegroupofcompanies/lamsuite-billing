@@ -1,6 +1,16 @@
 import { sqliteStorage } from "../db/sqliteStorage";
 import { getResolvedApiBaseUrl } from "../../config/env";
 import { storeRegistryService } from "../auth/storeRegistryService";
+import { companySettingsService } from "../settings/companySettingsService";
+import { counterSequenceService } from "../auth/counterSequenceService";
+import { counterSessionService } from "../auth/counterSessionService";
+import {
+  DeviceAuthError,
+  deviceAuthErrorFrom,
+  handleDeviceAuthFailure,
+  isDeviceAuthFailure,
+} from "../auth/deviceAuthFailure";
+import type { ServerRenumbering } from "../billing/documentIdentity";
 
 export interface SyncQueueItem {
   id: string;
@@ -21,6 +31,7 @@ export interface SyncQueueItem {
     | "staff"
     | "staff_user"
     | "unit"
+    | "charge_head"
     | "discount_schema"
     | "lookup"
     | "settings"
@@ -35,13 +46,38 @@ export interface SyncQueueItem {
   next_retry_at?: number;
 }
 
+export interface SyncPushResponse {
+  success: boolean;
+  /** CNT-014: numbers the counter gave documents this till had to invent. */
+  renumbered?: ServerRenumbering[];
+}
+
+export interface BatchPushResults {
+  total: number;
+  processed: number;
+  failed: number;
+  /** Ids the server actually filed; a rejected id is absent. */
+  processed_ids?: Array<string | number>;
+  errors?: Array<{ id?: string | number; entity_type?: string; error?: string }>;
+}
+
 export interface SyncApiClient {
-  pushInvoices?(items: Record<string, unknown>[]): Promise<{ success: boolean; ingested_count: number }>;
-  pushStockEvents?(items: Record<string, unknown>[]): Promise<{ success: boolean; ingested_count: number }>;
-  pushBatch?(items: Array<{ id: string; entity_type: string; action: string; payload: Record<string, unknown> }>): Promise<{
-    success: boolean;
-    results: { total: number; processed: number; failed: number };
-  }>;
+  pushInvoices?(items: Record<string, unknown>[]): Promise<SyncPushResponse & { ingested_count: number }>;
+  pushStockEvents?(items: Record<string, unknown>[]): Promise<SyncPushResponse & { ingested_count: number }>;
+  pushBatch?(items: Array<{ id: string; entity_type: string; action: string; payload: Record<string, unknown> }>): Promise<
+    SyncPushResponse & { results: BatchPushResults }
+  >;
+}
+
+export interface SyncQueueStatus {
+  /** Items due to go now. */
+  pendingCount: number;
+  /** Everything not yet taken by the server, including a retry in progress. */
+  unsentCount: number;
+  isProcessing: boolean;
+  lastSyncedAt?: number;
+  /** Bills the counter renumbered during the last flush (CNT-014). */
+  renumbered: ServerRenumbering[];
 }
 
 /**
@@ -92,10 +128,22 @@ export class BackendHttpApiClient implements SyncApiClient {
     return headers;
   }
 
-  async pushBatch(items: Array<{ id: string; entity_type: string; action: string; payload: Record<string, unknown> }>): Promise<{
-    success: boolean;
-    results: { total: number; processed: number; failed: number };
-  }> {
+  /**
+   * A refused device credential is not a network fault: the body says so, and
+   * the queue must stop retrying rather than bury a revoked till in backoff.
+   */
+  private async throwIfRejected(res: Response, label: string): Promise<void> {
+    if (res.ok) return;
+    const body = await res.json().catch(() => null);
+    if (isDeviceAuthFailure(res.status, body)) {
+      throw deviceAuthErrorFrom(res.status, body);
+    }
+    throw new Error(`${label} HTTP ${res.status}: ${res.statusText}`);
+  }
+
+  async pushBatch(items: Array<{ id: string; entity_type: string; action: string; payload: Record<string, unknown> }>): Promise<
+    SyncPushResponse & { results: BatchPushResults }
+  > {
     const activeStoreId = String(storeRegistryService.getActiveStore()?.id || "1");
     const url = `${this.getEffectiveBaseUrl()}/api/sync/push/batch`;
     const res = await fetch(url, {
@@ -104,14 +152,14 @@ export class BackendHttpApiClient implements SyncApiClient {
       body: JSON.stringify({ items, store_id: activeStoreId }),
     });
 
-    if (!res.ok) {
-      throw new Error(`Backend Sync API HTTP ${res.status}: ${res.statusText}`);
-    }
+    await this.throwIfRejected(res, "Backend Sync API");
 
     return await res.json();
   }
 
-  async pushInvoices(items: Record<string, unknown>[]): Promise<{ success: boolean; ingested_count: number }> {
+  async pushInvoices(
+    items: Record<string, unknown>[]
+  ): Promise<SyncPushResponse & { ingested_count: number; errors?: unknown[] }> {
     const activeStoreId = String(storeRegistryService.getActiveStore()?.id || "1");
     const url = `${this.getEffectiveBaseUrl()}/api/sync/push/invoices`;
     const res = await fetch(url, {
@@ -120,14 +168,14 @@ export class BackendHttpApiClient implements SyncApiClient {
       body: JSON.stringify({ invoices: items, store_id: activeStoreId }),
     });
 
-    if (!res.ok) {
-      throw new Error(`Backend Invoices API HTTP ${res.status}: ${res.statusText}`);
-    }
+    await this.throwIfRejected(res, "Backend Invoices API");
 
     return await res.json();
   }
 
-  async pushStockEvents(items: Record<string, unknown>[]): Promise<{ success: boolean; ingested_count: number }> {
+  async pushStockEvents(
+    items: Record<string, unknown>[]
+  ): Promise<SyncPushResponse & { ingested_count: number }> {
     const activeStoreId = String(storeRegistryService.getActiveStore()?.id || "1");
     const url = `${this.getEffectiveBaseUrl()}/api/sync/push/stock-events`;
     const res = await fetch(url, {
@@ -136,9 +184,7 @@ export class BackendHttpApiClient implements SyncApiClient {
       body: JSON.stringify({ events: items, store_id: activeStoreId }),
     });
 
-    if (!res.ok) {
-      throw new Error(`Backend Stock API HTTP ${res.status}: ${res.statusText}`);
-    }
+    await this.throwIfRejected(res, "Backend Stock API");
 
     return await res.json();
   }
@@ -149,8 +195,13 @@ export const defaultBackendApiClient = new BackendHttpApiClient();
 export class SyncQueueService {
   private isProcessing = false;
   private autoSyncInterval: ReturnType<typeof setInterval> | null = null;
-  private syncListeners: Set<(status: { pendingCount: number; isProcessing: boolean; lastSyncedAt?: number }) => void> = new Set();
+  private syncListeners: Set<(status: SyncQueueStatus) => void> = new Set();
   private lastSyncedAt?: number;
+  /** Set when the device credential was refused; only a fresh claim clears it. */
+  private authPaused = false;
+  private lastRenumberings: ServerRenumbering[] = [];
+  /** Bills saved inside the same millisecond still keep the order they were saved. */
+  private enqueueSequence = 0;
 
   constructor() {
     this.setupNetworkAutoSync();
@@ -179,7 +230,10 @@ export class SyncQueueService {
    * still carries the figures that were pushed is flipped, so an edit made while the push was in
    * flight keeps its pending flag and goes out on the next flush.
    */
-  private async markSourceDocumentsSynced(items: SyncQueueItem[]): Promise<void> {
+  private async markSourceDocumentsSynced(
+    items: SyncQueueItem[],
+    renumberings: ServerRenumbering[] = []
+  ): Promise<void> {
     for (const item of items) {
       const table = SyncQueueService.documentTables[item.entity_type];
       if (!table || !item.entity_id) continue;
@@ -198,7 +252,25 @@ export class SyncQueueService {
         continue;
       }
 
-      await sqliteStorage.insertRecord(table, String(item.entity_id), { ...row, sync_state: "synced" });
+      const externalId = payload.external_id ?? payload.idempotency_key ?? payload.id ?? item.entity_id;
+      const renumbered = renumberings.find(
+        (entry) =>
+          (entry.external_id && String(entry.external_id) === String(externalId)) ||
+          (entry.from && String(entry.from) === String(row.invoice_number ?? ""))
+      );
+
+      const next: Record<string, unknown> = { ...row, sync_state: "synced" };
+      if (renumbered) {
+        next.invoice_number = renumbered.to;
+        // The till's own preview must not offer the number the server just took.
+        const step =
+          renumbered.doc_type === "invoice"
+            ? companySettingsService.syncNextInvoiceSequence(renumbered.to)
+            : counterSequenceService.stepOverForActiveCounter(renumbered.to);
+        await step.catch(() => {});
+      }
+
+      await sqliteStorage.insertRecord(table, String(item.entity_id), next);
     }
   }
 
@@ -208,7 +280,7 @@ export class SyncQueueService {
     action: SyncQueueItem["action"],
     payload: Record<string, unknown> | object
   ): Promise<string> {
-    const queueId = `sync_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`;
+    const queueId = `sync_${Date.now()}_${String(++this.enqueueSequence).padStart(6, "0")}`;
     const idempotencyKey = this.generateIdempotencyKey(entityType, entityId);
 
     // If an item with same idempotency key is already pending, update its payload
@@ -217,11 +289,18 @@ export class SyncQueueService {
       (it) => (it.status === "pending" || it.status === "failed") && it.entity_type === entityType && it.entity_id === entityId
     );
 
+    // Q1 (b): the queued row carries the watermark of the permission document it
+    // was written inside. The server compares it with the one in force when the
+    // row lands, which is what lets it tell "this bill broke a rule" apart from
+    // "the owner wrote a new rule after this bill was made".
+    const profileVersion = counterSessionService.state().version;
+
     // Inject idempotency key into payload
     const enrichedPayload = {
       ...payload,
       idempotency_key: idempotencyKey,
       client_timestamp: Date.now(),
+      ...(profileVersion > 0 ? { permission_profile_version: profileVersion } : {}),
     };
 
     const targetId = existing ? existing.id : queueId;
@@ -249,16 +328,43 @@ export class SyncQueueService {
     return targetId;
   }
 
+  /**
+   * Due items in the order they were saved. The store hands rows back in
+   * whatever order it likes, and a flush that follows that order is how the
+   * first offline bill ended up landing after the bills saved behind it.
+   */
   async getPendingItems(): Promise<SyncQueueItem[]> {
     const all = await sqliteStorage.findAll<SyncQueueItem>("sync_queue");
     const now = Date.now();
-    return all.filter((item) => {
-      if (item.status === "pending") return true;
-      if (item.status === "failed") {
-        return !item.next_retry_at || item.next_retry_at <= now;
-      }
-      return false;
-    });
+    return all
+      .filter((item) => {
+        if (item.status === "pending") return true;
+        if (item.status === "failed") {
+          return !item.next_retry_at || item.next_retry_at <= now;
+        }
+        return false;
+      })
+      .sort((a, b) => {
+        const byTime = (a.created_at || 0) - (b.created_at || 0);
+        return byTime !== 0 ? byTime : String(a.id).localeCompare(String(b.id));
+      });
+  }
+
+  /** Everything the server has not taken yet, including a retry still waiting. */
+  async getUnsentCount(): Promise<number> {
+    const all = await sqliteStorage.findAll<SyncQueueItem>("sync_queue");
+    return all.filter((item) => item.status !== "synced").length;
+  }
+
+  /** The last flush's renumberings, so the till can show what the counter changed. */
+  getLastRenumberings(): ServerRenumbering[] {
+    return [...this.lastRenumberings];
+  }
+
+  /** Called once a counter code is claimed again; the preserved queue resumes. */
+  resumeAfterClaim(): void {
+    this.authPaused = false;
+    this.notifyListeners();
   }
 
   isOnline(): boolean {
@@ -287,7 +393,7 @@ export class SyncQueueService {
     }
   }
 
-  subscribe(listener: (status: { pendingCount: number; isProcessing: boolean; lastSyncedAt?: number }) => void): () => void {
+  subscribe(listener: (status: SyncQueueStatus) => void): () => void {
     this.syncListeners.add(listener);
     this.notifyListeners();
     return () => {
@@ -298,10 +404,13 @@ export class SyncQueueService {
   private async notifyListeners(): Promise<void> {
     try {
       const pending = await this.getPendingItems();
-      const status = {
+      const unsent = await this.getUnsentCount();
+      const status: SyncQueueStatus = {
         pendingCount: pending.length,
+        unsentCount: unsent,
         isProcessing: this.isProcessing,
         lastSyncedAt: this.lastSyncedAt,
+        renumbered: this.getLastRenumberings(),
       };
       this.syncListeners.forEach((listener) => {
         try {
@@ -311,8 +420,46 @@ export class SyncQueueService {
     } catch (_) {}
   }
 
+  private recordRenumberings(entries: ServerRenumbering[] | undefined): void {
+    if (!entries?.length) return;
+    this.lastRenumberings = [...entries, ...this.lastRenumberings].slice(0, 20);
+  }
+
+  /**
+   * A refused credential stops the whole queue: retrying every bill against a
+   * token the store has already taken away is how the till looked alive while
+   * its offline bill never landed. Only a fresh claim resumes it.
+   */
+  private async pauseForDeviceAuth(): Promise<void> {
+    this.authPaused = true;
+    await handleDeviceAuthFailure().catch(() => ({ locked: false }));
+  }
+
+  /**
+   * A transport failure moves the whole unsent queue to one retry time, so the
+   * bills that were already waiting do not jump ahead of the bill that failed.
+   */
+  private async rescheduleWholeQueue(message: string): Promise<number> {
+    const unsent = (await sqliteStorage.findAll<SyncQueueItem>("sync_queue")).filter(
+      (item) => item.status !== "synced"
+    );
+    const retryCount = Math.max(0, ...unsent.map((item) => item.retry_count || 0)) + 1;
+    const retryAt = Date.now() + this.calculateBackoffMs(retryCount);
+
+    for (const item of unsent) {
+      item.status = "failed";
+      item.retry_count = retryCount;
+      item.last_error = message;
+      item.next_retry_at = retryAt;
+      await sqliteStorage.insertRecord("sync_queue", item.id, item as unknown as Record<string, unknown>);
+    }
+
+    return unsent.length;
+  }
+
   async processQueue(apiClient: SyncApiClient = defaultBackendApiClient): Promise<{ processed: number; failed: number }> {
     if (this.isProcessing) return { processed: 0, failed: 0 };
+    if (this.authPaused) return { processed: 0, failed: 0 };
     this.isProcessing = true;
     this.notifyListeners();
 
@@ -325,7 +472,7 @@ export class SyncQueueService {
         return { processed: 0, failed: 0 };
       }
 
-      // If client supports unified pushBatch, send all items in a single atomic batch
+      // If client supports unified pushBatch, send all items in one batch, in creation order.
       if (typeof apiClient.pushBatch === "function") {
         const activeStoreId = String(storeRegistryService.getActiveStore()?.id || "1");
         const batchPayload = items.map((it) => {
@@ -346,32 +493,55 @@ export class SyncQueueService {
 
         try {
           const res = await apiClient.pushBatch(batchPayload);
-          if (res.success || res.results?.processed > 0) {
-            for (const item of items) {
-              item.status = "synced";
-              await sqliteStorage.insertRecord("sync_queue", item.id, item as unknown as Record<string, unknown>);
-              processed++;
-            }
-            this.lastSyncedAt = Date.now();
-            // The queue rows above all cleared, but a partially rejected batch leaves documents the
-            // server never took, so only a batch with nothing failed marks its sources synced.
-            if (!res.results || res.results.failed === 0) {
-              await this.markSourceDocumentsSynced(items);
-            }
-          } else {
+          const results = res.results;
+
+          if (!results && !res.success) {
             throw new Error("Batch sync push failed on server");
           }
-        } catch (batchErr) {
-          // If batch fails, fallback to item-by-item with backoff
+
+          const rejected = new Map<string, string>();
+          for (const entry of results?.errors ?? []) {
+            if (entry?.id !== undefined && entry?.id !== null) {
+              rejected.set(String(entry.id), entry.error || "Server rejected item");
+            }
+          }
+          const explicitIds = new Set((results?.processed_ids ?? []).map((id) => String(id)));
+          const accepted: SyncQueueItem[] = [];
+
           for (const item of items) {
-            failed++;
-            const retryCount = (item.retry_count || 0) + 1;
-            const backoffMs = this.calculateBackoffMs(retryCount);
-            item.status = "failed";
-            item.retry_count = retryCount;
-            item.last_error = batchErr instanceof Error ? batchErr.message : String(batchErr);
-            item.next_retry_at = Date.now() + backoffMs;
-            await sqliteStorage.insertRecord("sync_queue", item.id, item as unknown as Record<string, unknown>);
+            const rejection = rejected.get(item.id);
+            const taken = explicitIds.size > 0 ? explicitIds.has(item.id) : !rejection;
+
+            if (taken && !rejection) {
+              item.status = "synced";
+              item.last_error = undefined;
+              await sqliteStorage.insertRecord("sync_queue", item.id, item as unknown as Record<string, unknown>);
+              accepted.push(item);
+              processed++;
+            } else {
+              const retryCount = (item.retry_count || 0) + 1;
+              item.status = "failed";
+              item.retry_count = retryCount;
+              item.last_error = rejection || "Server rejected item";
+              item.next_retry_at = Date.now() + this.calculateBackoffMs(retryCount);
+              await sqliteStorage.insertRecord("sync_queue", item.id, item as unknown as Record<string, unknown>);
+              failed++;
+            }
+          }
+
+          if (accepted.length > 0) {
+            this.lastSyncedAt = Date.now();
+            await this.markSourceDocumentsSynced(accepted, res.renumbered ?? []);
+          }
+          this.recordRenumberings(res.renumbered);
+        } catch (batchErr) {
+          if (batchErr instanceof DeviceAuthError) {
+            await this.pauseForDeviceAuth();
+            failed = items.length;
+          } else {
+            failed = await this.rescheduleWholeQueue(
+              batchErr instanceof Error ? batchErr.message : String(batchErr)
+            );
           }
         }
       } else {
@@ -380,25 +550,36 @@ export class SyncQueueService {
           try {
             const payload = JSON.parse(item.payload_json);
 
+            let renumberings: ServerRenumbering[] = [];
+
             if (item.entity_type === "invoice") {
               if (apiClient.pushInvoices) {
                 const res = await apiClient.pushInvoices([payload]);
                 if (!res.success) throw new Error("Sync API rejected invoice batch");
+                renumberings = res.renumbered ?? [];
               }
             } else if (item.entity_type === "stock_event" || item.entity_type === "stock_adjustment") {
               if (apiClient.pushStockEvents) {
                 const res = await apiClient.pushStockEvents([payload]);
                 if (!res.success) throw new Error("Sync API rejected stock event batch");
+                renumberings = res.renumbered ?? [];
               }
             }
 
             // Mark synced
             item.status = "synced";
             await sqliteStorage.insertRecord("sync_queue", item.id, item as unknown as Record<string, unknown>);
-            await this.markSourceDocumentsSynced([item]);
+            await this.markSourceDocumentsSynced([item], renumberings);
+            this.recordRenumberings(renumberings);
             processed += 1;
             this.lastSyncedAt = Date.now();
           } catch (error) {
+            if (error instanceof DeviceAuthError) {
+              await this.pauseForDeviceAuth();
+              failed += 1;
+              break;
+            }
+
             failed += 1;
             const retryCount = (item.retry_count || 0) + 1;
             const backoffMs = this.calculateBackoffMs(retryCount);
@@ -414,7 +595,7 @@ export class SyncQueueService {
       }
     } finally {
       this.isProcessing = false;
-      this.notifyListeners();
+      await this.notifyListeners();
     }
 
     return { processed, failed };
@@ -459,7 +640,7 @@ export class SyncQueueService {
           item.last_error = undefined;
           await sqliteStorage.insertRecord("sync_queue", item.id, item as unknown as Record<string, unknown>);
           if (!res.results || res.results.failed === 0) {
-            await this.markSourceDocumentsSynced([item]);
+            await this.markSourceDocumentsSynced([item], res.renumbered ?? []);
           }
           this.lastSyncedAt = Date.now();
           this.notifyListeners();
@@ -474,7 +655,7 @@ export class SyncQueueService {
           item.status = "synced";
           item.last_error = undefined;
           await sqliteStorage.insertRecord("sync_queue", item.id, item as unknown as Record<string, unknown>);
-          await this.markSourceDocumentsSynced([item]);
+          await this.markSourceDocumentsSynced([item], res.renumbered ?? []);
           this.lastSyncedAt = Date.now();
           this.notifyListeners();
           return { success: true };
@@ -485,6 +666,15 @@ export class SyncQueueService {
         throw new Error("No compatible API push method available");
       }
     } catch (err: any) {
+      if (err instanceof DeviceAuthError) {
+        item.status = "pending";
+        item.last_error = err.message;
+        await sqliteStorage.insertRecord("sync_queue", item.id, item as unknown as Record<string, unknown>);
+        await this.pauseForDeviceAuth();
+        this.notifyListeners();
+        return { success: false, error: item.last_error };
+      }
+
       const retryCount = (item.retry_count || 0) + 1;
       item.status = "failed";
       item.retry_count = retryCount;

@@ -1,0 +1,240 @@
+[
+  {
+    "method": "GET",
+    "url": "/invoices",
+    "status": 401,
+    "leak": false,
+    "sample": "{\"success\":false,\"error\":\"DEVICE_AUTH_FAILED\",\"message\":\"Device authentication token is required.\"}"
+  },
+  {
+    "method": "GET",
+    "url": "/invoices/1",
+    "status": 401,
+    "leak": false,
+    "sample": "{\"success\":false,\"error\":\"DEVICE_AUTH_FAILED\",\"message\":\"Device authentication token is required.\"}"
+  },
+  {
+    "method": "GET",
+    "url": "/customers",
+    "status": 401,
+    "leak": false,
+    "sample": "{\"success\":false,\"error\":\"DEVICE_AUTH_FAILED\",\"message\":\"Device authentication token is required.\"}"
+  },
+  {
+    "method": "GET",
+    "url": "/customers/1",
+    "status": 401,
+    "leak": false,
+    "sample": "{\"success\":false,\"error\":\"DEVICE_AUTH_FAILED\",\"message\":\"Device authentication token is required.\"}"
+  },
+  {
+    "method": "GET",
+    "url": "/held-bills",
+    "status": 401,
+    "leak": false,
+    "sample": "{\"success\":false,\"error\":\"DEVICE_AUTH_FAILED\",\"message\":\"Device authentication token is required.\"}"
+  },
+  {
+    "method": "GET",
+    "url": "/settings",
+    "status": 401,
+    "leak": false,
+    "sample": "{\"success\":false,\"error\":\"DEVICE_AUTH_FAILED\",\"message\":\"Device authentication token is required.\"}"
+  },
+  {
+    "method": "GET",
+    "url": "/sync/pull/deltas",
+    "status": 401,
+    "leak": false,
+    "sample": "{\"success\":false,\"error\":\"DEVICE_AUTH_FAILED\",\"message\":\"Device authentication token is required.\"}"
+  },
+  {
+    "method": "GET",
+    "url": "/device-sessions",
+    "status": 401,
+    "leak": false,
+    "sample": "{\"success\":false,\"error\":\"DEVICE_AUTH_FAILED\",\"message\":\"Device authentication token is required.\"}"
+  },
+  {
+    "method": "GET",
+    "url": "/devices/connected",
+    "status": 401,
+    "leak": false,
+    "sample": "{\"success\":false,\"error\":\"DEVICE_AUTH_FAILED\",\"message\":\"Device authentication token is required.\"}"
+  },
+  {
+    "method": "GET",
+    "url": "/counters",
+    "status": 401,
+    "leak": false,
+    "sample": "{\"success\":false,\"error\":\"DEVICE_AUTH_FAILED\",\"message\":\"Device authentication token is required.\"}"
+  },
+  {
+    "method": "GET",
+    "url": "/counters/1/watch",
+    "status": 200,
+    "leak": true,
+    "sample": "{\"success\":true,\"counter_id\":1,\"counter_code\":\"C01\",\"counter_status\":\"unclaimed\",\"is_counter_active\":false,\"store_id\":2,\"is_store_active\":true,\"license_status\":\"active\",\"timestamp\":\"2026-11-22T04:48:50+05:30\"}"
+  },
+  {
+    "method": "GET",
+    "url": "/branches",
+    "status": 200,
+    "leak": true,
+    "sample": "{\"data\":[{\"id\":\"1\",\"name\":\"LamStone Healthcare Center\",\"code\":\"STORE-01\",\"phone\":\"+91 484 2901234\",\"email\":\"support@lamstone.in\",\"address\":\"Main Healthcare Complex, Kerala - 682001\",\"city\":\"Main Healthcare Complex\",\"state_code\":\"32\",\"gstin\""
+  },
+  {
+    "method": "GET",
+    "url": "/inventory/negative-stock-report",
+    "status": 401,
+    "leak": false,
+    "sample": "{\"success\":false,\"error\":\"DEVICE_AUTH_FAILED\",\"message\":\"Device authentication token is required.\"}"
+  },
+  {
+    "method": "GET",
+    "url": "/whatsapp/config",
+    "status": 401,
+    "leak": false,
+    "sample": "{\"success\":false,\"error\":\"DEVICE_AUTH_FAILED\",\"message\":\"Device authentication token is required.\"}"
+  },
+  {
+    "method": "GET",
+    "url": "/whatsapp/sessions",
+    "status": 401,
+    "leak": false,
+    "sample": "{\"success\":false,\"error\":\"DEVICE_AUTH_FAILED\",\"message\":\"Device authentication token is required.\"}"
+  },
+  {
+    "method": "GET",
+    "url": "/price-lists/resolve?product_id=1",
+    "status": 401,
+    "leak": false,
+    "sample": "{\"success\":false,\"error\":\"DEVICE_AUTH_FAILED\",\"message\":\"Device authentication token is required.\"}"
+  },
+  {
+    "method": "GET",
+    "url": "/license/check",
+    "status": 200,
+    "leak": true,
+    "sample": "{\"valid\":true,\"status\":\"active\",\"license_plan\":\"Enterprise Retail & Pharmacy Chain\",\"license_expires_at\":\"2027-12-31T23:59:59Z\",\"features\":[\"pos\",\"purchases\",\"stock\",\"reports\",\"multi_counter\",\"lan_sync\"]}"
+  },
+  {
+    "method": "GET",
+    "url": "/store",
+    "status": 401,
+    "leak": false,
+    "sample": "{\"success\":false,\"error\":\"DEVICE_AUTH_FAILED\",\"message\":\"Device authentication token is required.\"}"
+  },
+  {
+    "method": "GET",
+    "url": "/products",
+    "status": 401,
+    "leak": false,
+    "sample": "{\"success\":false,\"error\":\"DEVICE_AUTH_FAILED\",\"message\":\"Device authentication token is required.\"}"
+  },
+  {
+    "method": "GET",
+    "url": "/reports/daily-summary",
+    "status": 401,
+    "leak": false,
+    "sample": "{\"success\":false,\"error\":\"DEVICE_AUTH_FAILED\",\"message\":\"Device authentication token is required.\"}"
+  },
+  {
+    "method": "POST",
+    "url": "/invoices",
+    "status": 401,
+    "leak": false,
+    "sample": "{\"success\":false,\"error\":\"DEVICE_AUTH_FAILED\",\"message\":\"Device authentication token is required.\"}"
+  },
+  {
+    "method": "POST",
+    "url": "/customers",
+    "status": 401,
+    "leak": false,
+    "sample": "{\"success\":false,\"error\":\"DEVICE_AUTH_FAILED\",\"message\":\"Device authentication token is required.\"}"
+  },
+  {
+    "method": "POST",
+    "url": "/held-bills",
+    "status": 401,
+    "leak": false,
+    "sample": "{\"success\":false,\"error\":\"DEVICE_AUTH_FAILED\",\"message\":\"Device authentication token is required.\"}"
+  },
+  {
+    "method": "POST",
+    "url": "/counters/1/lease-sequence",
+    "status": 401,
+    "leak": false,
+    "sample": "{\"success\":false,\"error\":\"DEVICE_AUTH_FAILED\",\"message\":\"Device authentication token is required.\"}"
+  },
+  {
+    "method": "POST",
+    "url": "/stores/day-close",
+    "status": 401,
+    "leak": false,
+    "sample": "{\"success\":false,\"error\":\"DEVICE_AUTH_FAILED\",\"message\":\"Device authentication token is required.\"}"
+  },
+  {
+    "method": "POST",
+    "url": "/device-sessions/1/unlock",
+    "status": 401,
+    "leak": false,
+    "sample": "{\"success\":false,\"error\":\"DEVICE_AUTH_FAILED\",\"message\":\"Device authentication token is required.\"}"
+  },
+  {
+    "method": "POST",
+    "url": "/device-sessions/1/rename",
+    "status": 401,
+    "leak": false,
+    "sample": "{\"success\":false,\"error\":\"DEVICE_AUTH_FAILED\",\"message\":\"Device authentication token is required.\"}"
+  },
+  {
+    "method": "POST",
+    "url": "/invoices/1/cancel",
+    "status": 401,
+    "leak": false,
+    "sample": "{\"success\":false,\"error\":\"DEVICE_AUTH_FAILED\",\"message\":\"Device authentication token is required.\"}"
+  },
+  {
+    "method": "POST",
+    "url": "/invoices/1/lock",
+    "status": 401,
+    "leak": false,
+    "sample": "{\"success\":false,\"error\":\"DEVICE_AUTH_FAILED\",\"message\":\"Device authentication token is required.\"}"
+  },
+  {
+    "method": "POST",
+    "url": "/invoices/1/approvals/verify",
+    "status": 401,
+    "leak": false,
+    "sample": "{\"success\":false,\"error\":\"DEVICE_AUTH_FAILED\",\"message\":\"Device authentication token is required.\"}"
+  },
+  {
+    "method": "POST",
+    "url": "/settings",
+    "status": 401,
+    "leak": false,
+    "sample": "{\"success\":false,\"error\":\"DEVICE_AUTH_FAILED\",\"message\":\"Device authentication token is required.\"}"
+  },
+  {
+    "method": "POST",
+    "url": "/whatsapp/send-invoice",
+    "status": 401,
+    "leak": false,
+    "sample": "{\"success\":false,\"error\":\"DEVICE_AUTH_FAILED\",\"message\":\"Device authentication token is required.\"}"
+  },
+  {
+    "method": "POST",
+    "url": "/staff/logout",
+    "status": 401,
+    "leak": false,
+    "sample": "{\"success\":false,\"error\":\"DEVICE_AUTH_FAILED\",\"message\":\"Device authentication token is required.\"}"
+  },
+  {
+    "method": "POST",
+    "url": "/device-sessions/heartbeat",
+    "status": 401,
+    "leak": false,
+    "sample": "{\"success\":false,\"error\":\"DEVICE_AUTH_FAILED\",\"message\":\"Device authentication token is required.\"}"
+  }
+]

@@ -153,6 +153,31 @@ describe("InterStoreTransferService receive matching (P-STORE-SCOPE)", () => {
     expect(batch.stock_qty).toBe(5);
   });
 
+  it("refuses to credit a barcode twin that disagrees on HSN or GST", async () => {
+    await sqliteStorage.insertRecord("products", "prod_twin_1", {
+      id: "prod_twin_1",
+      name: "Glow Face Cream 50g",
+      barcode: "SRC-100",
+      hsn_sac_code: "33049910",
+      gst_percent: 18,
+      units_per_pack: 1,
+      mrp: 499,
+      sel_rate: 449,
+      current_stock: 0,
+      store_id: "store_B",
+      sync_state: "synced",
+    });
+
+    const transfer = await seedTransfer();
+
+    await expect(
+      interStoreTransferService.receiveTransfer(transfer.id, [{ line_id: "line_1", received_packs: 0, received_loose: 5 }], "Receiver")
+    ).rejects.toThrow(/Glow Face Cream 50g.*Paracetamol 500mg|Paracetamol 500mg.*Glow Face Cream 50g/);
+
+    const twin = await sqliteStorage.findById<any>("products", "prod_twin_1");
+    expect(twin.current_stock).toBe(0);
+  });
+
   it("never matches or mutates a foreign store's product", async () => {
     getMockDatabase().setStore("store_A");
     await sqliteStorage.insertRecord("products", "prod_foreign_1", {

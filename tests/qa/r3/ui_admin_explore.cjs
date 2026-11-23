@@ -1,0 +1,20 @@
+const { newSession } = require('./driver.cjs');
+(async () => {
+  const s = await newSession('admin_explore', { url: 'http://localhost:5174' });
+  const { page } = s;
+  await new Promise(r=>setTimeout(r,2500));
+  console.log((await s.text()).slice(0,600));
+  const inputs = await s.controls(); console.log(JSON.stringify(inputs.slice(0,12)));
+  await s.typeInto('input[type=email]', 'admin@lamstone.in');
+  await s.typeInto('input[type=password]', 'Qa-Throwaway-2026!');
+  await page.keyboard.press('Enter');
+  await new Promise(r=>setTimeout(r,4000));
+  console.log('URL', page.url());
+  console.log((await s.text()).slice(0,1500));
+  await s.screenshot('admin_after_login');
+  await page.goto('http://localhost:5174/stores', {waitUntil:'networkidle2'}).catch(()=>{});
+  await new Promise(r=>setTimeout(r,2500));
+  console.log('STORES', (await s.text()).slice(0,1500));
+  await s.screenshot('admin_stores');
+  await s.close();
+})();

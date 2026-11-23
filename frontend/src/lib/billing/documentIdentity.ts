@@ -34,6 +34,41 @@ function isTemporaryNumber(value: string | undefined): boolean {
   return typeof value === "string" && /^(TEMP|TMP|OFFLINE)/i.test(value.trim());
 }
 
+export { isTemporaryNumber };
+
+/**
+ * A number the counter issued while the till was out of contact is not the
+ * book number: the server files the document under its own series and reports
+ * the swap, and the till's copy has to follow it or the marker survives as the
+ * document's identity (CNT-014).
+ */
+export interface ServerRenumbering {
+  external_id?: string | null;
+  from?: string | null;
+  to: string;
+  doc_type: string;
+  counter_id?: number | null;
+}
+
+export function applyServerRenumbering<T extends DocumentIdentityLike>(
+  records: T[],
+  renumberings: ServerRenumbering[] | undefined
+): T[] {
+  if (!renumberings?.length) return records;
+
+  return records.map((record) => {
+    const hit = renumberings.find(
+      (entry) =>
+        (entry.external_id && record.external_id && String(entry.external_id) === String(record.external_id)) ||
+        (entry.from && record.invoice_number === entry.from)
+    );
+
+    if (!hit || record.invoice_number === hit.to) return record;
+
+    return { ...record, invoice_number: hit.to };
+  });
+}
+
 function preferenceScore(record: DocumentIdentityLike): number {
   let score = 0;
   if (record.sync_state === "synced") score += 1;

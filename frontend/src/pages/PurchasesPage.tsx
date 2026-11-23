@@ -48,6 +48,7 @@ import { ImportWizardModal } from "../lib/data-exchange/ui/ImportWizardModal";
 import { PurchaseOrderModal } from "../components/purchases/PurchaseOrderModal";
 import { SupplierPaymentModal } from "../components/purchases/SupplierPaymentModal";
 import { SupplierQuickAddModal } from "../components/purchases/SupplierQuickAddModal";
+import { shortcutDispatcher } from "../lib/keyboard/shortcutDispatcher";
 
 type ActiveTab = "bills" | "orders" | "ledger" | "reports";
 
@@ -98,6 +99,43 @@ export const PurchasesPage: React.FC = () => {
       loadStatement(selectedLedgerSupplierId);
     }
   }, [selectedLedgerSupplierId]);
+
+  // The button advertises F2, so the list has to answer it before the global shell claims the key
+  // (KB-01). While a child owns the screen the same chord belongs to that child.
+  useEffect(() => {
+    const uninstall = shortcutDispatcher.install();
+    const unregister = shortcutDispatcher.register({
+      id: "purchases-list",
+      scope: "purchase",
+      priority: 50,
+      isActive: () =>
+        !isEntryFormOpen &&
+        !selectedPurchaseId &&
+        !isPoModalOpen &&
+        !isPaymentModalOpen &&
+        !isQuickAddSupplierOpen &&
+        !isImportModalOpen,
+      handlers: {
+        newPurchase: () => {
+          setPoToConvert(null);
+          setEditingPurchaseId(null);
+          setIsEntryFormOpen(true);
+          return true;
+        },
+      },
+    });
+    return () => {
+      unregister();
+      uninstall();
+    };
+  }, [
+    isEntryFormOpen,
+    selectedPurchaseId,
+    isPoModalOpen,
+    isPaymentModalOpen,
+    isQuickAddSupplierOpen,
+    isImportModalOpen,
+  ]);
 
   const loadAllData = async () => {
     const docs = await sqliteStorage.findAll<PurchaseDocumentRecord>("purchase_documents");

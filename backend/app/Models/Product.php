@@ -34,6 +34,8 @@ class Product extends Model
         'current_stock',
         'is_active',
         'external_id',
+        'drug_schedule_id',
+        'schedule_code',
         'version',
     ];
 

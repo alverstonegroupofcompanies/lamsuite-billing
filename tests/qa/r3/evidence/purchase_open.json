@@ -1,0 +1,54 @@
+{
+  "open": [
+    {
+      "step": "F2 from billing -> purchases list",
+      "form": false
+    },
+    {
+      "step": "F2 on purchases list",
+      "form": true
+    }
+  ],
+  "tab_order": [
+    "BODY::LamSuite Billing\nv2.1.1\n\nRetai",
+    "A::LamSuite Billing\nv2.1.1\n\nRetai",
+    "BUTTON:button:QA Pharma Kochi\nQA-PH\nID:4\nCtr",
+    "BUTTON:submit:Search actions, modules, or to",
+    "BUTTON:submit:ML",
+    "BUTTON:submit:",
+    "BUTTON:submit:",
+    "A::POS Billing",
+    "BUTTON:submit:Sales & Bills",
+    "BUTTON:submit:Purchases",
+    "BUTTON:submit:Inventory",
+    "A::Reports",
+    "A::Masters",
+    "A::Import / Export",
+    "A::Data Migration",
+    "A::Settings",
+    "BUTTON:submit:",
+    "BUTTON:submit:Back to POS",
+    "BUTTON:submit:Import Invoices (Excel/CSV)",
+    "BUTTON:submit:New Inward Bill (F2)",
+    "BUTTON:submit:Inward Purchase Bills (0)",
+    "BUTTON:submit:Purchase Orders & Requests (0)",
+    "BUTTON:submit:Supplier Ledger & Ageing",
+    "BUTTON:submit:Purchase & ITC Reports",
+    "INPUT:text:Search Bill #, Supplier, Inv #...",
+    "SELECT:select-one:All Suppliers\nQA Pharma Distri",
+    "SELECT:select-one:All Payment Statuses\nPaid\nPart",
+    "BUTTON:submit:Today",
+    "BUTTON:submit:Last 7 Days",
+    "BUTTON:submit:This Month",
+    "BUTTON:submit:All Time",
+    "INPUT:text:Select or search supplier (Alt+S)...",
+    "INPUT:text:INV-001",
+    "INPUT:date:",
+    "INPUT:date:",
+    "INPUT:date:",
+    "INPUT:date:",
+    "SELECT:select-one:Credit\nCash",
+    "INPUT:text:Inward Notes",
+    "BUTTON:button:Columns (Ctrl+Shift+C)"
+  ]
+}

@@ -148,9 +148,13 @@ export const dailyProfitSummaryReport: ReportModule<any, DailyProfitSummaryRow> 
 
     const batchCostMap = new Map<string, number>();
     for (const b of allBatches) {
-      if (b.purchase_rate && b.purchase_rate > 0) {
-        batchCostMap.set(b.id, Number(b.purchase_rate));
-        batchCostMap.set(b.batch_no, Number(b.purchase_rate));
+      // REP-009: costed at the landed rate when add-to-cost charges moved it, otherwise unchanged.
+      const landed = Number(b.landed_cost_rate) || 0;
+      const booked = Number(b.purchase_rate) || 0;
+      const cost = landed > 0 ? landed : booked;
+      if (cost > 0) {
+        batchCostMap.set(b.id, cost);
+        batchCostMap.set(b.batch_no, cost);
       }
     }
 

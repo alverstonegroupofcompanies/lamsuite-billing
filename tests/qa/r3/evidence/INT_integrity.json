@@ -1,0 +1,244 @@
+{
+  "ledger_vs_batch": {
+    "count": 2,
+    "rows": [
+      {
+        "id": 7,
+        "store_id": 4,
+        "batch_no": "CS-A1",
+        "stock_qty": 33,
+        "ledger": -7
+      },
+      {
+        "id": 10,
+        "store_id": 5,
+        "batch_no": "LP-01",
+        "stock_qty": 20,
+        "ledger": -5
+      }
+    ]
+  },
+  "product_vs_batches": {
+    "count": 1,
+    "rows": [
+      {
+        "id": 9,
+        "store_id": 5,
+        "name": "QA Ruby Lipstick",
+        "current_stock": -5,
+        "batches": 20
+      }
+    ]
+  },
+  "ledger_store_mismatch": {
+    "count": 2,
+    "rows": [
+      {
+        "id": 20,
+        "ledger_store": 4,
+        "batch_store": 5,
+        "event_type": "SALE"
+      },
+      {
+        "id": 50,
+        "ledger_store": 4,
+        "batch_store": 5,
+        "event_type": "SALE"
+      }
+    ]
+  },
+  "negative_batches": {
+    "count": 2,
+    "rows": [
+      {
+        "id": 13,
+        "store_id": 4,
+        "batch_no": "CS-B2",
+        "stock_qty": -1
+      },
+      {
+        "id": 8,
+        "store_id": 4,
+        "batch_no": "B1",
+        "stock_qty": -20
+      }
+    ]
+  },
+  "orphan_items": {
+    "count": 0,
+    "rows": []
+  },
+  "orphan_payments": {
+    "count": 0,
+    "rows": []
+  },
+  "dup_invoice_numbers": {
+    "count": 0,
+    "rows": []
+  },
+  "dup_purchase_bills": {
+    "count": 2,
+    "rows": [
+      {
+        "store_id": 4,
+        "supplier_id": 8,
+        "invoice_number": "QA-PB-003",
+        "module_key": "purchase",
+        "c": 2
+      },
+      {
+        "store_id": 4,
+        "supplier_id": 8,
+        "invoice_number": "QA-PB-DUP",
+        "module_key": "purchase",
+        "c": 2
+      }
+    ]
+  },
+  "header_tax_vs_lines": {
+    "count": 0,
+    "rows": []
+  },
+  "header_total_vs_lines": {
+    "count": 0,
+    "rows": []
+  },
+  "paid_vs_payments": {
+    "count": 1,
+    "rows": [
+      {
+        "invoice_number": "C01-INV-13001",
+        "paid_amount": 210,
+        "pays": 0
+      }
+    ]
+  },
+  "paid_gt_grand": {
+    "count": 3,
+    "rows": [
+      {
+        "invoice_number": "C01-INV-8301",
+        "grand_total": 210,
+        "paid_amount": 500
+      },
+      {
+        "invoice_number": "C02-INV-QA011",
+        "grand_total": 0,
+        "paid_amount": 36
+      },
+      {
+        "invoice_number": "C02-INV-RE1",
+        "grand_total": 72,
+        "paid_amount": 81
+      }
+    ]
+  },
+  "invoice_cross_store_items": {
+    "count": 2,
+    "rows": [
+      {
+        "invoice_number": "C02-INV-QA014",
+        "inv_store": 4,
+        "product_store": 5,
+        "name": "QA Ruby Lipstick"
+      },
+      {
+        "invoice_number": "C02-INV-RE2",
+        "inv_store": 4,
+        "product_store": 5,
+        "name": "QA Ruby Lipstick"
+      }
+    ]
+  },
+  "invoice_counter_mismatch": {
+    "count": 0,
+    "rows": []
+  },
+  "purchases_without_batches": {
+    "count": 4,
+    "rows": [
+      {
+        "id": 4,
+        "invoice_number": "QA-PB-003",
+        "module_key": "purchase",
+        "ledger_rows": 0
+      },
+      {
+        "id": 7,
+        "invoice_number": "QA-PB-DUP",
+        "module_key": "purchase",
+        "ledger_rows": 0
+      },
+      {
+        "id": 3,
+        "invoice_number": "QA-PB-003",
+        "module_key": "purchase",
+        "ledger_rows": 0
+      },
+      {
+        "id": 6,
+        "invoice_number": "QA-PB-DUP",
+        "module_key": "purchase",
+        "ledger_rows": 0
+      }
+    ]
+  },
+  "purchase_header_vs_lines": {
+    "count": 4,
+    "rows": [
+      {
+        "invoice_number": "PUR-4-pur_G9V1795310849078",
+        "subtotal": 178.57,
+        "lines": 200
+      },
+      {
+        "invoice_number": "PUR-4-pur_G9V1795310856597",
+        "subtotal": 178.57,
+        "lines": 200
+      },
+      {
+        "invoice_number": "PUR-4-pur_G9V1795310868391",
+        "subtotal": 178.57,
+        "lines": 200
+      },
+      {
+        "invoice_number": "PUR-4-pur_G9V1795310874491",
+        "subtotal": 178.57,
+        "lines": 200
+      }
+    ]
+  },
+  "supplier_balance_vs_docs": {
+    "count": 1,
+    "rows": [
+      {
+        "id": 8,
+        "name": "QA Pharma Distributors",
+        "current_balance": 17429,
+        "derived": 30130
+      }
+    ]
+  },
+  "customer_balance_vs_docs": {
+    "count": 0,
+    "rows": []
+  },
+  "cancelled_without_audit": {
+    "count": 3,
+    "rows": [
+      {
+        "invoice_number": "C01-INV-8651"
+      },
+      {
+        "invoice_number": "C01-INV-8751"
+      },
+      {
+        "invoice_number": "C02-INV-RE4"
+      }
+    ]
+  },
+  "timestamps_future_or_utc_drift": {
+    "count": 0,
+    "rows": []
+  }
+}

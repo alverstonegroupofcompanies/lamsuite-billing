@@ -72,6 +72,11 @@ export interface InvoiceRecord {
   patient_name?: string;
   doctor_name?: string;
   doctor_reg_no?: string;
+  // Who vouched for a restricted pack. The PIN they typed is never kept.
+  pharmacist_id?: string;
+  pharmacist_name?: string;
+  pharmacist_reg_no?: string;
+  pharmacist_confirmed_at?: number;
   notes?: string;
   external_id?: string;
   bill_discount_percent?: number;
@@ -1116,6 +1121,8 @@ export class InvoiceManagementService {
       updated_at: now,
       approval_id: approval?.id,
       approved_by: approval?.approvedByName,
+      // G12: the server redeems this against the invoice; without it the push is refused.
+      approval_token: approval?.token,
     });
 
     return { success: true };

@@ -1,0 +1,54 @@
+[
+  [
+    "after first F1",
+    "BODY::LamSuite Billing\nv2.1.1\n\nRetai="
+  ],
+  [
+    "start",
+    "INPUT:text:Scan barcode or type product name (e.g. 3*paracetamol)="
+  ],
+  [
+    "suggestions",
+    [
+      "QA Paracet 500 Strip",
+      "Stock: 2250"
+    ]
+  ],
+  [
+    "totals with product highlighted, before Enter",
+    "ITEMS: | SUBTOTAL: ₹ 0.00 | GST TAX: ₹ 0.00 | Round-off: +₹0.00 | NET PAYABLE | ₹ 0.00 | Round-off | ₹ 90.00/Strip"
+  ],
+  [
+    "after Enter",
+    "DIV::Select Batch (FEFO Order)=",
+    "ITEMS: | SUBTOTAL: ₹ 0.00 | GST TAX: ₹ 0.00 | Round-off: +₹0.00 | NET PAYABLE | ₹ 0.00 | ₹ 90.00 | ₹ 90.00 | ₹ 90.00"
+  ],
+  [
+    "tab 0",
+    "BUTTON:button:+ Ad-hoc Batch="
+  ],
+  [
+    "tab 1",
+    "BUTTON:button:Cancel (Esc)="
+  ],
+  [
+    "tab 2",
+    "BUTTON:button:Select Batch (Enter)="
+  ],
+  [
+    "tab 3",
+    "BODY::LamSuite Billing\nv2.1.1\n\nRetai="
+  ],
+  [
+    "tab 4",
+    "A::LamSuite Billing\nv2.1.1\n\nRetai="
+  ],
+  [
+    "tab 5",
+    "BUTTON:button:QA Pharma Kochi\nQA-PH\nID:4\nCtr="
+  ],
+  [
+    "row",
+    []
+  ]
+]

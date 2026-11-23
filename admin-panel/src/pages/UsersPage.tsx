@@ -127,6 +127,7 @@ export const UsersPage: React.FC = () => {
     allowed_store_ids: number[];
     idle_timeout_minutes: number;
     max_failed_logins: number;
+    is_approver: boolean;
     permissions: UserPermissions;
   }>({
     name: "",
@@ -139,6 +140,7 @@ export const UsersPage: React.FC = () => {
     allowed_store_ids: [],
     idle_timeout_minutes: 15,
     max_failed_logins: 5,
+    is_approver: false,
     permissions: {},
   });
 
@@ -154,6 +156,7 @@ export const UsersPage: React.FC = () => {
     idle_timeout_minutes: number;
     password?: string;
     pin?: string;
+    is_approver: boolean;
     permissions: UserPermissions;
   }>({
     name: "",
@@ -165,6 +168,7 @@ export const UsersPage: React.FC = () => {
     idle_timeout_minutes: 15,
     password: "",
     pin: "",
+    is_approver: false,
     permissions: {},
   });
 
@@ -254,6 +258,7 @@ export const UsersPage: React.FC = () => {
         allowed_store_ids: newUser.allowed_store_ids.length ? newUser.allowed_store_ids : null,
         idle_timeout_minutes: newUser.idle_timeout_minutes,
         max_failed_logins: newUser.max_failed_logins,
+        is_approver: newUser.is_approver,
         permissions: Object.keys(newUser.permissions).length ? newUser.permissions : null,
       };
       if (newUser.pin && newUser.pin.trim()) {
@@ -278,6 +283,7 @@ export const UsersPage: React.FC = () => {
         allowed_store_ids: [],
         idle_timeout_minutes: 15,
         max_failed_logins: 5,
+        is_approver: false,
         permissions: {},
       });
       await fetchUsers();
@@ -299,6 +305,7 @@ export const UsersPage: React.FC = () => {
       idle_timeout_minutes: u.idle_timeout_minutes || 15,
       password: "",
       pin: "",
+      is_approver: Boolean(u.is_approver),
       permissions: normalizePermissions(u.permissions),
     });
   };
@@ -315,6 +322,7 @@ export const UsersPage: React.FC = () => {
         store_id: editFormData.store_id ? Number(editFormData.store_id) : null,
         allowed_store_ids: editFormData.allowed_store_ids.length ? editFormData.allowed_store_ids : null,
         idle_timeout_minutes: editFormData.idle_timeout_minutes,
+        is_approver: editFormData.is_approver,
         permissions: Object.keys(editFormData.permissions).length ? editFormData.permissions : null,
       };
       if (editFormData.password && editFormData.password.trim()) {
@@ -682,6 +690,15 @@ export const UsersPage: React.FC = () => {
                           >
                             <KeyRound className="w-2.5 h-2.5" />
                             <span>No PIN Set</span>
+                          </span>
+                        )}
+                        {u.is_approver && (
+                          <span
+                            title="This account may approve discounts and price changes with its Quick PIN"
+                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-100 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800"
+                          >
+                            <ShieldCheck className="w-2.5 h-2.5" />
+                            <span>Approver</span>
                           </span>
                         )}
                         <span title="Idle timeout">⏱️ {u.idle_timeout_minutes}m</span>
@@ -1185,6 +1202,27 @@ export const UsersPage: React.FC = () => {
                 </div>
               </div>
 
+              <label className="flex items-start gap-2.5 p-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={editFormData.is_approver}
+                  onChange={(e) => setEditFormData({ ...editFormData, is_approver: e.target.checked })}
+                  className="accent-brand-600 mt-0.5"
+                />
+                <span>
+                  <span className="block font-semibold text-slate-800 dark:text-slate-100">
+                    Approval authority (discounts &amp; price changes)
+                  </span>
+                  <span className="block text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">
+                    This account can approve a bill above the counter&apos;s discount or price threshold with its
+                    Quick PIN. A PIN must be set
+                    {!editingUser.has_pin && !(editFormData.pin && editFormData.pin.trim())
+                      ? " — none exists yet, so set one below before this account can approve."
+                      : "."}
+                  </span>
+                </span>
+              </label>
+
               <div>
                 <h4 className="mb-2 flex items-center gap-2 text-xs font-bold text-slate-800 dark:text-slate-100">
                   <Shield className="h-4 w-4 text-brand-600" />
@@ -1372,6 +1410,27 @@ export const UsersPage: React.FC = () => {
                     assigned branch, only the checked branches are reachable; leave both empty for global access.
                   </span>
                 </div>
+
+                <label className="col-span-2 flex items-start gap-2.5 p-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={newUser.is_approver}
+                    onChange={(e) => setNewUser({ ...newUser, is_approver: e.target.checked })}
+                    className="accent-brand-600 mt-0.5"
+                  />
+                  <span>
+                    <span className="block font-semibold text-slate-800 dark:text-slate-100">
+                      Approval authority (discounts &amp; price changes)
+                    </span>
+                    <span className="block text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">
+                      This account can approve a bill above the counter&apos;s discount or price threshold with its
+                      Quick PIN.
+                      {newUser.is_approver && !(newUser.pin && newUser.pin.trim())
+                        ? " No Quick PIN is entered yet — set one above or the account cannot approve."
+                        : ""}
+                    </span>
+                  </span>
+                </label>
 
                 <div className="col-span-2">
                   <label className="block font-medium text-slate-700 dark:text-slate-300 mb-1">

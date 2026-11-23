@@ -19,11 +19,20 @@ use App\Models\StockAdjustment;
 use App\Models\StockTransfer;
 use App\Models\Store;
 use App\Models\SupplierPayment;
+use App\Services\Parties\SupplierBalanceService;
+use App\Models\PaymentAllocation;
+use App\Services\Payments\PaymentAllocationService;
+use App\Services\Purchase\PurchasePostingService;
+use App\Services\Reports\PurchaseRegisterService;
+use App\Services\Sales\PharmacistGate;
+use App\Services\Sales\SalesReturnPricingService;
 use App\Services\Webhook\WebhookOutboxService;
+use App\Support\RestrictedDrugResolver;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
 
 class AdminTransactionController
 {
@@ -38,6 +47,7 @@ class AdminTransactionController
 
         if (is_array($record)) {
             unset($record['patient_name'], $record['doctor_name'], $record['doctor_reg_no'], $record['prescription_no'], $record['prescription_date']);
+            unset($record['pharmacist_id'], $record['pharmacist_name'], $record['pharmacist_reg_no'], $record['pharmacist_confirmed_at']);
             return $record;
         }
 
@@ -45,6 +55,9 @@ class AdminTransactionController
             $record->patient_name = null;
             $record->doctor_name = null;
             $record->doctor_reg_no = null;
+            // A store that sells no scheduled drugs has no pharmacist block at all,
+            // so these leave the payload rather than arriving as nulls.
+            $record->makeHidden(['pharmacist_id', 'pharmacist_name', 'pharmacist_reg_no', 'pharmacist_confirmed_at']);
             if ($record->relationLoaded('items')) {
                 foreach ($record->items as $item) {
                     $item->makeHidden(['is_schedule_h', 'is_schedule_x', 'requires_prescription']);
@@ -179,6 +192,10 @@ class AdminTransactionController
             'items.*.unit_price' => 'nullable|numeric|min:0',
             'items.*.gst_percent' => 'nullable|numeric|min:0',
             'items.*.reason' => 'nullable|string|max:255',
+            // GAP-02 / PHR-004: a return of a restricted bill is confirmed the
+            // same way the sale was.
+            'pharmacist_id' => 'nullable',
+            'pharmacist_pin' => 'nullable|string|max:64',
         ]);
 
         if (empty($validated['original_invoice_id']) && empty($validated['original_invoice_number'])) {
@@ -223,7 +240,27 @@ class AdminTransactionController
 
         $alreadyReturned = $this->returnedBaseUnitsByLine($store->id, $original->invoice_number);
         $resolved = [];
-        $taxLines = [];
+        $pricing = app(\App\Services\Sales\SalesReturnPricingService::class);
+
+        // A return is a reversal of the original document, so the split follows
+        // the place of supply the customer was actually billed under.
+        $storeStateCode = \App\Support\Gst\StateCodes::code($store->state_code) ?: '32';
+        $originalPosCode = \App\Support\Gst\StateCodes::code($original->place_of_supply)
+            ?: \App\Support\Gst\StateCodes::code($original->store_state_code)
+            ?: $storeStateCode;
+        $isInterState = $originalPosCode !== $storeStateCode;
+
+        $credits = [
+            'subtotal' => 0.0,
+            'taxable' => 0.0,
+            'discount' => 0.0,
+            'cgst' => 0.0,
+            'sgst' => 0.0,
+            'igst' => 0.0,
+            'cess' => 0.0,
+            'tax' => 0.0,
+            'total' => 0.0,
+        ];
 
         foreach ($validated['items'] as $index => $item) {
             $lineNumber = $index + 1;
@@ -295,8 +332,28 @@ class AdminTransactionController
                 ], 422);
             }
 
-            $rate = (float) ($item['rate'] ?? $item['unit_price'] ?? $originalItem->unit_price ?? $product->sel_rate ?? 0);
-            $gstPercent = (float) ($item['gst_percent'] ?? $originalItem->gst_percent ?? $product->gst_percent ?? 0);
+            $rate = (float) ($originalItem->unit_price ?? $item['rate'] ?? $item['unit_price'] ?? $product->sel_rate ?? 0);
+            $gstPercent = (float) ($originalItem->gst_percent ?? $item['gst_percent'] ?? $product->gst_percent ?? 0);
+
+            // Credit the share of the line that was really charged — its taxable
+            // value, tax components and discount — never a fresh price.
+            $credit = $pricing->reverseLine(
+                $originalItem,
+                $soldBase,
+                (float) ($alreadyReturned[$lineKey] ?? 0),
+                $baseUnits,
+                $isInterState
+            );
+
+            $credits['subtotal'] += $credit['total_amount'] + $credit['discount_amount'];
+            $credits['taxable'] += $credit['taxable_amount'];
+            $credits['discount'] += $credit['discount_amount'];
+            $credits['cgst'] += $credit['cgst_amount'];
+            $credits['sgst'] += $credit['sgst_amount'];
+            $credits['igst'] += $credit['igst_amount'];
+            $credits['cess'] += $credit['cess_amount'];
+            $credits['tax'] += $credit['tax_amount'];
+            $credits['total'] += $credit['total_amount'];
 
             $resolved[] = [
                 'product' => $product,
@@ -308,42 +365,50 @@ class AdminTransactionController
                 'expiry_date' => $item['expiry_date'] ?? $originalItem->expiry_date,
                 'unit_price' => $rate,
                 'gst_percent' => $gstPercent,
-            ];
-
-            $taxLines[] = [
-                'line_id' => (string) $index,
-                'product_id' => (string) $product->id,
-                'product_name' => $product->name,
-                'hsn_code' => $originalItem->hsn_code ?? $product->hsn_sac_code ?? '',
-                'qty' => $qty,
-                'loose_qty' => $looseQty,
-                'units_per_pack' => $unitsPerPack,
-                'unit_price' => $rate,
-                'rate_basis' => 'sel_rate',
-                'discount_percent' => 0,
-                'discount_amount' => 0,
-                'gst_percent' => $gstPercent,
-                'cess_percent' => 0,
+                'cess_rate' => (float) ($originalItem->cess_rate ?? 0),
+                'credit' => $credit,
             ];
         }
 
-        $taxMode = app(\App\Services\Tax\StoreTaxPolicy::class)->forStore($store->id)['tax_mode'];
+        // PHR-004: a restricted drug comes back over the same registration that
+        // let it out. A bill written before the rule recorded nobody, so any
+        // live pharmacist of the store may still reverse it.
+        $restrictedItems = RestrictedDrugResolver::forLines((int) $store->id, $validated['items']);
+        $pharmacist = PharmacistGate::require(
+            (int) $store->id,
+            $original->counter_id !== null ? (int) $original->counter_id : null,
+            $restrictedItems,
+            $validated['pharmacist_id'] ?? null,
+            $validated['pharmacist_pin'] ?? null,
+            'return',
+            $original
+        );
 
-        $tax = \App\Services\Tax\TaxEngine::calculate([
-            'store_state' => $store->state_code ?: '32',
-            'customer_gstin' => $original->customer_gstin,
-            'place_of_supply' => $original->place_of_supply ?: '32-Kerala',
-            'default_tax_mode' => $taxMode,
-            'is_composition' => in_array($store->gst_type, ['composition', 'no_tax', 'unregistered'], true),
-            'lines' => $taxLines,
-            'auto_round_off' => true,
-        ]);
+        $totals = [
+            'subtotal' => round($credits['subtotal'], 2),
+            'taxable' => round($credits['taxable'], 2),
+            'discount' => round($credits['discount'], 2),
+            'cgst' => round($credits['cgst'], 2),
+            'sgst' => round($credits['sgst'], 2),
+            'igst' => round($credits['igst'], 2),
+            'cess' => round($credits['cess'], 2),
+            'tax' => round($credits['tax'], 2),
+            // A credit note has already been settled by the sale it reverses, so
+            // it is never rounded to the nearest rupee.
+            'total' => round($credits['total'], 2),
+        ];
 
-        $result = DB::transaction(function () use ($store, $original, $validated, $resolved, $tax) {
+        $result = DB::transaction(function () use ($store, $original, $validated, $resolved, $totals, $pharmacist, $restrictedItems) {
             $invoice = Invoice::create([
                 'store_id' => $store->id,
                 'counter_id' => $original->counter_id,
                 'user_id' => $original->user_id,
+                // PHR-005: the return names whoever vouched for taking the
+                // restricted drug back, which is the sale's own pharmacist.
+                'pharmacist_id' => $pharmacist['pharmacist_id'] ?? null,
+                'pharmacist_name' => $pharmacist['pharmacist_name'] ?? null,
+                'pharmacist_reg_no' => $pharmacist['pharmacist_reg_no'] ?? null,
+                'pharmacist_confirmed_at' => $pharmacist['pharmacist_confirmed_at'] ?? null,
                 'module_key' => 'credit_note',
                 'invoice_number' => $this->nextCreditNoteNumber($store->id),
                 'invoice_date' => Carbon::now($store->timezone ?: 'Asia/Kolkata')->toDateString(),
@@ -352,17 +417,17 @@ class AdminTransactionController
                 'customer_phone' => $validated['customer_phone'] ?? $original->customer_phone,
                 'customer_gstin' => $original->customer_gstin,
                 'place_of_supply' => $original->place_of_supply,
-                'subtotal' => $tax['taxable_subtotal'],
-                'taxable_subtotal' => $tax['taxable_subtotal'],
-                'discount_total' => $tax['line_discount_total'] + $tax['bill_discount_total'],
-                'tax_total' => $tax['total_tax'],
-                'cgst_total' => $tax['cgst_total'],
-                'sgst_total' => $tax['sgst_total'],
-                'igst_total' => $tax['igst_total'],
-                'cess_total' => $tax['cess_total'],
-                'round_off' => $tax['round_off'],
-                'grand_total' => $tax['grand_total'],
-                'paid_amount' => $validated['refund_amount'] ?? $tax['grand_total'],
+                'subtotal' => $totals['subtotal'],
+                'taxable_subtotal' => $totals['taxable'],
+                'discount_total' => $totals['discount'],
+                'tax_total' => $totals['tax'],
+                'cgst_total' => $totals['cgst'],
+                'sgst_total' => $totals['sgst'],
+                'igst_total' => $totals['igst'],
+                'cess_total' => $totals['cess'],
+                'round_off' => 0,
+                'grand_total' => $totals['total'],
+                'paid_amount' => $validated['refund_amount'] ?? $totals['total'],
                 'payment_mode' => $validated['refund_mode'] ?? 'Cash',
                 'status' => 'issued',
                 'counter_code' => $original->counter_code,
@@ -371,8 +436,8 @@ class AdminTransactionController
                 'original_invoice_number' => $original->invoice_number,
             ]);
 
-            foreach ($resolved as $index => $line) {
-                $taxLine = $tax['lines'][$index];
+            foreach ($resolved as $line) {
+                $credit = $line['credit'];
                 InvoiceItem::create([
                     'invoice_id' => $invoice->id,
                     'product_id' => $line['product']->id,
@@ -385,16 +450,16 @@ class AdminTransactionController
                     'unit_price' => $line['unit_price'],
                     'mrp' => $line['product']->mrp ?? $line['unit_price'],
                     'discount_percent' => 0,
-                    'discount_amount' => 0,
-                    'taxable_amount' => $taxLine['taxable_amount'],
+                    'discount_amount' => $credit['discount_amount'],
+                    'taxable_amount' => $credit['taxable_amount'],
                     'gst_percent' => $line['gst_percent'],
-                    'cgst_amount' => $taxLine['cgst_amount'],
-                    'sgst_amount' => $taxLine['sgst_amount'],
-                    'igst_amount' => $taxLine['igst_amount'],
-                    'cess_rate' => $taxLine['cess_rate'],
-                    'cess_amount' => $taxLine['cess_amount'],
-                    'tax_amount' => $taxLine['total_tax'],
-                    'total_amount' => $taxLine['total_amount'],
+                    'cgst_amount' => $credit['cgst_amount'],
+                    'sgst_amount' => $credit['sgst_amount'],
+                    'igst_amount' => $credit['igst_amount'],
+                    'cess_rate' => $line['cess_rate'],
+                    'cess_amount' => $credit['cess_amount'],
+                    'tax_amount' => $credit['tax_amount'],
+                    'total_amount' => $credit['total_amount'],
                 ]);
 
                 $batch = ProductBatch::where('store_id', $store->id)
@@ -406,6 +471,19 @@ class AdminTransactionController
                     $batch->increment('stock_qty', $line['base_units']);
                 }
                 $line['product']->increment('current_stock', $line['base_units']);
+            }
+
+            // PHR-005: the confirmation is filed with the credit note it released.
+            if ($pharmacist !== null) {
+                PharmacistGate::record(
+                    (int) $store->id,
+                    $original->counter_id !== null ? (int) $original->counter_id : null,
+                    PharmacistGate::DOCUMENT_RETURN,
+                    (string) $invoice->id,
+                    (string) $invoice->invoice_number,
+                    $pharmacist,
+                    $restrictedItems
+                );
             }
 
             return $invoice->load('items');
@@ -422,29 +500,13 @@ class AdminTransactionController
 
     private function baseUnits($qty, $looseQty, $unitsPerPack): float
     {
-        $upp = max(1, (int) ($unitsPerPack ?: 1));
-        return max(0, (float) $qty) * $upp + max(0, (float) $looseQty);
+        return SalesReturnPricingService::baseUnits($qty, $looseQty, $unitsPerPack);
     }
 
     /** Base units already returned per `productId_batchNo` for an invoice. */
     private function returnedBaseUnitsByLine(int $storeId, string $invoiceNumber): array
     {
-        $prior = Invoice::where('store_id', $storeId)
-            ->whereIn('module_key', ['credit_note', 'sales_return'])
-            ->where('original_invoice_number', $invoiceNumber)
-            ->where('status', '!=', 'cancelled')
-            ->with('items')
-            ->get();
-
-        $map = [];
-        foreach ($prior as $doc) {
-            foreach ($doc->items as $item) {
-                $key = $item->product_id . '_' . ($item->batch_no ?? '');
-                $map[$key] = ($map[$key] ?? 0)
-                    + $this->baseUnits($item->qty, $item->loose_qty, $item->units_per_pack);
-            }
-        }
-        return $map;
+        return app(SalesReturnPricingService::class)->returnedBaseUnits($storeId, $invoiceNumber);
     }
 
     private function nextCreditNoteNumber(int $storeId): string
@@ -837,6 +899,15 @@ class AdminTransactionController
             ], 422);
         }
 
+        // G12: one closed-day rule for every path that reverses a bill — the panel
+        // included. A super administrator can still override, and that leaves an
+        // audit row; everyone else reopens the day first.
+        app(\App\Services\DayClose\StoreDayCloseService::class)->assertDayNotClosed(
+            (int) $invoice->store_id,
+            $invoice->invoice_date?->toDateString(),
+            'admin_invoice_cancel'
+        );
+
         DB::beginTransaction();
         try {
             // 2. Restore stock for each invoice line item
@@ -862,6 +933,13 @@ class AdminTransactionController
                     $customer->decrement('current_balance', $invoice->grand_total);
                 }
             }
+
+            // PAY-05: a receipt that settled this bill is free again.
+            app(PaymentAllocationService::class)->releaseForDocument(
+                PaymentAllocation::DOCUMENT_INVOICE,
+                (int) $invoice->id,
+                $request->user()?->id
+            );
 
             // 4. Update invoice status
             $oldStatus = $invoice->status;
@@ -950,7 +1028,7 @@ class AdminTransactionController
     public function purchases(Request $request): JsonResponse
     {
         $storeId = $request->get('active_store_id');
-        $query = Purchase::with(['items', 'supplier', 'store:id,name,code'])
+        $query = Purchase::with(['items', 'charges', 'supplier', 'store:id,name,code'])
             ->where(function ($q) {
                 $q->whereNull('module_key')
                   ->orWhere('module_key', 'purchase')
@@ -961,6 +1039,8 @@ class AdminTransactionController
         if ($search = $request->query('search')) {
             $query->where(function ($q) use ($search) {
                 $q->where('invoice_number', 'like', "%{$search}%")
+                  ->orWhere('document_number', 'like', "%{$search}%")
+                  ->orWhere('supplier_invoice_no', 'like', "%{$search}%")
                   ->orWhere('supplier_name', 'like', "%{$search}%");
             });
         }
@@ -968,16 +1048,36 @@ class AdminTransactionController
         $query->orderBy('invoice_date', 'desc')->orderBy('id', 'desc');
 
         if ($request->query('export') === 'true') {
-            return response()->json(['data' => $query->get()]);
+            return response()->json(['data' => $this->withChargeRegister($query->get())]);
         }
 
         $perPage = min((int) $request->query('per_page', 25), 500);
-        return response()->json($query->paginate($perPage));
+        $page = $query->paginate($perPage);
+        $this->withChargeRegister($page->getCollection());
+
+        return response()->json($page);
+    }
+
+    /**
+     * REP-007: every register row answers "what did I buy" and "what else did the bill make me
+     * pay" as two blocks, so the totals reconcile to the payable instead of hiding inside it.
+     */
+    private function withChargeRegister(\Illuminate\Support\Collection $purchases): \Illuminate\Support\Collection
+    {
+        $register = new PurchaseRegisterService();
+
+        foreach ($purchases as $purchase) {
+            $purchase->setAttribute('charge_register', $register->summary($purchase));
+        }
+
+        return $purchases;
     }
 
     public function showPurchase(string $id): JsonResponse
     {
-        $purchase = Purchase::with(['items', 'supplier', 'store'])->findOrFail($id);
+        $purchase = Purchase::with(['items', 'charges', 'supplier', 'store'])->findOrFail($id);
+        $this->withChargeRegister(collect([$purchase]));
+
         return response()->json($purchase);
     }
 
@@ -1099,12 +1199,27 @@ class AdminTransactionController
 
         DB::beginTransaction();
         try {
+            $goodsReceiptNumber = $this->nextGoodsReceiptNumber((int) $order->store_id);
+            $posting = app(PurchasePostingService::class);
+
+            // A receipt against an order is still a supplier bill, so the same bill number
+            // cannot be received twice for that supplier (PUR-06).
+            $posting->assertUniqueBill(
+                (int) $order->store_id,
+                'purchase',
+                $order->supplier_id ? (int) $order->supplier_id : null,
+                $order->supplier_name,
+                $validated['supplier_invoice_no'] ?? $goodsReceiptNumber,
+            );
+
             $purchase = Purchase::create([
                 'store_id' => $order->store_id,
                 'supplier_id' => $order->supplier_id,
                 'supplier_name' => $order->supplier_name,
                 'supplier_gstin' => $order->supplier_gstin,
-                'invoice_number' => $validated['supplier_invoice_no'] ?? $this->nextGoodsReceiptNumber((int) $order->store_id),
+                'invoice_number' => $validated['supplier_invoice_no'] ?? $goodsReceiptNumber,
+                'document_number' => $goodsReceiptNumber,
+                'supplier_invoice_no' => $validated['supplier_invoice_no'] ?? null,
                 'invoice_date' => $validated['invoice_date'] ?? now()->toDateString(),
                 'module_key' => 'purchase',
                 'subtotal' => $order->subtotal,
@@ -1116,6 +1231,7 @@ class AdminTransactionController
                 'is_interstate' => $order->is_interstate,
                 'is_rcm' => $order->is_rcm,
                 'itc_eligibility' => $order->itc_eligibility,
+                'place_of_supply' => $order->place_of_supply,
                 'grand_total' => $order->grand_total,
                 'paid_amount' => 0,
                 'status' => 'received',
@@ -1145,6 +1261,19 @@ class AdminTransactionController
                 $item->update(['received_qty' => (float) $item->received_qty + $qty]);
             }
 
+            // Receiving an order is the moment its goods become the store's stock and its
+            // value becomes the supplier's debt — the one posting path does both (PUR-05).
+            $posting->postInward(
+                $purchase,
+                [],
+                PurchaseItem::where('purchase_id', $purchase->id)->get(),
+                0.0,
+                null,
+                null,
+                $request->user()?->id
+            );
+            $posting->stampBillKey($purchase);
+
             $previousStatus = $order->status;
             $order->update([
                 'status' => 'completed',
@@ -1170,6 +1299,13 @@ class AdminTransactionController
                 'purchase' => $purchase->fresh()->load('items'),
                 'purchase_order' => $order->fresh()->load('items'),
             ], 201);
+        } catch (ValidationException $e) {
+            DB::rollBack();
+
+            return response()->json([
+                'message' => $e->validator->errors()->first(),
+                'errors' => $e->errors(),
+            ], 422);
         } catch (\Throwable $e) {
             DB::rollBack();
             return response()->json(['message' => 'Goods receipt failed: ' . $e->getMessage()], 500);
@@ -1529,14 +1665,7 @@ class AdminTransactionController
 
     private function nextExpenseNumber(int $storeId): string
     {
-        $sequence = Expense::where('store_id', $storeId)->count();
-
-        do {
-            $sequence++;
-            $number = 'EXP-' . str_pad((string) $sequence, 5, '0', STR_PAD_LEFT);
-        } while (Expense::where('store_id', $storeId)->where('expense_number', $number)->exists());
-
-        return $number;
+        return Expense::nextNumberForStore($storeId);
     }
 
     public function customerPayments(Request $request): JsonResponse
@@ -1560,15 +1689,28 @@ class AdminTransactionController
             'reference_no' => 'nullable|string|max:100',
             'notes' => 'nullable|string|max:500',
             'payment_date' => 'nullable|date',
+            'allocations' => 'nullable|array',
+            'allocations.*.invoice_id' => 'nullable|integer',
+            'allocations.*.amount' => 'nullable|numeric|min:0.01',
         ]);
 
         $validated['payment_date'] = $validated['payment_date'] ?? now()->toDateString();
         $validated['created_by'] = $request->user() ? $request->user()->id : null;
+        $allocations = $validated['allocations'] ?? null;
+        unset($validated['allocations']);
 
         DB::beginTransaction();
         try {
+            $customer = Party::where('store_id', $validated['store_id'])
+                ->findOrFail($validated['customer_id']);
             $payment = CustomerPayment::create($validated);
-            $customer = Party::findOrFail($validated['customer_id']);
+            $allocationResult = app(PaymentAllocationService::class)->allocateCustomerPayment(
+                (int) $payment->id,
+                (int) $validated['store_id'],
+                (int) $customer->id,
+                (float) $validated['amount'],
+                $allocations
+            );
             $oldBalance = $customer->current_balance;
             $customer->decrement('current_balance', $validated['amount']);
 
@@ -1604,7 +1746,13 @@ class AdminTransactionController
                 'success' => true,
                 'payment' => $payment->load(['customer:id,name,phone', 'creator:id,name']),
                 'new_balance' => $customer->current_balance,
+                'allocations' => $allocationResult['allocations'],
+                'allocated_amount' => $allocationResult['allocated'],
+                'unallocated_amount' => $allocationResult['unallocated'],
             ], 201);
+        } catch (\DomainException $e) {
+            DB::rollBack();
+            return response()->json(['message' => $e->getMessage()], 422);
         } catch (\Throwable $e) {
             DB::rollBack();
             return response()->json(['message' => 'Failed to record customer payment: ' . $e->getMessage()], 500);
@@ -1647,15 +1795,28 @@ class AdminTransactionController
             'reference_no' => 'nullable|string|max:100',
             'notes' => 'nullable|string|max:500',
             'payment_date' => 'nullable|date',
+            'allocations' => 'nullable|array',
+            'allocations.*.purchase_id' => 'nullable|integer',
+            'allocations.*.amount' => 'nullable|numeric|min:0.01',
         ]);
 
         $validated['payment_date'] = $validated['payment_date'] ?? now()->toDateString();
         $validated['created_by'] = $request->user() ? $request->user()->id : null;
+        $allocations = $validated['allocations'] ?? null;
+        unset($validated['allocations']);
 
         DB::beginTransaction();
         try {
+            $supplier = Party::where('store_id', $validated['store_id'])
+                ->findOrFail($validated['supplier_id']);
             $payment = SupplierPayment::create($validated);
-            $supplier = Party::findOrFail($validated['supplier_id']);
+            $allocationResult = app(PaymentAllocationService::class)->allocateSupplierPayment(
+                (int) $payment->id,
+                (int) $validated['store_id'],
+                (int) $supplier->id,
+                (float) $validated['amount'],
+                $allocations
+            );
             $oldBalance = $supplier->current_balance;
             $supplier->decrement('current_balance', $validated['amount']);
 
@@ -1673,11 +1834,80 @@ class AdminTransactionController
                 'success' => true,
                 'payment' => $payment->load(['supplier:id,name,phone,gstin', 'creator:id,name']),
                 'new_balance' => $supplier->current_balance,
+                'allocations' => $allocationResult['allocations'],
+                'allocated_amount' => $allocationResult['allocated'],
+                'unallocated_amount' => $allocationResult['unallocated'],
             ], 201);
+        } catch (\DomainException $e) {
+            DB::rollBack();
+            return response()->json(['message' => $e->getMessage()], 422);
         } catch (\Throwable $e) {
             DB::rollBack();
             return response()->json(['message' => 'Failed to record supplier payment: ' . $e->getMessage()], 500);
         }
+    }
+
+    /**
+     * PAY-05: the documents a receipt is allowed to settle, oldest debt first —
+     * the same list the allocation service walks when nobody names the bills.
+     */
+    public function outstandingDocuments(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'store_id' => 'required|integer',
+            'party_type' => 'required|string|in:customer,supplier',
+            'party_id' => 'required|integer',
+        ]);
+
+        $storeId = (int) $validated['store_id'];
+        $partyId = (int) $validated['party_id'];
+        $epsilon = PaymentAllocationService::EPSILON;
+
+        if ($validated['party_type'] === 'customer') {
+            $documents = Invoice::where('store_id', $storeId)
+                ->where('customer_id', $partyId)
+                ->where('module_key', 'invoice')
+                ->where('status', '!=', 'cancelled')
+                ->whereRaw('paid_amount < grand_total - ?', [$epsilon])
+                ->orderBy('invoice_date')
+                ->orderBy('id')
+                ->get()
+                ->map(fn (Invoice $invoice) => [
+                    'document_type' => 'invoice',
+                    'document_id' => (int) $invoice->id,
+                    'document_number' => $invoice->invoice_number,
+                    'document_date' => optional($invoice->invoice_date)->toDateString(),
+                    'grand_total' => (float) $invoice->grand_total,
+                    'paid_amount' => (float) $invoice->paid_amount,
+                    'outstanding' => round(max(0, (float) $invoice->grand_total - (float) $invoice->paid_amount), 2),
+                ]);
+
+            return response()->json(['data' => $documents]);
+        }
+
+        $documents = Purchase::where('store_id', $storeId)
+            ->where('supplier_id', $partyId)
+            ->where('status', '!=', 'cancelled')
+            ->whereRaw('paid_amount < grand_total - ?', [$epsilon])
+            ->where(function ($q) {
+                $q->whereNull('module_key')->orWhereNotIn('module_key', [
+                    'purchase_order', 'order', 'purchase_return', 'debit_note',
+                ]);
+            })
+            ->orderBy('invoice_date')
+            ->orderBy('id')
+            ->get()
+            ->map(fn (Purchase $purchase) => [
+                'document_type' => 'purchase',
+                'document_id' => (int) $purchase->id,
+                'document_number' => $purchase->invoice_number ?: $purchase->document_number,
+                'document_date' => optional($purchase->invoice_date)->toDateString(),
+                'grand_total' => (float) $purchase->grand_total,
+                'paid_amount' => (float) $purchase->paid_amount,
+                'outstanding' => round(max(0, (float) $purchase->grand_total - (float) $purchase->paid_amount), 2),
+            ]);
+
+        return response()->json(['data' => $documents]);
     }
 
     /**

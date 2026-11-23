@@ -10,6 +10,7 @@ use App\Models\DeviceSession;
 use App\Models\Store;
 use App\Models\User;
 use App\Models\UserSession;
+use App\Services\Auth\PinPolicy;
 use Laravel\Sanctum\PersonalAccessToken;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -180,7 +181,7 @@ class StaffAuthController
 
         // 4. Check Lockout State strictly on this user
         if ($user->locked_until) {
-            if ($user->locked_until->isPast()) {
+            if (!PinPolicy::isLocked($user->locked_until)) {
                 // Auto-clear expired lockout
                 $user->update(['locked_until' => null, 'failed_login_attempts' => 0]);
             } elseif (!empty($validated['password']) && Hash::check($validated['password'], $user->password)) {
@@ -230,11 +231,12 @@ class StaffAuthController
         // 6. Handle Failed Attempt strictly on this user
         if (!$isValid) {
             $user->increment('failed_login_attempts');
-            $maxAttempts = $user->max_failed_logins ?? 5;
+            $maxAttempts = PinPolicy::attemptsAllowed($user->max_failed_logins);
+            $lockedUntil = PinPolicy::lockoutUntil((int) $user->failed_login_attempts, $maxAttempts);
 
-            if ($user->failed_login_attempts >= $maxAttempts) {
+            if ($lockedUntil !== null) {
                 $user->update([
-                    'locked_until' => now()->addMinutes(15),
+                    'locked_until' => $lockedUntil,
                     'failed_login_attempts' => 0,
                 ]);
 
@@ -256,11 +258,11 @@ class StaffAuthController
                 return response()->json([
                     'message' => 'Account is temporarily locked due to consecutive failed attempts. Please try again later or contact your administrator.',
                     'locked' => true,
-                    'locked_until' => now()->addMinutes(15)->toIso8601String(),
+                    'locked_until' => $lockedUntil->toIso8601String(),
                 ], 423);
             }
 
-            $remaining = $maxAttempts - $user->failed_login_attempts;
+            $remaining = PinPolicy::remainingAttempts((int) $user->failed_login_attempts, $maxAttempts);
 
             AuditLog::log(
                 'staff_login_failed',
@@ -480,7 +482,7 @@ class StaffAuthController
             ->get();
 
         $staffData = $users->map(function (User $u) use ($store) {
-            $isLocked = !empty($u->locked_until) && $u->locked_until->isFuture();
+            $isLocked = PinPolicy::isLocked($u->locked_until);
             return [
                 'id' => (string)$u->id,
                 'store_id' => (string)$store->id,
@@ -509,7 +511,7 @@ class StaffAuthController
             ->whereIn('role', ['super_admin', 'admin'])
             ->get()
             ->map(function (User $u) {
-                $isLocked = !empty($u->locked_until) && $u->locked_until->isFuture();
+                $isLocked = PinPolicy::isLocked($u->locked_until);
                 return [
                     'id' => (string)$u->id,
                     'store_id' => null,
@@ -754,7 +756,11 @@ class StaffAuthController
         $user = $request->user();
 
         if ($deviceUuid) {
-            DeviceSession::recordLogout($deviceUuid);
+            // G1-SEC: only a workstation of the caller's own store can be signed off.
+            $storeId = \App\Support\RequestTenant::storeId($request);
+            if ($storeId !== null && DeviceSession::where('store_id', $storeId)->where('device_uuid', $deviceUuid)->exists()) {
+                DeviceSession::recordLogout($deviceUuid);
+            }
         } elseif ($user) {
             DeviceSession::where('user_id', $user->id)
                 ->where('is_active', true)

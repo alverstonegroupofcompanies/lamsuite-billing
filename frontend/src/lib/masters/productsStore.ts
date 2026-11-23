@@ -10,6 +10,7 @@ export interface ProductBatch {
   stock_qty: number;
   mrp?: number;
   purchase_rate?: number;
+  landed_cost_rate?: number;
   selling_rate?: number;
   rack_location?: string;
   shelf_location?: string;

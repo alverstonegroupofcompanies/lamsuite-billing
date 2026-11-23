@@ -30,6 +30,7 @@ A product's **batches, rates, barcodes, groups, brands, manufacturers, images, p
 | R9 | Rate/tax revisions apply per store. A multi-store price change is N separate previewed jobs. | Copy-tool + revision tests |
 | R10 | Imports target exactly one store, confirmed by name on the confirmation step. Exports are store-filtered. | Import tests |
 | R11 | Units are store-scoped: every unit row belongs to one store, defaults are seeded per store (store creation, billing app start, first use), and the set can be reset to defaults. An assigned unit cannot be deleted until its products are reassigned to a replacement unit. | `UnitStoreScopeTest` + till dom tests |
+| R12 | **Charge heads are store-scoped** (CR-C, 2026-11-19): every `master_lookups` row of type `charge_head` belongs to exactly one store (`store_id NOT NULL`), the defaults (`Freight`, `Packing`, `Loading/Unloading`, `Insurance`, `Other`) are seeded per store, the set can be reset, and a head already referenced by purchase charges cannot be deleted until reassigned. A till's delta pull for `charge_head` returns only its own store's rows — the same branch as units, never the legacy shared+own fallback. Posted charges carry the head **code and name** on the row, so a bill never depends on another store's master. | `ChargeHeadStoreScopeTest` + till tests |
 
 ### Flows under P-STORE-SCOPE
 
@@ -38,6 +39,7 @@ A product's **batches, rates, barcodes, groups, brands, manufacturers, images, p
 - **Consolidated reports** group lines by an admin-chosen matching key per run (barcode → item code → name+unit) and list unmatched lines separately; no merges are stored.
 - **Offline tills**: products created offline sit in a "waiting to sync" state and are persisted before any success is shown; conflicts route to the sync centre, never overwrite another store's row.
 - **Unit lifecycle per store**: the default unit set (Strip, Tablet, Capsule, Bottle, Box, Kilogram, Litre, …) is seeded when a store is created, when the billing app starts, and on first units read; "Reset to defaults" restores missing defaults, removes unused custom units and keeps assigned ones; deleting a unit that products reference is rejected with the referencing product list and completes only as reassign-then-delete. Till unit deltas pull only their own store's units.
+- **Charge-head lifecycle per store** (R12): the default charge-head set is seeded when a store is created and on the first charge-head read from either app; "Reset to defaults" restores missing defaults, removes unreferenced custom heads and keeps referenced ones; deleting a head that posted charges reference is rejected with the referencing bills listed and completes only as reassign-then-delete. Till pull-delta for `charge_head` delivers only that store's rows.
 
 ### Shared vs store-scoped reference
 
@@ -47,6 +49,7 @@ A product's **batches, rates, barcodes, groups, brands, manufacturers, images, p
 | Groups, brands, manufacturers | Store-scoped (copies travel with the product on copy) |
 | Products, barcodes, rates, images, batches, stock, history | Store-scoped |
 | Parties, invoices, purchases, payments | Store-scoped (separate spec) |
+| Charge heads (`master_lookups.type = charge_head`) | Store-scoped (R12) — never shared, never NULL-store |
 | Users, devices, counters | Per existing IAM spec |
 
 ### CI guards
@@ -54,3 +57,4 @@ A product's **batches, rates, barcodes, groups, brands, manufacturers, images, p
 - `ProductStoreScopeSchemaTest` — schema shape (R1–R5) and runtime cross-store insert impossibility (R3).
 - `ProductQueryScopeTest` — static scan: any `Product::` query in `app/` must be store-scoped or carry a `@store-scope-ok: <reason>` annotation for reviewed cross-store admin aggregation code (R6).
 - `UnitStoreScopeTest` — per-store unit seeding, isolation, reset, delete guard with reassignment, cross-store 404, per-store pull-delta (R11).
+- `ChargeHeadStoreScopeTest` — per-store charge-head seeding, isolation, reset to defaults, delete guard with reassignment, cross-store 404, per-store pull-delta branch, and that a posted purchase charge keeps its head code/name when the head is deleted (R12).

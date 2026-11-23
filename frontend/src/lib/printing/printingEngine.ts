@@ -79,6 +79,12 @@ export interface InvoicePrintData {
   cess_total?: number;
   round_off: number;
   grand_total: number;
+  /**
+   * CR-C: the extra costs a supplier billed besides the goods. Only a purchase document ever
+   * carries them, and when it does the paper must name each one — the grand total already contains
+   * the money, so a document that omits the rows does not foot against its own payable.
+   */
+  charges?: PurchaseChargePrintLine[];
   amount_in_words?: string;
   upi_vpa?: string;
   irn?: string;
@@ -124,6 +130,135 @@ export interface HsnSummaryRow {
   cessRate: number;
   cessAmount: number;
   totalTax: number;
+}
+
+/** One charge head as it prints on a purchase document (CR-C). */
+export interface PurchaseChargePrintLine {
+  head_code?: string | null;
+  head_name?: string | null;
+  amount?: number | null;
+  taxable_amount?: number | null;
+  total_tax?: number | null;
+  total_amount?: number | null;
+  paid_separately?: boolean | number | null;
+  in_payable?: boolean | number | null;
+}
+
+const printFlagOn = (value: unknown): boolean => value === 1 || value === true || value === "1";
+
+const printRupees = (value: number | null | undefined): string =>
+  `₹ ${round2(Number(value) || 0).toFixed(2)}`;
+
+export const chargeName = (charge: PurchaseChargePrintLine): string =>
+  String(charge.head_name || charge.head_code || "Charge");
+
+export const chargeTotalOf = (charge: PurchaseChargePrintLine): number =>
+  round2(Number(charge.total_amount ?? charge.amount) || 0);
+
+const chargeTaxableOf = (charge: PurchaseChargePrintLine): number =>
+  round2(Number(charge.taxable_amount ?? charge.amount) || 0);
+
+const chargeTaxOf = (charge: PurchaseChargePrintLine): number => round2(Number(charge.total_tax) || 0);
+
+export const chargeSeparate = (charge: PurchaseChargePrintLine): boolean => printFlagOn(charge.paid_separately);
+
+/**
+ * Whether the charge sits inside what the bill owes the supplier. A row printed without the fact
+ * falls back to the pre-CR-C-11 rule it was keyed under — paid separately meant outside — because
+ * the paper must not silently claim a rupee is in the payable when the engine left it out.
+ */
+export const chargeInPayable = (charge: PurchaseChargePrintLine): boolean =>
+  charge.in_payable === undefined || charge.in_payable === null
+    ? !chargeSeparate(charge)
+    : printFlagOn(charge.in_payable);
+
+/** The charges a document owns: a row of zero rupees names nothing and is left off the paper. */
+export function printChargeRows(data: { charges?: PurchaseChargePrintLine[] | null }): PurchaseChargePrintLine[] {
+  return (data.charges || []).filter((charge) => Math.abs(chargeTotalOf(charge)) >= 0.005);
+}
+
+const sumBy = (rows: PurchaseChargePrintLine[], pick: (row: PurchaseChargePrintLine) => number): number =>
+  round2(rows.reduce((sum, row) => sum + pick(row), 0));
+
+/** The purchase document's own charge block — each head, its taxable value, its tax, its total. */
+export function purchaseChargesBlockHtml(rows: PurchaseChargePrintLine[]): string {
+  if (!rows.length) return "";
+
+  const inPayable = rows.filter(chargeInPayable);
+  const outside = rows.filter((row) => !chargeInPayable(row));
+
+  const body = rows
+    .map(
+      (row) => `<tr>
+            <td style="padding: 2px 6px; border-bottom: 1px solid #e2e8f0;">${chargeName(row)}${
+              chargeSeparate(row) ? ' <span style="color:#64748b;">*</span>' : ""
+            }</td>
+            <td style="padding: 2px 6px; text-align: right; border-bottom: 1px solid #e2e8f0;">${printRupees(
+              chargeTaxableOf(row)
+            )}</td>
+            <td style="padding: 2px 6px; text-align: right; border-bottom: 1px solid #e2e8f0;">${printRupees(
+              chargeTaxOf(row)
+            )}</td>
+            <td style="padding: 2px 6px; text-align: right; border-bottom: 1px solid #e2e8f0; font-weight: 700;">${printRupees(
+              chargeTotalOf(row)
+            )}</td>
+          </tr>`
+    )
+    .join("");
+
+  return `<div style="width: 340px; border: 1px solid #cbd5e1; border-radius: 4px; background: #f8fafc; padding: 6px 10px; margin-bottom: 8px;">
+          <div style="font-weight: 800; font-size: 10px; text-transform: uppercase; color: #1e3a8a; margin-bottom: 3px;">Charges on this bill</div>
+          <table style="width: 100%; border-collapse: collapse; font-size: 9.5px;">
+            <thead>
+              <tr style="color: #475569;">
+                <th style="text-align: left; padding: 2px 6px; border-bottom: 1px solid #cbd5e1;">Head</th>
+                <th style="text-align: right; padding: 2px 6px; border-bottom: 1px solid #cbd5e1;">Taxable</th>
+                <th style="text-align: right; padding: 2px 6px; border-bottom: 1px solid #cbd5e1;">GST</th>
+                <th style="text-align: right; padding: 2px 6px; border-bottom: 1px solid #cbd5e1;">Total</th>
+              </tr>
+            </thead>
+            <tbody>${body}</tbody>
+          </table>
+          <div style="margin-top: 4px; font-size: 9.5px; color: #475569;">
+            In payable ${printRupees(sumBy(inPayable, chargeTotalOf))}${
+              outside.length ? ` · paid separately outside this bill ${printRupees(sumBy(outside, chargeTotalOf))} *` : ""
+            }
+          </div>
+        </div>`;
+}
+
+/**
+ * The same fact inside a totals column that only has room for one line per figure: the charges that
+ * are part of the payable foot into the grand total printed under them, so they read as lines, not
+ * as an unexplained difference.
+ */
+export function invoiceChargeTotalLines(rows: PurchaseChargePrintLine[]): string {
+  return rows
+    .filter(chargeInPayable)
+    .map(
+      (row) =>
+        `<div class="total-line"><span>${chargeName(row)} — taxable ${printRupees(
+          chargeTaxableOf(row)
+        )}, GST ${printRupees(chargeTaxOf(row))}:</span><span style="font-weight: 600;">${printRupees(
+          chargeTotalOf(row)
+        )}</span></div>`
+    )
+    .join("");
+}
+
+/** Money handed to a courier or a landlord rather than the supplier: a memo, because it is not in the total. */
+export function invoiceChargeMemoLines(rows: PurchaseChargePrintLine[]): string {
+  const outside = rows.filter((row) => !chargeInPayable(row));
+  if (!outside.length) return "";
+
+  return outside
+    .map(
+      (row) =>
+        `<div class="total-line"><span>${chargeName(row)} — paid separately, outside this bill:</span><span style="font-weight: 600;">${printRupees(
+          chargeTotalOf(row)
+        )}</span></div>`
+    )
+    .join("");
 }
 
 export function round2(n: number): number {
@@ -1010,7 +1145,9 @@ export class PrintingEngine {
                 ${cessTotal > 0 ? `<div class="total-line"><span>Cess:</span><span style="font-weight: 600;">₹ ${cessTotal.toFixed(2)}</span></div>` : ""}
                 <div class="total-line"><span>Total Tax:</span><span style="font-weight: 600;">₹ ${data.tax_total.toFixed(2)}</span></div>
                 ${data.round_off ? `<div class="total-line"><span>Round Off:</span><span style="font-weight: 600;">${data.round_off > 0 ? "+" : ""}₹ ${data.round_off.toFixed(2)}</span></div>` : ""}
+                ${invoiceChargeTotalLines(printChargeRows(data))}
                 <div class="grand-total-line"><span>Grand Total:</span><span>₹ ${data.grand_total.toFixed(2)}</span></div>
+                ${invoiceChargeMemoLines(printChargeRows(data))}
                 ${data.payments && data.payments.length > 0 ? `
                 <div style="border-top: 1px dashed #cbd5e1; margin-top: 5px; padding-top: 4px; font-size: 8.5px;">
                   ${data.payments.map((p) => `
@@ -3556,6 +3693,7 @@ export class PrintingEngine {
         ${
           isLastPage
             ? `
+        ${purchaseChargesBlockHtml(printChargeRows(data))}
         <div style="display: flex; justify-content: flex-end; margin-top: 10px;">
           <div style="width: 240px; border: 1px solid #cbd5e1; border-radius: 4px; background: #f8fafc; padding: 6px 10px;">
             <div style="display: flex; justify-content: space-between;"><span>Taxable Subtotal:</span><span>₹ ${(data.subtotal || 0).toFixed(2)}</span></div>
