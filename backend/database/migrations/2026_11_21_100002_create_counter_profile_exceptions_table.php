@@ -19,6 +19,12 @@ return new class extends Migration
 {
     public function up(): void
     {
+        // MySQL has no transactional DDL: an earlier run that died on the
+        // over-long index name left this table behind without recording the
+        // migration. up() only runs when unrecorded, so the table can only be
+        // that empty leftover.
+        Schema::dropIfExists('counter_profile_exceptions');
+
         Schema::create('counter_profile_exceptions', function (Blueprint $table) {
             $table->id();
             $table->foreignId('store_id')->constrained('stores')->cascadeOnDelete();
@@ -38,7 +44,8 @@ return new class extends Migration
             $table->timestamps();
 
             $table->index(['store_id', 'status', 'detected_at']);
-            $table->index(['counter_id', 'document_type', 'document_id']);
+            // Named explicitly: the generated name is 69 chars, past MySQL's 64.
+            $table->index(['counter_id', 'document_type', 'document_id'], 'cpe_counter_document_index');
         });
     }
 
