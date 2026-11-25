@@ -24,6 +24,7 @@ import { ImportWizardModal } from "../lib/data-exchange/ui/ImportWizardModal";
 import { ExportDialogModal } from "../lib/data-exchange/ui/ExportDialogModal";
 import { ImportHistoryModal } from "../lib/data-exchange/ui/ImportHistoryModal";
 import { gstStatutoryExporter } from "../lib/data-exchange/engine/gstExporter";
+import { companySettingsService } from "../lib/settings/companySettingsService";
 
 export const ImportExportHubPage: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -125,13 +126,15 @@ export const ImportExportHubPage: React.FC = () => {
             <span>Launch Import Wizard</span>
           </button>
 
-          <a
-            href="/migration"
-            className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-indigo-600 text-white text-xs font-bold hover:bg-indigo-700 shadow-sm transition-colors cursor-pointer"
-          >
-            <Sparkles className="h-4 w-4" />
-            <span>Store Data Migration Wizard</span>
-          </a>
+          {companySettingsService.isMigrationAllowed() && (
+            <a
+              href="/migration"
+              className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-indigo-600 text-white text-xs font-bold hover:bg-indigo-700 shadow-sm transition-colors cursor-pointer"
+            >
+              <Sparkles className="h-4 w-4" />
+              <span>Store Data Migration Wizard</span>
+            </a>
+          )}
 
           <button
             onClick={() => setIsHistoryOpen(true)}

@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import {
   Database,
   ArrowRight,
@@ -8,158 +8,246 @@ import {
   RotateCcw,
   ShieldCheck,
   FileText,
-  Upload,
   Server,
   Smartphone,
   BarChart,
   RefreshCw,
   FolderOpen,
+  History,
 } from "lucide-react";
 import {
-  clientMigrationEngine,
-  type MigrationPrecheckResult,
-  type ClientMigrationRunResult,
-} from "../lib/migration/clientMigrationEngine";
-import { API_BASE_URL, LEGACY_API_URL } from "../config/env";
+  MigrationRequestError,
+  tillMigrationService,
+  type MigrationRun,
+  type MigrationSourceType,
+  type PrecheckReport,
+  type StartResult,
+} from "../lib/migration/tillMigrationService";
+import { LEGACY_API_URL } from "../config/env";
+import { companySettingsService } from "../lib/settings/companySettingsService";
+
+/**
+ * MIG-01 — the wizard runs the server pipeline.
+ *
+ * It used to import into this workstation's own SQLite copy and call that a
+ * migration: six green steps, and the store's database stayed empty. Every
+ * action here is now one call to /api/till/migrations/*, so the numbers on the
+ * screen are the numbers the branch's database actually holds, and the cutover
+ * phrase is the server's, not a string this page invented.
+ */
+
+const STEPS = [
+  "1. Source Setup",
+  "2. Pre-Check",
+  "3. Field Mapping",
+  "4. Dry Run",
+  "5. Migration & Reconciliation",
+  "6. Final Cutover",
+];
+
+const explain = (err: unknown): string => {
+  if (err instanceof MigrationRequestError) {
+    if (err.code === "data_migration_disabled") {
+      return `${err.message} (Switched in the admin panel under Menu & Feature Control.)`;
+    }
+
+    if (err.code === "counter_action_not_permitted") {
+      return `This counter's permission profile does not include the Migration screen. ${err.message}`;
+    }
+
+    if (err.status === 401) {
+      return "The server no longer accepts this terminal's device token. Re-claim the counter, then try again.";
+    }
+  }
+
+  return err instanceof Error ? err.message : String(err);
+};
 
 export const DataMigrationPage: React.FC = () => {
   const [currentStep, setCurrentStep] = useState<number>(1);
-  const [sourceType, setSourceType] = useState<"api" | "file" | "device">("api");
+  const [sourceType, setSourceType] = useState<MigrationSourceType>("api");
   const [apiUrl, setApiUrl] = useState<string>(LEGACY_API_URL);
   const [apiToken, setApiToken] = useState<string>("");
-  const [fileContent, setFileContent] = useState<string>("");
-  const [fileName, setFileName] = useState<string>("");
+  const [legacyStoreId, setLegacyStoreId] = useState<string>("");
+  const [bundleFile, setBundleFile] = useState<File | null>(null);
+  const [bundleRef, setBundleRef] = useState<string | null>(null);
   const [deviceJson, setDeviceJson] = useState<string>("");
-  const [storeId] = useState<number>(1);
 
   const [loading, setLoading] = useState<boolean>(false);
-  const [loadedSourceData, setLoadedSourceData] = useState<any>(null);
-  const [precheck, setPrecheck] = useState<MigrationPrecheckResult | null>(null);
-  const [migrationResult, setMigrationResult] = useState<ClientMigrationRunResult | null>(null);
+  const [busyLabel, setBusyLabel] = useState<string>("");
+  const [runs, setRuns] = useState<MigrationRun[]>([]);
+  const [precheck, setPrecheck] = useState<PrecheckReport | null>(null);
+  const [dryRun, setDryRun] = useState<StartResult | null>(null);
+  const [liveRun, setLiveRun] = useState<StartResult | null>(null);
   const [cutoverPhrase, setCutoverPhrase] = useState<string>("");
-  const [cutoverSuccess, setCutoverSuccess] = useState<string | null>(null);
+  const [cutoverDone, setCutoverDone] = useState<MigrationRun | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setFileName(file.name);
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      setFileContent(event.target?.result as string);
-    };
-    reader.readAsText(file);
+  const refreshRuns = useCallback(async () => {
+    try {
+      setRuns(await tillMigrationService.list());
+    } catch {
+      // An unclaimed terminal has no history to show; the action itself reports why.
+    }
+  }, []);
+
+  useEffect(() => {
+    refreshRuns();
+  }, [refreshRuns]);
+
+  /**
+   * The config the server reads this source with. A bundle is uploaded once and
+   * referred to by the reference the upload issued.
+   */
+  const sourceConfig = async (): Promise<Record<string, unknown>> => {
+    if (sourceType === "api") {
+      if (!apiUrl.trim()) {
+        throw new Error("Enter the legacy server URL, e.g. https://admin.example.com");
+      }
+
+      if (!apiToken.trim()) {
+        throw new Error(
+          `The legacy pull needs a token. Mint one at ${LEGACY_API_URL}/admin/migration-token against the store being migrated.`
+        );
+      }
+
+      return {
+        url: apiUrl.trim(),
+        token: apiToken.trim(),
+        ...(legacyStoreId.trim() ? { store_id: legacyStoreId.trim() } : {}),
+      };
+    }
+
+    if (sourceType === "file") {
+      if (bundleRef) {
+        return { bundle_ref: bundleRef };
+      }
+
+      if (!bundleFile) {
+        throw new Error("Choose the JSON bundle produced by lamsuite:export-store first.");
+      }
+
+      setBusyLabel("Uploading bundle…");
+      const uploaded = await tillMigrationService.uploadBundle(bundleFile);
+      setBundleRef(uploaded.bundle_ref);
+
+      return { bundle_ref: uploaded.bundle_ref };
+    }
+
+    if (!deviceJson.trim()) {
+      throw new Error("Paste the device recovery export JSON from the workstation being rescued.");
+    }
+
+    try {
+      return { payload: JSON.parse(deviceJson) };
+    } catch {
+      throw new Error("That is not valid JSON.");
+    }
   };
 
-  const handleRunPrecheck = async () => {
+  const runStep = async (label: string, work: () => Promise<void>) => {
     setLoading(true);
+    setBusyLabel(label);
     setErrorMessage(null);
+    setNotice(null);
+
     try {
-      let config: any = {};
-      if (sourceType === "api") {
-        config = { url: apiUrl, token: apiToken, store_id: storeId };
-      } else if (sourceType === "file") {
-        if (!fileContent) {
-          throw new Error("Please choose a JSON migration bundle file first.");
-        }
-        config = { file_content: fileContent };
-      } else {
-        try {
-          config = { payload: JSON.parse(deviceJson || "{}") };
-        } catch {
-          throw new Error("Invalid JSON format in device recovery payload.");
-        }
-      }
+      await work();
+    } catch (err) {
+      setErrorMessage(explain(err));
+    } finally {
+      setLoading(false);
+      setBusyLabel("");
+    }
+  };
 
-      // First try fetching directly or using client engine
-      let sourceData: any;
-      try {
-        sourceData = await clientMigrationEngine.fetchSourceData(sourceType, config);
-      } catch (clientErr: any) {
-        // Fallback to backend API if available
-        try {
-          const res = await fetch(`${API_BASE_URL}/api/admin/migrations/precheck`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              store_id: storeId,
-              source_type: sourceType,
-              config,
-            }),
-          });
-          const data = await res.json();
-          if (!data.success) throw new Error(data.message);
-          setPrecheck(data.data);
-          setCurrentStep(2);
-          return;
-        } catch {
-          throw clientErr;
-        }
-      }
-
-      setLoadedSourceData(sourceData);
-      const report = clientMigrationEngine.runPrecheck(sourceData);
+  const handleRunPrecheck = () =>
+    runStep("Scanning source…", async () => {
+      const config = await sourceConfig();
+      const report = await tillMigrationService.precheck(sourceType, config);
       setPrecheck(report);
       setCurrentStep(2);
-    } catch (err: any) {
-      setErrorMessage(err.message || String(err));
-    } finally {
-      setLoading(false);
-    }
-  };
+    });
 
-  const handleExecuteMigration = async (isDryRun: boolean) => {
-    setLoading(true);
-    setErrorMessage(null);
-    try {
-      if (!loadedSourceData) {
-        throw new Error("No source data loaded. Please run precheck first.");
-      }
+  const handleExecuteMigration = (isDryRun: boolean) =>
+    runStep(isDryRun ? "Simulating run…" : "Writing to the store database…", async () => {
+      const result = await tillMigrationService.start(sourceType, await sourceConfig(), isDryRun);
 
-      const res = await clientMigrationEngine.executeMigration(loadedSourceData, isDryRun);
-      setMigrationResult(res);
       if (isDryRun) {
+        setDryRun(result);
         setCurrentStep(4);
-      } else {
-        setCurrentStep(5);
+        return;
       }
-    } catch (err: any) {
-      setErrorMessage(err.message || String(err));
-    } finally {
-      setLoading(false);
-    }
-  };
 
-  const handleRollback = async () => {
-    if (!migrationResult?.run?.run_uuid) return;
-    setLoading(true);
-    try {
-      await clientMigrationEngine.rollbackMigration(migrationResult.run.run_uuid);
-      alert("Migration run rolled back successfully.");
-      setMigrationResult(null);
+      setLiveRun(result);
+      setCutoverPhrase("");
+      setCutoverDone(null);
+      setCurrentStep(5);
+      await refreshRuns();
+    });
+
+  const handleRollback = (uuid: string) =>
+    runStep("Rolling back…", async () => {
+      const stats = await tillMigrationService.rollback(uuid);
+      setLiveRun(null);
+      setDryRun(null);
+      setCutoverDone(null);
+      setNotice(
+        `Run rolled back: ${stats.products_deleted ?? 0} product(s), ${stats.invoices_deleted ?? 0} invoice(s) and their batches removed from this branch.`
+      );
       setCurrentStep(1);
-    } catch (err: any) {
-      setErrorMessage(err.message || String(err));
-    } finally {
-      setLoading(false);
-    }
+      await refreshRuns();
+    });
+
+  const handleCutover = (uuid: string, expected: string) =>
+    runStep("Confirming cutover…", async () => {
+      if (cutoverPhrase.trim() !== expected) {
+        throw new Error(`Confirmation phrase must match "${expected}" exactly.`);
+      }
+
+      const run = await tillMigrationService.cutover(uuid, cutoverPhrase.trim());
+      setCutoverDone(run);
+      await refreshRuns();
+    });
+
+  const startFromRun = (run: MigrationRun) => {
+    setLiveRun({
+      run,
+      stats: run.progress_stats || {},
+      is_dry_run: false,
+      reconciliation: run.reconciliation_report || null,
+      cutover_phrase: run.cutover_phrase,
+    });
+    setNotice(null);
+    setErrorMessage(null);
+    setCurrentStep(run.cutover_at ? 6 : 5);
   };
 
-  const handleCutover = async () => {
-    if (cutoverPhrase.trim() !== "CUTOVER-STR001") {
-      setErrorMessage('Confirmation phrase must match "CUTOVER-STR001" exactly.');
-      return;
-    }
-    setLoading(true);
-    try {
-      setCutoverSuccess("Store cutover successfully confirmed! The store is now live on LamSuite Billing 2.0.");
-      setCurrentStep(6);
-    } catch (err: any) {
-      setErrorMessage(err.message);
-    } finally {
-      setLoading(false);
-    }
-  };
+  /**
+   * MIG-02: the store owns this switch, so a branch that has it off gets the reason
+   * rather than a wizard whose every button 403s. The server refuses the same request
+   * whether or not this screen is reached by the tab or by typing the URL.
+   */
+  if (!companySettingsService.isMigrationAllowed()) {
+    return (
+      <div className="p-6 max-w-2xl mx-auto">
+        <div className="rounded-2xl border border-amber-300 bg-amber-50 p-6 space-y-2 text-center">
+          <ShieldCheck className="mx-auto h-10 w-10 text-amber-600" />
+          <h1 className="text-base font-bold text-amber-900">Data migration is switched off for this branch</h1>
+          <p className="text-xs text-amber-800">
+            A store owner controls it under Admin Panel → Menu &amp; Feature Control → Data migration
+            allowed. Nothing this branch already imported is affected, and past runs stay listed under
+            Admin Panel → Migration Center for a store account.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  const stats = liveRun?.stats ?? dryRun?.stats;
+  const reconciliation = liveRun?.reconciliation ?? null;
+  const expectedPhrase = liveRun?.cutover_phrase || liveRun?.run?.cutover_phrase || "";
 
   return (
     <div className="p-6 max-w-5xl mx-auto space-y-6">
@@ -170,7 +258,7 @@ export const DataMigrationPage: React.FC = () => {
             Store Data Migration Wizard
           </h1>
           <p className="text-xs text-slate-500 mt-1">
-            Seamlessly migrate store masters, batches, stocks, invoices, and device drafts from legacy LamSuite into the new system.
+            Imports legacy masters, batches, stock, invoices and held bills into this branch's server database.
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -183,20 +271,19 @@ export const DataMigrationPage: React.FC = () => {
       {errorMessage && (
         <div className="p-4 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm flex items-start gap-2">
           <AlertTriangle className="h-5 w-5 shrink-0 mt-0.5" />
-          <div className="flex-1">{errorMessage}</div>
+          <div className="flex-1 whitespace-pre-wrap">{errorMessage}</div>
         </div>
       )}
 
-      {/* Step Indicators */}
+      {notice && (
+        <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-lg text-emerald-700 text-sm flex items-start gap-2">
+          <CheckCircle className="h-5 w-5 shrink-0 mt-0.5" />
+          <div className="flex-1">{notice}</div>
+        </div>
+      )}
+
       <div className="grid grid-cols-6 gap-2 text-center text-xs font-medium">
-        {[
-          "1. Source Setup",
-          "2. Pre-Check",
-          "3. Field Mapping",
-          "4. Dry Run",
-          "5. Migration & Reconciliation",
-          "6. Final Cutover",
-        ].map((title, idx) => (
+        {STEPS.map((title, idx) => (
           <div
             key={title}
             className={`p-2 rounded border transition ${
@@ -214,139 +301,236 @@ export const DataMigrationPage: React.FC = () => {
 
       {/* Step 1: Source Setup */}
       {currentStep === 1 && (
-        <div className="bg-white border rounded-lg p-6 space-y-5 shadow-sm">
-          <h2 className="text-sm font-semibold text-slate-700 flex items-center gap-2">
-            <Server className="h-4 w-4 text-indigo-600" /> Choose Migration Source
-          </h2>
+        <>
+          <div className="bg-white border rounded-lg p-6 space-y-5 shadow-sm">
+            <h2 className="text-sm font-semibold text-slate-700 flex items-center gap-2">
+              <Server className="h-4 w-4 text-indigo-600" /> Choose Migration Source
+            </h2>
 
-          <div className="grid grid-cols-3 gap-4">
-            <button
-              type="button"
-              onClick={() => setSourceType("file")}
-              className={`p-4 border rounded-lg text-left transition flex flex-col gap-2 ${
-                sourceType === "file" ? "border-indigo-600 bg-indigo-50/50 ring-1 ring-indigo-600" : "hover:bg-slate-50"
-              }`}
-            >
-              <div className="flex items-center gap-2 font-medium text-slate-800 text-sm">
-                <Upload className="h-4 w-4 text-indigo-600" /> Exported File Bundle
-              </div>
-              <p className="text-xs text-slate-500">
-                Import from an offline JSON backup generated by the legacy export command.
-              </p>
-            </button>
+            <div className="grid grid-cols-3 gap-4">
+              <button
+                type="button"
+                onClick={() => setSourceType("file")}
+                className={`p-4 border rounded-lg text-left transition flex flex-col gap-2 ${
+                  sourceType === "file" ? "border-indigo-600 bg-indigo-50/50 ring-1 ring-indigo-600" : "hover:bg-slate-50"
+                }`}
+              >
+                <div className="flex items-center gap-2 font-medium text-slate-800 text-sm">
+                  <FolderOpen className="h-4 w-4 text-indigo-600" /> Exported File Bundle
+                </div>
+                <p className="text-xs text-slate-500">
+                  Upload the JSON backup from <span className="font-mono">lamsuite:export-store</span>. The server keeps it and
+                  imports from it.
+                </p>
+              </button>
 
-            <button
-              type="button"
-              onClick={() => setSourceType("api")}
-              className={`p-4 border rounded-lg text-left transition flex flex-col gap-2 ${
-                sourceType === "api" ? "border-indigo-600 bg-indigo-50/50 ring-1 ring-indigo-600" : "hover:bg-slate-50"
-              }`}
-            >
-              <div className="flex items-center gap-2 font-medium text-slate-800 text-sm">
-                <Server className="h-4 w-4 text-indigo-600" /> Direct Laravel API
-              </div>
-              <p className="text-xs text-slate-500">
-                Connect directly to the running legacy server via REST API and pull live store data.
-              </p>
-            </button>
+              <button
+                type="button"
+                onClick={() => setSourceType("api")}
+                className={`p-4 border rounded-lg text-left transition flex flex-col gap-2 ${
+                  sourceType === "api" ? "border-indigo-600 bg-indigo-50/50 ring-1 ring-indigo-600" : "hover:bg-slate-50"
+                }`}
+              >
+                <div className="flex items-center gap-2 font-medium text-slate-800 text-sm">
+                  <Server className="h-4 w-4 text-indigo-600" /> Direct Laravel API
+                </div>
+                <p className="text-xs text-slate-500">
+                  The server pulls a full snapshot from the running legacy panel with a migration token.
+                </p>
+              </button>
 
-            <button
-              type="button"
-              onClick={() => setSourceType("device")}
-              className={`p-4 border rounded-lg text-left transition flex flex-col gap-2 ${
-                sourceType === "device" ? "border-indigo-600 bg-indigo-50/50 ring-1 ring-indigo-600" : "hover:bg-slate-50"
-              }`}
-            >
-              <div className="flex items-center gap-2 font-medium text-slate-800 text-sm">
-                <Smartphone className="h-4 w-4 text-indigo-600" /> Device Recovery
-              </div>
-              <p className="text-xs text-slate-500">
-                Recover held bills, unsynced queue items, and local drafts from a specific workstation.
-              </p>
-            </button>
-          </div>
+              <button
+                type="button"
+                onClick={() => setSourceType("device")}
+                className={`p-4 border rounded-lg text-left transition flex flex-col gap-2 ${
+                  sourceType === "device" ? "border-indigo-600 bg-indigo-50/50 ring-1 ring-indigo-600" : "hover:bg-slate-50"
+                }`}
+              >
+                <div className="flex items-center gap-2 font-medium text-slate-800 text-sm">
+                  <Smartphone className="h-4 w-4 text-indigo-600" /> Device Recovery
+                </div>
+                <p className="text-xs text-slate-500">
+                  Recover held bills and unsynced drafts a workstation exported before it was wiped.
+                </p>
+              </button>
+            </div>
 
-          <div className="pt-4 border-t space-y-4">
-            {sourceType === "file" && (
-              <div className="space-y-3">
-                <label className="block text-xs font-medium text-slate-700">
-                  Select Migration Bundle JSON File
-                </label>
-                <div className="flex items-center gap-3">
-                  <label className="flex items-center gap-2 px-4 py-2 bg-slate-100 hover:bg-slate-200 border rounded cursor-pointer text-xs font-medium text-slate-700 transition">
-                    <FolderOpen className="h-4 w-4 text-slate-600" />
-                    Browse JSON File
-                    <input type="file" accept=".json,.json.gz" onChange={handleFileUpload} className="hidden" />
+            <div className="pt-4 border-t space-y-4">
+              {sourceType === "file" && (
+                <div className="space-y-3">
+                  <label className="block text-xs font-medium text-slate-700">
+                    Select Migration Bundle JSON File
                   </label>
-                  <span className="text-xs text-slate-500 font-mono">
-                    {fileName || "No bundle file selected"}
-                  </span>
+                  <div className="flex items-center gap-3">
+                    <label className="flex items-center gap-2 px-4 py-2 bg-slate-100 hover:bg-slate-200 border rounded cursor-pointer text-xs font-medium text-slate-700 transition">
+                      <FolderOpen className="h-4 w-4 text-slate-600" />
+                      Browse JSON File
+                      <input
+                        type="file"
+                        accept=".json,.json.gz"
+                        className="hidden"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0] ?? null;
+                          setBundleFile(file);
+                          // A new file invalidates the copy the server already holds.
+                          setBundleRef(null);
+                        }}
+                      />
+                    </label>
+                    <span className="text-xs text-slate-500 font-mono">
+                      {bundleFile?.name || "No bundle file selected"}
+                      {bundleRef && " · uploaded"}
+                    </span>
+                  </div>
                 </div>
-              </div>
-            )}
+              )}
 
-            {sourceType === "api" && (
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-medium text-slate-700 mb-1">Legacy Server URL</label>
-                  <input
-                    type="text"
-                    value={apiUrl}
-                    onChange={(e) => setApiUrl(e.target.value)}
-                    className="w-full text-xs p-2.5 border rounded focus:ring-1 focus:ring-indigo-500 font-mono"
-                    placeholder="https://admin.lamstonehealthcare.com"
-                  />
-                  <p className="text-[11px] text-slate-500 mt-1">
-                    Enter full HTTPS URL of your legacy Laravel backend.
-                  </p>
+              {sourceType === "api" && (
+                <div className="grid grid-cols-3 gap-4">
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">Legacy Server URL</label>
+                    <input
+                      type="text"
+                      value={apiUrl}
+                      onChange={(e) => setApiUrl(e.target.value)}
+                      className="w-full text-xs p-2.5 border rounded focus:ring-1 focus:ring-indigo-500 font-mono"
+                      placeholder="https://admin.example.com"
+                    />
+                    <p className="text-[11px] text-slate-500 mt-1">
+                      The legacy v1 panel host — the one serving /api/sync/pull, not the portal.
+                    </p>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">API Token / Bearer Key</label>
+                    <input
+                      type="password"
+                      value={apiToken}
+                      onChange={(e) => setApiToken(e.target.value)}
+                      className="w-full text-xs p-2.5 border rounded focus:ring-1 focus:ring-indigo-500"
+                      placeholder="Sanctum token"
+                      autoComplete="off"
+                    />
+                    <p className="text-[11px] text-slate-500 mt-1">
+                      Mint it at {LEGACY_API_URL}/admin/migration-token against the store being migrated.
+                    </p>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">
+                      Legacy Store ID <span className="text-slate-400">(only for a multi-store legacy install)</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={legacyStoreId}
+                      onChange={(e) => setLegacyStoreId(e.target.value)}
+                      className="w-full text-xs p-2.5 border rounded focus:ring-1 focus:ring-indigo-500 font-mono"
+                      placeholder="blank = the token's store"
+                    />
+                    <p className="text-[11px] text-slate-500 mt-1">
+                      Leave blank unless the legacy panel hosts several stores and the token covers more than one.
+                    </p>
+                  </div>
                 </div>
+              )}
+
+              {sourceType === "device" && (
                 <div>
                   <label className="block text-xs font-medium text-slate-700 mb-1">
-                    API Token / Bearer Key
+                    Paste Device Recovery Export JSON
                   </label>
-                  <input
-                    type="password"
-                    value={apiToken}
-                    onChange={(e) => setApiToken(e.target.value)}
-                    className="w-full text-xs p-2.5 border rounded focus:ring-1 focus:ring-indigo-500"
-                    placeholder="Sanctum token"
+                  <textarea
+                    rows={4}
+                    value={deviceJson}
+                    onChange={(e) => setDeviceJson(e.target.value)}
+                    className="w-full text-xs p-2.5 border rounded focus:ring-1 focus:ring-indigo-500 font-mono"
+                    placeholder='{"device_holds": [...], "sync_queue": [...]}'
                   />
-                  <p className="text-[11px] text-slate-500 mt-1">
-                    Mint it at {LEGACY_API_URL}/admin/migration-token against the store being migrated. The legacy pull
-                    endpoint answers 401 without one.
-                  </p>
                 </div>
-              </div>
-            )}
+              )}
+            </div>
 
-            {sourceType === "device" && (
-              <div>
-                <label className="block text-xs font-medium text-slate-700 mb-1">
-                  Paste Device Recovery Export JSON
-                </label>
-                <textarea
-                  rows={4}
-                  value={deviceJson}
-                  onChange={(e) => setDeviceJson(e.target.value)}
-                  className="w-full text-xs p-2.5 border rounded focus:ring-1 focus:ring-indigo-500 font-mono"
-                  placeholder='{"device_holds": [...], "sync_queue": [...]}'
-                />
-              </div>
-            )}
+            <div className="flex items-center justify-between pt-4 border-t">
+              <span className="text-[11px] text-slate-500">
+                The store is decided by this terminal's claim — nothing here names a branch.
+              </span>
+              <button
+                type="button"
+                disabled={loading}
+                onClick={handleRunPrecheck}
+                className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded text-xs font-medium flex items-center gap-2 transition cursor-pointer"
+              >
+                {loading ? <RefreshCw className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}
+                {busyLabel || "Scan & Pre-check Quality"}
+              </button>
+            </div>
           </div>
 
-          <div className="flex justify-end pt-4">
-            <button
-              type="button"
-              disabled={loading}
-              onClick={handleRunPrecheck}
-              className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded text-xs font-medium flex items-center gap-2 transition cursor-pointer"
-            >
-              {loading ? <RefreshCw className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}
-              Scan & Pre-check Quality
-            </button>
+          <div className="bg-white border rounded-lg p-6 space-y-3 shadow-sm">
+            <h2 className="text-sm font-semibold text-slate-700 flex items-center gap-2">
+              <History className="h-4 w-4 text-indigo-600" /> Migration Runs On This Branch
+            </h2>
+            <p className="text-xs text-slate-500">
+              Counts come from the server's own records, so a run that wrote nothing reads as zero.
+            </p>
+            {runs.length === 0 ? (
+              <div className="text-xs text-slate-500 p-3 bg-slate-50 border rounded">
+                No migration run has been recorded for this branch yet.
+              </div>
+            ) : (
+              <table className="w-full text-xs text-left">
+                <thead className="bg-slate-50 border-b text-slate-600 font-semibold">
+                  <tr>
+                    <th className="p-2">Run</th>
+                    <th className="p-2">Source</th>
+                    <th className="p-2">Status</th>
+                    <th className="p-2 text-right">Products</th>
+                    <th className="p-2 text-right">Invoices</th>
+                    <th className="p-2">Reconciled</th>
+                    <th className="p-2"></th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y text-slate-700">
+                  {runs.map((run) => (
+                    <tr key={run.run_uuid}>
+                      <td className="p-2 font-mono text-[11px]">{run.run_uuid.slice(0, 8)}…</td>
+                      <td className="p-2 uppercase text-[10px]">{run.source_type}</td>
+                      <td className="p-2">
+                        {run.is_dry_run ? "dry-run " : ""}
+                        {run.status}
+                        {run.cutover_at && " · cut over"}
+                      </td>
+                      <td className="p-2 text-right">{run.progress_stats?.products ?? 0}</td>
+                      <td className="p-2 text-right">{run.progress_stats?.invoices ?? 0}</td>
+                      <td className="p-2">
+                        {run.reconciliation_report ? (
+                          run.reconciliation_report.is_passed ? (
+                            <span className="text-emerald-600">Passed</span>
+                          ) : (
+                            <span className="text-amber-600">
+                              {run.reconciliation_report.discrepancies?.length ?? 0} flagged
+                            </span>
+                          )
+                        ) : (
+                          <span className="text-slate-400">—</span>
+                        )}
+                      </td>
+                      <td className="p-2 text-right">
+                        {run.status === "completed" && !run.is_dry_run && (
+                          <button
+                            type="button"
+                            onClick={() => startFromRun(run)}
+                            className="text-indigo-600 hover:underline cursor-pointer"
+                          >
+                            Open
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
           </div>
-        </div>
+        </>
       )}
 
       {/* Step 2: Pre-Check Diagnostics */}
@@ -366,34 +550,20 @@ export const DataMigrationPage: React.FC = () => {
           </div>
 
           <div className="grid grid-cols-4 sm:grid-cols-7 gap-3 text-center">
-            <div className="p-3 bg-slate-50 border rounded">
-              <div className="text-[11px] text-slate-500">Total Entities</div>
-              <div className="text-base font-bold text-slate-800">{precheck.summary.total_records}</div>
-            </div>
-            <div className="p-3 bg-slate-50 border rounded">
-              <div className="text-[11px] text-slate-500">Products</div>
-              <div className="text-base font-bold text-slate-800">{precheck.record_counts.products || 0}</div>
-            </div>
-            <div className="p-3 bg-slate-50 border rounded">
-              <div className="text-[11px] text-slate-500">Batches & Stocks</div>
-              <div className="text-base font-bold text-slate-800">{precheck.record_counts.product_batches || 0}</div>
-            </div>
-            <div className="p-3 bg-slate-50 border rounded">
-              <div className="text-[11px] text-slate-500">Sales Invoices</div>
-              <div className="text-base font-bold text-slate-800">{precheck.record_counts.invoices || 0}</div>
-            </div>
-            <div className="p-3 bg-slate-50 border rounded">
-              <div className="text-[11px] text-slate-500">Purchases</div>
-              <div className="text-base font-bold text-slate-800">{precheck.record_counts.purchases || 0}</div>
-            </div>
-            <div className="p-3 bg-slate-50 border rounded">
-              <div className="text-[11px] text-slate-500">Sales Returns</div>
-              <div className="text-base font-bold text-slate-800">{precheck.record_counts.sales_returns || 0}</div>
-            </div>
-            <div className="p-3 bg-slate-50 border rounded">
-              <div className="text-[11px] text-slate-500">Purchase Returns</div>
-              <div className="text-base font-bold text-slate-800">{precheck.record_counts.purchase_returns || 0}</div>
-            </div>
+            {[
+              ["Total Records", precheck.summary.total_records],
+              ["Products", precheck.record_counts.products || 0],
+              ["Batches & Stocks", precheck.record_counts.product_batches || 0],
+              ["Sales Invoices", precheck.record_counts.invoices || 0],
+              ["Purchases", precheck.record_counts.purchases || 0],
+              ["Customers", precheck.record_counts.customers || 0],
+              ["Held Bills", precheck.record_counts.device_holds || 0],
+            ].map(([label, value]) => (
+              <div key={String(label)} className="p-3 bg-slate-50 border rounded">
+                <div className="text-[11px] text-slate-500">{label}</div>
+                <div className="text-base font-bold text-slate-800">{value}</div>
+              </div>
+            ))}
           </div>
 
           <div className="space-y-2">
@@ -410,6 +580,8 @@ export const DataMigrationPage: React.FC = () => {
                     className={`p-2.5 text-xs rounded border flex items-start gap-2 ${
                       issue.type === "error"
                         ? "bg-red-50 border-red-200 text-red-700"
+                        : issue.type === "info"
+                        ? "bg-slate-50 border-slate-200 text-slate-600"
                         : "bg-amber-50 border-amber-200 text-amber-700"
                     }`}
                   >
@@ -419,6 +591,9 @@ export const DataMigrationPage: React.FC = () => {
                         [{issue.category}]
                       </span>
                       {issue.message}
+                      {issue.details && issue.details.length > 0 && (
+                        <div className="font-mono text-[10px] mt-1 opacity-80">{issue.details.join(", ")}</div>
+                      )}
                     </div>
                   </div>
                 ))}
@@ -453,7 +628,7 @@ export const DataMigrationPage: React.FC = () => {
             <FileText className="h-4 w-4 text-indigo-600" /> Automatic Field & Status Mapping
           </h2>
           <p className="text-xs text-slate-500">
-            Field correspondences between legacy LamSuite and new database schema have been automatically normalized.
+            These are the correspondences the server pipeline applies. Nothing is written until you run it.
           </p>
 
           <table className="w-full text-xs text-left border rounded">
@@ -466,42 +641,22 @@ export const DataMigrationPage: React.FC = () => {
               </tr>
             </thead>
             <tbody className="divide-y text-slate-700">
-              <tr>
-                <td className="p-2.5 font-mono">stores, store_settings</td>
-                <td className="p-2.5 font-mono">stores, company_settings</td>
-                <td className="p-2.5">Preserve tax mode, GSTIN, invoice prefix</td>
-                <td className="p-2.5 text-emerald-600 font-semibold">Auto-Mapped</td>
-              </tr>
-              <tr>
-                <td className="p-2.5 font-mono">master_groups, brands, units</td>
-                <td className="p-2.5 font-mono">master_lookups</td>
-                <td className="p-2.5">Polymorphic type mapping, pack conversions preserved</td>
-                <td className="p-2.5 text-emerald-600 font-semibold">Auto-Mapped</td>
-              </tr>
-              <tr>
-                <td className="p-2.5 font-mono">customers, suppliers</td>
-                <td className="p-2.5 font-mono">parties</td>
-                <td className="p-2.5">Opening balances, credit limits, GSTIN reconciled</td>
-                <td className="p-2.5 text-emerald-600 font-semibold">Auto-Mapped</td>
-              </tr>
-              <tr>
-                <td className="p-2.5 font-mono">billing_app_users</td>
-                <td className="p-2.5 font-mono">users</td>
-                <td className="p-2.5">Bcrypt hash reuse; force reset if unrecognized</td>
-                <td className="p-2.5 text-emerald-600 font-semibold">Auto-Mapped</td>
-              </tr>
-              <tr>
-                <td className="p-2.5 font-mono">products, product_batches</td>
-                <td className="p-2.5 font-mono">products, product_batches</td>
-                <td className="p-2.5">Rates, MRP, HSN, batch stock preserved to exact paisa</td>
-                <td className="p-2.5 text-emerald-600 font-semibold">Auto-Mapped</td>
-              </tr>
-              <tr>
-                <td className="p-2.5 font-mono">invoices, invoice_items</td>
-                <td className="p-2.5 font-mono">invoices, invoice_items</td>
-                <td className="p-2.5">Original document numbers & cancellation dates kept</td>
-                <td className="p-2.5 text-emerald-600 font-semibold">Auto-Mapped</td>
-              </tr>
+              {[
+                ["stores, store_settings", "stores, company_settings", "Preserve tax mode, GSTIN, invoice prefix"],
+                ["master_groups, brands, units", "master_lookups", "Polymorphic type mapping, pack conversions preserved"],
+                ["customers, suppliers", "parties", "Opening balances, credit limits, GSTIN reconciled"],
+                ["billing_app_users", "users", "Bcrypt hash reuse; force reset if unrecognized"],
+                ["products, product_batches", "products, product_batches", "Rates, MRP, HSN, batch stock preserved to exact paisa"],
+                ["invoices, invoice_items", "invoices, invoice_items", "Original document numbers & cancellation dates kept"],
+                ["device_holds", "invoices (draft)", "Held POS carts recovered as editable drafts"],
+              ].map(([source, target, strategy]) => (
+                <tr key={source}>
+                  <td className="p-2.5 font-mono">{source}</td>
+                  <td className="p-2.5 font-mono">{target}</td>
+                  <td className="p-2.5">{strategy}</td>
+                  <td className="p-2.5 text-emerald-600 font-semibold">Auto-Mapped</td>
+                </tr>
+              ))}
             </tbody>
           </table>
 
@@ -521,7 +676,7 @@ export const DataMigrationPage: React.FC = () => {
                 className="px-4 py-2 bg-slate-800 hover:bg-slate-900 text-white rounded text-xs font-medium flex items-center gap-2 transition cursor-pointer"
               >
                 {loading ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
-                Run Dry-Run Simulation
+                {busyLabel || "Run Dry-Run Simulation"}
               </button>
               <button
                 type="button"
@@ -536,82 +691,153 @@ export const DataMigrationPage: React.FC = () => {
         </div>
       )}
 
-      {/* Step 4 & 5: Simulation Results & Reconciliation Report */}
-      {(currentStep === 4 || currentStep === 5) && migrationResult && (
+      {/* Step 4 & 5: Dry Run Summary / Live Run & Reconciliation */}
+      {(currentStep === 4 || currentStep === 5) && stats && (
         <div className="bg-white border rounded-lg p-6 space-y-5 shadow-sm">
           <div className="flex items-center justify-between">
             <h2 className="text-sm font-semibold text-slate-700 flex items-center gap-2">
               <BarChart className="h-4 w-4 text-indigo-600" />
               {currentStep === 4 ? "Dry-Run Simulation Summary" : "Live Migration Execution & Reconciliation"}
             </h2>
-            <span
-              className={`text-xs px-2.5 py-1 rounded font-semibold ${
-                migrationResult.reconciliation.is_passed
-                  ? "bg-emerald-100 text-emerald-800"
-                  : "bg-amber-100 text-amber-800"
-              }`}
-            >
-              {migrationResult.reconciliation.is_passed
-                ? "Reconciliation Passed: Paisa-Level Match"
-                : "Discrepancies Flagged"}
-            </span>
+            {currentStep === 5 ? (
+              reconciliation ? (
+                <span
+                  className={`text-xs px-2.5 py-1 rounded font-semibold ${
+                    reconciliation.is_passed ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800"
+                  }`}
+                >
+                  {reconciliation.is_passed
+                    ? "Reconciliation Passed: Paisa-Level Match"
+                    : `${reconciliation.discrepancies?.length ?? 0} Discrepancies Flagged`}
+                </span>
+              ) : (
+                <span className="text-xs px-2.5 py-1 rounded font-semibold bg-slate-100 text-slate-600">
+                  Not Reconciled
+                </span>
+              )
+            ) : (
+              <span className="text-xs px-2.5 py-1 rounded font-semibold bg-slate-100 text-slate-600">
+                Nothing written
+              </span>
+            )}
           </div>
+
+          {currentStep === 5 && liveRun?.run.run_uuid && (
+            <div className="text-[11px] text-slate-500 font-mono">
+              Run {liveRun.run.run_uuid} · branch database rows, not local drafts
+            </div>
+          )}
 
           <div className="grid grid-cols-3 sm:grid-cols-6 gap-3 text-center">
-            <div className="p-3 bg-slate-50 border rounded">
-              <div className="text-[11px] text-slate-500">Products</div>
-              <div className="text-base font-bold text-slate-800">{migrationResult.stats.products || 0}</div>
-            </div>
-            <div className="p-3 bg-slate-50 border rounded">
-              <div className="text-[11px] text-slate-500">Batches & Stocks</div>
-              <div className="text-base font-bold text-slate-800">{migrationResult.stats.batches || 0}</div>
-            </div>
-            <div className="p-3 bg-slate-50 border rounded">
-              <div className="text-[11px] text-slate-500">Sales Invoices</div>
-              <div className="text-base font-bold text-slate-800">{migrationResult.stats.invoices || 0}</div>
-            </div>
-            <div className="p-3 bg-slate-50 border rounded">
-              <div className="text-[11px] text-slate-500">Purchases</div>
-              <div className="text-base font-bold text-slate-800">{migrationResult.stats.purchases || 0}</div>
-            </div>
-            <div className="p-3 bg-slate-50 border rounded">
-              <div className="text-[11px] text-slate-500">Sales Returns</div>
-              <div className="text-base font-bold text-slate-800">{migrationResult.stats.sales_returns || 0}</div>
-            </div>
-            <div className="p-3 bg-slate-50 border rounded">
-              <div className="text-[11px] text-slate-500">Purchase Returns</div>
-              <div className="text-base font-bold text-slate-800">{migrationResult.stats.purchase_returns || 0}</div>
-            </div>
+            {[
+              ["Products", stats.products || 0],
+              ["Batches & Stocks", stats.batches || 0],
+              ["Sales Invoices", stats.invoices || 0],
+              ["Purchases", stats.purchases || 0],
+              ["Parties", stats.parties || 0],
+              ["Held Bills", stats.held_bills || 0],
+            ].map(([label, value]) => (
+              <div key={String(label)} className="p-3 bg-slate-50 border rounded">
+                <div className="text-[11px] text-slate-500">{label}</div>
+                <div className="text-base font-bold text-slate-800">{value}</div>
+              </div>
+            ))}
           </div>
 
-          <div className="p-4 bg-slate-50 border rounded space-y-2 text-xs">
-            <h3 className="font-semibold text-slate-700">Financial Side-by-Side Audit:</h3>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="p-3 bg-white border rounded">
-                <div className="text-slate-500">Sales Turnover Match:</div>
-                <div className="text-sm font-bold text-slate-800">
-                  Target: ₹{migrationResult.reconciliation.financial_comparison?.sales?.target || 0}
+          {stats.errors && stats.errors.length > 0 && (
+            <div className="p-3 bg-red-50 border border-red-200 rounded text-xs text-red-700 space-y-1">
+              <div className="font-semibold">{stats.errors.length} record(s) could not be migrated:</div>
+              {stats.errors.slice(0, 8).map((err, idx) => (
+                <div key={idx} className="font-mono text-[10px]">
+                  {err}
                 </div>
-                <div className="text-[11px] text-emerald-600 font-medium">Variance: ₹0.00</div>
-              </div>
-              <div className="p-3 bg-white border rounded">
-                <div className="text-slate-500">Total Migrated Stock Valuation:</div>
-                <div className="text-sm font-bold text-slate-800">
-                  ₹{migrationResult.reconciliation.stock_comparison?.valuation || 0}
-                </div>
-                <div className="text-[11px] text-emerald-600 font-medium">
-                  {migrationResult.reconciliation.stock_comparison?.total_stock_qty || 0} units on-hand
-                </div>
-              </div>
+              ))}
             </div>
-          </div>
+          )}
+
+          {currentStep === 4 ? (
+            <div className="p-3 bg-slate-50 border rounded text-xs text-slate-600">
+              A dry run writes inside a transaction and rolls it back, so these numbers describe what a live run would
+              create — no row survives it.
+            </div>
+          ) : (
+            reconciliation && (
+              <div className="p-4 bg-slate-50 border rounded space-y-2 text-xs">
+                <h3 className="font-semibold text-slate-700">Financial Side-by-Side Audit:</h3>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="p-3 bg-white border rounded">
+                    <div className="text-slate-500">Sales Turnover Match</div>
+                    <div className="text-sm font-bold text-slate-800">
+                      Source ₹{reconciliation.financial_comparison?.sales?.source ?? 0} · Target ₹
+                      {reconciliation.financial_comparison?.sales?.target ?? 0}
+                    </div>
+                    <div
+                      className={`text-[11px] font-medium ${
+                        (reconciliation.financial_comparison?.sales?.diff ?? 0) > 0 ? "text-amber-600" : "text-emerald-600"
+                      }`}
+                    >
+                      Variance: ₹{reconciliation.financial_comparison?.sales?.diff ?? 0}
+                    </div>
+                  </div>
+                  <div className="p-3 bg-white border rounded">
+                    <div className="text-slate-500">Purchases Match</div>
+                    <div className="text-sm font-bold text-slate-800">
+                      Source ₹{reconciliation.financial_comparison?.purchases?.source ?? 0} · Target ₹
+                      {reconciliation.financial_comparison?.purchases?.target ?? 0}
+                    </div>
+                    <div
+                      className={`text-[11px] font-medium ${
+                        (reconciliation.financial_comparison?.purchases?.diff ?? 0) > 0
+                          ? "text-amber-600"
+                          : "text-emerald-600"
+                      }`}
+                    >
+                      Variance: ₹{reconciliation.financial_comparison?.purchases?.diff ?? 0}
+                    </div>
+                  </div>
+                  <div className="p-3 bg-white border rounded">
+                    <div className="text-slate-500">Migrated Stock Valuation</div>
+                    <div className="text-sm font-bold text-slate-800">
+                      ₹{reconciliation.stock_comparison?.valuation ?? 0}
+                    </div>
+                    <div className="text-[11px] text-emerald-600 font-medium">
+                      {reconciliation.stock_comparison?.total_stock_qty ?? 0} units on-hand
+                    </div>
+                  </div>
+                  <div className="p-3 bg-white border rounded">
+                    <div className="text-slate-500">Count Comparison</div>
+                    <div className="text-sm font-bold text-slate-800">
+                      {Object.entries(reconciliation.counts_comparison?.target ?? {})
+                        .map(([entity, count]) => `${entity.slice(0, 3)} ${count}`)
+                        .join(" · ") || "—"}
+                    </div>
+                    <div className="text-[11px] text-slate-500">
+                      source {Object.values(reconciliation.counts_comparison?.source ?? {}).reduce((a, b) => a + b, 0)}
+                    </div>
+                  </div>
+                </div>
+
+                {reconciliation.discrepancies && reconciliation.discrepancies.length > 0 && (
+                  <div className="space-y-1 pt-2 border-t">
+                    {reconciliation.discrepancies.map((d, idx) => (
+                      <div key={idx} className="text-[11px] text-amber-700 flex items-start gap-1.5">
+                        <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                        <span>{d.message}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )
+          )}
 
           <div className="flex justify-between pt-4 border-t">
             {currentStep === 5 ? (
               <button
                 type="button"
-                onClick={handleRollback}
-                className="px-3 py-1.5 border border-red-200 text-red-600 hover:bg-red-50 rounded text-xs font-medium flex items-center gap-1.5 cursor-pointer"
+                disabled={loading || !liveRun?.run.run_uuid}
+                onClick={() => liveRun?.run.run_uuid && handleRollback(liveRun.run.run_uuid)}
+                className="px-3 py-1.5 border border-red-200 text-red-600 hover:bg-red-50 rounded text-xs font-medium flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
               >
                 <RotateCcw className="h-4 w-4" /> Rollback Migration Run
               </button>
@@ -629,6 +855,7 @@ export const DataMigrationPage: React.FC = () => {
               {currentStep === 4 && (
                 <button
                   type="button"
+                  disabled={loading}
                   onClick={() => handleExecuteMigration(false)}
                   className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded text-xs font-medium flex items-center gap-2 transition cursor-pointer"
                 >
@@ -638,8 +865,14 @@ export const DataMigrationPage: React.FC = () => {
               {currentStep === 5 && (
                 <button
                   type="button"
+                  disabled={!reconciliation?.is_passed}
+                  title={
+                    reconciliation?.is_passed
+                      ? undefined
+                      : "Reconcile the run without critical mismatches before cutting over"
+                  }
                   onClick={() => setCurrentStep(6)}
-                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-xs font-medium flex items-center gap-2 transition cursor-pointer"
+                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-xs font-medium flex items-center gap-2 transition disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
                 >
                   Proceed to Store Cutover <ArrowRight className="h-4 w-4" />
                 </button>
@@ -656,11 +889,14 @@ export const DataMigrationPage: React.FC = () => {
             <CheckCircle className="h-4 w-4 text-emerald-600" /> Final Cutover & System Activation
           </h2>
 
-          {cutoverSuccess ? (
+          {cutoverDone ? (
             <div className="p-6 bg-emerald-50 border border-emerald-200 rounded-lg text-center space-y-3">
               <CheckCircle className="h-10 w-10 text-emerald-600 mx-auto" />
               <h3 className="text-base font-bold text-emerald-800">Migration & Cutover Fully Complete!</h3>
-              <p className="text-xs text-emerald-700 max-w-md mx-auto">{cutoverSuccess}</p>
+              <p className="text-xs text-emerald-700 max-w-md mx-auto">
+                Run {cutoverDone.run_uuid.slice(0, 8)}… is recorded as cut over at {String(cutoverDone.cutover_at)}.
+                The branch's data already lives in the server database, so every counter and the admin panel see it.
+              </p>
               <div className="pt-2">
                 <a
                   href="/pos"
@@ -673,14 +909,15 @@ export const DataMigrationPage: React.FC = () => {
           ) : (
             <div className="space-y-4">
               <p className="text-xs text-slate-600">
-                You are about to freeze the legacy LamSuite store, apply the final cutover, and switch all counters
-                to this workstation.
+                This records the cutover against run {liveRun?.run.run_uuid.slice(0, 8) || "—"} on the server. The
+                migration itself already wrote to the branch database; confirming is the bookkeeping step that marks the
+                legacy store superseded.
               </p>
 
               <div className="p-3 bg-amber-50 border border-amber-200 rounded text-xs text-amber-800 space-y-1">
                 <div className="font-semibold">Security Confirmation Required:</div>
-                <div>To prevent accidental activation, type the confirmation phrase below:</div>
-                <div className="font-mono font-bold text-amber-900">CUTOVER-STR001</div>
+                <div>The server asks for this branch's own phrase — type it exactly:</div>
+                <div className="font-mono font-bold text-amber-900">{expectedPhrase || "CUTOVER-<store code>"}</div>
               </div>
 
               <div>
@@ -689,17 +926,27 @@ export const DataMigrationPage: React.FC = () => {
                   value={cutoverPhrase}
                   onChange={(e) => setCutoverPhrase(e.target.value)}
                   className="w-full text-xs p-2.5 border rounded focus:ring-1 focus:ring-emerald-500 font-mono"
-                  placeholder="CUTOVER-STR001"
+                  placeholder={expectedPhrase || "CUTOVER-<store code>"}
                 />
               </div>
 
-              <div className="flex justify-end pt-4 border-t">
+              <div className="flex justify-between pt-4 border-t">
                 <button
                   type="button"
-                  disabled={loading || cutoverPhrase !== "CUTOVER-STR001"}
-                  onClick={handleCutover}
+                  onClick={() => setCurrentStep(5)}
+                  className="px-3 py-1.5 border rounded text-xs text-slate-600 hover:bg-slate-50 cursor-pointer"
+                >
+                  Back to Reconciliation
+                </button>
+                <button
+                  type="button"
+                  disabled={loading || !liveRun?.run.run_uuid || !expectedPhrase}
+                  onClick={() =>
+                    liveRun?.run.run_uuid && handleCutover(liveRun.run.run_uuid, expectedPhrase)
+                  }
                   className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-xs font-bold transition disabled:opacity-50 cursor-pointer"
                 >
+                  {loading ? <RefreshCw className="h-4 w-4 animate-spin mr-1.5" /> : null}
                   Confirm Cutover & Activate Store
                 </button>
               </div>

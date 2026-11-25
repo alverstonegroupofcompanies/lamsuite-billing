@@ -30,23 +30,12 @@ class AdminFeatureController
             ['id' => 'settings', 'name' => 'Store Settings', 'description' => 'Printers, invoice sequences, GST rates & company profile'],
         ];
 
-        $defaultFeatureFlags = [
-            'allow_offline_billing' => true,
-            'require_doctor_on_schedule_h' => true,
-            'allow_custom_discounts' => true,
-            'auto_print_thermal' => true,
-            'enable_wallet_credit' => true,
-            'enforce_mrp_capping' => true,
-            'gstr1_auto_push' => false,
-            'dark_mode_allowed' => true,
-        ];
-
         return response()->json([
             'store_id' => $store->id,
             'store_name' => $store->name,
             'all_available_menus' => $allPossibleMenus,
-            'enabled_menu_items' => $store->enabled_menu_items ?? ['pos', 'bills', 'purchases', 'stock', 'reports', 'masters', 'settings'],
-            'feature_flags' => array_merge($defaultFeatureFlags, $store->feature_flags ?? []),
+            'enabled_menu_items' => $store->enabled_menu_items ?? Store::DEFAULT_MENUS,
+            'feature_flags' => $store->featureFlags(),
             'version' => $store->version,
         ]);
     }

@@ -334,6 +334,12 @@ export interface CompanySettings {
   store_type?: "pharmacy" | "cosmetics" | "kirana_general" | "clothing" | "electronics" | "stationery" | "wholesale" | "restaurant" | "other";
   /** TAX-02: the store's MRP ceiling switch, read from the server. Unset means on. */
   enforce_mrp_capping?: boolean;
+  /**
+   * MIG-02: the store's Data Migration switch. A flag rather than a menu row because
+   * the wizard was open on every till before Menu & Feature Control could close it,
+   * and an unset flag has to mean "as it was". Unset means on.
+   */
+  allow_data_migration?: boolean;
   gst_type: "regular" | "composition" | "no_tax";
   allow_tax_override_per_bill?: boolean;
 
@@ -1612,6 +1618,12 @@ export class CompanySettingsService {
           : typeof payload.feature_flags?.enforce_mrp_capping === "boolean"
           ? payload.feature_flags.enforce_mrp_capping
           : this.currentSettings.enforce_mrp_capping,
+      // MIG-02: Menu & Feature Control keeps its switches on the store row, so the
+      // till learns the migration switch with the rest of its configuration.
+      allow_data_migration:
+        typeof payload.feature_flags?.allow_data_migration === "boolean"
+          ? payload.feature_flags.allow_data_migration
+          : this.currentSettings.allow_data_migration,
       gst_type: gstType,
       allow_tax_override_per_bill: allowTaxOverride,
       tax_mode: taxMode,
@@ -1823,6 +1835,16 @@ export class CompanySettingsService {
 
   isMenuEnabled(menuKey: string): boolean {
     return this.currentSettings.enabled_menu_items.includes(menuKey);
+  }
+
+  /**
+   * MIG-02: whether this branch may run the migration wizard. Only an explicit "off"
+   * closes it — a till that has never received the flag behaves as it did before the
+   * switch existed. The server enforces the same rule on every write step; this only
+   * decides what the till offers.
+   */
+  isMigrationAllowed(): boolean {
+    return this.currentSettings.allow_data_migration !== false;
   }
 
   setEnabledMenuItems(menuKeys: string[]): void {

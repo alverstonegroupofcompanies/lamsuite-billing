@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { companySettingsService, DEFAULT_SETTINGS } from "./companySettingsService";
+import { CompanySettingsService, companySettingsService, DEFAULT_SETTINGS } from "./companySettingsService";
 import { getMockDatabase, sqliteStorage } from "../db/sqliteStorage";
 
 describe("Company Settings, Sequences & Menu Visibility (CFG-001, CFG-002)", () => {
@@ -74,6 +74,39 @@ describe("Company Settings, Sequences & Menu Visibility (CFG-001, CFG-002)", () 
 
       const loaded = await companySettingsService.loadSettings();
       expect(loaded.workspace.billsDefaultPeriod).toBe("last7days");
+    });
+  });
+
+  /**
+   * MIG-02: the switch lives on the store row and travels with the settings payload.
+   * A till that has never received it behaves as it did before the switch existed —
+   * the wizard was open on every till, and closing it silently would strand them.
+   */
+  describe("MIG-02: the store's Data Migration switch", () => {
+    it("is open for a till that never received the flag", () => {
+      expect(new CompanySettingsService().isMigrationAllowed()).toBe(true);
+    });
+
+    it("closes when the admin panel switches migration off for the branch", async () => {
+      await companySettingsService.updateLocalFromRemote({
+        feature_flags: { allow_data_migration: false },
+      });
+
+      expect(companySettingsService.getSettings().allow_data_migration).toBe(false);
+      expect(companySettingsService.isMigrationAllowed()).toBe(false);
+    });
+
+    it("reopens, and a payload without the flag keeps the answer this till already has", async () => {
+      await companySettingsService.updateLocalFromRemote({
+        feature_flags: { allow_data_migration: true },
+      });
+      expect(companySettingsService.isMigrationAllowed()).toBe(true);
+
+      await companySettingsService.updateLocalFromRemote({ feature_flags: {} });
+      expect(companySettingsService.isMigrationAllowed()).toBe(true);
+
+      await companySettingsService.updateLocalFromRemote({});
+      expect(companySettingsService.isMigrationAllowed()).toBe(true);
     });
   });
 

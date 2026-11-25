@@ -186,6 +186,21 @@ final class CounterActionRegistry
         'GET reports/tax-reconciliation' => ['action' => 'report.view', 'report' => 'tax-reconciliation'],
         'GET dashboard/metrics' => ['action' => 'dashboard.view'],
 
+        // --- the legacy-data migration wizard (MIG-01) ----------------------
+        // Every step of the pipeline writes to the store's own database, so the
+        // whole run answers to the Migration screen rather than to the masters it
+        // happens to create. The store-level switch is checked again in the
+        // controller: a profile says whether this counter may migrate, the store
+        // says whether migration is still open here at all.
+        'GET till/migrations' => ['action' => 'migration.run'],
+        'POST till/migrations/bundle' => ['action' => 'migration.run'],
+        'POST till/migrations/precheck' => ['action' => 'migration.run'],
+        'POST till/migrations/start' => ['action' => 'migration.run'],
+        'GET till/migrations/{uuid}' => ['action' => 'migration.run'],
+        'POST till/migrations/{uuid}/reconcile' => ['action' => 'migration.run'],
+        'POST till/migrations/{uuid}/rollback' => ['action' => 'migration.run'],
+        'POST till/migrations/{uuid}/cutover' => ['action' => 'migration.run'],
+
         // --- import / export ------------------------------------------------
         'POST data-exchange/preview' => ['action' => 'data_exchange.run'],
         'POST data-exchange/commit' => ['action' => 'data_exchange.run'],

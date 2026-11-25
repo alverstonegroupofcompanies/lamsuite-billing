@@ -13,6 +13,7 @@ use App\Services\Migration\MigrationRollbackService;
 use App\Services\Migration\MigrationSourceReader;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Throwable;
 
@@ -27,19 +28,182 @@ class MigrationController extends Controller
     ) {}
 
     /**
+     * A terminal is answered by its device token, and the counter that token claims
+     * decides the branch. A store_id in the body is ignored from there: a workstation
+     * must not be able to write another branch's entire dataset.
+     */
+    private function isTerminalRequest(Request $request): bool
+    {
+        return $request->user() === null
+            && $request->attributes->get('device_store_id') !== null;
+    }
+
+    private function terminalStoreId(Request $request): ?int
+    {
+        $store = $request->attributes->get('active_store_id')
+            ?? $request->attributes->get('device_store_id');
+
+        return $store !== null ? (int) $store : null;
+    }
+
+    /**
+     * The store a migration may touch, or null when no caller identity resolves one.
+     */
+    private function resolveStoreId(Request $request, mixed $requested): ?int
+    {
+        if ($this->isTerminalRequest($request)) {
+            return $this->terminalStoreId($request);
+        }
+
+        $user = $request->user();
+        if (!$user) {
+            return null;
+        }
+
+        if ($requested && $requested !== 'all' && $user->isSuperAdmin()) {
+            return (int) $requested;
+        }
+
+        return $user->store_id ? (int) $user->store_id : null;
+    }
+
+    private function storeMismatch(Request $request, MigrationRun $run): ?JsonResponse
+    {
+        $terminalStoreId = $this->isTerminalRequest($request) ? $this->terminalStoreId($request) : null;
+
+        if ($terminalStoreId !== null && (int) $run->store_id !== $terminalStoreId) {
+            return response()->json([
+                'success' => false,
+                'message' => 'This terminal can only act on migration runs for its own store.',
+            ], 403);
+        }
+
+        return null;
+    }
+
+    /**
+     * The phrase the cutover step asks to be typed, sent beside the run it belongs
+     * to. It is the branch's own code, so nothing secret travels — its job is to stop
+     * a confirmation being clicked by accident, not to authorise the caller.
+     *
+     * @return array<string,mixed>
+     */
+    private function runResource(MigrationRun $run): array
+    {
+        $resource = $run->toArray();
+        $resource['cutover_phrase'] = $run->store ? "CUTOVER-{$run->store->code}" : null;
+
+        return $resource;
+    }
+
+    /**
      * List migration runs for the current store.
      */
     public function index(Request $request): JsonResponse
     {
-        $storeId = $request->user()->store_id ?? $request->query('store_id');
+        $storeId = $this->resolveStoreId($request, $request->query('store_id'));
+
+        if (!$storeId) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Claim this terminal to a counter, or sign in as a store account, to list migration runs.',
+            ], 422);
+        }
+
         $runs = MigrationRun::where('store_id', $storeId)
-            ->with(['reconciliationReport'])
+            ->with(['reconciliationReport', 'store'])
             ->orderBy('id', 'desc')
             ->get();
 
         return response()->json([
             'success' => true,
-            'data' => $runs,
+            'data' => $runs->map(fn(MigrationRun $run) => $this->runResource($run)),
+        ]);
+    }
+
+    /**
+     * MIG-02: Menu & Feature Control decides whether a store may run the pipeline
+     * at all. The answer is checked here rather than only hidden in the nav,
+     * because a switch that a direct call walks past is a label, not a control.
+     *
+     * Reading a past run and rolling it back stay open: switching the wizard off
+     * is how an owner stops a migration, not how they strand the rows it wrote.
+     */
+    private function migrationSwitchedOff(Request $request): ?JsonResponse
+    {
+        if (!$this->isTerminalRequest($request)) {
+            return null;
+        }
+
+        $storeId = $this->terminalStoreId($request);
+        $store = $storeId !== null ? Store::find($storeId) : null;
+
+        if ($store && !$store->featureFlag('allow_data_migration')) {
+            return response()->json([
+                'success' => false,
+                'code' => 'data_migration_disabled',
+                'message' => "Data migration is switched off for {$store->name}. Turn it on under Menu & Feature Control, or run the wizard from a store account.",
+            ], 403);
+        }
+
+        return null;
+    }
+
+    /**
+     * Accept the exported bundle from a workstation's disk and hand back an opaque
+     * reference. The client never names a server path, so nothing here can be pointed
+     * at a file the upload did not put there.
+     */
+    public function upload(Request $request): JsonResponse
+    {
+        if ($denied = $this->migrationSwitchedOff($request)) {
+            return $denied;
+        }
+
+        $request->validate([
+            'bundle' => 'required|file|max:51200',
+        ]);
+
+        $file = $request->file('bundle');
+        $raw = file_get_contents($file->getRealPath());
+
+        if (str_starts_with($raw, "\x1f\x8b")) {
+            $decoded = gzdecode($raw);
+            if ($decoded === false) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'The bundle is gzip-compressed but could not be decompressed.',
+                ], 422);
+            }
+            $raw = $decoded;
+        }
+
+        $data = json_decode($raw, true);
+        if (!is_array($data)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'The bundle is not readable JSON: ' . json_last_error_msg(),
+            ], 422);
+        }
+
+        $entities = $this->sourceReader->presentEntities($data);
+        if ($entities === []) {
+            return response()->json([
+                'success' => false,
+                'message' => 'The bundle holds no migration entities. Export it again with "php artisan lamsuite:export-store <store_id>".',
+            ], 422);
+        }
+
+        $ref = (string) Str::uuid();
+        Storage::disk('local')->put("migrations/{$ref}.json", $raw);
+
+        return response()->json([
+            'success' => true,
+            'data' => [
+                'bundle_ref' => $ref,
+                'bytes' => strlen($raw),
+                'entities' => $entities,
+            ],
         ]);
     }
 
@@ -48,14 +212,26 @@ class MigrationController extends Controller
      */
     public function precheck(Request $request): JsonResponse
     {
+        if ($denied = $this->migrationSwitchedOff($request)) {
+            return $denied;
+        }
+
         $validated = $request->validate([
-            'store_id' => 'required|integer',
+            'store_id' => 'nullable',
             'source_type' => 'required|in:api,file,device',
             'config' => 'required|array',
         ]);
 
+        $storeId = $this->resolveStoreId($request, $validated['store_id'] ?? null);
+        if (!$storeId) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Claim this terminal to a counter before migrating its store.',
+            ], 422);
+        }
+
         try {
-            $sourceData = $this->sourceReader->readSource($validated['source_type'], $validated['config']);
+            $sourceData = $this->sourceReader->readSource($validated['source_type'], $this->sourceConfig($validated['config']));
             $report = $this->diagnosticsService->runPrecheck($sourceData);
 
             return response()->json([
@@ -75,45 +251,64 @@ class MigrationController extends Controller
      */
     public function start(Request $request): JsonResponse
     {
+        if ($denied = $this->migrationSwitchedOff($request)) {
+            return $denied;
+        }
+
         $validated = $request->validate([
-            'store_id' => 'required|integer',
+            'store_id' => 'nullable',
             'source_type' => 'required|in:api,file,device',
             'config' => 'required|array',
             'is_dry_run' => 'boolean',
             'mapping_config' => 'nullable|array',
         ]);
 
-        $store = Store::findOrFail($validated['store_id']);
-        $runUuid = (string)Str::uuid();
-        $isDryRun = (bool)($validated['is_dry_run'] ?? false);
+        $storeId = $this->resolveStoreId($request, $validated['store_id'] ?? null);
+        if (!$storeId) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Claim this terminal to a counter before migrating its store.',
+            ], 422);
+        }
+
+        $store = Store::findOrFail($storeId);
+        $config = $this->sourceConfig($validated['config']);
+        $runUuid = (string) Str::uuid();
+        $isDryRun = (bool) ($validated['is_dry_run'] ?? false);
 
         $run = MigrationRun::create([
             'store_id' => $store->id,
             'user_id' => $request->user()->id ?? null,
             'run_uuid' => $runUuid,
             'source_type' => $validated['source_type'],
-            'source_reference' => $validated['config']['url'] ?? $validated['config']['file_path'] ?? 'device-payload',
+            'source_reference' => $config['url'] ?? $config['bundle_ref'] ?? 'device-payload',
             'status' => 'running',
             'is_dry_run' => $isDryRun,
             'mapping_config' => $validated['mapping_config'] ?? null,
         ]);
 
         try {
-            $sourceData = $this->sourceReader->readSource($validated['source_type'], $validated['config']);
+            $sourceData = $this->sourceReader->readSource($validated['source_type'], $config);
             $stats = $this->pipelineRunner->execute($run, $sourceData, $isDryRun);
 
-            // Run reconciliation report
-            $reconciliation = $this->reconciliationService->reconcile($run, $sourceData);
+            // A dry run writes nothing, so reconciling it against the database would
+            // report every entity as missing. The stats are the only honest number.
+            $reconciliation = $isDryRun
+                ? null
+                : $this->reconciliationService->reconcile($run, $sourceData);
 
             return response()->json([
                 'success' => true,
                 'data' => [
-                    'run' => $run->fresh(['reconciliationReport']),
+                    'run' => $this->runResource($run->fresh(['reconciliationReport', 'store'])),
                     'stats' => $stats,
+                    'is_dry_run' => $isDryRun,
                     'reconciliation' => $reconciliation,
+                    'cutover_phrase' => "CUTOVER-{$store->code}",
                 ],
             ]);
         } catch (Throwable $e) {
+            // The runner already rolled back and recorded the failure on the run.
             return response()->json([
                 'success' => false,
                 'message' => 'Migration failed: ' . $e->getMessage(),
@@ -125,15 +320,19 @@ class MigrationController extends Controller
     /**
      * Get details of a specific migration run.
      */
-    public function show(string $uuid): JsonResponse
+    public function show(Request $request, string $uuid): JsonResponse
     {
         $run = MigrationRun::where('run_uuid', $uuid)
-            ->with(['reconciliationReport', 'unresolvedItems'])
+            ->with(['reconciliationReport', 'unresolvedItems', 'store'])
             ->firstOrFail();
+
+        if ($denied = $this->storeMismatch($request, $run)) {
+            return $denied;
+        }
 
         return response()->json([
             'success' => true,
-            'data' => $run,
+            'data' => $this->runResource($run),
         ]);
     }
 
@@ -143,12 +342,17 @@ class MigrationController extends Controller
     public function reconcile(Request $request, string $uuid): JsonResponse
     {
         $run = MigrationRun::where('run_uuid', $uuid)->firstOrFail();
+
+        if ($denied = $this->storeMismatch($request, $run)) {
+            return $denied;
+        }
+
         $validated = $request->validate([
             'source_type' => 'required|in:api,file,device',
             'config' => 'required|array',
         ]);
 
-        $sourceData = $this->sourceReader->readSource($validated['source_type'], $validated['config']);
+        $sourceData = $this->sourceReader->readSource($validated['source_type'], $this->sourceConfig($validated['config']));
         $report = $this->reconciliationService->reconcile($run, $sourceData);
 
         return response()->json([
@@ -160,9 +364,14 @@ class MigrationController extends Controller
     /**
      * Rollback a migration run.
      */
-    public function rollback(string $uuid): JsonResponse
+    public function rollback(Request $request, string $uuid): JsonResponse
     {
         $run = MigrationRun::where('run_uuid', $uuid)->firstOrFail();
+
+        if ($denied = $this->storeMismatch($request, $run)) {
+            return $denied;
+        }
+
         try {
             $stats = $this->rollbackService->rollback($run);
 
@@ -185,6 +394,15 @@ class MigrationController extends Controller
     public function cutover(Request $request, string $uuid): JsonResponse
     {
         $run = MigrationRun::where('run_uuid', $uuid)->firstOrFail();
+
+        if ($denied = $this->storeMismatch($request, $run)) {
+            return $denied;
+        }
+
+        if ($denied = $this->migrationSwitchedOff($request)) {
+            return $denied;
+        }
+
         $store = Store::findOrFail($run->store_id);
 
         $validated = $request->validate([
@@ -201,7 +419,13 @@ class MigrationController extends Controller
 
         // Verify reconciliation passed
         $report = $run->reconciliationReport;
-        if ($report && !$report->is_passed) {
+        if (!$report) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Cannot cutover: this run has no reconciliation report. Run the migration, then reconcile it.',
+            ], 422);
+        }
+        if (!$report->is_passed) {
             return response()->json([
                 'success' => false,
                 'message' => 'Cannot cutover: critical reconciliation mismatches remain. Resolve or review them first.',
@@ -217,7 +441,18 @@ class MigrationController extends Controller
         return response()->json([
             'success' => true,
             'message' => "Cutover confirmed for store {$store->name}. Store is now fully active on new system.",
-            'data' => $run->fresh(),
+            'data' => $this->runResource($run->fresh(['store'])),
         ]);
+    }
+
+    /**
+     * The reader only accepts a bundle_ref it issued; a client-supplied server path is
+     * dropped here so it can never reach the filesystem.
+     */
+    private function sourceConfig(array $config): array
+    {
+        unset($config['file_path']);
+
+        return $config;
     }
 }

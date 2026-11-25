@@ -40,6 +40,16 @@ class MigrationDiagnosticsService
             }
         }
 
+        // A source with nothing recognisable in it is not a migration. Without this the
+        // wizard walks six green steps, writes no rows and reports success.
+        if (array_sum($counts) === 0) {
+            $issues[] = [
+                'type' => 'error',
+                'category' => 'source',
+                'message' => 'The source carries no migratable records. Check that the bundle was exported for the right store, or that the token names a store whose data has not already been migrated.',
+            ];
+        }
+
         // 2. Barcode & Product scan
         $barcodesSeen = [];
         $duplicateBarcodes = [];

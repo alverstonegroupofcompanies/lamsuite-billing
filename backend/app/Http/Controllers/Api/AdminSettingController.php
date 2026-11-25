@@ -246,11 +246,7 @@ class AdminSettingController
             ? $settings['salesperson_on_bill']->value
             : \App\Support\SalespersonBillRule::REQUIRED;
 
-        $enabledMenuItems = $store->enabled_menu_items ?? ($settings['enabled_menu_items']->value ?? [
-            'dashboard', 'pos', 'bills', 'sales_returns', 'customer_debit_notes',
-            'purchases', 'purchase_returns', 'expenses', 'stock', 'stock_transfers',
-            'reports', 'masters', 'import_export', 'settings', 'counters',
-        ]);
+        $enabledMenuItems = $store->enabled_menu_items ?? ($settings['enabled_menu_items']->value ?? Store::DEFAULT_MENUS);
 
         return [
             'store_id' => (string)$store->id,
@@ -315,6 +311,9 @@ class AdminSettingController
             'batch_required' => (bool)$batchRequired,
             'salesperson_on_bill' => $salespersonOnBill,
             'enabled_menu_items' => $enabledMenuItems,
+            // MIG-02: the switches live on the store row, so a till learns them with
+            // the rest of its configuration instead of guessing from a build.
+            'feature_flags' => $store->featureFlags(),
             'is_active' => (bool)$store->is_active,
 
             // Admin panel parity structures

@@ -7,6 +7,7 @@ declare global {
     __ENV__?: {
       VITE_API_BASE_URL?: string;
       VITE_WS_URL?: string;
+      VITE_LEGACY_API_URL?: string;
     };
   }
 }
@@ -19,6 +20,20 @@ const rawApiBase =
 export const API_BASE = rawApiBase
   ? (rawApiBase.endsWith("/api") ? rawApiBase.replace(/\/+$/, "") : `${rawApiBase.replace(/\/+$/, "")}/api`)
   : "/api";
+
+/**
+ * The legacy v1 panel is a separate install from this admin app and the only host that
+ * serves /api/sync/pull. The portal answers that path with its own index.html, so a
+ * migration aimed at the wrong host fails as a bare network error — never derive this
+ * from API_BASE.
+ */
+export const LEGACY_PANEL_URL: string = (
+  (typeof window !== "undefined" && window.__ENV__?.VITE_LEGACY_API_URL) ||
+  import.meta.env.VITE_LEGACY_API_URL ||
+  "https://admin.lamstonehealthcare.com"
+)
+  .trim()
+  .replace(/\/+$/, "");
 
 export class ApiError extends Error {
   status: number;
@@ -40,8 +55,8 @@ export async function apiRequest<T = any>(
   const storeId = localStorage.getItem("admin_store_id");
   const impersonatorId = localStorage.getItem("impersonator_id");
 
+  const isMultipart = typeof FormData !== "undefined" && options.body instanceof FormData;
   const headers: Record<string, string> = {
-    "Content-Type": "application/json",
     Accept: "application/json",
     ...(options.headers as Record<string, string>),
   };
@@ -56,6 +71,12 @@ export async function apiRequest<T = any>(
   }
   if (impersonatorId) {
     headers["X-Impersonator-Id"] = impersonatorId;
+  }
+
+  // A multipart body has to keep the boundary the browser generated for it — naming a
+  // JSON type over it is how an upload arrives as an empty file. Everything else is JSON.
+  if (!isMultipart && !headers["Content-Type"]) {
+    headers["Content-Type"] = "application/json";
   }
 
   const url = endpoint.startsWith("http") ? endpoint : `${API_BASE}${endpoint}`;
@@ -152,6 +173,9 @@ export const api = {
   },
   post: <T = any>(url: string, body?: any) =>
     apiRequest<T>(url, { method: "POST", body: body ? JSON.stringify(body) : undefined }),
+  /** Sends a file the browser holds; the body must stay FormData. */
+  upload: <T = any>(url: string, form: FormData) =>
+    apiRequest<T>(url, { method: "POST", body: form }),
   put: <T = any>(url: string, body?: any) =>
     apiRequest<T>(url, { method: "PUT", body: body ? JSON.stringify(body) : undefined }),
   delete: <T = any>(url: string, body?: any) =>

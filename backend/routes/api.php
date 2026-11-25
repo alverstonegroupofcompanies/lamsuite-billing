@@ -127,6 +127,21 @@ Route::middleware(['device.auth', 'counter.profile'])->group(function () {
     Route::post('/till/staff/{id}/unlock', [AdminUserController::class, 'unlock']);
     Route::post('/till/staff/{id}/reset-pin', [AdminUserController::class, 'resetPin']);
 
+    // MIG-01: the wizard at the till drives the server-side pipeline — the one that
+    // writes to the store's real database. Until now it only wrote to that till's own
+    // SQLite and stamped the rows "synced", so nothing ever reached the new system.
+    // The device token decides the branch, counter.profile decides whether this
+    // counter may migrate (migration.run), and the store's Menu & Feature Control
+    // decides whether migration is open here at all.
+    Route::post('/till/migrations/bundle', [MigrationController::class, 'upload']);
+    Route::post('/till/migrations/precheck', [MigrationController::class, 'precheck']);
+    Route::post('/till/migrations/start', [MigrationController::class, 'start'])->middleware('throttle:6,1,migration-start');
+    Route::get('/till/migrations', [MigrationController::class, 'index']);
+    Route::get('/till/migrations/{uuid}', [MigrationController::class, 'show']);
+    Route::post('/till/migrations/{uuid}/reconcile', [MigrationController::class, 'reconcile']);
+    Route::post('/till/migrations/{uuid}/rollback', [MigrationController::class, 'rollback'])->middleware('throttle:6,1,migration-rollback');
+    Route::post('/till/migrations/{uuid}/cutover', [MigrationController::class, 'cutover']);
+
     // PRF-006: the counter's own unlock PIN, and the one cache that ships its hash.
     Route::post('/counter/unlock', [CounterUnlockController::class, 'unlock'])->middleware('throttle:10,1,counter-unlock');
     Route::get('/credentials/offline-cache', [CounterUnlockController::class, 'offlineCache']);
@@ -714,6 +729,9 @@ Route::middleware(['auth:sanctum', 'ip.allowlist', 'scope.store'])->prefix('admi
     Route::get('/data-exchange/history', [DataExchangeController::class, 'history'])->middleware('rbac:audit,view');
 
     // Module 16: Data Migration Engine
+    // MIG-01: a bundle is uploaded and referenced, never named by server path, so no
+    // caller can point the reader at a file already sitting on this machine.
+    Route::post('/migrations/bundle', [MigrationController::class, 'upload']);
     Route::get('/migrations', [MigrationController::class, 'index']);
     Route::post('/migrations/precheck', [MigrationController::class, 'precheck']);
     Route::post('/migrations/start', [MigrationController::class, 'start']);

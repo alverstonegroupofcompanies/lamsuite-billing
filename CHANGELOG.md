@@ -1,5 +1,73 @@
 # Changelog
 
+## 2.1.7 — 2026-11-25
+
+Both sources of the Store Data Migration Wizard — exported bundle upload and Direct Laravel API —
+walked six green steps, printed a reconciliation table, reported *Migration Completed* and left the
+branch's database empty. Admin Panel → Migration Center showed nothing either, because there was
+nothing to show.
+
+The wizard never touched the server. `clientMigrationEngine.ts` read the source into browser memory,
+wrote the rows into **that workstation's SQLite** with `sync_state: "synced"` stamped on them, and
+reported on its own handiwork: `can_proceed` was hardcoded `true`, reconciliation compared the
+payload to itself, the cutover step only changed button state, and `store_id` was a literal `1`.
+"Synced" rows are the ones the sync queue never pushes, so the store's real database — the one the
+admin panel reads — stayed empty while the till displayed the imported products. A run that moved
+zero rows and a run that moved 40,000 looked identical, and there was no run record to compare.
+
+1. **The wizard drives the server pipeline** — every step is now an HTTP call
+   (`POST /api/till/migrations/bundle` → `precheck` → `start` → `cutover`) and the work happens in
+   `MigrationPipelineRunner` inside one transaction against the branch's database. The screen shows
+   the server's run UUID, the server's per-entity counts and the server's reconciliation verdict, so
+   what a step claims and what it did are the same object. The client engine is deleted;
+   `tillMigrationService.ts` is a thin caller with no write path of its own.
+2. **A file cannot be named, only referenced** — the upload endpoint accepts a real multipart file,
+   checks it is JSON carrying at least one entity the pipeline knows, stores it under a UUID and
+   hands back a `bundle_ref`. The reader accepts that UUID and nothing else, so the
+   `config.file_path` that used to be read straight off the request body is gone — that field was an
+   arbitrary-file-read on the server, and a till could aim a migration at any path on disk.
+3. **Silence became an error** — a source with no rows now fails pre-check with a blocking
+   `source`-category issue instead of passing, a dry run writes nothing and its cutover is refused
+   because there is nothing to cut over, and cutover demands `CUTOVER-{store code}` against a run
+   whose reconciliation actually passed. `store_id` in the body is rejected as a tenant violation
+   rather than trusted; the device token decides the branch, so a stale local registry key
+   (`store_main`) migrates the counter's own store instead of nothing.
+4. **Migration Center is a real client** — rewritten on the panel's own `api` service with an
+   explicit branch picker, file upload, pre-check, dry run, live run, and a history table carrying
+   each run's server counts, cutover phrase and rollback. It previously posted to endpoints it
+   derived by string guesswork, so its own success panels could not be believed either.
+5. **The branch's Data Migration switch** — `Menu & Feature Control` gains a
+   **Branch Data Ownership → Legacy Data Migration** toggle backed by the store's
+   `allow_data_migration` flag (default on, so a branch that never saved one keeps working). It is
+   enforced server-side on upload, pre-check, start and cutover — not only by hiding the tab — while
+   history, reconciliation detail and rollback stay reachable, because a switch that stops future
+   imports must not strand what already landed. `/api/settings` now ships the store's flags, and the
+   till hides the nav tab, the hub link and the wizard body when it is off.
+   A flag rather than a menu row on purpose: the wizard shipped open on every till before this
+   switch existed, and a `enabled_menu_items` list saved by an older build is indistinguishable from
+   an owner having deliberately unchecked the row. An unset flag means "as it was".
+
+Verified on a scratch store end to end, twice: through the API with the till's device token, and
+through the browser as a store owner. Rows are proven in the database the panel reads — 1 product,
+2 parties, 1 batch, 1 invoice, 1 invoice item, 3 `master_lookups` and 8 `migration_id_maps` for an
+8-row bundle, with `migration_runs` completed and reconciliation passed — then rollback returns every
+count to 0. Flipping the switch in the panel bumped `stores.version`, appeared in the till's
+`/api/settings`, and turned the till's `start` into `403 data_migration_disabled` while its history
+list stayed readable; flipping it back opened the pipeline again. `config.file_path` answers 422, a
+wrong cutover phrase answers 422 and writes nothing. Backend 1245 tests, frontend 1236, admin panel
+110, both `tsc` clean. Not covered: a built installer — the till half is source-only until this
+build ships, and the previous release's host-default fix is in the same position. Not covered: a
+live pull from the real legacy panel through the new wizard, which has one known gap carried over
+from v1 — `SyncController::pull` omits the lookup rows this pipeline maps, so an API-only migration
+drops brand, unit and category and needs a bundle export for those. Not covered: a till noticing a
+flipped switch on its own — tills still do not poll `stores.version`, so the UI updates on the next
+settings load while the server gate applies immediately.
+
+After pulling: no `migrate --force` and no artisan step — this release adds no schema. The flag lives
+in the `feature_flags` JSON the stores table already has. Tills pick this up through the updater;
+`min_version` stays at 2.0.21, and a till on an older build still runs the old client engine, so
+migrations should be run from the panel or from a till on v2.1.7.
+
 ## 2.1.6 — 2026-11-25
 
 The Store Data Migration Wizard's "Direct Laravel API" source could not be made to work, from any

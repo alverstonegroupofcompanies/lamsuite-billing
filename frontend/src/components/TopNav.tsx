@@ -238,7 +238,10 @@ export const TopNav: React.FC<TopNavProps> = ({ enabledMenus, onOpenShortcutsHel
           children: filteredChildren,
         };
       }
-      const enabled = item.id === "migration" ? true : enabledMenus.includes(item.id);
+      // MIG-02: the Data Migration tab is in this list only while the store has the
+      // switch on — Layout derives the list from feature_flags. No exemption here, so
+      // a direct call to the wizard is still refused by the server.
+      const enabled = enabledMenus.includes(item.id);
       return enabled && counterSessionService.allowsModule(item.id) ? item : null;
     })
     .filter((item): item is NavItemConfig => item !== null);

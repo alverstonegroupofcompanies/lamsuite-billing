@@ -54,11 +54,11 @@ function renderGate(menu: string, children = <div>the screen is open</div>) {
   );
 }
 
-function renderNav() {
+function renderNav(menus: string[] = ALL_MENUS) {
   return render(
     <MemoryRouter initialEntries={["/pos"]}>
       <I18nProvider>
-        <TopNav enabledMenus={ALL_MENUS} onOpenShortcutsHelp={() => {}} />
+        <TopNav enabledMenus={menus} onOpenShortcutsHelp={() => {}} />
       </I18nProvider>
     </MemoryRouter>
   );

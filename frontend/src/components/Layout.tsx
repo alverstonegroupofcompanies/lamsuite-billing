@@ -227,7 +227,15 @@ export const Layout: React.FC<LayoutProps> = ({ children, onOpenGateway, onAddNe
     companySettingsService.loadSettings().then((cfg) => {
       if (cfg) {
         if (cfg.enabled_menu_items) {
-          setEnabledMenus(cfg.enabled_menu_items);
+          // MIG-02: the wizard answers to a store switch rather than a menu row, so
+          // the flag decides whether it joins the list. TopNav then filters every tab
+          // the same way instead of carrying an exception.
+          setEnabledMenus([
+            ...new Set([
+              ...cfg.enabled_menu_items,
+              ...(cfg.allow_data_migration === false ? [] : ["migration"]),
+            ]),
+          ]);
         }
       }
       const curStore = storeRegistryService.getActiveStore();
