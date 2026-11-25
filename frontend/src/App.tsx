@@ -27,7 +27,7 @@ import { counterSessionService } from "./lib/auth/counterSessionService";
 import "./lib/ui/modalEscapeManager";
 
 import { StoreGatewayPage } from "./pages/StoreGatewayPage";
-import { storeRegistryService, type RegisteredStoreRecord } from "./lib/auth/storeRegistryService";
+import { storeRegistryService, shellSelection, type RegisteredStoreRecord } from "./lib/auth/storeRegistryService";
 import { autoUpdateService, type UpdateInfo } from "./lib/settings/autoUpdateService";
 import { UpdateNotificationModal } from "./components/UpdateNotificationModal";
 import { windows7PrereqService, type Windows7PrereqStatus } from "./lib/lan/windows7PrereqService";
@@ -148,12 +148,15 @@ export const App: React.FC = () => {
         }
       } else {
         // Online token re-validation with cloud backend on boot
-        const validation = await storeDeviceService.validateDeviceSession().catch(() => ({ valid: true, locked: false }));
+        const validation = await storeDeviceService.validateDeviceSession().catch(() => ({ valid: true, locked: false } as { valid: boolean; locked?: boolean; reason?: string }));
         if (validation.locked) {
-          console.warn("Workstation token unrecognized or revoked by server. Device reset to Setup.");
+          // "locked" also covers a spent offline window or an empty vault read.
+          // Only a counter the registry now records as retired leaves the shell.
+          console.warn("Workstation validation locked:", validation.reason);
           const updated = await storeRegistryService.loadRegistry();
-          setRegisteredStores(updated.stores.filter((s) => s.is_active));
-          setActiveStore(null);
+          const next = shellSelection(updated.stores, storeRegistryService.getActiveStore());
+          setRegisteredStores(next.stores);
+          setActiveStore(next.active);
         } else {
           setRegisteredStores(registry.stores);
           const currentActive = storeRegistryService.getActiveStore() || registry.stores[0];
@@ -232,13 +235,19 @@ export const App: React.FC = () => {
       setIsInitializing(false);
     });
 
-    // Periodic heartbeat token re-validation while online (every 5 minutes)
+    // Periodic heartbeat token re-validation while online (every 5 minutes).
+    // A genuine revocation marks the registry record "revoked", which the
+    // registry listener below already turns into leaving the shell. Anything
+    // else "locked" reports (server unreachable past the offline window, an
+    // empty vault read) must not throw an operator mid-bill onto Select Store.
     const heartbeatTimer = setInterval(() => {
       storeDeviceService.validateDeviceSession().then((val) => {
         if (val.locked) {
+          console.warn("Workstation validation locked:", val.reason);
           storeRegistryService.loadRegistry().then((updated) => {
-            setRegisteredStores(updated.stores.filter((s) => s.is_active));
-            setActiveStore(null);
+            const next = shellSelection(updated.stores, storeRegistryService.getActiveStore());
+            setRegisteredStores(next.stores);
+            setActiveStore(next.active);
           });
         }
       }).catch(() => {});
@@ -257,13 +266,14 @@ export const App: React.FC = () => {
     });
 
     const unsubReg = storeRegistryService.onRegistryChange((reg) => {
-      // SYNC-02: a revoked store is deactivated in the registry. Dropping it
-      // here is what takes the shell away; keeping it selected left a retired
-      // till drawing the POS with its header falling back to "C01".
-      const stores = reg.stores.filter((store) => store.is_active !== false);
-      const selected = storeRegistryService.getActiveStore();
-      setRegisteredStores(stores);
-      setActiveStore(selected && selected.is_active !== false ? selected : null);
+      // SYNC-02: a retired counter is marked "revoked" in the registry. Dropping
+      // it here is what takes the shell away; keeping it selected left a retired
+      // till drawing the POS with its header falling back to "C01". A store
+      // that is merely inactive stays selected — Layout shows its disabled
+      // screen — instead of bouncing the operator to Select Store.
+      const next = shellSelection(reg.stores, storeRegistryService.getActiveStore());
+      setRegisteredStores(next.stores);
+      setActiveStore(next.active);
     });
 
     return () => {

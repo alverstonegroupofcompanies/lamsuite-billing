@@ -39,6 +39,27 @@ export interface StoreRegistryData {
 
 const REGISTRY_STORAGE_KEY = "lamsuite_stores_registry";
 
+/**
+ * SYNC-02: a counter the owner retired from this machine. Only this takes the
+ * store out of the shell. A suspended store (is_active false, still held) stays
+ * open and Layout draws its "store disabled" screen; an unreachable server or a
+ * spent offline window is not a retirement either.
+ */
+export function isRetiredFromThisTill(store: RegisteredStoreRecord | null | undefined): boolean {
+  return store?.sync_status === "revoked";
+}
+
+/** The stores the shell may show, and the one it opens — retired counters dropped. */
+export function shellSelection(
+  stores: RegisteredStoreRecord[],
+  selected: RegisteredStoreRecord | null
+): { stores: RegisteredStoreRecord[]; active: RegisteredStoreRecord | null } {
+  return {
+    stores: stores.filter((store) => !isRetiredFromThisTill(store)),
+    active: selected && !isRetiredFromThisTill(selected) ? selected : null,
+  };
+}
+
 export const STORE_PRESET_COLORS = [
   { label: "Emerald (Primary)", hex: "#059669", badge: "emerald", border: "border-emerald-500", bg: "bg-emerald-50 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300" },
   { label: "Sky Blue", hex: "#0284c7", badge: "blue", border: "border-sky-500", bg: "bg-sky-50 text-sky-800 dark:bg-sky-950/40 dark:text-sky-300" },
