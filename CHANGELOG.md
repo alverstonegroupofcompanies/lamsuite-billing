@@ -1,5 +1,42 @@
 # Changelog
 
+## 2.1.6 — 2026-11-25
+
+The Store Data Migration Wizard's "Direct Laravel API" source could not be made to work, from any
+machine, with any token. It was aimed at the wrong host by default — and its error text sent
+everyone checking the network.
+
+The Legacy Server URL field opens with `ADMIN_PORTAL_URL`, which is `PANEL_PORTAL_URL`, which comes
+from `VITE_ADMIN_PORTAL_URL` = `https://app.lamstonehealthcare.com`. That host is the v2 portal SPA.
+It has no `/api/sync/pull`; nginx's SPA fallback answers the path with `index.html`, and it sends no
+`Access-Control-Allow-Origin` doing so. So `fetch()` rejected inside the webview as `TypeError: Load
+failed`, and the engine reported it as *"Could not connect to https://app.lamstonehealthcare.com:
+Load failed. If the server is offline or CORS blocked…"*. A valid token could not change the outcome
+because the token was never sent to a host that reads it. The legacy install lives on a third host,
+`https://admin.lamstonehealthcare.com`, which serves `/api/sync/pull` and answers the preflight with
+`Access-Control-Allow-Origin: *`.
+
+1. **`LEGACY_API_URL` is its own setting** — resolved from `VITE_LEGACY_API_URL` (runtime `__ENV__`
+   first, then build-time), defaulting to the v1 panel, and set in all three env files. It is
+   deliberately *not* derived from `window.location.hostname` the way the portal URL is: the wizard
+   runs on the panel's host and has to reach a different one.
+2. **Each failure now names its own cause** — HTTP 401/403 report a rejected token and point at
+   `/admin/migration-token`; 404 reports that the host is not the legacy panel; a body that is not
+   JSON reports that the host is serving the portal. Only a request that never got a reply is
+   described as unreachable, and that message says which host to expect.
+3. **The token is no longer labelled optional** — `/api/sync/pull` answers `401 Unauthenticated`
+   without it, and the hint under the field now says where the token is minted.
+
+Verified against the live hosts: `admin.` returns `401` with a CORS header on an untokened pull,
+`app.` returns `200` HTML for the same path. The token-and-endpoint half is covered by the legacy
+panel's own `AdminMigrationTokenTest` ("issued token serves the wizard pull endpoint"). Not covered:
+a click-through in a built installer — this fix is a compiled default, so it only reaches tills
+through this build.
+
+After pulling: no `migrate --force` and no artisan step. Tills pick this up through the updater;
+`min_version` stays at 2.0.21. Until a till is on v2.1.6, the workaround is to retype the Legacy
+Server URL as `https://admin.lamstonehealthcare.com` — the field's default is the bug.
+
 ## 2.1.5 — 2026-11-25
 
 A till that could not reach its server threw the operator out of their own store, and the two
