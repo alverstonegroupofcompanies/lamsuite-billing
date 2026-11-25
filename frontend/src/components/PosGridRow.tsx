@@ -519,54 +519,18 @@ export const PosGridRow: React.FC<PosGridRowProps> = ({
             return (
               <td key="free_qty" className="px-3 py-2 text-center" onClick={(e) => e.stopPropagation()}>
                 {line ? (
-                  <div className="flex items-center gap-1 justify-center">
-                    <input
-                      type="number"
-                      min="0"
-                      inputMode="numeric"
-                      value={line.free_qty || ""}
-                      onChange={(e) =>
-                        onFreeQtyChange?.(
-                          Math.max(0, Math.floor(Number(e.target.value) || 0)),
-                          Math.max(0, Math.floor(Number(line.free_loose_qty) || 0))
-                        )
-                      }
-                      onFocus={onSelectRow}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") {
-                          e.preventDefault();
-                          (e.target as HTMLInputElement).blur();
-                        }
-                      }}
-                      placeholder="Pk"
-                      title="Free packs (bonus, not billed)"
-                      className="w-12 text-center font-mono text-xs rounded-[6px] border border-[var(--color-border)] bg-[var(--color-surface)] px-1 py-1 text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none"
-                    />
-                    {unitsPerPack > 1 && (
-                      <input
-                        type="number"
-                        min="0"
-                        inputMode="numeric"
-                        value={line.free_loose_qty || ""}
-                        onChange={(e) =>
-                          onFreeQtyChange?.(
-                            Math.max(0, Math.floor(Number(line.free_qty) || 0)),
-                            Math.max(0, Math.floor(Number(e.target.value) || 0))
-                          )
-                        }
-                        onFocus={onSelectRow}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") {
-                            e.preventDefault();
-                            (e.target as HTMLInputElement).blur();
-                          }
-                        }}
-                        placeholder="Loose"
-                        title="Free loose units (bonus, not billed)"
-                        className="w-12 text-center font-mono text-xs rounded-[6px] border border-[var(--color-border)] bg-[var(--color-surface)] px-1 py-1 text-[var(--color-text-muted)] focus:border-[var(--color-accent)] focus:outline-none"
-                      />
-                    )}
-                  </div>
+                  <SmartQtyInput
+                    inputId={isDraft ? "free-qty-input-draft" : `free-qty-input-${line.id}`}
+                    packs={line.free_qty || 0}
+                    loose={line.free_loose_qty || 0}
+                    unitsPerPack={line.product.units_per_pack || 1}
+                    packName={line.product.unit_name || (line.product.units_per_pack > 1 ? "strip" : "pc")}
+                    looseName={line.product.sub_unit_name || (line.product.units_per_pack > 1 ? "tabl" : "pc")}
+                    allowLoose={line.product.allow_loose_sale ?? ((line.product.units_per_pack || 1) > 1)}
+                    onFocusInput={onSelectRow}
+                    onEnter={() => (document.activeElement as HTMLElement | null)?.blur()}
+                    onChange={(newPacks, newLoose) => onFreeQtyChange?.(newPacks, newLoose)}
+                  />
                 ) : (
                   <span className="opacity-40">-</span>
                 )}

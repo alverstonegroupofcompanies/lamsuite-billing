@@ -5,6 +5,7 @@ import type { PurchaseLineItemInput } from "../../lib/purchases/purchaseService"
 import { parseExpiryInput, calculateLineMargin, isValidHsn, suggestGstForHsn } from "../../lib/purchases/purchaseEntryUtils";
 import { purchaseService } from "../../lib/purchases/purchaseService";
 import { BatchCombobox } from "../BatchCombobox";
+import { SmartQtyInput } from "../SmartQtyInput";
 import type { ProductBatch } from "../../lib/masters/productsStore";
 
 export interface PurchaseGridRowProps {
@@ -78,7 +79,6 @@ export const PurchaseGridRow: React.FC<PurchaseGridRowProps> = ({
   const expiryInputRef = useRef<HTMLInputElement>(null);
   const mfgInputRef = useRef<HTMLInputElement>(null);
   const qtyInputRef = useRef<HTMLInputElement>(null);
-  const freeQtyInputRef = useRef<HTMLInputElement>(null);
   const mrpInputRef = useRef<HTMLInputElement>(null);
   const rateInputRef = useRef<HTMLInputElement>(null);
   const discInputRef = useRef<HTMLInputElement>(null);
@@ -560,43 +560,20 @@ export const PurchaseGridRow: React.FC<PurchaseGridRowProps> = ({
             }}
           >
             {isDraft && line ? (
-              <div className="flex items-center gap-1 justify-center">
-                <input
-                  ref={freeQtyInputRef}
-                  type="number"
-                  min="0"
-                  value={line.free_qty || ""}
-                  onChange={(e) => onFieldChange?.("free_qty", Math.max(0, parseFloat(e.target.value) || 0))}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      e.preventDefault();
-                      mrpInputRef.current?.focus();
-                      mrpInputRef.current?.select();
-                    }
-                  }}
-                  placeholder="Pk"
-                  title="Free packs"
-                  className="w-11 text-center font-mono text-xs rounded-[6px] border border-[var(--color-border)] bg-[var(--color-surface)] px-1 py-1 text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none"
-                />
-                {(line.units_per_pack || 1) > 1 && (
-                  <input
-                    type="number"
-                    min="0"
-                    value={line.free_loose_qty || ""}
-                    onChange={(e) => onFieldChange?.("free_loose_qty", Math.max(0, parseInt(e.target.value, 10) || 0))}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") {
-                        e.preventDefault();
-                        mrpInputRef.current?.focus();
-                        mrpInputRef.current?.select();
-                      }
-                    }}
-                    placeholder="Loose"
-                    title="Free loose units"
-                    className="w-11 text-center font-mono text-xs rounded-[6px] border border-[var(--color-border)] bg-[var(--color-surface)] px-1 py-1 text-[var(--color-text-muted)] focus:border-[var(--color-accent)] focus:outline-none"
-                  />
-                )}
-              </div>
+              <SmartQtyInput
+                packs={line.free_qty || 0}
+                loose={line.free_loose_qty || 0}
+                unitsPerPack={line.units_per_pack || 1}
+                allowLoose={(line.units_per_pack || 1) > 1}
+                onChange={(packs, loose) => {
+                  onFieldChange?.("free_qty", packs);
+                  onFieldChange?.("free_loose_qty", loose);
+                }}
+                onEnter={() => {
+                  mrpInputRef.current?.focus();
+                  mrpInputRef.current?.select();
+                }}
+              />
             ) : isCellEditing && line ? (
               <div className="flex items-center gap-1 justify-center">
                 <input
