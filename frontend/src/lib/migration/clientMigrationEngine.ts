@@ -56,18 +56,35 @@ export class ClientMigrationEngine {
 
       // Try pulling sync snapshot from legacy Laravel API
       const pullUrl = `${baseUrl}/api/sync/pull?limit=0`;
+      let res: Response;
       try {
-        const res = await fetch(pullUrl, { method: "GET", headers });
-        if (!res.ok) {
-          throw new Error(`Legacy API responded with HTTP ${res.status}: ${res.statusText}`);
-        }
-        const json = await res.json();
-        return json.data?.snapshot || json.data || json;
+        res = await fetch(pullUrl, { method: "GET", headers });
       } catch (err: any) {
         throw new Error(
-          `Could not connect to ${baseUrl}: ${err.message}. If the server is offline or CORS blocked, use "Exported File Bundle".`
+          `Could not reach ${baseUrl} (${err.message}). This must be the legacy v1 panel host, not the portal host — the portal answers /api/sync/pull with a web page and no CORS headers, which reads as a connection failure. If that server is offline, use "Exported File Bundle".`
         );
       }
+
+      if (res.status === 401 || res.status === 403) {
+        throw new Error(
+          `${baseUrl} rejected the token (HTTP ${res.status}). Mint a fresh one at ${baseUrl}/admin/migration-token for the store being migrated; it has to carry the store:<id> ability.`
+        );
+      }
+      if (res.status === 404) {
+        throw new Error(
+          `${baseUrl} has no /api/sync/pull (HTTP 404), so it is not the legacy v1 panel. Use the admin host, e.g. https://admin.lamstonehealthcare.com.`
+        );
+      }
+      if (!res.ok) {
+        throw new Error(`${baseUrl} answered HTTP ${res.status} on /api/sync/pull.`);
+      }
+
+      const json = await res.json().catch(() => {
+        throw new Error(
+          `${baseUrl} replied with something that is not JSON — that host is serving the portal, not the legacy API. Use https://admin.lamstonehealthcare.com, or "Exported File Bundle".`
+        );
+      });
+      return json.data?.snapshot || json.data || json;
     }
 
     if (sourceType === "file") {

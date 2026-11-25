@@ -20,12 +20,12 @@ import {
   type MigrationPrecheckResult,
   type ClientMigrationRunResult,
 } from "../lib/migration/clientMigrationEngine";
-import { API_BASE_URL, ADMIN_PORTAL_URL } from "../config/env";
+import { API_BASE_URL, LEGACY_API_URL } from "../config/env";
 
 export const DataMigrationPage: React.FC = () => {
   const [currentStep, setCurrentStep] = useState<number>(1);
   const [sourceType, setSourceType] = useState<"api" | "file" | "device">("api");
-  const [apiUrl, setApiUrl] = useState<string>(ADMIN_PORTAL_URL);
+  const [apiUrl, setApiUrl] = useState<string>(LEGACY_API_URL);
   const [apiToken, setApiToken] = useState<string>("");
   const [fileContent, setFileContent] = useState<string>("");
   const [fileName, setFileName] = useState<string>("");
@@ -302,7 +302,7 @@ export const DataMigrationPage: React.FC = () => {
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-slate-700 mb-1">
-                    API Token / Bearer Key (Optional)
+                    API Token / Bearer Key
                   </label>
                   <input
                     type="password"
@@ -311,7 +311,10 @@ export const DataMigrationPage: React.FC = () => {
                     className="w-full text-xs p-2.5 border rounded focus:ring-1 focus:ring-indigo-500"
                     placeholder="Sanctum token"
                   />
-                  <p className="text-[11px] text-slate-500 mt-1">Leave blank if accessing via public demo / basic auth.</p>
+                  <p className="text-[11px] text-slate-500 mt-1">
+                    Mint it at {LEGACY_API_URL}/admin/migration-token against the store being migrated. The legacy pull
+                    endpoint answers 401 without one.
+                  </p>
                 </div>
               </div>
             )}

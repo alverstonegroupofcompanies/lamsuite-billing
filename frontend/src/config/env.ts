@@ -11,6 +11,7 @@ declare global {
       VITE_WS_URL?: string;
       VITE_PANEL_PORTAL_URL?: string;
       VITE_ADMIN_PORTAL_URL?: string;
+      VITE_LEGACY_API_URL?: string;
       VITE_DEFAULT_LAN_PORT?: string | number;
     };
   }
@@ -164,6 +165,24 @@ function resolvePanelPortalUrl(): string {
 
 export const PANEL_PORTAL_URL: string = resolvePanelPortalUrl();
 export const ADMIN_PORTAL_URL = PANEL_PORTAL_URL;
+
+/**
+ * The legacy v1 panel is a separate install from this portal. It is the only host
+ * that serves /api/sync/pull — the portal answers that path with index.html, and
+ * sends no CORS headers doing it, so a migration aimed at PANEL_PORTAL_URL fails
+ * as a bare network error rather than as a 404. Never derive this from the portal.
+ */
+function resolveLegacyApiUrl(): string {
+  const raw =
+    (typeof window !== "undefined" && window.__ENV__?.VITE_LEGACY_API_URL) ||
+    import.meta.env.VITE_LEGACY_API_URL;
+
+  if (raw?.trim()) return raw.trim().replace(/\/+$/, "");
+
+  return "https://admin.lamstonehealthcare.com";
+}
+
+export const LEGACY_API_URL: string = resolveLegacyApiUrl();
 
 export const DEFAULT_LAN_PORT: number =
   Number(
