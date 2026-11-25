@@ -18,12 +18,12 @@ class SalesReturnPricingServiceTest extends TestCase
             'gst_percent' => 12,
             'discount_percent' => 0,
             'discount_amount' => 0,
-            'taxable_amount' => 80.36,
-            'cgst_amount' => 4.82,
-            'sgst_amount' => 4.82,
+            'taxable_amount' => '80.36',
+            'cgst_amount' => '4.82',
+            'sgst_amount' => '4.82',
             'igst_amount' => 0,
             'cess_amount' => 0,
-            'tax_amount' => 9.64,
+            'tax_amount' => '9.64',
             'total_amount' => 90,
         ], $overrides));
     }
@@ -106,9 +106,9 @@ class SalesReturnPricingServiceTest extends TestCase
     {
         $line = (new SalesReturnPricingService())->reverseLine($this->item([
             'discount_amount' => 9,
-            'taxable_amount' => 72.32,
-            'cgst_amount' => 4.34,
-            'sgst_amount' => 4.34,
+            'taxable_amount' => '72.32',
+            'cgst_amount' => '4.34',
+            'sgst_amount' => '4.34',
             'total_amount' => 81,
         ]), 15, 0, 15);
 
