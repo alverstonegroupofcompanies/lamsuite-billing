@@ -1,6 +1,42 @@
 # Changelog
 
-# Changelog
+## 2.1.5 — 2026-11-25
+
+A till that could not reach its server threw the operator out of their own store, and the two
+grids that still hand-rolled a free-quantity cell disagreed about what could be typed into it.
+Nothing here changes what a bill contains, so there is no migration and no backfill.
+
+`storeDeviceService.validateDeviceSession()` reports `locked` for three different things: a
+credential the server actually revoked, an offline grace window that ran out, and an empty read
+from the local vault. The boot path and the five-minute heartbeat treated all three as retirement
+— they rebuilt the store list with `filter(s => s.is_active)` and cleared the active store. So a
+network blip past the offline window, and a store the owner suspended while this machine still
+held it, both landed the operator on Select Store mid-bill. Suspended stores were the worse half:
+Layout has a dedicated "store disabled" screen for them, and clearing the selection was what
+stepped over it.
+
+1. **Retirement is the only exit** — `isRetiredFromThisTill()` keys on `sync_status: "revoked"`,
+   the one state the registry writes when a counter is retired from this machine. A held store
+   stays open, a suspended store stays selected so its disabled screen renders, and an
+   unreachable server stops looking like a retirement.
+2. **The rule is stated once** — `shellSelection()` is now called identically from boot, the
+   heartbeat and `onRegistryChange`; the three places previously repeated the filter with three
+   slightly different predicates. SYNC-02's original fix stands: a retired counter still leaves
+   the list and deselects, which is what stopped a retired till drawing the POS under the
+   fallback "C01" header. The reason `validateDeviceSession()` locked is logged either way.
+3. **Free quantity uses the shared input in both grids** — `SmartQtyInput` already owned pack +
+   loose entry for billed quantity in these same rows, with the product's own unit names and
+   `allow_loose_sale`. The free-qty cell was the last hand-rolled pair of number inputs. The two
+   copies had drifted: the POS row floored both fields, the purchase row accepted a fractional
+   pack and an integer loose, and neither showed strip/tabl. Both now pass the same props their
+   billed-qty cell passes; Enter still blurs out of the POS cell and still advances a purchase row
+   to MRP.
+4. **The return fixtures match the cast** — `taxable_amount`, `cgst_amount` and `sgst_amount` are
+   `decimal:2`, so a hydrated line gives the pricing service `"80.36"`, not `80.36`. The fixtures
+   asserted the arithmetic while leaving the decimal-string path untested.
+
+After pulling: no `migrate --force`, no artisan commands. Desktop installs v2.1.5 through the
+normal updater — `min_version` stays at 2.0.21, so nothing is forced and older tills keep working.
 
 ## 2.1.4 — 2026-11-23
 
