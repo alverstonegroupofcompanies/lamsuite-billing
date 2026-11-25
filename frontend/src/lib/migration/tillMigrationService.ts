@@ -47,6 +47,10 @@ export interface MigrationStats {
   payments?: number;
   held_bills?: number;
   unresolved?: number;
+  credit_notes?: number;
+  debit_notes?: number;
+  guessed_rates?: number;
+  unlinked?: number;
   errors?: string[];
   is_dry_run?: boolean;
 }

@@ -24,6 +24,7 @@ use App\Models\StockTransferItem;
 use App\Models\Store;
 use App\Models\User;
 use App\Services\Gst\PartyStateResolver;
+use App\Services\Tax\StoreTaxPolicy;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
@@ -32,6 +33,56 @@ use Throwable;
 class MigrationPipelineRunner
 {
     private array $idMapCache = [];
+
+    /** Per-run tallies of what the normalizer had to work around, reported with the stats. */
+    private array $documentStats = [
+        'credit_notes' => 0,
+        'debit_notes' => 0,
+        'guessed_rates' => 0,
+        'unlinked' => 0,
+    ];
+
+    private array $productRateCache = [];
+
+    private LegacyRecordNormalizer $normalizer;
+
+    public function __construct(?LegacyRecordNormalizer $normalizer = null)
+    {
+        $this->normalizer = $normalizer ?? new LegacyRecordNormalizer();
+    }
+
+    /**
+     * The sale-side documents in a source, credit bills folded in. The merge itself lives in
+     * the normalizer so the reconciliation totals cannot disagree with the rows that were
+     * imported; this wrapper only arranges for a discarded duplicate to become a review item.
+     *
+     * @return array<int, array{0: array, 1: bool}>
+     */
+    private function saleDocuments(int $storeId, string $runUuid, array $sourceData): array
+    {
+        return $this->normalizer->saleDocuments(
+            $sourceData,
+            fn (array $row, string $list) => $this->recordDuplicateDocument($storeId, $runUuid, 'invoice', $row, $list)
+        );
+    }
+
+    /**
+     * @return array<int, array{0: array, 1: bool}>
+     */
+    private function purchaseDocuments(int $storeId, string $runUuid, array $sourceData): array
+    {
+        return $this->normalizer->purchaseDocuments(
+            $sourceData,
+            fn (array $row, string $list) => $this->recordDuplicateDocument($storeId, $runUuid, 'purchase', $row, $list)
+        );
+    }
+
+    private function recordDuplicateDocument(int $storeId, string $runUuid, string $entityType, array $row, string $list): void
+    {
+        $this->recordUnresolved($storeId, $runUuid, $entityType, isset($row['id']) ? (string) $row['id'] : null,
+            "This document was already imported from another entity list under the same number and total; check the source for duplicated bill numbers. Skipped list: {$list}.",
+            $row);
+    }
 
     /**
      * Executes the complete migration pipeline in dependency order.
@@ -49,7 +100,11 @@ class MigrationPipelineRunner
             'products' => 0,
             'batches' => 0,
             'invoices' => 0,
+            'credit_notes' => 0,
             'purchases' => 0,
+            'debit_notes' => 0,
+            'guessed_rates' => 0,
+            'unlinked' => 0,
             'stock_adjustments' => 0,
             'transfers' => 0,
             'expenses' => 0,
@@ -85,11 +140,14 @@ class MigrationPipelineRunner
             // 6. Product Batches & Stock
             $stats['batches'] = $this->migrateBatches($storeId, $runUuid, $sourceData);
 
-            // 7. Sales Invoices
+            // 7. Sales Invoices & Credit Bills
+            $this->documentStats = ['credit_notes' => 0, 'debit_notes' => 0, 'guessed_rates' => 0, 'unlinked' => 0];
             $stats['invoices'] = $this->migrateInvoices($storeId, $runUuid, $sourceData);
 
             // 8. Purchases & Debit Notes
             $stats['purchases'] = $this->migratePurchases($storeId, $runUuid, $sourceData);
+            // Merge, not `+=`: the zero placeholders above would otherwise swallow the tallies.
+            $stats = array_merge($stats, $this->documentStats);
 
             // 9. Stock Adjustments & Reconciliations
             $stats['stock_adjustments'] = $this->migrateStockAdjustments($storeId, $runUuid, $sourceData);
@@ -160,14 +218,20 @@ class MigrationPipelineRunner
 
     private function recordUnresolved(int $storeId, string $runUuid, string $entityType, ?string $oldId, string $reason, array $payload): void
     {
-        MigrationUnresolvedItem::create([
-            'store_id' => $storeId,
-            'migration_run_uuid' => $runUuid,
-            'entity_type' => $entityType,
-            'old_id' => $oldId,
-            'reason' => $reason,
-            'raw_payload' => $payload,
-        ]);
+        // A run is replayable, so the review list must not grow a second copy of every gap
+        // each time the operator retries it.
+        MigrationUnresolvedItem::updateOrCreate(
+            [
+                'store_id' => $storeId,
+                'migration_run_uuid' => $runUuid,
+                'entity_type' => $entityType,
+                'old_id' => $oldId,
+                'reason' => $reason,
+            ],
+            [
+                'raw_payload' => $payload,
+            ]
+        );
     }
 
     // --- Entity Specific Migration Methods ---
@@ -180,6 +244,8 @@ class MigrationPipelineRunner
         $store = Store::find($storeId);
         if (!$store) return 0;
 
+        // The v1 panel has no equivalent for the v2 feature menu, and a legacy list written
+        // over it switched v2-only screens off in the till without an operator touching them.
         $store->update([
             'phone' => $storeData['phone'] ?? $store->phone,
             'email' => $storeData['email'] ?? $store->email,
@@ -187,25 +253,76 @@ class MigrationPipelineRunner
             'state_code' => $storeData['state_code'] ?? $store->state_code,
             'gstin' => $storeData['gstin'] ?? $store->gstin,
             'fssai_no' => $storeData['fssai_no'] ?? $store->fssai_no,
-            'tax_mode' => $storeData['tax_mode'] ?? $store->tax_mode,
             'invoice_prefix' => $storeData['invoice_prefix'] ?? $store->invoice_prefix,
             'drug_license_numbers' => $storeData['drug_license_numbers'] ?? $store->drug_license_numbers,
-            'enabled_menu_items' => $storeData['enabled_menu_items'] ?? $store->enabled_menu_items,
         ]);
 
         // Migrate company settings
         $settings = $sourceData['company_settings'] ?? $sourceData['store_settings'] ?? [];
+        $billingFromSource = [];
         foreach ($settings as $setting) {
-            $key = $setting['key'] ?? $setting['setting_key'] ?? null;
-            if ($key) {
-                CompanySetting::updateOrCreate(
-                    ['store_id' => $storeId, 'key' => $key],
-                    ['value' => $setting['value'] ?? null]
-                );
+            if (!is_array($setting)) {
+                continue;
             }
+            $key = $setting['key'] ?? $setting['setting_key'] ?? null;
+            if (!$key) {
+                continue;
+            }
+            $value = $setting['value'] ?? null;
+            // The billing section decides how every price is read, so a legacy blob under that
+            // name is merged field by field rather than dropped in over the v2 settings.
+            if ($key === StoreTaxPolicy::BILLING_KEY || $key === StoreTaxPolicy::LEGACY_KEY) {
+                if (is_array($value)) {
+                    $billingFromSource += $value;
+                }
+                continue;
+            }
+            CompanySetting::updateOrCreate(
+                ['store_id' => $storeId, 'key' => $key],
+                ['value' => $value]
+            );
         }
 
+        $this->carryTaxMode($storeId, $runUuid, $store, $storeData, $billingFromSource);
+
         return 1;
+    }
+
+    /**
+     * The one store setting a wrong value cannot be spotted in a report: a shop that bills
+     * exclusive and lands on the inclusive default has every price on every bill re-derived,
+     * while totals still add up. So the mode is taken from wherever the source states it,
+     * written into the setting the till actually reads, and mirrored onto the store row the way
+     * the settings screen does — and left alone when nothing states it.
+     */
+    private function carryTaxMode(int $storeId, string $runUuid, Store $store, array $storeData, array $billingFromSource): void
+    {
+        $mode = $this->normalizer->taxMode($storeData)
+            ?? $this->normalizer->taxMode($billingFromSource);
+
+        $billing = CompanySetting::where('store_id', $storeId)
+            ->where('key', StoreTaxPolicy::BILLING_KEY)
+            ->first();
+        $current = is_array($billing?->value) ? $billing->value : [];
+
+        if ($mode === null) {
+            if ($this->normalizer->taxMode($current) === null) {
+                $this->recordUnresolved($storeId, $runUuid, 'tax_mode', (string) $storeId,
+                    'Neither the source nor the existing billing settings state whether prices include tax, so the till reads the store default and every migrated price is re-derived against it.',
+                    ['store_id' => $storeId]);
+            }
+
+            return;
+        }
+
+        $current['tax_mode'] = $mode;
+        CompanySetting::updateOrCreate(
+            ['store_id' => $storeId, 'key' => StoreTaxPolicy::BILLING_KEY],
+            ['value' => $current, 'is_secret' => false]
+        );
+        if ($store->tax_mode !== $mode) {
+            $store->update(['tax_mode' => $mode]);
+        }
     }
 
     protected function migrateLookups(int $storeId, string $runUuid, array $sourceData): int
@@ -414,7 +531,7 @@ class MigrationPipelineRunner
     protected function migrateBatches(int $storeId, string $runUuid, array $sourceData): int
     {
         $count = 0;
-        $batches = $sourceData['product_batches'] ?? [];
+        $batches = $sourceData['product_batches'] ?? $sourceData['batches'] ?? [];
 
         // Check if batches are embedded in products
         if (empty($batches) && !empty($sourceData['products'])) {
@@ -429,9 +546,10 @@ class MigrationPipelineRunner
         }
 
         foreach ($batches as $b) {
+            $row = $this->normalizer->batch($b);
             $oldId = $b['id'] ?? null;
-            $oldProductId = $b['product_id'] ?? null;
-            $batchNo = trim((string)($b['batch_no'] ?? 'DEFAULT'));
+            $oldProductId = $row['product_id'];
+            $batchNo = $this->clip($row['batch_no'], 50) ?? 'DEFAULT';
 
             $newProductId = $oldProductId ? $this->getMappedId('product', $oldProductId) : null;
             if (!$newProductId) {
@@ -439,8 +557,18 @@ class MigrationPipelineRunner
                 continue;
             }
 
-            $stockQty = (float)($b['stock_qty'] ?? $b['quantity'] ?? 0);
-            $expiryDate = !empty($b['expiry_date']) ? date('Y-m-d', strtotime($b['expiry_date'])) : date('Y-m-d', strtotime('+2 years'));
+            // Reading only `stock_qty` is what turned a full shelf into an empty one: the
+            // legacy export names the same figure `stock`, `balance` or `in_stock`.
+            $stockQty = (float) $row['stock_qty'];
+            $expiryDate = $row['expiry_date'];
+            if ($expiryDate === null) {
+                // The column cannot be empty, so a placeholder is unavoidable — but an invented
+                // date a pharmacist will trust has to be listed somewhere to be corrected.
+                $expiryDate = date('Y-m-d', strtotime('+2 years'));
+                $this->recordUnresolved($storeId, $runUuid, 'batch_expiry', (string) ($oldId ?? $batchNo),
+                    "Batch {$batchNo} has no expiry date in the source under any known key; it was filed as {$expiryDate} and must be corrected on the shelf.",
+                    $b);
+            }
 
             $existingId = $oldId ? $this->getMappedId('batch', $oldId) : null;
             $batch = $existingId ? ProductBatch::find($existingId) : null;
@@ -449,15 +577,15 @@ class MigrationPipelineRunner
                 'store_id' => $storeId,
                 'product_id' => (int)$newProductId,
                 'batch_no' => $batchNo,
-                'mfg_date' => !empty($b['mfg_date']) ? date('Y-m-d', strtotime($b['mfg_date'])) : null,
+                'mfg_date' => $row['mfg_date'],
                 'expiry_date' => $expiryDate,
                 'stock_qty' => $stockQty,
-                'mrp' => (float)($b['mrp'] ?? 0),
-                'purchase_rate' => (float)($b['purchase_rate'] ?? $b['cost_price'] ?? 0),
-                'selling_rate' => (float)($b['selling_rate'] ?? $b['selling_price'] ?? 0),
-                'rack_location' => $b['rack_location'] ?? null,
-                'shelf_location' => $b['shelf_location'] ?? null,
-                'external_id' => (string)($b['external_id'] ?? $oldId),
+                'mrp' => (float) $row['mrp'],
+                'purchase_rate' => (float) $row['purchase_rate'],
+                'selling_rate' => (float) $row['selling_rate'],
+                'rack_location' => $this->clip($row['rack_location'], 50),
+                'shelf_location' => $this->clip($row['shelf_location'], 50),
+                'external_id' => (string)($row['external_id'] ?? $oldId),
             ];
 
             if (!$batch) {
@@ -499,49 +627,92 @@ class MigrationPipelineRunner
     protected function migrateInvoices(int $storeId, string $runUuid, array $sourceData): int
     {
         $count = 0;
-        $invoices = $sourceData['invoices'] ?? [];
+        $homeState = $this->storeStateCode($storeId);
 
-        foreach ($invoices as $inv) {
-            $oldId = $inv['id'] ?? null;
-            $invoiceNumber = trim((string)($inv['invoice_number'] ?? $inv['bill_number'] ?? ''));
-            if (!$invoiceNumber || !$oldId) continue;
+        foreach ($this->saleDocuments($storeId, $runUuid, $sourceData) as [$legacy, $filedAsNote]) {
+            $doc = $this->normalizer->invoice($legacy, $filedAsNote);
+            $isNote = $doc['module_key'] === LegacyRecordNormalizer::KIND_CREDIT_NOTE;
 
-            $oldCustId = $inv['customer_id'] ?? null;
-            $newCustId = $oldCustId ? $this->getMappedId('customer', $oldCustId) : null;
+            $oldId = $legacy['id'] ?? null;
+            if ($oldId === null || $oldId === '') {
+                $this->recordUnresolved($storeId, $runUuid, 'invoice', null,
+                    'A sales document reached the pipeline with no source id, so a repeat run could not recognise it.',
+                    $legacy);
+                continue;
+            }
+
+            $invoiceNumber = $this->clip($doc['invoice_number'], 50);
+            if ($invoiceNumber === null) {
+                $this->recordUnresolved($storeId, $runUuid, 'invoice', (string) $oldId,
+                    'No bill number under any known key (invoice_number, bill_no, return_number…), so the document cannot be filed or found later.',
+                    $legacy);
+                continue;
+            }
+
+            $oldCustomerId = $doc['customer_id'];
+            $newCustomerId = $oldCustomerId === null ? null : $this->getMappedId('customer', $oldCustomerId);
+            if ($oldCustomerId !== null && !$newCustomerId) {
+                $this->documentStats['unlinked']++;
+                $this->recordUnresolved($storeId, $runUuid, 'customer', (string) $oldCustomerId,
+                    "Bill #{$invoiceNumber} references this customer but the party was never imported, so the bill is filed as a walk-in sale.",
+                    []);
+            }
+
+            $placeOfSupply = $doc['place_of_supply'] ?? $homeState;
+            $tax = $doc['tax_total'];
+            $grand = $doc['grand_total'];
+            $subtotal = $doc['subtotal'];
+            if ($subtotal == 0.0 && $grand != 0.0) {
+                $subtotal = round($grand - $tax, 2);
+            }
+            $taxable = $doc['taxable_subtotal'] > 0.0 ? $doc['taxable_subtotal'] : $subtotal;
+            $paid = $doc['paid_amount'];
+            $status = $doc['status'];
 
             $existingId = $this->getMappedId('invoice', $oldId);
             $invoice = $existingId ? Invoice::find($existingId) : null;
 
-            $invoiceDate = !empty($inv['invoice_date']) ? date('Y-m-d', strtotime($inv['invoice_date'])) : date('Y-m-d');
-            $status = match (strtolower((string)($inv['status'] ?? 'issued'))) {
-                'cancelled', 'canceled' => 'cancelled',
-                'draft' => 'draft',
-                default => 'issued',
-            };
+            $originalId = $isNote && $doc['original_invoice_id'] !== null
+                ? $this->getMappedId('invoice', $doc['original_invoice_id'])
+                : null;
+
+            [$cgst, $sgst, $igst] = $this->taxSplit($doc, $tax, $placeOfSupply, $homeState);
 
             $data = [
                 'store_id' => $storeId,
-                'customer_id' => $newCustId ? (int)$newCustId : null,
+                'customer_id' => $newCustomerId ? (int) $newCustomerId : null,
                 'invoice_number' => $invoiceNumber,
-                'invoice_date' => $invoiceDate,
-                'customer_name' => $inv['customer_name'] ?? ($inv['customer']['name'] ?? 'Walk-in Customer'),
-                'customer_phone' => $inv['customer_phone'] ?? ($inv['customer']['phone'] ?? null),
-                'customer_gstin' => $inv['customer_gstin'] ?? ($inv['customer']['gstin'] ?? null),
-                'place_of_supply' => $inv['place_of_supply'] ?? '32',
-                'subtotal' => (float)($inv['subtotal'] ?? 0),
-                'discount_total' => (float)($inv['discount_total'] ?? $inv['discount_amount'] ?? 0),
-                'tax_total' => (float)($inv['tax_total'] ?? $inv['tax_amount'] ?? 0),
-                'round_off' => (float)($inv['round_off'] ?? 0),
-                'grand_total' => (float)($inv['grand_total'] ?? $inv['total'] ?? 0),
-                'paid_amount' => (float)($inv['paid_amount'] ?? $inv['grand_total'] ?? 0),
-                'payment_mode' => $inv['payment_mode'] ?? 'Cash',
+                'module_key' => $doc['module_key'],
+                'invoice_date' => $doc['invoice_date'] ?? date('Y-m-d'),
+                'customer_name' => $doc['customer_name'] ?? 'Walk-in Customer',
+                'customer_phone' => $doc['customer_phone'],
+                'customer_gstin' => $doc['customer_gstin'],
+                'place_of_supply' => $placeOfSupply,
+                'store_state_code' => $homeState,
+                'subtotal' => $subtotal,
+                'taxable_subtotal' => $taxable,
+                'discount_total' => $doc['discount_total'],
+                'tax_total' => $tax,
+                'cgst_total' => $cgst,
+                'sgst_total' => $sgst,
+                'igst_total' => $igst,
+                'cess_total' => $doc['cess_total'],
+                'round_off' => $doc['round_off'],
+                'grand_total' => $grand,
+                'paid_amount' => $paid,
+                'payment_mode' => $doc['payment_mode'] ?? 'Cash',
+                'payment_status' => $this->paymentStatus($paid, $grand),
                 'status' => $status,
-                'cancel_reason' => $inv['cancel_reason'] ?? null,
-                'cancelled_at' => !empty($inv['cancelled_at']) ? date('Y-m-d H:i:s', strtotime($inv['cancelled_at'])) : null,
-                'patient_name' => $inv['patient_name'] ?? null,
-                'doctor_name' => $inv['doctor_name'] ?? null,
-                'doctor_reg_no' => $inv['doctor_reg_no'] ?? null,
-                'external_id' => (string)($inv['external_id'] ?? $oldId),
+                'cancel_reason' => $doc['cancel_reason'],
+                'cancelled_at' => $status === 'cancelled' ? ($doc['cancelled_at'] ?? null) : null,
+                'patient_name' => $doc['patient_name'],
+                'doctor_name' => $doc['doctor_name'],
+                'doctor_reg_no' => $this->clip($doc['doctor_reg_no'], 50),
+                'counter_code' => $this->clip($doc['counter_code'], 30),
+                'salesperson_name' => $doc['salesperson_name'],
+                'original_invoice_id' => $originalId ? (int) $originalId : null,
+                'original_invoice_number' => $isNote ? $this->clip($doc['original_invoice_number'], 50) : null,
+                'external_id' => (string) ($doc['external_id'] ?? $oldId),
             ];
 
             if (!$invoice) {
@@ -550,31 +721,92 @@ class MigrationPipelineRunner
                 $invoice->update($data);
             }
 
-            $this->mapId($storeId, $runUuid, 'invoice', $oldId, $invoice->id, $inv['external_id'] ?? null);
+            $this->mapId($storeId, $runUuid, 'invoice', $oldId, $invoice->id, $doc['external_id'] ?? ($legacy['external_id'] ?? null));
 
-            // Invoice items
-            $items = $inv['items'] ?? [];
-            if (!empty($items)) {
-                InvoiceItem::where('invoice_id', $invoice->id)->delete();
-                foreach ($items as $item) {
-                    $oldPId = $item['product_id'] ?? null;
-                    $newPId = $oldPId ? $this->getMappedId('product', $oldPId) : null;
+            if ($isNote) {
+                $this->documentStats['credit_notes']++;
+            }
 
-                    InvoiceItem::create([
-                        'invoice_id' => $invoice->id,
-                        'product_id' => $newPId ? (int)$newPId : null,
-                        'product_name' => $item['product_name'] ?? $item['name'] ?? 'Item',
-                        'batch_no' => $item['batch_no'] ?? null,
-                        'expiry_date' => !empty($item['expiry_date']) ? date('Y-m-d', strtotime($item['expiry_date'])) : null,
-                        'qty' => (float)($item['qty'] ?? 1),
-                        'unit_price' => (float)($item['unit_price'] ?? $item['rate'] ?? 0),
-                        'discount_percent' => (float)($item['discount_percent'] ?? 0),
-                        'discount_amount' => (float)($item['discount_amount'] ?? 0),
-                        'gst_percent' => (float)($item['gst_percent'] ?? 0),
-                        'tax_amount' => (float)($item['tax_amount'] ?? 0),
-                        'total_amount' => (float)($item['total_amount'] ?? 0),
-                    ]);
+            $guessed = 0;
+            foreach ($doc['items'] as $line) {
+                $oldProductId = $line['product_id'];
+                $newProductId = $oldProductId === null ? null : $this->getMappedId('product', $oldProductId);
+                if ($oldProductId !== null && !$newProductId) {
+                    $this->documentStats['unlinked']++;
+                    $this->recordUnresolved($storeId, $runUuid, 'product', (string) $oldProductId,
+                        "Bill #{$invoiceNumber} sold this product but it was never imported, so the line carries its name without a stock link.",
+                        []);
                 }
+
+                $qty = (float) $line['qty'];
+                $unitPrice = (float) $line['unit_price'];
+                $lineTaxable = (float) $line['taxable_amount'];
+                $lineTax = (float) $line['tax_amount'];
+
+                if ($lineTaxable <= 0.0 && $unitPrice > 0.0 && $qty > 0.0) {
+                    $lineTaxable = round($unitPrice * $qty, 2);
+                }
+                if ($unitPrice <= 0.0 && $lineTaxable > 0.0 && $qty > 0.0) {
+                    $unitPrice = round($lineTaxable / $qty, 2);
+                }
+
+                [$lineCgst, $lineSgst, $lineIgst] = $this->statedOrSplit(
+                    (float) $line['cgst_amount'],
+                    (float) $line['sgst_amount'],
+                    (float) $line['igst_amount'],
+                    $lineTax,
+                    $placeOfSupply,
+                    $homeState
+                );
+
+                $gstPercent = $line['gst_percent'];
+                if ($gstPercent === null) {
+                    // The export named no rate for this line. The rupees still have to balance,
+                    // so the rate comes from the next authority — the product master, then the
+                    // bill's own tax-over-taxable ratio — and the guess is reported, not hidden.
+                    $gstPercent = $newProductId ? $this->productGstPercent($storeId, (int) $newProductId) : null;
+                    if ($gstPercent === null && $taxable > 0.0 && $tax != 0.0) {
+                        $gstPercent = round(($tax / $taxable) * 100.0, 2);
+                    }
+                    $gstPercent ??= 0.0;
+                    $guessed++;
+                }
+
+                InvoiceItem::create([
+                    'invoice_id' => $invoice->id,
+                    'product_id' => $newProductId ? (int) $newProductId : null,
+                    'product_name' => $this->clip($line['product_name'], 255) ?? 'Item',
+                    'batch_no' => $this->clip($line['batch_no'], 50),
+                    'expiry_date' => $line['expiry_date'],
+                    'qty' => $qty,
+                    'loose_qty' => (float) $line['loose_qty'],
+                    'free_qty' => (float) $line['free_qty'],
+                    'free_loose_qty' => (float) $line['free_loose_qty'],
+                    'units_per_pack' => max(1, (int) $line['units_per_pack']),
+                    'unit_price' => $unitPrice,
+                    'mrp' => (float) $line['mrp'],
+                    'rate_basis' => $this->clip($line['rate_basis'], 20),
+                    'stock_action' => $this->clip($line['stock_action'], 30),
+                    'discount_percent' => (float) $line['discount_percent'],
+                    'discount_amount' => (float) $line['discount_amount'],
+                    'allocated_discount' => (float) $line['allocated_discount'],
+                    'taxable_amount' => $lineTaxable,
+                    'gst_percent' => $gstPercent,
+                    'cgst_amount' => $lineCgst,
+                    'sgst_amount' => $lineSgst,
+                    'igst_amount' => $lineIgst,
+                    'cess_rate' => (float) $line['cess_rate'],
+                    'cess_amount' => (float) $line['cess_amount'],
+                    'tax_amount' => $lineTax,
+                    'total_amount' => (float) $line['total_amount'],
+                ]);
+            }
+
+            if ($guessed > 0) {
+                $this->documentStats['guessed_rates'] += $guessed;
+                $this->recordUnresolved($storeId, $runUuid, 'invoice_tax_rate', (string) $oldId,
+                    "{$guessed} line(s) of bill #{$invoiceNumber} carry no GST rate in the source; the rate was taken from the product master or the bill's own tax ratio and must be confirmed before filing.",
+                    []);
             }
 
             $count++;
@@ -583,37 +815,147 @@ class MigrationPipelineRunner
         return $count;
     }
 
+    /**
+     * CGST/SGST/IGST for a document. A source that already states the split keeps it — those
+     * are the rupees that system filed — and only a single undivided tax figure is split here.
+     */
+    private function taxSplit(array $doc, float $tax, ?string $placeOfSupply, ?string $homeState): array
+    {
+        return $this->statedOrSplit(
+            (float) $doc['cgst_total'],
+            (float) $doc['sgst_total'],
+            (float) $doc['igst_total'],
+            $tax,
+            $placeOfSupply,
+            $homeState
+        );
+    }
+
+    private function statedOrSplit(float $cgst, float $sgst, float $igst, float $tax, ?string $placeOfSupply, ?string $homeState): array
+    {
+        if ($cgst != 0.0 || $sgst != 0.0 || $igst != 0.0) {
+            return [$cgst, $sgst, $igst];
+        }
+
+        $split = $this->normalizer->splitTax($tax, $placeOfSupply, $homeState);
+
+        return [$split['cgst'], $split['sgst'], $split['igst']];
+    }
+
+    private function paymentStatus(float $paid, float $grand): string
+    {
+        if ($paid <= 0.009) {
+            return 'unpaid';
+        }
+
+        return $paid + 0.01 >= $grand ? 'paid' : 'partially_paid';
+    }
+
+    private function storeStateCode(int $storeId): ?string
+    {
+        $code = trim((string) (Store::find($storeId)?->state_code ?? ''));
+
+        return $code === '' ? null : $code;
+    }
+
+    private function productGstPercent(int $storeId, int $productId): ?float
+    {
+        $key = $storeId . ':' . $productId;
+        if (!array_key_exists($key, $this->productRateCache)) {
+            $rate = Product::where('store_id', $storeId)->whereKey($productId)->value('gst_percent');
+            $this->productRateCache[$key] = $rate === null ? null : round((float) $rate, 2);
+        }
+
+        return $this->productRateCache[$key];
+    }
+
+    /**
+     * A column this schema measures in characters, not paragraphs. A legacy bill number longer
+     * than the column throws, and because one run is one transaction that single row would
+     * undo every document migrated before it.
+     */
+    private function clip(?string $value, int $max): ?string
+    {
+        if ($value === null) {
+            return null;
+        }
+
+        return $value === '' ? null : substr($value, 0, $max);
+    }
+
     protected function migratePurchases(int $storeId, string $runUuid, array $sourceData): int
     {
         $count = 0;
-        $purchases = $sourceData['purchases'] ?? $sourceData['purchase_documents'] ?? [];
+        $homeState = $this->storeStateCode($storeId);
 
-        foreach ($purchases as $p) {
-            $oldId = $p['id'] ?? null;
-            $invoiceNumber = trim((string)($p['invoice_number'] ?? $p['bill_number'] ?? ''));
-            if (!$invoiceNumber || !$oldId) continue;
+        foreach ($this->purchaseDocuments($storeId, $runUuid, $sourceData) as [$legacy, $filedAsNote]) {
+            $doc = $this->normalizer->purchase($legacy, $filedAsNote);
+            $isNote = $doc['module_key'] === LegacyRecordNormalizer::KIND_DEBIT_NOTE;
 
-            $oldSuppId = $p['supplier_id'] ?? null;
-            $newSuppId = $oldSuppId ? $this->getMappedId('supplier', $oldSuppId) : null;
+            $oldId = $legacy['id'] ?? null;
+            if ($oldId === null || $oldId === '') {
+                $this->recordUnresolved($storeId, $runUuid, 'purchase', null,
+                    'A purchase document reached the pipeline with no source id, so a repeat run could not recognise it.',
+                    $legacy);
+                continue;
+            }
 
+            $invoiceNumber = $this->clip($doc['invoice_number'], 50);
+            if ($invoiceNumber === null) {
+                $this->recordUnresolved($storeId, $runUuid, 'purchase', (string) $oldId,
+                    'No supplier bill number under any known key (invoice_number, bill_no, grn_number…), so the bill was not imported.',
+                    $legacy);
+                continue;
+            }
+
+            $oldSupplierId = $doc['supplier_id'];
+            $newSupplierId = $oldSupplierId === null ? null : $this->getMappedId('supplier', $oldSupplierId);
+            if ($oldSupplierId !== null && !$newSupplierId) {
+                $this->documentStats['unlinked']++;
+                $this->recordUnresolved($storeId, $runUuid, 'supplier', (string) $oldSupplierId,
+                    "Purchase bill #{$invoiceNumber} references this supplier but the party was never imported, so the bill carries the name without a ledger link.",
+                    []);
+            }
+
+            $placeOfSupply = $doc['place_of_supply'] ?? $homeState;
+            $tax = $doc['tax_total'];
+            $subtotal = $doc['subtotal'];
+            $grand = $doc['grand_total'];
+            if ($subtotal == 0.0 && $grand != 0.0) {
+                $subtotal = round($grand - $tax - (float) $doc['freight_charges'], 2);
+            }
             $existingId = $this->getMappedId('purchase', $oldId);
             $purchase = $existingId ? Purchase::find($existingId) : null;
 
+            [$cgst, $sgst, $igst] = $this->taxSplit($doc, $tax, $placeOfSupply, $homeState);
+
             $data = [
                 'store_id' => $storeId,
-                'supplier_id' => $newSuppId ? (int)$newSuppId : null,
-                'supplier_name' => $p['supplier_name'] ?? ($p['supplier']['name'] ?? 'Supplier'),
-                'supplier_gstin' => $p['supplier_gstin'] ?? ($p['supplier']['gstin'] ?? null),
+                'supplier_id' => $newSupplierId ? (int) $newSupplierId : null,
+                'supplier_name' => $doc['supplier_name'] ?? 'Supplier',
+                'supplier_gstin' => $doc['supplier_gstin'],
                 'invoice_number' => $invoiceNumber,
-                'invoice_date' => !empty($p['invoice_date']) ? date('Y-m-d', strtotime($p['invoice_date'])) : date('Y-m-d'),
-                'module_key' => $p['module_key'] ?? 'purchase',
-                'subtotal' => (float)($p['subtotal'] ?? 0),
-                'tax_total' => (float)($p['tax_total'] ?? $p['tax_amount'] ?? 0),
-                'round_off' => (float)($p['round_off'] ?? 0),
-                'grand_total' => (float)($p['grand_total'] ?? $p['total'] ?? 0),
-                'paid_amount' => (float)($p['paid_amount'] ?? 0),
-                'status' => $p['status'] ?? 'received',
-                'cancel_reason' => $p['cancel_reason'] ?? null,
+                'document_number' => $this->clip($doc['document_number'], 50),
+                'supplier_invoice_no' => $this->clip($doc['supplier_invoice_no'] ?? $invoiceNumber, 50),
+                'invoice_date' => $doc['invoice_date'] ?? date('Y-m-d'),
+                'module_key' => $doc['module_key'],
+                'subtotal' => $subtotal,
+                'tax_total' => $tax,
+                'cgst_total' => $cgst,
+                'sgst_total' => $sgst,
+                'igst_total' => $igst,
+                'cess_total' => $doc['cess_total'],
+                'is_interstate' => $placeOfSupply !== null && $homeState !== null && $placeOfSupply !== $homeState,
+                'freight_charges' => (float) $doc['freight_charges'],
+                'bill_discount' => (float) $doc['bill_discount'],
+                'place_of_supply' => $placeOfSupply,
+                'round_off' => (float) $doc['round_off'],
+                'grand_total' => $grand,
+                'paid_amount' => $doc['paid_amount'],
+                'status' => $doc['status'],
+                'cancel_reason' => $doc['cancel_reason'],
+                'notes' => $doc['notes'],
+                'external_id' => (string) ($doc['external_id'] ?? $oldId),
             ];
 
             if (!$purchase) {
@@ -622,30 +964,92 @@ class MigrationPipelineRunner
                 $purchase->update($data);
             }
 
-            $this->mapId($storeId, $runUuid, 'purchase', $oldId, $purchase->id);
+            $this->mapId($storeId, $runUuid, 'purchase', $oldId, $purchase->id, $doc['external_id'] ?? ($legacy['external_id'] ?? null));
 
-            // Purchase items
-            $items = $p['items'] ?? [];
-            if (!empty($items)) {
-                PurchaseItem::where('purchase_id', $purchase->id)->delete();
-                foreach ($items as $item) {
-                    $oldPId = $item['product_id'] ?? null;
-                    $newPId = $oldPId ? $this->getMappedId('product', $oldPId) : null;
+            if ($isNote) {
+                $this->documentStats['debit_notes']++;
+            }
 
-                    PurchaseItem::create([
-                        'purchase_id' => $purchase->id,
-                        'product_id' => $newPId ? (int)$newPId : null,
-                        'product_name' => $item['product_name'] ?? $item['name'] ?? 'Item',
-                        'batch_no' => $item['batch_no'] ?? 'DEFAULT',
-                        'expiry_date' => !empty($item['expiry_date']) ? date('Y-m-d', strtotime($item['expiry_date'])) : date('Y-m-d', strtotime('+2 years')),
-                        'qty' => (float)($item['qty'] ?? 1),
-                        'purchase_rate' => (float)($item['purchase_rate'] ?? $item['rate'] ?? 0),
-                        'mrp' => (float)($item['mrp'] ?? 0),
-                        'gst_percent' => (float)($item['gst_percent'] ?? 0),
-                        'tax_amount' => (float)($item['tax_amount'] ?? 0),
-                        'total_amount' => (float)($item['total_amount'] ?? 0),
-                    ]);
+            $guessed = 0;
+            foreach ($doc['items'] as $line) {
+                $oldProductId = $line['product_id'];
+                $newProductId = $oldProductId === null ? null : $this->getMappedId('product', $oldProductId);
+                if ($oldProductId !== null && !$newProductId) {
+                    $this->documentStats['unlinked']++;
+                    $this->recordUnresolved($storeId, $runUuid, 'product', (string) $oldProductId,
+                        "Purchase bill #{$invoiceNumber} bought this product but it was never imported, so the line carries its name without a stock link.",
+                        []);
                 }
+
+                $qty = (float) $line['qty'];
+                $rate = (float) $line['purchase_rate'];
+                $lineTaxable = (float) $line['taxable_amount'];
+                $lineTax = (float) $line['tax_amount'];
+
+                if ($lineTaxable <= 0.0 && $rate > 0.0 && $qty > 0.0) {
+                    $lineTaxable = round($rate * $qty, 2);
+                }
+                if ($rate <= 0.0 && $lineTaxable > 0.0 && $qty > 0.0) {
+                    $rate = round($lineTaxable / $qty, 2);
+                }
+
+                [$lineCgst, $lineSgst, $lineIgst] = $this->statedOrSplit(
+                    (float) $line['cgst_amount'],
+                    (float) $line['sgst_amount'],
+                    (float) $line['igst_amount'],
+                    $lineTax,
+                    $placeOfSupply,
+                    $homeState
+                );
+
+                $gstPercent = $line['gst_percent'];
+                if ($gstPercent === null) {
+                    $gstPercent = $newProductId ? $this->productGstPercent($storeId, (int) $newProductId) : null;
+                    if ($gstPercent === null && $subtotal > 0.0 && $tax != 0.0) {
+                        $gstPercent = round(($tax / $subtotal) * 100.0, 2);
+                    }
+                    $gstPercent ??= 0.0;
+                    $guessed++;
+                }
+
+                PurchaseItem::create([
+                    'purchase_id' => $purchase->id,
+                    'product_id' => $newProductId ? (int) $newProductId : null,
+                    'product_name' => $this->clip($line['product_name'], 255) ?? 'Item',
+                    'hsn_code' => $this->clip($line['hsn_code'], 20),
+                    'batch_no' => $this->clip($line['batch_no'], 50),
+                    'mfg_date' => $line['mfg_date'],
+                    'expiry_date' => $line['expiry_date'],
+                    'pack_qty' => (float) $line['pack_qty'],
+                    'loose_qty' => (float) $line['loose_qty'],
+                    'free_qty' => (float) $line['free_qty'],
+                    'units_per_pack' => max(1, (int) $line['units_per_pack']),
+                    'qty' => $qty,
+                    'received_qty' => (float) $line['received_qty'],
+                    'purchase_rate' => $rate,
+                    'ptr' => (float) $line['ptr'],
+                    'pts' => (float) $line['pts'],
+                    'ptss' => (float) $line['ptss'],
+                    'selling_rate' => (float) $line['selling_rate'],
+                    'mrp' => (float) $line['mrp'],
+                    'discount_percent' => (float) $line['discount_percent'],
+                    'discount_amount' => (float) $line['discount_amount'],
+                    'taxable_amount' => $lineTaxable,
+                    'gst_percent' => $gstPercent,
+                    'cgst_amount' => $lineCgst,
+                    'sgst_amount' => $lineSgst,
+                    'igst_amount' => $lineIgst,
+                    'cess_amount' => (float) $line['cess_amount'],
+                    'tax_amount' => $lineTax,
+                    'total_amount' => (float) $line['total_amount'],
+                ]);
+            }
+
+            if ($guessed > 0) {
+                $this->documentStats['guessed_rates'] += $guessed;
+                $this->recordUnresolved($storeId, $runUuid, 'purchase_tax_rate', (string) $oldId,
+                    "{$guessed} line(s) of purchase bill #{$invoiceNumber} carry no GST rate in the source; the rate was taken from the product master or the bill's own tax ratio and must be confirmed before filing.",
+                    []);
             }
 
             $count++;

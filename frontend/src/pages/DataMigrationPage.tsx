@@ -733,9 +733,14 @@ export const DataMigrationPage: React.FC = () => {
               ["Products", stats.products || 0],
               ["Batches & Stocks", stats.batches || 0],
               ["Sales Invoices", stats.invoices || 0],
+              ["Credit Bills", stats.credit_notes || 0],
               ["Purchases", stats.purchases || 0],
+              ["Purchase Returns", stats.debit_notes || 0],
               ["Parties", stats.parties || 0],
               ["Held Bills", stats.held_bills || 0],
+              ["Rates From Master/Bill", stats.guessed_rates || 0],
+              ["Unlinked References", stats.unlinked || 0],
+              ["Listed For Review", stats.unresolved || 0],
             ].map(([label, value]) => (
               <div key={String(label)} className="p-3 bg-slate-50 border rounded">
                 <div className="text-[11px] text-slate-500">{label}</div>
@@ -743,6 +748,15 @@ export const DataMigrationPage: React.FC = () => {
               </div>
             ))}
           </div>
+
+          {((stats.credit_notes || 0) + (stats.guessed_rates || 0) + (stats.unresolved || 0)) > 0 && (
+            <div className="p-3 bg-slate-50 border rounded text-xs text-slate-600">
+              Credit bills are stored against the sale they reverse, and turnover is reported net of them. A rate under
+              "Rates From Master/Bill" came from the product catalog or the bill's own totals rather than the line, so
+              read those slabs before filing. Anything counted under "Listed For Review" was left out of the import and
+              is waiting on a corrected export.
+            </div>
+          )}
 
           {stats.errors && stats.errors.length > 0 && (
             <div className="p-3 bg-red-50 border border-red-200 rounded text-xs text-red-700 space-y-1">

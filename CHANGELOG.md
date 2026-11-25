@@ -1,5 +1,77 @@
 # Changelog
 
+## 2.1.8 — 2026-11-25
+
+A store finished the wizard, and its reconciliation report read: Products 105, Batches 124, Invoices 88,
+**Purchases 0**, Sales turnover ₹750730.68 matched, Purchases source ₹307865 against target ₹0, Migrated
+Stock Valuation **₹0 / 0 units on-hand**, and under it a list of every bill in the financial year saying
+*`tax_engine_variance` — Invoice #ADH-CN26-27-0040: stored ₹14.43 vs authoritative TaxEngine ₹0.00`*.
+`is_passed` was false, so cutover was refused on a migration that had in fact landed. Both systems bill
+tax-exclusive; the till still showed **Prices include tax**.
+
+The rows were there because v2.1.7 made the pipeline real. The numbers were wrong because the pipeline
+reads one spelling per field, and the legacy panel exports several:
+
+1. **A normalizer now owns the spelling** — `LegacyRecordNormalizer` maps each v2 column to the key list
+   a v1 export actually uses (`bill_no`/`invoice_no`/`document_number`, `bill_amount`/`grand_total`/
+   `total`, `basic_amount`/`taxable_value`/`subtotal`, `bill_date`/`date`/`voucher_date`, day-first
+   `11/05/2026` dates, `sale_type`/`invoice_type` status) and separates *rate* spellings from *amount*
+   spellings, which is what turned a taxed year into 0%: a line carrying `tax_percent` was read as
+   nothing, so `gst_percent` arrived 0 and the engine recomputed the bill at ₹0 tax. A line that states
+   no rate falls back to its own tax-over-taxable, then the product master, then the bill's average
+   slab — and each fallback is counted and reported instead of silently applied.
+2. **Credit bills exist** — `sales_returns`, `returns` and `credit_notes` were never read at all, so
+   ₹107552.50 of reversals simply was not in the new system. They now land as `invoices` rows with
+   `module_key = 'credit_note'`, positive money, and `original_invoice_number` pointing at the bill they
+   reverse — the sign convention this schema already uses when it nets turnover. Reconciliation nets them
+   on both sides, so a year of returns no longer counts as a year of extra sales.
+3. **A bill that cannot be filed is listed, not lost** — the purchase importer skipped any row without an
+   `invoice_number`, which is how a branch's entire purchase history and its `debit_note` returns vanished
+   without a trace. An unmatchable row now becomes a `migration_unresolved_items` record naming the
+   document and why, `is_importable` false, and the pre-check blocks the run before it starts.
+4. **Stock opens with units in it** — batch rows spell on-hand `stock`, `quantity`, `balance`, `in_stock`
+   or `available_qty`, and cost `ptr`/`purchase_rate`; both were read as absent, giving 124 batches at
+   0 units and ₹0 valuation. A source whose batches name no quantity column at all is a pre-check error,
+   because after import it is indistinguishable from an empty shelf. `product_batches.expiry_date` is
+   NOT NULL, so a batch the export leaves undated is filed with an assumed date and recorded as a
+   `batch_expiry` review item naming it — an undated shelf is a correction to make, not a row to drop.
+5. **The tax mode is saved where the till reads it** — the pipeline wrote `stores.tax_mode`, but
+   `StoreTaxPolicy` consults the `billing` company setting first, so the write never reached the counter.
+   The migration now writes `billing.tax_mode` and mirrors the store column, reads the legacy mode under
+   `tax_type`/`gst_tax_type`/`price_includes_gst` (including the misspelling `price_incines_gst` the v1
+   settings row uses), and leaves the store's own mode alone when the source states none. The reconciler
+   stopped reading `invoices.is_tax_inclusive` — a column this schema has never had, so it always saw
+   `null` and pinned every recomputation to one mode.
+6. **A variance is a warning, a missing record is a block** — the migrated rupees are kept exactly as the
+   legacy system reported them, so a recomputation difference against the engine is advisory and cutover
+   stays open; only counts and totals that do not reconcile hold it. An export that mixes slabs and
+   states tax only on the bill is reported as such rather than filed at 0%.
+7. **The wizard says what it had to work around** — the summary tiles gained Credit Bills, Purchase
+   Returns, Rates From Master/Bill, Unlinked References and Listed For Review, and pre-check issues carry
+   the offending document numbers, so the next report is not a table of zeros to be read afterwards.
+
+Verified against the shapes the legacy panel emits, in `MigrationLegacyShapesTest` (18 tests) and
+`LegacyRecordNormalizerTest` (16): a bundle whose invoice header says `bill_no`/`bill_amount`, whose line
+says `tax_percent`, whose batch says `stock`/`ptr`/`exp` and whose returns sit in `sales_returns` imports
+at the right rate, quantity and valuation; `billing.tax_mode` + the store column + `StoreTaxPolicy` all
+answer exclusive afterwards; an unnumbered bill, a quantity-less batch table and an unrateable taxed line
+each block pre-check; a note listed under two tables imports once; a rounding difference passes while a
+missing document does not. Backend 1279 tests, frontend 1237, admin panel 110, both `tsc` clean, and the
+`ProductQueryScopeTest` constitution gate is satisfied by the new catalog lookup. Not covered: this was
+built from the v1 column names, not from the store's own bundle — the 88 invoices already on
+v2.lamstonehealthcare.com keep the tax figures the old importer wrote. **Roll that run back and re-run it
+on this build** before filing anything from it. Not covered: a built installer, and a live pull from the
+real legacy panel (the `SyncController::pull` lookup gap from v2.1.7 is unchanged, so bundle export is
+still the way to bring brands, units and categories).
+
+After pulling: no `migrate --force` and no artisan step — this release adds no schema; the fixes are all
+in how the existing columns are filled. Then open the store's migration history, roll the completed run
+back (this removes the products, batches, parties, invoices and purchase rows its id maps stamped, and
+nothing else), and start it again from the same bundle. The till's Billing tab should then read **Prices
+exclude tax**; if the legacy source never stated a mode the branch keeps the one it had, and the pre-check
+says so. The new summary tiles need this build, so a till on an older version still reports the old six
+counts — the server-side import is correct either way, and Migration Center in the panel shows it.
+
 ## 2.1.7 — 2026-11-25
 
 Both sources of the Store Data Migration Wizard — exported bundle upload and Direct Laravel API —

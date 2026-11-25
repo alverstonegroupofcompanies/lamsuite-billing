@@ -27,6 +27,7 @@ vi.mock("../lib/migration/tillMigrationService", async (importActual) => {
 
 const list = vi.mocked(tillMigrationService.list);
 const precheck = vi.mocked(tillMigrationService.precheck);
+const start = vi.mocked(tillMigrationService.start);
 
 const scanButton = () => screen.getByRole("button", { name: /Scan & Pre-check Quality/ });
 
@@ -50,6 +51,7 @@ describe("the migration wizard reports the server, not itself", () => {
   beforeEach(() => {
     list.mockResolvedValue([]);
     precheck.mockReset();
+    start.mockReset();
   });
 
   it("opens on the legacy panel host, not the portal", () => {
@@ -106,6 +108,56 @@ describe("the migration wizard reports the server, not itself", () => {
     expect(screen.getByText("1284")).toBeInTheDocument();
     expect(screen.getByText("Passed")).toBeInTheDocument();
     expect(screen.queryByText(/No migration run has been recorded/)).not.toBeInTheDocument();
+  });
+
+  /**
+   * The report that let a store believe it had migrated counted rows written; a year of credit
+   * bills, purchases and taxed lines passed through it invisible. These tiles are the difference
+   * between "it ran" and "this is what it could not read".
+   */
+  it("counts what the importer recovered beside what it wrote", async () => {
+    precheck.mockResolvedValue({
+      can_proceed: true,
+      record_counts: { products: 105, invoices: 88, sales_returns: 12 },
+      issues: [],
+      summary: { total_entities: 3, total_records: 205, warnings_count: 0, errors_count: 0 },
+    });
+    start.mockResolvedValue({
+      run: {
+        id: 6,
+        run_uuid: "bbbb1111-2222-3333-4444-555566667777",
+        store_id: 7,
+        source_type: "api",
+        source_reference: null,
+        status: "completed",
+        is_dry_run: true,
+        created_at: "2026-11-25 10:00:00",
+      },
+      stats: {
+        products: 105,
+        invoices: 88,
+        credit_notes: 12,
+        purchases: 40,
+        guessed_rates: 5,
+        unresolved: 2,
+      },
+      is_dry_run: true,
+      reconciliation: null,
+      cutover_phrase: "CUTOVER-STR001",
+    });
+
+    render(<DataMigrationPage />);
+    fireEvent.change(screen.getByPlaceholderText("Sanctum token"), { target: { value: "legacy-token" } });
+    fireEvent.click(scanButton());
+    fireEvent.click(await screen.findByRole("button", { name: /Continue to Entity Mapping/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /Run Dry-Run Simulation/ }));
+
+    expect(await screen.findByText("Credit Bills")).toBeInTheDocument();
+    expect(screen.getByText("Rates From Master/Bill")).toBeInTheDocument();
+    expect(screen.getByText("Listed For Review")).toBeInTheDocument();
+    expect((screen.getByText("Credit Bills").parentElement as HTMLElement).textContent).toContain("12");
+    expect((screen.getByText("Rates From Master/Bill").parentElement as HTMLElement).textContent).toContain("5");
+    expect(screen.getByText(/left out of the import/)).toBeInTheDocument();
   });
 });
 
