@@ -64,6 +64,14 @@ const batches = [
     stock_qty: 40,
     purchase_rate: 85,
   },
+  {
+    id: "b3",
+    product_id: "p2",
+    batch_no: "AMX-02",
+    expiry_date: "2027-01-31",
+    stock_qty: 5,
+    purchase_rate: 80,
+  },
 ];
 
 const products = {
@@ -113,6 +121,24 @@ const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 async function focusLastLine() {
   press("ArrowUp");
   await waitFor(() => expect(activeCell()).toBe("0-product_name"));
+}
+
+/** Opens the combobox the grid mounts in a cell and returns its search field. */
+async function openSearch(column: string) {
+  const shell = document.querySelector<HTMLElement>(`[data-cell-edit="0-${column}"]`);
+  if (!shell) throw new Error(`The ${column} cell is not in edit mode`);
+  fireEvent.click(shell.querySelector('[role="combobox"]')!);
+  return screen.findByPlaceholderText(/Search product name or batch number/i);
+}
+
+async function pickOption(column: string, term: string, contains: string) {
+  const search = await openSearch(column);
+  fireEvent.change(search, { target: { value: term } });
+  const options = await screen.findAllByRole("option");
+  const pick = options.find((option) => option.textContent?.includes(contains));
+  if (!pick) throw new Error(`No option listing "${contains}"`);
+  fireEvent.click(pick);
+  return options;
 }
 
 describe("StockAdjustmentDocumentModal keyboard grid", () => {
@@ -175,7 +201,7 @@ describe("StockAdjustmentDocumentModal keyboard grid", () => {
     await focusLastLine();
     press("Enter");
     const editor = await waitFor(() =>
-      document.querySelector<HTMLInputElement>('[data-cell-edit="0-product_name"]')
+      document.querySelector<HTMLElement>('[data-cell-edit="0-product_name"]')
     );
 
     fireEvent.keyDown(editor!, { key: "Escape" });
@@ -263,10 +289,7 @@ describe("StockAdjustmentDocumentModal keyboard grid", () => {
     await focusLastLine();
 
     press("Enter");
-    const productSelect = await waitFor(() =>
-      document.querySelector<HTMLSelectElement>('[data-cell-edit="0-product_name"]')
-    );
-    fireEvent.change(productSelect!, { target: { value: "p1" } });
+    await pickOption("product_name", "para", "Paracetamol");
 
     press("Enter", { ctrlKey: true });
 
@@ -281,6 +304,57 @@ describe("StockAdjustmentDocumentModal keyboard grid", () => {
       batch_no: "PAR-01",
       system_qty: 100,
     });
+  });
+
+  /**
+   * The catalog pickers used to be native <select>s over every stocked line, so a
+   * four-figure shelf left the pharmacist scrolling for the batch. They now use the
+   * searchable combobox the purchase and transfer screens already use.
+   */
+  it("narrows the product picker by name, batch or barcode instead of scrolling a list", async () => {
+    renderModal();
+    await settle();
+    await focusLastLine();
+
+    press("Enter");
+    expect(document.querySelector("select")).toBeNull();
+
+    const search = await openSearch("product_name");
+    fireEvent.change(search, { target: { value: "amox" } });
+
+    const options = await screen.findAllByRole("option");
+    expect(options).toHaveLength(2);
+    expect(options.map((option) => option.textContent)).toEqual(
+      expect.arrayContaining([expect.stringContaining("AMX-02")])
+    );
+
+    fireEvent.click(options.find((option) => option.textContent?.includes("AMX-02"))!);
+
+    await waitFor(() =>
+      expect(document.querySelector('[data-cell="0-product_name"]')).toHaveTextContent(
+        "Amoxicillin 500mg"
+      )
+    );
+    expect(document.querySelector('[data-cell="0-batch_no"]')).toHaveTextContent("AMX-02");
+    expect(document.querySelector('[data-cell="0-system_qty"]')).toHaveTextContent("5");
+  });
+
+  it("offers only the chosen product's batches, earliest expiry first, in the batch cell", async () => {
+    renderModal();
+    await settle();
+    await focusLastLine();
+
+    press("Enter");
+    await pickOption("product_name", "amox", "AMX-01");
+
+    // Choosing a batch parks the cursor on Adjustment; step back to the batch cell.
+    press("ArrowLeft");
+    await waitFor(() => expect(activeCell()).toBe("0-batch_no"));
+    press("Enter");
+    const options = await pickOption("batch_no", "", "AMX-02");
+
+    expect(options.every((option) => option.textContent?.includes("Amoxicillin"))).toBe(true);
+    expect(options[0].textContent).toContain("AMX-02");
   });
 
   it("renders policy rejections with line-level errors instead of posting", async () => {

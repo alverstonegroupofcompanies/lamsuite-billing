@@ -3,7 +3,7 @@ import { AlertCircle, CheckCircle, FileSpreadsheet, Plus, RotateCcw, Trash2, Upl
 import { ModalLayer } from "../lib/modal/CentralModalManager";
 import { shortcutLabel } from "../lib/keyboard/centralKeyMap";
 import type { ProductBatch, ProductItem } from "../lib/masters/productsStore";
-import { formatExpiryDisplay } from "../lib/masters/productsStore";
+import { BatchCombobox } from "./BatchCombobox";
 import {
   STOCK_ADJUSTMENT_REASONS,
   StockAdjustmentPolicyError,
@@ -78,10 +78,6 @@ export const StockAdjustmentDocumentModal: React.FC<StockAdjustmentDocumentModal
   const engine = engineRef.current;
   const policy = useMemo(() => getStockAdjustmentPolicy(), [isOpen]);
   const productList = useMemo(() => Object.values(products), [products]);
-  const productsWithBatches = useMemo(() => {
-    const ids = new Set(batches.map((batch) => String(batch.product_id)));
-    return productList.filter((product) => ids.has(String(product.id)));
-  }, [batches, productList]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -121,24 +117,6 @@ export const StockAdjustmentDocumentModal: React.FC<StockAdjustmentDocumentModal
     return [...scoped].sort((a, b) => (a.expiry_date || "").localeCompare(b.expiry_date || ""));
   };
 
-  const chooseProduct = (rowIndex: number, productId: string) => {
-    const row = engine.rows[rowIndex];
-    if (!row) return;
-    const product = products[productId];
-    const firstBatch = batches.find((batch) => String(batch.product_id) === String(productId));
-    Object.assign(row, {
-      product_id: productId,
-      product_name: product?.name || "",
-      batch_id: firstBatch?.id || "",
-      batch_no: firstBatch?.batch_no || "",
-      system_qty: Number(firstBatch?.stock_qty || 0),
-      unit_cost: Number(row.unit_cost ?? firstBatch?.purchase_rate ?? 0),
-    });
-    engine.commitEdit();
-    engine.activeColumn = "batch_no";
-    bump();
-  };
-
   const chooseBatch = (rowIndex: number, batchId: string) => {
     const row = engine.rows[rowIndex];
     const batch = batches.find((candidate) => candidate.id === batchId);
@@ -164,39 +142,38 @@ export const StockAdjustmentDocumentModal: React.FC<StockAdjustmentDocumentModal
     const commonClass =
       "w-full rounded border border-accent bg-surface px-1.5 py-1 text-xs text-text-main focus:outline-none";
 
-    if (column === "product_name") {
+    if (column === "product_name" || column === "batch_no") {
+      const isProductCell = column === "product_name";
       return (
-        <select
+        <div
           data-cell-edit={`${rowIndex}-${column}`}
-          value={row.product_id}
-          onChange={(event) => chooseProduct(rowIndex, event.target.value)}
-          className={commonClass}
+          className={WIDTHS[column]}
+          onKeyDown={(event) => {
+            // The combobox owns Enter here. Letting it reach the grid as well would commit
+            // the edit twice over and drop the cursor into the next cell mid-selection.
+            if (event.key === "Enter") event.stopPropagation();
+          }}
         >
-          <option value="">Select product…</option>
-          {productsWithBatches.map((product) => (
-            <option key={product.id} value={product.id}>
-              {product.name}
-            </option>
-          ))}
-        </select>
-      );
-    }
-
-    if (column === "batch_no") {
-      return (
-        <select
-          data-cell-edit={`${rowIndex}-${column}`}
-          value={row.batch_id}
-          onChange={(event) => chooseBatch(rowIndex, event.target.value)}
-          className={commonClass}
-        >
-          <option value="">Select batch…</option>
-          {batchesFor(row).map((batch) => (
-            <option key={batch.id} value={batch.id}>
-              {batch.batch_no} · {formatExpiryDisplay(batch.expiry_date)} · {batch.stock_qty}
-            </option>
-          ))}
-        </select>
+          <BatchCombobox
+            value={row.batch_id}
+            batches={isProductCell ? batches : batchesFor(row)}
+            products={products}
+            autoFocus
+            placeholder={isProductCell ? "Search product or batch…" : "Search batch…"}
+            onChange={(_batchId, batch) => {
+              if (batch) {
+                chooseBatch(rowIndex, batch.id);
+                return;
+              }
+              engine.commitEdit();
+              bump();
+            }}
+            onEnter={() => {
+              engine.commitEdit();
+              bump();
+            }}
+          />
+        </div>
       );
     }
 

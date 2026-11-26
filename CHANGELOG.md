@@ -1,5 +1,31 @@
 # Changelog
 
+## 2.1.10 — 2026-11-26
+
+The stock adjustment document made a pharmacist find one product inside a native `<select>` holding the whole
+stocked catalog — 105 options on the migrated store, no way to type what they were looking for, and a second
+batch list that ignored expiry order. Both cells now use the searchable combobox the purchase and transfer
+screens already use.
+
+1. **Product and batch cells search** — `BatchCombobox` matches product name, batch number, primary and
+   secondary barcodes, generic name and HSN, ranks name-prefix hits first, and shows batch, expiry and stock
+   on every row. The product cell searches the whole stocked catalog and files the batch it lands on, so one
+   choice fills product, batch, system quantity and unit cost; the batch cell lists only the chosen product's
+   batches, earliest expiry first.
+2. **Enter belongs to the picker** — the grid engine commits an edit on Enter and so does a combobox
+   selection, and both firing dropped the cursor into the next cell mid-selection. Enter now stops at the
+   cell and the combobox hands the grid over through `onEnter`. Escape closes the dropdown first and cancels
+   only the edit on the next press, which is what it did with the old `<select>`.
+
+Verification: `StockAdjustmentDocumentModal.test.tsx` (10 tests) drives the real modal and the real combobox —
+narrowing by name, batch scoping with FEFO order, and a keyboard pick reaching the posted payload — plus the
+full frontend suite and `tsc --noEmit`. One unrelated purchases-print test failed in the full run and passed
+on its own, which is contention in a shared tree rather than this change. Not clicked through in the built
+desktop app.
+
+No schema, setting or endpoint changed, and nothing is re-imported: the adjustment document posts the same
+lines it always did.
+
 ## 2.1.9 — 2026-11-26
 
 The corrected wizard was run against the running legacy panel, and its pre-check came back:
