@@ -217,12 +217,16 @@ class MigrationLegacyShapesTest extends TestCase
 
         $this->migrate($source);
 
-        $skipped = MigrationUnresolvedItem::where('entity_type', 'purchase')
+        $review = MigrationUnresolvedItem::where('entity_type', 'document_number')
             ->where('old_id', '1002')
-            ->first();
-        $this->assertNotNull($skipped, 'an unnumberable bill still disappears without trace');
-        $this->assertStringContainsString('bill number', $skipped->reason);
-        $this->assertEquals(1, Purchase::count(), 'the unnumberable bill was still written somewhere');
+            ->firstOrFail();
+        $this->assertStringContainsString('filed as MIGPUR-1002', $review->reason);
+
+        // The bill's money, date and stock are real; only its number is ours. It is kept under a
+        // number that announces itself as a migration's, not deleted for want of a label.
+        $renumbered = Purchase::where('invoice_number', 'MIGPUR-1002')->first();
+        $this->assertNotNull($renumbered, 'the unnumbered bill was thrown away instead of renumbered');
+        $this->assertEquals(2, Purchase::count());
     }
 
     public function test_a_batch_stored_as_stock_and_ptr_opens_with_units_and_valuation(): void
@@ -364,17 +368,35 @@ class MigrationLegacyShapesTest extends TestCase
         $this->assertEquals(12.0, (float) InvoiceItem::where('qty', 2.0)->value('gst_percent'));
     }
 
-    public function test_an_unnumbered_bill_is_blocked_at_precheck_instead_of_vanishing_after_run(): void
+    public function test_an_unnumbered_bill_is_named_at_precheck_instead_of_vanishing_after_run(): void
     {
         $source = $this->legacySource();
         unset($source['purchases'][1]['voucher_no']);
 
         $report = (new MigrationDiagnosticsService())->runPrecheck($source);
 
+        // A bill that can still be traced to its old row is imported under a derived number, so
+        // the pre-check warns and names that number instead of stopping the migration.
+        $this->assertTrue($report['can_proceed']);
+        $issues = array_values(array_filter(
+            $report['issues'],
+            fn ($i) => $i['type'] === 'warning' && str_contains($i['message'], 'no bill number')
+        ));
+        $this->assertCount(1, $issues);
+        $this->assertStringContainsString('MIGPUR-1002', implode(', ', $issues[0]['details']));
+    }
+
+    public function test_a_bill_with_neither_a_number_nor_a_row_identity_blocks_precheck(): void
+    {
+        $source = $this->legacySource();
+        unset($source['purchases'][1]['voucher_no'], $source['purchases'][1]['id']);
+
+        $report = (new MigrationDiagnosticsService())->runPrecheck($source);
+
         $this->assertFalse($report['can_proceed']);
         $this->assertNotEmpty(array_filter(
             $report['issues'],
-            fn ($i) => $i['type'] === 'error' && str_contains($i['message'], 'no bill number')
+            fn ($i) => $i['type'] === 'error' && str_contains($i['message'], 'neither a bill number nor a row identity')
         ));
     }
 
@@ -415,6 +437,111 @@ class MigrationLegacyShapesTest extends TestCase
         $this->assertEquals(0, Purchase::count());
         $this->assertEquals(0, Product::count());
         $this->assertEquals(0, MigrationUnresolvedItem::count());
+    }
+
+    /**
+     * The exact shape the running legacy panel answers with — batches nested inside each product,
+     * a return kept as an invoice row tagged `sales_module_key`, purchase bills under
+     * `purchase_documents` numbered `reference_no`, and lines carrying a percent but never a rupee
+     * tax figure. It was reported live as "Batches & Stocks 0, Purchases 0" because each of those
+     * spellings was read by a different name.
+     */
+    public function test_the_panels_own_pull_shape_reports_its_stocks_credit_bills_and_purchases(): void
+    {
+        $source = $this->panelPullShape();
+
+        $report = (new MigrationDiagnosticsService())->runPrecheck($source, ['tax_mode' => 'exclusive']);
+
+        $this->assertTrue($report['can_proceed'], print_r($report['issues'], true));
+        $this->assertSame(1, $report['record_counts']['product_batches']);
+        $this->assertSame(1, $report['record_counts']['purchases']);
+        $this->assertSame(2, $report['record_counts']['sales_invoices']);
+        $this->assertSame(1, $report['record_counts']['credit_bills']);
+
+        $this->migrate($source);
+
+        $batch = ProductBatch::firstOrFail();
+        $this->assertEquals(34.00, (float) $batch->stock_qty, 'packs × units_per_pack + loose was never totalled');
+        $this->assertEquals('2027-10-31', $batch->expiry_date->format('Y-m-d'));
+        $this->assertEquals(118.00, (float) $batch->mrp);
+
+        $note = Invoice::where('invoice_number', 'CN-26-0007')->firstOrFail();
+        $this->assertSame('credit_note', $note->module_key);
+
+        $purchase = Purchase::where('invoice_number', 'PUR-26-0031')->first();
+        $this->assertNotNull($purchase, 'reference_no is still not being read as a purchase bill number');
+
+        $line = PurchaseItem::where('purchase_id', $purchase->id)->firstOrFail();
+        $this->assertEquals(88.00, (float) $line->purchase_rate);
+        $this->assertEquals(12.00, (float) $line->gst_percent, 'a line stating gst_pct as a percent never became a slab');
+        $this->assertEquals('Zerodol SP Tablet', $line->product_name, 'the item name lives in description');
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function panelPullShape(): array
+    {
+        return [
+            'generated_at' => '2026-11-26 09:00:00',
+            // The panel answers with one flat settings object, not v2's {key, value} rows — and it
+            // holds no pricing switch at all, only a default rate, which is not an answer.
+            'store_settings' => ['sync_mode' => 'hybrid', 'default_tax_rate' => 12.0],
+            'products' => [[
+                'id' => 901, 'external_id' => 'P-901', 'name' => 'Zerodol SP Tablet',
+                'hsn_sac_code' => '30049099', 'mrp' => 118.00, 'selling_rate' => 106.00,
+                'purchase_rate' => 88.00, 'cgst_percent' => 6.0, 'sgst_percent' => 6.0,
+                'igst_percent' => 0.0, 'stock' => 40,
+                'batches' => [[
+                    'id' => 9101, 'external_id' => 'B-9101', 'batch_no' => 'ZD-2410',
+                    'expiry_date' => '2027-10-31', 'packs' => 3, 'units_per_pack' => 10,
+                    'loose_qty' => 4, 'mrp' => 118.00, 'purchase_rate' => 88.00, 'selling_rate' => 106.00,
+                ]],
+            ]],
+            'customers' => [['id' => 911, 'external_id' => 'C-911', 'name' => 'Residency Apartments', 'current_balance' => 354.00]],
+            'suppliers' => [['id' => 921, 'external_id' => 'S-921', 'name' => 'Central Distributors', 'current_balance' => 9856.00]],
+            'invoices' => [
+                [
+                    'id' => 9201, 'external_id' => 'I-9201', 'invoice_number' => 'SAL-26-0001',
+                    'invoice_date' => '2026-04-12', 'sales_module_key' => 'invoice',
+                    'subtotal' => 318.00, 'tax_total' => 36.00, 'grand_total' => 354.00,
+                    'paid_amount' => 354.00, 'payment_mode' => 'CASH', 'status' => 'posted',
+                    'customer_id' => 911,
+                    'items' => [[
+                        'product_external_id' => 'P-901', 'batch_no' => 'ZD-2410', 'quantity' => 3,
+                        'unit_price' => 106.00, 'tax_pct' => 12.000, 'tax_amount' => 36.00,
+                        'line_total' => 354.00, 'hsn_code' => '30049099',
+                    ]],
+                ],
+                [
+                    'id' => 9202, 'external_id' => 'I-9202', 'invoice_number' => 'CN-26-0007',
+                    'invoice_date' => '2026-05-02', 'sales_module_key' => 'credit-note',
+                    'subtotal' => 106.00, 'tax_total' => 12.00, 'grand_total' => 118.00,
+                    'status' => 'posted', 'customer_id' => 911,
+                    'items' => [[
+                        'product_external_id' => 'P-901', 'batch_no' => 'ZD-2410', 'quantity' => 1,
+                        'unit_price' => 106.00, 'gst_percent' => 12.000, 'line_total' => 118.00,
+                        'hsn_code' => '00000000',
+                    ]],
+                ],
+            ],
+            'purchase_documents' => [
+                [
+                    'id' => 9301, 'external_id' => 'PD-9301', 'reference_no' => 'PUR-26-0031',
+                    'supplier_invoice_no' => 'CD/2026/8891', 'date' => '2026-03-20',
+                    'module_key' => 'purchase-bill', 'subtotal' => 8800.00, 'tax_total' => 1056.00,
+                    'discount_amount' => 0.00, 'round_off' => 0.00, 'grand_total' => 9856.00,
+                    'amount_paid' => 9856.00, 'status' => 'received', 'payment_mode' => 'UPI',
+                    'origin' => 'manual', 'supplier_id' => 921,
+                    'items' => [[
+                        'product_external_id' => 'P-901', 'description' => 'Zerodol SP Tablet',
+                        'qty' => 100, 'unit_price' => 88.00, 'gst_pct' => 12.000, 'cess_pct' => 0.000,
+                        'line_total' => 9856.00, 'batch_no' => 'ZD-2410', 'expiry_date' => '2027-10-31',
+                        'packs' => 10, 'units_per_pack' => 10, 'mrp' => 118.00, 'sale_price' => 106.00,
+                    ]],
+                ],
+            ],
+        ];
     }
 
     private function runLegacyReconcile(MigrationRun $migration, array $source)

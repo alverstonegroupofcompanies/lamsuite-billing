@@ -159,6 +159,60 @@ describe("the migration wizard reports the server, not itself", () => {
     expect((screen.getByText("Rates From Master/Bill").parentElement as HTMLElement).textContent).toContain("5");
     expect(screen.getByText(/left out of the import/)).toBeInTheDocument();
   });
+
+  /**
+   * A legacy panel records nowhere whether a displayed price already carried the GST, and reading
+   * that backwards re-derives every migrated price while the totals still reconcile. The wizard is
+   * the only place left that can be told, so the answer given here has to reach both calls.
+   */
+  it("sends the pricing answer the operator gave with the scan and the run", async () => {
+    precheck.mockResolvedValue({
+      can_proceed: true,
+      record_counts: { products: 105, sales_invoices: 88, credit_bills: 12, purchases: 40 },
+      issues: [],
+      summary: { total_entities: 4, total_records: 245, warnings_count: 0, errors_count: 0 },
+    });
+    start.mockResolvedValue({
+      run: {
+        id: 7,
+        run_uuid: "cccc1111-2222-3333-4444-555566667777",
+        store_id: 7,
+        source_type: "api",
+        source_reference: null,
+        status: "completed",
+        is_dry_run: true,
+        created_at: "2026-11-26 10:00:00",
+      },
+      stats: { products: 105, invoices: 88 },
+      is_dry_run: true,
+      reconciliation: null,
+      cutover_phrase: "CUTOVER-STR001",
+    });
+
+    render(<DataMigrationPage />);
+    fireEvent.change(screen.getByPlaceholderText("Sanctum token"), { target: { value: "legacy-token" } });
+    fireEvent.click(screen.getByRole("button", { name: /GST added on the rate/ }));
+    fireEvent.click(scanButton());
+
+    await waitFor(() => expect(precheck).toHaveBeenCalled());
+    expect(precheck.mock.calls[0][1]).toMatchObject({ tax_mode: "exclusive" });
+
+    fireEvent.click(await screen.findByRole("button", { name: /Continue to Entity Mapping/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /Run Dry-Run Simulation/ }));
+
+    await waitFor(() => expect(start).toHaveBeenCalled());
+    expect(start.mock.calls[0][1]).toMatchObject({ tax_mode: "exclusive" });
+  });
+
+  it("leaves the pricing question off a device recovery", async () => {
+    render(<DataMigrationPage />);
+
+    expect(screen.getByText(/How the old system priced a bill/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /Device Recovery/ }));
+
+    await waitFor(() => expect(screen.queryByText(/How the old system priced a bill/)).toBeNull());
+  });
 });
 
 /**

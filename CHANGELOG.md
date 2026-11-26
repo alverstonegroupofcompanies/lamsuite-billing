@@ -1,5 +1,71 @@
 # Changelog
 
+## 2.1.9 — 2026-11-26
+
+The corrected wizard was run against the running legacy panel, and its pre-check came back:
+Products 105 · **Batches & Stocks 0** · Sales Invoices 88 · **Purchases 0** · Customers 40 · Held Bills 0,
+**Blockers Detected** — *"2 documents carry no bill number"* — under it warnings for 2 total variances,
+12 lines priced from the product catalog, 91 lines filed at the bill's own average slab, 2 placeholder HSN
+codes, and a note that the source states no tax mode. Every one of those was a field the importer still
+read under a different name, or a decision nobody had asked the operator to make.
+
+1. **A product carries its own batches** — the legacy pull has no batches entity at all: it loads each
+   product's batches into `products[].batches`, and those rows state no quantity column, only `packs`,
+   `units_per_pack` and `loose_qty`. `batchesOf()` now collects batch rows under every spelling — a
+   top-level `product_batches`/`batches`/`batch_stocks`/`stocks` list and the rows nested in the product
+   that owns them — deduped by external id, row id and product+batch_no, and `batchStock()` totals the
+   pack pair. The total had a bug of its own: a row with no quantity column hit the `null` sentinel and
+   returned `-1` instead of doing the pack arithmetic, which is a shelf of negative stock.
+2. **A purchase bill is a `purchase_documents` row** — numbered `reference_no` (or `purchase_number`),
+   dated `date`, with `gst_pct` as a *percent* and never a rupee tax figure, and the item's name in
+   `description` — which is why a migrated purchase line read "Item". Purchases now count, import, and
+   reconcile instead of reporting zero.
+3. **An unnumbered document gets a number rather than being deleted** — a bill with no number under any
+   key but a readable row identity is filed as `MIGBILL-`/`MIGPUR-` plus the tail of that identity, its
+   money, stock and party balances kept, counted in the new `renumbered` stat, and left on the review list
+   as a `document_number` item naming the number it was given. The pre-check *warns* and lists those
+   numbers; only a row with neither a number nor an identity still blocks, because nothing can be traced
+   back to it after cutover.
+4. **A placeholder HSN is not an HSN** — `hsnCode()` treats `''`, `00000000`, `NA`, `NIL`, `NONE` and `-`
+   as absent, so the GST print layer falls back to the product master instead of filing a zero as a code.
+5. **The wizard asks how the old system priced a bill** — the v1 panel stores that switch nowhere in its
+   pull, so "the source does not state a tax mode" is a true sentence with no answer attached. Step 1 now
+   offers the three answers (*read it from the source* / *shown price includes GST* / *GST added on the
+   rate*), sends the choice as `config.tax_mode` to both the scan and the run, keeps it on the run's
+   `mapping_config` so a replay reads prices the same way, and writes it into the `billing` company
+   setting the till actually consults — including for a bundle that carries no store profile at all.
+   `StoreTaxPolicy::statedModeForStore()` stopped treating the `stores.tax_mode` column as an operator
+   statement (its non-null default is `inclusive`, on a store nobody ever configured), so an unset till is
+   now blocked at pre-check with instructions instead of re-pricing a year silently while the totals still
+   reconciled.
+6. **Counts that describe the run** — `record_counts` gained `sales_invoices`, `credit_bills` and
+   `purchases`, read the way the importer files documents rather than by which key a row arrived under (a
+   return kept inside the invoice table tagged `sales_module_key: credit-note` *is* a credit bill), the
+   wizard's tiles show them, and `total_records` no longer counts a bill twice — once as the table it came
+   in on and once as the document it is filed as. Held Bills showing 0 now carries an explanation beside
+   it: those rows live on each till, not in a panel database.
+7. **`config` survives its own validation rule** — adding a rule for `config.tax_mode` made Laravel's
+   `validated()` prune the array down to the children its rules name, so `bundle_ref`, `url` and `since`
+   disappeared and every till scan died on *Undefined array key "config"*. The reader is handed the
+   request's own copy after the rules have checked it.
+
+Verified in `MigrationLegacyShapesTest` (20 tests) and `TillMigrationPipelineTest` (16): a payload shaped
+exactly as the panel answers — nested batches, a `credit-note` inside `invoices`, a `purchase_documents`
+row numbered `reference_no` with `gst_pct` lines — pre-checks as Batches 1, Purchases 1, Sales Invoices 2,
+Credit Bills 1, and imports 34 units onto the shelf (3 × 10 + 4), the reversal as `module_key credit_note`,
+and the purchase line at ₹88.00 under the 12% slab. An unnumbered bill is named at pre-check and survives
+the run; the same row with its identity removed blocks. A store that never stated a pricing mode cannot be
+scanned until the operator states one, and the mode stated at the till is the mode the run saves — on the
+`billing` setting, the store row and the run row. Backend 1283 tests, frontend 1240, both `tsc` clean.
+Not covered: a live pull from the panel (minting its migration token is a manual screen) and a built
+installer. The 88 invoices already migrated on the production store keep the figures written before this
+build — roll that run back and re-run it on this build before filing anything from it.
+
+After pulling: no `migrate --force` and no artisan step — this release adds no schema. Re-import the
+batches and purchase bills from the same bundle (the id maps make a second run update the rows it stamped
+rather than duplicating them), then set the till's Billing tab to how the shop actually billed and check the
+`document_number` entries in Migration Center's review list for the bills that had no number.
+
 ## 2.1.8 — 2026-11-25
 
 A store finished the wizard, and its reconciliation report read: Products 105, Batches 124, Invoices 88,

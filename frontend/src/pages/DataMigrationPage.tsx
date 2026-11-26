@@ -45,6 +45,26 @@ const STEPS = [
   "6. Final Cutover",
 ];
 
+type PricingMode = "" | "inclusive" | "exclusive";
+
+const PRICING_MODES: { value: PricingMode; label: string; hint: string }[] = [
+  {
+    value: "",
+    label: "Read it from the source",
+    hint: "Use whatever the old system states; fall back to this till's billing setting.",
+  },
+  {
+    value: "inclusive",
+    label: "Shown price includes GST",
+    hint: "₹118.00 printed on an old bill is the whole amount the customer paid.",
+  },
+  {
+    value: "exclusive",
+    label: "GST added on the rate",
+    hint: "₹118.00 on an old bill is before tax; the tax was added on top of it.",
+  },
+];
+
 const explain = (err: unknown): string => {
   if (err instanceof MigrationRequestError) {
     if (err.code === "data_migration_disabled") {
@@ -72,6 +92,7 @@ export const DataMigrationPage: React.FC = () => {
   const [bundleFile, setBundleFile] = useState<File | null>(null);
   const [bundleRef, setBundleRef] = useState<string | null>(null);
   const [deviceJson, setDeviceJson] = useState<string>("");
+  const [pricingMode, setPricingMode] = useState<PricingMode>("");
 
   const [loading, setLoading] = useState<boolean>(false);
   const [busyLabel, setBusyLabel] = useState<string>("");
@@ -100,7 +121,7 @@ export const DataMigrationPage: React.FC = () => {
    * The config the server reads this source with. A bundle is uploaded once and
    * referred to by the reference the upload issued.
    */
-  const sourceConfig = async (): Promise<Record<string, unknown>> => {
+  const sourceFields = async (): Promise<Record<string, unknown>> => {
     if (sourceType === "api") {
       if (!apiUrl.trim()) {
         throw new Error("Enter the legacy server URL, e.g. https://admin.example.com");
@@ -144,6 +165,33 @@ export const DataMigrationPage: React.FC = () => {
     } catch {
       throw new Error("That is not valid JSON.");
     }
+  };
+
+  /**
+   * The pricing mode, sent with the source fields on every step of one wizard session.
+   *
+   * The legacy panel keeps no record of whether its shelf prices already carried the GST, so
+   * without this the import guesses from the till's own setting. A wrong guess re-derives every
+   * migrated price while the rupee totals still reconcile, which is why the number stated here
+   * also goes to the pre-check and is stored on the run.
+   */
+  const sourceConfig = async (): Promise<Record<string, unknown>> => {
+    const fields = await sourceFields();
+
+    return pricingMode ? { ...fields, tax_mode: pricingMode } : fields;
+  };
+
+  /** Every rupee figure a scan described changes with the pricing answer, so the scan is dropped. */
+  const choosePricingMode = (mode: PricingMode) => {
+    if (mode === pricingMode) {
+      return;
+    }
+
+    setPricingMode(mode);
+    setPrecheck(null);
+    setDryRun(null);
+    setLiveRun(null);
+    setCutoverDone(null);
   };
 
   const runStep = async (label: string, work: () => Promise<void>) => {
@@ -448,6 +496,37 @@ export const DataMigrationPage: React.FC = () => {
               )}
             </div>
 
+            {sourceType !== "device" && (
+              <div className="pt-4 border-t space-y-3">
+                <div>
+                  <label className="block text-xs font-medium text-slate-700">
+                    How the old system priced a bill
+                  </label>
+                  <p className="text-[11px] text-slate-500 mt-1">
+                    A legacy panel stores this switch nowhere, so a migrated year is read with whichever answer is
+                    chosen here. Get it wrong and every price in the store is re-derived while the totals still add up.
+                  </p>
+                </div>
+                <div className="grid grid-cols-3 gap-3">
+                  {PRICING_MODES.map((mode) => (
+                    <button
+                      key={mode.value || "source"}
+                      type="button"
+                      onClick={() => choosePricingMode(mode.value)}
+                      className={`p-3 border rounded-lg text-left transition ${
+                        pricingMode === mode.value
+                          ? "border-indigo-600 bg-indigo-50/50 ring-1 ring-indigo-600"
+                          : "hover:bg-slate-50"
+                      }`}
+                    >
+                      <div className="text-xs font-medium text-slate-800">{mode.label}</div>
+                      <p className="text-[11px] text-slate-500 mt-1">{mode.hint}</p>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
             <div className="flex items-center justify-between pt-4 border-t">
               <span className="text-[11px] text-slate-500">
                 The store is decided by this terminal's claim — nothing here names a branch.
@@ -549,12 +628,13 @@ export const DataMigrationPage: React.FC = () => {
             </span>
           </div>
 
-          <div className="grid grid-cols-4 sm:grid-cols-7 gap-3 text-center">
+          <div className="grid grid-cols-4 sm:grid-cols-8 gap-3 text-center">
             {[
               ["Total Records", precheck.summary.total_records],
               ["Products", precheck.record_counts.products || 0],
               ["Batches & Stocks", precheck.record_counts.product_batches || 0],
-              ["Sales Invoices", precheck.record_counts.invoices || 0],
+              ["Sales Invoices", precheck.record_counts.sales_invoices ?? (precheck.record_counts.invoices || 0)],
+              ["Credit Bills", precheck.record_counts.credit_bills || 0],
               ["Purchases", precheck.record_counts.purchases || 0],
               ["Customers", precheck.record_counts.customers || 0],
               ["Held Bills", precheck.record_counts.device_holds || 0],

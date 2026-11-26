@@ -75,6 +75,28 @@ class StoreTaxPolicy
         return in_array($value, self::TAX_MODES, true) ? $value : null;
     }
 
+    /**
+     * The mode an operator actually set, as opposed to the one this class falls back to.
+     *
+     * `forStore()` always answers, so a caller cannot tell "this till bills exclusive" from
+     * "nobody ever said and the default is inclusive". A migration has to: importing a year of
+     * bills against an unset default silently re-prices all of them, and the report cannot show
+     * it because the totals still add up.
+     *
+     * The stores column stays out of this answer. Every screen that saves a choice writes it into
+     * the billing setting and mirrors the row, so a mode visible only on the row is the schema
+     * default on a store nobody configured — and reading that as an instruction is the failure
+     * above, in the one case it matters.
+     */
+    public function statedModeForStore(?int $storeId): ?string
+    {
+        $billing = $this->settings($storeId, self::BILLING_KEY);
+        $legacy = $this->settings($storeId, self::LEGACY_KEY);
+
+        return $this->pickMode($billing['tax_mode'] ?? null)
+            ?? $this->pickMode($legacy['tax_mode'] ?? null);
+    }
+
     private function pickType(mixed $value): ?string
     {
         return in_array($value, self::GST_TYPES, true) ? $value : null;

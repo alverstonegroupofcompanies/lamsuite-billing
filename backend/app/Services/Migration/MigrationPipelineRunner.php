@@ -40,6 +40,7 @@ class MigrationPipelineRunner
         'debit_notes' => 0,
         'guessed_rates' => 0,
         'unlinked' => 0,
+        'renumbered' => 0,
     ];
 
     private array $productRateCache = [];
@@ -110,6 +111,7 @@ class MigrationPipelineRunner
             'expenses' => 0,
             'payments' => 0,
             'held_bills' => 0,
+            'renumbered' => 0,
             'unresolved' => 0,
             'errors' => [],
         ];
@@ -118,12 +120,15 @@ class MigrationPipelineRunner
         $existingMaps = MigrationIdMap::where('store_id', $storeId)->get();
         foreach ($existingMaps as $m) {
             $this->idMapCache[$m->entity_type . ':' . $m->old_id] = $m->new_id;
+            if (!empty($m->old_uuid)) {
+                $this->idMapCache[$m->entity_type . ':' . $m->old_uuid] = $m->new_id;
+            }
         }
 
         DB::beginTransaction();
         try {
             // 1. Store Profile & Company Settings
-            $stats['store'] = $this->migrateStoreProfile($storeId, $runUuid, $sourceData);
+            $stats['store'] = $this->migrateStoreProfile($storeId, $runUuid, $sourceData, $run);
 
             // 2. Masters / Lookups
             $stats['lookups'] = $this->migrateLookups($storeId, $runUuid, $sourceData);
@@ -141,7 +146,7 @@ class MigrationPipelineRunner
             $stats['batches'] = $this->migrateBatches($storeId, $runUuid, $sourceData);
 
             // 7. Sales Invoices & Credit Bills
-            $this->documentStats = ['credit_notes' => 0, 'debit_notes' => 0, 'guessed_rates' => 0, 'unlinked' => 0];
+            $this->documentStats = ['credit_notes' => 0, 'debit_notes' => 0, 'guessed_rates' => 0, 'unlinked' => 0, 'renumbered' => 0];
             $stats['invoices'] = $this->migrateInvoices($storeId, $runUuid, $sourceData);
 
             // 8. Purchases & Debit Notes
@@ -197,6 +202,13 @@ class MigrationPipelineRunner
         $key = $entityType . ':' . $oldIdStr;
         $this->idMapCache[$key] = $newIdStr;
 
+        // A legacy bill line names its product by the device-side uuid rather than the panel's
+        // row id, so both handles resolve to the row this run imported.
+        $uuid = trim((string) $oldUuid);
+        if ($uuid !== '' && $uuid !== '0' && $uuid !== $oldIdStr) {
+            $this->idMapCache[$entityType . ':' . $uuid] = $newIdStr;
+        }
+
         MigrationIdMap::updateOrCreate(
             [
                 'store_id' => $storeId,
@@ -206,7 +218,7 @@ class MigrationPipelineRunner
             [
                 'migration_run_uuid' => $runUuid,
                 'new_id' => $newIdStr,
-                'old_uuid' => $oldUuid,
+                'old_uuid' => $uuid !== '' ? $uuid : null,
             ]
         );
     }
@@ -236,13 +248,19 @@ class MigrationPipelineRunner
 
     // --- Entity Specific Migration Methods ---
 
-    protected function migrateStoreProfile(int $storeId, string $runUuid, array $sourceData): int
+    protected function migrateStoreProfile(int $storeId, string $runUuid, array $sourceData, MigrationRun $run): int
     {
-        $storeData = $sourceData['store_profile'] ?? $sourceData['stores'][0] ?? null;
-        if (!$storeData) return 0;
-
         $store = Store::find($storeId);
         if (!$store) return 0;
+
+        $storeData = $sourceData['store_profile'] ?? $sourceData['stores'][0] ?? null;
+        if (!is_array($storeData)) {
+            // A bundle of documents alone still carries the pricing answer the operator gave in
+            // the wizard, and losing that silently is the one failure a report cannot show.
+            $this->carryTaxMode($run, $storeId, $runUuid, $store, [], [], $sourceData);
+
+            return 0;
+        }
 
         // The v1 panel has no equivalent for the v2 feature menu, and a legacy list written
         // over it switched v2-only screens off in the till without an operator touching them.
@@ -257,7 +275,10 @@ class MigrationPipelineRunner
             'drug_license_numbers' => $storeData['drug_license_numbers'] ?? $store->drug_license_numbers,
         ]);
 
-        // Migrate company settings
+        // Migrate company settings. A v2 bundle lists them as `{key, value}` rows; the legacy
+        // panel answers with one flat object, and writing that object's every field over the v2
+        // settings would copy v1-only keys (`sync_mode`, `logo_data_url`) into this schema, so
+        // the flat shape is read for the billing mode alone and left out of the writes.
         $settings = $sourceData['company_settings'] ?? $sourceData['store_settings'] ?? [];
         $billingFromSource = [];
         foreach ($settings as $setting) {
@@ -273,7 +294,7 @@ class MigrationPipelineRunner
             // name is merged field by field rather than dropped in over the v2 settings.
             if ($key === StoreTaxPolicy::BILLING_KEY || $key === StoreTaxPolicy::LEGACY_KEY) {
                 if (is_array($value)) {
-                    $billingFromSource += $value;
+                    $billingFromSource = array_merge($billingFromSource, $value);
                 }
                 continue;
             }
@@ -283,7 +304,7 @@ class MigrationPipelineRunner
             );
         }
 
-        $this->carryTaxMode($storeId, $runUuid, $store, $storeData, $billingFromSource);
+        $this->carryTaxMode($run, $storeId, $runUuid, $store, $storeData, $billingFromSource, $sourceData);
 
         return 1;
     }
@@ -291,14 +312,27 @@ class MigrationPipelineRunner
     /**
      * The one store setting a wrong value cannot be spotted in a report: a shop that bills
      * exclusive and lands on the inclusive default has every price on every bill re-derived,
-     * while totals still add up. So the mode is taken from wherever the source states it,
-     * written into the setting the till actually reads, and mirrored onto the store row the way
-     * the settings screen does — and left alone when nothing states it.
+     * while totals still add up. So the mode is taken from the operator's own choice in the
+     * wizard first, then from wherever the source states it, written into the setting the till
+     * actually reads, and mirrored onto the store row the way the settings screen does.
      */
-    private function carryTaxMode(int $storeId, string $runUuid, Store $store, array $storeData, array $billingFromSource): void
-    {
-        $mode = $this->normalizer->taxMode($storeData)
-            ?? $this->normalizer->taxMode($billingFromSource);
+    private function carryTaxMode(
+        MigrationRun $run,
+        int $storeId,
+        string $runUuid,
+        Store $store,
+        array $storeData,
+        array $billingFromSource,
+        array $sourceData
+    ): void {
+        $mapping = is_array($run->mapping_config) ? $run->mapping_config : [];
+        $chosen = $mapping['tax_mode'] ?? null;
+        $chosen = in_array($chosen, StoreTaxPolicy::TAX_MODES, true) ? (string) $chosen : null;
+
+        $mode = $chosen
+            ?? $this->normalizer->taxMode($storeData)
+            ?? $this->normalizer->settingsTaxMode($billingFromSource)
+            ?? $this->normalizer->settingsTaxMode($this->normalizer->settingsFields($sourceData));
 
         $billing = CompanySetting::where('store_id', $storeId)
             ->where('key', StoreTaxPolicy::BILLING_KEY)
@@ -308,7 +342,7 @@ class MigrationPipelineRunner
         if ($mode === null) {
             if ($this->normalizer->taxMode($current) === null) {
                 $this->recordUnresolved($storeId, $runUuid, 'tax_mode', (string) $storeId,
-                    'Neither the source nor the existing billing settings state whether prices include tax, so the till reads the store default and every migrated price is re-derived against it.',
+                    'Neither the source nor the existing billing settings state whether prices include tax, so the till reads the store default and every migrated price is re-derived against it. Set the billing mode, or re-run with the mode chosen in the migration wizard.',
                     ['store_id' => $storeId]);
             }
 
@@ -372,7 +406,9 @@ class MigrationPipelineRunner
                     ]);
                 }
 
-                $this->mapId($storeId, $runUuid, $targetType, $oldId, $lookup->id);
+                // The uuid is the handle a legacy product row uses to name its group, brand or
+                // unit, so a lookup mapped only by its panel id cannot be found from there.
+                $this->mapId($storeId, $runUuid, $targetType, $oldId, $lookup->id, $item['external_id'] ?? null);
                 $count++;
             }
         }
@@ -487,9 +523,11 @@ class MigrationPipelineRunner
             $existingId = $this->getMappedId('product', $oldId);
             $product = $existingId ? Product::find($existingId) : null;
 
-            $categoryId = isset($p['category_id']) ? $this->getMappedId('group', $p['category_id']) : null;
-            $brandId = isset($p['brand_id']) ? $this->getMappedId('brand', $p['brand_id']) : null;
-            $unitId = isset($p['unit_id']) ? $this->getMappedId('unit', $p['unit_id']) : null;
+            // A legacy product names its masters by the device uuid rather than the panel's row
+            // id, so reading `category_id` alone migrated 105 products with no group, brand or unit.
+            $categoryId = $this->resolveRef($p, ['category_id', 'group_id', 'group_external_id'], 'group');
+            $brandId = $this->resolveRef($p, ['brand_id', 'brand_external_id'], 'brand');
+            $unitId = $this->resolveRef($p, ['unit_id', 'unit_external_id'], 'unit');
 
             $data = [
                 'store_id' => $storeId,
@@ -497,20 +535,24 @@ class MigrationPipelineRunner
                 'name' => $name,
                 'print_name' => $p['print_name'] ?? $name,
                 'generic_name' => $p['generic_name'] ?? null,
-                'hsn_sac_code' => $p['hsn_sac_code'] ?? $p['hsn_code'] ?? null,
+                'hsn_sac_code' => $this->clip($this->normalizer->hsnCode($p), 20),
                 'category_id' => $categoryId,
                 'brand_id' => $brandId,
                 'unit_id' => $unitId,
-                'mrp' => (float)($p['mrp'] ?? 0),
-                'sel_rate' => (float)($p['sel_rate'] ?? $p['selling_price'] ?? 0),
-                'ptr' => (float)($p['ptr'] ?? 0),
-                'pts' => (float)($p['pts'] ?? 0),
-                'gst_percent' => (float)($p['gst_percent'] ?? 0),
-                'units_per_pack' => (int)($p['units_per_pack'] ?? 1),
+                'mrp' => $this->normalizer->number($p, ['mrp', 'max_retail_price']),
+                // The panel keeps its shelf price under `sale_price`, already falling back to the
+                // first batch's selling rate when the product row states none.
+                'sel_rate' => $this->normalizer->number($p, ['sel_rate', 'sale_price', 'selling_price']),
+                'ptr' => $this->normalizer->number($p, ['ptr']),
+                'pts' => $this->normalizer->number($p, ['pts']),
+                // The slab a line inherits when the bill omits its own: the legacy catalog states
+                // it as a CGST/SGST pair and frequently leaves `gst_percent` at zero.
+                'gst_percent' => $this->normalizer->lineRate($p) ?? 0.0,
+                'units_per_pack' => max(1, (int) $this->normalizer->number($p, ['units_per_pack', 'pack_size'], 1)),
                 'rack_location' => $p['rack_location'] ?? null,
                 'shelf_location' => $p['shelf_location'] ?? null,
-                'reorder_level' => (float)($p['reorder_level'] ?? 10),
-                'current_stock' => (float)($p['current_stock'] ?? 0),
+                'reorder_level' => $this->normalizer->number($p, ['reorder_level'], 10),
+                'current_stock' => $this->normalizer->number($p, ['current_stock', 'stock', 'stock_qty']),
                 'is_active' => (bool)($p['is_active'] ?? true),
                 'external_id' => (string)($p['external_id'] ?? $oldId),
             ];
@@ -531,19 +573,9 @@ class MigrationPipelineRunner
     protected function migrateBatches(int $storeId, string $runUuid, array $sourceData): int
     {
         $count = 0;
-        $batches = $sourceData['product_batches'] ?? $sourceData['batches'] ?? [];
-
-        // Check if batches are embedded in products
-        if (empty($batches) && !empty($sourceData['products'])) {
-            foreach ($sourceData['products'] as $p) {
-                if (!empty($p['batches']) && is_array($p['batches'])) {
-                    foreach ($p['batches'] as $b) {
-                        $b['product_id'] = $p['id'];
-                        $batches[] = $b;
-                    }
-                }
-            }
-        }
+        // The legacy pull has no batches entity: each product carries its own. Counting only a
+        // top-level batch list is what migrated a stocked shop onto an empty shelf.
+        $batches = $this->normalizer->batchesOf($sourceData);
 
         foreach ($batches as $b) {
             $row = $this->normalizer->batch($b);
@@ -643,10 +675,22 @@ class MigrationPipelineRunner
 
             $invoiceNumber = $this->clip($doc['invoice_number'], 50);
             if ($invoiceNumber === null) {
-                $this->recordUnresolved($storeId, $runUuid, 'invoice', (string) $oldId,
-                    'No bill number under any known key (invoice_number, bill_no, return_number…), so the document cannot be filed or found later.',
+                $invoiceNumber = $this->normalizer->derivedDocumentNumber($legacy, 'MIGBILL');
+                if ($invoiceNumber === null) {
+                    $this->recordUnresolved($storeId, $runUuid, 'invoice', null,
+                        'A sale document reached the pipeline with neither a bill number under any known key nor a row identity, so nothing could be traced back to it.',
+                        $legacy);
+                    continue;
+                }
+
+                // The bill is worth importing even unnumbered: its money, stock and customer
+                // balance are real. It is filed under a number that announces itself as ours and
+                // left on the review list to be renamed.
+                $this->documentStats['renumbered']++;
+                $this->recordUnresolved($storeId, $runUuid, 'document_number', (string) $oldId,
+                    "A sale bill of ₹" . number_format(abs((float) $doc['grand_total']), 2) . ' carries no number in the old system; it is filed as ' . $invoiceNumber . ' and should be renamed before the return is filed.',
                     $legacy);
-                continue;
+                $doc['invoice_number'] = $invoiceNumber;
             }
 
             $oldCustomerId = $doc['customer_id'];
@@ -874,6 +918,27 @@ class MigrationPipelineRunner
      * than the column throws, and because one run is one transaction that single row would
      * undo every document migrated before it.
      */
+    /**
+     * A master this source row points at, by whichever handle it uses — a panel row id or the
+     * device uuid a legacy pull names it with. An unmatched reference stays null rather than
+     * becoming a plausible-looking wrong link.
+     */
+    private function resolveRef(array $row, array $keys, string $entityType): ?string
+    {
+        foreach ($keys as $key) {
+            $ref = $this->normalizer->idRef($row, [$key]);
+            if ($ref === null) {
+                continue;
+            }
+            $mapped = $this->getMappedId($entityType, $ref);
+            if ($mapped !== null) {
+                return $mapped;
+            }
+        }
+
+        return null;
+    }
+
     private function clip(?string $value, int $max): ?string
     {
         if ($value === null) {
@@ -902,10 +967,19 @@ class MigrationPipelineRunner
 
             $invoiceNumber = $this->clip($doc['invoice_number'], 50);
             if ($invoiceNumber === null) {
-                $this->recordUnresolved($storeId, $runUuid, 'purchase', (string) $oldId,
-                    'No supplier bill number under any known key (invoice_number, bill_no, grn_number…), so the bill was not imported.',
+                $invoiceNumber = $this->normalizer->derivedDocumentNumber($legacy, 'MIGPUR');
+                if ($invoiceNumber === null) {
+                    $this->recordUnresolved($storeId, $runUuid, 'purchase', null,
+                        'A purchase document reached the pipeline with neither a supplier bill number under any known key nor a row identity, so nothing could be traced back to it.',
+                        $legacy);
+                    continue;
+                }
+
+                $this->documentStats['renumbered']++;
+                $this->recordUnresolved($storeId, $runUuid, 'document_number', (string) $oldId,
+                    'A purchase bill of ₹' . number_format(abs((float) $doc['grand_total']), 2) . ' carries no supplier bill number in the old system; it is filed as ' . $invoiceNumber . ' and should be renamed before the return is filed.',
                     $legacy);
-                continue;
+                $doc['invoice_number'] = $invoiceNumber;
             }
 
             $oldSupplierId = $doc['supplier_id'];

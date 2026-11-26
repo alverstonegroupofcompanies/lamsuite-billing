@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\ActivationKey;
+use App\Models\CompanySetting;
 use App\Models\Counter;
 use App\Models\Invoice;
 use App\Models\MigrationRun;
@@ -196,8 +197,8 @@ class TillMigrationPipelineTest extends TestCase
         ])->assertOk();
 
         $this->assertFalse($res->json('data.can_proceed'));
-        $this->assertSame(1, $res->json('data.summary.errors_count'));
         $this->assertSame('source', $res->json('data.issues.0.category'));
+        $this->assertStringContainsString('no migratable records', $res->json('data.issues.0.message'));
     }
 
     public function test_precheck_reports_the_counts_a_run_will_actually_move(): void
@@ -207,13 +208,69 @@ class TillMigrationPipelineTest extends TestCase
 
         $res = $this->tillPost('/api/till/migrations/precheck', [
             'source_type' => 'file',
-            'config' => ['bundle_ref' => $ref],
+            // Nothing in this bundle, and nothing on a fresh store, states how the shop priced
+            // its bills, so the operator states it here.
+            'config' => ['bundle_ref' => $ref, 'tax_mode' => 'exclusive'],
         ])->assertOk();
 
         $this->assertTrue($res->json('data.can_proceed'));
         $this->assertSame(1, $res->json('data.record_counts.products'));
         $this->assertSame(1, $res->json('data.record_counts.invoices'));
+        $this->assertSame(1, $res->json('data.record_counts.product_batches'));
+        $this->assertSame(1, $res->json('data.record_counts.sales_invoices'));
+        $this->assertSame(0, $res->json('data.record_counts.credit_bills'));
+        // Seven rows the bundle lists plus the batch nested in the product — and not the invoice
+        // counted twice, once as a table and once as the sale it is filed as.
         $this->assertSame(8, $res->json('data.summary.total_records'));
+
+        $stated = array_filter(
+            $res->json('data.issues'),
+            fn ($issue) => str_contains($issue['message'], 'as chosen in this wizard')
+        );
+        $this->assertNotEmpty($stated, 'the pricing answer the till gave was not read by the server');
+    }
+
+    public function test_a_store_that_never_priced_a_bill_stops_the_scan_until_the_mode_is_said(): void
+    {
+        $this->fakeDisk();
+        $ref = $this->uploadBundle($this->bundle());
+
+        $res = $this->tillPost('/api/till/migrations/precheck', [
+            'source_type' => 'file',
+            'config' => ['bundle_ref' => $ref],
+        ])->assertOk();
+
+        // The stores row defaults to 'inclusive', and reading that as an instruction re-derives a
+        // migrated year while every total still reconciles, so an unset till has to be asked.
+        $this->assertFalse($res->json('data.can_proceed'));
+        $this->assertNotEmpty(array_filter(
+            $res->json('data.issues'),
+            fn ($issue) => $issue['type'] === 'error' && str_contains($issue['message'], 'Set "How the old system priced a bill"')
+        ));
+    }
+
+    public function test_the_pricing_mode_chosen_at_the_till_is_the_one_the_run_saves(): void
+    {
+        $this->fakeDisk();
+        $ref = $this->uploadBundle($this->bundle());
+
+        $res = $this->tillPost('/api/till/migrations/start', [
+            'source_type' => 'file',
+            'config' => ['bundle_ref' => $ref, 'tax_mode' => 'exclusive'],
+        ])->assertOk();
+
+        $uuid = $res->json('data.run.run_uuid');
+        $this->assertSame('exclusive', $res->json('data.run.mapping_config.tax_mode'));
+        $this->assertSame('exclusive', $this->store->fresh()->tax_mode);
+
+        $billing = CompanySetting::where('store_id', $this->store->id)->where('key', 'billing')->first();
+        $this->assertSame('exclusive', $billing->value['tax_mode'] ?? null);
+
+        // The choice survives on the run row, so a replay reads prices the same way.
+        $this->assertSame(
+            'exclusive',
+            MigrationRun::where('run_uuid', $uuid)->value('mapping_config')['tax_mode'] ?? null
+        );
     }
 
     public function test_a_dry_run_writes_nothing_and_leaves_the_store_empty(): void

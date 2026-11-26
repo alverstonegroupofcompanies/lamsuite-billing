@@ -11,6 +11,7 @@ use App\Services\Migration\MigrationPipelineRunner;
 use App\Services\Migration\MigrationReconciliationService;
 use App\Services\Migration\MigrationRollbackService;
 use App\Services\Migration\MigrationSourceReader;
+use App\Services\Tax\StoreTaxPolicy;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
@@ -25,6 +26,7 @@ class MigrationController extends Controller
         private readonly MigrationPipelineRunner $pipelineRunner,
         private readonly MigrationReconciliationService $reconciliationService,
         private readonly MigrationRollbackService $rollbackService,
+        private readonly StoreTaxPolicy $taxPolicy,
     ) {}
 
     /**
@@ -220,6 +222,7 @@ class MigrationController extends Controller
             'store_id' => 'nullable',
             'source_type' => 'required|in:api,file,device',
             'config' => 'required|array',
+            'config.tax_mode' => 'nullable|in:inclusive,exclusive',
         ]);
 
         $storeId = $this->resolveStoreId($request, $validated['store_id'] ?? null);
@@ -231,8 +234,15 @@ class MigrationController extends Controller
         }
 
         try {
-            $sourceData = $this->sourceReader->readSource($validated['source_type'], $this->sourceConfig($validated['config']));
-            $report = $this->diagnosticsService->runPrecheck($sourceData);
+            // The rules above check config.tax_mode, but validated() prunes an array down to the
+            // children its rules name — which would drop bundle_ref, url and since before the
+            // reader ever sees them. The request's own copy is handed over after the check.
+            $config = $this->sourceConfig($request->input('config', []));
+            $sourceData = $this->sourceReader->readSource($validated['source_type'], $config);
+            $report = $this->diagnosticsService->runPrecheck($sourceData, [
+                'tax_mode' => $config['tax_mode'] ?? null,
+                'current_tax_mode' => $this->taxPolicy->statedModeForStore($storeId),
+            ]);
 
             return response()->json([
                 'success' => true,
@@ -260,7 +270,9 @@ class MigrationController extends Controller
             'source_type' => 'required|in:api,file,device',
             'config' => 'required|array',
             'is_dry_run' => 'boolean',
+            'config.tax_mode' => 'nullable|in:inclusive,exclusive',
             'mapping_config' => 'nullable|array',
+            'mapping_config.tax_mode' => 'nullable|in:inclusive,exclusive',
         ]);
 
         $storeId = $this->resolveStoreId($request, $validated['store_id'] ?? null);
@@ -272,7 +284,15 @@ class MigrationController extends Controller
         }
 
         $store = Store::findOrFail($storeId);
-        $config = $this->sourceConfig($validated['config']);
+        // See precheck: validated() would prune the transport keys the reader needs.
+        $config = $this->sourceConfig($request->input('config', []));
+        // The pricing mode the operator chose here is the one the import reads prices with, and
+        // it has to survive on the run row: a replayed run must not fall back to a default.
+        $mappingConfig = $request->input('mapping_config', []);
+        $mappingConfig = is_array($mappingConfig) ? $mappingConfig : [];
+        if (isset($config['tax_mode'])) {
+            $mappingConfig['tax_mode'] = $config['tax_mode'];
+        }
         $runUuid = (string) Str::uuid();
         $isDryRun = (bool) ($validated['is_dry_run'] ?? false);
 
@@ -284,7 +304,7 @@ class MigrationController extends Controller
             'source_reference' => $config['url'] ?? $config['bundle_ref'] ?? 'device-payload',
             'status' => 'running',
             'is_dry_run' => $isDryRun,
-            'mapping_config' => $validated['mapping_config'] ?? null,
+            'mapping_config' => $mappingConfig ?: null,
         ]);
 
         try {

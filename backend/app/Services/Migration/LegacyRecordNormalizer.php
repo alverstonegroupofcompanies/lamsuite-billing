@@ -29,7 +29,10 @@ class LegacyRecordNormalizer
     public const KIND_PURCHASE = 'purchase';
     public const KIND_DEBIT_NOTE = 'debit_note';
 
-    private const KIND_KEYS = ['module_key', 'document_type', 'doc_type', 'bill_type', 'type', 'transaction_type'];
+    private const KIND_KEYS = [
+        'module_key', 'sales_module_key', 'purchase_type', 'document_type', 'doc_type',
+        'bill_type', 'type', 'transaction_type',
+    ];
 
     private const NOTE_NUMBER_KEYS = [
         'return_number', 'credit_note_number', 'credit_note_no', 'cn_number', 'return_no',
@@ -41,12 +44,17 @@ class LegacyRecordNormalizer
         'against_invoice_number', 'ref_invoice_number', 'original_invoice_no',
     ];
 
+    // `reference_no` and `purchase_number` are how the legacy pull spells a purchase bill's own
+    // number; a document left unnumbered cannot be filed in a GST register after cutover.
     private const DOC_NUMBER_KEYS = [
         'invoice_number', 'bill_number', 'invoice_no', 'bill_no', 'inv_no', 'document_number',
-        'purchase_bill_no', 'voucher_no', 'bill_ref', 'number',
+        'purchase_bill_no', 'purchase_number', 'voucher_no', 'reference_no', 'challan_no',
+        'po_number', 'receipt_no', 'bill_ref', 'number',
     ];
 
-    private const DATE_KEYS = ['invoice_date', 'bill_date', 'date', 'document_date', 'created_at'];
+    private const DATE_KEYS = [
+        'invoice_date', 'bill_date', 'purchase_date', 'date', 'document_date', 'reference_date', 'created_at',
+    ];
 
     private const SUBTOTAL_KEYS = ['subtotal', 'taxable_subtotal', 'basic_amount', 'net_taxable_value', 'taxable_value'];
     private const TAXABLE_SUBTOTAL_KEYS = ['taxable_subtotal', 'net_taxable_value', 'taxable_value', 'basic_amount'];
@@ -67,10 +75,25 @@ class LegacyRecordNormalizer
     // A document line and a stock row count the same idea with different words, and reading
     // a line's `balance` as a quantity would invent stock.
     private const LINE_QTY_KEYS = ['qty', 'quantity', 'units', 'sold_qty', 'invoiced_qty', 'dispatch_qty'];
-    private const BATCH_QTY_KEYS = ['stock_qty', 'quantity', 'qty', 'stock', 'in_stock', 'available_qty', 'balance'];
+
+    // `opening_qty` and the pack pair are the only quantity figures a legacy batch row carries:
+    // the panel keeps a batch's live balance in its stock ledger, so a migrator that looked only
+    // for `quantity`/`stock` read every shelf as empty.
+    private const BATCH_QTY_KEYS = [
+        'stock_qty', 'quantity', 'qty', 'opening_qty', 'stock', 'current_stock', 'in_stock',
+        'available_qty', 'balance',
+    ];
+    private const PACK_QTY_KEYS = ['packs', 'pack_qty'];
+    private const PER_PACK_KEYS = ['units_per_pack', 'pack_size', 'units_per_strip'];
+    private const LOOSE_QTY_KEYS = ['loose_qty', 'loose_units', 'loose'];
 
     private const RATE_KEYS = ['unit_price', 'rate', 'price', 'sel_rate', 'selling_rate', 'basic_rate'];
-    private const PURCHASE_RATE_KEYS = ['purchase_rate', 'cost_price', 'rate', 'ptr', 'cost_rate', 'purchase_value', 'buying_rate'];
+    // A legacy purchase line books its cost as `unit_price`, which is the same word the sale side
+    // uses for the selling price; `ptr`/`pts` on that row are retailer prices, not the cost.
+    private const PURCHASE_RATE_KEYS = [
+        'purchase_rate', 'unit_price', 'cost_price', 'rate', 'purchase_value', 'buying_rate',
+        'cost_rate', 'landing_rate', 'ptr',
+    ];
     private const SELLING_RATE_KEYS = ['selling_rate', 'selling_price', 'sel_rate', 'pts', 'price'];
     private const MRP_KEYS = ['mrp', 'max_retail_price', 'retail_price'];
     private const LINE_TAX_KEYS = ['tax_amount', 'total_tax', 'gst_amount', 'tax'];
@@ -82,10 +105,19 @@ class LegacyRecordNormalizer
 
     /** Percent keys, strongest spelling first. A bare `gst` is deliberately absent: in some
      *  exports that key holds the tax *amount*, and guessing a rate from it is worse than
-     *  deriving one from the taxable value beside it. */
+     *  deriving one from the taxable value beside it. `tax_pct`/`gst_pct` are the spellings the
+     *  legacy panel's own line tables use, and missing them is why a taxed year arrived at 0%. */
     private const PERCENT_KEYS = [
-        'gst_percent', 'tax_percent', 'gst_rate', 'tax_rate', 'gst_percentage', 'tax_percentage',
-        'rate_percent', 'percentage',
+        'gst_percent', 'tax_percent', 'gst_pct', 'tax_pct', 'gst_rate', 'tax_rate',
+        'gst_percentage', 'tax_percentage', 'rate_percent', 'percentage',
+    ];
+
+    /** The tax split as separate columns, which is how a GST catalog and a purchase line state a
+     *  slab. Bare `cgst`/`sgst` are absent on purpose: on a bill line those hold rupee amounts. */
+    private const SPLIT_PERCENT_KEYS = [
+        ['cgst_percent', 'cgst_pct', 'cgst_rate'],
+        ['sgst_percent', 'sgst_pct', 'sgst_rate'],
+        ['igst_percent', 'igst_pct', 'igst_rate'],
     ];
 
     // --- Header builders -------------------------------------------------------------
@@ -185,8 +217,9 @@ class LegacyRecordNormalizer
             'mfg_date' => $this->day($row, self::MFG_KEYS),
             'expiry_date' => $this->day($row, self::EXPIRY_KEYS),
             // On-hand quantity is the one figure a stock row cannot be wrong about: the
-            // legacy export has been seen to call it `stock`, `balance` or `in_stock`.
-            'stock_qty' => $this->number($row, self::BATCH_QTY_KEYS),
+            // legacy export has been seen to call it `stock`, `balance`, `opening_qty`, or
+            // nothing but a pack count beside a units-per-pack.
+            'stock_qty' => $this->batchStock($row),
             'mrp' => $this->number($row, self::MRP_KEYS),
             'purchase_rate' => $this->number($row, self::PURCHASE_RATE_KEYS),
             'selling_rate' => $this->number($row, self::SELLING_RATE_KEYS),
@@ -223,20 +256,25 @@ class LegacyRecordNormalizer
             $rate = $this->lineRate($line, abs($taxable), abs($tax));
 
             $out[] = [
-                'product_id' => $this->idRef($line, ['product_id', 'product', 'medicine_id', 'item_id', 'sku_id']),
-                'product_name' => $this->text($line, ['product_name', 'name', 'item_name', 'product']) ?? 'Item',
+                // A legacy bill line names its product by the catalog row and by the device-side
+                // uuid; the numeric id is missing from a payload pulled after a re-import, and an
+                // unmatched line is a bill that prints without stock.
+                'product_id' => $this->idRef($line, ['product_id', 'product', 'medicine_id', 'item_id', 'sku_id'])
+                    ?? $this->idRef($line, ['product_external_id', 'product_uuid', 'product_uid']),
+                'product_external_id' => $this->text($line, ['product_external_id', 'product_uuid', 'product_uid']),
+                'product_name' => $this->text($line, ['product_name', 'description', 'name', 'item_name', 'product']) ?? 'Item',
                 'batch_no' => $this->text($line, self::BATCH_NO_KEYS),
                 'expiry_date' => $this->day($line, self::EXPIRY_KEYS),
                 'qty' => $this->magnitude($qty, $isNote),
-                'loose_qty' => $this->magnitude($this->number($line, ['loose_qty', 'loose_units', 'loose']), $isNote),
+                'loose_qty' => $this->magnitude($this->number($line, self::LOOSE_QTY_KEYS), $isNote),
                 'free_qty' => $this->magnitude($this->number($line, ['free_qty', 'free_quantity', 'complimentary_qty']), $isNote),
                 'free_loose_qty' => $this->magnitude($this->number($line, ['free_loose_qty']), $isNote),
-                'units_per_pack' => $this->number($line, ['units_per_pack', 'pack_size', 'units_per_strip'], 1),
+                'units_per_pack' => $this->number($line, self::PER_PACK_KEYS, 1),
                 'unit_price' => $this->magnitude($price, $isNote),
                 'mrp' => $this->magnitude($this->number($line, self::MRP_KEYS), $isNote),
                 'rate_basis' => $this->text($line, ['rate_basis', 'billed_on', 'rate_basis_type']),
                 'stock_action' => $this->text($line, ['stock_action', 'return_action']),
-                'discount_percent' => $this->magnitude($this->number($line, ['discount_percent', 'disc_percent', 'discount_pc']), $isNote),
+                'discount_percent' => $this->magnitude($this->number($line, ['discount_percent', 'discount_pct', 'disc_percent', 'discount_pc']), $isNote),
                 'discount_amount' => $this->magnitude($this->number($line, ['discount_amount', 'disc_amount', 'discount']), $isNote),
                 'allocated_discount' => $this->magnitude($this->number($line, ['allocated_discount', 'allocated_bill_discount']), $isNote),
                 'taxable_amount' => $this->magnitude($taxable, $isNote),
@@ -271,17 +309,21 @@ class LegacyRecordNormalizer
             $rate = $this->lineRate($line, abs($taxable), abs($tax));
 
             $out[] = [
-                'product_id' => $this->idRef($line, ['product_id', 'product', 'medicine_id', 'item_id', 'sku_id']),
-                'product_name' => $this->text($line, ['product_name', 'name', 'item_name', 'product']) ?? 'Item',
+                'product_id' => $this->idRef($line, ['product_id', 'product', 'medicine_id', 'item_id', 'sku_id'])
+                    ?? $this->idRef($line, ['product_external_id', 'product_uuid', 'product_uid']),
+                'product_external_id' => $this->text($line, ['product_external_id', 'product_uuid', 'product_uid']),
+                // A legacy purchase line calls the item `description`, so reading only
+                // `product_name` left every migrated purchase line labelled "Item".
+                'product_name' => $this->text($line, ['product_name', 'description', 'name', 'item_name', 'product']) ?? 'Item',
                 'batch_no' => $this->text($line, self::BATCH_NO_KEYS),
                 'mfg_date' => $this->day($line, self::MFG_KEYS),
                 'expiry_date' => $this->day($line, self::EXPIRY_KEYS),
                 'qty' => $this->magnitude($qty, $isNote),
                 'received_qty' => $this->magnitude($this->number($line, ['received_qty']), $isNote),
-                'pack_qty' => $this->magnitude($this->number($line, ['pack_qty', 'packs']), $isNote),
-                'loose_qty' => $this->magnitude($this->number($line, ['loose_qty']), $isNote),
+                'pack_qty' => $this->magnitude($this->number($line, self::PACK_QTY_KEYS), $isNote),
+                'loose_qty' => $this->magnitude($this->number($line, self::LOOSE_QTY_KEYS), $isNote),
                 'free_qty' => $this->magnitude($this->number($line, ['free_qty', 'free_quantity']), $isNote),
-                'units_per_pack' => $this->number($line, ['units_per_pack', 'pack_size'], 1),
+                'units_per_pack' => $this->number($line, self::PER_PACK_KEYS, 1),
                 'purchase_rate' => $this->magnitude($price, $isNote),
                 'ptr' => $this->magnitude($this->number($line, ['ptr']), $isNote),
                 'pts' => $this->magnitude($this->number($line, ['pts']), $isNote),
@@ -289,7 +331,7 @@ class LegacyRecordNormalizer
                 'selling_rate' => $this->magnitude($this->number($line, self::SELLING_RATE_KEYS), $isNote),
                 'mrp' => $this->magnitude($this->number($line, self::MRP_KEYS), $isNote),
                 'hsn_code' => $this->text($line, ['hsn_code', 'hsn_sac_code', 'hsn']),
-                'discount_percent' => $this->magnitude($this->number($line, ['discount_percent', 'disc_percent']), $isNote),
+                'discount_percent' => $this->magnitude($this->number($line, ['discount_percent', 'discount_pct', 'disc_percent']), $isNote),
                 'discount_amount' => $this->magnitude($this->number($line, ['discount_amount', 'disc_amount']), $isNote),
                 'taxable_amount' => $this->magnitude($taxable, $isNote),
                 'gst_percent' => $rate,
@@ -306,13 +348,54 @@ class LegacyRecordNormalizer
     }
 
     /**
+     * Units a stock row holds. The legacy batch table states its live quantity as pack
+     * arithmetic — `packs` × `units_per_pack` plus `loose_qty` — while its `opening_qty` column
+     * keeps whatever the batch was booked in at, so neither figure alone is the shelf: taking
+     * only a quantity column opened every migrated batch at zero, and taking only the packs
+     * would re-count a batch that has since been sold down.
+     */
+    /**
+     * The catalog's HSN/SAC code, or null. A shop that typed a placeholder into the field is not
+     * stating a code, and printing one on a GST summary is worse than printing nothing.
+     */
+    public function hsnCode(array $row): ?string
+    {
+        $code = $this->text($row, ['hsn_sac_code', 'hsn_code', 'hsn']);
+        if ($code === null || preg_match('/^0+$/', $code) || in_array(strtoupper($code), ['NA', 'N/A', 'NIL', 'NONE', '-'], true)) {
+            return null;
+        }
+
+        return $code;
+    }
+
+    public function batchStock(array $row): float
+    {
+        $stated = $this->number($row, self::BATCH_QTY_KEYS, -1.0);
+        // -1.0 is "this source names no quantity figure", which is the case the pack pair answers;
+        // a stated zero is a genuinely empty shelf and stays the caller's answer.
+        if ($stated !== -1.0) {
+            return $stated;
+        }
+
+        $packs = $this->number($row, self::PACK_QTY_KEYS);
+        $loose = $this->number($row, self::LOOSE_QTY_KEYS);
+        if ($packs != 0.0 || $loose != 0.0) {
+            return round($packs * $this->number($row, self::PER_PACK_KEYS, 1.0) + $loose, 3);
+        }
+
+        return $stated;
+    }
+
+    /**
      * Whether this stock row states an on-hand quantity anywhere. An export that omits the
      * column entirely has to be distinguished from a shop whose shelves genuinely are empty:
      * both arrive as zero, and only the first one is a mistake.
      */
     public function hasStockFigure(array $row): bool
     {
-        return $this->raw($row, self::BATCH_QTY_KEYS) !== null;
+        return $this->raw($row, self::BATCH_QTY_KEYS) !== null
+            || $this->raw($row, self::PACK_QTY_KEYS) !== null
+            || $this->raw($row, self::LOOSE_QTY_KEYS) !== null;
     }
 
     // --- Document families -----------------------------------------------------------
@@ -344,6 +427,92 @@ class LegacyRecordNormalizer
     public function purchaseDocuments(array $sourceData, ?callable $onDuplicate = null): array
     {
         return $this->collectDocuments($sourceData, self::PURCHASE_PLAIN_KEYS, self::PURCHASE_NOTE_KEYS, $onDuplicate);
+    }
+
+    public const BATCH_LIST_KEYS = ['product_batches', 'batches', 'batch_stocks', 'stocks'];
+
+    /**
+     * Every batch the source offers, whether it is listed as its own entity or nested inside the
+     * product that owns it.
+     *
+     * The legacy pull has no batches entity: it loads each product's batches and returns them
+     * under `products[].batches`. Reading only a top-level batch list therefore reported a full
+     * shop as "Batches & Stocks 0" — no batch numbers, no expiry dates, no shelf quantities — and
+     * a product's own `batch_no`/`expiry_date` scalars are the same rows restated, which is why a
+     * row seen under both spellings is imported once.
+     *
+     * @return array<int, array>
+     */
+    public function batchesOf(array $sourceData): array
+    {
+        $out = [];
+        $seen = [];
+
+        $collect = function (array $row, $parentId) use (&$out, &$seen): void {
+            $batch = $this->raw($row, ['product_id']) === null && $parentId !== null
+                ? array_merge($row, ['product_id' => $parentId])
+                : $row;
+
+            $identity = $this->batchIdentity($batch);
+            if ($identity !== null) {
+                if (isset($seen[$identity])) {
+                    return;
+                }
+                $seen[$identity] = true;
+            }
+
+            $out[] = $batch;
+        };
+
+        foreach (self::BATCH_LIST_KEYS as $key) {
+            $rows = $sourceData[$key] ?? null;
+            if (!is_array($rows)) {
+                continue;
+            }
+            foreach ($rows as $row) {
+                if (is_array($row)) {
+                    $collect($row, null);
+                }
+            }
+        }
+
+        foreach (($sourceData['products'] ?? []) as $product) {
+            if (!is_array($product) || !is_array($product['batches'] ?? null)) {
+                continue;
+            }
+            $parentId = $product['id'] ?? $product['product_id'] ?? $product['external_id'] ?? null;
+            foreach ($product['batches'] as $row) {
+                if (is_array($row)) {
+                    $collect($row, $parentId);
+                }
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * What makes two stock rows the same batch: its own identity if it has one, otherwise the
+     * product and batch number pair.
+     */
+    private function batchIdentity(array $row): ?string
+    {
+        $external = $this->text($row, ['external_id', 'uuid', 'guid']);
+        if ($external !== null) {
+            return 'uuid:' . strtolower($external);
+        }
+
+        $id = $row['id'] ?? $row['batch_id'] ?? null;
+        if ($id !== null && $id !== '') {
+            return 'row:' . $id;
+        }
+
+        $batchNo = $this->text($row, self::BATCH_NO_KEYS);
+        if ($batchNo !== null) {
+            return 'no:' . strtolower($batchNo) . '|' . ($row['product_id'] ?? '');
+        }
+
+        return null;
     }
 
     /**
@@ -407,24 +576,32 @@ class LegacyRecordNormalizer
      * taxable/tax pair to derive one from. Deriving is honest arithmetic — a ₹7.20 tax on a
      * ₹60.00 taxable value is 12% whatever the export chose to call it — and it is what keeps
      * a migrated year out of the 0% slab in the GST working papers.
+     *
+     * The order is evidence, not convenience. A legacy line defaults its percent column to
+     * 0.000 while still recording the rupee tax against it, and a legacy catalog states its slab
+     * as a CGST/SGST pair with the single `gst_percent` left at zero — so a stated zero is read
+     * only after the pair and the tax figure beside it have been tried. A line that genuinely
+     * states no tax inside a taxed bill is the exempt slab, and averaging the bill's rate onto it
+     * would move rupees into a GST column where the shop reported none.
      */
     public function lineRate(array $line, ?float $taxable = null, ?float $tax = null): ?float
     {
         $percent = $this->number($line, self::PERCENT_KEYS, -1.0);
-        if ($percent >= 0.0) {
-            return round($percent, 2);
-        }
 
         $split = 0.0;
-        $found = false;
-        foreach ([['cgst_percent', 'cgst_rate'], ['sgst_percent', 'sgst_rate'], ['igst_percent', 'igst_rate']] as $keys) {
+        $splitFound = false;
+        foreach (self::SPLIT_PERCENT_KEYS as $keys) {
             $v = $this->number($line, $keys, -1.0);
             if ($v >= 0.0) {
                 $split += $v;
-                $found = true;
+                $splitFound = true;
             }
         }
-        if ($found) {
+
+        if ($percent > 0.0) {
+            return round($percent, 2);
+        }
+        if ($split > 0.0) {
             return round($split, 2);
         }
 
@@ -432,7 +609,15 @@ class LegacyRecordNormalizer
         $tax ??= $this->number($line, self::LINE_TAX_KEYS);
 
         if ($taxable > 0.0 && $tax != 0.0) {
-            return round(($tax / $taxable) * 100.0, 2);
+            return round(abs($tax / $taxable) * 100.0, 2);
+        }
+
+        if ($percent === 0.0 || ($splitFound && $split === 0.0)) {
+            return 0.0;
+        }
+
+        if ($this->raw($line, self::LINE_TAX_KEYS) !== null && $tax === 0.0 && $taxable > 0.0) {
+            return 0.0;
         }
 
         return null;
@@ -467,15 +652,24 @@ class LegacyRecordNormalizer
      */
     public function documentKind(array $row, string $family, bool $provenanceIsNote = false): string
     {
-        $stated = strtolower(trim((string) ($this->raw($row, self::KIND_KEYS) ?? '')));
+        // The legacy panel writes its document types hyphenated (`sales-return`, `purchase-bill`)
+        // and v2 keeps them underscored, so both are one vocabulary here.
+        $stated = str_replace('-', '_', trim((string) ($this->raw($row, self::KIND_KEYS) ?? '')));
+        $stated = strtolower($stated);
         $isPurchase = $family === self::PURCHASE;
 
+        // A purchase-side credit note is the same event as a purchase return: the vendor is owed
+        // nothing and stock comes back. The legacy reports sign it the same way, so it belongs in
+        // the note family rather than being imported as a second bill.
         $noteWords = $isPurchase
-            ? ['purchase_return', 'purchase-return', 'purchase return', 'debit_note', 'debit-note', 'debit note', 'debit', 'return_bill', 'return']
-            : ['credit_note', 'credit-note', 'credit note', 'sales_return', 'sales-return', 'sales return', 'return_invoice', 'return', 'credit', 'cn'];
+            ? ['purchase_return', 'purchase_returns', 'debit_note', 'debit', 'return_bill', 'return',
+                'credit_note', 'credit', 'sales_return']
+            : ['credit_note', 'credit', 'sales_return', 'return_invoice', 'return', 'cn'];
         $plainWords = $isPurchase
-            ? ['purchase', 'purchase_bill', 'grn', 'stock_entry', 'received', 'bill', 'invoice']
-            : ['invoice', 'tax_invoice', 'bill', 'sale', 'sales', 'pos', 'cash_sale'];
+            ? ['purchase', 'purchase_bill', 'purchase_document', 'grn', 'stock_entry', 'received', 'bill',
+                'invoice', 'po', 'purchase_order']
+            : ['invoice', 'tax_invoice', 'sales_invoice', 'bill', 'sale', 'sales', 'pos', 'cash_sale',
+                'debit_note', 'debit'];
 
         if ($stated !== '' && in_array($stated, $noteWords, true)) {
             return $isPurchase ? self::KIND_DEBIT_NOTE : self::KIND_CREDIT_NOTE;
@@ -530,6 +724,31 @@ class LegacyRecordNormalizer
         // column. Read it, or the same document listed under both families arrives with two
         // different identities and is imported twice.
         return $number ?? $this->text($row, self::NOTE_NUMBER_KEYS);
+    }
+
+    /**
+     * The number to file a document under when the source states none anywhere.
+     *
+     * Dropping the bill is the worse of the two mistakes: the money, the stock and the customer
+     * balance all disappear while the totals still look plausible. A derived number keeps the
+     * document, is unique against the source's own row identity, announces itself as a migration
+     * artifact on the bills screen, and is listed for the operator to rename.
+     */
+    public function derivedDocumentNumber(array $row, string $prefix): ?string
+    {
+        $handle = $this->text($row, ['external_id', 'uuid', 'guid'])
+            ?? $this->text($row, ['id', 'row_id']);
+        if ($handle === null) {
+            return null;
+        }
+
+        $handle = preg_replace('/[^0-9A-Za-z]/', '', $handle) ?? '';
+        if ($handle === '') {
+            return null;
+        }
+
+        // The tail of a uuid distinguishes two rows; the whole of a numeric id does the same job.
+        return $prefix . '-' . strtoupper(substr($handle, -12));
     }
 
     /**
@@ -731,6 +950,77 @@ class LegacyRecordNormalizer
             }
             if (in_array($s, ['exclusive', 'excl', 'exclusive_of_tax', 'plus_tax', 'add_tax', 'no', 'n', 'false', '0'], true)) {
                 return 'exclusive';
+            }
+        }
+
+        return null;
+    }
+
+    public const SETTINGS_LIST_KEYS = ['company_settings', 'store_settings', 'settings'];
+
+    /**
+     * The source's settings as one flat bag of fields.
+     *
+     * A v2 bundle exports settings as `{key, value}` rows; the legacy panel answers with a single
+     * flat object whose operator choices sit inside nested sections. Reading only the row shape
+     * found nothing in the flat one, which is how a store that priced exclusive of tax ended up
+     * inheriting the inclusive default.
+     *
+     * @return array<string, mixed>
+     */
+    public function settingsFields(array $sourceData): array
+    {
+        $bag = [];
+
+        foreach (self::SETTINGS_LIST_KEYS as $entity) {
+            $rows = $sourceData[$entity] ?? null;
+            if (!is_array($rows)) {
+                continue;
+            }
+
+            foreach ($rows as $key => $value) {
+                $isRow = is_array($value) && (isset($value['key']) || isset($value['setting_key']));
+                if (!$isRow) {
+                    if (is_string($key)) {
+                        $bag[$key] = $value;
+                    }
+                    continue;
+                }
+
+                $name = (string) ($value['key'] ?? $value['setting_key']);
+                $stated = $value['value'] ?? null;
+                if ($name === '') {
+                    continue;
+                }
+                // A billing blob belongs at the top of the bag: that is where the mode lives.
+                $bag = is_array($stated) ? array_merge($bag, $stated) : array_merge($bag, [$name => $stated]);
+            }
+        }
+
+        return $bag;
+    }
+
+    /**
+     * The billing mode as a settings payload states it, wherever in that payload the switch sits.
+     *
+     * The legacy panel answers with one flat settings object — not v2's list of `{key, value}`
+     * rows — and keeps operator choices inside nested sections (`company_preferences.taxation`)
+     * whose values are strings, '1' and '0' rather than booleans. Searching one level down is
+     * what turns "the source does not state its tax mode" into a real answer.
+     */
+    public function settingsTaxMode(array $settings): ?string
+    {
+        $direct = $this->taxMode($settings);
+        if ($direct !== null) {
+            return $direct;
+        }
+
+        foreach ($settings as $value) {
+            if (is_array($value)) {
+                $nested = $this->taxMode($value);
+                if ($nested !== null) {
+                    return $nested;
+                }
             }
         }
 
