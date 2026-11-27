@@ -1,6 +1,6 @@
 [package]
 name = "lamsuite-billing"
-version = "2.1.11"
+version = "2.1.12"
 description = "LamSuite Billing Desktop"
 authors = ["Muhammad Anshad <muhammad.anshad@teronext.com>"]
 edition = "2021"

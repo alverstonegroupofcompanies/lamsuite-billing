@@ -10,6 +10,7 @@ import {
 } from "./salesReturnService";
 import { returnKey } from "./salesReturnPricing";
 import { onlineTransactionService } from "../sync/onlineTransactionService";
+import { storeDeviceService } from "../auth/storeDeviceService";
 
 describe("salesReturnService - Credit Notes & Sales Returns", () => {
   const dummyProduct = {
@@ -727,6 +728,30 @@ describe("salesReturnService - credit notes held on the server", () => {
       condition: "restock",
       reason: "customer_return",
     });
+  });
+
+  it("authenticates the note read with this workstation's device token", async () => {
+    // The till routes answer 401 without it, and a silent 401 is indistinguishable from a store
+    // that has no credit notes — which is how the merged list first shipped looking empty.
+    vi.spyOn(storeDeviceService, "getDeviceAuthHeaders").mockResolvedValue({
+      "X-Device-Token": "tok-store-7",
+      "X-Store-Id": "7",
+      "Store-Id": "7",
+    });
+    const calls: any[][] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (...args: any[]) => {
+        calls.push(args);
+        return { ok: true, json: async () => ({ data: [serverNote] }) };
+      })
+    );
+
+    const list = await salesReturnService.getSalesReturns();
+
+    expect(list.map((r) => r.return_number)).toEqual(["CN-1-0042"]);
+    expect(calls[0][1].headers["X-Device-Token"]).toBe("tok-store-7");
+    expect(String(calls[0][0])).toContain("store_id=7");
   });
 
   it("keeps the till's own copy of a note the server also holds", async () => {

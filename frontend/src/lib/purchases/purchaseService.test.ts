@@ -1,8 +1,10 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { purchaseService, type PurchaseLineItemInput } from "./purchaseService";
 import { getMockDatabase, sqliteStorage } from "../db/sqliteStorage";
 import { productsStore, type ProductBatch } from "../masters/productsStore";
 import { supplierLedgerService } from "./supplierLedgerService";
+import { onlineTransactionService } from "../sync/onlineTransactionService";
+import { storeDeviceService } from "../auth/storeDeviceService";
 
 describe("Purchase Service & Inward Stock Receipts (PUR-001, PUR-002, PUR-003, STK-001)", () => {
   beforeEach(async () => {
@@ -396,5 +398,145 @@ describe("Purchase Service & Inward Stock Receipts (PUR-001, PUR-002, PUR-003, S
       expect(calc.discount_amount).toBe(20);
       expect(calc.taxable_amount).toBe(180);
     });
+  });
+});
+
+describe("purchaseService - inward bills held on the server", () => {
+  const serverBill = {
+    id: 30,
+    external_id: "b8acdb48-99f9-43d3-96d6-01d9125218f4",
+    module_key: "purchase",
+    invoice_number: "ADH-PB26-27-0008",
+    invoice_date: "2026-11-23",
+    supplier_id: 4,
+    supplier_name: "DEVI PHARMA WELLNESS PVT LTD",
+    supplier_invoice_no: "DP-991",
+    subtotal: 6518.75,
+    tax_total: 782.25,
+    grand_total: "7301.00",
+    paid_amount: "0.00",
+    status: "received",
+    created_at: "2026-11-26T10:08:27.000000Z",
+    items: [
+      {
+        id: 44,
+        product_id: 12,
+        product_name: "Paracetamol 650 Tablet",
+        batch_no: "PC-77",
+        pack_qty: 5,
+        loose_qty: 0,
+        units_per_pack: 10,
+        purchase_rate: 30,
+        gst_percent: 12,
+        taxable_amount: 1500,
+        total_amount: 1680,
+      },
+    ],
+  };
+
+  beforeEach(async () => {
+    getMockDatabase().reset();
+    await sqliteStorage.initDatabase();
+    vi.spyOn(onlineTransactionService, "getEffectiveBaseUrl").mockReturnValue("http://server.test");
+    vi.spyOn(storeDeviceService, "getDeviceAuthHeaders").mockResolvedValue({
+      "X-Device-Token": "tok-store-7",
+      "X-Store-Id": "7",
+      "Store-Id": "7",
+    });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  const stubFetch = (rows: any[]) => {
+    const calls: any[][] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (...args: any[]) => {
+        calls.push(args);
+        return { ok: true, json: async () => ({ data: rows }) };
+      })
+    );
+    return calls;
+  };
+
+  it("lists a bill this till never recorded, authenticated as this counter", async () => {
+    const calls = stubFetch([serverBill]);
+
+    const docs = await purchaseService.getAllPurchaseDocuments();
+
+    expect(String(calls[0][0])).toContain("/api/purchases?");
+    expect(String(calls[0][0])).toContain("module=purchases");
+    expect(String(calls[0][0])).toContain("store_id=7");
+    // Without the token the server answers 401 and the screen cannot tell that from an empty book.
+    expect(calls[0][1].headers["X-Device-Token"]).toBe("tok-store-7");
+
+    expect(docs).toHaveLength(1);
+    expect(docs[0]).toMatchObject({
+      id: "b8acdb48-99f9-43d3-96d6-01d9125218f4",
+      purchase_number: "ADH-PB26-27-0008",
+      supplier_name: "DEVI PHARMA WELLNESS PVT LTD",
+      supplier_invoice_no: "DP-991",
+      purchase_date: "2026-11-23",
+      grand_total: 7301,
+      payment_status: "unpaid",
+      status: "received",
+    });
+    expect(docs[0].created_at).toBeGreaterThan(0);
+  });
+
+  it("keeps the till's own copy when the server echoes the same bill back", async () => {
+    await sqliteStorage.insertRecord("purchase_documents", "pur_local", {
+      id: "pur_local",
+      external_id: "pur_local",
+      purchase_number: "ADH-PB26-27-0008",
+      module_key: "purchase",
+      supplier_name: "DEVI PHARMA WELLNESS PVT LTD",
+      purchase_date: "2026-11-23",
+      grand_total: 7301,
+      created_at: 1763865600000,
+    });
+    stubFetch([{ ...serverBill, external_id: "pur_local" }]);
+
+    const docs = await purchaseService.getAllPurchaseDocuments();
+
+    expect(docs).toHaveLength(1);
+    expect(docs[0].id).toBe("pur_local");
+  });
+
+  it("opens a server-only bill with the lines the server sent", async () => {
+    stubFetch([serverBill]);
+
+    const loaded = await purchaseService.getPurchaseBillById("b8acdb48-99f9-43d3-96d6-01d9125218f4");
+
+    expect(loaded).not.toBeNull();
+    expect(loaded!.document.purchase_number).toBe("ADH-PB26-27-0008");
+    expect(loaded!.items).toHaveLength(1);
+    expect(loaded!.items[0].product_name).toBe("Paracetamol 650 Tablet");
+    expect(loaded!.charges).toEqual([]);
+  });
+
+  it("leaves the local book on screen when the server will not answer", async () => {
+    await sqliteStorage.insertRecord("purchase_documents", "pur_off", {
+      id: "pur_off",
+      purchase_number: "PUR-OFF-1",
+      module_key: "purchase",
+      supplier_name: "Local Supplier",
+      purchase_date: "2026-11-20",
+      grand_total: 100,
+      created_at: 1763600000000,
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new Error("network down");
+      })
+    );
+
+    const docs = await purchaseService.getAllPurchaseDocuments();
+
+    expect(docs.map((d) => d.purchase_number)).toContain("PUR-OFF-1");
   });
 });

@@ -7,6 +7,10 @@ import { counterSequenceService } from "../auth/counterSequenceService";
 import { round2 } from "../billing/billingCalculations";
 import { getIndianFinancialYear } from "../billing/salesReturnService";
 import { syncQueueService } from "../sync/syncQueueService";
+import { onlineTransactionService } from "../sync/onlineTransactionService";
+import { storeRegistryService } from "../auth/storeRegistryService";
+import { storeDeviceService } from "../auth/storeDeviceService";
+import { serverTimeToEpoch } from "../dateTimeUtils";
 import { calculateDocumentTaxes, cleanStateCode, type TaxEngineDocumentTotals } from "../tax-engine/taxEngine";
 import {
   chargePayload,
@@ -818,6 +822,120 @@ export class PurchaseService {
    * a bill keyed before CR-C has no rows, and its freight scalar is the caller's to present
    * (PUR-017) — this read never invents a charge row for it.
    */
+  /**
+   * Inward bills this store holds on the server — bought before this till was paired, entered at
+   * another counter, or imported from the old panel. `purchase_documents` only ever saw the bills
+   * typed on this device, so the purchase screen listed nothing while the book was full.
+   */
+  async getServerPurchases(): Promise<PurchaseDocumentRecord[]> {
+    if (!syncQueueService.isOnline()) return [];
+
+    const baseUrl = onlineTransactionService.getEffectiveBaseUrl();
+    const deviceHeaders = await storeDeviceService.getDeviceAuthHeaders();
+    // The token belongs to a store, so its store is the one to ask about — the registry's local id
+    // ("store_main") is not a server store and would be refused as a tenant mismatch.
+    const storeId = deviceHeaders["X-Store-Id"] || String(storeRegistryService.getActiveStore()?.id || "1");
+    const params = new URLSearchParams({ store_id: storeId, module: "purchases", per_page: "200" });
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 15000);
+
+    try {
+      const res = await fetch(`${baseUrl}/api/purchases?${params.toString()}`, {
+        headers: {
+          Accept: "application/json",
+          "X-Store-Id": storeId,
+          "Store-Id": storeId,
+          // `/api/purchases` is a till route: with no device token the server answers 401, and a
+          // silent 401 here looks to the operator exactly like a store with no purchases.
+          ...deviceHeaders,
+        },
+        signal: controller.signal,
+        cache: "no-store",
+      });
+      if (!res.ok) return [];
+      const json = await res.json();
+      const rows = Array.isArray(json?.data) ? json.data : [];
+      return rows.map((row: any) => this.mapServerPurchase(row)).filter(Boolean) as PurchaseDocumentRecord[];
+    } catch (_) {
+      // A server that will not answer must not empty the purchase screen; the local book stays.
+      return [];
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  /**
+   * This device's own bills first, then the server's that are not already filed here. A bill pushed
+   * from this till carries its own id as `external_id`, so the server copy is recognised and dropped.
+   */
+  async getAllPurchaseDocuments(): Promise<PurchaseDocumentRecord[]> {
+    const [local, server] = await Promise.all([
+      sqliteStorage.findAll<PurchaseDocumentRecord>("purchase_documents"),
+      this.getServerPurchases(),
+    ]);
+
+    const known = new Set<string>();
+    for (const doc of local) {
+      if (doc.id) known.add(String(doc.id));
+      if (doc.external_id) known.add(String(doc.external_id));
+      if (doc.purchase_number) known.add(String(doc.purchase_number).toLowerCase());
+    }
+
+    const merged = [...local];
+    for (const doc of server) {
+      if (known.has(doc.id) || known.has(doc.purchase_number.toLowerCase())) continue;
+      merged.push(doc);
+    }
+
+    return merged.sort((a, b) => (b.created_at || 0) - (a.created_at || 0));
+  }
+
+  private mapServerPurchase(row: any): PurchaseDocumentRecord | null {
+    if (!row || (row.id == null && !row.invoice_number)) return null;
+
+    const items = Array.isArray(row.items) ? row.items : [];
+    const grandTotal = Number(row.grand_total || 0);
+    const paid = Number(row.paid_amount || 0);
+
+    return {
+      id: String(row.external_id || row.id),
+      purchase_number: String(row.invoice_number || row.document_number || `PUR-${row.id}`),
+      module_key: row.module_key || "purchase",
+      supplier_id: String(row.supplier_id ?? ""),
+      supplier_name: row.supplier_name || "Supplier",
+      supplier_gstin: row.supplier_gstin || undefined,
+      supplier_invoice_no: row.supplier_invoice_no || "",
+      purchase_date: String(row.invoice_date || "").slice(0, 10),
+      place_of_supply: row.place_of_supply || undefined,
+      is_interstate: Number(row.is_interstate || 0),
+      is_rcm: Number(row.is_rcm || 0),
+      itc_eligibility: row.itc_eligibility || "eligible",
+      subtotal: Number(row.subtotal || 0),
+      discount_total: Number(row.bill_discount || 0),
+      bill_discount_type: row.bill_discount_type || undefined,
+      bill_discount: Number(row.bill_discount || 0),
+      freight_charges: Number(row.freight_charges || 0),
+      tax_total: Number(row.tax_total || 0),
+      cgst_total: Number(row.cgst_total || 0),
+      sgst_total: Number(row.sgst_total || 0),
+      igst_total: Number(row.igst_total || 0),
+      cess_total: Number(row.cess_total || 0),
+      round_off: Number(row.round_off || 0),
+      grand_total: grandTotal,
+      paid_amount: paid,
+      payment_status: paid >= grandTotal && grandTotal > 0 ? "paid" : paid > 0 ? "partial" : "unpaid",
+      status: row.status === "cancelled" ? "cancelled" : "received",
+      notes: row.notes || undefined,
+      sync_state: "synced",
+      external_id: String(row.external_id || ""),
+      // The server answers both an ISO instant and the bare timestamp SQLite stores.
+      created_at: serverTimeToEpoch(row.created_at) || serverTimeToEpoch(row.invoice_date),
+      updated_at: serverTimeToEpoch(row.updated_at),
+      // Kept so the details drawer can show lines of a bill this device never recorded locally.
+      lines: items,
+    } as PurchaseDocumentRecord;
+  }
+
   async getPurchaseBillById(
     purchaseId: string
   ): Promise<{
@@ -826,7 +944,19 @@ export class PurchaseService {
     charges: PurchaseChargeRecord[];
   } | null> {
     const doc = await sqliteStorage.findById<PurchaseDocumentRecord>("purchase_documents", purchaseId);
-    if (!doc) return null;
+    if (!doc) {
+      // A bill that lives only on the server arrives with its lines attached, which is all the
+      // drawer needs — the local charge rows cannot exist for it.
+      const remote = (await this.getServerPurchases()).find(
+        (d) => d.id === purchaseId || d.external_id === purchaseId || d.purchase_number === purchaseId
+      );
+      if (!remote) return null;
+      return {
+        document: remote,
+        items: ((remote as any).lines || []) as PurchaseItemRecord[],
+        charges: [],
+      };
+    }
 
     if (!doc.payment_status) {
       const paid = Number(doc.paid_amount || 0);

@@ -1,5 +1,32 @@
 # Changelog
 
+## 2.1.12 — 2026-11-27
+
+2.1.11 taught the till to ask the server for the documents it was missing, but asked as a stranger:
+`/api/invoices` and `/api/purchases` are counter routes, and a request without `X-Device-Token` is
+answered 401. Both merges swallowed that as "no rows", so the credit-note list stayed exactly as empty
+as it had been — a silent 401 and an empty book look identical from the counter.
+
+1. **The merged reads carry the workstation's token** — `salesReturnService.getServerSalesReturns()`
+   and `purchaseReturnService.fetchServerDocuments()` now send `storeDeviceService.getDeviceAuthHeaders()`,
+   and take `store_id` from the device profile rather than the local registry id, so a registry key like
+   `store_main` cannot be sent as a tenant.
+2. **The purchase screen reads the server** — `/purchases` still listed `purchase_documents` alone, so a
+   store whose nine inward bills were imported or rung up at another till showed "Inward Purchase Bills (0)".
+   `purchaseService.getAllPurchaseDocuments()` merges the server's `module=purchases` rows into the local
+   book, deduped on id / `external_id` / bill number, newest first.
+3. **A server-only bill opens** — `getPurchaseBillById()` used to return `null` for any bill this device
+   never recorded, so the details drawer had nothing to show. It now answers from the server row, with the
+   lines the server sends attached; the charge rows cannot exist for a bill never entered here.
+
+Verification: 6 new frontend tests, including one per service that fails if the token header is dropped,
+and one that a server-only bill opens with its lines. The full suite is 1275 frontend tests with
+`tsc --noEmit` clean. Replayed live for the migrated store with **this workstation's own stored token**:
+`/api/invoices?module=credit_notes` answered 15, `/api/purchases?module=purchases` answered 9,
+`/api/purchases?module=purchase_returns` answered 0 — that store genuinely holds no debit notes, so an
+empty purchase-return list there is correct rather than a bug. No backend change, no schema change, no
+new route. Not clicked through in the built desktop app.
+
 ## 2.1.11 — 2026-11-27
 
 The returns screens existed in the till, and both of them read only this device's own SQLite table.

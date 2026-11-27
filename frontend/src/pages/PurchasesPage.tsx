@@ -41,7 +41,6 @@ import {
   purchaseOrderService,
   type PurchaseOrderRecord,
 } from "../lib/purchases/purchaseOrderService";
-import { sqliteStorage } from "../lib/db/sqliteStorage";
 import { PurchaseEntryForm } from "../components/purchases/PurchaseEntryForm";
 import { PurchaseDetailsDrawer } from "../components/purchases/PurchaseDetailsDrawer";
 import { ImportWizardModal } from "../lib/data-exchange/ui/ImportWizardModal";
@@ -138,8 +137,10 @@ export const PurchasesPage: React.FC = () => {
   ]);
 
   const loadAllData = async () => {
-    const docs = await sqliteStorage.findAll<PurchaseDocumentRecord>("purchase_documents");
-    setPurchasesList(docs.sort((a, b) => (b.created_at || 0) - (a.created_at || 0)));
+    // A bill entered before this till was paired sits on the server only, so the list reads both
+    // books — `purchase_documents` alone made a migrated store look like it had never bought anything.
+    const docs = await purchaseService.getAllPurchaseDocuments();
+    setPurchasesList(docs);
 
     const sups = await supplierLedgerService.getAllSuppliers();
     setSuppliers(sups);

@@ -7,6 +7,7 @@ import { counterSequenceService } from "../auth/counterSequenceService";
 import { serverTimeToEpoch, storeToday } from "../dateTimeUtils";
 import { onlineTransactionService } from "../sync/onlineTransactionService";
 import { storeRegistryService } from "../auth/storeRegistryService";
+import { storeDeviceService } from "../auth/storeDeviceService";
 import { round2 } from "./billingCalculations";
 import { calculateDocumentTaxes } from "../tax-engine/taxEngine";
 import {
@@ -760,7 +761,10 @@ export class SalesReturnService {
     if (!syncQueueService.isOnline()) return [];
 
     const baseUrl = onlineTransactionService.getEffectiveBaseUrl();
-    const storeId = String(storeRegistryService.getActiveStore()?.id || "1");
+    const deviceHeaders = await storeDeviceService.getDeviceAuthHeaders();
+    // The token belongs to a store, so its store is the one to ask about — the registry's local id
+    // ("store_main") is not a server store and would be refused as a tenant mismatch.
+    const storeId = deviceHeaders["X-Store-Id"] || String(storeRegistryService.getActiveStore()?.id || "1");
     const params = new URLSearchParams({
       store_id: storeId,
       module: "credit_notes",
@@ -775,6 +779,9 @@ export class SalesReturnService {
           Accept: "application/json",
           "X-Store-Id": storeId,
           "Store-Id": storeId,
+          // `/api/invoices` is a till route: with no device token the server answers 401, and a
+          // silent 401 here looks to the operator exactly like a store with no returns.
+          ...deviceHeaders,
         },
         signal: controller.signal,
         cache: "no-store",

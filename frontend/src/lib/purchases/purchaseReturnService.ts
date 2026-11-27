@@ -7,6 +7,7 @@ import { round2 } from "../billing/billingCalculations";
 import { serverTimeToEpoch } from "../dateTimeUtils";
 import { onlineTransactionService } from "../sync/onlineTransactionService";
 import { storeRegistryService } from "../auth/storeRegistryService";
+import { storeDeviceService } from "../auth/storeDeviceService";
 import { getIndianFinancialYear } from "../billing/salesReturnService";
 import { calculateDocumentTaxes } from "../tax-engine/taxEngine";
 import { postCharges, removePostedCharges } from "./chargePosting";
@@ -520,7 +521,10 @@ export class PurchaseReturnService {
     if (!syncQueueService.isOnline()) return [];
 
     const baseUrl = onlineTransactionService.getEffectiveBaseUrl();
-    const storeId = String(storeRegistryService.getActiveStore()?.id || "1");
+    const deviceHeaders = await storeDeviceService.getDeviceAuthHeaders();
+    // The token belongs to a store, so its store is the one to ask about — the registry's local id
+    // ("store_main") is not a server store and would be refused as a tenant mismatch.
+    const storeId = deviceHeaders["X-Store-Id"] || String(storeRegistryService.getActiveStore()?.id || "1");
     const params = new URLSearchParams({ store_id: storeId, module, per_page: "200" });
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 15000);
@@ -531,6 +535,9 @@ export class PurchaseReturnService {
           Accept: "application/json",
           "X-Store-Id": storeId,
           "Store-Id": storeId,
+          // `/api/purchases` is a till route: with no device token the server answers 401, and a
+          // silent 401 here looks to the operator exactly like a store with no purchases.
+          ...deviceHeaders,
         },
         signal: controller.signal,
         cache: "no-store",

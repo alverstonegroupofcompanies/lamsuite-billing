@@ -4,6 +4,7 @@ import { productsStore } from "../masters/productsStore";
 import { partiesStore } from "../masters/partiesStore";
 import { purchaseReturnService, type PurchaseReturnInput } from "./purchaseReturnService";
 import { onlineTransactionService } from "../sync/onlineTransactionService";
+import { storeDeviceService } from "../auth/storeDeviceService";
 
 describe("purchaseReturnService - Debit Notes & Purchase Returns", () => {
   const dummyProduct = {
@@ -414,6 +415,23 @@ describe("purchaseReturnService - documents held on the server", () => {
       return_qty: 50,
       purchase_rate: 60,
     });
+  });
+
+  it("authenticates the server read with this workstation's device token", async () => {
+    // The till routes answer 401 without it, and a silent 401 is indistinguishable from a store
+    // that has no debit notes — which is how the merged lists first shipped looking empty.
+    vi.spyOn(storeDeviceService, "getDeviceAuthHeaders").mockResolvedValue({
+      "X-Device-Token": "tok-store-7",
+      "X-Store-Id": "7",
+      "Store-Id": "7",
+    });
+    const calls = stubLists([serverDebitNote], []);
+
+    const list = await purchaseReturnService.getPurchaseReturns();
+
+    expect(list.map((r) => r.return_number)).toEqual(["PR-1-0007"]);
+    expect(calls[0][1].headers["X-Device-Token"]).toBe("tok-store-7");
+    expect(String(calls[0][0])).toContain("store_id=7");
   });
 
   it("keeps the till's own note when the server echoes it back", async () => {
