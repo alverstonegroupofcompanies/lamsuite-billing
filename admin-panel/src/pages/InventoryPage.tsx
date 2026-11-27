@@ -1,8 +1,10 @@
 import React, { useEffect, useState } from "react";
 import { ProductBatch } from "../types";
 import { api } from "../services/api";
-import { formatINR, formatDate, formatIndianNumber } from "../utils/formatters";
+import { formatINR, formatDate, formatDateTime, formatIndianNumber } from "../utils/formatters";
 import { useAuth } from "../context/AuthContext";
+import { RowAction } from "../components/RowAction";
+import { RecordInspector, type InspectorColumn, type InspectorField } from "../components/RecordInspector";
 import {
   Boxes,
   Search,
@@ -16,7 +18,180 @@ import {
   RefreshCw,
   X,
   ShieldCheck,
+  Eye,
 } from "lucide-react";
+
+type InspectorRequest = Omit<React.ComponentProps<typeof RecordInspector>, "onClose">;
+
+/**
+ * MV-BAT-01 — the batch behind a row of the batch list or a near-expiry alert, read inline.
+ *
+ * A batch has no show endpoint of its own, so the inspector shows the batch facts from the list row
+ * and pulls the product's inward/outward ledger, which is what an owner checks before writing a batch
+ * down: where the remaining units came from and when. The two lists carry the product differently —
+ * the alert query flattens it to product_name, the batch list nests it under product — and only the
+ * alert row knows days_remaining, so both readers are resolved field by field.
+ */
+const batchLedgerColumns: InspectorColumn[] = [
+  { key: "transaction_date", label: "Date", render: (line: any) => formatDate(line.transaction_date) },
+  { key: "voucher_type", label: "Voucher" },
+  { key: "reference_number", label: "Reference", mono: true },
+  { key: "batch_no", label: "Batch", mono: true },
+  { label: "In", align: "right", render: (line: any) => formatIndianNumber(line.in_qty) },
+  { label: "Out", align: "right", render: (line: any) => formatIndianNumber(line.out_qty) },
+  { label: "Party", render: (line: any) => line.party_name || "—" },
+];
+
+const inspectBatch = (b: any): InspectorRequest => ({
+  kind: "Batch",
+  heading: `Batch ${b.batch_no}`,
+  subheading: b.product_name || b.product?.name,
+  endpoint: `/admin/inventory/ledger?product_id=${b.product_id}`,
+  row: b,
+  lineKey: "data",
+  columns: batchLedgerColumns,
+  linesEmpty: "No inward or outward movement recorded for this product.",
+  fields: (record) => [
+    { label: "Product", value: record.product_name || record.product?.name, strong: true },
+    { label: "Batch", value: record.batch_no, mono: true },
+    { label: "Expiry", value: formatDate(record.expiry_date) },
+    record.days_remaining === undefined || record.days_remaining === null
+      ? null
+      : {
+          label: "Days remaining",
+          value: `${record.days_remaining} days`,
+          tone: Number(record.days_remaining) < 0 ? "credit" : undefined,
+        },
+    { label: "Stock on hand", value: formatIndianNumber(record.stock_qty), strong: true },
+    { label: "MRP", value: record.mrp, money: true },
+    { label: "Selling rate", value: record.selling_rate, money: true },
+  ].filter(Boolean) as InspectorField[],
+  note: "The ledger below is the product's whole movement history — read the Batch column for this batch's rows. Rate, MRP and expiry are corrected on the batch record itself; this row's Reconcile action writes the physical count.",
+});
+
+/**
+ * STK-05 — a branch transfer read inline from the inventory tab.
+ *
+ * `/admin/stock/transfers` eager-loads the batch lines, and the server has no show route for one
+ * transfer, so this inspector reads the row it was opened from rather than fetching a document that
+ * does not exist. The lines carry sent and received quantities; the shortfall is what the receive
+ * dialog below has to account for.
+ */
+const transferLineColumns: InspectorColumn[] = [
+  { label: "Item", render: (line: any) => line.product?.name || line.product_name },
+  { label: "Batch", mono: true, render: (line: any) => line.batch_no },
+  { label: "Sent", align: "right", mono: true, render: (line: any) => formatIndianNumber(line.qty) },
+  {
+    label: "Received",
+    align: "right",
+    mono: true,
+    render: (line: any) => (line.received_qty === null || line.received_qty === undefined ? "—" : formatIndianNumber(line.received_qty)),
+  },
+  {
+    label: "Short",
+    align: "right",
+    mono: true,
+    render: (line: any) => (Number(line.short_qty) ? formatIndianNumber(line.short_qty) : "—"),
+  },
+  { label: "Shortage reason", render: (line: any) => line.shortage_reason || "—" },
+];
+
+const inspectInventoryTransfer = (t: any): InspectorRequest => ({
+  kind: "Stock Transfer",
+  heading: t.transfer_number || `Transfer #${t.id}`,
+  subheading: `${t.from_store?.name || `Store #${t.from_store_id}`} → ${t.to_store?.name || `Store #${t.to_store_id}`}`,
+  row: t,
+  columns: transferLineColumns,
+  linesEmpty: "This transfer has no batch lines recorded.",
+  fields: (record) => [
+    { label: "Status", value: record.status },
+    { label: "Raised", value: formatDateTime(record.created_at) },
+    { label: "Dispatched By", value: record.creator?.name },
+    { label: "Received", value: record.received_at ? formatDateTime(record.received_at) : undefined },
+    { label: "Notes", value: record.notes },
+  ],
+  note: "Stock leaves the origin branch on dispatch and reaches the destination only when the receiving branch posts goods receipt from this row's Actions.",
+});
+
+/**
+ * STK-04 — one row of the stock ledger is a movement, not a document.
+ *
+ * `stockLedger` unions purchase and invoice lines and keeps only the reference number, so a ledger
+ * row has no id to open. The inspector therefore reads the row itself and copies the reference out,
+ * and the second action hands the batch to the Batch Inventory list where the quantity is actionable.
+ */
+const inspectLedgerMovement = (entry: any): InspectorRequest => ({
+  kind: "Stock movement",
+  heading: entry.reference_number || `${entry.voucher_type}`,
+  subheading: `${entry.product_name} · ${entry.batch_no || "no batch"}`,
+  row: entry,
+  fields: (record) => [
+    { label: "Voucher", value: record.voucher_type, strong: true },
+    { label: "Reference", value: record.reference_number, mono: true },
+    { label: "Date", value: formatDate(record.transaction_date) },
+    { label: "Product", value: record.product_name },
+    { label: "Batch", value: record.batch_no, mono: true },
+    { label: "Party", value: record.party_name },
+  ],
+  totals: (record) => [
+    { label: "Units in", value: `${formatIndianNumber(record.in_qty)} units` },
+    { label: "Units out", value: `${formatIndianNumber(record.out_qty)} units` },
+    {
+      label: "Net movement",
+      value: `${Number(record.in_qty) > 0 ? "+" : "−"}${formatIndianNumber(Math.abs(Number(record.in_qty) || Number(record.out_qty)))} units`,
+    },
+  ],
+  note: "The ledger stores the voucher number, not the voucher itself — the document is under Transactions, and the quantity this movement left behind is on the Batch Inventory list.",
+});
+
+/** MV-ADJ-01 — the lines behind an adjustment document, which the list row only counts. */
+const adjustmentLineColumns: InspectorColumn[] = [
+  { label: "Product", render: (line: any) => line.product?.name || line.product_name },
+  { label: "Batch", mono: true, render: (line: any) => line.batch?.batch_no || line.batch_no || "—" },
+  { label: "System", align: "right", render: (line: any) => formatIndianNumber(line.system_qty) },
+  {
+    label: "Counted",
+    align: "right",
+    render: (line: any) => (line.counted_qty === null || line.counted_qty === undefined ? "—" : formatIndianNumber(line.counted_qty)),
+  },
+  {
+    label: "Adjustment",
+    align: "right",
+    mono: true,
+    render: (line: any) => `${Number(line.adjustment_qty) > 0 ? "+" : ""}${formatIndianNumber(line.adjustment_qty)}`,
+  },
+  { label: "Reason", render: (line: any) => line.reason || line.notes || "—" },
+];
+
+const inspectAdjustmentDocument = (doc: AdjustmentDocument): InspectorRequest => ({
+  kind: "Stock adjustment",
+  heading: doc.document_id,
+  subheading: doc.mode === "physical_count" ? "Physical count" : "Manual adjustment",
+  endpoint: `/admin/stock-adjustments/${doc.id}`,
+  row: doc,
+  lineKey: "lines",
+  columns: adjustmentLineColumns,
+  linesEmpty: "This document has no lines.",
+  fields: (record) => [
+    { label: "Document", value: record.document_id, mono: true, strong: true },
+    { label: "Mode", value: record.mode === "physical_count" ? "Physical count" : "Manual adjustment" },
+    { label: "Document date", value: formatDate(record.document_date) },
+    { label: "Submitted", value: formatDate(record.created_at) },
+    { label: "Submitted by", value: record.creator?.name || "—" },
+    { label: "Decided by", value: record.approver?.name || "—" },
+    { label: "Status", value: String(record.status || "").replace("_", " ") },
+    { label: "Held by rule", value: record.blocking_rule || "—" },
+    { label: "Reason", value: record.reason || "—" },
+    { label: "Notes", value: record.notes || "—" },
+  ],
+  totals: (record) => [
+    { label: "Lines", value: String(record.lines_count ?? (record.lines || []).length) },
+    { label: "Net units", value: formatIndianNumber(record.total_qty) },
+    { label: "Value at cost", value: record.total_value, money: true },
+  ],
+  note: "A pending document has moved no stock yet — approving it from this row's Actions posts every line to the batch ledger.",
+});
+
 
 interface AdjustmentLine {
   id: number;
@@ -113,6 +288,8 @@ export const InventoryPage: React.FC = () => {
   const [reconcileBatch, setReconcileBatch] = useState<ProductBatch | null>(null);
   const [physicalQty, setPhysicalQty] = useState<number>(0);
   const [reconcileReason, setReconcileReason] = useState("");
+
+  const [inspector, setInspector] = useState<InspectorRequest | null>(null);
 
   const fetchInventory = async () => {
     setIsLoading(true);
@@ -435,19 +612,26 @@ export const InventoryPage: React.FC = () => {
                         {formatIndianNumber(b.stock_qty)} units
                       </td>
                       <td className="px-4 py-3 text-right">
-                        {hasPermission("inventory", "edit") && (
-                          <button
-                            onClick={() => {
-                              setReconcileBatch(b);
-                              setPhysicalQty(b.stock_qty);
-                              setReconcileReason("");
-                              setIsReconcileModalOpen(true);
-                            }}
-                            className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-semibold rounded-lg text-[10px]"
-                          >
-                            Reconcile
-                          </button>
-                        )}
+                        <div className="flex justify-end gap-1">
+                          <RowAction
+                            icon={Eye}
+                            title="View batch & product movement"
+                            onClick={() => setInspector(inspectBatch(b))}
+                          />
+                          {hasPermission("inventory", "edit") && (
+                            <RowAction
+                              icon={Sliders}
+                              title="Reconcile this batch against physical stock"
+                              tone="emerald"
+                              onClick={() => {
+                                setReconcileBatch(b);
+                                setPhysicalQty(Number(b.stock_qty));
+                                setReconcileReason("");
+                                setIsReconcileModalOpen(true);
+                              }}
+                            />
+                          )}
+                        </div>
                       </td>
                     </tr>
                   ))
@@ -526,6 +710,92 @@ export const InventoryPage: React.FC = () => {
         </div>
       )}
 
+      {/* Stock Ledger Tab */}
+      {activeTab === "ledger" && (
+        <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs overflow-hidden">
+          <div className="px-4 py-3 border-b border-slate-200 dark:border-slate-800">
+            <h2 className="text-sm font-bold text-slate-900 dark:text-white">Stock Ledger</h2>
+            <p className="text-[11px] text-slate-500">
+              Purchases in, sales out, as the server unions them — the newest {ledgerEntries.length} movements of
+              this store.
+            </p>
+          </div>
+          <table className="w-full text-xs text-left text-slate-600 dark:text-slate-300">
+            <thead className="bg-slate-50 dark:bg-slate-800/50 text-slate-500 uppercase text-[10px] font-semibold border-b border-slate-200 dark:border-slate-800">
+              <tr>
+                <th className="px-4 py-3">Date</th>
+                <th className="px-4 py-3">Voucher</th>
+                <th className="px-4 py-3">Reference</th>
+                <th className="px-4 py-3">Product</th>
+                <th className="px-4 py-3">Batch</th>
+                <th className="px-4 py-3 text-right">In</th>
+                <th className="px-4 py-3 text-right">Out</th>
+                <th className="px-4 py-3">Party</th>
+                <th className="px-4 py-3 text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+              {isLoading ? (
+                <tr>
+                  <td colSpan={9} className="px-4 py-8 text-center text-slate-400">
+                    Loading stock ledger...
+                  </td>
+                </tr>
+              ) : ledgerEntries.length === 0 ? (
+                <tr>
+                  <td colSpan={9} className="px-4 py-8 text-center text-slate-400">
+                    No stock movements recorded for this store yet.
+                  </td>
+                </tr>
+              ) : (
+                ledgerEntries.map((entry, index) => (
+                  <tr
+                    key={`${entry.reference_number}-${entry.batch_no}-${index}`}
+                    className="hover:bg-slate-50/50 dark:hover:bg-slate-800/40"
+                  >
+                    <td className="px-4 py-3 font-mono">{formatDate(entry.transaction_date)}</td>
+                    <td className="px-4 py-3">{entry.voucher_type}</td>
+                    <td className="px-4 py-3 font-mono font-semibold text-slate-800 dark:text-slate-200">
+                      {entry.reference_number || "—"}
+                    </td>
+                    <td className="px-4 py-3 font-semibold text-slate-900 dark:text-white">{entry.product_name}</td>
+                    <td className="px-4 py-3 font-mono">{entry.batch_no || "—"}</td>
+                    <td className="px-4 py-3 text-right font-mono text-emerald-600 dark:text-emerald-400">
+                      {Number(entry.in_qty) > 0 ? formatIndianNumber(entry.in_qty) : "—"}
+                    </td>
+                    <td className="px-4 py-3 text-right font-mono text-rose-500">
+                      {Number(entry.out_qty) > 0 ? formatIndianNumber(entry.out_qty) : "—"}
+                    </td>
+                    <td className="px-4 py-3">{entry.party_name || "—"}</td>
+                    <td className="px-4 py-3">
+                      <div className="flex justify-end gap-1">
+                        <RowAction
+                          icon={Eye}
+                          title="View this movement"
+                          onClick={() => setInspector(inspectLedgerMovement(entry))}
+                        />
+                        {entry.batch_no ? (
+                          <RowAction
+                            icon={Search}
+                            title="Find this batch in the batch list"
+                            tone="brand"
+                            onClick={() => {
+                              setSearch(entry.batch_no);
+                              setPage(1);
+                              setActiveTab("batches");
+                            }}
+                          />
+                        ) : null}
+                      </div>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
+
       {/* Near Expiry Tab */}
       {activeTab === "near_expiry" && (
         <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs overflow-hidden">
@@ -538,6 +808,7 @@ export const InventoryPage: React.FC = () => {
                 <th className="px-4 py-3 text-center">Remaining Days</th>
                 <th className="px-4 py-3 text-center">Stock Units</th>
                 <th className="px-4 py-3 text-center">Status</th>
+                <th className="px-4 py-3 text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
@@ -558,6 +829,24 @@ export const InventoryPage: React.FC = () => {
                     >
                       {b.is_expired ? "EXPIRED" : "NEAR EXPIRY"}
                     </span>
+                  </td>
+                  <td className="px-4 py-3">
+                    <div className="flex justify-end gap-1">
+                      <RowAction icon={Eye} title="View batch & product movement" onClick={() => setInspector(inspectBatch(b))} />
+                      {activeStore && hasPermission("inventory", "edit") ? (
+                        <RowAction
+                          icon={Sliders}
+                          title="Reconcile this batch against physical stock"
+                          tone="emerald"
+                          onClick={() => {
+                            setReconcileBatch(b as unknown as ProductBatch);
+                            setPhysicalQty(Number(b.stock_qty));
+                            setReconcileReason("");
+                            setIsReconcileModalOpen(true);
+                          }}
+                        />
+                      ) : null}
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -580,7 +869,14 @@ export const InventoryPage: React.FC = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-              {transfers.map((t) => (
+              {transfers.length === 0 ? (
+                <tr>
+                  <td colSpan={5} className="px-4 py-8 text-center text-slate-400">
+                    No branch transfers recorded.
+                  </td>
+                </tr>
+              ) : (
+              transfers.map((t) => (
                 <tr key={t.id}>
                   <td className="px-4 py-3 font-mono font-bold text-slate-900 dark:text-white">
                     {t.transfer_number}
@@ -599,17 +895,25 @@ export const InventoryPage: React.FC = () => {
                     </span>
                   </td>
                   <td className="px-4 py-3 text-right">
-                    {t.status === "dispatched" && (
-                      <button
-                        onClick={() => openReceiveDialog(t)}
-                        className="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-lg text-[10px]"
-                      >
-                        Receive Stock
-                      </button>
-                    )}
+                    <div className="flex items-center justify-end gap-2">
+                      <RowAction
+                        icon={Eye}
+                        title="View transfer lines"
+                        onClick={() => setInspector(inspectInventoryTransfer(t))}
+                      />
+                      {t.status === "dispatched" && (
+                        <button
+                          onClick={() => openReceiveDialog(t)}
+                          className="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-lg text-[10px]"
+                        >
+                          Receive Stock
+                        </button>
+                      )}
+                    </div>
                   </td>
                 </tr>
-              ))}
+              ))
+              )}
             </tbody>
           </table>
         </div>
@@ -656,7 +960,7 @@ export const InventoryPage: React.FC = () => {
                     <th className="px-4 py-3 text-right">Qty / Value</th>
                     <th className="px-4 py-3">Submitted By</th>
                     <th className="px-4 py-3 text-center">Status</th>
-                    <th className="px-4 py-3 text-right">Decision</th>
+                    <th className="px-4 py-3 text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
@@ -703,26 +1007,33 @@ export const InventoryPage: React.FC = () => {
                           </span>
                         </td>
                         <td className="px-4 py-3 text-right">
-                          {doc.status === "pending_approval" && hasPermission("inventory", "edit") ? (
-                            <div className="flex justify-end gap-1.5">
-                              <button
-                                onClick={() => handleRejectAdjustment(doc.id)}
-                                className="px-2.5 py-1 bg-rose-100 hover:bg-rose-200 text-rose-700 dark:bg-rose-950 dark:text-rose-400 font-semibold rounded-lg text-[10px]"
-                              >
-                                Reject
-                              </button>
-                              <button
-                                onClick={() => handleApproveAdjustment(doc.id)}
-                                className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold rounded-lg text-[10px]"
-                              >
-                                Approve & Post
-                              </button>
-                            </div>
-                          ) : (
-                            <span className="text-[10px] text-slate-400">
-                              {doc.approver?.name ? `By ${doc.approver.name}` : "—"}
-                            </span>
-                          )}
+                          <div className="flex items-center justify-end gap-1.5">
+                            <RowAction
+                              icon={Eye}
+                              title="View adjustment lines"
+                              onClick={() => setInspector(inspectAdjustmentDocument(doc))}
+                            />
+                            {doc.status === "pending_approval" && hasPermission("inventory", "edit") ? (
+                              <>
+                                <button
+                                  onClick={() => handleRejectAdjustment(doc.id)}
+                                  className="px-2.5 py-1 bg-rose-100 hover:bg-rose-200 text-rose-700 dark:bg-rose-950 dark:text-rose-400 font-semibold rounded-lg text-[10px]"
+                                >
+                                  Reject
+                                </button>
+                                <button
+                                  onClick={() => handleApproveAdjustment(doc.id)}
+                                  className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold rounded-lg text-[10px]"
+                                >
+                                  Approve &amp; Post
+                                </button>
+                              </>
+                            ) : (
+                              <span className="text-[10px] text-slate-400">
+                                {doc.approver?.name ? `By ${doc.approver.name}` : "—"}
+                              </span>
+                            )}
+                          </div>
                         </td>
                       </tr>
                     ))
@@ -1214,6 +1525,9 @@ export const InventoryPage: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Row Inspector: the batch or adjustment document behind any list row */}
+      {inspector && <RecordInspector {...inspector} onClose={() => setInspector(null)} />}
     </div>
   );
 };

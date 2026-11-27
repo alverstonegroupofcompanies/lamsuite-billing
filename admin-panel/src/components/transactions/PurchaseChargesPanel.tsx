@@ -1,9 +1,69 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { Download, RefreshCw, Search } from "lucide-react";
+import { Download, Eye, RefreshCw, Search } from "lucide-react";
 import { api } from "../../services/api";
 import { useAuth } from "../../context/AuthContext";
 import { formatDate, formatINR } from "../../utils/formatters";
 import { downloadCsv } from "../../utils/csv";
+import { RowAction } from "../RowAction";
+import { RecordInspector, type InspectorColumn } from "../RecordInspector";
+
+type InspectorRequest = Omit<React.ComponentProps<typeof RecordInspector>, "onClose">;
+
+/**
+ * MV-CHG-01 — the bill a charge line sits on.
+ *
+ * A charge row carries its own denormalised head, so the only thing it cannot answer is what it was
+ * spread against: that is the supplier bill, which `showPurchase` returns with its `charges` relation.
+ * A line whose bill has not reached the server has nothing to open.
+ */
+const chargeBillColumns: InspectorColumn[] = [
+  { label: "Charge head", render: (line: any) => line.head_name || line.head?.name || `#${line.head_id}` },
+  { label: "Treatment", render: (line: any) => String(line.treatment || "").replace("_", " ") },
+  { label: "Payable", align: "center", render: (line: any) => (line.in_payable ? "In" : "Outside") },
+  { label: "Amount", align: "right", money: true, render: (line: any) => line.amount },
+  { label: "GST", align: "right", render: (line: any) => `${Number(line.gst_percent || 0)}%` },
+  { label: "Total", align: "right", money: true, render: (line: any) => line.total_amount },
+];
+
+const inspectChargeBill = (row: ChargeRow): InspectorRequest => {
+  const purchaseId = row.purchase?.id;
+  return {
+    kind: "Supplier bill",
+    heading: row.purchase?.invoice_number || `Purchase #${purchaseId}`,
+    subheading: `${row.head_name} · ${formatDate(row.purchase?.invoice_date)}`,
+    endpoint: `/admin/purchases/${purchaseId}`,
+    row: {
+      invoice_number: row.purchase?.invoice_number,
+      supplier_name: row.purchase?.supplier_name,
+      invoice_date: row.purchase?.invoice_date,
+    },
+    lineKey: "charges",
+    columns: chargeBillColumns,
+    linesEmpty: "This bill carries no charge lines.",
+    fields: (record) => [
+      { label: "Bill number", value: record.invoice_number, mono: true, strong: true },
+      { label: "Supplier", value: record.supplier_name },
+      { label: "Bill date", value: formatDate(record.invoice_date) },
+      { label: "Supplier GSTIN", value: record.supplier_gstin, mono: true },
+      { label: "Bill status", value: record.status },
+      { label: "This charge head", value: `${row.head_name} (${row.head_code})` },
+      { label: "Entered by", value: row.source },
+      { label: "Paid separately", value: row.paid_separately ? row.paid_to_label || "Yes" : "No" },
+      { label: "Charge note", value: row.note },
+    ],
+    totals: (record) => [
+      { label: "Goods value (taxable)", value: record.subtotal, money: true },
+      { label: "This charge (incl. GST)", value: row.total_amount, money: true },
+      { label: "Bill payable", value: record.grand_total, money: true, strong: true },
+      { label: "Settled against bill", value: record.paid_amount, money: true },
+      { label: "This charge allocated", value: row.allocated_amount, money: true },
+      { label: "This charge reversed", value: row.reversed_amount, money: true, tone: "credit" },
+    ],
+    note: row.paid_separately
+      ? "This charge was paid outside the bill, so it is not part of the payable above — the supplier settlement on the bill ignores it."
+      : "A charge paid with the bill raises the payable above. Its share of goods value is spread by the method shown on the line, and correcting a posted charge means editing the bill, not this row.",
+  };
+};
 
 /**
  * CR-C Task 4.14 — the charges of supplier bills, as rows.
@@ -102,7 +162,7 @@ const selectClass =
 const labelClass = "text-[10px] uppercase font-semibold text-slate-500 dark:text-slate-400";
 
 export const PurchaseChargesPanel: React.FC = () => {
-  const { activeStore, isAllStores } = useAuth();
+  const { activeStore, isAllStores, hasPermission } = useAuth();
   const [filters, setFilters] = useState({ ...EMPTY_FILTERS });
   const [page, setPage] = useState(1);
   const [rows, setRows] = useState<ChargeRow[]>([]);
@@ -111,6 +171,7 @@ export const PurchaseChargesPanel: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
+  const [inspector, setInspector] = useState<InspectorRequest | null>(null);
 
   const query = useCallback(
     () => ({
@@ -355,18 +416,19 @@ export const PurchaseChargesPanel: React.FC = () => {
                 <th className="px-4 py-3 text-right">GST</th>
                 <th className="px-4 py-3 text-right">Total</th>
                 <th className="px-4 py-3 text-center">Payable</th>
+                <th className="px-4 py-3 text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
               {isLoading && rows.length === 0 ? (
                 <tr>
-                  <td colSpan={isAllStores ? 8 : 7} className="px-4 py-8 text-center text-slate-400">
+                  <td colSpan={isAllStores ? 9 : 8} className="px-4 py-8 text-center text-slate-400">
                     Loading charge lines…
                   </td>
                 </tr>
               ) : rows.length === 0 ? (
                 <tr>
-                  <td colSpan={isAllStores ? 8 : 7} className="px-4 py-8 text-center text-slate-400">
+                  <td colSpan={isAllStores ? 9 : 8} className="px-4 py-8 text-center text-slate-400">
                     No charge lines match this filter.
                   </td>
                 </tr>
@@ -421,6 +483,16 @@ export const PurchaseChargesPanel: React.FC = () => {
                         {row.in_payable ? "In payable" : "Outside payable"}
                       </span>
                     </td>
+                    <td className="px-4 py-3">
+                      <div className="flex justify-end gap-1">
+                        <RowAction
+                          icon={Eye}
+                          title={row.purchase?.id ? "View the supplier bill this charge sits on" : "This charge line has no supplier bill on the server yet"}
+                          disabled={!row.purchase?.id || !hasPermission("transactions", "view")}
+                          onClick={() => setInspector(inspectChargeBill(row))}
+                        />
+                      </div>
+                    </td>
                   </tr>
                 ))
               )}
@@ -455,6 +527,9 @@ export const PurchaseChargesPanel: React.FC = () => {
           </div>
         )}
       </div>
+
+      {/* Row Inspector: the supplier bill behind a charge line */}
+      {inspector && <RecordInspector {...inspector} onClose={() => setInspector(null)} />}
     </div>
   );
 };

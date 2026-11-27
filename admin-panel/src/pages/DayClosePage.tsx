@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   CalendarDays,
   CheckCircle2,
+  Eye,
   Lock,
   RefreshCw,
   RotateCcw,
@@ -11,7 +12,9 @@ import {
 } from "lucide-react";
 import { api } from "../services/api";
 import { useAuth } from "../context/AuthContext";
-import { formatINR } from "../utils/formatters";
+import { formatDateTime, formatINR } from "../utils/formatters";
+import { RowAction } from "../components/RowAction";
+import { RecordInspector } from "../components/RecordInspector";
 
 interface TenderRow {
   collected: number;
@@ -118,6 +121,43 @@ const STATUS_STYLES: Record<string, string> = {
   reconciled: "bg-emerald-100 text-emerald-800 border-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-300 dark:border-emerald-800",
 };
 
+type InspectorRequest = Omit<React.ComponentProps<typeof RecordInspector>, "onClose">;
+
+/**
+ * DCL-04 — a closed day stays readable after the panel has moved on to today.
+ *
+ * The history row already carries the money that close posted, so the row opens it directly instead
+ * of making the operator re-pick the date and wait for the summary endpoint.
+ */
+const inspectDayClose = (row: HistoryRow): InspectorRequest => ({
+  kind: "Day close",
+  heading: row.close_date,
+  subheading: row.status,
+  row,
+  fields: (record) => [
+    { label: "Date", value: record.close_date, strong: true },
+    { label: "Status", value: record.status },
+    { label: "Bills", value: String(record.bills_count ?? "—") },
+    { label: "Locked at", value: record.locked_at ? formatDateTime(record.locked_at) : "—" },
+  ],
+  totals: (record) => [
+    { label: "Gross sales", value: record.gross_sales, money: true },
+    { label: "Cash collected", value: record.cash_collected, money: true },
+    { label: "Digital collected", value: record.digital_collected, money: true },
+    { label: "Refunds", value: record.refunds, money: true, tone: "credit" },
+    { label: "Expected cash", value: record.expected_cash, money: true },
+    { label: "Counted cash", value: record.counted_cash, money: true },
+    {
+      label: "Variance",
+      value: record.cash_variance,
+      money: true,
+      strong: true,
+      tone: Number(record.cash_variance) < 0 ? "credit" : "received",
+    },
+  ],
+  note: "Reconciling or re-opening a close happens in the panel above, with that date loaded.",
+});
+
 const todayISO = () => {
   const now = new Date();
   const offset = now.getTimezoneOffset();
@@ -139,6 +179,7 @@ export const DayClosePage: React.FC = () => {
   const [countedCash, setCountedCash] = useState("");
   const [notes, setNotes] = useState("");
   const [reopenReason, setReopenReason] = useState("");
+  const [inspector, setInspector] = useState<InspectorRequest | null>(null);
   const [busy, setBusy] = useState<"close" | "reconcile" | "reopen" | null>(null);
 
   const storeId = activeStore?.id ?? user?.store_id ?? null;
@@ -540,6 +581,7 @@ export const DayClosePage: React.FC = () => {
                       <th className="px-3 py-2 text-right">Expected</th>
                       <th className="px-3 py-2 text-right">Counted</th>
                       <th className="px-3 py-2 text-right">Variance</th>
+                <th className="px-3 py-2 text-right">Actions</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-200 dark:divide-slate-700">
@@ -603,19 +645,20 @@ export const DayClosePage: React.FC = () => {
                 <th className="px-3 py-2 text-right">Expected Cash</th>
                 <th className="px-3 py-2 text-right">Counted</th>
                 <th className="px-3 py-2 text-right">Variance</th>
+                <th className="px-3 py-2 text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-200 dark:divide-slate-700">
               {isHistoryLoading && history.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="px-3 py-6 text-center text-slate-400">
+                  <td colSpan={8} className="px-3 py-6 text-center text-slate-400">
                     Loading…
                   </td>
                 </tr>
               )}
               {!isHistoryLoading && history.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="px-3 py-6 text-center text-slate-400">
+                  <td colSpan={8} className="px-3 py-6 text-center text-slate-400">
                     No days closed yet.
                   </td>
                 </tr>
@@ -651,12 +694,26 @@ export const DayClosePage: React.FC = () => {
                   >
                     {formatINR(row.cash_variance)}
                   </td>
+                  <td className="px-3 py-2">
+                    <div className="flex justify-end gap-1" onClick={(e) => e.stopPropagation()}>
+                      <RowAction icon={Eye} title="View this day close" onClick={() => setInspector(inspectDayClose(row))} />
+                      <RowAction
+                        icon={CalendarDays}
+                        title="Load this date into the day close panel"
+                        tone="brand"
+                        onClick={() => setDate(row.close_date)}
+                      />
+                    </div>
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
       </div>
+
+      {/* Row Inspector: a day close read from history */}
+      {inspector && <RecordInspector {...inspector} onClose={() => setInspector(null)} />}
     </div>
   );
 };

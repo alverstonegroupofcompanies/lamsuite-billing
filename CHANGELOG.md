@@ -1,5 +1,39 @@
 # Changelog
 
+## 2.3.0 — 2026-11-27
+
+The admin panel had two kinds of tables: the ones with an editor behind every row, and the lists that
+only ever showed a number — a credit note, a purchase bill, a held cart, a day close — where reading what
+the document actually contained meant leaving the page and guessing at an id. Now every record row in
+Transactions, Inventory and Day Close ends on an Actions column, and the read-only half of that work is a
+dialog that opens on the row you clicked.
+
+1. **Two primitives** — `admin-panel/src/components/RowAction.tsx` is the icon button (title doubles as
+   the accessible name and the `data-testid`), and `RecordInspector.tsx` is the read-only record view:
+   fields, a line table, a totals block and a note about what the document has already done to the books.
+   A row the list already fetched renders straight away, and an `endpoint` then merges the server's own
+   copy of the document over it, so the lines a list query drops appear without a second click. An unset
+   amount reads `—`, never ₹0.00 — an empty MRP is not a free batch.
+2. **Every transactions list** — invoices, credit notes, quotations, purchase bills, debit notes, purchase
+   orders, bill charges, held carts, shifts, transfers, expenses, receipts and supplier payments. The
+   actions that already existed (reprint, cancel, issue an edit PIN, approve) stayed exactly where they
+   were; the inspector is what was missing. "Record a payment to this supplier" now opens the disbursement
+   dialog with the supplier already selected.
+3. **Inventory, including a table that was not there** — the Stock Ledger tab fetched its rows and rendered
+   nothing at all, so it is now a real table with a movement inspector and a hand-off that searches the
+   batch list for that batch. Batch Inventory, Near-Expiry, Inter-Store Transfers and the pending
+   adjustment documents each got their row actions, and the batch inspector reads the product whether the
+   list nested it (`product.name`) or flattened it (`product_name`).
+4. **Day close history** — each closed date reads inline (bills, expected, counted, variance) and one click
+   loads that date into the reconciliation panel above, instead of retyping it into the date field.
+5. **What live data corrected** — held carts park their lines under `cart_payload.items`, not
+   `cart_payload`, and `held_at` is milliseconds while every other document on the page is a datetime; a
+   transfer that has not been received yet shows `—` for received and short, not `0`. All three were found
+   by reading the running API, not the fixtures, and each is now pinned by a test.
+6. **Tests** — four new DOM suites (`*.rowActions.dom.test.tsx`) assert that every list ends on an Actions
+   column, that the row's action hits the document's own endpoint, and that a hand-off refetches with the
+   filter it promises. 125 tests across 27 files.
+
 ## 2.2.0 — 2026-11-27
 
 Until now a document number was `PREFIX-` plus whatever integer the series was sitting on, and the only

@@ -9,6 +9,8 @@ import { DocumentEditorModal, type DocumentKind } from "../components/transactio
 import { CustomerReceiptModal } from "../components/transactions/CustomerReceiptModal";
 import { AllocationPicker } from "../components/transactions/AllocationPicker";
 import { PurchaseChargesPanel } from "../components/transactions/PurchaseChargesPanel";
+import { RowAction } from "../components/RowAction";
+import { RecordInspector, type InspectorColumn } from "../components/RecordInspector";
 import {
   Receipt,
   Search,
@@ -37,6 +39,7 @@ import {
   Pencil,
   Trash2,
   ScrollText,
+  Eye,
 } from "lucide-react";
 
 const todayInputValue = () => {
@@ -54,6 +57,308 @@ const toDateInputValue = (value: unknown): string => {
   if (isNaN(d.getTime())) return raw.slice(0, 10);
   return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
 };
+
+/**
+ * Every list on this page is a document the till wrote and the server filed, so each row gets the
+ * same affordance: read the record the panel has, without leaving the table. The inspector renders
+ * from the row while `/admin/.../{id}` fills in the lines a list query does not carry.
+ */
+type InspectorRequest = Omit<React.ComponentProps<typeof RecordInspector>, "onClose">;
+
+const SALE_LINES: InspectorColumn[] = [
+  { label: "Item", render: (l) => l.product_name || l.product?.name },
+  { label: "Batch", mono: true, render: (l) => l.batch_no },
+  { label: "Qty", align: "right", mono: true, render: (l) => l.qty },
+  { label: "Rate", align: "right", money: true, render: (l) => l.unit_price ?? l.rate },
+  { label: "GST %", align: "right", mono: true, render: (l) => l.gst_percent },
+  { label: "Tax", align: "right", money: true, render: (l) => l.tax_amount },
+  { label: "Line Total", align: "right", money: true, render: (l) => l.total_amount },
+];
+
+const PURCHASE_LINES: InspectorColumn[] = [
+  { label: "Item", render: (l) => l.product_name || l.product?.name },
+  { label: "HSN", mono: true, render: (l) => l.hsn_code },
+  { label: "Batch", mono: true, render: (l) => l.batch_no },
+  { label: "Qty", align: "right", mono: true, render: (l) => l.qty },
+  { label: "Free", align: "right", mono: true, render: (l) => l.free_qty },
+  { label: "Rate", align: "right", money: true, render: (l) => l.purchase_rate },
+  { label: "GST %", align: "right", mono: true, render: (l) => l.gst_percent },
+  { label: "Total", align: "right", money: true, render: (l) => l.total_amount },
+];
+
+const CART_LINES: InspectorColumn[] = [
+  { label: "Item", render: (l) => l.product_name || l.name || l.product?.name },
+  { label: "Batch", mono: true, render: (l) => l.batch_no },
+  { label: "Qty", align: "right", mono: true, render: (l) => l.qty },
+  { label: "Rate", align: "right", money: true, render: (l) => l.rate ?? l.unit_price },
+  { label: "Total", align: "right", money: true, render: (l) => l.total ?? l.total_amount },
+];
+
+const TRANSFER_LINES: InspectorColumn[] = [
+  { label: "Item", render: (l) => l.product?.name || l.product_name },
+  { label: "Batch", mono: true, render: (l) => l.batch_no },
+  { label: "Dispatched", align: "right", mono: true, render: (l) => l.qty },
+  { label: "Received", align: "right", mono: true, render: (l) => l.received_qty },
+  { label: "Short", align: "right", mono: true, render: (l) => l.short_qty },
+  { label: "Reason", render: (l) => l.shortage_reason },
+];
+
+const inspectInvoice = (inv: any): InspectorRequest => ({
+  kind: "Sales Invoice",
+  heading: inv.invoice_number,
+  subheading: `${formatDate(inv.invoice_date)} • ${inv.store?.name || `Store #${inv.store_id}`}`,
+  endpoint: `/admin/invoices/${inv.id}`,
+  row: inv,
+  columns: SALE_LINES,
+  fields: (r) => [
+    { label: "Customer", value: r.customer_name },
+    { label: "Counter", value: r.counter_name || r.counter?.counter_name },
+    { label: "Cashier", value: r.created_by?.name || r.cashier_name || r.user?.name },
+    { label: "Payment Mode", value: (r.payments || []).map((p: any) => p.payment_mode).join(", ") || r.payment_mode },
+    { label: "Place of Supply", value: r.place_of_supply, mono: true },
+    { label: "Status", value: r.status },
+  ],
+  totals: (r) => [
+    { label: "Taxable Value", value: r.taxable_amount ?? r.subtotal, money: true },
+    { label: "Discount", value: r.discount_amount, money: true },
+    { label: "Tax Total", value: r.tax_total, money: true },
+    { label: "Grand Total", value: r.grand_total, money: true, strong: true },
+  ],
+});
+
+const inspectCreditNote = (ret: any): InspectorRequest => ({
+  kind: "Sales Return / Credit Note",
+  heading: ret.invoice_number,
+  subheading: `${formatDate(ret.invoice_date)} • ${ret.store?.name || `Store #${ret.store_id}`}`,
+  endpoint: `/admin/invoices/${ret.id}`,
+  row: ret,
+  columns: SALE_LINES,
+  fields: (r) => [
+    { label: "Customer", value: r.customer_name },
+    { label: "Against Invoice", value: r.reference_invoice_number || r.original_invoice_number, mono: true },
+    { label: "Refund Mode", value: r.payment_mode || r.refund_mode || (r.payments || [])[0]?.payment_mode },
+    { label: "Counter", value: r.counter_name || r.counter?.counter_name },
+    { label: "Till Document No", value: r.document_number, mono: true },
+    { label: "Status", value: r.status || "issued" },
+  ],
+  totals: (r) => [
+    { label: "Taxable Value", value: r.taxable_amount ?? r.subtotal, money: true },
+    { label: "Tax Refunded", value: r.tax_total, money: true, tone: "credit" },
+    { label: "Credit Amount", value: r.grand_total, money: true, strong: true, tone: "credit" },
+  ],
+  note:
+    "A credit note reverses a sale. Stock went back to the batch and the customer ledger was credited when it was " +
+    "filed; correcting one means raising a fresh bill, not cancelling this — cancelling would move the stock a second time.",
+});
+
+const inspectPurchase = (p: any): InspectorRequest => ({
+  kind: "Inward Purchase Bill",
+  heading: p.supplier_invoice_no || p.invoice_number,
+  subheading: `${formatDate(p.invoice_date)} • ${p.store?.name || `Store #${p.store_id}`}`,
+  endpoint: `/admin/purchases/${p.id}`,
+  row: p,
+  columns: PURCHASE_LINES,
+  fields: (r) => [
+    { label: "Supplier", value: r.supplier_name || r.supplier?.name },
+    { label: "Supplier GSTIN", value: r.supplier_gstin, mono: true },
+    { label: "Server Doc No", value: r.invoice_number, mono: true },
+    { label: "Till Doc No", value: r.document_number, mono: true },
+    { label: "Payment Terms", value: r.payment_terms },
+    { label: "Status", value: r.status },
+  ],
+  totals: (r) => [
+    { label: "Taxable Value", value: r.taxable_amount ?? r.subtotal, money: true },
+    { label: "Charges", value: r.charge_register?.charge_total ?? r.charge_total, money: true },
+    { label: "Tax Total", value: r.tax_total, money: true },
+    { label: "Payable", value: r.grand_total, money: true, strong: true },
+  ],
+});
+
+const inspectDebitNote = (pr: any): InspectorRequest => ({
+  kind: "Purchase Return / Debit Note",
+  heading: pr.invoice_number,
+  subheading: `${formatDate(pr.invoice_date)} • ${pr.store?.name || `Store #${pr.store_id}`}`,
+  endpoint: `/admin/purchases/${pr.id}`,
+  row: pr,
+  lineKey: "items",
+  columns: PURCHASE_LINES,
+  fields: (r) => [
+    { label: "Supplier", value: r.supplier_name || r.supplier?.name },
+    { label: "Supplier GSTIN", value: r.supplier_gstin, mono: true },
+    { label: "Till Doc No", value: r.document_number, mono: true },
+    { label: "Against Bill", value: r.reference_invoice_number || r.original_invoice_number, mono: true },
+    { label: "Reason", value: r.notes },
+    { label: "Status", value: r.status },
+  ],
+  totals: (r) => [
+    { label: "Taxable Value", value: r.taxable_amount ?? r.subtotal, money: true },
+    { label: "Tax", value: r.tax_total, money: true, tone: "credit" },
+    { label: "Debit Total", value: r.grand_total, money: true, strong: true, tone: "credit" },
+  ],
+});
+
+const inspectQuotation = (q: any): InspectorRequest => ({
+  kind: "Quotation / Estimate",
+  heading: q.invoice_number,
+  subheading: `${formatDate(q.invoice_date)} • ${q.store?.name || `Store #${q.store_id}`}`,
+  row: q,
+  columns: SALE_LINES,
+  fields: (r) => [
+    { label: "Customer", value: r.customer_name },
+    { label: "Till Doc No", value: r.document_number, mono: true },
+    { label: "Counter", value: r.counter_name || r.counter?.counter_name },
+    { label: "Valid Till", value: r.valid_till ? formatDate(r.valid_till) : undefined },
+    { label: "Status", value: r.status || "issued" },
+  ],
+  totals: (r) => [
+    { label: "Taxable Value", value: r.taxable_amount ?? r.subtotal, money: true },
+    { label: "Tax Total", value: r.tax_total, money: true },
+    { label: "Estimate Total", value: r.grand_total, money: true, strong: true },
+  ],
+});
+
+const inspectPurchaseOrder = (po: any): InspectorRequest => ({
+  kind: "Purchase Order",
+  heading: po.invoice_number,
+  subheading: `${formatDate(po.invoice_date)} • ${po.store?.name || `Store #${po.store_id}`}`,
+  row: po,
+  columns: PURCHASE_LINES,
+  fields: (r) => [
+    { label: "Supplier", value: r.supplier_name || r.supplier?.name },
+    { label: "Expected Delivery", value: r.expected_delivery_date ? formatDate(r.expected_delivery_date) : undefined },
+    { label: "Till Doc No", value: r.document_number, mono: true },
+    { label: "Notes", value: r.notes },
+    { label: "Status", value: r.status },
+  ],
+  totals: (r) => [
+    { label: "Taxable Value", value: r.taxable_amount ?? r.subtotal, money: true },
+    { label: "Tax Total", value: r.tax_total, money: true },
+    { label: "Estimated Amount", value: r.grand_total, money: true, strong: true },
+  ],
+});
+
+// HeldBill parks held_at as an integer epoch the till wrote with Date.now(), so it is milliseconds;
+// every other document on this page carries a real datetime, so the buffer row needs its own reader.
+const formatHeldAt = (value: unknown): string => {
+  const epoch = Number(value);
+  if (Number.isFinite(epoch) && epoch > 0) {
+    // Anything below a trillion is a second count, above it a millisecond count (2001-09-09 onward).
+    const ms = epoch > 1e12 ? epoch : epoch * 1000;
+    return formatDateTime(new Date(ms).toISOString());
+  }
+  return value ? formatDateTime(String(value)) : "—";
+};
+
+const inspectHeldBill = (hb: any): InspectorRequest => ({
+  kind: "Held Bill",
+  heading: String(hb.id),
+  subheading: `Held ${formatHeldAt(hb.held_at)}`,
+  endpoint: `/admin/held-bills/${hb.id}`,
+  row: hb,
+  lineKey: "cart_payload.items",
+  columns: CART_LINES,
+  linesEmpty: "This held cart was parked without a line breakdown.",
+  fields: (r) => [
+    { label: "Customer", value: r.customer_name },
+    { label: "Counter", value: r.held_by_counter_name },
+    { label: "Held By", value: r.held_by_user_name },
+    { label: "Items", value: r.items_count, mono: true },
+    { label: "Claimed By", value: r.claimed_by_counter_id ? `Counter #${r.claimed_by_counter_id}` : undefined },
+    { label: "Status", value: r.status },
+  ],
+  totals: (r) => [{ label: "Cart Value", value: r.grand_total, money: true, strong: true }],
+  note: "A held bill is a parked cart, not a posted transaction — no stock or ledger has moved for it.",
+});
+
+const inspectShift = (s: any): InspectorRequest => ({
+  kind: "Counter Shift",
+  heading: `Shift #${s.id}`,
+  subheading: `${s.counter?.counter_code || "Counter"} • opened ${formatDateTime(s.opened_at)}`,
+  row: s,
+  fields: (r) => [
+    { label: "Cashier", value: r.opened_by?.name },
+    { label: "Opened Via", value: r.opened_via, mono: true },
+    { label: "Closed By", value: r.closed_by?.name },
+    { label: "Closed At", value: r.closed_at ? formatDateTime(r.closed_at) : undefined },
+    { label: "Status", value: r.status },
+  ],
+  totals: (r) => [
+    { label: "Opening Float", value: r.opening_float, money: true },
+    { label: "Cash Sales", value: r.cash_sales, money: true },
+    { label: "Cash Refunds", value: r.cash_refunds, money: true, tone: "credit" },
+    { label: "Cash In / Drops", value: r.cash_in, money: true },
+    { label: "Digital Sales", value: r.digital_sales, money: true },
+    { label: "Expected Cash", value: r.expected_cash, money: true },
+    { label: "Counted Cash", value: r.closing_cash_actual, money: true, strong: true },
+    { label: "Discrepancy", value: r.closing_discrepancy, money: true, strong: true },
+  ],
+  note: "The drawer figures come from the till's own cash close. A day can only be reopened from Day Close.",
+});
+
+const inspectTransfer = (t: any): InspectorRequest => ({
+  kind: "Stock Transfer",
+  heading: t.transfer_number,
+  subheading: `${formatDate(t.created_at)} • ${t.from_store?.name || `Store #${t.from_store_id}`} → ${
+    t.to_store?.name || `Store #${t.to_store_id}`
+  }`,
+  row: t,
+  columns: TRANSFER_LINES,
+  linesEmpty: "This transfer has no batch lines recorded.",
+  fields: (r) => [
+    { label: "Dispatched By", value: r.creator?.name },
+    { label: "Approved By", value: r.approved_by?.name },
+    { label: "Received At", value: r.received_at ? formatDateTime(r.received_at) : undefined },
+    { label: "Notes", value: r.notes },
+    { label: "Status", value: r.status },
+  ],
+  note: "Stock moves on goods receipt, which is recorded under Inventory → Inter-Store Transfers.",
+});
+
+const inspectReceipt = (p: any): InspectorRequest => ({
+  kind: "Customer Receipt",
+  heading: p.reference_no || `REC-${p.id}`,
+  subheading: `${formatDate(p.payment_date)} • ${p.store?.name || `Store #${p.store_id}`}`,
+  row: p,
+  fields: (r) => [
+    { label: "Customer", value: r.customer?.name || `Customer #${r.customer_id}` },
+    { label: "Phone", value: r.customer?.phone, mono: true },
+    { label: "Payment Mode", value: r.payment_mode },
+    { label: "Recorded By", value: r.creator?.name },
+    { label: "Notes", value: r.notes },
+  ],
+  totals: (r) => [{ label: "Amount Received", value: r.amount, money: true, strong: true, tone: "received" }],
+  note: "Money the customer paid in. What it settled against is listed in the customer ledger under Master Data.",
+});
+
+const inspectPayout = (sp: any): InspectorRequest => ({
+  kind: "Supplier Disbursement",
+  heading: sp.reference_no || `PAY-${sp.id}`,
+  subheading: `${formatDate(sp.payment_date)} • ${sp.store?.name || `Store #${sp.store_id}`}`,
+  row: sp,
+  fields: (r) => [
+    { label: "Supplier", value: r.supplier?.name || `Supplier #${r.supplier_id}` },
+    { label: "GSTIN", value: r.supplier?.gstin, mono: true },
+    { label: "Payment Mode", value: r.payment_mode },
+    { label: "Recorded By", value: r.creator?.name },
+    { label: "Notes", value: r.notes },
+  ],
+  totals: (r) => [{ label: "Amount Disbursed", value: r.amount, money: true, strong: true, tone: "credit" }],
+});
+
+const inspectExpense = (e: any): InspectorRequest => ({
+  kind: "Expense Voucher",
+  heading: e.expense_number || e.reference_no || `#${e.id}`,
+  subheading: `${formatDate(e.expense_date)} • ${e.store?.name || `Store #${e.store_id}`}`,
+  row: e,
+  fields: (r) => [
+    { label: "Expense Head", value: r.expense_head },
+    { label: "Payment Mode", value: r.payment_mode },
+    { label: "Reference", value: r.reference_no, mono: true },
+    { label: "Recorded By", value: r.creator?.name },
+    { label: "Notes", value: r.notes },
+  ],
+  totals: (r) => [{ label: "Amount", value: r.amount, money: true, strong: true, tone: "credit" }],
+});
 
 export const TransactionsPage: React.FC = () => {
   const { hasPermission, activeStore, role, isAllStores } = useAuth();
@@ -147,6 +452,7 @@ export const TransactionsPage: React.FC = () => {
 
   // Quotation / purchase-order editor + customer receipt
   const [docEditor, setDocEditor] = useState<{ kind: DocumentKind; doc: any | null } | null>(null);
+  const [inspector, setInspector] = useState<InspectorRequest | null>(null);
   const [isReceiptModalOpen, setIsReceiptModalOpen] = useState(false);
   const [actionFeedback, setActionFeedback] = useState<{ kind: "success" | "error"; message: string } | null>(null);
 
@@ -340,9 +646,28 @@ export const TransactionsPage: React.FC = () => {
         active_store_id: activeStore?.id,
       });
       setSuppliersList(res.data || []);
+      return res.data || [];
     } catch (e) {
       console.error("Failed to load suppliers:", e);
+      return [];
     }
+  };
+
+  // A purchase row pays the supplier it was billed under, so the row opens the same disbursement
+  // modal the header button does with that supplier already selected.
+  const openSupplierPaymentFor = async (supplierId: number | string, supplierName?: string) => {
+    if (!activeStore) {
+      setActionFeedback({ kind: "error", message: "Select a specific store before recording a supplier payment." });
+      return;
+    }
+    const list = await loadSuppliers();
+    if (!list.some((s) => String(s.id) === String(supplierId))) {
+      setSuppliersList((prev) => [...prev, { id: supplierId, name: supplierName || `Supplier #${supplierId}` }]);
+    }
+    setSupplierPayAmount("");
+    setSupplierPayAllocations(undefined);
+    setSupplierPaySupplierId(String(supplierId));
+    setIsSupplierPayModalOpen(true);
   };
 
   const handleCreateSupplierPayment = async (e: React.FormEvent) => {
@@ -883,30 +1208,23 @@ export const TransactionsPage: React.FC = () => {
                       </td>
                       <td className="px-4 py-3 text-right">
                         <div className="flex items-center justify-end gap-1.5">
-                          <button
-                            onClick={() => setSelectedInvoice(inv)}
-                            title="View / Reprint Invoice"
-                            className="p-1.5 text-slate-400 hover:text-brand-600 hover:bg-brand-50 dark:hover:bg-brand-950/40 rounded-lg"
-                          >
-                            <Printer className="w-3.5 h-3.5" />
-                          </button>
+                          <RowAction icon={Eye} title="View invoice details" onClick={() => setInspector(inspectInvoice(inv))} tone="brand" />
+                          <RowAction icon={Printer} title="View / Reprint Invoice" onClick={() => setSelectedInvoice(inv)} />
 
                           {(inv.status === "issued" || inv.status === "paid") && canIssueEditPin && (
                             <>
-                              <button
-                                onClick={() => openApprovalModal(inv)}
+                              <RowAction
+                                icon={KeyRound}
                                 title="Issue One-Time Edit/Cancel PIN"
-                                className="p-1.5 text-slate-400 hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-950/40 rounded-lg"
-                              >
-                                <KeyRound className="w-3.5 h-3.5" />
-                              </button>
-                              <button
-                                onClick={() => setCancelModalInvoice(inv)}
+                                onClick={() => openApprovalModal(inv)}
+                                tone="amber"
+                              />
+                              <RowAction
+                                icon={Ban}
                                 title="Cancel Invoice (Restores Stock & Adjusts Ledger)"
-                                className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/40 rounded-lg"
-                              >
-                                <Ban className="w-3.5 h-3.5" />
-                              </button>
+                                onClick={() => setCancelModalInvoice(inv)}
+                                tone="rose"
+                              />
                             </>
                           )}
                         </div>
@@ -957,12 +1275,13 @@ export const TransactionsPage: React.FC = () => {
                 <th className="px-4 py-3 text-right">Credit Amount</th>
                 <th className="px-4 py-3">Refund Mode</th>
                 <th className="px-4 py-3 text-center">Status</th>
+                <th className="px-4 py-3 text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
               {returnsList.length === 0 ? (
                 <tr>
-                  <td colSpan={isAllStores ? 7 : 6} className="px-4 py-8 text-center text-slate-400">
+                  <td colSpan={isAllStores ? 8 : 7} className="px-4 py-8 text-center text-slate-400">
                     No sales returns or credit notes recorded.
                   </td>
                 </tr>
@@ -986,6 +1305,12 @@ export const TransactionsPage: React.FC = () => {
                       <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-700">
                         {r.status || "issued"}
                       </span>
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      <div className="flex items-center justify-end gap-1.5">
+                        <RowAction icon={Eye} title="View credit note" onClick={() => setInspector(inspectCreditNote(r))} tone="brand" />
+                        <RowAction icon={Printer} title="Print credit note voucher" onClick={() => setSelectedInvoice(r as Invoice)} />
+                      </div>
                     </td>
                   </tr>
                 ))
@@ -1047,8 +1372,9 @@ export const TransactionsPage: React.FC = () => {
                         {(q.status || "issued") === "issued" ? "open quote" : q.status || "issued"}
                       </span>
                     </td>
-                    <td className="px-4 py-3">
+                    <td className="px-4 py-3 text-right">
                       <div className="flex items-center justify-end gap-1">
+                        <RowAction icon={Eye} title="View quotation" onClick={() => setInspector(inspectQuotation(q))} tone="brand" />
                         {hasPermission("transactions", "edit") && q.status !== "converted" && q.status !== "cancelled" && (
                           <>
                             <button
@@ -1098,12 +1424,13 @@ export const TransactionsPage: React.FC = () => {
                 <th className="px-4 py-3 text-right">Tax Total</th>
                 <th className="px-4 py-3 text-right">Grand Total</th>
                 <th className="px-4 py-3 text-center">Status</th>
+                <th className="px-4 py-3 text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
               {purchases.length === 0 ? (
                 <tr>
-                  <td colSpan={(isAllStores ? 8 : 7)} className="px-4 py-8 text-center text-slate-400">
+                  <td colSpan={(isAllStores ? 9 : 8)} className="px-4 py-8 text-center text-slate-400">
                     No inward purchase bills recorded.
                   </td>
                 </tr>
@@ -1137,6 +1464,19 @@ export const TransactionsPage: React.FC = () => {
                       {formatINR(p.grand_total)}
                     </td>
                     <td className="px-4 py-3 text-center capitalize font-semibold text-emerald-600">{p.status}</td>
+                    <td className="px-4 py-3 text-right">
+                      <div className="flex items-center justify-end gap-1.5">
+                        <RowAction icon={Eye} title="View purchase bill" onClick={() => setInspector(inspectPurchase(p))} tone="brand" />
+                        {p.supplier_id && activeStore && hasPermission("transactions", "create") && (
+                          <RowAction
+                            icon={CreditCard}
+                            title="Record a payment to this supplier"
+                            onClick={() => openSupplierPaymentFor(p.supplier_id, p.supplier_name)}
+                            tone="emerald"
+                          />
+                        )}
+                      </div>
+                    </td>
                   </tr>
                 ))
               )}
@@ -1156,12 +1496,13 @@ export const TransactionsPage: React.FC = () => {
                 <th className="px-4 py-3">Supplier Name</th>
                 <th className="px-4 py-3 text-right">Debit Total</th>
                 <th className="px-4 py-3 text-center">Status</th>
+                <th className="px-4 py-3 text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
               {purchaseReturnsList.length === 0 ? (
                 <tr>
-                  <td colSpan={isAllStores ? 5 : 4} className="px-4 py-8 text-center text-slate-400">
+                  <td colSpan={isAllStores ? 6 : 5} className="px-4 py-8 text-center text-slate-400">
                     No purchase return debit notes recorded.
                   </td>
                 </tr>
@@ -1180,6 +1521,9 @@ export const TransactionsPage: React.FC = () => {
                       {formatINR(pr.grand_total)}
                     </td>
                     <td className="px-4 py-3 text-center capitalize text-amber-600 font-semibold">{pr.status}</td>
+                    <td className="px-4 py-3 text-right">
+                      <RowAction icon={Eye} title="View debit note" onClick={() => setInspector(inspectDebitNote(pr))} tone="brand" />
+                    </td>
                   </tr>
                 ))
               )}
@@ -1246,8 +1590,9 @@ export const TransactionsPage: React.FC = () => {
                         {String(po.status || "pending").replace("_", " ")}
                       </span>
                     </td>
-                    <td className="px-4 py-3">
+                    <td className="px-4 py-3 text-right">
                       <div className="flex items-center justify-end gap-1">
+                        <RowAction icon={Eye} title="View purchase order" onClick={() => setInspector(inspectPurchaseOrder(po))} tone="brand" />
                         {hasPermission("transactions", "edit") &&
                           !["completed", "received", "cancelled"].includes(po.status) && (
                             <>
@@ -1296,12 +1641,13 @@ export const TransactionsPage: React.FC = () => {
                 <th className="px-4 py-3 text-center">Items</th>
                 <th className="px-4 py-3 text-right">Amount</th>
                 <th className="px-4 py-3 text-center">Status</th>
+                <th className="px-4 py-3 text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
               {heldBillsList.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-4 py-8 text-center text-slate-400">
+                  <td colSpan={7} className="px-4 py-8 text-center text-slate-400">
                     No held bills in parking buffer.
                   </td>
                 </tr>
@@ -1322,6 +1668,9 @@ export const TransactionsPage: React.FC = () => {
                       <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold capitalize bg-amber-100 text-amber-700">
                         {hb.status}
                       </span>
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      <RowAction icon={Eye} title="View held cart" onClick={() => setInspector(inspectHeldBill(hb))} tone="brand" />
                     </td>
                   </tr>
                 ))
@@ -1344,12 +1693,13 @@ export const TransactionsPage: React.FC = () => {
                 <th className="px-4 py-3 text-right">Digital Sales</th>
                 <th className="px-4 py-3 text-right">Closing Cash</th>
                 <th className="px-4 py-3 text-center">Shift Status</th>
+                <th className="px-4 py-3 text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
               {shiftsList.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-4 py-8 text-center text-slate-400">
+                  <td colSpan={8} className="px-4 py-8 text-center text-slate-400">
                     No counter shifts recorded.
                   </td>
                 </tr>
@@ -1376,6 +1726,9 @@ export const TransactionsPage: React.FC = () => {
                         {s.status}
                       </span>
                     </td>
+                    <td className="px-4 py-3 text-right">
+                      <RowAction icon={Eye} title="View shift & cash close" onClick={() => setInspector(inspectShift(s))} tone="brand" />
+                    </td>
                   </tr>
                 ))
               )}
@@ -1396,12 +1749,13 @@ export const TransactionsPage: React.FC = () => {
                 <th className="px-4 py-3 text-center">Items Count</th>
                 <th className="px-4 py-3 text-center">Status</th>
                 <th className="px-4 py-3">Date</th>
+                <th className="px-4 py-3 text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
               {transfers.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-4 py-8 text-center text-slate-400">
+                  <td colSpan={7} className="px-4 py-8 text-center text-slate-400">
                     No stock transfers recorded.
                   </td>
                 </tr>
@@ -1421,6 +1775,9 @@ export const TransactionsPage: React.FC = () => {
                       </span>
                     </td>
                     <td className="px-4 py-3 text-slate-400 text-[10px]">{formatDate(t.created_at)}</td>
+                    <td className="px-4 py-3 text-right">
+                      <RowAction icon={Eye} title="View transfer lines" onClick={() => setInspector(inspectTransfer(t))} tone="brand" />
+                    </td>
                   </tr>
                 ))
               )}
@@ -1454,19 +1811,19 @@ export const TransactionsPage: React.FC = () => {
                     <th className="px-4 py-3">Payment Mode</th>
                     <th className="px-4 py-3">Notes</th>
                     <th className="px-4 py-3 text-right">Amount</th>
-                    {activeStore && <th className="px-4 py-3 text-right">Actions</th>}
+                    <th className="px-4 py-3 text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                   {isLoading ? (
                     <tr>
-                      <td colSpan={activeStore ? 6 : 5} className="px-4 py-8 text-center text-slate-400">
+                      <td colSpan={6} className="px-4 py-8 text-center text-slate-400">
                         Loading expense vouchers...
                       </td>
                     </tr>
                   ) : expenses.length === 0 ? (
                     <tr>
-                      <td colSpan={activeStore ? 6 : 5} className="px-4 py-8 text-center text-slate-400">
+                      <td colSpan={6} className="px-4 py-8 text-center text-slate-400">
                         No expense vouchers recorded.
                       </td>
                     </tr>
@@ -1491,30 +1848,17 @@ export const TransactionsPage: React.FC = () => {
                         <td className="px-4 py-3 text-right font-mono font-bold text-red-600 dark:text-red-400">
                           {formatINR(e.amount)}
                         </td>
-                        {activeStore && (
-                          <td className="px-4 py-3 text-right">
-                            <div className="flex items-center justify-end gap-1">
-                              {hasPermission("transactions", "edit") && (
-                                <>
-                                  <button
-                                    onClick={() => openExpenseModal(e)}
-                                    className="p-1.5 text-slate-400 hover:text-brand-600 hover:bg-brand-50 dark:hover:bg-brand-950/40 rounded-lg transition"
-                                    title="Edit expense"
-                                  >
-                                    <Pencil className="w-3.5 h-3.5" />
-                                  </button>
-                                  <button
-                                    onClick={() => setExpenseDeleteTarget(e)}
-                                    className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/40 rounded-lg transition"
-                                    title="Delete expense"
-                                  >
-                                    <Trash2 className="w-3.5 h-3.5" />
-                                  </button>
-                                </>
-                              )}
-                            </div>
-                          </td>
-                        )}
+                        <td className="px-4 py-3 text-right">
+                          <div className="flex items-center justify-end gap-1">
+                            <RowAction icon={Eye} title="View expense voucher" onClick={() => setInspector(inspectExpense(e))} tone="brand" />
+                            {activeStore && hasPermission("transactions", "edit") && (
+                              <>
+                                <RowAction icon={Pencil} title="Edit expense" onClick={() => openExpenseModal(e)} tone="brand" />
+                                <RowAction icon={Trash2} title="Delete expense" onClick={() => setExpenseDeleteTarget(e)} tone="rose" />
+                              </>
+                            )}
+                          </div>
+                        </td>
                       </tr>
                     ))
                   )}
@@ -1559,12 +1903,13 @@ export const TransactionsPage: React.FC = () => {
                 <th className="px-4 py-3">Payment Mode</th>
                 <th className="px-4 py-3">Notes</th>
                 <th className="px-4 py-3 text-right">Amount Received</th>
+                <th className="px-4 py-3 text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
               {payments.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="px-4 py-8 text-center text-slate-400">
+                  <td colSpan={6} className="px-4 py-8 text-center text-slate-400">
                     No customer receipts recorded.
                   </td>
                 </tr>
@@ -1583,6 +1928,9 @@ export const TransactionsPage: React.FC = () => {
                     <td className="px-4 py-3 text-slate-400">{p.notes || "—"}</td>
                     <td className="px-4 py-3 text-right font-mono font-bold text-emerald-600 dark:text-emerald-400">
                       {formatINR(p.amount)}
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      <RowAction icon={Eye} title="View receipt voucher" onClick={() => setInspector(inspectReceipt(p))} tone="brand" />
                     </td>
                   </tr>
                 ))
@@ -1603,12 +1951,13 @@ export const TransactionsPage: React.FC = () => {
                 <th className="px-4 py-3">Payment Mode</th>
                 <th className="px-4 py-3">Notes</th>
                 <th className="px-4 py-3 text-right">Disbursed Amount</th>
+                <th className="px-4 py-3 text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
               {supplierPaymentsList.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="px-4 py-8 text-center text-slate-400">
+                  <td colSpan={6} className="px-4 py-8 text-center text-slate-400">
                     No supplier disbursements recorded.
                   </td>
                 </tr>
@@ -1627,6 +1976,9 @@ export const TransactionsPage: React.FC = () => {
                     <td className="px-4 py-3 text-slate-400">{sp.notes || "—"}</td>
                     <td className="px-4 py-3 text-right font-mono font-bold text-red-600 dark:text-red-400">
                       {formatINR(sp.amount)}
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      <RowAction icon={Eye} title="View disbursement voucher" onClick={() => setInspector(inspectPayout(sp))} tone="brand" />
                     </td>
                   </tr>
                 ))
@@ -1887,6 +2239,9 @@ export const TransactionsPage: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Row Inspector: the document behind any list row, read without leaving the table */}
+      {inspector && <RecordInspector {...inspector} onClose={() => setInspector(null)} />}
 
       {/* Invoice Thermal Reprint Modal */}
       {selectedInvoice && (
