@@ -1,5 +1,51 @@
 # Changelog
 
+## 2.2.0 — 2026-11-27
+
+Until now a document number was `PREFIX-` plus whatever integer the series was sitting on, and the only
+way a store could get `INV-0273` or `SR-00001/26` was to type the padding into the prefix — which broke
+every reader that had to take the number apart again. This is the Tally-style numbering: each series
+carries a suffix, a minimum digit width and a zero-fill switch, a store sets them once, and a counter may
+override them for one of its own series.
+
+1. **One formatting contract** — `frontend/src/lib/billing/documentNumberFormat.ts` is the single place a
+   number is built or taken apart, and `CounterSequenceService` mirrors it on the server. `width` is a
+   floor, never a ceiling: a serial that has grown past it keeps every digit, because 9999 with width 4
+   printing `9999` and the next bill printing a truncated `0000` would hand out a number the book already
+   holds. A series with no rule prints exactly what it printed before.
+2. **Store defaults ride the settings document** — `company_settings.sequences.numbering` holds one rule
+   per series (`invoice`, `sales_return`, `purchase_return`, `purchase`, `quotation`, `adjustment`,
+   `transfer`). No schema change: the column is already JSON, the admin panel already writes the whole
+   object, and `/api/settings` already echoes it, so a till picks the rules up with everything else.
+   `mergeNumberingRules` merges per series, because a panel that shows three series and writes
+   `sequences` back whole would otherwise clear the other four.
+3. **A counter can override its own series** — new nullable `counter_sequences.numbering` JSON column
+   (migration `2026_11_27_090001`), `NULL` meaning inherit the store default, and
+   `PUT /api/admin/counters/{id}/sequence` (rbac `devices:edit`) to set or clear it. The server resolves
+   the effective rule and ships it under the till's own key names (`suffix`, `serial_width`, `pad_zeros`)
+   in the claim manifest, the series manifest and a lease answer — a lease that returns numbers without
+   the rule they print under is how a padded series ends up with bare numbers in it.
+4. **Every reader goes through the rule** — the till's preview, generator and step-over, the sales-return,
+   purchase, purchase-return, debit-note and quotation generators, and the server's own
+   `ownSeriesPart`/`adopt`/`numberLiveDocument` parse the serial with the series' suffix in hand, so
+   `C01-SR-00001/26` is read as serial 1 rather than as `26` or nothing. `numberAlreadyFiled` compares the
+   padded and the bare spelling, so one serial cannot be filed twice under two spellings, and the
+   schedule-H register orders by the serial instead of the text, which filed 1000 before 999.
+5. **Both panels** — the till's Document Sequences tab is now a defaults table plus one card per series
+   (prefix, suffix, start, digits, zero-fill, the number it prints, and the counter series alongside),
+   refusing a width narrower than a serial already issued. The admin panel gets a Serial Rendering block
+   on Settings and a per-series override editor on the counter card, with the counter list showing each
+   counter's numbering.
+
+Verification: 20 new frontend tests across three files (the formatter, the counter series carrying a
+rule, and the store defaults driving preview/generate/sync) and 8 new backend feature tests (store
+default reaching two counters, counter override beating it, clearing it returning the series to the
+store, a lease echoing the rule, an offline padded number being adopted, and one serial not surviving
+two spellings). Gates: 1301 frontend tests, 110 admin-panel tests, both `tsc --noEmit` clean, 1305
+backend tests; the migration ran against the dev SQLite database. Not verified: the built desktop app
+was not launched, no MySQL server ran this migration (it is guarded by `Schema::hasColumn` and ships a
+`down()`), and the purchase-order series deliberately keeps its existing 4-digit spelling unchanged.
+
 ## 2.1.12 — 2026-11-27
 
 2.1.11 taught the till to ask the server for the documents it was missing, but asked as a stranger:

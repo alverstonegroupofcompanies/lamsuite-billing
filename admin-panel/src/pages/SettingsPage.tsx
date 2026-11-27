@@ -663,6 +663,90 @@ export const SettingsPage: React.FC = () => {
                   />
                 </div>
               </div>
+
+              {/* TALLY-01: how each series renders its serial. A counter that carries its own rule
+                  in counter_sequences.numbering prints that for its own bills instead. */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="block font-medium text-slate-700 dark:text-slate-300">Serial Rendering</label>
+                  <span className="text-[10px] text-slate-400">prefix + zero-filled serial + suffix</span>
+                </div>
+                <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-700">
+                  <table className="w-full text-[11px]">
+                    <thead className="bg-slate-50 dark:bg-slate-800 text-left text-slate-500">
+                      <tr>
+                        <th className="px-3 py-2 font-medium">Series</th>
+                        <th className="px-3 py-2 font-medium">Suffix</th>
+                        <th className="px-3 py-2 font-medium">Digits</th>
+                        <th className="px-3 py-2 font-medium">Pad zeros</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                      {[
+                        { key: "invoice", label: "Sales Invoice" },
+                        { key: "sales_return", label: "Sales Return" },
+                        { key: "purchase_return", label: "Purchase Return" },
+                        { key: "purchase", label: "Purchase Inward" },
+                        { key: "quotation", label: "Quotation" },
+                        { key: "adjustment", label: "Stock Adjustment" },
+                        { key: "transfer", label: "Stock Transfer" },
+                      ].map((series) => {
+                        const rule = settingsData.sequences?.numbering?.[series.key] || {};
+                        const patchRule = (patch: { suffix?: string; width?: number | null; pad?: boolean }) =>
+                          setSettingsData({
+                            ...settingsData,
+                            sequences: {
+                              ...settingsData.sequences,
+                              numbering: {
+                                ...(settingsData.sequences?.numbering || {}),
+                                [series.key]: { ...rule, ...patch },
+                              },
+                            },
+                          });
+
+                        return (
+                          <tr key={series.key}>
+                            <td className="px-3 py-2 text-slate-600 dark:text-slate-300">{series.label}</td>
+                            <td className="px-3 py-2">
+                              <input
+                                type="text"
+                                placeholder="none"
+                                value={rule.suffix ?? ""}
+                                onChange={(e) => patchRule({ suffix: e.target.value })}
+                                className="w-24 px-2 py-1 rounded-lg border border-slate-200 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                              />
+                            </td>
+                            <td className="px-3 py-2">
+                              <input
+                                type="number"
+                                min="1"
+                                max="20"
+                                placeholder="off"
+                                value={rule.width ?? ""}
+                                onChange={(e) => patchRule({ width: e.target.value === "" ? null : Number(e.target.value) })}
+                                className="w-20 px-2 py-1 rounded-lg border border-slate-200 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                              />
+                            </td>
+                            <td className="px-3 py-2">
+                              <input
+                                type="checkbox"
+                                checked={rule.pad === true || rule.padZeros === true}
+                                onChange={(e) => patchRule({ pad: e.target.checked })}
+                                className="mt-0.5 w-4 h-4 rounded border-slate-300 dark:border-slate-600"
+                              />
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+                <p className="mt-2 text-[10px] text-slate-400">
+                  Digits is a minimum: a serial that grows past it keeps every digit, so 9999 with width 4 prints 10000.
+                  Clearing a series leaves it printing the bare number, and bills already issued never change.
+                </p>
+              </div>
+
             </div>
 
             {/* Store Clock, Security & Inventory */}

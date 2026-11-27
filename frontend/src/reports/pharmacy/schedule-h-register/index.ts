@@ -1,5 +1,6 @@
 import type { ReportModule, ReportColumn, ReportFilterDef } from "../../types";
 import { sqliteStorage } from "../../../lib/db/sqliteStorage";
+import { parseSerialNumber } from "../../../lib/billing/documentNumberFormat";
 import type { InvoiceRecord, InvoiceItemRecord } from "../../../lib/billing/invoiceManagementService";
 
 /**
@@ -231,7 +232,14 @@ export const scheduleHReport: ReportModule<any, ScheduleHRow> = {
         inv.invoice_date <= dates.endDate
     );
 
-    filtered.sort((a, b) => a.invoice_date.localeCompare(b.invoice_date) || a.invoice_number.localeCompare(b.invoice_number));
+    // Same serial, different spelling: `INV-273` and `INV-0273` are one book number, so the register
+    // orders on the serial rather than the text, which would file 1000 before 999.
+    filtered.sort(
+      (a, b) =>
+        a.invoice_date.localeCompare(b.invoice_date) ||
+        (parseSerialNumber(a.invoice_number) ?? 0) - (parseSerialNumber(b.invoice_number) ?? 0) ||
+        a.invoice_number.localeCompare(b.invoice_number)
+    );
 
     const rows: ScheduleHRow[] = [];
 

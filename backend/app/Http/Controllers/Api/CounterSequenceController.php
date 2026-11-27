@@ -71,6 +71,11 @@ class CounterSequenceController
             'range_end' => $block['range_end'],
             'block_size' => $block['block_size'],
             'next_number' => $block['next_number'],
+            // TALLY-01: the till reads its lease off this object, so the rendering rule the numbers
+            // in it print under travels here too, not only inside `leased_block`.
+            'suffix' => $block['suffix'],
+            'serial_width' => $block['serial_width'],
+            'pad_zeros' => $block['pad_zeros'],
             'leased_block' => $block,
             'sequences' => $this->sequences->manifest($counter, $block['financial_year']),
             'message' => "Numbers {$block['range_start']}-{$block['range_end']} reserved for {$block['prefix']}.",

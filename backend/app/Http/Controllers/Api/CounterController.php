@@ -306,6 +306,10 @@ class CounterController
             ))],
             'financial_year' => 'nullable|string',
             'prefix' => 'nullable|string',
+            'numbering' => 'nullable|array',
+            'suffix' => 'nullable|string|max:16',
+            'serial_width' => 'nullable|integer|min:1|max:20',
+            'pad_zeros' => 'nullable|boolean',
             'range_start' => 'nullable|integer',
             'range_end' => 'nullable|integer',
             'next_number' => 'nullable|integer',
@@ -314,6 +318,24 @@ class CounterController
         ], [
             'doc_type.in' => 'The document series must be one of: ' . implode(', ', CounterSequenceService::docTypes()) . '.',
         ]);
+
+        // TALLY-01: a counter may render its serial its own way. Sending no numbering field at all
+        // leaves the series inheriting the store default; sending one that normalizes to nothing
+        // clears the override back to that inheritance.
+        $numberingSent = array_key_exists('numbering', $validated)
+            || array_key_exists('suffix', $validated)
+            || array_key_exists('serial_width', $validated)
+            || array_key_exists('pad_zeros', $validated);
+
+        $numbering = $numberingSent ? CounterSequenceService::normalizeNumbering(
+            is_array($validated['numbering'] ?? null)
+                ? $validated['numbering']
+                : [
+                    'suffix' => $validated['suffix'] ?? null,
+                    'width' => $validated['serial_width'] ?? null,
+                    'pad' => $validated['pad_zeros'] ?? null,
+                ]
+        ) : null;
 
         $fy = $validated['financial_year'] ?? $service->currentFinancialYear();
         $docType = CounterSequenceService::normalizeDocType($validated['doc_type']);
@@ -336,6 +358,11 @@ class CounterController
                 $block['prefix'] = $validated['prefix'];
             }
 
+            if ($numberingSent && $sequence) {
+                $sequence->update(['numbering' => $numbering]);
+                $block = array_merge($block, $service->ruleFields($sequence->fresh()));
+            }
+
             return response()->json([
                 'success' => true,
                 'counter_id' => (int) $counter->id,
@@ -354,6 +381,10 @@ class CounterController
             'range_end' => $validated['range_end'] ?? null,
             'next_number' => $validated['next_number'] ?? null,
         ], fn ($v) => $v !== null));
+
+        if ($numberingSent) {
+            $sequence->update(['numbering' => $numbering]);
+        }
 
         return response()->json([
             'success' => true,

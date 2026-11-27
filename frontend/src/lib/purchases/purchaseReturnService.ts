@@ -4,6 +4,7 @@ import { partiesStore, type Supplier } from "../masters/partiesStore";
 import { syncQueueService } from "../sync/syncQueueService";
 import { companySettingsService } from "../settings/companySettingsService";
 import { round2 } from "../billing/billingCalculations";
+import { formatDocumentNumber, nextSerialAfter, numberingFor } from "../billing/documentNumberFormat";
 import { serverTimeToEpoch } from "../dateTimeUtils";
 import { onlineTransactionService } from "../sync/onlineTransactionService";
 import { storeRegistryService } from "../auth/storeRegistryService";
@@ -113,24 +114,13 @@ export class PurchaseReturnService {
    */
   async generateNextReturnNumber(): Promise<string> {
     const settings = await companySettingsService.loadSettings();
-    let prefix = settings.sequences?.purchaseReturnPrefix || "PR";
-    prefix = prefix.replace(/-+$/, "");
-    let nextNum = settings.sequences?.nextPurchaseReturnNumber || 1;
+    const { prefix, searchPrefix, next, rule } = numberingFor(settings.sequences, "purchase_return");
 
     const allReturns = await sqliteStorage.findAll<PurchaseReturnRecord>("purchase_returns");
-    const searchPrefix = `${prefix}-`;
     const matching = allReturns.filter((r) => r.return_number.startsWith(searchPrefix));
+    const nextNum = nextSerialAfter(next, matching.map((r) => r.return_number), rule);
 
-    for (const ret of matching) {
-      const parts = ret.return_number.split("-");
-      const lastPart = parts[parts.length - 1];
-      const parsed = parseInt(lastPart, 10);
-      if (!isNaN(parsed) && parsed >= nextNum) {
-        nextNum = parsed + 1;
-      }
-    }
-
-    const docNumber = `${prefix}-${nextNum}`;
+    const docNumber = formatDocumentNumber({ ...rule, prefix }, nextNum);
 
     await companySettingsService.saveLocalSettings(
       {

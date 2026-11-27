@@ -173,6 +173,11 @@ class CounterSequenceLeaseTest extends TestCase
             $this->assertSame(1001, $row['next_number']);
             $this->assertSame($counter->id, $row['counter_id']);
             $this->assertNull($row['range_end'], 'nothing is leased until a till asks');
+            // TALLY-01: a store that never set a numbering rule ships one that says so.
+            $this->assertArrayHasKey('suffix', $row);
+            $this->assertNull($row['suffix']);
+            $this->assertNull($row['serial_width']);
+            $this->assertFalse($row['pad_zeros']);
         }
     }
 

@@ -5,6 +5,7 @@ import { syncQueueService } from "../sync/syncQueueService";
 import { companySettingsService } from "../settings/companySettingsService";
 import { storeToday } from "../dateTimeUtils";
 import { round2 } from "./billingCalculations";
+import { formatDocumentNumber, nextSerialAfter, numberingFor } from "./documentNumberFormat";
 import { calculateDocumentTaxes } from "../tax-engine/taxEngine";
 import { documentPlaceOfSupply } from "../gst/stateCodes";
 import type { InvoiceRecord, InvoiceItemRecord } from "../reports/reportEngine";
@@ -319,23 +320,13 @@ export class CustomerDebitNoteService {
    */
   async generateNextCreditNoteNumber(): Promise<string> {
     const settings = await companySettingsService.loadSettings();
-    let prefix = settings.sequences?.returnPrefix || "SR";
-    prefix = prefix.replace(/-+$/, "");
-    let nextNum = settings.sequences?.nextReturnNumber || 1;
+    const { prefix, searchPrefix, next, rule } = numberingFor(settings.sequences, "sales_return");
 
     const allCNs = await sqliteStorage.findAll<CreditNoteRecord>("credit_notes");
-    const searchPrefix = `${prefix}-`;
     const matching = allCNs.filter((cn) => cn.credit_note_number?.startsWith(searchPrefix));
+    const nextNum = nextSerialAfter(next, matching.map((cn) => cn.credit_note_number), rule);
 
-    for (const cn of matching) {
-      const parts = cn.credit_note_number.split("-");
-      const lastPart = parseInt(parts[parts.length - 1], 10);
-      if (!isNaN(lastPart) && lastPart >= nextNum) {
-        nextNum = lastPart + 1;
-      }
-    }
-
-    const docNumber = `${prefix}-${nextNum}`;
+    const docNumber = formatDocumentNumber({ ...rule, prefix }, nextNum);
 
     await companySettingsService.saveLocalSettings(
       {

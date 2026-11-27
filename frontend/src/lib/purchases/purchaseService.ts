@@ -5,6 +5,12 @@ import { purchaseOrderService } from "./purchaseOrderService";
 import { companySettingsService } from "../settings/companySettingsService";
 import { counterSequenceService } from "../auth/counterSequenceService";
 import { round2 } from "../billing/billingCalculations";
+import {
+  formatDocumentNumber,
+  nextSerialAfter,
+  numberingFor,
+  parseSerialNumber,
+} from "../billing/documentNumberFormat";
 import { getIndianFinancialYear } from "../billing/salesReturnService";
 import { syncQueueService } from "../sync/syncQueueService";
 import { onlineTransactionService } from "../sync/onlineTransactionService";
@@ -207,23 +213,13 @@ export class PurchaseService {
     if (counterNumber) return counterNumber;
 
     const settings = await companySettingsService.loadSettings();
-    let prefix = settings.sequences?.purchasePrefix || "PUR";
-    prefix = prefix.replace(/-+$/, "");
-    let nextNum = settings.sequences?.nextPurchaseNumber || 201;
+    const { prefix, searchPrefix, next, rule } = numberingFor(settings.sequences, "purchase");
 
     const allPurchases = await sqliteStorage.findAll<any>("purchase_documents");
-    const searchPrefix = `${prefix}-`;
     const matching = allPurchases.filter((p) => p.purchase_number?.startsWith(searchPrefix));
+    const nextNum = nextSerialAfter(next, matching.map((p) => p.purchase_number), rule);
 
-    for (const p of matching) {
-      const parts = p.purchase_number.split("-");
-      const last = parseInt(parts[parts.length - 1], 10);
-      if (!isNaN(last) && last >= nextNum) {
-        nextNum = last + 1;
-      }
-    }
-
-    return `${prefix}-${nextNum}`;
+    return formatDocumentNumber({ ...rule, prefix }, nextNum);
   }
 
   /**
@@ -234,23 +230,13 @@ export class PurchaseService {
     if (counterNumber) return counterNumber;
 
     const settings = await companySettingsService.loadSettings();
-    let prefix = settings.sequences?.purchasePrefix || "PUR";
-    prefix = prefix.replace(/-+$/, "");
-    let nextNum = settings.sequences?.nextPurchaseNumber || 201;
+    const { prefix, searchPrefix, next, rule } = numberingFor(settings.sequences, "purchase");
 
     const allPurchases = await sqliteStorage.findAll<any>("purchase_documents");
-    const searchPrefix = `${prefix}-`;
     const matching = allPurchases.filter((p) => p.purchase_number?.startsWith(searchPrefix));
+    const nextNum = nextSerialAfter(next, matching.map((p) => p.purchase_number), rule);
 
-    for (const p of matching) {
-      const parts = p.purchase_number.split("-");
-      const last = parseInt(parts[parts.length - 1], 10);
-      if (!isNaN(last) && last >= nextNum) {
-        nextNum = last + 1;
-      }
-    }
-
-    const docNumber = `${prefix}-${nextNum}`;
+    const docNumber = formatDocumentNumber({ ...rule, prefix }, nextNum);
 
     await companySettingsService.saveLocalSettings(
       {
@@ -266,10 +252,10 @@ export class PurchaseService {
 
   async syncNextPurchaseSequence(purchaseNumber: string): Promise<void> {
     if (!purchaseNumber) return;
-    const parts = purchaseNumber.split("-");
-    const lastNum = parseInt(parts[parts.length - 1], 10);
-    if (isNaN(lastNum)) return;
     const settings = await companySettingsService.loadSettings();
+    const { rule } = numberingFor(settings.sequences, "purchase");
+    const lastNum = parseSerialNumber(purchaseNumber, rule.suffix);
+    if (lastNum === null) return;
     const currNext = settings.sequences?.nextPurchaseNumber || 201;
     if (lastNum >= currNext) {
       await companySettingsService.saveLocalSettings(

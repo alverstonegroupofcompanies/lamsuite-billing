@@ -80,6 +80,8 @@ export interface CounterItem {
     financial_year: string;
     prefix: string;
     next_number: number;
+    /** This counter's own rendering rule; null means the series follows the store default. */
+    numbering?: { suffix?: string | null; width?: number | null; pad?: boolean } | null;
   }>;
 }
 
@@ -104,6 +106,9 @@ export const DevicesPage: React.FC = () => {
   const [renameForm, setRenameForm] = useState({ device_name: "", counter_name: "" });
 
   const [selectedCounter, setSelectedCounter] = useState<CounterItem | null>(null);
+  /** Draft of each series' counter-level rendering rule, keyed by sequence id. */
+  const [numberingDraft, setNumberingDraft] = useState<Record<string, { suffix: string; width: string; pad: boolean }>>({});
+  const [isSavingNumbering, setIsSavingNumbering] = useState<string | null>(null);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
   const [isSavingSettings, setIsSavingSettings] = useState(false);
   const [settingsForm, setSettingsForm] = useState({
@@ -269,6 +274,18 @@ export const DevicesPage: React.FC = () => {
       require_manager_pin: Boolean(c.role_profile?.require_manager_pin),
       printer_type: c.printer_profile?.type || "thermal_80mm",
     });
+    setNumberingDraft(
+      Object.fromEntries(
+        (c.sequences || []).map((s) => [
+          String(s.id),
+          {
+            suffix: s.numbering?.suffix ?? "",
+            width: s.numbering?.width == null ? "" : String(s.numbering.width),
+            pad: s.numbering?.pad === true,
+          },
+        ])
+      )
+    );
     setIsSettingsModalOpen(true);
   };
 
@@ -297,6 +314,46 @@ export const DevicesPage: React.FC = () => {
       alert(err?.message || "Failed to update settings.");
     } finally {
       setIsSavingSettings(false);
+    }
+  };
+
+  /**
+   * TALLY-01: the rule this counter renders one series with. An untouched series keeps inheriting the
+   * store default; a saved one prints its own bills from then on — bills already issued keep numbers.
+   */
+  const saveNumbering = async (sequence: NonNullable<CounterItem["sequences"]>[number]) => {
+    if (!selectedCounter) return;
+    const draft = numberingDraft[String(sequence.id)] || { suffix: "", width: "", pad: false };
+    const key = String(sequence.id);
+
+    setIsSavingNumbering(key);
+    try {
+      await api.put(`/admin/counters/${selectedCounter.id}/sequence`, {
+        doc_type: sequence.doc_type,
+        financial_year: sequence.financial_year,
+        suffix: draft.suffix.trim(),
+        serial_width: draft.width === "" ? null : Number(draft.width),
+        pad_zeros: draft.pad,
+      });
+
+      const res = await api.get<{ success: boolean; counters: CounterItem[] }>("/admin/counters");
+      setCounters(res.counters || []);
+      const latest = (res.counters || [])
+        .find((c) => c.id === selectedCounter.id)
+        ?.sequences?.find((s) => s.id === sequence.id);
+
+      if (latest) {
+        setSelectedCounter({
+          ...selectedCounter,
+          sequences: (selectedCounter.sequences || []).map((s) => (s.id === sequence.id ? latest : s)),
+        });
+      }
+
+      alert(`Numbering saved for ${sequence.prefix}.`);
+    } catch (err: any) {
+      alert(err?.message || "Failed to update numbering.");
+    } finally {
+      setIsSavingNumbering(null);
     }
   };
 
@@ -1002,22 +1059,72 @@ export const DevicesPage: React.FC = () => {
                 </div>
               </div>
 
-              {/* Sequence Info (Read-Only) */}
+              {/* TALLY-01: the counter's own serial rule, series by series */}
               {selectedCounter.sequences && selectedCounter.sequences.length > 0 && (
                 <div className="pt-2 border-t border-slate-100 dark:border-slate-800">
                   <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
-                    Assigned Document Number Series
+                    Counter Numbering Overrides
                   </label>
-                  <div className="flex flex-wrap gap-1.5">
-                    {selectedCounter.sequences.map((s) => (
-                      <span
-                        key={s.id}
-                        className="inline-flex items-center gap-1 font-mono text-[10px] bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 px-2 py-0.5 rounded-lg border border-slate-200 dark:border-slate-700"
-                      >
-                        <span className="font-semibold text-slate-500 capitalize">{s.doc_type}:</span>
-                        <span>{s.prefix}-{s.next_number}</span>
-                      </span>
-                    ))}
+                  <p className="text-[10px] text-slate-400 mb-2">
+                    A series with no suffix and no digit width follows the store's numbering default. Bills already
+                    issued keep their numbers; the rule applies from the next bill this counter prints.
+                  </p>
+                  <div className="space-y-1.5">
+                    {selectedCounter.sequences.map((s) => {
+                      const key = String(s.id);
+                      const draft = numberingDraft[key] || {
+                        suffix: s.numbering?.suffix ?? "",
+                        width: s.numbering?.width == null ? "" : String(s.numbering.width),
+                        pad: s.numbering?.pad === true,
+                      };
+                      const setDraft = (patch: { suffix?: string; width?: string; pad?: boolean }) =>
+                        setNumberingDraft({ ...numberingDraft, [key]: { ...draft, ...patch } });
+
+                      return (
+                        <div key={s.id} className="flex flex-wrap items-center gap-2 text-[11px]">
+                          <span className="inline-flex w-40 shrink-0 items-center gap-1 font-mono text-[10px] bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 px-2 py-0.5 rounded-lg border border-slate-200 dark:border-slate-700">
+                            <span className="font-semibold text-slate-500 capitalize">{s.doc_type}</span>
+                            <span>{s.prefix}-{s.next_number}</span>
+                          </span>
+                          <input
+                            type="text"
+                            placeholder="suffix"
+                            value={draft.suffix}
+                            onChange={(e) => setDraft({ suffix: e.target.value })}
+                            className="w-20 px-2 py-1 rounded-lg border border-slate-200 dark:border-slate-700 dark:bg-slate-800 dark:text-white font-mono"
+                          />
+                          <input
+                            type="number"
+                            min="1"
+                            max="20"
+                            placeholder="digits"
+                            value={draft.width}
+                            onChange={(e) => setDraft({ width: e.target.value })}
+                            className="w-20 px-2 py-1 rounded-lg border border-slate-200 dark:border-slate-700 dark:bg-slate-800 dark:text-white font-mono"
+                          />
+                          <label className="flex items-center gap-1 text-slate-600 dark:text-slate-300">
+                            <input
+                              type="checkbox"
+                              checked={draft.pad}
+                              onChange={(e) => setDraft({ pad: e.target.checked })}
+                              className="w-4 h-4 rounded border-slate-300 dark:border-slate-600"
+                            />
+                            pad
+                          </label>
+                          <button
+                            type="button"
+                            onClick={() => saveNumbering(s)}
+                            disabled={isSavingNumbering === key}
+                            className="px-2 py-1 text-[10px] font-semibold rounded-lg border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-50 cursor-pointer"
+                          >
+                            {isSavingNumbering === key ? "Saving..." : "Save"}
+                          </button>
+                          <span className="text-[10px] text-slate-400">
+                            {s.numbering ? "own rule" : "store default"}
+                          </span>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               )}

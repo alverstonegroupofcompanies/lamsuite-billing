@@ -1,4 +1,5 @@
 import { sqliteStorage } from "../db/sqliteStorage";
+import { formatDocumentNumber, parseSerialNumber, type NumberingRule } from "../billing/documentNumberFormat";
 
 /** The series every counter holds, with the tail its prefix ends in. */
 export const DOC_TAILS = {
@@ -49,7 +50,20 @@ export interface CounterSequence {
   next_number: number;
   range_start?: number | null;
   range_end?: number | null;
+  /**
+   * How this counter renders its serial, resolved by the server from the counter's own override and
+   * the store default. Absent on a series from a server that predates numbering rules, which prints
+   * the bare number as it always did.
+   */
+  suffix?: string | null;
+  serial_width?: number | null;
+  pad_zeros?: boolean;
   updated_at: number;
+}
+
+/** The rule a series prints with, read off its own row. */
+export function numberingRuleOf(seq: Pick<CounterSequence, "prefix" | "suffix" | "serial_width" | "pad_zeros">): NumberingRule & { prefix: string } {
+  return { prefix: seq.prefix, suffix: seq.suffix, width: seq.serial_width, padZeros: seq.pad_zeros };
 }
 
 export interface SequenceManifestItem {
@@ -60,6 +74,9 @@ export interface SequenceManifestItem {
   next_number: number;
   range_start?: number | null;
   range_end?: number | null;
+  suffix?: string | null;
+  serial_width?: number | null;
+  pad_zeros?: boolean;
 }
 
 export interface SequenceManifest {
@@ -80,6 +97,9 @@ export interface LeasedBlock {
   range_end: number;
   block_size?: number;
   next_number: number;
+  suffix?: string | null;
+  serial_width?: number | null;
+  pad_zeros?: boolean;
 }
 
 export interface ActiveCounter {
@@ -193,6 +213,9 @@ export class CounterSequenceService {
         next_number: nextNumber,
         range_start: hasRemoteRange ? item.range_start : (local?.range_start ?? null),
         range_end: hasRemoteRange ? item.range_end : (local?.range_end ?? null),
+        suffix: item.suffix ?? local?.suffix ?? null,
+        serial_width: item.serial_width ?? local?.serial_width ?? null,
+        pad_zeros: item.pad_zeros ?? local?.pad_zeros ?? false,
         updated_at: Date.now(),
       };
 
@@ -227,7 +250,7 @@ export class CounterSequenceService {
     const fy = customFy || this.active?.financialYear || this.getCurrentFinancialYear();
     const seq = this.mirror.get(`${counterId}_${canonical}_${fy}`);
 
-    return seq ? `${seq.prefix}-${seq.next_number}` : null;
+    return seq ? formatDocumentNumber(numberingRuleOf(seq), seq.next_number) : null;
   }
 
   async getNextDocumentNumber(
@@ -257,6 +280,9 @@ export class CounterSequenceService {
         next_number: 1001,
         range_start: null,
         range_end: null,
+        suffix: null,
+        serial_width: null,
+        pad_zeros: false,
         updated_at: Date.now(),
       };
     }
@@ -271,7 +297,7 @@ export class CounterSequenceService {
       );
     }
 
-    const formattedNumber = `${seq.prefix}-${currentNumber}`;
+    const formattedNumber = formatDocumentNumber(numberingRuleOf(seq), currentNumber);
 
     seq = { ...seq, id: seqId, doc_type: canonical, next_number: currentNumber + 1, updated_at: Date.now() };
     await sqliteStorage.insertRecord("counter_sequences", seqId, seq as unknown as Record<string, unknown>);
@@ -333,6 +359,9 @@ export class CounterSequenceService {
       next_number: local ? Math.max(Number(local.next_number), blockNext) : blockNext,
       range_start: Number(block.range_start),
       range_end: Number(block.range_end),
+      suffix: block.suffix ?? local?.suffix ?? null,
+      serial_width: block.serial_width ?? local?.serial_width ?? null,
+      pad_zeros: block.pad_zeros ?? local?.pad_zeros ?? false,
       updated_at: Date.now(),
     };
 
@@ -471,22 +500,36 @@ export class CounterSequenceService {
   async stepOverForActiveCounter(number: string): Promise<void> {
     if (!this.active || !number) return;
 
-    const parts = String(number).trim().toUpperCase().split("-");
-    if (parts.length < 3 || parts[0] !== this.active.counterCode) return;
-
-    const docType = (Object.entries(DOC_TAILS) as [DocType, string][]).find(
-      ([, tail]) => tail === parts[parts.length - 2]
-    )?.[0];
-    const part = Number(parts[parts.length - 1]);
-    if (!docType || !Number.isFinite(part)) return;
+    const text = String(number).trim().toUpperCase();
+    const docType = await this.seriesOwning(text);
+    if (!docType) return;
 
     const seq = await this.getSequence(this.active.counterId, docType, this.active.financialYear);
-    if (!seq || part < seq.next_number) return;
+    if (!seq) return;
+
+    // The serial is read back through the series' own rule: `C01-SR-00001/26` carries neither a
+    // bare integer nor a last dash-segment, and reading it wrong leaves the cursor behind.
+    const part = parseSerialNumber(text, seq.suffix);
+    if (part === null || part < seq.next_number) return;
 
     seq.next_number = part + 1;
     seq.updated_at = Date.now();
     await sqliteStorage.insertRecord("counter_sequences", seq.id, seq as unknown as Record<string, unknown>);
     this.mirror.set(seq.id, seq);
+  }
+
+  /** Which of the active counter's series prints a given number, judged by the prefix that series actually uses. */
+  private async seriesOwning(text: string): Promise<DocType | null> {
+    if (!this.active) return null;
+
+    for (const docType of this.docTypes) {
+      const key = `${this.active.counterId}_${docType}_${this.active.financialYear}`;
+      const seq = this.mirror.get(key) ?? (await this.getSequence(this.active.counterId, docType, this.active.financialYear));
+      const prefix = String(seq?.prefix || this.getDefaultPrefix(this.active.counterCode, docType)).toUpperCase();
+      if (text.startsWith(`${prefix}-`)) return docType;
+    }
+
+    return null;
   }
 }
 

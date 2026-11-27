@@ -88,6 +88,7 @@ import { autoUpdateService, type UpdateInfo } from "../lib/settings/autoUpdateSe
 import { APP_FULL_VERSION } from "../config/version";
 import { UpdateNotificationModal } from "../components/UpdateNotificationModal";
 import { SoftwareUpdatesTab } from "../components/settings/SoftwareUpdatesTab";
+import { DocumentSequencesTab } from "../components/settings/DocumentSequencesTab";
 import { storeRegistryService } from "../lib/auth/storeRegistryService";
 import { StaffManagementPanel } from "../components/settings/StaffManagementPanel";
 
@@ -2180,172 +2181,10 @@ export const SettingsPage: React.FC = () => {
 
           {/* TAB 3: Document Sequences */}
           {activeTab === "sequences" && (
-            <div className="max-w-2xl space-y-6">
-              <div>
-                <h2 className="text-sm font-bold text-slate-800">Document Prefix & Sequential Numbering</h2>
-                <p className="text-xs text-slate-500">Configure separate auto-incrementing serial prefixes for each transaction type.</p>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div className="rounded-lg border border-slate-200 p-3 bg-slate-50/50">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-slate-800">Sales Invoices</span>
-                    <span className="rounded bg-blue-100 px-2 py-0.5 font-mono text-[11px] font-bold text-blue-700">
-                      {(settings.sequences?.invoicePrefix || "INV")}-{settings.sequences?.nextInvoiceNumber || 1001}
-                    </span>
-                  </div>
-                  <div className="grid grid-cols-2 gap-2 mt-2">
-                    <div>
-                      <span className="text-[10px] text-slate-500">Prefix</span>
-                      <input
-                        type="text"
-                        value={settings.sequences?.invoicePrefix || "INV"}
-                        onChange={(e) =>
-                          setSettings({
-                            ...settings,
-                            invoice_prefix: e.target.value,
-                            sequences: { ...settings.sequences, invoicePrefix: e.target.value },
-                          })
-                        }
-                        className="mt-0.5 w-full rounded border border-slate-300 bg-white p-1.5 text-xs font-mono uppercase"
-                      />
-                    </div>
-                    <div>
-                      <span className="text-[10px] text-slate-500">Next Number</span>
-                      <input
-                        type="number"
-                        value={settings.sequences?.nextInvoiceNumber || 1001}
-                        onChange={(e) =>
-                          setSettings({
-                            ...settings,
-                            next_invoice_number: Number(e.target.value),
-                            sequences: { ...settings.sequences, nextInvoiceNumber: Number(e.target.value) },
-                          })
-                        }
-                        className="mt-0.5 w-full rounded border border-slate-300 bg-white p-1.5 text-xs font-mono"
-                      />
-                    </div>
-                  </div>
-                </div>
-
-                <div className="rounded-lg border border-slate-200 p-3 bg-slate-50/50">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-slate-800">Sales Returns / Credit Notes</span>
-                    <span className="rounded-full bg-accent-soft px-2 py-0.5 font-mono text-[11px] font-bold text-accent">
-                      {(settings.sequences?.returnPrefix || "SR")}-{settings.sequences?.nextReturnNumber || 1}
-                    </span>
-                  </div>
-                  <div className="grid grid-cols-2 gap-2 mt-2">
-                    <div>
-                      <span className="text-[10px] text-slate-500">Prefix</span>
-                      <input
-                        type="text"
-                        value={settings.sequences?.returnPrefix || "SR"}
-                        onChange={(e) =>
-                          setSettings({
-                            ...settings,
-                            sequences: { ...settings.sequences, returnPrefix: e.target.value },
-                          })
-                        }
-                        className="mt-0.5 w-full rounded border border-slate-300 bg-white p-1.5 text-xs font-mono uppercase"
-                      />
-                    </div>
-                    <div>
-                      <span className="text-[10px] text-slate-500">Next Number</span>
-                      <input
-                        type="number"
-                        value={settings.sequences?.nextReturnNumber || 1}
-                        onChange={(e) =>
-                          setSettings({
-                            ...settings,
-                            sequences: { ...settings.sequences, nextReturnNumber: Number(e.target.value) },
-                          })
-                        }
-                        className="mt-0.5 w-full rounded border border-slate-300 bg-white p-1.5 text-xs font-mono"
-                      />
-                    </div>
-                  </div>
-                </div>
-
-                <div className="rounded-lg border border-slate-200 p-3 bg-slate-50/50">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-slate-800">Purchase Inwards</span>
-                    <span className="rounded bg-emerald-100 px-2 py-0.5 font-mono text-[11px] font-bold text-emerald-700">
-                      {(settings.sequences?.purchasePrefix || "PUR")}-{settings.sequences?.nextPurchaseNumber || 201}
-                    </span>
-                  </div>
-                  <div className="grid grid-cols-2 gap-2 mt-2">
-                    <div>
-                      <span className="text-[10px] text-slate-500">Prefix</span>
-                      <input
-                        type="text"
-                        value={settings.sequences?.purchasePrefix || "PUR"}
-                        onChange={(e) =>
-                          setSettings({
-                            ...settings,
-                            sequences: { ...settings.sequences, purchasePrefix: e.target.value },
-                          })
-                        }
-                        className="mt-0.5 w-full rounded border border-slate-300 bg-white p-1.5 text-xs font-mono uppercase"
-                      />
-                    </div>
-                    <div>
-                      <span className="text-[10px] text-slate-500">Next Number</span>
-                      <input
-                        type="number"
-                        value={settings.sequences?.nextPurchaseNumber || 201}
-                        onChange={(e) =>
-                          setSettings({
-                            ...settings,
-                            sequences: { ...settings.sequences, nextPurchaseNumber: Number(e.target.value) },
-                          })
-                        }
-                        className="mt-0.5 w-full rounded border border-slate-300 bg-white p-1.5 text-xs font-mono"
-                      />
-                    </div>
-                  </div>
-                </div>
-
-                <div className="rounded-lg border border-slate-200 p-3 bg-slate-50/50">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-slate-800">Estimates & Quotations</span>
-                    <span className="rounded bg-amber-100 px-2 py-0.5 font-mono text-[11px] font-bold text-amber-800">
-                      {(settings.sequences?.quotationPrefix || "QUO")}-{settings.sequences?.nextQuotationNumber || 101}
-                    </span>
-                  </div>
-                  <div className="grid grid-cols-2 gap-2 mt-2">
-                    <div>
-                      <span className="text-[10px] text-slate-500">Prefix</span>
-                      <input
-                        type="text"
-                        value={settings.sequences?.quotationPrefix || "QUO"}
-                        onChange={(e) =>
-                          setSettings({
-                            ...settings,
-                            sequences: { ...settings.sequences, quotationPrefix: e.target.value },
-                          })
-                        }
-                        className="mt-0.5 w-full rounded border border-slate-300 bg-white p-1.5 text-xs font-mono uppercase"
-                      />
-                    </div>
-                    <div>
-                      <span className="text-[10px] text-slate-500">Next Number</span>
-                      <input
-                        type="number"
-                        value={settings.sequences?.nextQuotationNumber || 101}
-                        onChange={(e) =>
-                          setSettings({
-                            ...settings,
-                            sequences: { ...settings.sequences, nextQuotationNumber: Number(e.target.value) },
-                          })
-                        }
-                        className="mt-0.5 w-full rounded border border-slate-300 bg-white p-1.5 text-xs font-mono"
-                      />
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
+            <DocumentSequencesTab
+              sequences={settings.sequences}
+              onChange={(sequences, legacy) => setSettings({ ...settings, ...legacy, sequences })}
+            />
           )}
 
           {/* TAB 4: Printing & Templates */}

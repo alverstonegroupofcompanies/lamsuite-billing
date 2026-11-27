@@ -1,5 +1,14 @@
 import { sqliteStorage } from "../db/sqliteStorage";
 import { counterSequenceService } from "../auth/counterSequenceService";
+import {
+  NUMBERING_SERIES,
+  formatDocumentNumber,
+  mergeNumberingRules,
+  parseSerialNumber,
+  readSeries,
+  type DocumentSeries,
+  type NumberingRule,
+} from "../billing/documentNumberFormat";
 import { getResolvedApiBaseUrl } from "../../config/env";
 
 const memoryFallbackStorage = new Map<string, string>();
@@ -85,6 +94,11 @@ export interface DocumentSequenceConfig {
   nextAdjustmentNumber: number;
   transferPrefix: string;
   nextTransferNumber: number;
+  /**
+   * How each series renders its serial — suffix, minimum digit width, zero fill. A series missing
+   * here prints `PREFIX-N` as it always did; the counter series overrides these per counter.
+   */
+  numbering?: Partial<Record<DocumentSeries, NumberingRule>>;
 }
 
 export interface PrintingConfig {
@@ -1591,6 +1605,12 @@ export class CompanySettingsService {
         Number(this.currentSettings.sequences?.nextTransferNumber || 501),
         Number(sequences.nextTransferNumber || sequences.next_transfer_number || 0)
       ),
+      // A panel rule wins for the series it configures; a series it never mentions keeps the rule
+      // this till saved, because `sequences` is written back whole.
+      numbering: mergeNumberingRules(
+        this.currentSettings.sequences?.numbering,
+        sequences.numbering || sequences.numbering_rules
+      ),
     };
 
     this.currentSettings = {
@@ -1696,16 +1716,19 @@ export class CompanySettingsService {
     return { ...this.currentSettings };
   }
 
+  /** The prefix, upcoming serial and rendering rule of one store series. */
+  getNumbering(series: DocumentSeries): { prefix: string; next: number; rule: NumberingRule } {
+    return readSeries(this.currentSettings.sequences, series);
+  }
+
   previewNextInvoiceNumber(): string {
     // CNT-014: a counter bills from its own series, so two counters of one
     // store never print the same invoice number.
     const counterNumber = counterSequenceService.previewForActive("invoice");
     if (counterNumber) return counterNumber;
 
-    const seq = this.currentSettings.sequences;
-    const prefix = seq?.invoicePrefix || this.currentSettings.invoice_prefix || "INV";
-    const currentNum = seq?.nextInvoiceNumber ?? this.currentSettings.next_invoice_number ?? 1001;
-    return `${prefix}-${currentNum}`;
+    const { prefix, next, rule } = readSeries(this.currentSettings.sequences, "invoice");
+    return formatDocumentNumber({ ...rule, prefix }, next);
   }
 
   async generateNextInvoiceNumber(): Promise<string> {
@@ -1714,17 +1737,16 @@ export class CompanySettingsService {
 
     await this.loadSettings();
     const seq = { ...this.currentSettings.sequences };
-    const prefix = seq.invoicePrefix || this.currentSettings.invoice_prefix || "INV";
-    const currentNum = seq.nextInvoiceNumber ?? this.currentSettings.next_invoice_number ?? 1001;
-    const invoiceNumber = `${prefix}-${currentNum}`;
+    const { prefix, next, rule } = readSeries(seq, "invoice");
+    const invoiceNumber = formatDocumentNumber({ ...rule, prefix }, next);
 
     // Increment and persist next number
     seq.invoicePrefix = prefix;
-    seq.nextInvoiceNumber = currentNum + 1;
+    seq.nextInvoiceNumber = next + 1;
     await this.saveLocalSettings(
       {
         invoice_prefix: prefix,
-        next_invoice_number: currentNum + 1,
+        next_invoice_number: next + 1,
         sequences: seq,
       });
     return invoiceNumber;
@@ -1734,37 +1756,35 @@ export class CompanySettingsService {
     if (!assignedInvoiceNumber) return;
     await counterSequenceService.stepOverForActiveCounter(assignedInvoiceNumber);
     await this.loadSettings();
-    const parts = assignedInvoiceNumber.split("-");
-    const lastPart = parseInt(parts[parts.length - 1], 10);
     const seq = { ...this.currentSettings.sequences };
+    const { next, rule } = readSeries(seq, "invoice");
     const currentNext = seq.nextInvoiceNumber ?? this.currentSettings.next_invoice_number ?? 1001;
-    if (!isNaN(lastPart) && lastPart >= currentNext) {
-      seq.nextInvoiceNumber = lastPart + 1;
+    const issued = parseSerialNumber(assignedInvoiceNumber, rule.suffix);
+    if (issued !== null && issued >= (Number(currentNext) || next)) {
+      seq.nextInvoiceNumber = issued + 1;
       await this.saveLocalSettings(
         {
-          next_invoice_number: lastPart + 1,
+          next_invoice_number: issued + 1,
           sequences: seq,
         });
     }
+  }
+
+  private seriesForType(
+    type: "return" | "purchase" | "quotation" | "adjustment" | "transfer"
+  ): DocumentSeries {
+    return type === "return" ? "sales_return" : type;
   }
 
   previewNextDocumentNumber(type: "return" | "purchase" | "quotation" | "adjustment" | "transfer"): string {
     const counterNumber = counterSequenceService.previewForActive(type);
     if (counterNumber) return counterNumber;
 
-    const seq = this.currentSettings.sequences;
-    if (type === "return") {
-      return `${seq?.returnPrefix || "SR"}-${seq?.nextReturnNumber || 1}`;
-    } else if (type === "purchase") {
-      return `${seq?.purchasePrefix || "PUR"}-${seq?.nextPurchaseNumber || 201}`;
-    } else if (type === "quotation") {
-      return `${seq?.quotationPrefix || "QUO"}-${seq?.nextQuotationNumber || 101}`;
-    } else if (type === "adjustment") {
-      return `${seq?.adjustmentPrefix || "ADJ"}-${seq?.nextAdjustmentNumber || 401}`;
-    } else if (type === "transfer") {
-      return `${seq?.transferPrefix || "TRF"}-${seq?.nextTransferNumber || 501}`;
-    }
-    return `DOC-1`;
+    const { prefix, next, rule } = readSeries(
+      this.currentSettings.sequences,
+      this.seriesForType(type)
+    );
+    return formatDocumentNumber({ ...rule, prefix }, next);
   }
 
   async generateNextDocumentNumber(type: "return" | "purchase" | "quotation" | "adjustment" | "transfer"): Promise<string> {
@@ -1772,35 +1792,13 @@ export class CompanySettingsService {
     if (counterNumber) return counterNumber;
 
     await this.loadSettings();
-    const seq = { ...this.currentSettings.sequences };
+    const seq = { ...this.currentSettings.sequences } as DocumentSequenceConfig & Record<string, any>;
+    const series = this.seriesForType(type);
+    const { prefix, next, rule } = readSeries(seq, series);
 
-    let prefix = "DOC";
-    let num = 1;
-
-    if (type === "return") {
-      prefix = seq.returnPrefix || "SR";
-      num = seq.nextReturnNumber || 1;
-      seq.nextReturnNumber = num + 1;
-    } else if (type === "purchase") {
-      prefix = seq.purchasePrefix || "PUR";
-      num = seq.nextPurchaseNumber || 201;
-      seq.nextPurchaseNumber = num + 1;
-    } else if (type === "quotation") {
-      prefix = seq.quotationPrefix || "QUO";
-      num = seq.nextQuotationNumber || 101;
-      seq.nextQuotationNumber = num + 1;
-    } else if (type === "adjustment") {
-      prefix = seq.adjustmentPrefix || "ADJ";
-      num = seq.nextAdjustmentNumber || 401;
-      seq.nextAdjustmentNumber = num + 1;
-    } else if (type === "transfer") {
-      prefix = seq.transferPrefix || "TRF";
-      num = seq.nextTransferNumber || 501;
-      seq.nextTransferNumber = num + 1;
-    }
-
-    await this.saveLocalSettings({ sequences: seq });
-    return `${prefix}-${num}`;
+    seq[NUMBERING_SERIES[series].nextKey] = next + 1;
+    await this.saveLocalSettings({ sequences: seq as DocumentSequenceConfig });
+    return formatDocumentNumber({ ...rule, prefix }, next);
   }
 
   async syncNextDocumentSequence(
@@ -1810,27 +1808,14 @@ export class CompanySettingsService {
     if (!assignedNumber) return;
     await counterSequenceService.stepOverForActiveCounter(assignedNumber);
     await this.loadSettings();
-    const parts = assignedNumber.split("-");
-    const lastPart = parseInt(parts[parts.length - 1], 10);
-    if (isNaN(lastPart)) return;
+    const seq = { ...this.currentSettings.sequences } as DocumentSequenceConfig & Record<string, any>;
+    const series = this.seriesForType(type);
+    const { next, rule } = readSeries(seq, series);
+    const issued = parseSerialNumber(assignedNumber, rule.suffix);
+    if (issued === null || issued < next) return;
 
-    const seq = { ...this.currentSettings.sequences };
-    if (type === "return" && lastPart >= (seq.nextReturnNumber || 1)) {
-      seq.nextReturnNumber = lastPart + 1;
-      await this.saveLocalSettings({ sequences: seq });
-    } else if (type === "purchase" && lastPart >= (seq.nextPurchaseNumber || 201)) {
-      seq.nextPurchaseNumber = lastPart + 1;
-      await this.saveLocalSettings({ sequences: seq });
-    } else if (type === "quotation" && lastPart >= (seq.nextQuotationNumber || 101)) {
-      seq.nextQuotationNumber = lastPart + 1;
-      await this.saveLocalSettings({ sequences: seq });
-    } else if (type === "adjustment" && lastPart >= (seq.nextAdjustmentNumber || 401)) {
-      seq.nextAdjustmentNumber = lastPart + 1;
-      await this.saveLocalSettings({ sequences: seq });
-    } else if (type === "transfer" && lastPart >= (seq.nextTransferNumber || 501)) {
-      seq.nextTransferNumber = lastPart + 1;
-      await this.saveLocalSettings({ sequences: seq });
-    }
+    seq[NUMBERING_SERIES[series].nextKey] = issued + 1;
+    await this.saveLocalSettings({ sequences: seq });
   }
 
   isMenuEnabled(menuKey: string): boolean {

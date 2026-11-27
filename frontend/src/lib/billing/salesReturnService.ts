@@ -9,6 +9,12 @@ import { onlineTransactionService } from "../sync/onlineTransactionService";
 import { storeRegistryService } from "../auth/storeRegistryService";
 import { storeDeviceService } from "../auth/storeDeviceService";
 import { round2 } from "./billingCalculations";
+import {
+  formatDocumentNumber,
+  nextSerialAfter,
+  numberingFor,
+  parseSerialNumber,
+} from "./documentNumberFormat";
 import { calculateDocumentTaxes } from "../tax-engine/taxEngine";
 import {
   returnKey,
@@ -168,24 +174,13 @@ export class SalesReturnService {
     if (counterNumber) return counterNumber;
 
     const settings = await companySettingsService.loadSettings();
-    let prefix = settings.sequences?.returnPrefix || "SR";
-    prefix = prefix.replace(/-+$/, "");
-    let nextNum = settings.sequences?.nextReturnNumber || 1;
+    const { prefix, searchPrefix, next, rule } = numberingFor(settings.sequences, "sales_return");
 
     const allReturns = await sqliteStorage.findAll<SalesReturnRecord>("sales_returns");
-    const searchPrefix = `${prefix}-`;
     const matching = allReturns.filter((r) => r.return_number?.startsWith(searchPrefix));
+    const nextNum = nextSerialAfter(next, matching.map((r) => r.return_number), rule);
 
-    for (const ret of matching) {
-      const parts = ret.return_number.split("-");
-      const lastPart = parts[parts.length - 1];
-      const parsed = parseInt(lastPart, 10);
-      if (!isNaN(parsed) && parsed >= nextNum) {
-        nextNum = parsed + 1;
-      }
-    }
-
-    return `${prefix}-${nextNum}`;
+    return formatDocumentNumber({ ...rule, prefix }, nextNum);
   }
 
   /**
@@ -196,24 +191,13 @@ export class SalesReturnService {
     if (counterNumber) return counterNumber;
 
     const settings = await companySettingsService.loadSettings();
-    let prefix = settings.sequences?.returnPrefix || "SR";
-    prefix = prefix.replace(/-+$/, "");
-    let nextNum = settings.sequences?.nextReturnNumber || 1;
+    const { prefix, searchPrefix, next, rule } = numberingFor(settings.sequences, "sales_return");
 
     const allReturns = await sqliteStorage.findAll<SalesReturnRecord>("sales_returns");
-    const searchPrefix = `${prefix}-`;
     const matching = allReturns.filter((r) => r.return_number?.startsWith(searchPrefix));
+    const nextNum = nextSerialAfter(next, matching.map((r) => r.return_number), rule);
 
-    for (const ret of matching) {
-      const parts = ret.return_number.split("-");
-      const lastPart = parts[parts.length - 1];
-      const parsed = parseInt(lastPart, 10);
-      if (!isNaN(parsed) && parsed >= nextNum) {
-        nextNum = parsed + 1;
-      }
-    }
-
-    const docNumber = `${prefix}-${nextNum}`;
+    const docNumber = formatDocumentNumber({ ...rule, prefix }, nextNum);
 
     await companySettingsService.saveLocalSettings(
       {
@@ -229,10 +213,10 @@ export class SalesReturnService {
 
   async syncNextReturnSequence(returnNumber: string): Promise<void> {
     if (!returnNumber) return;
-    const parts = returnNumber.split("-");
-    const lastNum = parseInt(parts[parts.length - 1], 10);
-    if (isNaN(lastNum)) return;
     const settings = await companySettingsService.loadSettings();
+    const { rule } = numberingFor(settings.sequences, "sales_return");
+    const lastNum = parseSerialNumber(returnNumber, rule.suffix);
+    if (lastNum === null) return;
     const currNext = settings.sequences?.nextReturnNumber || 1;
     if (lastNum >= currNext) {
       await companySettingsService.saveLocalSettings(

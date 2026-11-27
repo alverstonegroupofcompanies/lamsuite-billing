@@ -13,12 +13,14 @@ class CounterSequence extends Model
         'doc_type',
         'financial_year',
         'prefix',
+        'numbering',
         'range_start',
         'range_end',
         'next_number',
     ];
 
     protected $casts = [
+        'numbering' => 'array',
         'range_start' => 'integer',
         'range_end' => 'integer',
         'next_number' => 'integer',

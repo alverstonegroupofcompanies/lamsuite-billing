@@ -152,6 +152,57 @@ class AdminCounterController
     }
 
     /**
+     * TALLY-01: how one of this counter's series renders its serial. A series with no rule of its own
+     * inherits the store's numbering default, and clearing the rule here puts it back on inheritance.
+     */
+    public function updateSequence(Request $request, string $id, CounterSequenceService $sequences): JsonResponse
+    {
+        $counter = $this->findCounter($request, $id);
+
+        $validated = $request->validate([
+            'doc_type' => ['required', 'string'],
+            'financial_year' => 'nullable|string',
+            'suffix' => 'nullable|string|max:16',
+            'serial_width' => 'nullable|integer|min:1|max:20',
+            'pad_zeros' => 'nullable|boolean',
+            'inherit_store' => 'nullable|boolean',
+        ]);
+
+        $docType = CounterSequenceService::normalizeDocType($validated['doc_type']);
+
+        if ($docType === null) {
+            return response()->json([
+                'message' => 'Unknown document series.',
+                'errors' => ['doc_type' => ['The document series must be one of: ' . implode(', ', CounterSequenceService::docTypes()) . '.']],
+            ], 422);
+        }
+
+        $sequence = $sequences->sequenceFor($counter, $docType, $validated['financial_year'] ?? null);
+
+        $numbering = !empty($validated['inherit_store'])
+            ? null
+            : CounterSequenceService::normalizeNumbering([
+                'suffix' => $validated['suffix'] ?? null,
+                'width' => $validated['serial_width'] ?? null,
+                'pad' => $validated['pad_zeros'] ?? null,
+            ]);
+
+        $old = ['numbering' => $sequence->numbering];
+        $sequence->update(['numbering' => $numbering]);
+
+        AuditLog::log('counter_numbering_updated', 'Counter', (string) $counter->id, $old, ['numbering' => $numbering], $counter->store_id);
+
+        $fresh = $sequence->fresh();
+
+        return response()->json([
+            'success' => true,
+            'sequence' => $fresh,
+            'numbering' => $sequences->ruleFields($fresh),
+            'next_number' => $sequences->formatNumber($fresh, (int) $fresh->next_number),
+        ]);
+    }
+
+    /**
      * PRF-001: the permission document this counter works inside, answered as a
      * complete one even when the owner has only ever set part of it.
      */

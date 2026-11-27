@@ -2,6 +2,12 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { autoUpdateService, classifyUpdaterError, resolveUpdateEndpoints } from "./autoUpdateService";
 import { sqliteStorage } from "../db/sqliteStorage";
 import { registerMockHandler, resetMockHandlers } from "../ipc/ipcBridge";
+import { APP_VERSION } from "../../config/version";
+
+// A feed is judged against the version this build reports, so these two cannot flip on a release bump.
+const [MAJOR, MINOR, PATCH] = APP_VERSION.split(".").map(Number);
+const OLDER_FEED = PATCH > 0 ? `${MAJOR}.${MINOR}.${PATCH - 1}` : `${MAJOR}.${Math.max(0, MINOR - 1)}.0`;
+const NEWER_FEED = `${MAJOR}.${MINOR}.${PATCH + 1}`;
 
 vi.mock("@tauri-apps/api/updater", () => ({
   onUpdaterEvent: vi.fn(),
@@ -148,7 +154,7 @@ describe("AutoUpdateService - Mocked Feed Scenarios", () => {
 
   it("1. Mocked feed returning no update -> Up to date state", async () => {
     const mockFeed = {
-      version: "2.0.35",
+      version: OLDER_FEED,
       notes: "Current version",
       pub_date: new Date().toISOString(),
       platforms: {},
@@ -166,7 +172,7 @@ describe("AutoUpdateService - Mocked Feed Scenarios", () => {
 
   it("2. Mocked feed returning a newer version -> Offers new version with release notes", async () => {
     const mockFeed = {
-      version: "2.2.0",
+      version: NEWER_FEED,
       notes: "- Security patch\n- Enhanced offline reconciliation",
       pub_date: new Date().toISOString(),
       platforms: {},
@@ -178,7 +184,7 @@ describe("AutoUpdateService - Mocked Feed Scenarios", () => {
 
     const result = await autoUpdateService.checkForUpdates();
     expect(result.shouldUpdate).toBe(true);
-    expect(result.manifest?.version).toBe("2.2.0");
+    expect(result.manifest?.version).toBe(NEWER_FEED);
     expect(result.manifest?.body).toContain("Security patch");
   });
 

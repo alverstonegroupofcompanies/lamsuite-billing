@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\CompanySetting;
 use App\Models\Counter;
 use App\Models\CounterSequence;
 use App\Models\Invoice;
@@ -98,6 +99,119 @@ class CounterSequenceService
         return "{$counter->counter_code}-" . self::DOC_TAILS[$docType];
     }
 
+    /** Which store numbering series a counter doc type inherits its default from. */
+    public const SERIES_OF_DOC_TYPE = [
+        'invoice' => 'invoice',
+        'sales_return' => 'sales_return',
+        'purchase_return' => 'purchase_return',
+        'purchase_bill' => 'purchase',
+        'quotation' => 'quotation',
+        'receipt' => 'receipt',
+        'stock_adjustment' => 'adjustment',
+        'stock_transfer' => 'transfer',
+    ];
+
+    /** @var array<int, array<string, mixed>> store_id => the store's per-series numbering rules */
+    private array $storeNumberingCache = [];
+
+    /**
+     * The numbering rule in either shape the panels write it (`suffix`/`serial_suffix`,
+     * `width`/`serial_width`/`digits`, `pad`/`padZeros`/`pad_zeros`), or null when it sets nothing.
+     *
+     * @return array{suffix:?string,width:?int,pad:bool}|null
+     */
+    public static function normalizeNumbering(mixed $raw): ?array
+    {
+        if (!is_array($raw)) {
+            return null;
+        }
+
+        $suffix = $raw['suffix'] ?? $raw['serial_suffix'] ?? null;
+        $width = $raw['width'] ?? $raw['serial_width'] ?? $raw['digits'] ?? null;
+        $pad = $raw['pad'] ?? $raw['padZeros'] ?? $raw['pad_zeros'] ?? null;
+
+        if ($suffix === null && $width === null && $pad === null) {
+            return null;
+        }
+
+        return [
+            'suffix' => $suffix === null ? null : trim((string) $suffix),
+            'width' => is_numeric($width) && (int) $width > 0 ? (int) $width : null,
+            'pad' => filter_var($pad, FILTER_VALIDATE_BOOLEAN),
+        ];
+    }
+
+    /** The store's own numbering defaults, as `company_settings.sequences.numbering` holds them. */
+    public function storeNumbering(int $storeId): array
+    {
+        if (!array_key_exists($storeId, $this->storeNumberingCache)) {
+            $sequences = CompanySetting::where('store_id', $storeId)
+                ->where('key', 'sequences')
+                ->value('value');
+
+            $numbering = is_array($sequences) ? ($sequences['numbering'] ?? null) : null;
+            $this->storeNumberingCache[$storeId] = is_array($numbering) ? $numbering : [];
+        }
+
+        return $this->storeNumberingCache[$storeId];
+    }
+
+    /**
+     * How one series renders its serial: the counter's own rule when it carries one, the store's
+     * default for that series otherwise, and nothing at all when neither is set — which prints the
+     * bare number exactly as it did before rules existed.
+     *
+     * @return array{suffix:?string,width:?int,pad:bool}
+     */
+    public function ruleFor(CounterSequence $sequence): array
+    {
+        $rule = self::normalizeNumbering($sequence->numbering);
+
+        if ($rule === null) {
+            $series = self::SERIES_OF_DOC_TYPE[$sequence->doc_type] ?? $sequence->doc_type;
+            $rule = self::normalizeNumbering($this->storeNumbering((int) $sequence->store_id)[$series] ?? null);
+        }
+
+        return $rule ?? ['suffix' => null, 'width' => null, 'pad' => false];
+    }
+
+    /**
+     * The serial as it prints. `width` is a minimum, never a fixed length: a serial that has grown
+     * past it keeps every digit, because truncating would hand out a number the book already holds.
+     */
+    public static function formatSerial(int $number, array $rule): string
+    {
+        $digits = (string) abs($number);
+        $width = max((int) ($rule['width'] ?? 0), strlen($digits));
+
+        if (!empty($rule['pad']) && strlen($digits) < $width) {
+            $digits = str_pad($digits, $width, '0', STR_PAD_LEFT);
+        }
+
+        return ($number < 0 ? '-' : '') . $digits . trim((string) ($rule['suffix'] ?? ''));
+    }
+
+    /** The whole document number of a series: `PREFIX-SERIAL`. */
+    public function formatNumber(CounterSequence $sequence, int $number): string
+    {
+        $serial = self::formatSerial($number, $this->ruleFor($sequence));
+        $prefix = rtrim(trim((string) $sequence->prefix), '-');
+
+        return $prefix === '' ? $serial : "{$prefix}-{$serial}";
+    }
+
+    /** The rule as the till receives it, under the key names its own formatter reads. */
+    public function ruleFields(CounterSequence $sequence): array
+    {
+        $rule = $this->ruleFor($sequence);
+
+        return [
+            'suffix' => $rule['suffix'],
+            'serial_width' => $rule['width'],
+            'pad_zeros' => $rule['pad'],
+        ];
+    }
+
     /** @return list<string> every canonical doc type, in order */
     public static function docTypes(): array
     {
@@ -140,7 +254,7 @@ class CounterSequenceService
         foreach (self::DOC_TAILS as $docType => $tail) {
             $row = $rows->get($docType);
 
-            $items[] = [
+            $items[] = array_merge([
                 'counter_id' => (int) $counter->id,
                 'doc_type' => $docType,
                 'financial_year' => $fy,
@@ -148,7 +262,7 @@ class CounterSequenceService
                 'next_number' => (int) ($row?->next_number ?? self::DEFAULT_START),
                 'range_start' => $row?->range_start !== null ? (int) $row->range_start : null,
                 'range_end' => $row?->range_end !== null ? (int) $row->range_end : null,
-            ];
+            ], $row ? $this->ruleFields($row) : ['suffix' => null, 'serial_width' => null, 'pad_zeros' => false]);
         }
 
         return [
@@ -228,7 +342,7 @@ class CounterSequenceService
     /** The block as the till receives it. */
     private function blockOf(CounterSequence $row, Counter $counter, string $docType, int $nextNumber): array
     {
-        return [
+        return array_merge([
             'counter_id' => (int) $counter->id,
             'counter_code' => $counter->counter_code,
             'doc_type' => $docType,
@@ -238,7 +352,7 @@ class CounterSequenceService
             'range_end' => (int) $row->range_end,
             'block_size' => (int) $row->range_end - (int) $row->range_start + 1,
             'next_number' => $nextNumber,
-        ];
+        ], $this->ruleFields($row));
     }
 
     /**
@@ -349,7 +463,7 @@ class CounterSequenceService
 
             // A number the counter already moved past is not this bill's to
             // take, even when the bill that used it was later deleted.
-            if ($part < (int) $row->next_number || $this->numberAlreadyFiled($counter, $incoming)) {
+            if ($part < (int) $row->next_number || $this->numberAlreadyFiled($counter, $incoming, $sequence, $part)) {
                 return false;
             }
 
@@ -376,7 +490,7 @@ class CounterSequenceService
             return null;
         }
 
-        if ($part < (int) $sequence->next_number && $this->numberAlreadyFiled($counter, $number)) {
+        if ($part < (int) $sequence->next_number && $this->numberAlreadyFiled($counter, $number, $sequence, $part)) {
             return null;
         }
 
@@ -388,7 +502,14 @@ class CounterSequenceService
     /** The numeric part of a number on this counter's own series, or null. */
     private function ownSeriesPart(CounterSequence $sequence, string $number): ?int
     {
-        if (!preg_match('/^' . preg_quote($sequence->prefix, '/') . '-(\d+)$/', $number, $matches)) {
+        $suffix = preg_quote(trim((string) ($this->ruleFor($sequence)['suffix'] ?? '')), '/');
+
+        // The suffix is optional because a series keeps the bills it printed before the rule was
+        // written: `C01-SR-5` is the same serial as `C01-SR-00005/26`, and reading it as foreign
+        // would have the counter replace a number it legitimately issued.
+        $pattern = '/^' . preg_quote(trim((string) $sequence->prefix), '/') . '-(\d+)(?:' . $suffix . ')?$/';
+
+        if (!preg_match($pattern, trim($number), $matches)) {
             return null;
         }
 
@@ -415,7 +536,9 @@ class CounterSequenceService
     {
         $tails = implode('|', array_values(self::DOC_TAILS));
 
-        if (!preg_match('/^(?<code>.+)-(?<tail>' . $tails . ')-\d+$/', strtoupper(trim($number)), $m)) {
+        // A series may ride a suffix on the end of its serial (`C02-SR-00007/26`), so the tail of the
+        // number is anything that is not another digit run.
+        if (!preg_match('/^(?<code>.+)-(?<tail>' . $tails . ')-\d+(?:\D.*)?$/', strtoupper(trim($number)), $m)) {
             return false;
         }
 
@@ -428,10 +551,20 @@ class CounterSequenceService
             ->exists();
     }
 
-    private function numberAlreadyFiled(Counter $counter, string $number): bool
+    private function numberAlreadyFiled(Counter $counter, string $number, ?CounterSequence $sequence = null, ?int $part = null): bool
     {
+        $spellings = [$number];
+
+        // Padding and suffix are part of a number's spelling, not of its value: a bill filed as
+        // `C01-INV-273` holds the same book number as the `C01-INV-0273` the rule now prints, and
+        // missing that would let one serial be issued twice.
+        if ($sequence !== null && $part !== null) {
+            $spellings[] = $this->formatNumber($sequence, $part);
+            $spellings[] = trim((string) $sequence->prefix) . '-' . $part;
+        }
+
         return Invoice::where('store_id', $counter->store_id)
-            ->where('invoice_number', $number)
+            ->whereIn('invoice_number', array_values(array_unique(array_filter($spellings))))
             ->exists();
     }
 
@@ -444,7 +577,7 @@ class CounterSequenceService
 
             $row->forceFill(['next_number' => $number + 1])->save();
 
-            return "{$row->prefix}-{$number}";
+            return $this->formatNumber($row, $number);
         });
     }
 

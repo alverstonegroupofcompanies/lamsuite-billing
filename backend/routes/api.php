@@ -402,6 +402,8 @@ Route::middleware(['auth:sanctum', 'ip.allowlist', 'scope.store'])->prefix('admi
     Route::get('/counters', [CounterController::class, 'index'])->middleware('rbac:devices,view');
     Route::post('/counters', [AdminCounterController::class, 'store'])->middleware('rbac:devices,create');
     Route::put('/counters/{id}', [AdminCounterController::class, 'update'])->middleware('rbac:devices,edit');
+    // TALLY-01: a counter's own serial rendering rule; without it the series follows the store default.
+    Route::put('/counters/{id}/sequence', [AdminCounterController::class, 'updateSequence'])->middleware('rbac:devices,edit');
     Route::delete('/counters/{id}', [AdminCounterController::class, 'destroy'])->middleware('rbac:devices,delete');
     Route::post('/counters/{id}/lock', [AdminCounterController::class, 'lock'])->middleware('rbac:devices,edit');
     Route::post('/counters/{id}/unlock', [AdminCounterController::class, 'unlock'])->middleware('rbac:devices,edit');

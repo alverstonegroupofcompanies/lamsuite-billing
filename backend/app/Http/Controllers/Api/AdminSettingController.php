@@ -163,6 +163,9 @@ class AdminSettingController
             'nextAdjustmentNumber' => 401,
             'transferPrefix' => 'TRF',
             'nextTransferNumber' => 501,
+            // TALLY-01: per-series suffix / digit width / zero fill. A series missing here prints the
+            // bare serial, and a counter's own series rule (counter_sequences.numbering) wins over it.
+            'numbering' => [],
         ], $sequences);
 
         $printingFull = array_merge([

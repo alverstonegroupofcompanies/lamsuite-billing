@@ -3,6 +3,7 @@ import { syncQueueService } from "../sync/syncQueueService";
 import { companySettingsService } from "../settings/companySettingsService";
 import { getIndianFinancialYear } from "../billing/salesReturnService";
 import { round2 } from "../billing/billingCalculations";
+import { formatDocumentNumber } from "../billing/documentNumberFormat";
 
 export interface POLineItemInput {
   product_id: string;
@@ -45,8 +46,7 @@ export class PurchaseOrderService {
       if (!isNaN(last) && last > maxNum) maxNum = last;
     }
 
-    const nextSeq = String(maxNum + 1).padStart(4, "0");
-    return `${prefix}-${fy}-${nextSeq}`;
+    return formatDocumentNumber({ prefix: `${prefix}-${fy}`, width: 4, padZeros: true }, maxNum + 1);
   }
 
   async createPO(input: {
