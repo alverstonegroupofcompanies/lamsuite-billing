@@ -21,7 +21,6 @@ import {
   type PurchaseReturnSettlement,
 } from "../lib/purchases/purchaseReturnService";
 import { purchaseService } from "../lib/purchases/purchaseService";
-import { sqliteStorage } from "../lib/db/sqliteStorage";
 import { printingEngine, type DebitNotePrintData } from "../lib/printing/printingEngine";
 import { companySettingsService } from "../lib/settings/companySettingsService";
 import { PrintPreviewModal } from "../components/PrintPreviewModal";
@@ -140,8 +139,9 @@ export const PurchaseReturnPage: React.FC = () => {
   };
 
   const loadPurchases = async () => {
-    const docs = await sqliteStorage.findAll<PurchaseDoc>("purchase_documents");
-    setAllPurchases(docs);
+    // A bill taken at another counter, or imported from the old panel, is only on the server, so
+    // the picker has to read both books or such goods could never be returned from here.
+    setAllPurchases(await purchaseReturnService.getOriginalBills());
   };
 
   useEffect(() => {
@@ -176,7 +176,7 @@ export const PurchaseReturnPage: React.FC = () => {
 
   const openFormForPurchaseId = async (purchaseId: string) => {
     openForm();
-    const docs = await sqliteStorage.findAll<PurchaseDoc>("purchase_documents");
+    const docs = await purchaseReturnService.getOriginalBills();
     const found = docs.find((d) => d.id === purchaseId);
     if (found) {
       await selectPurchase(found);

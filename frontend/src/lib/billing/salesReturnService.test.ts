@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { sqliteStorage } from "../db/sqliteStorage";
 import { productsStore } from "../masters/productsStore";
 import { partiesStore } from "../masters/partiesStore";
@@ -9,6 +9,7 @@ import {
   type SalesReturnInput,
 } from "./salesReturnService";
 import { returnKey } from "./salesReturnPricing";
+import { onlineTransactionService } from "../sync/onlineTransactionService";
 
 describe("salesReturnService - Credit Notes & Sales Returns", () => {
   const dummyProduct = {
@@ -622,5 +623,205 @@ describe("salesReturnService - Credit Notes & Sales Returns", () => {
 
     const map = await salesReturnService.getReturnedQtyMapForInvoice("INV-CN-1");
     expect(map.get(returnKey("prod_dolo_sr", "DL2601"))).toBe(17);
+  });
+});
+
+/**
+ * A return only ever lived in the table of the till that typed it: a legacy migration, a note
+ * raised at another counter or one posted in the admin panel existed in the backend and nowhere
+ * in the till. These cover the read that fixed that.
+ */
+describe("salesReturnService - credit notes held on the server", () => {
+  const serverNote = {
+    id: 91,
+    external_id: null,
+    module_key: "credit_note",
+    invoice_number: "CN-1-0042",
+    invoice_date: "2026-11-20",
+    original_invoice_number: "INV-1-0100",
+    customer_name: "Ravi Verma",
+    customer_phone: "9812300000",
+    subtotal: 300,
+    discount_total: 0,
+    tax_total: 33.9,
+    cgst_total: 16.95,
+    sgst_total: 16.95,
+    igst_total: 0,
+    round_off: 0.1,
+    grand_total: -334,
+    paid_amount: -334,
+    payment_mode: "Cash",
+    status: "issued",
+    created_at: "2026-11-20T09:30:00.000000Z",
+    updated_at: "2026-11-20T09:30:00.000000Z",
+    items: [
+      {
+        id: 501,
+        product_id: 12,
+        product_name: "Dolo 650 Tablet",
+        batch_no: "DL2601",
+        expiry_date: "2027-10",
+        qty: 10,
+        unit_price: 30,
+        gst_percent: 12,
+        taxable_amount: 267.86,
+        cgst_amount: 16.07,
+        sgst_amount: 16.07,
+        total_amount: 300,
+        stock_action: "restock",
+      },
+    ],
+  };
+
+  const untypedNote = {
+    ...serverNote,
+    id: 92,
+    module_key: "",
+    invoice_number: "MIG-CN-7",
+    created_at: "2026-11-18 08:00:00",
+    items: [],
+  };
+
+  const asked = (calls: any[][], url: string) => calls.some(([target]) => String(target).includes(url));
+
+  beforeEach(async () => {
+    await sqliteStorage.initDatabase();
+    await sqliteStorage.clearTable("sales_returns");
+    vi.spyOn(onlineTransactionService, "getEffectiveBaseUrl").mockReturnValue("http://server.test");
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it("lists the notes this till never held, with their lines", async () => {
+    const calls: any[][] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (...args: any[]) => {
+        calls.push(args);
+        return { ok: true, json: async () => ({ data: [serverNote, untypedNote] }) };
+      })
+    );
+
+    const list = await salesReturnService.getSalesReturns();
+
+    expect(asked(calls, "/api/invoices?")).toBe(true);
+    expect(String(calls[0][0])).toContain("module=credit_notes");
+    expect(calls[0][1].headers["X-Store-Id"]).toBeTruthy();
+    expect(list.map((r) => r.return_number)).toEqual(["CN-1-0042", "MIG-CN-7"]);
+
+    const note = list[0];
+    expect(note.customer_name).toBe("Ravi Verma");
+    expect(note.original_invoice_number).toBe("INV-1-0100");
+    expect(note.refund_mode).toBe("Cash");
+    expect(note.refund_status).toBe("paid");
+    expect(note.created_at).toBeGreaterThan(0);
+    expect(note.lines).toHaveLength(1);
+    expect(note.lines[0]).toMatchObject({
+      product_name: "Dolo 650 Tablet",
+      batch_no: "DL2601",
+      return_qty: 10,
+      unit_price: 30,
+      condition: "restock",
+      reason: "customer_return",
+    });
+  });
+
+  it("keeps the till's own copy of a note the server also holds", async () => {
+    await sqliteStorage.insertRecord("sales_returns", "sret_1", {
+      id: "sret_1",
+      return_number: "CN-1-0042",
+      return_date: "2026-11-20",
+      return_time: "09:30:00",
+      customer_name: "Ravi Verma",
+      lines: [
+        {
+          id: "sret_1_line",
+          return_id: "sret_1",
+          product_id: "prod_dolo_sr",
+          product_name: "Dolo 650 Tablet",
+          batch_id: "batch_dolo_sr1",
+          batch_no: "DL2601",
+          sold_qty: 10,
+          return_qty: 10,
+          unit_price: 30,
+          gst_percent: 12,
+          reason: "damaged",
+          condition: "damaged_discard",
+          discount_amount: 0,
+          taxable_amount: 300,
+          cgst_amount: 16.07,
+          sgst_amount: 16.07,
+          igst_amount: 0,
+          total_amount: 334,
+        },
+      ],
+      subtotal: 300,
+      discount_total: 0,
+      tax_total: 34,
+      cgst_total: 17,
+      sgst_total: 17,
+      igst_total: 0,
+      round_off: 0,
+      grand_total: 334,
+      refund_amount: 334,
+      refund_mode: "Cash",
+      refund_status: "paid",
+      status: "completed",
+      created_at: 1763600000000,
+      updated_at: 1763600000000,
+    });
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        json: async () => ({ data: [{ ...serverNote, external_id: "sret_1" }] }),
+      }))
+    );
+
+    const list = await salesReturnService.getSalesReturns();
+
+    expect(list).toHaveLength(1);
+    expect(list[0].id).toBe("sret_1");
+    expect(list[0].lines[0].reason).toBe("damaged");
+  });
+
+  it("still answers from the local book when the server will not reply", async () => {
+    await sqliteStorage.insertRecord("sales_returns", "sret_offline", {
+      id: "sret_offline",
+      return_number: "CN-OFF-1",
+      return_date: "2026-11-25",
+      return_time: "10:00:00",
+      customer_name: "Walk-in Customer",
+      lines: [],
+      subtotal: 0,
+      discount_total: 0,
+      tax_total: 0,
+      cgst_total: 0,
+      sgst_total: 0,
+      igst_total: 0,
+      round_off: 0,
+      grand_total: 10,
+      refund_amount: 10,
+      refund_mode: "Cash",
+      refund_status: "paid",
+      status: "completed",
+      created_at: 1763900000000,
+      updated_at: 1763900000000,
+    });
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new TypeError("Failed to fetch");
+      })
+    );
+
+    const list = await salesReturnService.getSalesReturns();
+
+    expect(list.map((r) => r.return_number)).toEqual(["CN-OFF-1"]);
   });
 });

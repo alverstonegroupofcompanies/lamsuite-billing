@@ -4,7 +4,9 @@ import { partiesStore, type Customer } from "../masters/partiesStore";
 import { syncQueueService } from "../sync/syncQueueService";
 import { companySettingsService } from "../settings/companySettingsService";
 import { counterSequenceService } from "../auth/counterSequenceService";
-import { storeToday } from "../dateTimeUtils";
+import { serverTimeToEpoch, storeToday } from "../dateTimeUtils";
+import { onlineTransactionService } from "../sync/onlineTransactionService";
+import { storeRegistryService } from "../auth/storeRegistryService";
 import { round2 } from "./billingCalculations";
 import { calculateDocumentTaxes } from "../tax-engine/taxEngine";
 import {
@@ -750,11 +752,148 @@ export class SalesReturnService {
   }
 
   /**
+   * Credit notes the store holds on the server — a legacy migration, a return raised at another
+   * counter, or a note created in the admin panel. The till's own table only ever saw the returns
+   * typed on this device, so those documents existed in the backend and nowhere in the till.
+   */
+  async getServerSalesReturns(): Promise<SalesReturnRecord[]> {
+    if (!syncQueueService.isOnline()) return [];
+
+    const baseUrl = onlineTransactionService.getEffectiveBaseUrl();
+    const storeId = String(storeRegistryService.getActiveStore()?.id || "1");
+    const params = new URLSearchParams({
+      store_id: storeId,
+      module: "credit_notes",
+      per_page: "200",
+    });
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 15000);
+
+    try {
+      const res = await fetch(`${baseUrl}/api/invoices?${params.toString()}`, {
+        headers: {
+          Accept: "application/json",
+          "X-Store-Id": storeId,
+          "Store-Id": storeId,
+        },
+        signal: controller.signal,
+        cache: "no-store",
+      });
+      if (!res.ok) return [];
+      const json = await res.json();
+      const rows = Array.isArray(json?.data) ? json.data : [];
+      return rows.map((row: any) => this.mapServerCreditNote(row)).filter(Boolean) as SalesReturnRecord[];
+    } catch (_) {
+      // A server that will not answer must not empty the return screen; the local book stays.
+      return [];
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  private mapServerCreditNote(row: any): SalesReturnRecord | null {
+    if (!row || (row.id == null && !row.invoice_number)) return null;
+
+    const id = String(row.external_id || row.id);
+    const createdAt = serverTimeToEpoch(row.created_at) || serverTimeToEpoch(row.invoice_date);
+    const items = Array.isArray(row.items) ? row.items : [];
+    const qtyOf = (item: any) => Number(item.qty ?? item.return_qty ?? 0);
+
+    const lines: SalesReturnItem[] = items.map((item: any, index: number) => ({
+      id: String(item.id ?? `${id}_line_${index}`),
+      return_id: id,
+      product_id: String(item.product_id ?? ""),
+      product_name: item.product_name || "Item",
+      hsn_code: item.hsn_code || undefined,
+      batch_id: "",
+      batch_no: item.batch_no || "",
+      expiry_date: item.expiry_date || undefined,
+      sold_qty: qtyOf(item),
+      return_qty: qtyOf(item),
+      loose_qty: Number(item.loose_qty || 0),
+      units_per_pack: Number(item.units_per_pack || 1),
+      unit_price: Number(item.unit_price || 0),
+      discount_percent: Number(item.discount_percent || 0),
+      discount_amount: Number(item.discount_amount || 0),
+      taxable_amount: Number(item.taxable_amount || 0),
+      gst_percent: Number(item.gst_percent || 0),
+      cgst_amount: Number(item.cgst_amount || 0),
+      sgst_amount: Number(item.sgst_amount || 0),
+      igst_amount: Number(item.igst_amount || 0),
+      total_amount: Number(item.total_amount || 0),
+      // The server keeps the restock decision on the line but not the reason a customer gave.
+      reason: "customer_return",
+      condition: item.stock_action === "damaged_discard" || item.stock_action === "quarantine"
+        ? item.stock_action
+        : "restock",
+    }));
+
+    const grandTotal = Number(row.grand_total || 0);
+    const refunded = Number(row.paid_amount ?? row.grand_total ?? 0);
+
+    return {
+      id,
+      return_number: String(row.invoice_number || `CN-${row.id}`),
+      return_date: String(row.invoice_date || "").slice(0, 10),
+      return_time: "",
+      original_invoice_id: row.original_invoice_id ? String(row.original_invoice_id) : undefined,
+      original_invoice_number: row.original_invoice_number || undefined,
+      original_invoice_date: row.original_invoice_date
+        ? String(row.original_invoice_date).slice(0, 10)
+        : undefined,
+      customer_id: row.customer_id ? String(row.customer_id) : undefined,
+      customer_name: row.customer_name || row.customer?.name || "Walk-in Customer",
+      customer_phone: row.customer_phone || row.customer?.phone || "",
+      customer_gstin: row.customer_gstin || row.customer?.gstin || "",
+      lines,
+      subtotal: Number(row.subtotal || 0),
+      discount_total: Number(row.discount_total || 0),
+      tax_total: Number(row.tax_total || 0),
+      cgst_total: Number(row.cgst_total || 0),
+      sgst_total: Number(row.sgst_total || 0),
+      igst_total: Number(row.igst_total || 0),
+      round_off: Number(row.round_off || 0),
+      grand_total: grandTotal,
+      refund_amount: refunded,
+      refund_mode: (row.payment_mode || "Cash") as RefundPaymentMode,
+      refund_status:
+        Math.abs(refunded) >= Math.abs(grandTotal) && grandTotal !== 0
+          ? "paid"
+          : refunded
+            ? "partial"
+            : "unpaid",
+      status: String(row.status || "").toLowerCase() === "cancelled" ? "cancelled" : "completed",
+      notes: row.notes || undefined,
+      created_at: createdAt,
+      updated_at: serverTimeToEpoch(row.updated_at) || createdAt,
+    };
+  }
+
+  /**
    * Search and filter sales returns
+   *
+   * The till's own rows lead: they carry the reason, the restock decision and any edit the server
+   * has not been given yet. Server notes are appended for documents this device never held.
    */
   async getSalesReturns(filter?: SalesReturnFilter): Promise<SalesReturnRecord[]> {
-    const all = await sqliteStorage.findAll<SalesReturnRecord>("sales_returns");
-    let results = all.sort((a, b) => (b.created_at || 0) - (a.created_at || 0));
+    const [local, server] = await Promise.all([
+      sqliteStorage.findAll<SalesReturnRecord>("sales_returns"),
+      this.getServerSalesReturns(),
+    ]);
+
+    const known = new Set<string>();
+    for (const row of local) {
+      if (row.id) known.add(String(row.id));
+      if (row.return_number) known.add(String(row.return_number).toLowerCase());
+    }
+
+    let results = [...local];
+    for (const row of server) {
+      if (known.has(row.id) || known.has(row.return_number.toLowerCase())) continue;
+      results.push(row);
+    }
+
+    results.sort((a, b) => (b.created_at || 0) - (a.created_at || 0));
 
     if (!filter) return results;
 

@@ -4,6 +4,9 @@ import { partiesStore, type Supplier } from "../masters/partiesStore";
 import { syncQueueService } from "../sync/syncQueueService";
 import { companySettingsService } from "../settings/companySettingsService";
 import { round2 } from "../billing/billingCalculations";
+import { serverTimeToEpoch } from "../dateTimeUtils";
+import { onlineTransactionService } from "../sync/onlineTransactionService";
+import { storeRegistryService } from "../auth/storeRegistryService";
 import { getIndianFinancialYear } from "../billing/salesReturnService";
 import { calculateDocumentTaxes } from "../tax-engine/taxEngine";
 import { postCharges, removePostedCharges } from "./chargePosting";
@@ -78,6 +81,21 @@ export interface PurchaseReturnRecord {
   notes?: string;
   created_at: number;
   updated_at: number;
+}
+
+/** An inward bill a debit note can be raised against, from this till or from the server. */
+export interface PurchaseBillForReturn {
+  id: string;
+  purchase_number: string;
+  supplier_id?: string;
+  supplier_name: string;
+  supplier_gstin?: string;
+  supplier_invoice_no?: string;
+  purchase_date: string;
+  grand_total?: number;
+  subtotal?: number;
+  tax_total?: number;
+  lines?: any[];
 }
 
 export interface PurchaseReturnFilter {
@@ -362,6 +380,9 @@ export class PurchaseReturnService {
     const queueId = await syncQueueService.enqueue("purchase", returnId, "create", {
       ...returnRecord,
       module_key: "purchase_return",
+      // The purchase ingest only matches a re-push on an explicit external id, so without it one
+      // debit note taken offline and pushed twice could be filed as two.
+      external_id: returnId,
     } as unknown as Record<string, unknown>);
 
     // The counter is told the note is posted only when the server has taken it; offline it is
@@ -457,11 +478,209 @@ export class PurchaseReturnService {
   }
 
   /**
+   * Debit notes the store holds on the server — a migrated legacy return, a note raised at
+   * another counter, or one posted in the admin panel. They were invisible here because the
+   * till only ever read its own `purchase_returns` table.
+   */
+  async getServerPurchaseReturns(): Promise<PurchaseReturnRecord[]> {
+    const rows = await this.fetchServerDocuments("purchase_returns");
+    return rows
+      .map((row: any) => this.mapServerDebitNote(row))
+      .filter(Boolean) as PurchaseReturnRecord[];
+  }
+
+  /**
+   * Inward bills a debit note can be raised against, this device's own plus the server's. The
+   * picker used to read `purchase_documents` alone, so goods bought before the till was set up —
+   * or at another counter — could not be returned from here.
+   */
+  async getOriginalBills(): Promise<PurchaseBillForReturn[]> {
+    const [local, rows] = await Promise.all([
+      sqliteStorage.findAll<PurchaseBillForReturn>("purchase_documents"),
+      this.fetchServerDocuments("purchases"),
+    ]);
+
+    const known = new Set<string>();
+    for (const doc of local) {
+      if (doc.id) known.add(String(doc.id));
+      if (doc.purchase_number) known.add(String(doc.purchase_number).toLowerCase());
+    }
+
+    const bills = [...local];
+    for (const row of rows) {
+      const bill = this.mapServerPurchaseBill(row);
+      if (!bill || known.has(bill.id) || known.has(bill.purchase_number.toLowerCase())) continue;
+      bills.push(bill);
+    }
+
+    return bills;
+  }
+
+  private async fetchServerDocuments(module: string): Promise<any[]> {
+    if (!syncQueueService.isOnline()) return [];
+
+    const baseUrl = onlineTransactionService.getEffectiveBaseUrl();
+    const storeId = String(storeRegistryService.getActiveStore()?.id || "1");
+    const params = new URLSearchParams({ store_id: storeId, module, per_page: "200" });
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 15000);
+
+    try {
+      const res = await fetch(`${baseUrl}/api/purchases?${params.toString()}`, {
+        headers: {
+          Accept: "application/json",
+          "X-Store-Id": storeId,
+          "Store-Id": storeId,
+        },
+        signal: controller.signal,
+        cache: "no-store",
+      });
+      if (!res.ok) return [];
+      const json = await res.json();
+      return Array.isArray(json?.data) ? json.data : [];
+    } catch (_) {
+      // A server that will not answer must not empty the screen; the local book stays.
+      return [];
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  /**
+   * The base units a server line covers. A bill pushed by a till stores its billed packs in both
+   * `pack_qty` and `qty`, while a migrated line keeps its own units in `qty`, so the pack maths is
+   * only applied when the row was packed.
+   */
+  private serverLineUnits(item: any): number {
+    const perPack = Number(item.units_per_pack || 1);
+    if (item.total_units != null) return Number(item.total_units);
+    if (item.pack_qty != null || perPack > 1) {
+      const packs = Number(item.pack_qty ?? item.qty ?? 0);
+      return packs * perPack + Number(item.loose_qty || 0);
+    }
+    return Number(item.qty || 0);
+  }
+
+  private mapServerDebitNote(row: any): PurchaseReturnRecord | null {
+    if (!row || (row.id == null && !row.invoice_number)) return null;
+
+    const id = String(row.external_id || row.id);
+    const createdAt = serverTimeToEpoch(row.created_at) || serverTimeToEpoch(row.invoice_date);
+    const items = Array.isArray(row.items) ? row.items : [];
+
+    const lines: PurchaseReturnItem[] = items.map((item: any, index: number) => {
+      const units = this.serverLineUnits(item);
+      return {
+        id: String(item.id ?? `${id}_line_${index}`),
+        return_id: id,
+        product_id: String(item.product_id ?? ""),
+        product_name: item.product_name || "Item",
+        hsn_code: item.hsn_code || undefined,
+        batch_id: "",
+        batch_no: item.batch_no || "",
+        expiry_date: item.expiry_date || undefined,
+        purchased_qty: units,
+        return_qty: units,
+        purchase_rate: Number(item.purchase_rate || item.effective_unit_cost || 0),
+        gst_percent: Number(item.gst_percent || 0),
+        // The server has no per-line reason column; the note's own notes carry the supplier's.
+        reason: "other",
+        taxable_amount: Number(item.taxable_amount || 0),
+        cgst_amount: Number(item.cgst_amount || 0),
+        sgst_amount: Number(item.sgst_amount || 0),
+        igst_amount: Number(item.igst_amount || 0),
+        cess_amount: Number(item.cess_amount || 0),
+        total_amount: Number(item.total_amount || 0),
+      };
+    });
+
+    return {
+      id,
+      return_number: String(row.invoice_number || `DN-${row.id}`),
+      return_date: String(row.invoice_date || "").slice(0, 10),
+      return_time: "",
+      original_purchase_number: row.original_purchase_number || row.supplier_invoice_no || undefined,
+      supplier_id: String(row.supplier?.external_id ?? row.supplier_id ?? ""),
+      supplier_name: row.supplier_name || row.supplier?.name || "Supplier",
+      supplier_gstin: row.supplier_gstin || row.supplier?.gstin || undefined,
+      supplier_invoice_no: row.supplier_invoice_no || undefined,
+      lines,
+      subtotal: Number(row.subtotal || 0),
+      tax_total: Number(row.tax_total || 0),
+      cgst_total: Number(row.cgst_total || 0),
+      sgst_total: Number(row.sgst_total || 0),
+      igst_total: Number(row.igst_total || 0),
+      cess_total: Number(row.cess_total || 0),
+      round_off: Number(row.round_off || 0),
+      grand_total: Number(row.grand_total || 0),
+      settlement_type: (row.settlement_type === "refund" ? "refund" : "credit_adjust") as PurchaseReturnSettlement,
+      refund_mode: row.payment_mode || row.refund_mode || undefined,
+      status: String(row.status || "").toLowerCase() === "cancelled" ? "cancelled" : "completed",
+      notes: row.notes || undefined,
+      created_at: createdAt,
+      updated_at: serverTimeToEpoch(row.updated_at) || createdAt,
+    };
+  }
+
+  private mapServerPurchaseBill(row: any): PurchaseBillForReturn | null {
+    if (!row || (row.id == null && !row.invoice_number)) return null;
+
+    return {
+      id: String(row.external_id || row.id),
+      purchase_number: String(row.invoice_number || ""),
+      supplier_id: String(row.supplier?.external_id ?? row.supplier_id ?? ""),
+      supplier_name: row.supplier_name || row.supplier?.name || "Supplier",
+      supplier_gstin: row.supplier_gstin || undefined,
+      supplier_invoice_no: row.supplier_invoice_no || undefined,
+      purchase_date: String(row.invoice_date || "").slice(0, 10),
+      grand_total: Number(row.grand_total || 0),
+      subtotal: Number(row.subtotal || 0),
+      tax_total: Number(row.tax_total || 0),
+      // The till loads a local bill's lines by id; a server bill arrives with them attached.
+      lines: (Array.isArray(row.items) ? row.items : []).map((item: any) => ({
+        product_id: String(item.product_id ?? ""),
+        product_name: item.product_name || "Item",
+        hsn_code: item.hsn_code || undefined,
+        batch_id: "",
+        batch_no: item.batch_no || "",
+        expiry_date: item.expiry_date || undefined,
+        pack_qty: item.pack_qty ?? undefined,
+        loose_qty: Number(item.loose_qty || 0),
+        units_per_pack: Number(item.units_per_pack || 1),
+        qty: Number(item.qty || 0),
+        purchase_rate: Number(item.purchase_rate || 0),
+        effective_unit_cost: Number(item.effective_unit_cost || 0),
+        taxable_amount: Number(item.taxable_amount || 0),
+        gst_percent: Number(item.gst_percent || 0),
+      })),
+    };
+  }
+
+  /**
    * Search and filter purchase returns
+   *
+   * This device's own notes lead — they carry the per-line reason and any edit the server has not
+   * been given — and the server's notes are appended after them.
    */
   async getPurchaseReturns(filter?: PurchaseReturnFilter): Promise<PurchaseReturnRecord[]> {
-    const all = await sqliteStorage.findAll<PurchaseReturnRecord>("purchase_returns");
-    let results = all.sort((a, b) => (b.created_at || 0) - (a.created_at || 0));
+    const [local, server] = await Promise.all([
+      sqliteStorage.findAll<PurchaseReturnRecord>("purchase_returns"),
+      this.getServerPurchaseReturns(),
+    ]);
+
+    const known = new Set<string>();
+    for (const row of local) {
+      if (row.id) known.add(String(row.id));
+      if (row.return_number) known.add(String(row.return_number).toLowerCase());
+    }
+
+    let results = [...local];
+    for (const row of server) {
+      if (known.has(row.id) || known.has(row.return_number.toLowerCase())) continue;
+      results.push(row);
+    }
+
+    results.sort((a, b) => (b.created_at || 0) - (a.created_at || 0));
 
     if (!filter) return results;
 

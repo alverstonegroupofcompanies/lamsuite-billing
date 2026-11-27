@@ -23,8 +23,32 @@ class PurchaseController
 {
     public function index(Request $request): JsonResponse
     {
-        $storeId = $request->query('store_id', $request->header('X-Store-Id', 1));
+        // G1-SEC: the store comes from the authenticated counter or the person's checked scope.
+        // It used to fall back to "store 1", which let a till read another store's book.
+        $storeId = RequestTenant::requireStoreId($request);
         $query = Purchase::with('items')->where('store_id', $storeId);
+
+        // A debit note is a purchase row on the other side of the shelf, so the return screen asks
+        // for the notes and the purchase screen asks for the inward bills instead of paging
+        // through one mixed list.
+        $module = strtolower(trim((string) $request->query('module', '')));
+        $noteKeys = "'purchase_return', 'debit_note'";
+        if ($module === 'purchase_returns') {
+            $query->whereRaw("COALESCE(module_key, '') IN ({$noteKeys})");
+        } elseif ($module === 'purchases') {
+            $query->whereRaw(
+                "COALESCE(module_key, '') NOT IN ({$noteKeys}, 'purchase_order', 'order', 'po')"
+            );
+        }
+
+        if ($search = trim((string) $request->query('search', ''))) {
+            $query->where(function ($q) use ($search) {
+                $q->where('invoice_number', 'like', "%{$search}%")
+                  ->orWhere('document_number', 'like', "%{$search}%")
+                  ->orWhere('supplier_invoice_no', 'like', "%{$search}%")
+                  ->orWhere('supplier_name', 'like', "%{$search}%");
+            });
+        }
 
         if ($request->has('supplier_id')) {
             $query->where('supplier_id', $request->query('supplier_id'));
@@ -34,7 +58,9 @@ class PurchaseController
             $query->where('status', $request->query('status'));
         }
 
-        $purchases = $query->orderBy('invoice_date', 'desc')->paginate(50);
+        $perPage = min(500, max(1, (int) $request->query('per_page', 50)));
+        $purchases = $query->orderBy('invoice_date', 'desc')->orderBy('id', 'desc')->paginate($perPage);
+
         return response()->json($purchases);
     }
 

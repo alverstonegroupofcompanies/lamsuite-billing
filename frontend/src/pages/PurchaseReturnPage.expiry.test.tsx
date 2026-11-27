@@ -40,7 +40,12 @@ vi.mock("../lib/purchases/purchaseService", () => ({
 }));
 
 vi.mock("../lib/purchases/purchaseReturnService", () => ({
-  purchaseReturnService: { getPurchaseReturns: vi.fn(async () => []) },
+  purchaseReturnService: {
+    getPurchaseReturns: vi.fn(async () => []),
+    // The picker reads this till's bills plus the server's, so the page no longer queries the
+    // local table itself.
+    getOriginalBills: vi.fn(async () => [fixtures.purchase]),
+  },
 }));
 
 vi.mock("../lib/printing/printingEngine", () => ({ printingEngine: {} }));

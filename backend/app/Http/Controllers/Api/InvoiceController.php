@@ -124,6 +124,19 @@ class InvoiceController
             $builder->whereDate('invoice_date', '<=', $to);
         }
 
+        // A credit note is an invoice row tagged by module_key, and returns were only ever
+        // readable one page of sales at a time. The till's return screen asks for the notes
+        // directly. The negative-total form is kept because a return raised on the server by an
+        // older panel carries no module_key, and the nulls are coalesced because an untagged
+        // plain bill must survive the "invoices" side of the filter.
+        $module = strtolower(trim((string) $request->query('module', '')));
+        $isNoteSql = "(COALESCE(module_key, '') IN ('credit_note', 'sales_return') OR COALESCE(grand_total, 0) < 0)";
+        if ($module === 'credit_notes') {
+            $builder->whereRaw($isNoteSql);
+        } elseif ($module === 'invoices') {
+            $builder->whereRaw("NOT {$isNoteSql}");
+        }
+
         if ($status && strtolower($status) !== 'all') {
             $builder->whereRaw('LOWER(status) = ?', [strtolower($status)]);
         }

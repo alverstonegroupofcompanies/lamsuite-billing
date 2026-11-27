@@ -1,5 +1,47 @@
 # Changelog
 
+## 2.1.11 — 2026-11-27
+
+The returns screens existed in the till, and both of them read only this device's own SQLite table.
+A return that the backend held — one of the 15 credit notes a migration imported, a note posted at
+another counter, a debit note raised in the admin panel — existed in the database and nowhere in the
+till, and the purchase-return picker could only ever offer a bill bought on this machine.
+
+1. **Sales returns read the server** — `GET /api/invoices` grew a `module` filter
+   (`credit_notes` / `invoices`), because a credit note is an invoice row tagged by `module_key` and
+   the return screen had to page through every sale to find one. An untagged negative-total bill
+   counts as a note, which is how an older panel's returns land. `salesReturnService.getSalesReturns()`
+   now asks for them and appends the ones this till does not already hold, so the store's notes appear
+   with their customer, totals and printable lines.
+2. **Purchase returns read the server too** — `GET /api/purchases` grew `module` (the notes apart
+   from the inward bills, purchase orders excluded), `search` and `per_page`, and takes its store from
+   the authenticated counter instead of `?store_id=`, which used to fall back to store 1. The debit
+   note list merges from `/api/purchases?module=purchase_returns`, and the original-bill picker now
+   offers `getOriginalBills()`: this till's `purchase_documents` plus the server's inward bills, with
+   their lines attached so a bill never seen here can still be returned against.
+3. **A pushed debit note names itself** — the purchase ingest matches a re-push on an explicit
+   `external_id`, which the till never sent for a debit note (it does for a purchase bill), so an
+   offline note pushed twice could be filed twice. It now carries its own id.
+
+The till's own rows lead every merged list: they hold the per-line reason and restock decision, and an
+edit the server has not been given yet outranks the server's copy. Dedupe runs on the local id (which
+is the server row's `external_id`) and on the document number. When the server will not answer, both
+screens fall back to the local book rather than emptying.
+
+Verification: `TillReturnListTest` (3 tests) pins both filters, the untagged cases and the fact that a
+query string cannot move the purchase list to another store; the whole backend suite is 1297 tests and
+the frontend suite 1269, with `tsc --noEmit` clean. Probed against the running dev server for the
+migrated store: `module=credit_notes` answered 15 notes with lines on every one of them, `module=invoices`
+answered 74 bills with no note among them (74 + 15 = the 89 unfiltered rows), `module=purchases` answered
+that store's 9 bills with items, `module=purchase_returns` answered 0 because the dev store holds none,
+and `?store_id=1` alongside `X-Store-Id: 7` still answered store 7. Not clicked through in the built
+desktop app, and no store with real purchase returns was available to read.
+
+No schema change, no new route, no new setting. Two known blanks: a server note has no per-line reason
+column, so it prints as a customer return with the reason unset, and the "Against bill" column is empty
+for the imported notes because the legacy panel never stored the link. A *new* return still has to be
+raised against a sale the till has, so migrated sales bills need the Bills screen's history sync first.
+
 ## 2.1.10 — 2026-11-26
 
 The stock adjustment document made a pharmacist find one product inside a native `<select>` holding the whole

@@ -1,8 +1,9 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { sqliteStorage } from "../db/sqliteStorage";
 import { productsStore } from "../masters/productsStore";
 import { partiesStore } from "../masters/partiesStore";
 import { purchaseReturnService, type PurchaseReturnInput } from "./purchaseReturnService";
+import { onlineTransactionService } from "../sync/onlineTransactionService";
 
 describe("purchaseReturnService - Debit Notes & Purchase Returns", () => {
   const dummyProduct = {
@@ -284,5 +285,253 @@ describe("purchaseReturnService - Debit Notes & Purchase Returns", () => {
     const payload = parsePayload(queued);
     expect(payload.status).toBe("cancelled");
     expect(payload.module_key).toBe("purchase_return");
+  });
+});
+
+/**
+ * A debit note only ever lived on the till that typed it, so the notes a migration imported or
+ * another counter posted were invisible here even though the backend held them.
+ */
+describe("purchaseReturnService - documents held on the server", () => {
+  const serverDebitNote = {
+    id: 77,
+    external_id: null,
+    module_key: "purchase_return",
+    invoice_number: "PR-1-0007",
+    invoice_date: "2026-11-19",
+    supplier_id: 4,
+    supplier_name: "ACME Distributors",
+    supplier_gstin: "32AAACA1234B1Z2",
+    supplier_invoice_no: "ACME-INV-55",
+    subtotal: -500,
+    tax_total: -60,
+    cgst_total: -30,
+    sgst_total: -30,
+    igst_total: 0,
+    round_off: 0,
+    grand_total: -560,
+    status: "completed",
+    created_at: "2026-11-19T10:15:00.000000Z",
+    updated_at: "2026-11-19T10:15:00.000000Z",
+    items: [
+      {
+        id: 301,
+        product_id: 12,
+        product_name: "Amoxicillin 500mg Capsule",
+        hsn_code: "2901",
+        batch_no: "AMX501",
+        expiry_date: "2027-12",
+        pack_qty: 5,
+        loose_qty: 0,
+        units_per_pack: 10,
+        qty: 5,
+        purchase_rate: 60,
+        gst_percent: 12,
+        taxable_amount: 500,
+        cgst_amount: 30,
+        sgst_amount: 30,
+        total_amount: 560,
+      },
+    ],
+  };
+
+  const serverPurchaseBill = {
+    id: 60,
+    external_id: null,
+    module_key: "purchase",
+    invoice_number: "PUR-1-0031",
+    invoice_date: "2026-11-10",
+    supplier_id: 4,
+    supplier_name: "ACME Distributors",
+    supplier_invoice_no: "ACME-INV-55",
+    subtotal: 1000,
+    tax_total: 120,
+    grand_total: 1120,
+    status: "received",
+    items: [
+      {
+        id: 401,
+        product_id: 12,
+        product_name: "Amoxicillin 500mg Capsule",
+        batch_no: "AMX501",
+        expiry_date: "2027-12",
+        pack_qty: 10,
+        loose_qty: 3,
+        units_per_pack: 10,
+        qty: 10,
+        purchase_rate: 60,
+        taxable_amount: 600,
+        gst_percent: 12,
+      },
+    ],
+  };
+
+  beforeEach(async () => {
+    await sqliteStorage.initDatabase();
+    await sqliteStorage.clearTable("purchase_returns");
+    await sqliteStorage.clearTable("purchase_documents");
+    vi.spyOn(onlineTransactionService, "getEffectiveBaseUrl").mockReturnValue("http://server.test");
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  const stubLists = (purchases: any[], bills: any[]) => {
+    const calls: any[][] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (...args: any[]) => {
+        calls.push(args);
+        const url = String(args[0]);
+        return {
+          ok: true,
+          json: async () => ({ data: url.includes("module=purchase_returns") ? purchases : bills }),
+        };
+      })
+    );
+    return calls;
+  };
+
+  it("lists a debit note the backend holds and this till never saw", async () => {
+    const calls = stubLists([serverDebitNote], []);
+
+    const list = await purchaseReturnService.getPurchaseReturns();
+
+    expect(String(calls[0][0])).toContain("/api/purchases?");
+    expect(String(calls[0][0])).toContain("module=purchase_returns");
+    expect(list.map((r) => r.return_number)).toEqual(["PR-1-0007"]);
+    expect(list[0].supplier_name).toBe("ACME Distributors");
+    expect(list[0].original_purchase_number).toBe("ACME-INV-55");
+    expect(list[0].settlement_type).toBe("credit_adjust");
+    expect(list[0].created_at).toBeGreaterThan(0);
+    // The server bills a line in packs, so the return line has to be in base units.
+    expect(list[0].lines[0]).toMatchObject({
+      product_name: "Amoxicillin 500mg Capsule",
+      batch_no: "AMX501",
+      purchased_qty: 50,
+      return_qty: 50,
+      purchase_rate: 60,
+    });
+  });
+
+  it("keeps the till's own note when the server echoes it back", async () => {
+    await sqliteStorage.insertRecord("purchase_returns", "prat_1", {
+      id: "prat_1",
+      return_number: "PR-1-0007",
+      return_date: "2026-11-19",
+      return_time: "10:15:00",
+      original_purchase_number: "PUR-1-0031",
+      supplier_id: "supp_apollo_pr",
+      supplier_name: "Apollo Pharma Distributors Pvt Ltd",
+      lines: [
+        {
+          id: "prat_1_line",
+          return_id: "prat_1",
+          product_id: "prod_amx_pr",
+          product_name: "Amoxicillin 500mg Capsule",
+          batch_id: "batch_amx_pr1",
+          batch_no: "AMX501",
+          purchased_qty: 50,
+          return_qty: 50,
+          purchase_rate: 60,
+          gst_percent: 12,
+          reason: "expired",
+          taxable_amount: 500,
+          cgst_amount: 30,
+          sgst_amount: 30,
+          igst_amount: 0,
+          total_amount: 560,
+        },
+      ],
+      subtotal: 500,
+      tax_total: 60,
+      cgst_total: 30,
+      sgst_total: 30,
+      igst_total: 0,
+      round_off: 0,
+      grand_total: 560,
+      settlement_type: "credit_adjust",
+      status: "completed",
+      created_at: 1763777700000,
+      updated_at: 1763777700000,
+    });
+
+    stubLists([{ ...serverDebitNote, external_id: "prat_1" }], []);
+
+    const list = await purchaseReturnService.getPurchaseReturns();
+
+    expect(list).toHaveLength(1);
+    expect(list[0].id).toBe("prat_1");
+    expect(list[0].lines[0].reason).toBe("expired");
+  });
+
+  it("offers a server purchase bill as a bill to return against", async () => {
+    await sqliteStorage.insertRecord("purchase_documents", "pur_local", {
+      id: "pur_local",
+      purchase_number: "PUR-LOCAL-1",
+      module_key: "purchase",
+      supplier_name: "Apollo Pharma Distributors Pvt Ltd",
+      supplier_invoice_no: "LOCAL-1",
+      purchase_date: "2026-11-21",
+      grand_total: 900,
+      sync_state: "pending",
+    });
+
+    stubLists([], [serverPurchaseBill, { ...serverPurchaseBill, id: 61, external_id: "pur_local" }]);
+
+    const bills = await purchaseReturnService.getOriginalBills();
+
+    expect(bills.map((b) => b.purchase_number)).toEqual(["PUR-LOCAL-1", "PUR-1-0031"]);
+    const serverBill = bills.find((b) => b.purchase_number === "PUR-1-0031");
+    expect(serverBill.lines).toHaveLength(1);
+    expect(serverBill.lines[0]).toMatchObject({ pack_qty: 10, units_per_pack: 10, loose_qty: 3 });
+  });
+
+  it("still answers from the local book when the server will not reply", async () => {
+    await sqliteStorage.insertRecord("purchase_returns", "prat_off", {
+      id: "prat_off",
+      return_number: "PR-OFF-1",
+      return_date: "2026-11-25",
+      return_time: "09:00:00",
+      supplier_id: "supp_apollo_pr",
+      supplier_name: "Apollo Pharma Distributors Pvt Ltd",
+      lines: [],
+      subtotal: 0,
+      tax_total: 0,
+      cgst_total: 0,
+      sgst_total: 0,
+      igst_total: 0,
+      round_off: 0,
+      grand_total: 100,
+      settlement_type: "refund",
+      refund_mode: "Cash",
+      status: "completed",
+      created_at: 1763900000000,
+      updated_at: 1763900000000,
+    });
+
+    await sqliteStorage.insertRecord("purchase_documents", "pur_off", {
+      id: "pur_off",
+      purchase_number: "PUR-OFF-1",
+      module_key: "purchase",
+      supplier_name: "Apollo Pharma Distributors Pvt Ltd",
+      purchase_date: "2026-11-24",
+      grand_total: 400,
+    });
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new TypeError("Failed to fetch");
+      })
+    );
+
+    const list = await purchaseReturnService.getPurchaseReturns();
+    const bills = await purchaseReturnService.getOriginalBills();
+
+    expect(list.map((r) => r.return_number)).toEqual(["PR-OFF-1"]);
+    expect(bills.map((b) => b.purchase_number)).toContain("PUR-OFF-1");
   });
 });

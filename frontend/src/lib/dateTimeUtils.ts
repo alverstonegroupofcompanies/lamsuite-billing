@@ -195,3 +195,17 @@ export function formatDateTimeInStoreTZ(
     ...options,
   }).format(date);
 }
+
+/**
+ * A server timestamp as epoch millis. The API answers both an ISO instant and the bare
+ * "YYYY-MM-DD HH:MM:SS" that SQLite stores, and a till list that sorts by `created_at` needs one.
+ */
+export function serverTimeToEpoch(value: unknown): number {
+  if (value == null || value === "") return 0;
+  if (typeof value === "number") return value < 1e12 ? value * 1000 : value;
+
+  const raw = String(value).trim();
+  const iso = raw.includes("T") ? raw : `${raw.replace(" ", "T")}T00:00:00`;
+  const ms = Date.parse(iso);
+  return Number.isNaN(ms) ? 0 : ms;
+}
